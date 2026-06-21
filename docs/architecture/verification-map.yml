@@ -124,6 +124,7 @@ verification:
       - tests/servertool/stopless-vr-route-hint.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+      - tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
       - tests/servertool/stop-message-auto.goal-default.spec.ts
@@ -136,10 +137,10 @@ verification:
     notes:
       - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessOrchestrationAction` must expose `cli_projection` for non-terminal stop_message_flow."
       - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
-      - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoning_stop` CLI."
+      - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoningStop` CLI."
       - "Engine must project stopless to a client-visible `exec_command` and must not call `reenterPipeline` for stopless CLI flows."
       - "Command input must stay concise (`flowId/repeatCount/maxRepeats/triggerHint` plus optional structured `schemaFeedback{reasonCode,missingFields}`); CLI stdout must carry continuationPrompt/schemaGuidance plus structured feedback for req_chatprocess rewrite."
-      - "Validation must prove the client-visible stopless command uses alias `reasoning_stop` and the client payload does not expose `__servertool_cli_projection`."
+      - "Validation must prove the client-visible stopless command uses alias `reasoningStop` and the client payload does not expose `__servertool_cli_projection`."
       - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while current-request restoration advances repeatCount 1 -> 2 -> 3."
       - "Validation must prove req_chatprocess rewrites the paired stopless tool result into model-transparent natural language + missing/error feedback, and VR still routes that turn to thinking."
       - "Validation must prove `/v1/responses` stopless turns do not lose the schema contract between req_chatprocess and the responses->chat bridge: req owner must preserve the contract in `instructions`, and bridge owner must materialize it into the outbound system message."
@@ -153,6 +154,313 @@ verification:
       - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
       - "Focused Rust gates: `cargo test -p servertool-core stopless --lib -- --nocapture`, `cargo test -p servertool-core cli_contract --lib -- --nocapture`, and `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`."
       - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-projection.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`."
+
+  - feature_id: hub.servertool_auto_hook_execution
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
+    contract:
+      - tests/servertool/servertool-auto-hook-trace.spec.ts
+    integration:
+      - tests/servertool/server-side-tools.failfast.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns auto-hook execution decision and trace planning."
+
+  - feature_id: hub.servertool_auto_hook_queue_progress
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
+    contract:
+      - tests/servertool/servertool-auto-hook-trace.spec.ts
+    integration:
+      - tests/servertool/server-side-tools.failfast.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns auto-hook queue progress planning."
+
+  - feature_id: hub.servertool_engine_preflight_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+    contract:
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+    integration:
+      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns engine preflight planning."
+
+  - feature_id: hub.servertool_engine_runtime_action_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+    contract:
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+    integration:
+      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns engine runtime action planning."
+
+  - feature_id: hub.servertool_engine_skip_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+    contract:
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+    integration:
+      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns engine skip planning."
+
+  - feature_id: hub.servertool_execution_branch_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
+    contract:
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+    integration:
+      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns execution branch and projected tool index planning."
+
+  - feature_id: hub.servertool_execution_dispatch_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts
+    contract:
+      - tests/servertool/execution-dispatch-outcome-shell.spec.ts
+    integration:
+      - tests/servertool/server-side-tools.failfast.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns execution dispatch error planning."
+
+  - feature_id: hub.servertool_execution_handler_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts
+    contract:
+      - tests/servertool/execution-shell.backend-failfast.spec.ts
+    integration:
+      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns execution handler contract, materialization, and runtime action planning."
+
+  - feature_id: hub.servertool_execution_loop_effect_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-shell.ts
+    contract:
+      - tests/servertool/execution-shell.backend-failfast.spec.ts
+    integration:
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns execution loop effect planning."
+
+  - feature_id: hub.servertool_execution_loop_runtime_action_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts
+    contract:
+      - tests/servertool/execution-dispatch-outcome-shell.spec.ts
+    integration:
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns execution loop runtime action planning."
+
+  - feature_id: hub.servertool_execution_outcome_runtime_action_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts
+    contract:
+      - tests/servertool/execution-dispatch-outcome-shell.spec.ts
+    integration:
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns execution outcome runtime action planning."
+
+  - feature_id: hub.servertool_execution_state_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-shell.ts
+    contract:
+      - tests/servertool/execution-shell.backend-failfast.spec.ts
+    integration:
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns execution state create/append planning."
+
+  - feature_id: hub.servertool_registry_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/registry-impl.ts
+    contract:
+      - tests/servertool/server-side-tools.auto-hook-config.spec.ts
+    integration:
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns registry registration, lookup, descriptor, and projection planning."
+
+  - feature_id: hub.servertool_response_stage_runtime_action_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
+    contract:
+      - tests/servertool/server-side-tools.failfast.spec.ts
+    integration:
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns response-stage runtime action planning."
+
+  - feature_id: hub.servertool_server_side_tool_entry_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
+    contract:
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+    integration:
+      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns server-side-tool entry preflight planning."
+
+  - feature_id: hub.servertool_stopless_cli_projection_context
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+    contract:
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+    integration:
+      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns stopless CLI projection context planning."
 
   - feature_id: hub.servertool_flow_presentation
     change_risk: medium
@@ -228,7 +536,9 @@ verification:
       - tests/servertool/server-side-web-search.spec.ts
       - tests/servertool/vision-flow.spec.ts
       - tests/servertool/servertool-mixed-tools.spec.ts
+      - tests/servertool/server-side-tools.dispatch-native.spec.ts
       - tests/servertool/followup-bootstrap-replay.spec.ts
+      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -236,6 +546,28 @@ verification:
       - npm run build:base
     notes:
       - "servertool-core owns followup materialization, runtime metadata/action, terminal error envelope, and bootstrap replay plans; TS may only execute IO builders and native plans."
+
+  - feature_id: hub.servertool_rust_only_closeout
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs
+      - scripts/verify-servertool-rust-only.mjs
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+    contract:
+      - tests/servertool/server-side-tools.auto-hook-config.spec.ts
+      - tests/servertool/servertool-auto-hook-trace.spec.ts
+    integration:
+      - tests/servertool/server-side-tools.dispatch-native.spec.ts
+      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run build:base
+    notes:
+      - "Closeout gate only: use this feature to prove remaining TS orchestration has been reduced to thin shells before physical deletion."
+      - "Do not use this feature to fake Rust owner binding for hook skeleton runtime; runtime owner binding must land separately with real function-map symbols."
 
   - feature_id: error.provider_failure_policy
     change_risk: high
