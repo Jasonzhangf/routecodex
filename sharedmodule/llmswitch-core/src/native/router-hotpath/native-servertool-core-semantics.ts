@@ -1,6 +1,7 @@
 // Native bridge for servertool-core functions.
 // Provides inspect_stop_gateway_signal, evaluate_loop_guard, calculate_budget.
 
+import type { JsonObject } from '../../conversion/hub/types/json.js';
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
 import { parseStopMessagePersistedLookupPlanPayload } from './native-router-hotpath-analysis.js';
 
@@ -422,7 +423,7 @@ export interface StoplessCliProjectionContextPlan {
   repeatCount: number;
   maxRepeats: number;
   triggerHint?: string;
-  schemaFeedback?: Record<string, unknown>;
+  schemaFeedback?: JsonObject;
 }
 
 export interface ServertoolBackendRoutePolicyInput {
@@ -1669,7 +1670,7 @@ export function planStoplessCliProjectionContextWithNative(input: {
       ? { triggerHint: record.triggerHint }
       : {}),
     ...(record.schemaFeedback && typeof record.schemaFeedback === 'object' && !Array.isArray(record.schemaFeedback)
-      ? { schemaFeedback: record.schemaFeedback as Record<string, unknown> }
+      ? { schemaFeedback: record.schemaFeedback as JsonObject }
       : {})
   };
 }
@@ -1885,10 +1886,18 @@ export function buildServertoolCliProjectionExecutionContextWithNative(
     throw new Error('buildServertoolCliProjectionExecutionContextJson native returned invalid projection context');
   }
   const record = parsed as Record<string, unknown>;
-  if (record.flowId !== 'servertool_cli_projection' || !record.context || typeof record.context !== 'object' || Array.isArray(record.context)) {
+  if (
+    record.flowId !== 'servertool_cli_projection' ||
+    !record.context ||
+    typeof record.context !== 'object' ||
+    Array.isArray(record.context)
+  ) {
     throw new Error('buildServertoolCliProjectionExecutionContextJson native returned invalid projection context fields');
   }
-  return record as ServertoolCliProjectionExecutionContextOutput;
+  return {
+    flowId: 'servertool_cli_projection',
+    context: record.context as Record<string, unknown>
+  };
 }
 
 export function validateClientExecCommandResultWithNative(rawOutput: string): Record<string, unknown> {

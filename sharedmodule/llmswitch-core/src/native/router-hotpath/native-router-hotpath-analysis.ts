@@ -73,6 +73,8 @@ export type ServertoolDispatchNoopPayload = {
   id: string;
   name: string;
   arguments: string;
+  executionMode?: string;
+  stripAfterExecute?: boolean;
 };
 
 export type ServertoolDispatchPlanPayload = {
@@ -345,7 +347,9 @@ export function parseServertoolDispatchPlanPayload(raw: string): ServertoolDispa
     .map((entry) => ({
       id: typeof entry.id === 'string' ? entry.id : '',
       name: typeof entry.name === 'string' ? entry.name : '',
-      arguments: typeof entry.arguments === 'string' ? entry.arguments : ''
+      arguments: typeof entry.arguments === 'string' ? entry.arguments : '',
+      ...(typeof entry.executionMode === 'string' ? { executionMode: entry.executionMode } : {}),
+      ...(typeof entry.stripAfterExecute === 'boolean' ? { stripAfterExecute: entry.stripAfterExecute } : {})
     }))
     .filter((entry) => entry.id && entry.name);
   const skippedToolCalls = parsed.skippedToolCalls
