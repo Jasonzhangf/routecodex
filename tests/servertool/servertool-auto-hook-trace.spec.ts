@@ -232,11 +232,7 @@ function createContextBase(options: ServerSideToolEngineOptions): ServerToolHand
     adapterContext: options.adapterContext,
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
-    providerProtocol: options.providerProtocol,
-    capabilities: {
-      reenterPipeline: false,
-      providerInvoker: false
-    }
+    providerProtocol: options.providerProtocol
   };
 }
 

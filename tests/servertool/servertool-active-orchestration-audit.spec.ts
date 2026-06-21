@@ -125,7 +125,8 @@ const TARGETS = [
       "postAutoHookRuntimeAction.action === 'return_auto_hook_result' && autoHookResult",
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
       '[servertool] native execution-branch projected missing tool call id:',
-      'hasServertoolSupport:',
+      'capabilities: runtimeCapabilities',
+      'deriveServertoolRuntimeCapabilities(',
       "typeof options.providerInvoker === 'function' || typeof options.reenterPipeline === 'function'",
         "'SERVERTOOL_CLIENT_DISCONNECTED'",
         "'[servertool] client disconnected before servertool execution'",
@@ -173,7 +174,7 @@ const TARGETS = [
       'providerInvoker?:',
       'reenterPipeline?:',
       'clientInjectDispatch?:',
-      'hasServertoolSupport:',
+      'capabilities: {',
       'providerInvoker: options.providerInvoker',
       'reenterPipeline: options.reenterPipeline',
       'clientInjectDispatch: options.clientInjectDispatch'

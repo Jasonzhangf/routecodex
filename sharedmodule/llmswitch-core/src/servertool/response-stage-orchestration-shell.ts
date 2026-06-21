@@ -63,12 +63,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     payload: options.payload,
     adapterContext: options.adapterContext as Record<string, unknown>,
     runtimeControl,
-    allowFollowup: options.allowFollowup === true,
-    capabilities: {
-      providerInvoker: false,
-      reenterPipeline: false,
-      clientInjectDispatch: false
-    }
+    allowFollowup: options.allowFollowup === true
   });
 
   if (gatePlan.nextAction === 'bypass') {

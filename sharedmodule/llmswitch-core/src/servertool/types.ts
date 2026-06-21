@@ -212,10 +212,6 @@ export interface ServerToolHandlerContext {
   requestId: string;
   entryEndpoint: string;
   providerProtocol: string;
-  capabilities: {
-    reenterPipeline: boolean;
-    providerInvoker: boolean;
-  };
 }
 
 export interface ServerToolHandlerResult {

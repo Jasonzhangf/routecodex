@@ -115,18 +115,14 @@ describe('execution-shell auto hook failfast', () => {
       onAutoHookTrace: (event) => traces.push(event)
     };
 
-    const contextBase: ServerToolHandlerContext = {
-      base: options.chatResponse,
-      toolCalls: [],
-      adapterContext: options.adapterContext,
-      requestId: options.requestId,
-      entryEndpoint: options.entryEndpoint,
-      providerProtocol: options.providerProtocol,
-      capabilities: {
-        reenterPipeline: false,
-        providerInvoker: false
-      }
-    };
+  const contextBase: ServerToolHandlerContext = {
+    base: options.chatResponse,
+    toolCalls: [],
+    adapterContext: options.adapterContext,
+    requestId: options.requestId,
+    entryEndpoint: options.entryEndpoint,
+    providerProtocol: options.providerProtocol
+  };
 
     await expect(
       runAutoHookExecutionQueue({

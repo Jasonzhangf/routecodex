@@ -1086,7 +1086,7 @@ describe('server-side-tools tool-error closed loop', () => {
     );
   });
 
-  test('derives response-stage support through native capabilities input instead of TS support boolean', async () => {
+  test('does not pass legacy servertool support capability details into the native response-stage gate', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-servertool-response-stage-capabilities-1',
       entryEndpoint: '/v1/responses',
@@ -1098,21 +1098,18 @@ describe('server-side-tools tool-error closed loop', () => {
       adapterContext,
       entryEndpoint: '/v1/responses',
       requestId: 'req-servertool-response-stage-capabilities-1',
-      providerProtocol: 'openai-responses',
-      providerInvoker: jest.fn(async () => ({ ok: true } as any))
+      providerProtocol: 'openai-responses'
     });
 
-    expect(planServertoolResponseStageGateWithNativeMock).toHaveBeenCalledWith(
+    const gateInput = planServertoolResponseStageGateWithNativeMock.mock.calls[0]?.[0];
+    expect(gateInput).toEqual(
       expect.objectContaining({
         payload: expect.any(Object),
-        adapterContext,
-        capabilities: {
-          providerInvoker: true,
-          reenterPipeline: false,
-          clientInjectDispatch: false
-        }
+        adapterContext
       })
     );
+    expect(Object.prototype.hasOwnProperty.call(gateInput, 'hasServertoolSupport')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(gateInput, 'capabilities')).toBe(false);
     expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(1, {
       responseStageGatePlan: {
         shouldBypass: false,

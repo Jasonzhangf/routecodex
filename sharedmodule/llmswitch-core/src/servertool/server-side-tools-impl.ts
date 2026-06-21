@@ -39,7 +39,6 @@ import {
 } from './orchestration-blocks.js';
 import { runServertoolAutoHookCallerViaThinShell } from './auto-hook-caller.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
-import { deriveServertoolRuntimeCapabilities } from './runtime-capabilities.js';
 import {
   createServertoolProviderProtocolErrorFromPlan,
   createServerToolClientDisconnectedError,
@@ -82,18 +81,13 @@ const runServerSideToolEngineViaThinShell = async (
   }
   const baseObject = base as JsonObject;
   const toolCalls = extractToolCallsImpl(baseObject, options.requestId);
-  const runtimeCapabilities = deriveServertoolRuntimeCapabilities(options);
   const contextBase: Omit<ServerToolHandlerContext, 'toolCall'> = {
     base: baseObject,
     toolCalls,
     adapterContext: options.adapterContext,
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
-    providerProtocol: options.providerProtocol,
-    capabilities: {
-      reenterPipeline: runtimeCapabilities.reenterPipeline,
-      providerInvoker: runtimeCapabilities.providerInvoker
-    }
+    providerProtocol: options.providerProtocol
   };
   const includeToolCallNames = normalizeFilterTokenSet(options.includeToolCallHandlerNames);
   const excludeToolCallNames = normalizeFilterTokenSet(options.excludeToolCallHandlerNames);
@@ -101,8 +95,7 @@ const runServerSideToolEngineViaThinShell = async (
   const excludeAutoHookIds = normalizeFilterTokenSet(options.excludeAutoHookIds);
   const responseHookStagePlan = planServertoolResponseStageGateWithNative({
     payload: baseObject,
-    adapterContext: options.adapterContext as Record<string, unknown>,
-    capabilities: runtimeCapabilities
+    adapterContext: options.adapterContext as Record<string, unknown>
   });
   if (responseHookStagePlan.responseHookMatched) {
     const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
@@ -283,8 +276,7 @@ const runServerSideToolEngineViaThinShell = async (
 
   const responseStagePlan = responseHookStagePlan.responseHookMatched ? responseHookStagePlan : planServertoolResponseStageGateWithNative({
     payload: baseObject,
-    adapterContext: options.adapterContext as Record<string, unknown>,
-    capabilities: runtimeCapabilities
+    adapterContext: options.adapterContext as Record<string, unknown>
   });
   const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: responseStagePlan,
