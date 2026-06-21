@@ -5443,9 +5443,28 @@ function checkServertoolAutoHookCallerThinShell() {
       'server-side-tools-impl.ts must not retain the deleted runServertoolAutoHookCallerViaImplThinShell wrapper'
     );
   }
+  if (serverSideToolsImpl.includes('runServertoolAutoHookCallerViaThinShell')) {
+    fail(
+      'servertool-auto-hook-caller-thin-shell',
+      'server-side-tools-impl.ts must not retain deleted runServertoolAutoHookCallerViaThinShell import/call marker'
+    );
+  }
+  const autoHookCallerShell = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
+  if (autoHookCallerShell.includes('export async function runServertoolAutoHookCallerViaThinShell(')) {
+    fail(
+      'servertool-auto-hook-caller-thin-shell',
+      'auto-hook-caller.ts must not retain the deleted runServertoolAutoHookCallerViaThinShell export name'
+    );
+  }
+  if (!autoHookCallerShell.includes('export async function runServertoolAutoHookCaller(')) {
+    fail(
+      'servertool-auto-hook-caller-thin-shell',
+      'auto-hook-caller.ts must keep direct runServertoolAutoHookCaller export'
+    );
+  }
   pass(
     'servertool-auto-hook-caller-thin-shell',
-    'server-side-tools.ts keeps auto-hook caller on the thin-shell path without alias wrapper residue'
+    'auto-hook-caller.ts keeps direct runServertoolAutoHookCaller export without alias wrapper residue'
   );
 }
 

@@ -7,7 +7,7 @@ jest.unstable_mockModule(
     extractTextFromChatLike: jest.fn(() => ''),
     extractToolCalls: jest.fn(() => []),
     runServerSideToolEngine: jest.fn(),
-    runServertoolAutoHookCallerViaThinShell: jest.fn(),
+    runServertoolAutoHookCaller: jest.fn(),
     isClientExecCliProjectionToolCall: jest.fn((toolCall: any) =>
       Boolean(
         toolCall &&

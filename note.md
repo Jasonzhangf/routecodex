@@ -10905,3 +10905,23 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 下一步候选 slice（active orchestration audit 未报新违规）：
   - `auto-hook-caller.ts` 重复别名壳。
   - 或下一条薄透传 wrapper / 单纯 naming alias。
+
+## 2026-06-22 servertool auto-hook caller naming shell delete
+
+- 物理删除 `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts` 里的纯命名壳 `runServertoolAutoHookCallerViaThinShell`，改成直接导出 `runServertoolAutoHookCaller`。
+- 调用点同步改名：
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts`
+  - `tests/servertool/servertool-auto-hook-trace.spec.ts`
+  - `tests/servertool/server-side-tools.cli-projection-guard.spec.ts`
+- Gate 同步反向锁：
+  - `scripts/verify-servertool-rust-only.mjs` 禁止旧 export 名和旧 import/call marker 复活，只允许直接导出名存在。
+- 验证：
+  - `tests/servertool/servertool-auto-hook-trace.spec.ts`
+  - `tests/servertool/execution-shell.auto-hook-failfast.spec.ts`
+  - `tests/servertool/server-side-tools.cli-projection-guard.spec.ts`
+  - `tests/servertool/server-side-tools.auto-hook-caller-guard.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+- 结论：
+  - auto-hook 队列执行真源只有一个，TS 侧不需要再保留“ViaThinShell”这种纯命名壳。

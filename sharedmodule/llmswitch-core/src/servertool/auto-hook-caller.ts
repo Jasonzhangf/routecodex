@@ -96,7 +96,7 @@ export async function runAutoHookExecutionQueue(args: {
   return null;
 }
 
-export async function runServertoolAutoHookCallerViaThinShell(args: {
+export async function runServertoolAutoHookCaller(args: {
   options: ServerSideToolEngineOptions;
   contextBase: ServerToolHandlerContext;
   includeAutoHookIds: Set<string> | null;

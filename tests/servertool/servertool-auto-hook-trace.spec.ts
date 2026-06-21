@@ -121,10 +121,10 @@ jest.unstable_mockModule(
   })
 );
 
-let runServertoolAutoHookCallerViaThinShell: typeof import('../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js').runServertoolAutoHookCallerViaThinShell;
+let runServertoolAutoHookCaller: typeof import('../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js').runServertoolAutoHookCaller;
 
 beforeAll(async () => {
-  ({ runServertoolAutoHookCallerViaThinShell } = await import(
+  ({ runServertoolAutoHookCaller } = await import(
     '../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js'
   ));
 });
@@ -255,7 +255,7 @@ describe('servertool auto hook trace', () => {
     });
 
     const options = createOptions(traces);
-    const result = await runServertoolAutoHookCallerViaThinShell({
+  const result = await runServertoolAutoHookCaller({
       options,
       contextBase: createContextBase(options),
       includeAutoHookIds: null,
@@ -296,7 +296,7 @@ describe('servertool auto hook trace', () => {
     );
 
     const options = createOptions(traces);
-    const result = await runServertoolAutoHookCallerViaThinShell({
+  const result = await runServertoolAutoHookCaller({
       options,
       contextBase: createContextBase(options),
       includeAutoHookIds: null,
@@ -340,7 +340,7 @@ describe('servertool auto hook trace', () => {
     );
 
     const options = createOptions(traces);
-    await runServertoolAutoHookCallerViaThinShell({
+  await runServertoolAutoHookCaller({
       options,
       contextBase: createContextBase(options),
       includeAutoHookIds: null,
@@ -378,7 +378,7 @@ describe('servertool auto hook trace', () => {
 
     const options = createOptions(traces);
     await expect(
-      runServertoolAutoHookCallerViaThinShell({
+  runServertoolAutoHookCaller({
         options,
         contextBase: createContextBase(options),
         includeAutoHookIds: null,

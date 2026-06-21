@@ -38,7 +38,7 @@ import {
   replaceJsonObjectInPlace,
   stripToolOutputs
 } from './orchestration-blocks.js';
-import { runServertoolAutoHookCallerViaThinShell } from './auto-hook-caller.js';
+import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import {
   createServertoolProviderProtocolErrorFromPlan,
@@ -107,7 +107,7 @@ export const runServerSideToolEngine = async (
       responseHookRequired: responseHookStagePlan.responseHookRequired === true
     });
     if (preAutoHookRuntimeAction.action !== 'return_passthrough_bypass') {
-      const autoHookResult = await runServertoolAutoHookCallerViaThinShell({
+    const autoHookResult = await runServertoolAutoHookCaller({
         options,
         contextBase: contextBase as ServerToolHandlerContext,
         includeAutoHookIds,
@@ -288,7 +288,7 @@ export const runServerSideToolEngine = async (
   if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass') {
     return { mode: 'passthrough', finalChatResponse: baseObject };
   }
-  const autoHookResult = await runServertoolAutoHookCallerViaThinShell({
+    const autoHookResult = await runServertoolAutoHookCaller({
     options,
     contextBase: contextBase as ServerToolHandlerContext,
     includeAutoHookIds,
