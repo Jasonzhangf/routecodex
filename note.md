@@ -9243,6 +9243,108 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
   - registry names / auto order / record grouping owner 已不在 TS；
   - 但 `listAdHocRegisteredToolCallHandlerSpecsImpl()` 仍是 registry 视图薄壳，`server-side-tools-impl.ts`、`engine.ts`、`execution-shell.ts` 仍有活 TS orchestration；
   - `servertool.hook_skeleton.mainline` 仍必须保持 `binding pending`，不能宣称全流程 Rust-only 已完成。
+
+## 2026-06-21 servertool runtime pre-command state selection scope-key rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts`：
+  - 旧 TS 仍本地 owner 一层 pre-command state 选择分支：
+    - direct runtime / runtime metadata 优先
+    - 没命中时本地 `if (!persistentScopeKey) return undefined`
+    - 有 key 才继续 persisted state load
+  - 现在把“是否允许进入 persisted load”这层条件也收进 Rust：
+    - owner 仍是 `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs`
+    - 仍沿用 feature_id：`hub.servertool_pre_command_hooks`
+    - contract 扩展：`RuntimePreCommandStateSelectionInput.has_persistent_scope_key`
+    - 责任新增：
+      - 没有 direct/runtime state 且没有 persisted scope key 时，直接返回 `use_selected + source=none`
+      - 只有有 persisted scope key 时才返回 `load_persisted`
+  - 新 bridge/薄壳变化：
+    - `servertool_core_blocks.rs` bridge test 现在额外锁住 `hasPersistentScopeKey=false` 时不得请求 persisted load
+    - `native-servertool-core-semantics.ts` wrapper 接收 `hasPersistentScopeKey`
+    - `server-side-tools-impl.ts` 现在先采 `persistentScopeKey`，把 `Boolean(persistentScopeKey)` 交给 native selection；TS 不再本地 owner `if (!persistentScopeKey) return undefined`
+- gate 收紧：
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 额外禁止 `server-side-tools-impl.ts` 复活：
+      - `if (!persistentScopeKey) {`
+  - `scripts/verify-servertool-rust-only.mjs`
+    - 同步禁止上述 TS 本地分支
+- focused 验证：
+  - `cargo test -p servertool-core pre_command_hook_contract -- --nocapture` -> 5 passed
+  - `cargo test -p router-hotpath-napi plans_runtime_pre_command_state_selection_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+    -> 2 suites / 14 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+- 当前边界：
+  - pre-command state 是否允许 persisted load 的条件 owner 已不在 TS；
+  - 但 persisted state 的真实 IO、load failure wrap shell、以及 `server-side-tools-impl.ts` 更上层 response-stage / auto-hook orchestration 仍未 closeout；
+  - `servertool.hook_skeleton.mainline` 仍必须保持 `binding pending`。
+
+## 2026-06-21 servertool entry preflight rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 入口段：
+  - 旧 TS 仍本地 owner 两个最外层 entry 分支：
+    - `if (!base)`：非 object chat response 直接 passthrough
+    - `if (isAdapterClientDisconnected(options.adapterContext))`：client disconnected 直接 fail-fast
+  - 现在把这层入口前置判定下沉到 Rust：
+    - 新 owner：`sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs`
+    - feature_id：`hub.servertool_server_side_tool_entry_contract`
+    - 新 contract：`plan_servertool_entry_preflight(...)`
+    - action：
+      - `return_passthrough_non_object_chat`
+      - `throw_client_disconnected`
+      - `continue_to_tool_flow`
+- 新 bridge/薄壳变化：
+  - NAPI：`plan_servertool_entry_preflight_json`
+  - TS wrapper：`planServertoolEntryPreflightWithNative(...)`
+  - `server-side-tools-impl.ts` 现在先采 `hasBaseObject + adapterClientDisconnected`，统一按 native action 决定 passthrough / fail-fast / continue；TS 不再本地 owner `if (!base)` 或 disconnect branch
+- gate 收紧：
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 额外禁止 `server-side-tools-impl.ts` 复活：
+      - `if (!base) {`
+      - `if (isAdapterClientDisconnected(options.adapterContext)) {`
+  - `scripts/verify-servertool-rust-only.mjs`
+    - 新增 `checkServertoolEntryPreflightRustOwner()`
+    - 同步要求 Rust contract / NAPI export / required export / TS wrapper / TS thin-shell 调用点存在
+- focused 验证：
+  - `cargo test -p servertool-core server_side_tool_entry_contract -- --nocapture` -> 3 passed
+  - `cargo test -p router-hotpath-napi plans_servertool_entry_preflight_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/servertool-cli-native-bridge.spec.ts tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+    -> 3 suites / 35 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `git diff --check -- <touched files>` -> PASS
+- 当前边界：
+  - server-side-tools entry preflight 的非 object passthrough / disconnected fail-fast owner 已不在 TS；
+  - 但 `server-side-tools-impl.ts` 仍有 execution/response-stage/orchestration 薄壳和后续活语义未收口；
+  - `servertool.hook_skeleton.mainline` 仍必须保持 `binding pending`，不能宣称全流程 Rust-only 已完成。
+## 2026-06-21 `/v1/models` Codex envelope closeout
+
+- 继续追 RouteCodex `/v1/models` 为什么即使 metadata 字段齐全，Codex 仍可能拿不到完整模型能力。
+- 根因确认：
+  - `src/server/runtime/http-server/routes.ts` 的 `listModels` 之前返回的是 OpenAI list envelope：`{ object: "list", data: items }`
+  - 但 `~/code/codex/codex-rs/codex-api/src/endpoint/models.rs` 把 `/v1/models` 按 `ModelsResponse { models: Vec<ModelInfo> }` 解码，缺少顶层 `models` 会直接导致 Codex 无法把 catalog 当模型能力真源使用。
+- 本轮修复：
+  - owner 仍是 `src/server/runtime/http-server/routes.ts`
+  - 新增 `buildModelsListResponse(items)`，统一输出：
+    - `models: items` 作为 Codex canonical catalog field
+    - `data: items` + `object: "list"` 继续镜像同一份 items，避免现有 generic OpenAI list 消费方断裂
+  - 不是 fallback；是单一 response projector 在同一 payload 中承载 Codex canonical field 与现有 list mirror。
+- 红测/锁样本更新：
+  - `tests/server/http-server/routes.invalid-json.spec.ts`
+  - `tests/server/http-server/models-port-scoped.spec.ts`
+  - 新 helper `readModelsPayload(body)` 强制：
+    - `body.models` 存在且为数组
+    - `body.data` 仍存在
+    - `body.models === body.data`
+- 文档同步：
+  - `docs/design/codex-model-capability-contract.md` 补充 Response envelope contract：
+    - `models` 是 Codex canonical field
+    - `data/object` 只是同 payload mirror
+- 验证：
+  - `npm run jest:run -- --runInBand tests/server/http-server/routes.invalid-json.spec.ts tests/server/http-server/models-port-scoped.spec.ts` -> 2 suites / 6 tests passed
+  - `npm run verify:models-capability-contract` -> PASS
+
 ## 2026-06-21 Codex `/v1/models` vs provider capabilities audit
 
 - 用户要求确认 `~/code/codex` 中 Codex 是否把 `/v1/models` 当作模型能力检查入口，以及 RouteCodex 是否必须始终暴露 `gpt-5.5` 以保证 Codex 能力完整。

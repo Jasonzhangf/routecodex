@@ -281,6 +281,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planServertoolExecutionLoopEffectJson",
   "planServertoolExecutionOutcomeRuntimeActionJson",
   "planServertoolResponseStageRuntimeActionJson",
+  "planServertoolEntryPreflightJson",
   "planServertoolRegistryRegistrationActionJson",
   "planServertoolRegistryLookupActionJson",
   "planServertoolRegistryAutoHookDescriptorsJson",

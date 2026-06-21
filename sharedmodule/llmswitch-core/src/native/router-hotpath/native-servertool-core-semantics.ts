@@ -340,10 +340,17 @@ export interface ServertoolExecutionLoopEffectPlan {
 
 export interface ServertoolResponseStageRuntimeActionPlan {
   action:
-    | 'return_passthrough_bypass'
-    | 'run_auto_hooks'
-    | 'return_auto_hook_result'
-    | 'return_passthrough_no_auto_hook_result';
+  | 'return_passthrough_bypass'
+  | 'run_auto_hooks'
+  | 'return_auto_hook_result'
+  | 'return_passthrough_no_auto_hook_result';
+}
+
+export interface ServertoolEntryPreflightPlan {
+  action:
+  | 'return_passthrough_non_object_chat'
+  | 'throw_client_disconnected'
+  | 'continue_to_tool_flow';
 }
 
 export interface ServertoolHandlerRuntimeActionPlan {
@@ -2247,6 +2254,7 @@ export function planRuntimePreCommandRuleWithNative(input: {
 export function planRuntimePreCommandStateSelectionWithNative(input: {
   directRuntimePreCommandState?: unknown;
   runtimeMetadataPreCommandState?: unknown;
+  hasPersistentScopeKey?: boolean;
   persistedState?: unknown;
   persistedLoadAttempted: boolean;
 }): RuntimePreCommandStateSelectionPlan {
@@ -2689,6 +2697,36 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     record.action !== 'return_passthrough_no_auto_hook_result'
   ) {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid action');
+  }
+  return {
+    action: record.action
+  };
+}
+
+export function planServertoolEntryPreflightWithNative(input: {
+  hasBaseObject: boolean;
+  adapterClientDisconnected: boolean;
+}): ServertoolEntryPreflightPlan {
+  const capability = 'planServertoolEntryPreflightJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEntryPreflightJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEntryPreflightJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEntryPreflightJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'return_passthrough_non_object_chat' &&
+    record.action !== 'throw_client_disconnected' &&
+    record.action !== 'continue_to_tool_flow'
+  ) {
+    throw new Error('planServertoolEntryPreflightJson native returned invalid action');
   }
   return {
     action: record.action

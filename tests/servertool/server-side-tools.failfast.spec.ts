@@ -39,6 +39,15 @@ const planServertoolExecutionBranchWithNativeMock = jest.fn((input: any) => {
     ? { action: 'resolve_execution_outcome' }
     : { action: 'continue_response_stage' };
 });
+const planServertoolEntryPreflightWithNativeMock = jest.fn((input: any) => {
+  if (input?.hasBaseObject !== true) {
+    return { action: 'return_passthrough_non_object_chat' };
+  }
+  if (input?.adapterClientDisconnected === true) {
+    return { action: 'throw_client_disconnected' };
+  }
+  return { action: 'continue_to_tool_flow' };
+});
 const planRuntimePreCommandStateSelectionWithNativeMock = jest.fn((input: any) => {
   const direct = input?.directRuntimePreCommandState;
   if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
@@ -54,6 +63,13 @@ const planRuntimePreCommandStateSelectionWithNativeMock = jest.fn((input: any) =
       action: 'use_selected',
       source: 'runtime_metadata',
       state: runtime
+    };
+  }
+  if (!input?.persistedLoadAttempted && input?.hasPersistentScopeKey !== true) {
+    return {
+      action: 'use_selected',
+      source: 'none',
+      state: undefined
     };
   }
   if (input?.persistedLoadAttempted) {
@@ -152,6 +168,7 @@ jest.unstable_mockModule(
         autoHandlerNames
       };
     }),
+    planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
     isAdapterClientDisconnectedWithNative: jest.fn((adapterContext: unknown) =>
       readDisconnectedFlag(adapterContext as any)
     ),
@@ -790,6 +807,7 @@ describe('server-side-tools tool-error closed loop', () => {
         : { action: 'return_passthrough_no_auto_hook_result' };
     });
     planServertoolExecutionBranchWithNativeMock.mockClear();
+    planServertoolEntryPreflightWithNativeMock.mockClear();
     planRuntimePreCommandStateSelectionWithNativeMock.mockClear();
   });
 
@@ -812,6 +830,35 @@ describe('server-side-tools tool-error closed loop', () => {
     ).rejects.toMatchObject({
       code: 'SERVERTOOL_CLIENT_DISCONNECTED',
       details: { requestId: 'req-servertool-disconnected-1' }
+    });
+    expect(planServertoolEntryPreflightWithNativeMock).toHaveBeenCalledWith({
+      hasBaseObject: true,
+      adapterClientDisconnected: true
+    });
+  });
+
+  test('returns passthrough through native entry preflight when chat response is not an object', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-servertool-non-object-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse: 'not-an-object' as any,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-servertool-non-object-1',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(result).toEqual({
+      mode: 'passthrough',
+      finalChatResponse: 'not-an-object'
+    });
+    expect(planServertoolEntryPreflightWithNativeMock).toHaveBeenCalledWith({
+      hasBaseObject: false,
+      adapterClientDisconnected: false
     });
   });
 
@@ -897,6 +944,7 @@ describe('server-side-tools tool-error closed loop', () => {
         preCommandScriptPath: '/tmp/direct-pre-command.sh'
       },
       runtimeMetadataPreCommandState: undefined,
+      hasPersistentScopeKey: false,
       persistedLoadAttempted: false
     });
     expect(applyPreCommandHooksToToolCallsMock).toHaveBeenCalledWith(
@@ -934,6 +982,7 @@ describe('server-side-tools tool-error closed loop', () => {
       runtimeMetadataPreCommandState: {
         preCommandScriptPath: '/tmp/runtime-pre-command.sh'
       },
+      hasPersistentScopeKey: false,
       persistedLoadAttempted: false
     });
     expect(applyPreCommandHooksToToolCallsMock).toHaveBeenCalledWith(
@@ -941,6 +990,36 @@ describe('server-side-tools tool-error closed loop', () => {
         runtimePreCommandState: {
           preCommandScriptPath: '/tmp/runtime-pre-command.sh'
         }
+      })
+    );
+  });
+
+  test('does not load persisted routing state when native pre-command selection sees no scope key', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-servertool-precommand-no-scope-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    } as any;
+
+    await runServerSideToolEngine({
+      chatResponse: makeToolCallResponse(),
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-servertool-precommand-no-scope-1',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(resolveServertoolPersistentScopeKeyMock).toHaveBeenCalledWith(adapterContext);
+    expect(loadRoutingInstructionStateSyncMock).not.toHaveBeenCalled();
+    expect(planRuntimePreCommandStateSelectionWithNativeMock).toHaveBeenCalledWith({
+      directRuntimePreCommandState: undefined,
+      runtimeMetadataPreCommandState: undefined,
+      hasPersistentScopeKey: false,
+      persistedLoadAttempted: false
+    });
+    expect(applyPreCommandHooksToToolCallsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimePreCommandState: undefined
       })
     );
   });
@@ -1007,11 +1086,13 @@ describe('server-side-tools tool-error closed loop', () => {
     expect(planRuntimePreCommandStateSelectionWithNativeMock).toHaveBeenNthCalledWith(1, {
       directRuntimePreCommandState: undefined,
       runtimeMetadataPreCommandState: undefined,
+      hasPersistentScopeKey: true,
       persistedLoadAttempted: false
     });
     expect(planRuntimePreCommandStateSelectionWithNativeMock).toHaveBeenNthCalledWith(2, {
       directRuntimePreCommandState: undefined,
       runtimeMetadataPreCommandState: undefined,
+      hasPersistentScopeKey: true,
       persistedState: {
         preCommandScriptPath: '/tmp/persisted-pre-command.sh'
       },

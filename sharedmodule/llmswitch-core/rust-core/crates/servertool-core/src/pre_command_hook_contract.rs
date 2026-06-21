@@ -54,6 +54,46 @@ pub struct RuntimePreCommandRulePlanInput {
     pub script_path_allowed: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimePreCommandStateSelectionInput {
+    #[serde(default)]
+    pub direct_runtime_pre_command_state: Option<Value>,
+    #[serde(default)]
+    pub runtime_metadata_pre_command_state: Option<Value>,
+    #[serde(default)]
+    pub has_persistent_scope_key: bool,
+    #[serde(default)]
+    pub persisted_state: Option<Value>,
+    #[serde(default)]
+    pub persisted_load_attempted: bool,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimePreCommandStateSelectionPlan {
+    pub action: RuntimePreCommandStateSelectionAction,
+    pub source: RuntimePreCommandStateSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<Value>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePreCommandStateSelectionAction {
+    UseSelected,
+    LoadPersisted,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePreCommandStateSource {
+    DirectRuntime,
+    RuntimeMetadata,
+    Persisted,
+    None,
+}
+
 pub fn plan_pre_command_hooks_config(
     input: &PreCommandHooksConfigPlanInput,
 ) -> PreCommandHooksConfigPlan {
@@ -128,6 +168,51 @@ pub fn plan_runtime_pre_command_rule(
         priority: -1000,
         order: -1,
     })
+}
+
+pub fn plan_runtime_pre_command_state_selection(
+    input: &RuntimePreCommandStateSelectionInput,
+) -> RuntimePreCommandStateSelectionPlan {
+    if let Some(state) = clone_object_value(input.direct_runtime_pre_command_state.as_ref()) {
+        return RuntimePreCommandStateSelectionPlan {
+            action: RuntimePreCommandStateSelectionAction::UseSelected,
+            source: RuntimePreCommandStateSource::DirectRuntime,
+            state: Some(state),
+        };
+    }
+    if let Some(state) = clone_object_value(input.runtime_metadata_pre_command_state.as_ref()) {
+        return RuntimePreCommandStateSelectionPlan {
+            action: RuntimePreCommandStateSelectionAction::UseSelected,
+            source: RuntimePreCommandStateSource::RuntimeMetadata,
+            state: Some(state),
+        };
+    }
+    if !input.persisted_load_attempted {
+        if !input.has_persistent_scope_key {
+            return RuntimePreCommandStateSelectionPlan {
+                action: RuntimePreCommandStateSelectionAction::UseSelected,
+                source: RuntimePreCommandStateSource::None,
+                state: None,
+            };
+        }
+        return RuntimePreCommandStateSelectionPlan {
+            action: RuntimePreCommandStateSelectionAction::LoadPersisted,
+            source: RuntimePreCommandStateSource::None,
+            state: None,
+        };
+    }
+    if let Some(state) = clone_object_value(input.persisted_state.as_ref()) {
+        return RuntimePreCommandStateSelectionPlan {
+            action: RuntimePreCommandStateSelectionAction::UseSelected,
+            source: RuntimePreCommandStateSource::Persisted,
+            state: Some(state),
+        };
+    }
+    RuntimePreCommandStateSelectionPlan {
+        action: RuntimePreCommandStateSelectionAction::UseSelected,
+        source: RuntimePreCommandStateSource::None,
+        state: None,
+    }
 }
 
 fn disabled_config() -> PreCommandHooksConfigPlan {
@@ -320,11 +405,20 @@ fn parse_js_int_prefix(value: &str) -> Option<i64> {
     candidate.parse::<i64>().ok()
 }
 
+fn clone_object_value(raw: Option<&Value>) -> Option<Value> {
+    match raw {
+        Some(Value::Object(record)) => Some(Value::Object(record.clone())),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         plan_pre_command_hooks_config, plan_runtime_pre_command_rule,
-        PreCommandHooksConfigPlanInput, RuntimePreCommandRulePlanInput,
+        plan_runtime_pre_command_state_selection, PreCommandHooksConfigPlanInput,
+        RuntimePreCommandRulePlanInput, RuntimePreCommandStateSelectionAction,
+        RuntimePreCommandStateSelectionInput, RuntimePreCommandStateSource,
     };
     use serde_json::json;
 
@@ -400,5 +494,89 @@ mod tests {
             })
             .is_none()
         );
+    }
+
+    #[test]
+    fn runtime_pre_command_state_selection_prefers_direct_then_runtime_then_persisted() {
+        let direct = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+            direct_runtime_pre_command_state: Some(json!({})),
+            runtime_metadata_pre_command_state: Some(json!({ "preCommandScriptPath": "/tmp/runtime.sh" })),
+            has_persistent_scope_key: true,
+            persisted_state: None,
+            persisted_load_attempted: false,
+        });
+        assert_eq!(direct.action, RuntimePreCommandStateSelectionAction::UseSelected);
+        assert_eq!(direct.source, RuntimePreCommandStateSource::DirectRuntime);
+        assert_eq!(direct.state, Some(json!({})));
+
+        let runtime = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+            direct_runtime_pre_command_state: Some(json!("not-an-object")),
+            runtime_metadata_pre_command_state: Some(json!({ "preCommandScriptPath": "/tmp/runtime.sh" })),
+            has_persistent_scope_key: true,
+            persisted_state: None,
+            persisted_load_attempted: false,
+        });
+        assert_eq!(runtime.action, RuntimePreCommandStateSelectionAction::UseSelected);
+        assert_eq!(runtime.source, RuntimePreCommandStateSource::RuntimeMetadata);
+        assert_eq!(
+            runtime.state,
+            Some(json!({ "preCommandScriptPath": "/tmp/runtime.sh" }))
+        );
+
+        let persisted = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+            direct_runtime_pre_command_state: None,
+            runtime_metadata_pre_command_state: None,
+            has_persistent_scope_key: true,
+            persisted_state: Some(json!({ "preCommandScriptPath": "/tmp/persisted.sh" })),
+            persisted_load_attempted: true,
+        });
+        assert_eq!(persisted.action, RuntimePreCommandStateSelectionAction::UseSelected);
+        assert_eq!(persisted.source, RuntimePreCommandStateSource::Persisted);
+        assert_eq!(
+            persisted.state,
+            Some(json!({ "preCommandScriptPath": "/tmp/persisted.sh" }))
+        );
+    }
+
+    #[test]
+    fn runtime_pre_command_state_selection_requests_persisted_load_only_when_needed() {
+        let plan = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+            direct_runtime_pre_command_state: None,
+            runtime_metadata_pre_command_state: Some(json!(["ignored"])),
+            has_persistent_scope_key: true,
+            persisted_state: None,
+            persisted_load_attempted: false,
+        });
+        assert_eq!(plan.action, RuntimePreCommandStateSelectionAction::LoadPersisted);
+        assert_eq!(plan.source, RuntimePreCommandStateSource::None);
+        assert_eq!(plan.state, None);
+
+        let after_load = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+            direct_runtime_pre_command_state: None,
+            runtime_metadata_pre_command_state: None,
+            has_persistent_scope_key: true,
+            persisted_state: Some(json!("still-invalid")),
+            persisted_load_attempted: true,
+        });
+        assert_eq!(
+            after_load.action,
+            RuntimePreCommandStateSelectionAction::UseSelected
+        );
+        assert_eq!(after_load.source, RuntimePreCommandStateSource::None);
+        assert_eq!(after_load.state, None);
+
+        let without_scope_key = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+            direct_runtime_pre_command_state: None,
+            runtime_metadata_pre_command_state: None,
+            has_persistent_scope_key: false,
+            persisted_state: None,
+            persisted_load_attempted: false,
+        });
+        assert_eq!(
+            without_scope_key.action,
+            RuntimePreCommandStateSelectionAction::UseSelected
+        );
+        assert_eq!(without_scope_key.source, RuntimePreCommandStateSource::None);
+        assert_eq!(without_scope_key.state, None);
     }
 }

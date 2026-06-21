@@ -67,6 +67,7 @@ const RUST_SERVERTOOL_AUTO_HOOK_QUEUE = `${ROOT}/sharedmodule/llmswitch-core/rus
 const RUST_SERVERTOOL_REGISTRY_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs`;
 const RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs`;
 const RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs`;
+const RUST_SERVERTOOL_ENTRY_PREFLIGHT_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs`;
 const RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs`;
 const RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs`;
 const RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs`;
@@ -3356,6 +3357,72 @@ function checkServertoolRegistryRustOwner() {
   );
 }
 
+function checkServertoolEntryPreflightRustOwner() {
+  const rustEntryPreflight = readRequired(RUST_SERVERTOOL_ENTRY_PREFLIGHT_CONTRACT);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
+
+  for (const needle of [
+    'feature_id: hub.servertool_server_side_tool_entry_contract',
+    'pub struct ServertoolEntryPreflightInput',
+    'pub struct ServertoolEntryPreflightPlan',
+    'pub fn plan_servertool_entry_preflight',
+  ]) {
+    assertContains('servertool-entry-preflight-rust-owner', RUST_SERVERTOOL_ENTRY_PREFLIGHT_CONTRACT, rustEntryPreflight, needle);
+  }
+  assertContains(
+    'servertool-entry-preflight-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod server_side_tool_entry_contract'
+  );
+  assertContains(
+    'servertool-entry-preflight-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'plan_servertool_entry_preflight_json'
+  );
+  assertContains(
+    'servertool-entry-preflight-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn plan_servertool_entry_preflight_json'
+  );
+  assertContains(
+    'servertool-entry-preflight-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planServertoolEntryPreflightJson'
+  );
+  assertContains(
+    'servertool-entry-preflight-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planServertoolEntryPreflightWithNative'
+  );
+  assertContains(
+    'servertool-entry-preflight-ts-thin-shell',
+    `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
+    serverSideToolsImpl,
+    'planServertoolEntryPreflightWithNative'
+  );
+  for (const keyword of [
+    'if (!base) {',
+    'if (isAdapterClientDisconnected(options.adapterContext)) {',
+  ]) {
+    assertMissing(
+      'servertool-entry-preflight-no-ts-owner',
+      `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
+      serverSideToolsImpl,
+      keyword
+    );
+  }
+}
+
 function checkEngineSelectionRustOwner() {
   const rustEngineSelection = readRequired(RUST_SERVERTOOL_ENGINE_SELECTION);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
@@ -5548,6 +5615,8 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'hasServertoolSupport:',
         "typeof options.providerInvoker === 'function' || typeof options.reenterPipeline === 'function'",
         "return name !== 'stop_message_auto';",
+        'if (!base) {',
+        'if (isAdapterClientDisconnected(options.adapterContext)) {',
         "'SERVERTOOL_CLIENT_DISCONNECTED'",
         "'[servertool] client disconnected before servertool execution'",
         '.find(isClientExecCliProjectionToolCall)',
@@ -5556,6 +5625,7 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'servertoolCliProjection: {',
         "code: 'SERVERTOOL_STATE_LOAD_FAILED'",
         '[servertool] sticky routing state load failed:',
+        'if (!persistentScopeKey) {',
         'asObject(directRuntime?.preCommandState) ??',
         'asObject((runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState)',
       ],
@@ -5752,6 +5822,7 @@ checkPendingSessionRustOwner();
 checkPreCommandHooksRustOwner();
 checkAutoHookExecutionRustOwner();
 checkServertoolRegistryRustOwner();
+checkServertoolEntryPreflightRustOwner();
 checkEngineSelectionRustOwner();
 checkServertoolFlowPresentationRustOwner();
 checkBackendRoutePolicyRustOwner();

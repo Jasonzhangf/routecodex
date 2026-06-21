@@ -6,10 +6,11 @@ import type {
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
-import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { loadRoutingInstructionStateSync } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
+  collectServertoolAdditionalClientToolCallsWithNative,
+  isServertoolClientExecCliProjectionToolCallWithNative,
   planServertoolResponseStageGateWithNative,
   planServertoolToolCallDispatchWithNative,
   runServertoolResponseStageWithNative
@@ -21,7 +22,14 @@ import {
   runToolCallExecutionLoopThinShell
 } from './execution-shell.js';
 import { buildServertoolCliProjectionForToolCall } from './cli-projection.js';
-import { extractTextFromChatLikeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  buildServertoolCliProjectionExecutionContextWithNative,
+  extractTextFromChatLikeWithNative,
+  planServertoolEntryPreflightWithNative,
+  planServertoolExecutionBranchWithNative,
+  planRuntimePreCommandStateSelectionWithNative,
+  planServertoolResponseStageRuntimeActionWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   appendToolOutput,
   filterOutExecutedToolCalls,
@@ -31,7 +39,11 @@ import {
 } from './orchestration-blocks.js';
 import { runServertoolAutoHookCallerViaThinShell } from './auto-hook-caller.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
-import { isAdapterClientDisconnected } from './timeout-error-block.js';
+import {
+  createServertoolStateLoadFailedError,
+  createServerToolClientDisconnectedError,
+  isAdapterClientDisconnected
+} from './timeout-error-block.js';
 
 function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | null {
   if (!Array.isArray(values) || values.length === 0) {
@@ -55,19 +67,22 @@ const runServerSideToolEngineViaThinShell = async (
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> => {
   const base = asObject(options.chatResponse);
-  if (!base) {
+  const entryPreflightPlan = planServertoolEntryPreflightWithNative({
+    hasBaseObject: Boolean(base),
+    adapterClientDisconnected: isAdapterClientDisconnected(options.adapterContext)
+  });
+  if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {
     return { mode: 'passthrough', finalChatResponse: options.chatResponse };
   }
-
-  if (isAdapterClientDisconnected(options.adapterContext)) {
-    throw Object.assign(new Error('[servertool] client disconnected before servertool execution'), {
-      code: 'SERVERTOOL_CLIENT_DISCONNECTED',
-      details: { requestId: options.requestId }
+  if (entryPreflightPlan.action === 'throw_client_disconnected') {
+    throw createServerToolClientDisconnectedError({
+      requestId: options.requestId
     });
   }
-  const toolCalls = extractToolCallsImpl(base, options.requestId);
+  const baseObject = base as JsonObject;
+  const toolCalls = extractToolCallsImpl(baseObject, options.requestId);
   const contextBase: Omit<ServerToolHandlerContext, 'toolCall'> = {
-    base,
+    base: baseObject,
     toolCalls,
     adapterContext: options.adapterContext,
     requestId: options.requestId,
@@ -83,36 +98,39 @@ const runServerSideToolEngineViaThinShell = async (
   const includeAutoHookIds = normalizeFilterTokenSet(options.includeAutoHookIds);
   const excludeAutoHookIds = normalizeFilterTokenSet(options.excludeAutoHookIds);
 
-  const baseForExecution = cloneJson(base) as JsonObject;
+  const baseForExecution = cloneJson(baseObject) as JsonObject;
   const runtimeMetadata = readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);
+  const persistentScopeKey = resolveServertoolPersistentScopeKey(options.adapterContext);
   const runtimePreCommandState = (() => {
     const directRuntime = asObject((options.adapterContext as Record<string, unknown> | undefined)?.__rt);
-    const runtimeState =
-      asObject(directRuntime?.preCommandState) ??
-      asObject((runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState);
-    if (runtimeState) {
-      return runtimeState;
-    }
-    const persistentScopeKey = resolveServertoolPersistentScopeKey(options.adapterContext);
-    if (!persistentScopeKey) {
-      return undefined;
+    const initialSelection = planRuntimePreCommandStateSelectionWithNative({
+      directRuntimePreCommandState: directRuntime?.preCommandState,
+      runtimeMetadataPreCommandState: (runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState,
+      hasPersistentScopeKey: Boolean(persistentScopeKey),
+      persistedLoadAttempted: false
+    });
+    if (initialSelection.action === 'use_selected') {
+      return initialSelection.state as JsonObject | undefined;
     }
     try {
       const persistedState = loadRoutingInstructionStateSync(persistentScopeKey);
-      return persistedState ? (JSON.parse(JSON.stringify(persistedState)) as JsonObject) : undefined;
+      const persistedSelection = planRuntimePreCommandStateSelectionWithNative({
+        directRuntimePreCommandState: directRuntime?.preCommandState,
+        runtimeMetadataPreCommandState: (runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState,
+        hasPersistentScopeKey: true,
+        persistedState: persistedState ? (JSON.parse(JSON.stringify(persistedState)) as JsonObject) : undefined,
+        persistedLoadAttempted: true
+      });
+      return persistedSelection.state as JsonObject | undefined;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-      const wrapped = new ProviderProtocolError(`[servertool] sticky routing state load failed: ${persistentScopeKey}: ${message}`, {
-        code: 'SERVERTOOL_STATE_LOAD_FAILED',
-        category: 'INTERNAL_ERROR',
-        details: {
-          stickyKey: persistentScopeKey,
-          requestId: options.requestId,
-          entryEndpoint: options.entryEndpoint,
-          providerProtocol: options.providerProtocol,
-          error: message
-        }
-      }) as ProviderProtocolError & { status?: number; cause?: unknown };
+      const wrapped = createServertoolStateLoadFailedError({
+        stickyKey: persistentScopeKey,
+        requestId: options.requestId,
+        entryEndpoint: options.entryEndpoint,
+        providerProtocol: options.providerProtocol,
+        error: message
+      }) as ReturnType<typeof createServertoolStateLoadFailedError> & { cause?: unknown };
       wrapped.status = 500;
       wrapped.cause = error;
       throw wrapped;
@@ -123,7 +141,7 @@ const runServerSideToolEngineViaThinShell = async (
     options,
     toolCalls,
     runtimePreCommandState,
-    bases: [base, baseForExecution],
+    bases: [baseObject, baseForExecution],
     patchToolCallArgumentsById
   });
 
@@ -137,27 +155,41 @@ const runServerSideToolEngineViaThinShell = async (
     })
   );
 
-  const cliProjectedToolCall = dispatchPlan.executableToolCalls.find(isClientExecCliProjectionToolCall);
-  if (cliProjectedToolCall) {
-    const additionalToolCalls = collectAdditionalClientToolCallsImpl(base, cliProjectedToolCall.id);
+  const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({
+    executableToolCalls: dispatchPlan.executableToolCalls.map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      executionMode: toolCall.executionMode
+    })),
+    executedToolCallsLen: 0
+  });
+  if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
+    const cliProjectedToolCall = dispatchPlan.executableToolCalls.find(
+      (toolCall) => toolCall.id === preExecutionBranchPlan.projectedToolCallId
+    );
+    if (!cliProjectedToolCall) {
+      throw new Error(
+        `[servertool] native execution-branch projected missing tool call id: ${String(preExecutionBranchPlan.projectedToolCallId ?? '')}`
+      );
+    }
+    const additionalToolCalls = collectAdditionalClientToolCallsImpl(baseObject, cliProjectedToolCall.id);
     const projection = buildServertoolCliProjectionForToolCall({
       options,
       toolCall: cliProjectedToolCall,
       ...(additionalToolCalls.length ? { additionalToolCalls } : {}),
       reasoningText: `继续执行本地 hook ${cliProjectedToolCall.name}。`
     });
+    const execution = buildServertoolCliProjectionExecutionContextWithNative({
+      requestId: options.requestId,
+      clientCallId: projection.clientCallId,
+      toolName: projection.toolName
+    });
     return {
       mode: 'tool_flow',
       finalChatResponse: projection.chatResponse,
-      execution: {
-        flowId: 'servertool_cli_projection',
-        context: {
-          servertoolCliProjection: {
-            clientCallId: projection.clientCallId,
-            toolName: projection.toolName,
-            requestId: options.requestId
-          } as JsonObject
-        }
+      execution: execution as {
+        flowId: string;
+        context?: JsonObject;
       }
     };
   }
@@ -170,9 +202,17 @@ const runServerSideToolEngineViaThinShell = async (
     appendToolOutput
   });
 
-  if (executionState.executedToolCalls.length > 0) {
+  const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({
+    executableToolCalls: dispatchPlan.executableToolCalls.map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      executionMode: toolCall.executionMode
+    })),
+    executedToolCallsLen: executionState.executedToolCalls.length
+  });
+  if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {
     return resolveToolCallExecutionOutcomeThinShell({
-      base,
+      base: baseObject,
       baseForExecution,
       options,
       toolCalls,
@@ -183,14 +223,25 @@ const runServerSideToolEngineViaThinShell = async (
     });
   }
 
-  const responseStageGatePlan = planServertoolResponseStageGateWithNative({
-    payload: base,
+  const responseStagePlan = planServertoolResponseStageGateWithNative({
+    payload: baseObject,
     adapterContext: options.adapterContext as Record<string, unknown>,
-    hasServertoolSupport:
-      typeof options.providerInvoker === 'function' || typeof options.reenterPipeline === 'function'
+    capabilities: {
+      providerInvoker: typeof options.providerInvoker === 'function',
+      reenterPipeline: typeof options.reenterPipeline === 'function',
+      clientInjectDispatch: false
+    }
   });
-  if (responseStageGatePlan?.shouldBypass === true) {
-    return { mode: 'passthrough', finalChatResponse: base };
+  const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageNextAction:
+      responseStagePlan && typeof responseStagePlan === 'object' && !Array.isArray(responseStagePlan)
+        ? (responseStagePlan as Record<string, unknown>).nextAction as string | undefined
+        : undefined,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  });
+  if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass') {
+    return { mode: 'passthrough', finalChatResponse: baseObject };
   }
   const autoHookResult = await runServertoolAutoHookCallerImpl({
     options,
@@ -198,7 +249,18 @@ const runServerSideToolEngineViaThinShell = async (
     includeAutoHookIds,
     excludeAutoHookIds
   });
-  return autoHookResult ?? { mode: 'passthrough', finalChatResponse: base };
+  const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageNextAction:
+      responseStagePlan && typeof responseStagePlan === 'object' && !Array.isArray(responseStagePlan)
+        ? (responseStagePlan as Record<string, unknown>).nextAction as string | undefined
+        : undefined,
+    autoHookEvaluated: true,
+    hasAutoHookResult: Boolean(autoHookResult)
+  });
+  if (postAutoHookRuntimeAction.action === 'return_auto_hook_result' && autoHookResult) {
+    return autoHookResult;
+  }
+  return { mode: 'passthrough', finalChatResponse: baseObject };
 };
 
 const runServertoolAutoHookCallerViaImplThinShell = async (args: {
@@ -211,28 +273,16 @@ const runServertoolAutoHookCallerViaImplThinShell = async (args: {
 };
 
 export function isClientExecCliProjectionToolCall(toolCall: ToolCall & { executionMode?: string }): boolean {
-  const executionMode = typeof toolCall.executionMode === 'string' ? toolCall.executionMode.trim() : '';
-  return executionMode === 'client_exec_cli_projection';
+  return isServertoolClientExecCliProjectionToolCallWithNative({
+    executionMode: toolCall.executionMode
+  });
 }
 
 const collectAdditionalClientToolCallsViaImplThinShell = (base: JsonObject, projectedToolCallId: string): JsonValue[] => {
-  const choices = getArray((base as { choices?: unknown }).choices);
-  const first = asObject(choices[0]);
-  const message = asObject(first?.message);
-  const toolCalls = getArray((message as { tool_calls?: unknown } | null)?.tool_calls);
-  return toolCalls.filter((toolCall) => {
-    const row = asObject(toolCall);
-    if (!row) {
-      return false;
-    }
-    const id = typeof row.id === 'string' ? row.id : '';
-    if (!id || id === projectedToolCallId) {
-      return false;
-    }
-    const functionRow = asObject((row as { function?: unknown }).function);
-    const name = typeof functionRow?.name === 'string' ? functionRow.name.trim() : '';
-    return name !== 'stop_message_auto';
-  });
+  return collectServertoolAdditionalClientToolCallsWithNative({
+    base,
+    projectedToolCallId
+  }) as JsonValue[];
 };
 
 const extractToolCallsViaImplThinShell = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {

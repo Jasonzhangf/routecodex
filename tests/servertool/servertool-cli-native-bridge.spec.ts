@@ -10,6 +10,7 @@ import {
   planServertoolExecutionLoopEffectWithNative,
   planServertoolExecutionLoopRuntimeActionWithNative,
   planServertoolExecutionOutcomeRuntimeActionWithNative,
+  planServertoolEntryPreflightWithNative,
   planServertoolResponseStageRuntimeActionWithNative,
   planServertoolRegistryAutoHookDescriptorsWithNative,
   planServertoolRegistryLookupActionWithNative,
@@ -215,6 +216,35 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'continue_to_engine'
+    });
+  });
+
+  it('uses Rust-owned server-side-tool entry preflight planning', () => {
+    expect(
+      planServertoolEntryPreflightWithNative({
+        hasBaseObject: false,
+        adapterClientDisconnected: false
+      })
+    ).toEqual({
+      action: 'return_passthrough_non_object_chat'
+    });
+
+    expect(
+      planServertoolEntryPreflightWithNative({
+        hasBaseObject: true,
+        adapterClientDisconnected: true
+      })
+    ).toEqual({
+      action: 'throw_client_disconnected'
+    });
+
+    expect(
+      planServertoolEntryPreflightWithNative({
+        hasBaseObject: true,
+        adapterClientDisconnected: false
+      })
+    ).toEqual({
+      action: 'continue_to_tool_flow'
     });
   });
 

@@ -43,6 +43,7 @@ use servertool_core::persisted_lookup;
 use servertool_core::pre_command_hook_contract;
 use servertool_core::registry_contract;
 use servertool_core::response_stage_runtime_action_contract;
+use servertool_core::server_side_tool_entry_contract;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
@@ -571,6 +572,16 @@ pub fn plan_servertool_response_stage_runtime_action_json(
         ),
     )
     .map_err(|e| format!("serialize servertool response stage runtime action plan: {e}"))
+}
+
+pub fn plan_servertool_entry_preflight_json(input_json: &str) -> Result<String, String> {
+    let input: server_side_tool_entry_contract::ServertoolEntryPreflightInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool entry preflight input: {e}"))?;
+    serde_json::to_string(&server_side_tool_entry_contract::plan_servertool_entry_preflight(
+        input,
+    ))
+    .map_err(|e| format!("serialize servertool entry preflight plan: {e}"))
 }
 
 pub fn plan_servertool_registry_registration_action_json(
@@ -2597,6 +2608,7 @@ fn plans_runtime_pre_command_state_selection_via_servertool_core_bridge() {
         &serde_json::json!({
             "directRuntimePreCommandState": null,
             "runtimeMetadataPreCommandState": { "preCommandScriptPath": "/tmp/runtime.sh" },
+            "hasPersistentScopeKey": false,
             "persistedLoadAttempted": false
         })
         .to_string(),
@@ -2608,6 +2620,54 @@ fn plans_runtime_pre_command_state_selection_via_servertool_core_bridge() {
     assert_eq!(
         parsed["state"]["preCommandScriptPath"],
         serde_json::Value::String("/tmp/runtime.sh".to_string())
+    );
+
+    let skip = plan_runtime_pre_command_state_selection_json(
+        &serde_json::json!({
+            "directRuntimePreCommandState": null,
+            "runtimeMetadataPreCommandState": null,
+            "hasPersistentScopeKey": false,
+            "persistedLoadAttempted": false
+        })
+        .to_string(),
+    )
+    .expect("skip state selection plan");
+    let skip_parsed: serde_json::Value = serde_json::from_str(&skip).expect("parse skip plan");
+    assert_eq!(skip_parsed["action"], "use_selected");
+    assert_eq!(skip_parsed["source"], "none");
+    assert!(skip_parsed.get("state").is_none() || skip_parsed["state"].is_null());
+}
+
+#[test]
+fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
+    let passthrough = plan_servertool_entry_preflight_json(
+        &serde_json::json!({
+            "hasBaseObject": false,
+            "adapterClientDisconnected": false
+        })
+        .to_string(),
+    )
+    .expect("passthrough entry preflight");
+    let passthrough_parsed: serde_json::Value =
+        serde_json::from_str(&passthrough).expect("parse passthrough preflight");
+    assert_eq!(
+        passthrough_parsed["action"],
+        serde_json::Value::String("return_passthrough_non_object_chat".to_string())
+    );
+
+    let disconnected = plan_servertool_entry_preflight_json(
+        &serde_json::json!({
+            "hasBaseObject": true,
+            "adapterClientDisconnected": true
+        })
+        .to_string(),
+    )
+    .expect("disconnected entry preflight");
+    let disconnected_parsed: serde_json::Value =
+        serde_json::from_str(&disconnected).expect("parse disconnected preflight");
+    assert_eq!(
+        disconnected_parsed["action"],
+        serde_json::Value::String("throw_client_disconnected".to_string())
     );
 }
 
