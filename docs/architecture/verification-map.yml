@@ -124,7 +124,6 @@ verification:
       - tests/servertool/stopless-vr-route-hint.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
-      - tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
       - tests/servertool/stop-message-auto.goal-default.spec.ts
@@ -466,7 +465,8 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
-      - sharedmodule/llmswitch-core/src/servertool/flow-presentation-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
+      - sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts
       - sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts

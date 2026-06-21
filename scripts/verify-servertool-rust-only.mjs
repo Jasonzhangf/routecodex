@@ -3553,8 +3553,8 @@ function checkEngineSelectionRustOwner() {
 
 function checkServertoolFlowPresentationRustOwner() {
   const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
-  const flowPresentationShell = readRequired(TS_FLOW_PRESENTATION);
   const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
+  const progressLogShell = readRequired(`${SERVERTOOL_TS_DIR}/progress-log-block.ts`);
   const nativeWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
 
@@ -3592,25 +3592,16 @@ function checkServertoolFlowPresentationRustOwner() {
     );
     assertContains(
       'servertool-flow-presentation-ts-thin-shell',
-      TS_FLOW_PRESENTATION,
-      flowPresentationShell,
+      `${SERVERTOOL_TS_DIR}/progress-log-block.ts`,
+      progressLogShell,
       needle
     );
   }
-  for (const keyword of [
-    'function normalizeFlowId',
-    'buildServertoolProgressConfig',
-    'toolNameByFlowId',
-    'goldHighlightFlowIds',
-    'new Set(',
-    "return 'unknown'",
-  ]) {
-    if (flowPresentationShell.includes(keyword)) {
-      fail(
-        'servertool-flow-presentation-no-ts-owner',
-        `Forbidden TS flow presentation semantic "${keyword}" found in flow-presentation-block.ts`
-      );
-    }
+  if (existsSync(TS_FLOW_PRESENTATION)) {
+    fail(
+      'servertool-flow-presentation-no-ts-owner',
+      'flow-presentation-block.ts must stay deleted after direct native import closeout'
+    );
   }
   for (const keyword of [
     'buildServertoolProgressConfig',
@@ -3627,7 +3618,7 @@ function checkServertoolFlowPresentationRustOwner() {
   }
   pass(
     'servertool-flow-presentation-no-ts-owner',
-    'flow-presentation-block.ts is native-only shell for progress tool name and highlight semantics'
+    'flow-presentation-block.ts stays deleted; progress-log-block.ts directly uses native flow presentation wrappers'
   );
   pass(
     'servertool-flow-presentation-no-skeleton-ts-owner',

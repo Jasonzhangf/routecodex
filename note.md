@@ -10883,3 +10883,25 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `node scripts/build-core.mjs`
 - 结论：
   - 这只是去壳，不改变行为；但把 response-stage 的纯记录包装面再收小了一层。
+
+## 2026-06-22 servertool flow-presentation thin shell delete
+
+- 物理删除 `sharedmodule/llmswitch-core/src/servertool/flow-presentation-block.ts`，该文件只对两个 native wrapper 做纯透传，无独立 owner。
+- 替换路径：
+  - `sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts` 直接 import `resolveServertoolProgressToolNameWithNative` / `shouldUseServertoolGoldProgressHighlightWithNative`，不再走 `./flow-presentation-block.js`。
+  - `sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts` 改为直接 import native wrapper，断言 `shouldUseServertoolGoldProgressHighlightWithNative({ flowId: 'continue_execution_flow' })`。
+- Gate 调整：
+  - `scripts/verify-servertool-rust-only.mjs` 不再 `readRequired(TS_FLOW_PRESENTATION)`，新增 “flow-presentation-block.ts must stay deleted after direct native import closeout” 与 “flow-presentation-block.ts stays deleted; progress-log-block.ts directly uses native wrappers” 反向锁。
+  - `docs/architecture/function-map.yml` `hub.servertool_flow_presentation.owner_scope` 改为 `file-scoped Rust owner for servertool progress log tool-name and highlight presentation policy`；`docs/architecture/wiki/servertool-ownership-map.md` 同步。
+  - 根因：`scripts/architecture/verify-architecture-feature-anchor-coverage.mjs` 要求 canonical builder 字符串至少出现在 2 个 allowed_paths 文件；删薄壳后只剩 `servertool_skeleton_config.rs` 命中一次。把 owner 显式标 file-scoped 后，gate 降为“至少 1 个命中”，不再要求伪造 anchor。
+- 验证：
+  - `npm run verify:function-map-compile-gate` PASS（含 `verify:architecture-feature-anchor-coverage`）。
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` PASS。
+  - `node scripts/build-core.mjs` PASS（native rebuild + dist rebuild）。
+  - focused Jest：`tests/servertool/servertool-progress-logging.spec.ts` + `tests/servertool/servertool-active-orchestration-audit.spec.ts` 13 passed / 3 skipped。
+- 反模式：
+  - 不要为了凑齐 2 个 anchor 在 native wrapper 文件里硬塞 random `feature_id:` 注释或 fake builder 字符串；那只会把 gate 变成“看起来过、实际没真源”。
+  - 删薄壳前必须先把 owner_scope 调整与功能 map 注释同步，否则 function-map compile gate 会先红。
+- 下一步候选 slice（active orchestration audit 未报新违规）：
+  - `auto-hook-caller.ts` 重复别名壳。
+  - 或下一条薄透传 wrapper / 单纯 naming alias。

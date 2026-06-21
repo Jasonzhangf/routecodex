@@ -253,7 +253,7 @@ owners:
       - "servertool-core owns stopless CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline."
       - "req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts."
       - "Stopless is a dual-gate stop contract: `finish_reason=stop` is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard."
-      - "Response hook gate must cover both `finish_reason=stop` text/fence schema and `finish_reason=tool_calls` registered internal servertool calls. For stopless, `reasoningStop.arguments` is the schema source for the tool-call trigger arm."
+      - "Response hook gate must cover both `finish_reason=stop` text/fence schema and `finish_reason=tool_calls` registered internal servertool calls. For stopless, stop schema fence may arrive as `<rcc_stop_schema>...</rcc_stop_schema>` or standalone stop-schema JSON code fence, while `reasoningStop.arguments` remains the schema source for the tool-call trigger arm."
       - "`reasoningStop` is a model-facing/internal servertool name, not a client-executable tool. It must be intercepted by the response hook gate; clients may only receive shell `exec_command(routecodex hook run reasoningStop ...)` when the schema gate requires client execution/feedback."
       - "Stopless must not activate on same-protocol direct/provider-direct response paths; existing runtime metadata routeName is the only allowed discriminator for this bypass."
       - "If `finish_reason=stop` arrives without schema, RouteCodex must auto-project the same stop hook (internal `stop_message_auto`, public CLI alias `reasoningStop`) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop."
@@ -805,7 +805,7 @@ owners:
     status: active
     summary: "servertool progress log tool-name and highlight presentation policy"
     owner_kind: rust_ssot
-    owner_scope: "servertool progress log tool-name and highlight presentation policy"
+    owner_scope: "file-scoped Rust owner for servertool progress log tool-name and highlight presentation policy"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
     canonical_types:
       - ServertoolProgressPresentationInput
@@ -817,9 +817,9 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/flow-presentation-block.ts
       - sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts
       - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
+      - sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts
       - tests/servertool/servertool-progress-logging.spec.ts
       - docs
     forbidden_paths:
@@ -835,7 +835,7 @@ owners:
     migration_target: rust
     notes:
       - "Rust skeleton config owns flow id normalization, progress tool-name resolution, and gold highlight decisions."
-      - "TS flow-presentation-block may only call native wrappers."
+      - "progress-log-block.ts may only call native flow presentation wrappers."
       - "TS skeleton-config must not expose progress presentation projection helpers."
       - "Do not restore local `normalizeFlowId`, `buildServertoolProgressConfig`, `toolNameByFlowId`, `goldHighlightFlowIds`, or Set-based highlight policy in TS."
 

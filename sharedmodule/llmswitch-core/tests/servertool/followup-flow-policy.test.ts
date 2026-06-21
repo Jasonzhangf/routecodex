@@ -4,8 +4,8 @@ import {
   resolveFollowupFlowDecision,
 } from '../../src/servertool/backend-route-flow-policy.js';
 import {
-  shouldUseGoldProgressHighlight
-} from '../../src/servertool/flow-presentation-block.js';
+  shouldUseServertoolGoldProgressHighlightWithNative
+} from '../../src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 describe('servertool followup flow policy', () => {
   test('reads stop_message runtime plan from skeleton config', () => {
@@ -38,6 +38,6 @@ describe('servertool followup flow policy', () => {
   });
 
   test('reads gold highlight flow ids from skeleton config', () => {
-    expect(shouldUseGoldProgressHighlight('continue_execution_flow')).toBe(true);
+    expect(shouldUseServertoolGoldProgressHighlightWithNative({ flowId: 'continue_execution_flow' })).toBe(true);
   });
 });

@@ -1,7 +1,10 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
-import { resolveProgressToolName, shouldUseGoldProgressHighlight } from './flow-presentation-block.js';
+import {
+  resolveServertoolProgressToolNameWithNative,
+  shouldUseServertoolGoldProgressHighlightWithNative
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { formatStopMessageCompareContext, readStopMessageCompareContext } from './stop-message-compare-context.js';
 
 function resolveStage(step: number, message: string): string {
@@ -108,10 +111,10 @@ export function createServertoolProgressLogger(args: CommonArgs) {
 
   const logProgress = (step: number, _total: number, message: string, extra?: Record<string, unknown>): void => {
     const flowId = typeof extra?.flowId === 'string' ? extra.flowId.trim() : '';
-    const tool = resolveProgressToolName(flowId);
+    const tool = resolveServertoolProgressToolNameWithNative({ flowId });
     const stage = resolveStage(step, message);
     const result = normalizeResult(message);
-    const color = shouldUseGoldProgressHighlight(flowId) ? args.gold : args.yellow;
+    const color = shouldUseServertoolGoldProgressHighlightWithNative({ flowId }) ? args.gold : args.yellow;
     const shouldPrintConsole = tool !== 'stop_message_auto';
     if (shouldPrintConsole) {
       try {
