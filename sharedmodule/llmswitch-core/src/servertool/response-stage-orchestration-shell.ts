@@ -3,7 +3,6 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { recordStage } from '../conversion/hub/pipeline/stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../conversion/hub/pipeline/hub-stage-timing.js';
-import type { ProviderInvoker } from './types.js';
 import { runServerToolOrchestration } from './engine.js';
 import {
   runServertoolResponseStageWithNative,
@@ -19,20 +18,6 @@ import {
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 type ChatCompletionLike = JsonObject;
 
-type ReenterPipeline = (options: {
-  entryEndpoint: string;
-  requestId: string;
-  body: JsonObject;
-  metadata?: JsonObject;
-}) => Promise<{ body?: JsonObject; sseStream?: NodeJS.ReadableStream; format?: string }>;
-
-type ClientInjectDispatch = (options: {
-  entryEndpoint: string;
-  requestId: string;
-  body?: JsonObject;
-  metadata?: JsonObject;
-}) => Promise<{ ok: boolean; reason?: string }>;
-
 export interface ServertoolResponseStageShellOptions {
   payload: ChatCompletionLike;
   adapterContext: AdapterContext;
@@ -41,9 +26,6 @@ export interface ServertoolResponseStageShellOptions {
   providerProtocol: ProviderProtocol;
   allowFollowup?: boolean;
   stageRecorder?: StageRecorder;
-  providerInvoker?: ProviderInvoker;
-  reenterPipeline?: ReenterPipeline;
-  clientInjectDispatch?: ClientInjectDispatch;
 }
 
 export interface ServertoolResponseStageShellResult {
@@ -77,17 +59,19 @@ export async function runServertoolResponseStageOrchestrationShell(
   const forceDetailLog = isHubStageTimingDetailEnabled();
   const runtimeControl = readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
   const responseStage = runServertoolResponseStageWithNative(options.payload, options.requestId);
-  const hasServerToolSupport =
-    Boolean(options.providerInvoker) || Boolean(options.reenterPipeline) || Boolean(options.clientInjectDispatch);
   const gatePlan = planServertoolResponseStageGateWithNative({
     payload: options.payload,
     adapterContext: options.adapterContext as Record<string, unknown>,
     runtimeControl,
     allowFollowup: options.allowFollowup === true,
-    hasServertoolSupport: hasServerToolSupport
+    capabilities: {
+      providerInvoker: false,
+      reenterPipeline: false,
+      clientInjectDispatch: false
+    }
   });
 
-  if (gatePlan.shouldBypass === true) {
+  if (gatePlan.nextAction === 'bypass') {
     recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: false,
       skipReason: gatePlan.skipReason || 'followup_bypass',
@@ -112,10 +96,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
     providerProtocol: options.providerProtocol,
-    stageRecorder: options.stageRecorder,
-    providerInvoker: options.providerInvoker,
-    reenterPipeline: options.reenterPipeline,
-    clientInjectDispatch: options.clientInjectDispatch
+    stageRecorder: options.stageRecorder
   });
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'completed', {
     elapsedMs: Date.now() - orchestrationStart,

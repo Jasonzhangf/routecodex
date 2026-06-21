@@ -1,6 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import type { ProviderInvoker, ServerSideToolEngineOptions } from './types.js';
+import type { ServerSideToolEngineOptions } from './types.js';
 import { runServerSideToolEngine } from './server-side-tools.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { attachStopGatewayContext, inspectStopGatewaySignal } from './stop-gateway-context.js';
@@ -12,14 +12,12 @@ import {
 } from './timeout-error-block.js';
 import {
   containsSyntheticRouteCodexControlText,
-  resolveServerToolFollowupTimeoutMs,
   resolveServerToolTimeoutMs
 } from './orchestration-policy-block.js';
 import {
   runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
-import { runFollowupMainline as runFollowupMainlineShell } from './backend-route-mainline-block.js';
 import { buildServertoolCliProjectionForAutoFlow as buildServertoolCliProjectionForAutoFlowShell } from './cli-projection.js';
 import {
   extractCurrentAssistantStopTextWithNative,
@@ -45,26 +43,6 @@ export interface ServerToolOrchestrationOptions {
   entryEndpoint: string;
   providerProtocol: string;
   stageRecorder?: StageRecorder;
-  reenterPipeline?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<{
-    body?: JsonObject;
-    sseStream?: unknown;
-    format?: string;
-  }>;
-  clientInjectDispatch?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<{
-    ok: boolean;
-    reason?: string;
-  }>;
-  providerInvoker?: ProviderInvoker;
 }
 
 export interface ServerToolOrchestrationResult {
@@ -308,16 +286,12 @@ export async function runServerToolOrchestration(
 
   const serverToolTimeoutMs = resolveServerToolTimeoutMs();
   const effectiveServerToolTimeoutMs = serverToolTimeoutMs;
-  const followupTimeoutMs = resolveServerToolFollowupTimeoutMs();
   const engineOptions: ServerSideToolEngineOptions = {
     chatResponse: options.chat,
     adapterContext: options.adapterContext,
     entryEndpoint: options.entryEndpoint,
     requestId: options.requestId,
     providerProtocol: options.providerProtocol,
-    providerInvoker: options.providerInvoker,
-    reenterPipeline: options.reenterPipeline,
-    clientInjectDispatch: options.clientInjectDispatch,
     onAutoHookTrace: logAutoHookTrace
   };
 
@@ -459,21 +433,12 @@ export async function runServerToolOrchestration(
       flowId: engineResult.execution.flowId
     };
   }
-  return runFollowupMainlineShell({
-    adapterContext: options.adapterContext,
-    requestId: options.requestId,
-    entryEndpoint: options.entryEndpoint,
-    followupTimeoutMs,
-    execution: engineResult.execution,
-    finalChatResponse: engineResult.finalChatResponse,
-    flowId,
-    totalSteps,
-    stopMessageLoopWarnThreshold: STOP_MESSAGE_LOOP_WARN_THRESHOLD,
-    stopMessageLoopFailThreshold: STOP_MESSAGE_LOOP_FAIL_THRESHOLD,
-    stageRecorder: options.stageRecorder,
-    reenterPipeline: options.reenterPipeline,
-    clientInjectDispatch: options.clientInjectDispatch,
-    onLogProgress: (step, total, message, extra) => logProgress(step, total, message, extra),
-    logNonBlocking: logServerToolNonBlocking
+  throw Object.assign(new Error(`[servertool] retired followup/reenter mainline reached for flow ${flowId}`), {
+    code: 'SERVERTOOL_REENTER_RETIRED',
+    details: {
+      requestId: options.requestId,
+      flowId,
+      runtimeAction: runtimeAction.action
+    }
   });
 }

@@ -5,11 +5,16 @@ import path from 'path';
 describe('servertool CLI result restoration removal', () => {
   it('keeps real servertool CLI stdout as ordinary exec_command output with stopless guidance payload', () => {
     const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const binaryPath = [
+      'sharedmodule/llmswitch-core/dist/bin/routecodex-servertool',
+      'sharedmodule/llmswitch-core/rust-core/target/release/routecodex-servertool',
+      'sharedmodule/llmswitch-core/rust-core/target/debug/routecodex-servertool'
+    ]
+      .map((candidate) => path.join(process.cwd(), candidate))
+      .find((candidate) => fs.existsSync(candidate));
+    expect(binaryPath).toBeDefined();
     const stdout = execFileSync(
-      path.join(
-        process.cwd(),
-        'sharedmodule/llmswitch-core/rust-core/target/debug/routecodex-servertool'
-      ),
+      binaryPath as string,
       [
         'run',
         'stop_message_auto',
@@ -40,7 +45,7 @@ describe('servertool CLI result restoration removal', () => {
     expect(typeof parsedOutput.continuationPrompt).toBe('string');
     expect(parsedOutput.continuationPrompt.length).toBeGreaterThan(0);
     expect(parsedOutput.schemaGuidance).toBeDefined();
-    expect(parsedOutput.schemaGuidance.schemaOverview).toContain('结构化结果');
+    expect(parsedOutput.schemaGuidance.schemaOverview).toContain('结构化 JSON');
     expect(parsedOutput.schemaGuidance.schemaPurpose).toContain('结束原因');
     expect(Array.isArray(parsedOutput.schemaGuidance.requiredFields)).toBe(true);
     expect(parsedOutput.schemaGuidance.requiredFields).toContain('stopreason');

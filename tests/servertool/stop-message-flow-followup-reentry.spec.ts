@@ -63,6 +63,10 @@ function buildStopResponse(content = "done"): JsonObject {
   };
 }
 
+function buildFencedStopSchema(schemaJson: string): string {
+  return `<rcc_stop_schema>${schemaJson}</rcc_stop_schema>`;
+}
+
 function buildToolCallsResponse(): JsonObject {
   return {
     id: "chatcmpl_stop_message_flow_tool_calls",
@@ -126,7 +130,7 @@ function expectCliProjectedStoplessResult(
   expect(result.flowId).toBe("stop_message_flow");
   const serialized = JSON.stringify(result.chat ?? {});
   expect(serialized).toContain("exec_command");
-  expect(serialized).toContain("routecodex hook run reasoning_stop");
+  expect(serialized).toContain("routecodex hook run reasoningStop");
   expect(serialized).not.toContain("stop_message_auto");
 }
 
@@ -192,7 +196,7 @@ describe("stop_message_flow reentry", () => {
     );
   });
 
-  test("continues stop_message_flow when followup hop stops again", async () => {
+  test("followup hop stop does not start a second stop_message_flow", async () => {
     const sessionId = "stop-message-flow-followup-hop";
     const stateKey = `session:${sessionId}`;
     const state = createEmptyRoutingInstructionState();
@@ -206,7 +210,11 @@ describe("stop_message_flow reentry", () => {
     const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
 
     const result = await runServerToolOrchestration({
-      chat: buildStopResponse("再次停止"),
+      chat: buildStopResponse(
+        buildFencedStopSchema(
+          '{"stopreason":2,"reason":"仍需继续 followup 验证","has_evidence":1,"evidence":"reentered","issue_cause":"尚未完成最后验证","excluded_factors":"不是 direct passthrough","diagnostic_order":"followup->schema->continue","done_steps":"已完成 reenter","next_step":"继续下一步验证","next_suggested_path":"","needs_user_input":false,"learned":""}'
+        )
+      ),
       adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
@@ -231,13 +239,14 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expectCliProjectedStoplessResult(result);
+    expect(result.executed).toBe(false);
+    expect(result.flowId).toBeUndefined();
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
   });
 
-  test("tool call response resets consecutive stop_message_flow count", async () => {
+  test("tool call response does not engage stopless flow", async () => {
     const sessionId = "stop-message-flow-tool-call-reset";
     const stateKey = `session:${sessionId}`;
     const state = createEmptyRoutingInstructionState();
@@ -276,7 +285,7 @@ describe("stop_message_flow reentry", () => {
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 
-  test("non-goal stopless default counts missing schema stops", async () => {
+  test("non-goal stopless default counts only schema-bounded followups", async () => {
     const sessionId = "stopless-default-missing-schema";
     const stateKey = `session:${sessionId}`;
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
@@ -324,7 +333,7 @@ describe("stop_message_flow reentry", () => {
     expect(reenterPipeline).not.toHaveBeenCalled();
   });
 
-  test("non-goal stopless default counts invalid schema stops then returns final summary", async () => {
+  test("non-goal stopless default ignores invalid bare JSON schema in stop_message_flow", async () => {
     const sessionId = "stopless-default-invalid-schema-three-turns";
     const stateKey = `session:${sessionId}`;
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
@@ -410,7 +419,7 @@ describe("stop_message_flow reentry", () => {
 
     const validSchemaWithLearned = '{"stopreason":0,"reason":"目标完成","has_evidence":1,"evidence":"测试通过","issue_cause":"目标已验证","excluded_factors":"非无证据停止","diagnostic_order":"失败 schema -> 完整 schema -> note 写入","done_steps":"完成验证","next_step":"","learned":"只在真正停止时写 note.md"}';
     const valid = await runServerToolOrchestration({
-      chat: buildStopResponse(validSchemaWithLearned),
+      chat: buildStopResponse(buildFencedStopSchema(validSchemaWithLearned)),
       adapterContext: bindRuntimeControl({
         sessionId,
         workingDirectory: tempWorkdir,
@@ -433,14 +442,18 @@ describe("stop_message_flow reentry", () => {
     expect(note).not.toContain("不应写入");
   });
 
-  test("servertool followup hop stop does not trigger stopless client injection", async () => {
+  test("servertool followup hop stop does not trigger a second stopless flow or client injection", async () => {
     const sessionId = "stopless-after-apply-patch-followup-stop";
     const stateKey = `session:${sessionId}`;
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
     const reenterPipeline = jest.fn(async () => ({ body: buildStopResponse("reentered") }));
 
     const result = await runServerToolOrchestration({
-      chat: buildStopResponse("apply_patch followup stopped"),
+      chat: buildStopResponse(
+        buildFencedStopSchema(
+          '{"stopreason":2,"reason":"apply_patch followup 后仍需继续","has_evidence":1,"evidence":"apply_patch 已执行","issue_cause":"还要继续验证结果","excluded_factors":"不是二次 client inject","diagnostic_order":"followup->schema->continue","done_steps":"patch complete","next_step":"继续验证修改结果","next_suggested_path":"","needs_user_input":false,"learned":""}'
+        )
+      ),
       adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
@@ -459,14 +472,14 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe("stop_message_flow");
+    expect(result.executed).toBe(false);
+    expect(result.flowId).toBeUndefined();
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBeUndefined();
   });
 
-  test("servertool loop-state followup stop does not become a second stopless trigger", async () => {
+  test("servertool loop-state followup stop does not become a second stopless flow", async () => {
     const sessionId = "stopless-after-loop-state-followup-stop";
     const clientInjectDispatch = jest.fn(async () => ({ ok: true }) as const);
     const reenterPipeline = jest.fn(async () => {
@@ -474,7 +487,11 @@ describe("stop_message_flow reentry", () => {
     });
 
     const result = await runServerToolOrchestration({
-      chat: buildStopResponse("loop-state followup stopped"),
+      chat: buildStopResponse(
+        buildFencedStopSchema(
+          '{"stopreason":2,"reason":"loop-state followup 还未完成","has_evidence":1,"evidence":"loop state kept","issue_cause":"还需继续执行下一步","excluded_factors":"不是 stopless recursion","diagnostic_order":"loop-state->schema->continue","done_steps":"restored loop-state","next_step":"继续执行 loop-state 后续动作","next_suggested_path":"","needs_user_input":false,"learned":""}'
+        )
+      ),
       adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
@@ -495,8 +512,8 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expect(result.executed).toBe(true);
-    expect(result.flowId).toBe("stop_message_flow");
+    expect(result.executed).toBe(false);
+    expect(result.flowId).toBeUndefined();
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
   });

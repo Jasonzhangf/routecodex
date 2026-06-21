@@ -49,6 +49,7 @@ import {
 import { writeStoplessLearnedNoteEntry } from './memory/cache-writer.js';
 import {
   buildStopMessageTerminalVisiblePayloadWithNative,
+  extractCurrentAssistantReasoningStopArgumentsWithNative,
   extractCurrentAssistantStopTextWithNative,
   planStoplessLearnedNoteWriteWithNative
 } from '../../native/router-hotpath/native-servertool-core-semantics.js';
@@ -254,6 +255,43 @@ function attachStoplessRuntimeControlToMetadata(metadata: Record<string, unknown
     reason: 'stopless-runtime-state',
     required: true
   });
+}
+
+export function normalizeStoplessTriggerHintForMetadata(triggerHint: unknown): string | undefined {
+  if (typeof triggerHint !== 'string') {
+    return undefined;
+  }
+  const normalized = triggerHint.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  switch (normalized) {
+    case 'stop_schema_missing':
+      return 'no_schema';
+    case 'stop_schema_reason_missing':
+    case 'stop_schema_terminal_missing_fields':
+    case 'stop_schema_stopreason_missing_or_non_numeric':
+    case 'stop_schema_needs_user_input_missing_next_step':
+    case 'stop_schema_next_step_missing':
+    case 'stop_schema_forcestop_reason_missing':
+    case 'invalid_schema':
+      return 'invalid_schema';
+    case 'stop_schema_continue_without_next_step':
+    case 'stop_schema_continue_next_step':
+    case 'non_terminal_schema':
+      return 'non_terminal_schema';
+    case 'stop_schema_budget_exhausted':
+    case 'budget_exhausted':
+      return 'budget_exhausted';
+    case 'stop_schema_finished':
+    case 'stop_schema_blocked':
+    case 'stop_schema_needs_user_input':
+    case 'stop_schema_forcestop':
+    case 'schema_pass':
+      return 'schema_pass';
+    default:
+      return 'no_schema';
+  }
 }
 
 function bindMetadataCenterFromRecordToMetadata(
@@ -472,6 +510,7 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (
       : 0;
     const schemaGate = evaluateStopSchemaGateWithNative({
       assistantText: extractCurrentAssistantStopTextWithNative(ctx.base),
+      reasoningStopArguments: extractCurrentAssistantReasoningStopArgumentsWithNative(ctx.base) ?? undefined,
       used: decision.used,
       maxRepeats: decision.max_repeats,
       prevObservationHash,
@@ -550,12 +589,13 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (
           record.metadata = metadata;
         }
         bindMetadataCenterFromRecordToMetadata(record, metadata);
+        const stoplessTriggerHint = normalizeStoplessTriggerHintForMetadata(schemaGate.reason_code);
         attachStoplessRuntimeControlToMetadata(metadata, {
           sessionId: typeof record.sessionId === 'string' ? record.sessionId : undefined,
           flowId: FLOW_ID,
           repeatCount: persistPlan.nextUsed,
           maxRepeats: persistPlan.nextMaxRepeats,
-          ...(schemaGate.reason_code ? { triggerHint: schemaGate.reason_code } : {}),
+          ...(stoplessTriggerHint ? { triggerHint: stoplessTriggerHint } : {}),
           ...(typeof effectiveDecision.followup_text === 'string' ? { continuationPrompt: effectiveDecision.followup_text } : {}),
           ...(schemaFeedback ? { schemaFeedback } : {}),
           active: true
@@ -568,13 +608,13 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (
           context: {
             decision: effectiveDecision as unknown as JsonObject,
             assistantStopText,
-            stopSchemaTriggerHint: schemaGate.reason_code,
+            ...(stoplessTriggerHint ? { stopSchemaTriggerHint: stoplessTriggerHint } : {}),
             ...(schemaFeedback ? { stopSchemaFeedback: schemaFeedback } : {}),
             serverToolLoopState: {
               flowId: FLOW_ID,
               repeatCount: persistPlan.nextUsed,
               maxRepeats: persistPlan.nextMaxRepeats,
-              triggerHint: schemaGate.reason_code,
+              ...(stoplessTriggerHint ? { triggerHint: stoplessTriggerHint } : {}),
               ...(schemaFeedback ? { schemaFeedback } : {})
             }
           }

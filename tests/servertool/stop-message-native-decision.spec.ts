@@ -209,21 +209,14 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('malformed schema returns parse feedback and explicit field guidance', () => {
     const gate = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":"oops","reason":"想停","has_evidence":1,"evidence":"log"}',
+      assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
     });
     expect(gate.action).toBe('followup');
-    expect(gate.reason_code).toBe('stop_schema_stopreason_missing_or_non_numeric');
+    expect(gate.reason_code).toBe('stop_schema_invalid_json');
     expect(gate.count_budget).toBe(true);
-    expect(gate.missing_fields).toContain('stopreason');
-    expect(gate.parsed).toMatchObject({
-      reason: '想停',
-      has_evidence: 1,
-      evidence: 'log',
-    });
-    expect(gate.followup_text).toContain('stopreason');
-    expect(gate.followup_text).toContain('0/1/2');
+    expect(gate.followup_text).toContain('<rcc_stop_schema>');
   });
 
   test('stop schema gate exhausts repeated missing schema loop', () => {
@@ -262,7 +255,8 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('stop schema gate requires evidence and diagnostics before terminal stop', () => {
     const shallow = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":0,"evidence":"","next_step":""}',
+      assistantText:
+        '<rcc_stop_schema>{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":0,"evidence":"","next_step":""}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
     });
@@ -274,7 +268,8 @@ describe('stop-message native decision (blackbox)', () => {
     );
 
     const gate = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":1,"evidence":"exec_command rejected","issue_cause":"客户端拒绝工具权限","excluded_factors":"非模型输出格式问题","diagnostic_order":"工具调用 -> 拒绝日志 -> 阻塞判定","done_steps":"确认工具权限被拒","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"需要先确认工具权限"}',
+      assistantText:
+        '<rcc_stop_schema>{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":1,"evidence":"exec_command rejected","issue_cause":"客户端拒绝工具权限","excluded_factors":"非模型输出格式问题","diagnostic_order":"工具调用 -> 拒绝日志 -> 阻塞判定","done_steps":"确认工具权限被拒","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"需要先确认工具权限"}</rcc_stop_schema>',
       used: 5,
       maxRepeats: 3,
     });
@@ -283,9 +278,11 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.count_budget).toBe(false);
   });
 
-  test('valid terminal schema allows stop without requiring prior explicit hook call', () => {
+  test('valid terminal reasoningStop arguments allow stop without requiring prior explicit hook call', () => {
     const gate = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":0,"reason":"任务完成","has_evidence":1,"evidence":"live probe ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"check->verify","done_steps":"done","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"summary ready"}',
+      assistantText: '',
+      reasoningStopArguments:
+        '{"stopreason":0,"reason":"任务完成","has_evidence":1,"evidence":"live probe ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"check->verify","done_steps":"done","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"summary ready"}',
       used: 0,
       maxRepeats: 3,
     });
@@ -357,13 +354,13 @@ describe('stop-message native decision (blackbox)', () => {
 
   test('stop schema gate exhausts only invalid schema budget', () => {
     const invalid1 = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":"bad"}',
+      assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
     });
     expect(invalid1.action).toBe('followup');
     const invalid2 = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":"bad"}',
+      assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
       prevObservationHash: invalid1.observation_hash,
@@ -371,7 +368,7 @@ describe('stop-message native decision (blackbox)', () => {
     });
     expect(invalid2.action).toBe('followup');
     const invalid3 = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":"bad"}',
+      assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
       prevObservationHash: invalid2.observation_hash,
@@ -382,7 +379,8 @@ describe('stop-message native decision (blackbox)', () => {
     expect(invalid3.count_budget).toBe(true);
 
     const valid = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","issue_cause":"实现满足 contract","excluded_factors":"无关配置未参与","diagnostic_order":"单测 -> gate","done_steps":"补齐 Rust gate","next_step":""}',
+      assistantText:
+        '<rcc_stop_schema>{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","issue_cause":"实现满足 contract","excluded_factors":"无关配置未参与","diagnostic_order":"单测 -> gate","done_steps":"补齐 Rust gate","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"gate green"}</rcc_stop_schema>',
       used: 3,
       maxRepeats: 3,
     });

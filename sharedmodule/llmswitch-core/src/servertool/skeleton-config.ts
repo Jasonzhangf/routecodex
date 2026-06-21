@@ -6,6 +6,7 @@ import type {
   ServertoolSkeletonConfig,
   ServertoolStateConfig,
   ServertoolToolSpec,
+  ServertoolResponseHookGateConfig,
   ServertoolSkeletonDocument,
   ServerToolHandlerRegistrationSpec,
   ServerToolRegisteredHandlerRecord,
@@ -25,6 +26,7 @@ export type {
   ServertoolSkeletonConfig,
   ServertoolStateConfig,
   ServertoolToolSpec,
+  ServertoolResponseHookGateConfig,
   ServertoolSkeletonDocument,
   ServerToolHandlerRegistrationSpec,
   ServerToolRegisteredHandlerRecord,
@@ -71,6 +73,7 @@ type ServertoolSkeletonDerivedConfig = {
   pendingInjectionConfig: {
     messageKinds: string[];
   };
+  responseHookGateConfig: ServertoolResponseHookGateConfig;
   followupConfig: ServertoolFollowupConfig;
   stateConfig: ServertoolStateConfig;
 };
@@ -121,6 +124,10 @@ export function buildServertoolPendingInjectionConfig(): {
   messageKinds: string[];
 } {
   return getDerivedConfig().pendingInjectionConfig;
+}
+
+export function buildServertoolResponseHookGateConfig(): ServertoolResponseHookGateConfig {
+  return getDerivedConfig().responseHookGateConfig;
 }
 
 export function buildServertoolFollowupConfig(): ServertoolFollowupConfig {

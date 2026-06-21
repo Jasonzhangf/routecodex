@@ -27,14 +27,6 @@ function readSkeletonOwnedRegistration(name: string): ServerToolHandlerRegistrat
 }
 
 const BUILTIN_TOOL_HANDLERS: Record<string, ServerToolHandler> = {
-  web_search: async (ctx) => {
-    const mod = await import('./handlers/web-search.js');
-    return await mod.webSearchServerToolHandler(ctx);
-  },
-  vision_auto: async (ctx) => {
-    const mod = await import('./handlers/vision.js');
-    return await mod.visionAutoServerToolHandler(ctx);
-  },
   stop_message_auto: async (ctx) => {
     const mod = await import('./handlers/stop-message-auto.js');
     return await mod.stopMessageAutoServerToolHandler(ctx);

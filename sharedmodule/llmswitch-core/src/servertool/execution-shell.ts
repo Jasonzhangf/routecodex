@@ -1,9 +1,7 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import type {
   ServerSideToolEngineOptions,
   ServerToolAutoHookTraceEvent,
-  ServerToolExecution,
   ServerToolHandler,
   ServerToolHandlerContext,
   ServerToolHandlerResult,
@@ -11,7 +9,6 @@ import type {
 } from './types.js';
 import { runPreCommandHooks } from './pre-command-hooks.js';
 import {
-  executeServertoolBackendPlan as executeServertoolBackendPlanShell,
   materializeServertoolPlannedResult as materializeServertoolPlannedResultShell,
   runServertoolHandler,
   type ServertoolExecutedRecord,
@@ -19,8 +16,11 @@ import {
 } from './execution-handler-materialization-shell.js';
 import {
   applyServertoolExecutionResult as applyServertoolExecutionResultShell,
+  appendExecutedToolRecord as appendExecutedToolRecordShell,
+  assertDispatchExecutionMode as assertDispatchExecutionModeShell,
   buildServertoolDispatchPlanInputThinShell as buildServertoolDispatchPlanInputThinShellShell,
   buildServertoolOutcomePlanInputThinShell as buildServertoolOutcomePlanInputThinShellShell,
+  createServertoolExecutionLoopState as createServertoolExecutionLoopStateShell,
   resolveToolCallExecutionOutcomeThinShell as resolveToolCallExecutionOutcomeThinShellShell,
   runToolCallExecutionLoopThinShell as runToolCallExecutionLoopThinShellShell
 } from './execution-dispatch-outcome-shell.js';
@@ -34,57 +34,14 @@ export interface ServertoolAutoHookDescriptor {
   handler: ServerToolHandler;
 }
 
-export function createServertoolExecutionLoopState(): ServertoolExecutionLoopState {
-  return {
-    executedToolCalls: [],
-    executedIds: new Set<string>(),
-    executedFlowIds: []
-  };
-}
+export const createServertoolExecutionLoopState = createServertoolExecutionLoopStateShell;
 
-export function appendExecutedToolRecord(
-  state: ServertoolExecutionLoopState,
-  toolCall: ServertoolExecutedRecord['toolCall'],
-  execution?: ServerToolExecution
-): void {
-  state.executedToolCalls.push({ toolCall, ...(execution ? { execution } : {}) });
-  state.executedIds.add(toolCall.id);
-  if (execution?.flowId && execution.flowId.trim()) {
-    state.executedFlowIds.push(execution.flowId.trim());
-  }
-  if (execution) {
-    state.lastExecution = execution;
-  }
-}
+export const appendExecutedToolRecord = appendExecutedToolRecordShell;
 
-export function assertDispatchExecutionMode(
-  options: ServerSideToolEngineOptions,
-  toolName: string,
-  nativeExecutionMode: string,
-  tsExecutionMode: string
-): void {
-  if (tsExecutionMode === nativeExecutionMode) {
-    return;
-  }
-  throw new ProviderProtocolError(
-    `[servertool] dispatch spec mismatch: ${toolName}: native=${nativeExecutionMode} ts=${tsExecutionMode}`,
-    {
-      code: 'SERVERTOOL_HANDLER_FAILED',
-      category: 'INTERNAL_ERROR',
-      details: {
-        toolName,
-        requestId: options.requestId,
-        nativeExecutionMode,
-        tsExecutionMode
-      }
-    }
-  );
-}
+export const assertDispatchExecutionMode = assertDispatchExecutionModeShell;
 
 export const materializeServertoolPlannedResult =
   materializeServertoolPlannedResultShell;
-
-export const executeServertoolBackendPlan = executeServertoolBackendPlanShell;
 
 export { runServertoolHandler };
 

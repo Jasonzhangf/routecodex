@@ -24,6 +24,10 @@ function buildStopChatResponse(content: string = 'need continue'): JsonObject {
   } as JsonObject;
 }
 
+function buildFencedStopSchema(schemaJson: string): string {
+  return `<rcc_stop_schema>${schemaJson}</rcc_stop_schema>`;
+}
+
 function buildAdapterContext(overrides: Partial<AdapterContext> = {}): AdapterContext {
   const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return bindMetadataCenter({
@@ -249,7 +253,7 @@ describe('stopless CLI continuation', () => {
 
     expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
     expect((result.chat as any).choices?.[0]?.finish_reason).toBe('stop');
-    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoning_stop');
+    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
   });
 
   test('sentinel unknown session makes stopless terminal instead of projecting CLI', async () => {
@@ -281,7 +285,7 @@ describe('stopless CLI continuation', () => {
 
     expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
     expect((result.chat as any).choices?.[0]?.finish_reason).toBe('stop');
-    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoning_stop');
+    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
   });
 
   test('responsesRequestContext-only session makes stopless terminal instead of projecting CLI', async () => {
@@ -316,7 +320,7 @@ describe('stopless CLI continuation', () => {
 
     expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
     expect((result.chat as any).choices?.[0]?.finish_reason).toBe('stop');
-    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoning_stop');
+    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
   });
 
   test('stopless reaches max repeats and turns terminal instead of looping forever', async () => {
@@ -390,7 +394,7 @@ describe('stopless CLI continuation', () => {
 
     expect(secondOutput.repeatCount).toBe(3);
     expect(maybeExtractExecCommand(third.chat)).toBeUndefined();
-    expect(JSON.stringify(third.chat)).not.toContain('routecodex hook run reasoning_stop');
+    expect(JSON.stringify(third.chat)).not.toContain('routecodex hook run reasoningStop');
   });
 
   test('terminal stopless result stays terminal and does not project CLI', async () => {
@@ -412,7 +416,9 @@ describe('stopless CLI continuation', () => {
               role: 'assistant',
               content: [
                 '已完成在线验证。',
-                '{"stopreason":0,"reason":"done","has_evidence":1,"evidence":"live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round","done_steps":"verified","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"ok"}'
+                buildFencedStopSchema(
+                  '{"stopreason":0,"reason":"done","has_evidence":1,"evidence":"live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round","done_steps":"verified","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"ok"}'
+                )
               ].join('\n')
             },
             finish_reason: 'stop'
@@ -431,7 +437,7 @@ describe('stopless CLI continuation', () => {
     expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
     const visible = JSON.stringify(result.chat);
     expect(visible).not.toContain('routecodex hook run stop_message_auto');
-    expect(visible).not.toContain('routecodex hook run reasoning_stop');
+    expect(visible).not.toContain('routecodex hook run reasoningStop');
     expect(visible).not.toContain('exec_command');
   });
 
@@ -458,7 +464,7 @@ describe('stopless CLI continuation', () => {
     expect(result.flowId).toBe('stop_message_flow');
     expect(reenterPipeline).not.toHaveBeenCalled();
     const command = extractExecCommand(result.chat);
-    expect(command).toContain("routecodex hook run reasoning_stop --input-json '");
+    expect(command).toContain("routecodex hook run reasoningStop --input-json '");
     expect(command).not.toContain('stop_message_auto');
   });
 });

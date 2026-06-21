@@ -10253,3 +10253,12 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
 - evidence: commit 1bdedfa 推到 origin/main；install:global / 5555&5520 restart / /health version=0.90.3244；5555 live probe 拿到 hasReasoningStop=true + arguments={stopreason:2,reason:'第一轮故意缺 schema'}，续轮 200/completed，客户端无 raw reasoningStop 泄漏
 
 response-hook 路径不应和 followup/runtime executor 共用 action 类型，否则 planner 在没 runtime callback 时会 fail-fast；客户端永远只能见到 exec_command 投影，reasoningStop 永远是 internal stop tool
+
+## 2026-06-21T17:06:38.993Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260622T010629147-384947-4316
+- sessionId: 019ee874-5240-7671-bc3e-544e4b034ddb
+- stopReason: 当前未验证 glm-5.2 / gpt-5.4-mini / MiniMax-M3 在 5520 真实路由配置真源，未满足 evidence-first；servertool dirty 切片也还未收口。
+- evidence: rg 已确认 thinking 路由/loadBalancing 在多份样板中存在；gpt-5.4-mini 有 crs/asxs/crsa/cc 多套 alias，MiniMax-M3 有 mini27/dbittai/minimax 多套 alias；未读 22/23 servertool 真源，未跑 build-core.mjs 闭环，未跑 live probe。
+
+1) 多套 alias 并存时，禁止凭意图直接改 config；2) 5520 live 真源未读前不能宣称可落地；3) 当前 dirty workspace 必须先收口 servertool 切片，再切其它主线。

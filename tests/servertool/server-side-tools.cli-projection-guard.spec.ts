@@ -1,8 +1,39 @@
-import { describe, expect, test } from '@jest/globals';
-import {
+import { describe, expect, jest, test } from '@jest/globals';
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js',
+  () => ({
+    bindServertoolContractWithNative: jest.fn((value: unknown) => value),
+    cloneJson: jest.fn((value: unknown) => JSON.parse(JSON.stringify(value))),
+    extractTextFromChatLike: jest.fn(() => ''),
+    extractToolCallsImpl: jest.fn(() => []),
+    runServerSideToolEngineImpl: jest.fn(),
+    runServertoolAutoHookCallerImpl: jest.fn(),
+    isClientExecCliProjectionToolCall: jest.fn((toolCall: any) =>
+      Boolean(
+        toolCall &&
+          typeof toolCall.executionMode === 'string' &&
+          toolCall.executionMode.trim() === 'client_exec_cli_projection'
+      )
+    ),
+    collectAdditionalClientToolCallsImpl: jest.fn((base: any, projectedToolCallId: string) => {
+      const choices = Array.isArray(base?.choices) ? base.choices : [];
+      const first = choices[0] ?? {};
+      const message = first?.message ?? {};
+      const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+      return toolCalls.filter((toolCall: any) => {
+        const id = typeof toolCall?.id === 'string' ? toolCall.id : '';
+        const name = typeof toolCall?.function?.name === 'string' ? toolCall.function.name.trim() : '';
+        return Boolean(id) && id !== projectedToolCallId && name !== 'stop_message_auto';
+      });
+    })
+  })
+);
+
+const {
   collectAdditionalClientToolCalls,
   isClientExecCliProjectionToolCall
-} from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+} = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
 
 describe('server-side-tools cli projection guard', () => {
   test('only client_exec_cli_projection execution mode can trigger CLI projection', () => {

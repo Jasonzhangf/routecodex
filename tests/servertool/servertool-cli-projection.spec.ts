@@ -36,7 +36,7 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
       return {
         toolName: 'stop_message_auto',
         flowId: 'stop_message_flow',
-        execCommand: `routecodex hook run reasoning_stop --input-json '{"flowId":"stop_message_flow","repeatCount":2,"maxRepeats":3}' --repeat-count '2' --max-repeats '3'`,
+        execCommand: `routecodex hook run reasoningStop --input-json '{"flowId":"stop_message_flow","repeatCount":2,"maxRepeats":3}' --repeat-count '2' --max-repeats '3'`,
         repeatCount: 2,
         maxRepeats: 3
       };
@@ -139,7 +139,7 @@ describe('servertool CLI projection', () => {
     expect(message.reasoning.summary[0].text).toBe('full stop summary');
     expect(message.reasoning.content).toBeUndefined();
     expect(message.tool_calls[0].function.name).toBe('exec_command');
-    expect(command).toMatch(/^routecodex hook run reasoning_stop --input-json '/);
+    expect(command).toMatch(/^routecodex hook run reasoningStop --input-json '/);
     expect(command).not.toContain('--session-dir');
     const inputJson = command.match(/--input-json '([^']+)'(?=\s--repeat-count|\s--max-repeats|$)/)?.[1];
     expect(inputJson ? JSON.parse(inputJson) : null).toEqual({
@@ -265,7 +265,7 @@ describe('servertool CLI projection', () => {
       nativeProjection: {
         toolName: 'stop_message_auto',
         flowId: 'stop_message_flow',
-        execCommand: "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\"}'"
+        execCommand: "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\"}'"
       },
       reasoningText: 'parsed shell',
       additionalToolCalls: []
