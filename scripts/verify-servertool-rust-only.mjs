@@ -5379,6 +5379,7 @@ function checkServertoolRustOutcomeCloseout() {
 function checkResponseStageMetadataCenterOnly() {
   const responseStageShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-orchestration-shell.ts`);
   for (const marker of [
+    'function markServertoolResponseOrchestration(',
     'function projectRuntimeControlSideChannel(',
     'record.runtime_control = {',
     'projectRuntimeControlSideChannel(options.adapterContext, runtimeControl);',

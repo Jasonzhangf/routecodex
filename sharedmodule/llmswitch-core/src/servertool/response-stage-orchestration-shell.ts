@@ -35,24 +35,6 @@ export interface ServertoolResponseStageShellResult {
   skipReason?: 'no_servertool_support' | 'followup_bypass';
 }
 
-function markServertoolResponseOrchestration(adapterContext: AdapterContext): void {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return;
-  }
-  writeRuntimeControlToBoundMetadataCenter({
-    metadata: adapterContext as Record<string, unknown>,
-    key: 'servertoolResponseOrchestration',
-    value: true,
-    writer: {
-      module: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
-      symbol: 'markServertoolResponseOrchestration',
-      stage: 'HubRespChatProcess03Governed.servertool_orchestration'
-    },
-    reason: 'servertool-response-stage-orchestration',
-    required: true
-  });
-}
-
 export async function runServertoolResponseStageOrchestrationShell(
   options: ServertoolResponseStageShellOptions
 ): Promise<ServertoolResponseStageShellResult> {
@@ -84,7 +66,20 @@ export async function runServertoolResponseStageOrchestrationShell(
 
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
   const orchestrationStart = Date.now();
-  markServertoolResponseOrchestration(options.adapterContext);
+  if (options.adapterContext && typeof options.adapterContext === 'object' && !Array.isArray(options.adapterContext)) {
+    writeRuntimeControlToBoundMetadataCenter({
+      metadata: options.adapterContext as Record<string, unknown>,
+      key: 'servertoolResponseOrchestration',
+      value: true,
+      writer: {
+        module: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+        symbol: 'runServertoolResponseStageOrchestrationShell',
+        stage: 'HubRespChatProcess03Governed.servertool_orchestration'
+      },
+      reason: 'servertool-response-stage-orchestration',
+      required: true
+    });
+  }
   const orchestration = await runServerToolOrchestration({
     chat: options.payload as JsonObject,
     adapterContext: options.adapterContext,

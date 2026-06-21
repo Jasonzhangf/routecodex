@@ -10868,3 +10868,18 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 反模式：
   - 不再保留单独 TS direct-route preflight helper 作为第二真源。
   - required response hook empty 必须走 Rust error plan，不回到 TS 本地 if/throw 分支。
+
+## 2026-06-22 servertool response-stage metadata write inline slice
+
+- 已完成：
+  - `sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts` 删除了纯包装函数 `markServertoolResponseOrchestration(...)`。
+  - 同一段 `writeRuntimeControlToBoundMetadataCenter(...)` 直接内联到 `runServertoolResponseStageOrchestrationShell(...)`。
+  - `scripts/verify-servertool-rust-only.mjs` 新增 helper 名称反向锁，禁止旧 helper 复活。
+- 验证：
+  - `tests/servertool/resp-process-stage3-reentry.spec.ts`
+  - `tests/servertool/stop-message-flow-followup-reentry.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+- 结论：
+  - 这只是去壳，不改变行为；但把 response-stage 的纯记录包装面再收小了一层。
