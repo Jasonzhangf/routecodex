@@ -13,18 +13,26 @@ import {
   planServertoolOutcomeWithNative,
   buildServertoolDispatchPlanInputWithNative,
   buildServertoolOutcomePlanInputWithNative,
-  planServertoolToolCallDispatchWithNative
+  planServertoolToolCallDispatchWithNative,
+  buildServertoolHandlerErrorToolOutputPayloadWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import {
+  planServertoolExecutionDispatchErrorWithNative,
+  planServertoolExecutionLoopEffectWithNative,
+  planServertoolExecutionLoopRuntimeActionWithNative,
+  planServertoolExecutionOutcomeRuntimeActionWithNative,
+  createServertoolExecutionLoopStateWithNative,
+  appendServertoolExecutedRecordWithNative,
+  type NativeServertoolExecutionLoopState,
+  type ServertoolErrorPlan
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { materializeServertoolPlannedResult, type ServertoolExecutedRecord, type ServertoolExecutionLoopState, runServertoolHandler } from './execution-handler-materialization-shell.js';
+import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 
 export type { ServertoolExecutedRecord, ServertoolExecutionLoopState };
 
 export function createServertoolExecutionLoopState(): ServertoolExecutionLoopState {
-  return {
-    executedToolCalls: [],
-    executedIds: new Set<string>(),
-    executedFlowIds: []
-  };
+  return hydrateExecutionLoopState(createServertoolExecutionLoopStateWithNative());
 }
 
 export function appendExecutedToolRecord(
@@ -32,14 +40,17 @@ export function appendExecutedToolRecord(
   toolCall: ServertoolExecutedRecord['toolCall'],
   execution?: ServerToolExecution
 ): void {
-  state.executedToolCalls.push({ toolCall, ...(execution ? { execution } : {}) });
-  state.executedIds.add(toolCall.id);
-  if (execution?.flowId && execution.flowId.trim()) {
-    state.executedFlowIds.push(execution.flowId.trim());
-  }
-  if (execution) {
-    state.lastExecution = execution;
-  }
+  const next = hydrateExecutionLoopState(
+    appendServertoolExecutedRecordWithNative({
+      state: dehydrateExecutionLoopState(state),
+      toolCall,
+      ...(execution ? { execution } : {})
+    })
+  );
+  state.executedToolCalls = next.executedToolCalls;
+  state.executedIds = next.executedIds;
+  state.executedFlowIds = next.executedFlowIds;
+  state.lastExecution = next.lastExecution;
 }
 
 export function assertDispatchExecutionMode(
@@ -51,18 +62,14 @@ export function assertDispatchExecutionMode(
   if (tsExecutionMode === nativeExecutionMode) {
     return;
   }
-  throw new ProviderProtocolError(
-    `[servertool] dispatch spec mismatch: ${toolName}: native=${nativeExecutionMode} ts=${tsExecutionMode}`,
-    {
-      code: 'SERVERTOOL_HANDLER_FAILED',
-      category: 'INTERNAL_ERROR',
-      details: {
-        toolName,
-        requestId: options.requestId,
-        nativeExecutionMode,
-        tsExecutionMode
-      }
-    }
+  throw buildProviderProtocolError(
+    planServertoolExecutionDispatchErrorWithNative({
+      kind: 'dispatch_spec_mismatch',
+      requestId: options.requestId,
+      toolName,
+      nativeExecutionMode,
+      tsExecutionMode
+    })
   );
 }
 
@@ -70,15 +77,7 @@ export function applyServertoolExecutionResult(
   baseForExecution: JsonObject,
   nextChatResponse: JsonObject
 ): void {
-  const newKeys = new Set(Object.keys(nextChatResponse));
-  for (const [key, value] of Object.entries(nextChatResponse)) {
-    (baseForExecution as any)[key] = value;
-  }
-  for (const key of Object.keys(baseForExecution)) {
-    if (!newKeys.has(key)) {
-      delete (baseForExecution as any)[key];
-    }
-  }
+  replaceJsonObjectInPlace(baseForExecution, nextChatResponse);
 }
 
 export const buildServertoolDispatchPlanInputThinShell = (args: {
@@ -111,6 +110,8 @@ export const buildServertoolDispatchPlanInputThinShell = (args: {
 export const buildServertoolOutcomePlanInputThinShell = (args: {
   toolCalls: ToolCall[];
   executionState: ServertoolExecutionLoopState;
+  adapterContext?: unknown;
+  baseForExecution?: unknown;
   sessionId?: string;
   conversationId?: string;
   toolOutputs?: unknown[];
@@ -119,6 +120,8 @@ export const buildServertoolOutcomePlanInputThinShell = (args: {
   return buildServertoolOutcomePlanInputWithNative({
     toolCalls: args.toolCalls,
     executionState: args.executionState,
+    ...(args.adapterContext !== undefined ? { adapterContext: args.adapterContext } : {}),
+    ...(args.baseForExecution !== undefined ? { baseForExecution: args.baseForExecution } : {}),
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     ...(args.conversationId ? { conversationId: args.conversationId } : {}),
     ...(args.toolOutputs?.length ? { toolOutputs: args.toolOutputs } : {}),
@@ -138,41 +141,28 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   stripToolOutputs: (base: JsonObject) => void;
   pendingInjectionMessageKinds: string[];
 }): ServerSideToolEngineResult {
-  const sessionId =
-    args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId === 'string'
-      ? String((args.options.adapterContext as any).sessionId).trim()
-      : '';
-  const conversationId =
-    args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId === 'string'
-      ? String((args.options.adapterContext as any).conversationId).trim()
-      : '';
-
   const outcomePlan = planServertoolOutcomeWithNative(
     buildServertoolOutcomePlanInputThinShell({
       toolCalls: args.toolCalls,
       executionState: args.executionState,
-      toolOutputs: Array.isArray((args.baseForExecution as any).tool_outputs)
-        ? ((args.baseForExecution as any).tool_outputs as unknown[])
-        : undefined,
+      adapterContext: args.options.adapterContext,
+      baseForExecution: args.baseForExecution,
       pendingInjectionMessageKinds: args.pendingInjectionMessageKinds,
-      ...(sessionId ? { sessionId } : {}),
-      ...(conversationId ? { conversationId } : {})
     })
   );
 
-  if (outcomePlan.outcomeMode === 'mixed_client_tools') {
-    if (!outcomePlan.requiresPendingInjection || outcomePlan.followupStrategy !== 'pending_injection') {
-      throw new ProviderProtocolError('[servertool] invalid native mixed-client-tools outcome contract', {
-        code: 'SERVERTOOL_HANDLER_FAILED',
-        category: 'INTERNAL_ERROR',
-        details: {
-          requestId: args.options.requestId,
-          outcomeMode: outcomePlan.outcomeMode,
-          followupStrategy: outcomePlan.followupStrategy,
-          requiresPendingInjection: outcomePlan.requiresPendingInjection
-        }
-      });
-    }
+  const outcomeRuntimeActionPlan = planServertoolExecutionOutcomeRuntimeActionWithNative({
+    outcomeMode: outcomePlan.outcomeMode,
+    requiresPendingInjection: outcomePlan.requiresPendingInjection,
+    followupStrategy: outcomePlan.followupStrategy,
+    useLastExecutionFollowup: outcomePlan.useLastExecutionFollowup,
+    hasLastExecutionFollowup: Boolean(args.executionState.lastExecution?.followup),
+    hasResolvedFollowup: Boolean(outcomePlan.resolvedFollowup),
+    hasLastExecution: Boolean(args.executionState.lastExecution),
+    executedToolCallsLen: args.executionState.executedToolCalls.length
+  });
+
+  if (outcomeRuntimeActionPlan.action === 'return_mixed_client_tools_pending_injection') {
     const clientResponse = JSON.parse(JSON.stringify(args.base)) as JsonObject;
     args.filterOutExecutedToolCalls(clientResponse, args.executionState.executedIds);
     args.stripToolOutputs(clientResponse);
@@ -194,31 +184,42 @@ export function materializeNativeToolCallExecutionOutcome(args: {
     };
   }
 
+  if (outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome') {
+    throw buildProviderProtocolError(
+      planServertoolExecutionDispatchErrorWithNative({
+        kind: 'invalid_mixed_client_tools_outcome',
+        requestId: args.options.requestId,
+        outcomeMode: outcomePlan.outcomeMode,
+        followupStrategy: outcomePlan.followupStrategy,
+        requiresPendingInjection: outcomePlan.requiresPendingInjection
+      })
+    );
+  }
+
   const followup =
-    outcomePlan.followupStrategy === 'reuse_last_execution' &&
-    outcomePlan.useLastExecutionFollowup &&
-    args.executionState.lastExecution?.followup
-      ? args.executionState.lastExecution.followup
-      : (outcomePlan.resolvedFollowup as ServerToolFollowupPlan | undefined);
+    outcomeRuntimeActionPlan.action === 'reuse_last_execution_followup'
+      ? (args.executionState.lastExecution?.followup as ServerToolFollowupPlan | undefined)
+      : outcomeRuntimeActionPlan.action === 'use_resolved_followup'
+        ? (outcomePlan.resolvedFollowup as ServerToolFollowupPlan | undefined)
+        : undefined;
   if (!followup) {
-    throw new ProviderProtocolError('[servertool] missing native followup contract for servertool-only outcome', {
-      code: 'SERVERTOOL_HANDLER_FAILED',
-      category: 'INTERNAL_ERROR',
-      details: {
+    throw buildProviderProtocolError(
+      planServertoolExecutionDispatchErrorWithNative({
+        kind: 'missing_followup_contract',
         requestId: args.options.requestId,
         outcomeMode: outcomePlan.outcomeMode,
         followupStrategy: outcomePlan.followupStrategy,
         useLastExecutionFollowup: outcomePlan.useLastExecutionFollowup,
         useGenericFollowup: outcomePlan.useGenericFollowup
-      }
-    });
+      })
+    );
   }
   const flowId = outcomePlan.flowId || 'servertool_multi';
   return {
     mode: 'tool_flow',
     finalChatResponse: args.baseForExecution,
     execution: {
-      ...(args.executionState.lastExecution && args.executionState.executedToolCalls.length === 1
+      ...(outcomeRuntimeActionPlan.reuseLastExecutionEnvelope === true
         ? args.executionState.lastExecution
         : ({ flowId } as any)),
       flowId,
@@ -238,7 +239,13 @@ export async function runServertoolIoExecutionQueue(args: {
 
   for (const toolCall of args.dispatchPlan.executableToolCalls) {
     const entry = getServerToolHandler(toolCall.name);
-    if (!entry || entry.trigger !== 'tool_call') {
+    const initialLoopActionPlan = planServertoolExecutionLoopRuntimeActionWithNative({
+      hasHandlerEntry: Boolean(entry),
+      triggerMode: entry?.trigger,
+      hasMaterializedResult: false,
+      hasHandlerError: false
+    });
+    if (initialLoopActionPlan.action === 'skip_non_tool_call_handler') {
       continue;
     }
     assertDispatchExecutionMode(args.options, toolCall.name, toolCall.executionMode, entry.registration.executionMode);
@@ -251,27 +258,44 @@ export async function runServertoolIoExecutionQueue(args: {
       lastErr = err;
     }
     const result = planned ? await materializeServertoolPlannedResult(planned, args.options) : null;
-    if (result) {
+    const resultLoopActionPlan = planServertoolExecutionLoopRuntimeActionWithNative({
+      hasHandlerEntry: true,
+      triggerMode: entry.trigger,
+      hasMaterializedResult: Boolean(result),
+      hasHandlerError: Boolean(lastErr)
+    });
+    if (resultLoopActionPlan.action === 'apply_materialized_result') {
       applyServertoolExecutionResult(args.baseForExecution, JSON.parse(JSON.stringify(result.chatResponse)) as JsonObject);
       appendExecutedToolRecord(executionState, toolCall, result.execution);
       continue;
     }
-    if (lastErr) {
+    if (resultLoopActionPlan.action === 'apply_handler_error_tool_output') {
       const message = lastErr instanceof Error ? lastErr.message : String(lastErr ?? 'unknown');
-      args.appendToolOutput(
+      const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({
+        base: args.baseForExecution as Record<string, unknown>,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        message
+      }) as JsonObject;
+      applyServertoolExecutionResult(
         args.baseForExecution,
-        toolCall.id,
-        toolCall.name,
-        JSON.stringify({
-          ok: false,
-          tool: toolCall.name,
-          message,
-          retryable: true
-        })
+        JSON.parse(JSON.stringify(toolOutputPayload)) as JsonObject
       );
-      appendExecutedToolRecord(executionState, toolCall, {
-        flowId: `${toolCall.name}_error`
+      const errorEffectPlan = planServertoolExecutionLoopEffectWithNative({
+        mode: 'handler_error',
+        toolCall: {
+          id: toolCall.id,
+          name: toolCall.name,
+          arguments: toolCall.arguments,
+          executionMode: toolCall.executionMode,
+          stripAfterExecute: toolCall.stripAfterExecute
+        }
       });
+      appendExecutedToolRecord(
+        executionState,
+        errorEffectPlan.toolCall as ServertoolExecutedRecord['toolCall'],
+        errorEffectPlan.execution as ServerToolExecution
+      );
     }
   }
 
@@ -282,23 +306,35 @@ export async function runServertoolIoExecutionQueue(args: {
       toolArguments: toolCall.arguments,
       base: args.baseForExecution as Record<string, unknown>
     });
+    const {
+      flowId: noopFlowId,
+      followup: noopFollowup,
+      executionContext: noopExecutionContext
+    } = noopResult;
 
     applyServertoolExecutionResult(
       args.baseForExecution,
       JSON.parse(JSON.stringify(noopResult.chatResponse)) as JsonObject
     );
 
-    appendExecutedToolRecord(executionState, {
-      id: toolCall.id,
-      name: toolCall.name,
-      arguments: toolCall.arguments,
-      executionMode: 'noop',
-      stripAfterExecute: true
-    }, {
-      flowId: noopResult.flowId,
-      followup: noopResult.followup as unknown as ServerToolFollowupPlan,
-      context: noopResult.executionContext as JsonObject
+    const noopEffectPlan = planServertoolExecutionLoopEffectWithNative({
+      mode: 'noop',
+      toolCall: {
+        id: toolCall.id,
+        name: toolCall.name,
+        arguments: toolCall.arguments,
+        executionMode: toolCall.executionMode,
+        stripAfterExecute: toolCall.stripAfterExecute
+      },
+      noopFlowId,
+      noopFollowup,
+      noopExecutionContext
     });
+    appendExecutedToolRecord(
+      executionState,
+      noopEffectPlan.toolCall as ServertoolExecutedRecord['toolCall'],
+      noopEffectPlan.execution as ServerToolExecution
+    );
   }
 
   return executionState;
@@ -306,3 +342,31 @@ export async function runServertoolIoExecutionQueue(args: {
 
 export const resolveToolCallExecutionOutcomeThinShell = materializeNativeToolCallExecutionOutcome;
 export const runToolCallExecutionLoopThinShell = runServertoolIoExecutionQueue;
+
+function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {
+  const err = new ProviderProtocolError(plan.message, {
+    code: plan.code as any,
+    category: plan.category as any,
+    details: plan.details
+  }) as ProviderProtocolError & { status?: number };
+  err.status = plan.status;
+  return err;
+}
+
+function hydrateExecutionLoopState(state: NativeServertoolExecutionLoopState): ServertoolExecutionLoopState {
+  return {
+    executedToolCalls: state.executedToolCalls as ServertoolExecutedRecord[],
+    executedIds: new Set(state.executedIds),
+    executedFlowIds: state.executedFlowIds,
+    ...(state.lastExecution ? { lastExecution: state.lastExecution as ServerToolExecution } : {})
+  };
+}
+
+function dehydrateExecutionLoopState(state: ServertoolExecutionLoopState): NativeServertoolExecutionLoopState {
+  return {
+    executedToolCalls: state.executedToolCalls as any,
+    executedIds: [...state.executedIds],
+    executedFlowIds: state.executedFlowIds,
+    ...(state.lastExecution ? { lastExecution: state.lastExecution as any } : {})
+  };
+}

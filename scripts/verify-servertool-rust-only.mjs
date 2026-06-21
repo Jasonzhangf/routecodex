@@ -201,6 +201,9 @@ const SERVERTOOL_DISPATCH_OUTCOME_FORBIDDEN_MARKERS = [
   'args.appendToolOutput(',
   'JSON.stringify({',
   'retryable: true',
+  'args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId ===',
+  'args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===',
+  'Array.isArray((args.baseForExecution as any).tool_outputs)',
 ];
 
 // ── Issues accumulator ─────────────────────────────────────────

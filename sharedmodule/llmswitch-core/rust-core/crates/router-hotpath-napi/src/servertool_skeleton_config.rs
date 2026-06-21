@@ -525,6 +525,8 @@ pub fn build_servertool_outcome_plan_input_json(input_json: String) -> NapiResul
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let execution_state = input.get("executionState").unwrap_or(&Value::Null);
+    let adapter_context = input.get("adapterContext").unwrap_or(&Value::Null);
+    let base_for_execution = input.get("baseForExecution").unwrap_or(&Value::Null);
     let executed_tool_calls = execution_state
         .get("executedToolCalls")
         .and_then(Value::as_array)
@@ -544,15 +546,45 @@ pub fn build_servertool_outcome_plan_input_json(input_json: String) -> NapiResul
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let session_id = input
+        .get("sessionId")
+        .cloned()
+        .or_else(|| {
+            adapter_context
+                .as_object()
+                .and_then(|row| row.get("sessionId"))
+                .cloned()
+        })
+        .unwrap_or(Value::Null);
+    let conversation_id = input
+        .get("conversationId")
+        .cloned()
+        .or_else(|| {
+            adapter_context
+                .as_object()
+                .and_then(|row| row.get("conversationId"))
+                .cloned()
+        })
+        .unwrap_or(Value::Null);
+    let tool_outputs = input
+        .get("toolOutputs")
+        .cloned()
+        .or_else(|| {
+            base_for_execution
+                .as_object()
+                .and_then(|row| row.get("tool_outputs"))
+                .cloned()
+        })
+        .unwrap_or(Value::Null);
     let output = json!({
         "toolCalls": input.get("toolCalls").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
         "executedToolCalls": executed_tool_calls,
         "executedFlowIds": execution_state.get("executedFlowIds").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
         "lastExecutionFlowId": execution_state.get("lastExecution").and_then(|value| value.get("flowId")).cloned().unwrap_or(Value::Null),
         "hasLastExecutionFollowup": execution_state.get("lastExecution").and_then(|value| value.get("followup")).is_some(),
-        "sessionId": input.get("sessionId").cloned().unwrap_or(Value::Null),
-        "conversationId": input.get("conversationId").cloned().unwrap_or(Value::Null),
-        "toolOutputs": input.get("toolOutputs").cloned().unwrap_or(Value::Null),
+        "sessionId": session_id,
+        "conversationId": conversation_id,
+        "toolOutputs": tool_outputs,
         "pendingInjectionMessageKinds": input.get("pendingInjectionMessageKinds").cloned().unwrap_or(Value::Null)
     });
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -843,6 +875,32 @@ mod tests {
     }
 
     #[test]
+    fn builds_outcome_plan_input_from_adapter_context_and_base_for_execution() {
+        let raw = build_servertool_outcome_plan_input_json(json!({
+            "toolCalls": [{ "id": "call_1", "name": "web_search", "arguments": "{}" }],
+            "executionState": {
+                "executedToolCalls": [],
+                "executedFlowIds": []
+            },
+            "adapterContext": {
+                "sessionId": "sess_outcome_1",
+                "conversationId": "conv_outcome_1"
+            },
+            "baseForExecution": {
+                "tool_outputs": [{
+                    "tool_call_id": "call_1",
+                    "name": "web_search",
+                    "content": "ok"
+                }]
+            }
+        }).to_string()).expect("outcome input json");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse outcome input");
+        assert_eq!(parsed["sessionId"], json!("sess_outcome_1"));
+        assert_eq!(parsed["conversationId"], json!("conv_outcome_1"));
+        assert_eq!(parsed["toolOutputs"][0]["tool_call_id"], json!("call_1"));
+    }
+
+    #[test]
     fn plans_handler_and_backend_contracts() {
         let handler = plan_servertool_handler_contract_json(json!({
             "hasFinalizeFunction": false,
@@ -1016,7 +1074,7 @@ mod tests {
         assert_eq!(parsed["execution"]["mode"], "backend");
 
         let missing =
-            resolve_servertool_tool_spec_json(json!({ "name": "reasoning_stop" }).to_string())
+            resolve_servertool_tool_spec_json(json!({ "name": "reasoningStop" }).to_string())
                 .expect("missing tool spec");
         assert_eq!(missing, "null");
     }

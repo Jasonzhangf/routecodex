@@ -1,3 +1,37 @@
+## 2026-06-21 servertool outcome-plan input extraction rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 的 outcome-plan 输入提炼残余 TS owner。
+- 旧 TS 仍本地 owner 一层 outcome-plan 输入提炼：
+  - 从 `adapterContext.sessionId`
+  - 从 `adapterContext.conversationId`
+  - 从 `baseForExecution.tool_outputs`
+  - 再喂给 `buildServertoolOutcomePlanInputWithNative(...)`
+- 现在把这层提炼并回现有 Rust builder：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`
+  - `build_servertool_outcome_plan_input_json(...)` 新增从 `adapterContext` / `baseForExecution` 读 `sessionId` / `conversationId` / `tool_outputs`
+  - 旧显式 `sessionId` / `conversationId` / `toolOutputs` 输入仍保留兼容
+- TS 壳层变化：
+  - `execution-dispatch-outcome-shell.ts` 不再本地提炼上述三个字段
+  - 直接传 `adapterContext: args.options.adapterContext`
+  - 直接传 `baseForExecution: args.baseForExecution`
+- gate 收紧：
+  - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - `scripts/verify-servertool-rust-only.mjs`
+  - 明确禁止 `execution-dispatch-outcome-shell.ts` 复活：
+    - `args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId ===`
+    - `args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===`
+    - `Array.isArray((args.baseForExecution as any).tool_outputs)`
+- focused 验证：
+  - `cargo test -p router-hotpath-napi builds_outcome_plan_input_from_adapter_context_and_base_for_execution -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - focused Jest:
+    - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 结果：2 suites / 16 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+
 ## 2026-06-21 servertool engine cli-projection-context runtime action rust-owner
 
 - 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/engine.ts` 的 post-engine 残余 TS owner。
@@ -218,6 +252,48 @@
     - `executionState.executedToolCalls.length > 0`
   - 同时要求：
     - Rust contract / `lib.rs` / NAPI bridge / required export / TS wrapper / TS thin-shell 调用点全部存在。
+
+## 2026-06-21 forwarder authoring redundancy review
+
+- Jason 提出 forwarder 配置当前写法冗余：同一类模型跨 provider 聚合时，不应在每个 target 重复 `modelId`，应由 forwarder-level `model` 统一声明，target 只保留聚合/选路信息。
+- 代码证据已确认 runtime 真源本身就是“单模型 forwarder”：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/forwarder.rs`
+  - `ForwarderEntry` 只持有一份 `model_id`
+  - `ForwarderTarget` 只持有 `provider_key / weight / priority / disabled`
+- TS contract/status 也与该语义一致：
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts`
+  - `ForwarderStatusState` 只持有 `forwarderId / protocol / modelId / strategy / stickyKey / targets`
+- 冗余主要出现在 authoring/live config 层：
+  - `/Volumes/extension/.rcc/config.toml`
+  - 当前 `virtualrouter.forwarders."fwd.paid.gpt-5.4"` 已声明 `model = "gpt-5.4"`，但每个 `targets` 仍重复 `modelId = "gpt-5.4"`
+- Host normalization 当前支持“继承 forwarder model”，说明 runtime 并不需要 target-level `modelId`：
+  - `src/config/virtual-router-builder.ts`
+  - `resolveForwarderTargetProviderKeys()` 中 `modelId = target.modelId ?? target.model ?? options.forwarderModelId`
+- 但 host 仍会把 target 展开成完整 providerKey 列表并把原 target 字段一并透传给 native：
+  - `normalizeForwardersForNative()` 使用 `...target, providerKey`
+  - 这让 authoring shape 看起来像 target 自己持有 model 语义，造成配置风格冗余
+- `src/providers/profile/forwarder-types.ts` 已经把 `ProviderForwarderTarget` 收敛成仅 `providerId / weight / priority / disabled`
+  - 说明 schema 设计方向其实已经接近 Jason 想要的样子
+  - 真正待收口的是 config authoring 规范与 normalize/export 形态，而不是 Rust 选路逻辑
+
+## 2026-06-21 forwarder authoring strictness + materialized rebuild boundary
+
+- 这轮已把 forwarder 规则收口成双边界：
+  - authoring config：target 只允许 `providerId + priority/weight/disabled`，不同模型必须拆独立 forwarder，禁止 target `modelId/model/provider` 覆写
+  - materialized config：`buildVirtualRouterInputV2()` 仍必须接受已规范化的 `forwarders`（顶层 `modelId`、target `providerKey`），否则 `materializeRouteCodexConfig()` 产物无法再次启动
+- 代码侧边界：
+  - `src/providers/profile/provider-profile-loader.ts` 负责 authoring 约束与清晰错误
+  - `src/config/virtual-router-builder.ts` 负责同时兼容 authoring 输入和 materialized 输入，但禁止 target-level model override
+- live config 真相同步：
+  - `~/.rcc/config.toml`
+  - `/Volumes/extension/.rcc/config.toml`
+  - 当前 forwarder target 已物理移除冗余 `modelId`
+- focused 验证闭环：
+  - `tests/providers/forwarder-selection.spec.ts`
+  - `tests/config/virtual-router-builder.model-alias-contract.spec.ts`
+  - `tests/config/provider-v2-loader.spec.ts`
+  - `tests/config/virtual-router-builder.forwarder-10000.spec.ts`
+  - 两份 live config `config validate` 均 PASS
 - focused 验证：
   - `cargo test -p servertool-core execution_branch_contract -- --nocapture` -> 3 passed
   - `cargo test -p router-hotpath-napi plans_servertool_execution_branch_via_servertool_core_bridge -- --nocapture` -> 1 passed
@@ -9617,3 +9693,62 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
 - 本轮修复目标：
   - 在 provider runtime 前移把 stream 请求收到的非 SSE 文本响应识别成 `MALFORMED_RESPONSE`
   - 让 request-executor 看到 provider failure，按 priority/default pool 排除当前 provider 并继续切换
+
+## 2026-06-21 21:03:44 responses provider error consumed-but-not-rerouted
+
+- live 5520 复放新证据：
+  - `server-5520.log` 已出现 `MALFORMED_RESPONSE`，说明 provider runtime 前移识别已生效
+  - 但同请求仍直接 `failed`，没有 `provider-switch`
+- 新根因确认：
+  - `src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts`
+  - `phase === 'provider_response_processing'` 时，`isRetryableProviderResponseProcessingFailure()` 只放行：
+    - `provider.http`
+    - `provider.sse_decode`
+    - 少数 `host.response_contract`
+  - `requestExecutorProviderErrorStage === 'provider.responses'` 会被直接 `throw`
+- 下一步唯一修点：
+  - 放行 `provider.responses` 进入 `resolveRequestExecutorProviderFailurePlan(...)`
+  - 用 focused executor 测试锁同请求 `exclude_and_reroute`
+## 2026-06-21 5520 priority malformed-response reroute live closeout
+
+- 交接复核完成：
+  - `~/.rcc/provider/llmtoken/config.v2.toml` 仍是故障态 `baseURL = "https://llmtoken.io"`，便于继续做坏样本 live replay。
+  - 当前全局 CLI / runtime 还没切到新包：`routecodex --version`、`rcc --version`、`curl 127.0.0.1:5520/health` 全是 `0.90.3241`。
+  - 仓库 `package.json` 已是 `0.90.3242`，且本地 tarball `routecodex-0.90.3242.tgz` 存在。
+  - `npm ls -g routecodex --depth=0` 仍显示 `/opt/homebrew/lib/node_modules/routecodex@0.90.3241`，说明上一轮 `npm install -g ./routecodex-0.90.3242.tgz --ignore-scripts --force` 没真正替换全局安装。
+- 结论：先把全局安装真相修正到 `0.90.3242`，再继续 `5520` 的 live replay，否则无法证明“同请求内切 provider”是否已在新代码路径生效。
+
+## 2026-06-21 21:37:12 5520 same-request reroute live proof
+
+- live 请求已拿到强证据：
+  - request=`openai-responses-router-gpt-5.4-20260621T212944353-383502-2871`
+  - req=`req_1782048584353_e416089f`
+- `~/.rcc/logs/server-5520.log` 证据链：
+  - `21:29:44` 首次命中 `default/gateway-priority-5520-priority-default -> llmtoken[key1].gpt-5.4-mini`
+  - 紧接着出现 `[provider-switch] ... provider=llmtoken.key1.gpt-5.4-mini ... status=200 code=MALFORMED_RESPONSE ... switch=exclude_and_reroute`
+  - 同一 `req` 再次命中 `default/gateway-priority-5520-priority-default -> asxs[crsa].gpt-5.4-mini`
+  - 最终 `21:29:51` 客户端 `status=200 finish_reason=stop`
+- 结论：
+  - priority 模式下，`200 text/html`/malformed stream 已在同请求内进入 provider failure 链并成功切下一个 provider；
+  - “错了也不该风暴，priority 也要切 provider” 这一条在 live 5520 runtime 上已被证明成立。
+- 当前待收口：
+  - 恢复 `~/.rcc/config.toml` 中临时把 `llmtoken` 挪到 `fwd.paid.gpt-5.4-mini` 首位的探针配置；
+  - 恢复 `~/.rcc/provider/llmtoken/config.v2.toml` 的正确 `baseURL = "https://llmtoken.io/v1"`；
+  - 然后做 `routecodex config validate` + `routecodex restart --port 5520` + health + 正常 smoke。
+
+## 2026-06-21 21:34:00 5520 probe cleanup and recovery verify
+
+- 已恢复运行时配置：
+  - `~/.rcc/config.toml`：`fwd.paid.gpt-5.4-mini` 顺序恢复为 `asxs -> XL -> cc`，删除临时 `llmtoken` 首位探针 target
+  - `~/.rcc/provider/llmtoken/config.v2.toml`：`baseURL` 恢复为 `https://llmtoken.io/v1`
+- 验证：
+  - `routecodex config validate` -> `✓ Configuration is valid`
+  - `routecodex restart --port 5520` -> CLI 返回 `✔ RouteCodex server restarted: localhost:5520`
+  - `curl -s http://127.0.0.1:5520/health` -> `{"status":"ok","ready":true,"pipelineReady":true,"version":"0.90.3244"}`
+  - 正常 smoke：`POST /v1/responses {"model":"gpt-5.4","input":"Return exactly: smoke-ok","stream":true}` -> 客户端收到 `smoke-ok`
+  - `~/.rcc/logs/server-5520.log` 显示：
+    - `21:33:47` `default/... -> asxs[crsa].gpt-5.4-mini`
+    - `21:33:55` request completed `status=200 finish_reason=stop`
+- 结论：
+  - live 探针后的运行时已恢复正常；
+  - 5520 默认链当前不再先打到 `llmtoken`，而是按恢复后的 priority 首跳命中 `asxs`。

@@ -360,7 +360,12 @@ export function planServertoolResponseStageGateWithNative(input: {
   adapterContext?: Record<string, unknown>;
   runtimeControl?: Record<string, unknown>;
   allowFollowup?: boolean;
-  hasServertoolSupport: boolean;
+  hasServertoolSupport?: boolean;
+  capabilities?: {
+    providerInvoker: boolean;
+    reenterPipeline: boolean;
+    clientInjectDispatch?: boolean;
+  };
 }): NativeServertoolResponseStageGate {
   const capability = 'planServertoolResponseStageGateJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolResponseStageGate>(capability, reason);
@@ -370,7 +375,8 @@ export function planServertoolResponseStageGateWithNative(input: {
       adapterContext: input.adapterContext ?? null,
       runtimeControl: input.runtimeControl ?? null,
       allowFollowup: input.allowFollowup === true,
-      hasServertoolSupport: input.hasServertoolSupport === true
+      hasServertoolSupport: input.hasServertoolSupport === true,
+      capabilities: input.capabilities ?? null
     }]);
     const parsed = parseServertoolResponseStageGatePayload(raw);
     return parsed ?? fail('invalid payload');
@@ -438,6 +444,8 @@ export function buildServertoolDispatchPlanInputWithNative(input: {
 export function buildServertoolOutcomePlanInputWithNative(input: {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   executionState: unknown;
+  adapterContext?: unknown;
+  baseForExecution?: unknown;
   sessionId?: string;
   conversationId?: string;
   toolOutputs?: unknown[];
@@ -852,6 +860,94 @@ export function buildServertoolToolOutputPayloadWithNative(input: {
       return fail('invalid payload');
     }
     return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function buildServertoolHandlerErrorToolOutputPayloadWithNative(input: {
+  base: Record<string, unknown>;
+  toolCallId: string;
+  toolName: string;
+  message: string;
+  retryable?: boolean;
+}): Record<string, unknown> {
+  const capability = 'buildServertoolHandlerErrorToolOutputPayloadJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  try {
+    if (isNativeDisabledByEnv()) {
+      return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+      return fail();
+    }
+    const raw = fn(JSON.stringify(input));
+    if (typeof raw !== 'string') {
+      return fail('non-string result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function collectServertoolAdditionalClientToolCallsWithNative(input: {
+  base: Record<string, unknown>;
+  projectedToolCallId: string;
+}): unknown[] {
+  const capability = 'collectServertoolAdditionalClientToolCallsJson';
+  const fail = (reason?: string) => failNativeRequired<unknown[]>(capability, reason);
+  try {
+    if (isNativeDisabledByEnv()) {
+      return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+      return fail();
+    }
+    const raw = fn(JSON.stringify(input));
+    if (typeof raw !== 'string') {
+      return fail('non-string result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function isServertoolClientExecCliProjectionToolCallWithNative(input: {
+  executionMode?: unknown;
+}): boolean {
+  const capability = 'isServertoolClientExecCliProjectionToolCallJson';
+  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
+  try {
+    if (isNativeDisabledByEnv()) {
+      return fail('native disabled');
+    }
+    const fn = readNativeFunction(capability);
+    if (!fn) {
+      return fail();
+    }
+    const raw = fn(JSON.stringify(input));
+    if (raw === 'true') {
+      return true;
+    }
+    if (raw === 'false') {
+      return false;
+    }
+    return fail(`invalid bool: ${String(raw)}`);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
