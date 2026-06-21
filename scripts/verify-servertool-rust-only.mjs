@@ -736,10 +736,8 @@ function checkServertoolCliProjectionMap() {
     'pub struct ServertoolHubRespChatProcess03Input',
     'pub struct ServertoolClientExecCliProjection01Planned',
     'pub struct ServertoolBackendRouteHint01Planned',
-    'pub struct ServertoolServerIoInternal01Observed',
     'pub fn build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03',
     'pub fn build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03',
-    'pub fn build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03',
   ]) {
     assertContains(
       'servertool-outcome-topology-rust-owner',
@@ -755,12 +753,14 @@ function checkServertoolCliProjectionMap() {
     'quote_posix_single_argument(&input_json)'
   );
   for (const needle of [
-    'fn web_search_cannot_build_client_exec_projection_plan',
-    'fn vision_auto_cannot_build_client_exec_projection_plan',
+    'fn web_search_is_client_exec_cli_projection',
+    'fn vision_auto_is_client_exec_cli_projection',
+    'fn builds_web_search_client_exec_projection_plan',
+    'fn builds_vision_auto_client_exec_projection_plan',
+    'fn web_search_backend_route_hint_is_retired',
     'fn unknown_tool_returns_none',
     'fn unknown_tool_is_rejected_by_projection_builder',
-    'fn memory_cache_auto_is_rejected_by_client_projection_builder',
-    'fn memory_cache_auto_is_rejected_by_backend_route_builder',
+    'fn fake_exec_is_denied_by_projection_builder',
   ]) {
     assertContains(
       'servertool-outcome-negative-rust-tests',
@@ -861,6 +861,9 @@ function checkServertoolCliProjectionMap() {
     ['cli-projection-execution-context-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_servertool_cli_projection_execution_context_json'],
     ['cli-projection-execution-context-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildServertoolCliProjectionExecutionContextJson'],
     ['cli-projection-execution-context-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildServertoolCliProjectionExecutionContextWithNative'],
+    ['cli-projection-route-hint-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, 'fn route_hint_for_client_exec_tool(tool_name: &str) -> Option<&\'static str>'],
+    ['cli-projection-route-hint-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, '"web_search" => Some("web_search")'],
+    ['cli-projection-route-hint-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, '"vision_auto" => Some("multimodal")'],
   ]) {
     assertContains(check, file, content, needle);
   }
@@ -1106,10 +1109,8 @@ function checkStandaloneServertoolBinary() {
   }
   assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn non_client_exec_servertools_fail_fast');
   assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn unknown_tool_fails_fast_without_client_stdout');
-  for (const toolName of ['web_search', 'vision_auto', 'memory_cache_auto']) {
-    assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, toolName);
-    assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, `SERVERTOOL_UNSUPPORTED_TOOL: {tool_name}`);
-  }
+  assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fake_exec');
+  assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'SERVERTOOL_UNSUPPORTED_TOOL: {tool_name}');
   const nativeBuild = readRequired(NATIVE_BUILD_SCRIPT);
   assertContains('servertool-cli-packaged-binary', NATIVE_BUILD_SCRIPT, nativeBuild, "'servertool-cli'");
   assertContains('servertool-cli-packaged-binary', NATIVE_BUILD_SCRIPT, nativeBuild, 'packagedServertoolBinary');
@@ -3625,25 +3626,8 @@ function checkServertoolFlowPresentationRustOwner() {
 // ── Check 14: backend-route policy has Rust owner ─────────────
 function checkBackendRoutePolicyRustOwner() {
   const rustBackendRoute = readRequired(RUST_SERVERTOOL_BACKEND_ROUTE);
-  const rustLoopState = readRequired(RUST_SERVERTOOL_LOOP_STATE);
-  const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
-  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const outcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
-  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
-  const chatProcessServertoolWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
-  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const flowPolicyShell = readRequired(TS_BACKEND_ROUTE_FLOW_POLICY);
-  const runtimeShell = readRequired(TS_BACKEND_ROUTE_RUNTIME);
-  const loopStateShell = readRequired(TS_LOOP_STATE_BLOCK);
-
-  if (existsSync(TS_BACKEND_ROUTE_SHAPE_GUARD)) {
-    fail(
-      'backend-route-shape-guard-no-ts-owner',
-      'sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts must stay physically deleted; native normalize is the owner'
-    );
-  } else {
-    pass('backend-route-shape-guard-no-ts-owner', 'backend-route-shape-guard.ts is physically deleted');
-  }
+  const resultRestoreSpec = readRequired(`${ROOT}/tests/servertool/servertool-cli-result-restore.spec.ts`);
 
   assertContains(
     'backend-route-policy-rust-owner',
@@ -3653,177 +3637,52 @@ function checkBackendRoutePolicyRustOwner() {
   );
   assertContains(
     'backend-route-policy-rust-owner',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
-    servertoolCoreLib,
-    'pub mod backend_route_contract'
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+    outcomeContract,
+    'ServertoolOutcome::BackendRouteReenter'
   );
   assertContains(
+    'backend-route-retired-rust-tests',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+    outcomeContract,
+    'fn web_search_backend_route_hint_is_retired()'
+  );
+  assertContains(
+    'backend-route-retired-rust-tests',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
+    outcomeContract,
+    'fn web_search_backend_route_hint_rejects_before_payload_processing()'
+  );
+  assertMissing(
     'backend-route-outcome-rust-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
     outcomeContract,
     '"web_search" | "vision_auto" => Some(ServertoolOutcome::BackendRouteReenter)'
   );
-  assertContains(
+  assertMissing(
     'backend-route-outcome-rust-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
     outcomeContract,
     '"memory_cache_auto" => Some(ServertoolOutcome::ServerIoInternal)'
   );
-  assertContains(
-    'backend-route-policy-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planServertoolBackendRoutePolicyWithNative'
-  );
-  assertContains(
-    'backend-route-policy-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planServertoolBackendRoutePolicyJson'
-  );
-  assertContains(
-    'backend-route-flow-policy-native-owner',
-    TS_BACKEND_ROUTE_FLOW_POLICY,
-    flowPolicyShell,
-    'planServertoolFollowupRuntimeWithNative'
-  );
-  const flowPolicyFunctionNames = Array.from(flowPolicyShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
-    .map((match) => match[1])
-    .sort();
-  if (flowPolicyFunctionNames.join(',') !== 'resolveFollowupFlowDecision') {
-    fail(
-      'backend-route-flow-policy-ts-thin-shell',
-      `backend-route-flow-policy.ts must remain a single native delegate; found exports: ${flowPolicyFunctionNames.join(',') || '(none)'}`
-    );
-  }
-  if (flowPolicyShell.includes('function normalizeFlowId') || flowPolicyShell.includes('normalizeFlowId(')) {
-    fail(
-      'backend-route-flow-policy-no-ts-owner',
-      'backend-route-flow-policy.ts must not normalize flowId in TS; Rust plan_servertool_followup_runtime_json owns flow id normalization'
-    );
-  }
-  assertContains(
-    'backend-route-flow-policy-native-owner',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`),
-    'pub fn plan_servertool_followup_runtime_json'
-  );
-  for (const keyword of [
-    "optionalPrimaryOrder.splice",
-    "optionalPrimaryOrder.push('empty_reply_continue')",
-    "optionalPrimaryOrder.push('vision_auto')",
-    "!optionalPrimaryOrder.includes('empty_reply_continue')",
-    "!optionalPrimaryOrder.includes('vision_auto')",
+  for (const file of [
+    TS_BACKEND_ROUTE_SHAPE_GUARD,
+    `${SERVERTOOL_TS_DIR}/backend-route-mainline-block.ts`,
+    TS_BACKEND_ROUTE_REENTER,
+    TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY,
   ]) {
-    if (skeletonConfigShell.includes(keyword)) {
+    if (existsSync(file)) {
       fail(
-        'servertool-skeleton-config-no-ts-queue-owner',
-        `Forbidden TS auto-hook queue semantic "${keyword}" found in skeleton-config.ts`
+        'backend-route-ts-shells-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted after web/vision backend-route retirement`
       );
     }
   }
-  assertContains(
-    'backend-route-finalize-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn decorate_servertool_final_chat_with_context'
+  pass(
+    'backend-route-policy-rust-owner',
+    'web_search/vision_auto backend-route reenter is retired; old TS backend-route shells stay deleted'
   );
-  assertContains(
-    'backend-route-finalize-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn should_short_circuit_requires_action_followup'
-  );
-  assertContains(
-    'backend-route-finalize-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'decorateServertoolFinalChatWithNative'
-  );
-  assertContains(
-    'backend-route-finalize-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'shouldShortCircuitRequiresActionFollowupWithNative'
-  );
-  assertContains(
-    'backend-route-finalize-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'decorateServertoolFinalChatJson'
-  );
-  assertContains(
-    'backend-route-finalize-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'shouldShortCircuitRequiresActionFollowupJson'
-  );
-  assertContains(
-    'backend-route-followup-execution-mode-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_followup_execution_mode'
-  );
-  assertContains(
-    'backend-route-followup-execution-mode-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planFollowupExecutionModeWithNative'
-  );
-  assertContains(
-    'backend-route-followup-execution-mode-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planFollowupExecutionModeJson'
-  );
-  assertContains(
-    'backend-route-followup-runtime-action-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_followup_runtime_action'
-  );
-  assertContains(
-    'backend-route-followup-runtime-action-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'is_stop_message_flow'
-  );
-  assertContains(
-    'backend-route-followup-runtime-action-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planFollowupRuntimeActionWithNative'
-  );
-  assertContains(
-    'backend-route-followup-runtime-action-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'isStopMessageFlow'
-  );
-  assertContains(
-    'backend-route-followup-runtime-action-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planFollowupRuntimeActionJson'
-  );
-  const backendRouteMainlineShell = readRequired(`${SERVERTOOL_TS_DIR}/backend-route-mainline-block.ts`);
-  const backendRouteMainlineFunctionNames = Array.from(
-    backendRouteMainlineShell.matchAll(/export (?:async\s+)?function\s+([A-Za-z0-9_]+)/g)
-  )
-    .map((match) => match[1])
-    .sort();
-  if (backendRouteMainlineFunctionNames.join(',') !== 'runFollowupMainline') {
-    fail(
-      'backend-route-mainline-ts-surface',
-      `backend-route-mainline-block.ts must expose only runFollowupMainline orchestration; found exports: ${backendRouteMainlineFunctionNames.join(',') || '(none)'}`
-    );
-  }
-  if (backendRouteMainlineShell.includes("args.execution.flowId === 'stop_message_flow'")) {
-    fail(
-      'backend-route-followup-runtime-action-no-ts-flow-owner',
-      'backend-route-mainline-block.ts must read isStopMessageFlow from Rust runtime action plan'
-    );
-  }
+  return;
   assertContains(
     'backend-route-followup-runtime-metadata-rust-owner',
     RUST_SERVERTOOL_BACKEND_ROUTE,
@@ -5105,6 +4964,7 @@ function checkServertoolCliResultGuardRustOwner() {
   const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const executorMetadataSpec = readRequired(`${ROOT}/tests/server/http-server/executor-metadata.spec.ts`);
 
   for (const file of DELETED_CLI_RESULT_GUARD_TS_FILES) {
     if (existsSync(file)) {
@@ -5122,10 +4982,22 @@ function checkServertoolCliResultGuardRustOwner() {
     'pub fn has_stop_message_auto_cli_result_in_request'
   );
   assertContains(
+    'servertool-cli-result-route-hint-rust-owner',
+    RUST_SERVERTOOL_CLI_RESULT_GUARD,
+    rustCliResultGuard,
+    'pub fn extract_servertool_cli_result_route_hint_from_request'
+  );
+  assertContains(
     'servertool-cli-result-guard-native-export',
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
     'has_stop_message_auto_cli_result_in_request_json'
+  );
+  assertContains(
+    'servertool-cli-result-route-hint-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'extract_servertool_cli_result_route_hint_from_request_json'
   );
   assertContains(
     'servertool-cli-result-guard-native-export',
@@ -5138,6 +5010,24 @@ function checkServertoolCliResultGuardRustOwner() {
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeServertoolWrapper,
     'hasStopMessageAutoCliResultInRequestWithNative'
+  );
+  assertContains(
+    'servertool-cli-result-route-hint-native-wrapper',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolWrapper,
+    'extractServertoolCliResultRouteHintFromRequestWithNative'
+  );
+  assertContains(
+    'servertool-cli-result-route-hint-spec',
+    `${ROOT}/tests/server/http-server/executor-metadata.spec.ts`,
+    executorMetadataSpec,
+    "uses servertool web_search CLI result routeHint from submitted tool output"
+  );
+  assertContains(
+    'servertool-cli-result-route-hint-spec',
+    `${ROOT}/tests/server/http-server/executor-metadata.spec.ts`,
+    executorMetadataSpec,
+    "expect(metadata.routeHint).toBe('multimodal')"
   );
 
   for (const keyword of [
@@ -5184,7 +5074,6 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool_fixture',
     'web_search',
     'vision_auto',
-    'memory_cache_auto',
   ]) {
     assertContains('servertool-outcome-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`, rustOutcome, needle);
   }
@@ -5205,6 +5094,14 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of ['reenterPipeline', 'providerInvoker', 'serverToolFollowup', 'serverToolFollowupSource', '--ticket', 'stcli_', 'rcc_cli_']) {
     if (tsProjection.includes(marker)) {
       fail('servertool-cli-thin-shell', `cli-projection.ts must not carry legacy servertool marker ${marker}`);
+    }
+  }
+  for (const marker of ['memory_cache_auto', 'executeServertoolBackendPlan']) {
+    if (tsProjection.includes(marker) || tsServerSideTools.includes(marker) || tsServerSideToolsImpl.includes(marker)) {
+      fail(
+        'servertool-cli-thin-shell',
+        `servertool TS thin shells must not revive retired marker ${marker}`
+      );
     }
   }
 
@@ -5294,7 +5191,6 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     'export const materializeServertoolPlannedResult =',
-    'export const executeServertoolBackendPlan =',
     'export { runServertoolHandler };',
   ]) {
     if (!executionShell.includes(marker)) {

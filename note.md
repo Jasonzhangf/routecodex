@@ -10035,3 +10035,31 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
   - followup auto-limit 错误 message/code/category/status/details 现在由 Rust owner 产出；
   - `backend-route-runtime-block.ts` 仅保留 native plan 消费 + `ProviderProtocolError` 外壳；
   - 不能宣称 followup/reenter 整体 Rust-only 完成，当前只是 `backend-route-runtime-block` 下的一块错误投影 slice 收口。
+
+## 2026-06-21 servertool web_search / vision_auto CLI routeHint gate closeout
+
+- 本轮目标：不改 runtime 语义，只把 `scripts/verify-servertool-rust-only.mjs` 对齐到已落地的新目标：
+  - `web_search` / `vision_auto` 走普通 servertool CLI；
+  - CLI stdout 带 `routeHint`；
+  - 下一次请求从合法 CLI tool result 恢复 `metadata.routeHint`；
+  - web/vision 旧 backend-route/reenter TS 文件保持物理删除；
+  - `memory_cache_auto` 不再作为标准能力/样例。
+- gate 改动点：
+  - outcome/CLI checks 改为检查 `ClientExecCliProjection` + `route_hint_for_client_exec_tool(...)`；
+  - `cli_result_guard` 改为检查 `extract_servertool_cli_result_route_hint_from_request`、NAPI export、TS native wrapper、`executor-metadata` routeHint 测试；
+  - backend-route checks 改为要求：
+    - `web_search_backend_route_hint_is_retired`
+    - `web_search_backend_route_hint_rejects_before_payload_processing`
+    - `backend-route-mainline-block.ts`
+    - `backend-route-reenter-block.ts`
+    - `backend-route-bootstrap-replay-block.ts`
+    - `backend-route-shape-guard.ts`
+      都保持删除；
+  - 删掉 gate 对 `memory_cache_auto`、`executeServertoolBackendPlan`、旧 unsupported blackbox 名称的依赖。
+- 串行验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+- 结论：
+  - 当前 blocker 是旧 verify gate，不是 runtime/编译问题；
+  - gate 已跟现行 web/vision CLI + routeHint 设计对齐；
+  - 这轮没有复活任何已删 TS backend-route 文件。
