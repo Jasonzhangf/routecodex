@@ -133,6 +133,15 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.ts',
+    forbidden: [],
+    required: [
+      'runServertoolResponseStageWithNative',
+      'replaceJsonObjectInPlace',
+      'stage.toolCalls.map(',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
     forbidden: [
       "import './handlers/stop-message-auto.js';",
@@ -174,6 +183,8 @@ const TARGETS = [
       'planRuntimePreCommandStateRuntimeActionWithNative({',
       'const responseStagePlan = responseHookStagePlan.responseHookMatched ? responseHookStagePlan : planServertoolResponseStageGateWithNative(',
       "if (responseStageAutoHook.action === 'return_passthrough_bypass') {",
+      'const stage = runServertoolResponseStageWithNative(chatResponse, requestId);',
+      'replaceJsonObjectInPlace(chatResponse, normalizedPayload);',
       "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
       'function getArray(value: unknown): JsonValue[] {',
     ],

@@ -10,8 +10,7 @@ import {
   collectServertoolAdditionalClientToolCallsWithNative,
   isServertoolClientExecCliProjectionToolCallWithNative,
   planServertoolResponseStageGateWithNative,
-  planServertoolToolCallDispatchWithNative,
-  runServertoolResponseStageWithNative
+  planServertoolToolCallDispatchWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   applyPreCommandHooksToToolCalls,
@@ -28,12 +27,12 @@ import {
 import {
   filterOutExecutedToolCalls,
   patchToolCallArgumentsById,
-  replaceJsonObjectInPlace,
   stripToolOutputs
 } from './orchestration-blocks.js';
 import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
+import { extractToolCallsFromResponseStage } from './extract-tool-calls-shell.js';
 import {
   buildServertoolCliProjectionBranchResult,
   collectAdditionalClientToolCalls,
@@ -80,7 +79,7 @@ export const runServerSideToolEngine = async (
     });
   }
   const baseObject = base as JsonObject;
-  const toolCalls = extractToolCalls(baseObject, options.requestId);
+  const toolCalls = extractToolCallsFromResponseStage(baseObject, options.requestId);
   const contextBase: Omit<ServerToolHandlerContext, 'toolCall'> = {
     base: baseObject,
     toolCalls,
@@ -186,14 +185,7 @@ export const runServerSideToolEngine = async (
 };
 
 export const extractToolCalls = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {
-  const stage = runServertoolResponseStageWithNative(chatResponse, requestId);
-  const normalizedPayload = asObject(stage.normalizedPayload) ?? chatResponse;
-  replaceJsonObjectInPlace(chatResponse, normalizedPayload);
-  return stage.toolCalls.map((entry) => ({
-    id: entry.id,
-    name: entry.name,
-    arguments: entry.arguments
-  }));
+  return extractToolCallsFromResponseStage(chatResponse, requestId);
 };
 
 function asObject(value: unknown): JsonObject | null {

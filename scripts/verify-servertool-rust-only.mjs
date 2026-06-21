@@ -103,6 +103,7 @@ const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
 const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch-runtime-shell.ts`;
 const TS_RESPONSE_STAGE_FINALIZE_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`;
+const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
@@ -5174,6 +5175,7 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'collectAdditionalClientToolCalls,',
     'extractToolCalls,',
+    'extractToolCallsFromResponseStage',
     'runServerSideToolEngine',
   ]) {
     if (!tsServerSideTools.includes(marker)) {
@@ -5194,6 +5196,19 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-cli-projection-thin-shell-guard',
         `server-side-tools-impl.ts must keep thin-shell owner marker ${marker}`
+      );
+    }
+  }
+  const extractToolCallsShell = readRequired(TS_EXTRACT_TOOL_CALLS_SHELL);
+  for (const marker of [
+    'export const extractToolCallsFromResponseStage =',
+    'runServertoolResponseStageWithNative',
+    'replaceJsonObjectInPlace'
+  ]) {
+    if (!extractToolCallsShell.includes(marker)) {
+      fail(
+        'servertool-extract-tool-calls-shell-owner',
+        `extract-tool-calls-shell.ts must keep extraction owner marker ${marker}`
       );
     }
   }
