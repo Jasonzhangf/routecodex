@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { writeStoplessRuntimeControl } from '../../src/server/runtime/http-server/metadata-center/request-truth-readers.ts';
 import { writeStoplessRuntimeControlToBoundMetadataCenter } from '../../sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts';
+import { normalizeStoplessTriggerHintForMetadata } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
 
 describe('stopless metadata center helper', () => {
@@ -142,8 +143,7 @@ describe('stopless metadata center helper', () => {
       adapterContext: adapterContext as any,
       entryEndpoint: '/v1/responses',
       requestId: 'req-stopless-rootless-center',
-      providerProtocol: 'openai-responses',
-      reenterPipeline: async () => ({ body: {} as any })
+      providerProtocol: 'openai-responses'
     });
 
     expect(center.readRuntimeControl().stopless).toEqual(
@@ -194,8 +194,7 @@ describe('stopless metadata center helper', () => {
       adapterContext: adapterContext as any,
       entryEndpoint: '/v1/responses',
       requestId: 'req-stopless-root-center',
-      providerProtocol: 'openai-responses',
-      reenterPipeline: async () => ({ body: {} as any })
+      providerProtocol: 'openai-responses'
     });
 
     expect(adapterContext.metadata).toEqual(expect.any(Object));
@@ -207,5 +206,12 @@ describe('stopless metadata center helper', () => {
       })
     );
     expect(MetadataCenter.read(adapterContext.metadata as Record<string, unknown>)).toBe(center);
+  });
+
+  it('normalizes stop schema reason codes into MetadataCenter triggerHint tokens', () => {
+    expect(normalizeStoplessTriggerHintForMetadata('stop_schema_budget_exhausted')).toBe('budget_exhausted');
+    expect(normalizeStoplessTriggerHintForMetadata('stop_schema_finished')).toBe('schema_pass');
+    expect(normalizeStoplessTriggerHintForMetadata('stop_schema_next_step_missing')).toBe('invalid_schema');
+    expect(normalizeStoplessTriggerHintForMetadata('stop_schema_missing')).toBe('no_schema');
   });
 });

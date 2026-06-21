@@ -1,19 +1,16 @@
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import type {
   ServerSideToolEngineOptions,
-  ServerToolBackendPlan,
-  ServerToolBackendResult,
   ServerToolHandler,
   ServerToolHandlerContext,
   ServerToolHandlerPlan,
   ServerToolHandlerResult,
 } from './types.js';
-import { executeVisionBackendPlan } from './handlers/vision.js';
-import { executeWebSearchBackendPlan } from './handlers/web-search.js';
 import {
-  planServertoolBackendExecutionWithNative,
-  planServertoolHandlerContractWithNative
-} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+  planServertoolHandlerContractErrorWithNative,
+  planServertoolHandlerRuntimeActionWithNative,
+  type ServertoolErrorPlan
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export interface ServertoolExecutedRecord {
   toolCall: {
@@ -41,78 +38,68 @@ export interface ServertoolExecutionLoopState {
   };
 }
 
-type BackendIoExecutorMap = {
-  [K in ServerToolBackendPlan['kind']]: (args: {
-    plan: Extract<ServerToolBackendPlan, { kind: K }>;
-    options: ServerSideToolEngineOptions;
-  }) => Promise<ServerToolBackendResult | undefined>;
-};
-
-function planHandlerMaterializationAction(
-  planned: ServerToolHandlerPlan | ServerToolHandlerResult,
+function buildHandlerRuntimeActionInput(
+  planned: Partial<ServerToolHandlerPlan & ServerToolHandlerResult>,
   options: ServerSideToolEngineOptions
-): 'handler_plan' | 'handler_result' {
-  const maybePlan = planned as {
-    flowId?: unknown;
-    backend?: unknown;
-    finalize?: unknown;
-    chatResponse?: unknown;
-    execution?: unknown;
-  };
-  const execution = maybePlan.execution as { flowId?: unknown } | undefined;
-  const plan = planServertoolHandlerContractWithNative({
-    hasFinalizeFunction: typeof maybePlan.finalize === 'function',
-    hasChatResponseObject: Boolean(maybePlan.chatResponse && typeof maybePlan.chatResponse === 'object' && !Array.isArray(maybePlan.chatResponse)),
-    hasExecutionObject: Boolean(maybePlan.execution && typeof maybePlan.execution === 'object' && !Array.isArray(maybePlan.execution)),
+): Parameters<typeof planServertoolHandlerRuntimeActionWithNative>[0] {
+  const execution = planned.execution as { flowId?: unknown } | undefined;
+  const backend = planned.backend as { kind?: unknown } | undefined;
+  return {
+    hasFinalizeFunction: typeof planned.finalize === 'function',
+    hasChatResponseObject: Boolean(planned.chatResponse && typeof planned.chatResponse === 'object' && !Array.isArray(planned.chatResponse)),
+    hasExecutionObject: Boolean(planned.execution && typeof planned.execution === 'object' && !Array.isArray(planned.execution)),
     hasExecutionFlowId: typeof execution?.flowId === 'string',
-    hasPlanMarkers: typeof maybePlan.flowId === 'string' || maybePlan.backend !== undefined || maybePlan.finalize !== undefined
-  });
-  if (plan.action === 'handler_plan' || plan.action === 'handler_result') {
-    return plan.action;
-  }
-  if (plan.action === 'invalid_plan_missing_finalize') {
-    throw new ProviderProtocolError('[servertool] invalid handler plan contract: missing finalize', {
-      code: 'SERVERTOOL_HANDLER_FAILED',
-      category: 'INTERNAL_ERROR',
-      details: {
-        requestId: options.requestId
-      }
-    });
-  }
-  throw new ProviderProtocolError('[servertool] invalid handler plan/result contract', {
-    code: 'SERVERTOOL_HANDLER_FAILED',
-    category: 'INTERNAL_ERROR',
-    details: {
-      requestId: options.requestId
-    }
-  });
+    hasPlanMarkers: typeof planned.flowId === 'string' || planned.backend !== undefined || planned.finalize !== undefined,
+    hasBackendPlan: planned.backend !== undefined,
+    ...(typeof backend?.kind === 'string' ? { backendKind: backend.kind } : {}),
+    hasReenterPipeline: false
+  };
 }
-
-const backendIoExecutors: BackendIoExecutorMap = {
-  vision_analysis: async ({ plan, options }) => {
-    if (!options.reenterPipeline) {
-      throw new ProviderProtocolError('[servertool] vision_analysis backend requires reenterPipeline', {
-        code: 'SERVERTOOL_HANDLER_FAILED',
-        category: 'INTERNAL_ERROR',
-        details: {
-          requestId: options.requestId,
-          backendKind: plan.kind
-        }
-      });
-    }
-    return await executeVisionBackendPlan({ plan, options });
-  },
-  web_search: async ({ plan, options }) => await executeWebSearchBackendPlan({ plan, options })
-};
 
 export const materializeServertoolPlannedResult = async (
   planned: ServerToolHandlerPlan | ServerToolHandlerResult,
   options: ServerSideToolEngineOptions
 ): Promise<ServerToolHandlerResult | null> => {
-  if (planHandlerMaterializationAction(planned, options) === 'handler_plan') {
+  const actionPlan = planServertoolHandlerRuntimeActionWithNative(
+    buildHandlerRuntimeActionInput(planned as Partial<ServerToolHandlerPlan & ServerToolHandlerResult>, options)
+  );
+  if (
+    actionPlan.action === 'execute_backend_vision_analysis_then_finalize' ||
+    actionPlan.action === 'execute_backend_web_search_then_finalize' ||
+    actionPlan.action === 'unsupported_backend_plan_kind' ||
+    actionPlan.action === 'finalize_without_backend'
+  ) {
     const plan = planned as ServerToolHandlerPlan;
-    const backendResult = plan.backend ? await executeServertoolBackendPlan(plan.backend, options) : undefined;
-    return await plan.finalize({ ...(backendResult ? { backendResult } : {}) });
+    if (
+      actionPlan.action === 'execute_backend_vision_analysis_then_finalize' ||
+      actionPlan.action === 'execute_backend_web_search_then_finalize' ||
+      actionPlan.action === 'unsupported_backend_plan_kind'
+    ) {
+      throw buildProviderProtocolError(
+        planServertoolHandlerContractErrorWithNative({
+          kind: 'unsupported_backend_plan_kind',
+          requestId: options.requestId,
+          backendKind: actionPlan.backendKind ?? String((plan.backend as { kind?: unknown } | undefined)?.kind ?? '')
+        })
+      );
+    }
+    return await plan.finalize({});
+  }
+  if (actionPlan.action === 'invalid_plan_missing_finalize') {
+    throw buildProviderProtocolError(
+      planServertoolHandlerContractErrorWithNative({
+        kind: 'invalid_handler_plan_missing_finalize',
+        requestId: options.requestId
+      })
+    );
+  }
+  if (actionPlan.action === 'invalid_plan_result') {
+    throw buildProviderProtocolError(
+      planServertoolHandlerContractErrorWithNative({
+        kind: 'invalid_handler_plan_result',
+        requestId: options.requestId
+      })
+    );
   }
   return planned as ServerToolHandlerResult;
 };
@@ -129,42 +116,27 @@ export const runServertoolHandler = async (
         ? ctx.toolCall.name.trim()
         : 'auto';
     const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-    const wrapped = new ProviderProtocolError(`[servertool] handler failed: ${toolName}: ${message}`, {
-      code: 'SERVERTOOL_HANDLER_FAILED',
-      category: 'INTERNAL_ERROR',
-      details: {
+    const wrapped = buildProviderProtocolError(
+      planServertoolHandlerContractErrorWithNative({
+        kind: 'handler_failed',
         toolName,
         requestId: ctx.requestId,
         entryEndpoint: ctx.entryEndpoint,
         providerProtocol: ctx.providerProtocol,
         error: message
-      }
-    }) as ProviderProtocolError & { status?: number; cause?: unknown };
-    wrapped.status = 500;
+      })
+    ) as ProviderProtocolError & { status?: number; cause?: unknown };
     wrapped.cause = error;
     throw wrapped;
   }
 };
 
-export const executeServertoolBackendPlan = async (
-  plan: ServerToolBackendPlan,
-  options: ServerSideToolEngineOptions
-): Promise<ServerToolBackendResult | undefined> => {
-  if (!plan) return undefined;
-  const nativePlan = planServertoolBackendExecutionWithNative({ kind: (plan as { kind?: string }).kind });
-  if (nativePlan.action === 'vision_analysis' || nativePlan.action === 'web_search') {
-    const executor = backendIoExecutors[nativePlan.action as keyof BackendIoExecutorMap];
-    return await executor({
-      plan: plan as never,
-      options
-    });
-  }
-  throw new ProviderProtocolError(`[servertool] unsupported backend plan kind: ${nativePlan.backendKind}`, {
-    code: 'SERVERTOOL_HANDLER_FAILED',
-    category: 'INTERNAL_ERROR',
-    details: {
-      requestId: options.requestId,
-      backendKind: nativePlan.backendKind
-    }
-  });
-};
+function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {
+  const err = new ProviderProtocolError(plan.message, {
+    code: plan.code as any,
+    category: plan.category as any,
+    details: plan.details
+  }) as ProviderProtocolError & { status?: number };
+  err.status = plan.status;
+  return err;
+}

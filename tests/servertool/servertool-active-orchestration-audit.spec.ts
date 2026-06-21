@@ -11,7 +11,6 @@ const TARGETS = [
       'const executeBackendPlanViaThinShell',
       'const runServertoolHandlerThinShell',
       'function materializeServertoolPlannedResult(',
-      'function executeServertoolBackendPlan(',
       'export async function runServertoolHandler(',
       '[servertool] invalid handler plan contract: missing finalize',
       '[servertool] invalid handler plan/result contract',
@@ -166,6 +165,18 @@ const TARGETS = [
       "!stoplessPlan.isStopMessageFlow &&",
       "if (stoplessPlan.action === 'terminal_final')",
       "if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow)",
+    ],
+  },
+  {
+    file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+    forbidden: [
+      'providerInvoker?:',
+      'reenterPipeline?:',
+      'clientInjectDispatch?:',
+      'hasServertoolSupport:',
+      'providerInvoker: options.providerInvoker',
+      'reenterPipeline: options.reenterPipeline',
+      'clientInjectDispatch: options.clientInjectDispatch'
     ],
   },
   {

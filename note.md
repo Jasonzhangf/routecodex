@@ -10218,3 +10218,38 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
   - response-stage capabilities 不再由 TS 壳层伪造固定 false；
   - 这轮还只是 response-stage/failfast slice 收口，不代表整个 hook skeleton 已 anchored；
   - 后续继续审计 `server-side-tools-impl.ts` / `engine.ts` / execution shells 里剩余 TS 活语义时，focused Jest mock 必须继续跟 native registration 真相同源。
+
+## 2026-06-22 execution-handler materialization unsupported-backend failfast closeout
+
+- 本轮 slice 目标：把 `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts` 中 `unsupported_backend_plan_kind` 穿透返回原 plan 的漏口补上，锁死“retired backend/reenter mainline 不得静默落回成功结果”。
+- 已确认根因：
+  - 现有 dirty slice 已把 `engine.ts` 改成 `SERVERTOOL_REENTER_RETIRED`，并把 `response-stage-orchestration-shell.ts` 从入口 options 上移除 `providerInvoker/reenterPipeline/clientInjectDispatch`；
+  - 但 `materializeServertoolPlannedResult(...)` 对 native `planServertoolHandlerRuntimeActionWithNative()` 返回的 `unsupported_backend_plan_kind` 没有显式处理，最后走到了 `return planned as ServerToolHandlerResult`；
+  - 这会把本应 fail-fast 的 backend plan 包装成“成功 materialized result”，属于明确的错误链漏拦。
+- 变更点：
+  - `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts`
+  - `tests/servertool/execution-shell.backend-failfast.spec.ts`
+  - `tests/servertool/stopless-metadata-center.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- 关键收口：
+  - `materializeServertoolPlannedResult(...)` 现在把 `unsupported_backend_plan_kind` 与旧 compat action `execute_backend_vision_analysis_then_finalize` / `execute_backend_web_search_then_finalize` 一样统一投影成 native error；
+  - `execution-shell.backend-failfast.spec.ts` 不再依赖已删除的 `executeServertoolBackendPlan` / `handlers/vision.ts` / `handlers/web-search.ts`，而是直接验证 materialization shell 的 fail-fast；
+  - `stopless-metadata-center.spec.ts` 去掉无效 `reenterPipeline` 入参，和当前 retired design 对齐；
+  - active orchestration audit 新增锁：`response-stage-orchestration-shell.ts` 不得重新暴露 `providerInvoker?/reenterPipeline?/clientInjectDispatch?` 入口，也不得回到 `hasServertoolSupport` 本地判定。
+- 串行验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/execution-shell.backend-failfast.spec.ts tests/servertool/stopless-metadata-center.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` -> 3 suites / 19 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+- 结论：
+  - retired backend/reenter mainline 的错误链现在不会再被 materialization shell 静默包装成成功；
+  - 这一刀收的是 execution-handler materialization fail-fast owner，不代表整个 engine/response-stage retired slice 已全部提交；
+  - 下一轮应继续围绕当前 dirty 的 `engine.ts` / `response-stage-orchestration-shell.ts` / `execution-shell.ts` 做 focused tests + 分阶段提交，而不是混回旧 callback 入口。
+
+## 2026-06-21T16:48:27.626Z stopless learned
+
+- requestId: openai-responses-minimax.key1-MiniMax-M3-20260622T004817462-384812-4181
+- sessionId: 019ee85e-8c96-77b0-920f-f3fbb3772b6d
+- stopReason: reasoningStop response-hook 修复在 5555 live 闭环并已 cherry-pick 提交推送
+- evidence: commit 1bdedfa 推到 origin/main；install:global / 5555&5520 restart / /health version=0.90.3244；5555 live probe 拿到 hasReasoningStop=true + arguments={stopreason:2,reason:'第一轮故意缺 schema'}，续轮 200/completed，客户端无 raw reasoningStop 泄漏
+
+response-hook 路径不应和 followup/runtime executor 共用 action 类型，否则 planner 在没 runtime callback 时会 fail-fast；客户端永远只能见到 exec_command 投影，reasoningStop 永远是 internal stop tool
