@@ -172,7 +172,6 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
   'hub.servertool_stopless_cli_continuation': [
     'tests/servertool/stopless-cli-continuation.spec.ts',
     'tests/servertool/servertool-cli-projection.spec.ts',
-    'tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts',
   ],
   'hub.servertool_rust_only_closeout': [
     'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
@@ -5121,8 +5120,22 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'export const collectAdditionalClientToolCalls = collectAdditionalClientToolCallsImpl;',
-    'export const extractToolCalls = extractToolCallsImpl;',
+    'export function isClientExecCliProjectionToolCall(',
+    'return isServertoolClientExecCliProjectionToolCallWithNative({',
+    'executionMode: toolCall.executionMode',
+  ]) {
+    if (!tsServerSideToolsImpl.includes(marker)) {
+      fail(
+        'servertool-cli-projection-thin-shell-guard',
+        `server-side-tools-impl.ts must keep CLI projection impl guard marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'collectAdditionalClientToolCallsViaImplThinShell as collectAdditionalClientToolCalls',
+    'extractToolCallsViaImplThinShell as extractToolCalls',
+    'runServerSideToolEngineViaThinShell as runServerSideToolEngine',
+    'runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller',
   ]) {
     if (!tsServerSideTools.includes(marker)) {
       fail(
@@ -5132,15 +5145,14 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'export function isClientExecCliProjectionToolCall(',
-    'return isServertoolClientExecCliProjectionToolCallWithNative({',
-    'executionMode: toolCall.executionMode',
-    'export const collectAdditionalClientToolCallsImpl =',
+    'export const runServerSideToolEngineViaThinShell =',
+    'export const collectAdditionalClientToolCallsViaImplThinShell =',
+    'export const extractToolCallsViaImplThinShell =',
   ]) {
     if (!tsServerSideToolsImpl.includes(marker)) {
       fail(
         'servertool-cli-projection-thin-shell-guard',
-        `server-side-tools-impl.ts must keep CLI projection impl guard marker ${marker}`
+        `server-side-tools-impl.ts must keep thin-shell owner marker ${marker}`
       );
     }
   }
@@ -5189,8 +5201,8 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'export const materializeServertoolPlannedResult =',
-    'export { runServertoolHandler };',
+    'materializeServertoolPlannedResult',
+    'runServertoolHandler',
   ]) {
     if (!executionShell.includes(marker)) {
       fail(
@@ -5395,7 +5407,7 @@ function checkServertoolAutoHookCallerThinShell() {
     }
   }
   for (const marker of [
-    'export const runServertoolAutoHookCaller = runServertoolAutoHookCallerImpl;',
+    'runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller',
   ]) {
     if (!serverSideTools.includes(marker)) {
       fail(
@@ -5406,14 +5418,19 @@ function checkServertoolAutoHookCallerThinShell() {
   }
   for (const marker of [
     'export const runServertoolAutoHookCallerImpl =',
-    'return await runServertoolAutoHookCallerViaThinShell(args);',
   ]) {
-    if (!serverSideToolsImpl.includes(marker)) {
+    if (serverSideToolsImpl.includes(marker) || serverSideTools.includes(marker)) {
       fail(
         'servertool-auto-hook-caller-thin-shell',
-        `server-side-tools-impl.ts must keep auto-hook caller impl marker ${marker}`
+        `*Impl alias export must not revive: ${marker}`
       );
     }
+  }
+  if (serverSideToolsImpl.includes('runServertoolAutoHookCallerViaImplThinShell')) {
+    fail(
+      'servertool-auto-hook-caller-thin-shell',
+      'server-side-tools-impl.ts must not retain the deleted runServertoolAutoHookCallerViaImplThinShell wrapper'
+    );
   }
   pass(
     'servertool-auto-hook-caller-thin-shell',
@@ -5434,16 +5451,16 @@ function checkServertoolResponseStageGateThinShell() {
       );
     }
   }
-  if (!serverSideTools.includes('planServertoolResponseStageGateWithNative as respStageGateNative')) {
+  if (serverSideTools.includes('bindResponseStageGateNativeShell(')) {
     fail(
       'servertool-response-stage-gate-thin-shell',
-      'server-side-tools.ts must route response-stage bypass through native response-stage gate alias'
+      'server-side-tools.ts must not retain deleted bindResponseStageGateNativeShell wrapper'
     );
     return;
   }
   pass(
     'servertool-response-stage-gate-thin-shell',
-    'server-side-tools.ts routes response-stage bypass through native response-stage gate alias'
+    'server-side-tools.ts does not retain response-stage wrapper alias'
   );
 }
 
@@ -5502,9 +5519,8 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'const resolveHandlerExecutionSpecViaThinShell',
         'function buildServertoolDispatchPlanInputThinShell(',
         'function buildServertoolOutcomePlanInputThinShell(',
-        'function resolveToolCallExecutionOutcomeThinShell(',
-        'function runToolCallExecutionLoopThinShell(',
         'export function resolveServertoolHandlerExecutionSpec(',
+        'JSON.parse(JSON.stringify(',
         ...SERVERTOOL_DISPATCH_OUTCOME_FORBIDDEN_MARKERS,
       ],
     ],
@@ -5513,11 +5529,7 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
       [
         "import './handlers/stop-message-auto.js';",
         "import './handlers/vision.js';",
-        'export async function runServerSideToolEngineImpl(',
-        'export function extractToolCallsImpl(',
-        'export function collectAdditionalClientToolCallsImpl(',
         'const gatePlan = planServertoolResponseStageGateWithNative(',
-        'return await runServertoolAutoHookCallerImpl(',
         'hasServertoolSupport:',
         "typeof options.providerInvoker === 'function' || typeof options.reenterPipeline === 'function'",
         "return name !== 'stop_message_auto';",

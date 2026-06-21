@@ -170,7 +170,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   });
 
   if (outcomeRuntimeActionPlan.action === 'return_mixed_client_tools_pending_injection') {
-    const clientResponse = JSON.parse(JSON.stringify(args.base)) as JsonObject;
+    const clientResponse = structuredClone(args.base);
     args.filterOutExecutedToolCalls(clientResponse, args.executionState.executedIds);
     args.stripToolOutputs(clientResponse);
     return {
@@ -260,7 +260,7 @@ export async function runServertoolIoExecutionQueue(args: {
       hasHandlerError: Boolean(lastErr)
     });
     if (resultLoopActionPlan.action === 'apply_materialized_result') {
-      applyServertoolExecutionResult(args.baseForExecution, JSON.parse(JSON.stringify(result.chatResponse)) as JsonObject);
+      applyServertoolExecutionResult(args.baseForExecution, result.chatResponse as JsonObject);
       appendExecutedToolRecord(executionState, toolCall, result.execution);
       continue;
     }
@@ -274,7 +274,7 @@ export async function runServertoolIoExecutionQueue(args: {
       }) as JsonObject;
       applyServertoolExecutionResult(
         args.baseForExecution,
-        JSON.parse(JSON.stringify(toolOutputPayload)) as JsonObject
+        toolOutputPayload
       );
       const errorEffectPlan = planServertoolExecutionLoopEffectWithNative({
         mode: 'handler_error',
@@ -309,7 +309,7 @@ export async function runServertoolIoExecutionQueue(args: {
 
     applyServertoolExecutionResult(
       args.baseForExecution,
-      JSON.parse(JSON.stringify(noopResult.chatResponse)) as JsonObject
+      noopResult.chatResponse as JsonObject
     );
 
     const noopEffectPlan = planServertoolExecutionLoopEffectWithNative({
@@ -334,9 +334,6 @@ export async function runServertoolIoExecutionQueue(args: {
 
   return executionState;
 }
-
-export const resolveToolCallExecutionOutcomeThinShell = materializeNativeToolCallExecutionOutcome;
-export const runToolCallExecutionLoopThinShell = runServertoolIoExecutionQueue;
 
 function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {
   const err = new ProviderProtocolError(plan.message, {

@@ -113,9 +113,11 @@ describe('execution-dispatch-outcome-shell', () => {
 
     expect(source).toContain('adapterContext: args.options.adapterContext');
     expect(source).toContain('baseForExecution: args.baseForExecution');
+    expect(source).toContain('const clientResponse = structuredClone(args.base);');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId ===');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===');
     expect(source).not.toContain('Array.isArray((args.baseForExecution as any).tool_outputs)');
+    expect(source).not.toContain('JSON.parse(JSON.stringify(');
   });
 
   beforeEach(() => {

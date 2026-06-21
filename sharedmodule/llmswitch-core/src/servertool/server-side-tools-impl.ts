@@ -63,7 +63,7 @@ function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | nu
   return normalized.size > 0 ? normalized : null;
 }
 
-const runServerSideToolEngineViaThinShell = async (
+export const runServerSideToolEngineViaThinShell = async (
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> => {
   const base = asObject(options.chatResponse);
@@ -80,7 +80,7 @@ const runServerSideToolEngineViaThinShell = async (
     });
   }
   const baseObject = base as JsonObject;
-  const toolCalls = extractToolCallsImpl(baseObject, options.requestId);
+  const toolCalls = extractToolCallsViaImplThinShell(baseObject, options.requestId);
   const contextBase: Omit<ServerToolHandlerContext, 'toolCall'> = {
     base: baseObject,
     toolCalls,
@@ -104,7 +104,7 @@ const runServerSideToolEngineViaThinShell = async (
       hasAutoHookResult: false
     });
     if (preAutoHookRuntimeAction.action !== 'return_passthrough_bypass') {
-      const autoHookResult = await runServertoolAutoHookCallerImpl({
+      const autoHookResult = await runServertoolAutoHookCallerViaThinShell({
         options,
         contextBase: contextBase as ServerToolHandlerContext,
         includeAutoHookIds,
@@ -130,7 +130,7 @@ const runServerSideToolEngineViaThinShell = async (
     }
   }
 
-  const baseForExecution = cloneJson(baseObject) as JsonObject;
+  const baseForExecution = structuredClone(baseObject);
   const runtimeMetadata = readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);
   const persistentScopeKey = resolveServertoolPersistentScopeKey(options.adapterContext);
   const runtimePreCommandState = (() => {
@@ -152,7 +152,7 @@ const runServerSideToolEngineViaThinShell = async (
       const persistedAction = planRuntimePreCommandStateRuntimeActionWithNative({
         ...runtimeActionBase,
         hasPersistentScopeKey: true,
-        persistedState: persistedState ? (JSON.parse(JSON.stringify(persistedState)) as JsonObject) : undefined,
+        persistedState: persistedState ? structuredClone(persistedState as unknown as JsonObject) : undefined,
         persistedLoadAttempted: true
       });
       if (persistedAction.action !== 'use_selected') {
@@ -223,7 +223,7 @@ const runServerSideToolEngineViaThinShell = async (
         `[servertool] native execution-branch projected missing tool call index: ${String(preExecutionBranchPlan.projectedToolCallIndex ?? '')}`
       );
     }
-    const additionalToolCalls = collectAdditionalClientToolCallsImpl(baseObject, cliProjectedToolCall.id);
+    const additionalToolCalls = collectAdditionalClientToolCallsViaImplThinShell(baseObject, cliProjectedToolCall.id);
     const projection = buildServertoolCliProjectionForToolCall({
       options,
       toolCall: cliProjectedToolCall,
@@ -286,7 +286,7 @@ const runServerSideToolEngineViaThinShell = async (
   if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass') {
     return { mode: 'passthrough', finalChatResponse: baseObject };
   }
-  const autoHookResult = await runServertoolAutoHookCallerImpl({
+  const autoHookResult = await runServertoolAutoHookCallerViaThinShell({
     options,
     contextBase: contextBase as ServerToolHandlerContext,
     includeAutoHookIds,
@@ -303,29 +303,20 @@ const runServerSideToolEngineViaThinShell = async (
   return { mode: 'passthrough', finalChatResponse: baseObject };
 };
 
-const runServertoolAutoHookCallerViaImplThinShell = async (args: {
-  options: ServerSideToolEngineOptions;
-  contextBase: ServerToolHandlerContext;
-  includeAutoHookIds: Set<string> | null;
-  excludeAutoHookIds: Set<string> | null;
-}): Promise<ServerSideToolEngineResult | null> => {
-  return await runServertoolAutoHookCallerViaThinShell(args);
-};
-
 export function isClientExecCliProjectionToolCall(toolCall: ToolCall & { executionMode?: string }): boolean {
   return isServertoolClientExecCliProjectionToolCallWithNative({
     executionMode: toolCall.executionMode
   });
 }
 
-const collectAdditionalClientToolCallsViaImplThinShell = (base: JsonObject, projectedToolCallId: string): JsonValue[] => {
+export const collectAdditionalClientToolCallsViaImplThinShell = (base: JsonObject, projectedToolCallId: string): JsonValue[] => {
   return collectServertoolAdditionalClientToolCallsWithNative({
     base,
     projectedToolCallId
   }) as JsonValue[];
 };
 
-const extractToolCallsViaImplThinShell = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {
+export const extractToolCallsViaImplThinShell = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {
   const stage = runServertoolResponseStageWithNative(chatResponse, requestId);
   const normalizedPayload = asObject(stage.normalizedPayload) ?? chatResponse;
   replaceJsonObjectInPlace(chatResponse, normalizedPayload);
@@ -344,19 +335,6 @@ function getArray(value: unknown): JsonValue[] {
   return Array.isArray(value) ? (value as JsonValue[]) : [];
 }
 
-export function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
 export function extractTextFromChatLike(payload: JsonObject): string {
   return extractTextFromChatLikeWithNative(payload);
 }
-
-export function bindServertoolContractWithNative<T>(value: T): T {
-  return value;
-}
-
-export const runServerSideToolEngineImpl = runServerSideToolEngineViaThinShell;
-export const runServertoolAutoHookCallerImpl = runServertoolAutoHookCallerViaImplThinShell;
-export const collectAdditionalClientToolCallsImpl = collectAdditionalClientToolCallsViaImplThinShell;
-export const extractToolCallsImpl = extractToolCallsViaImplThinShell;
