@@ -51,6 +51,45 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
     getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => skeletonDocument),
+    planServertoolToolCallDispatchWithNative: jest.fn(() => ({
+      executableToolCalls: [],
+      skippedToolCalls: [],
+      noopToolCalls: []
+    })),
+    planServertoolOutcomeWithNative: jest.fn(() => ({
+      outcomeMode: 'servertool_only',
+      followupStrategy: 'generic_tool_outputs',
+      useGenericFollowup: true,
+      useLastExecutionFollowup: false,
+      requiresPendingInjection: false,
+      pendingInjectionMessagesResolved: [],
+      pendingInjectionMessageKinds: [],
+      remainingToolCallIds: [],
+      aliasSessionIds: [],
+      resolvedFollowup: {
+        requestIdSuffix: ':servertool_followup',
+        injection: {
+          ops: [
+            { op: 'append_assistant_message', required: true },
+            { op: 'append_tool_messages_from_tool_outputs', required: true }
+          ]
+        }
+      }
+    })),
+    planServertoolNoopOutcomeWithNative: jest.fn((input: any) => ({
+      flowId: `${String(input.toolName ?? 'noop')}_noop`,
+      followup: {
+        requestIdSuffix: ':servertool_followup',
+        injection: {
+          ops: [
+            { op: 'append_assistant_message', required: true },
+            { op: 'append_tool_messages_from_tool_outputs', required: true }
+          ]
+        }
+      },
+      executionContext: {},
+      chatResponse: input.base ?? {}
+    })),
     planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
       document: skeletonDocument,
       toolSpecs: skeletonDocument.servertool.internalTools,
@@ -107,6 +146,24 @@ jest.unstable_mockModule(
       const name = String(input.name ?? '').trim().toLowerCase();
       return (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
     }),
+    extractCapturedChatSeedWithNative: jest.fn(() => null),
+    normalizeFollowupParametersWithNative: jest.fn((value: any) => value ?? undefined),
+    resolveFollowupModelWithNative: jest.fn((seedModel: any) => String(seedModel ?? 'gpt-test')),
+    buildServertoolToolOutputPayloadWithNative: jest.fn((payload: any) => payload),
+    webSearchIsGeminiEngineWithNative: jest.fn(() => false),
+    webSearchIsGlmEngineWithNative: jest.fn(() => false),
+    webSearchIsQwenEngineWithNative: jest.fn(() => false),
+    webSearchExtractAssistantMessageWithNative: jest.fn(() => 'null'),
+    webSearchBuildToolMessagesWithNative: jest.fn(() => '[]'),
+    webSearchCollectHitsWithNative: jest.fn(() => '[]'),
+    webSearchLimitHitsWithNative: jest.fn(() => '[]'),
+    webSearchFormatHitsSummaryWithNative: jest.fn(() => ''),
+    webSearchNormalizeResultCountWithNative: jest.fn(() => 5),
+    webSearchSanitizeBackendErrorWithNative: jest.fn((message: string) => message),
+    webSearchBuildSystemPromptWithNative: jest.fn(() => ''),
+    visionBuildAnalysisPayloadWithNative: jest.fn(() => 'null'),
+    visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
+    visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
     planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => ({
       optionalQueue: [...input.hooks].sort((a, b) => a.priority - b.priority),
       mandatoryQueue: []
@@ -120,6 +177,8 @@ let buildServertoolPendingInjectionConfig: any;
 let getDefaultServertoolSkeletonDocument: any;
 let getServertoolToolSpec: any;
 let normalizeServerToolRegistrationSpec: any;
+let registerServerToolHandler: any;
+let listAutoServerToolHooks: any;
 
 beforeAll(async () => {
   const skeletonConfig = await import('../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js');
@@ -129,6 +188,9 @@ beforeAll(async () => {
   getDefaultServertoolSkeletonDocument = skeletonConfig.getDefaultServertoolSkeletonDocument;
   getServertoolToolSpec = skeletonConfig.getServertoolToolSpec;
   normalizeServerToolRegistrationSpec = skeletonConfig.normalizeServerToolRegistrationSpec;
+  const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry.js');
+  registerServerToolHandler = registry.registerServerToolHandler;
+  listAutoServerToolHooks = registry.listAutoServerToolHooks;
 
 });
 
@@ -186,6 +248,29 @@ describe('servertool skeleton config', () => {
       }
     });
     expect(getServertoolToolSpec('reasoning_stop')).toBeNull();
+  });
+
+  test('registry ignores TS auto-hook overrides for skeleton-owned tools', () => {
+    registerServerToolHandler('stop_message_auto', async () => null, {
+      trigger: 'tool_call',
+      hook: {
+        phase: 'post',
+        priority: 999
+      }
+    });
+
+    const hook = listAutoServerToolHooks().find((entry: any) => entry.id === 'stop_message_auto');
+    expect(hook).toBeDefined();
+    expect(hook).toMatchObject({
+      id: 'stop_message_auto',
+      phase: 'default',
+      priority: 40
+    });
+    expect(hook.registration).toMatchObject({
+      name: 'stop_message_auto',
+      trigger: 'auto',
+      executionMode: 'auto_hook'
+    });
   });
 
 });

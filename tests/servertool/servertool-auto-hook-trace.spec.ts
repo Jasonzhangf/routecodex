@@ -2,11 +2,17 @@ import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/s
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import type { ServerToolAutoHookTraceEvent } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function bindMetadataCenter<T extends Record<string, unknown>>(adapterContext: T): T {
+  MetadataCenter.attach(adapterContext);
+  return adapterContext;
+}
 
 describe('servertool auto hook trace', () => {
   test('emits match trace for default stopless stop_message_auto hook', async () => {
     const traces: ServerToolAutoHookTraceEvent[] = [];
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-hook-trace-miss',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -14,7 +20,7 @@ describe('servertool auto hook trace', () => {
         model: 'gpt-test',
         messages: [{ role: 'user', content: 'hello' }]
       }
-    } as any;
+    } as any);
 
     const chatResponse: JsonObject = {
       id: 'chatcmpl-hook-trace-miss',
@@ -52,7 +58,7 @@ describe('servertool auto hook trace', () => {
 
   test('empty assistant stop does not use deleted empty-reply hook', async () => {
     const traces: ServerToolAutoHookTraceEvent[] = [];
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-hook-trace-empty',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -60,7 +66,7 @@ describe('servertool auto hook trace', () => {
         model: 'gpt-test',
         messages: [{ role: 'user', content: '继续执行任务' }]
       }
-    } as any;
+    } as any);
 
     const chatResponse: JsonObject = {
       id: 'chatcmpl-hook-trace-empty',
@@ -104,7 +110,7 @@ describe('servertool auto hook trace', () => {
 
   test('keeps optional primary hooks in empty -> stop order', async () => {
     const traces: ServerToolAutoHookTraceEvent[] = [];
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-hook-trace-order',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -112,7 +118,7 @@ describe('servertool auto hook trace', () => {
         model: 'gpt-test',
         messages: [{ role: 'user', content: 'hello' }]
       }
-    } as any;
+    } as any);
 
     const chatResponse: JsonObject = {
       id: 'chatcmpl-hook-trace-order',

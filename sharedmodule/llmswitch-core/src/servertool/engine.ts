@@ -1,6 +1,5 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import type { ProviderInvoker, ServerSideToolEngineOptions } from './types.js';
 import { runServerSideToolEngine } from './server-side-tools.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
@@ -20,11 +19,16 @@ import {
   runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
-import { runFollowupMainline } from './backend-route-mainline-block.js';
-import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
+import { runFollowupMainline as runFollowupMainlineShell } from './backend-route-mainline-block.js';
+import { buildServertoolCliProjectionForAutoFlow as buildServertoolCliProjectionForAutoFlowShell } from './cli-projection.js';
 import {
-  planStoplessOrchestrationActionWithNative
+  extractCurrentAssistantStopTextWithNative,
+  planStoplessOrchestrationActionWithNative as planStoplessOrchestrationActionShell,
+  resolveRuntimeStopMessageStateFromAdapterContextWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { readRuntimeControlFromBoundMetadataCenter } from './stopless-metadata-carrier.js';
+import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
+import { stoplessIsDisabledOnDirectRoute } from './direct-stopless-route-guard.js';
 
 // native-router-hotpath contract:
 // servertool followup metadata/injection shape is consumed by Rust hub pipeline
@@ -149,24 +153,12 @@ function summarizeServertoolExecutionForSnapshot(engineResult: ServerToolEngineR
   return summary;
 }
 
-function extractStoplessReasoningText(finalChatResponse: JsonObject): string {
-  const choice = Array.isArray((finalChatResponse as any).choices) ? (finalChatResponse as any).choices[0] : null;
-  const message = choice && typeof choice === 'object' ? choice.message : null;
-  const candidates: unknown[] = [
-    message?.reasoning_text,
-    message?.reasoning_content,
-    message?.content,
-    (finalChatResponse as any).output_text
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  return '继续推进当前任务。';
-}
-
-function extractStoplessLoopState(execution: ServerToolEngineResult['execution']): {
+function resolveStoplessCliProjectionContext(
+  execution: ServerToolEngineResult['execution'],
+  adapterContext?: unknown,
+  chatResponse?: JsonObject
+): {
+  reasoningText: string;
   repeatCount: number;
   maxRepeats: number;
   triggerHint?: string;
@@ -181,100 +173,58 @@ function extractStoplessLoopState(execution: ServerToolEngineResult['execution']
   const row = state && typeof state === 'object' && !Array.isArray(state)
     ? state as Record<string, unknown>
     : {};
-  const repeatCount = typeof row.repeatCount === 'number' ? row.repeatCount : 1;
-  const maxRepeats = typeof row.maxRepeats === 'number' ? row.maxRepeats : Math.max(repeatCount, 1);
+  const adapterRecord =
+    adapterContext && typeof adapterContext === 'object' && !Array.isArray(adapterContext)
+      ? adapterContext as Record<string, unknown>
+      : undefined;
+  const metadata =
+    adapterRecord?.metadata &&
+    typeof adapterRecord.metadata === 'object' &&
+    !Array.isArray(adapterRecord.metadata)
+      ? adapterRecord.metadata as Record<string, unknown>
+      : undefined;
+  const runtimeMetadata = adapterRecord ? readRuntimeMetadata(adapterRecord) : undefined;
+  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(metadata);
+  const stoplessControl =
+    runtimeControl?.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)
+      ? runtimeControl.stopless as Record<string, unknown>
+      : {};
+  const runtimeSnapshot = resolveRuntimeStopMessageStateFromAdapterContextWithNative({
+    adapterContext: adapterRecord ?? null,
+    ...(runtimeMetadata ? { runtimeMetadata } : {})
+  });
+  const repeatCount =
+    typeof runtimeSnapshot?.used === 'number'
+      ? Math.max(runtimeSnapshot.used + 1, 1)
+      : typeof row.repeatCount === 'number'
+        ? row.repeatCount
+        : 1;
+  const maxRepeats =
+    typeof runtimeSnapshot?.maxRepeats === 'number' && runtimeSnapshot.maxRepeats > 0
+      ? runtimeSnapshot.maxRepeats
+      : typeof row.maxRepeats === 'number'
+        ? row.maxRepeats
+        : Math.max(repeatCount, 1);
   const triggerHint = [
     row.triggerHint,
-    context.stopSchemaTriggerHint
+    context.stopSchemaTriggerHint,
+    stoplessControl.triggerHint
   ].find((value) => typeof value === 'string' && value.trim()) as string | undefined;
   const schemaFeedbackCandidate = [
     row.schemaFeedback,
-    context.stopSchemaFeedback
+    context.stopSchemaFeedback,
+    stoplessControl.schemaFeedback
   ].find((value) => value && typeof value === 'object' && !Array.isArray(value)) as JsonObject | undefined;
   return {
+    reasoningText:
+      extractCurrentAssistantStopTextWithNative(chatResponse ?? null) ||
+      extractCurrentAssistantStopTextWithNative(adapterRecord ?? null) ||
+      '继续推进当前任务。',
     repeatCount,
     maxRepeats,
     ...(typeof triggerHint === 'string' && triggerHint.trim() ? { triggerHint: triggerHint.trim() } : {}),
     ...(schemaFeedbackCandidate ? { schemaFeedback: schemaFeedbackCandidate } : {})
   };
-}
-
-function normalizeStoplessSessionToken(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  const lowered = trimmed.toLowerCase();
-  if (lowered === 'unknown' || lowered === 'none' || lowered === 'null' || lowered === '-') {
-    return undefined;
-  }
-  return trimmed;
-}
-
-function readStoplessSessionId(adapterContext: unknown): string | undefined {
-  if (!adapterContext || typeof adapterContext !== 'object') {
-    return undefined;
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const runtimeMetadata = readRuntimeMetadata(record) as Record<string, unknown> | undefined;
-  const metadata =
-    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
-      ? record.metadata as Record<string, unknown>
-      : null;
-  const direct = normalizeStoplessSessionToken(record.sessionId);
-  if (direct) {
-    return direct;
-  }
-  const runtime = record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
-    ? record.__rt as Record<string, unknown>
-    : null;
-  const metadataSession = normalizeStoplessSessionToken(metadata?.sessionId);
-  if (metadataSession) {
-    return metadataSession;
-  }
-  const rt = normalizeStoplessSessionToken(runtime?.sessionId);
-  if (rt) {
-    return rt;
-  }
-  const runtimeMetadataSession = normalizeStoplessSessionToken(runtimeMetadata?.sessionId);
-  if (runtimeMetadataSession) {
-    return runtimeMetadataSession;
-  }
-  return undefined;
-}
-
-function readStoplessRouteName(adapterContext: unknown): string | undefined {
-  if (!adapterContext || typeof adapterContext !== 'object') {
-    return undefined;
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const runtimeMetadata = readRuntimeMetadata(record) as Record<string, unknown> | undefined;
-  const directRuntime =
-    record.__rt && typeof record.__rt === 'object' && !Array.isArray(record.__rt)
-      ? record.__rt as Record<string, unknown>
-      : null;
-  const candidates = [
-    runtimeMetadata?.routeName,
-    directRuntime?.routeName,
-    record.routeName
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  return undefined;
-}
-
-function isDirectStoplessDisabled(adapterContext: unknown): boolean {
-  const routeName = readStoplessRouteName(adapterContext)?.toLowerCase();
-  if (!routeName) {
-    return false;
-  }
-  return routeName.startsWith('router-direct') || routeName.startsWith('provider-direct');
 }
 
 function recordServertoolExecutionSnapshot(args: {
@@ -355,7 +305,7 @@ export async function runServerToolOrchestration(
   const stopSignal = inspectStopGatewaySignal(options.chat);
   attachStopGatewayContext(options.adapterContext, stopSignal);
   if (stopSignal.observed) {
-    if (isDirectStoplessDisabled(options.adapterContext)) {
+    if (stoplessIsDisabledOnDirectRoute(options.adapterContext)) {
       logStopEntry('trigger', 'skipped_direct_passthrough', {
         reason: stopSignal.reason,
         source: stopSignal.source,
@@ -431,11 +381,10 @@ export async function runServerToolOrchestration(
     logNonBlocking: logServerToolNonBlocking
   });
   const totalSteps = 5;
-  const stoplessSessionId = readStoplessSessionId(options.adapterContext);
-  const stoplessPlan = planStoplessOrchestrationActionWithNative({
+  const stoplessPlan = planStoplessOrchestrationActionShell({
     flowId,
     execution: engineResult.execution,
-    sessionId: stoplessSessionId
+    adapterContext: options.adapterContext as Record<string, unknown>
   });
   if (stopSignal.observed) {
     logStopEntry('trigger', stoplessPlan.isStopMessageFlow ? 'activated' : 'non_stop_flow', {
@@ -469,6 +418,7 @@ export async function runServerToolOrchestration(
     };
   }
   if (
+    !stoplessPlan.isStopMessageFlow &&
     engineResult.execution.context &&
     typeof engineResult.execution.context === 'object' &&
     !Array.isArray(engineResult.execution.context) &&
@@ -493,18 +443,22 @@ export async function runServerToolOrchestration(
     };
   }
   if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow) {
-    const loopState = extractStoplessLoopState(engineResult.execution);
-    const projection = buildServertoolCliProjectionForAutoFlow({
+    const projectionContext = resolveStoplessCliProjectionContext(
+      engineResult.execution,
+      options.adapterContext,
+      engineResult.finalChatResponse
+    );
+    const projection = buildServertoolCliProjectionForAutoFlowShell({
       options: { requestId: options.requestId, adapterContext: options.adapterContext },
       flowId,
-      reasoningText: extractStoplessReasoningText(engineResult.finalChatResponse),
-      ...(stoplessSessionId ? { sessionId: stoplessSessionId } : {}),
+      reasoningText: projectionContext.reasoningText,
+      ...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),
       input: {
         flowId,
-        repeatCount: loopState.repeatCount,
-        maxRepeats: loopState.maxRepeats,
-        ...(loopState.triggerHint ? { triggerHint: loopState.triggerHint } : {}),
-        ...(loopState.schemaFeedback ? { schemaFeedback: loopState.schemaFeedback } : {})
+        repeatCount: projectionContext.repeatCount,
+        maxRepeats: projectionContext.maxRepeats,
+        ...(projectionContext.triggerHint ? { triggerHint: projectionContext.triggerHint } : {}),
+        ...(projectionContext.schemaFeedback ? { schemaFeedback: projectionContext.schemaFeedback } : {})
       }
     });
     logProgress(5, totalSteps, 'completed (stop_message_auto cli projection)', {
@@ -517,7 +471,7 @@ export async function runServerToolOrchestration(
       flowId: engineResult.execution.flowId
     };
   }
-  return runFollowupMainline({
+  return runFollowupMainlineShell({
     adapterContext: options.adapterContext,
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,

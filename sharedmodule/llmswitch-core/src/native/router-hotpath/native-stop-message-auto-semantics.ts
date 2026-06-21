@@ -71,12 +71,21 @@ type StopMessageHandlerResult = {
 export type StopSchemaGateDecision = {
   action: 'allow_stop' | 'followup' | 'fail_fast';
   reason_code: string;
+  reasonCode?: string;
   summary_prefix?: string;
+  summaryPrefix?: string;
   followup_text?: string;
+  followupText?: string;
   count_budget?: boolean;
+  countBudget?: boolean;
   no_change_count?: number;
+  noChangeCount?: number;
   observation_hash?: string;
+  observationHash?: string;
   max_repeats?: number;
+  maxRepeats?: number;
+  missing_fields?: string[];
+  missingFields?: string[];
   parsed?: Record<string, unknown>;
 };
 
@@ -159,7 +168,56 @@ export function evaluateStopSchemaGateWithNative(args: {
     if (typeof raw !== 'string') {
       return fail(`native_returned_non_string: ${typeof raw}`);
     }
-    return JSON.parse(raw) as StopSchemaGateDecision;
+    const parsed = JSON.parse(raw) as StopSchemaGateDecision & Record<string, unknown>;
+    const normalized: StopSchemaGateDecision = {
+      ...parsed,
+      reason_code: String(parsed.reason_code ?? parsed.reasonCode ?? ''),
+      ...(typeof (parsed.summary_prefix ?? parsed.summaryPrefix) === 'string'
+        ? {
+            summary_prefix: String(parsed.summary_prefix ?? parsed.summaryPrefix),
+            summaryPrefix: String(parsed.summary_prefix ?? parsed.summaryPrefix)
+          }
+        : {}),
+      ...(typeof (parsed.followup_text ?? parsed.followupText) === 'string'
+        ? {
+            followup_text: String(parsed.followup_text ?? parsed.followupText),
+            followupText: String(parsed.followup_text ?? parsed.followupText)
+          }
+        : {}),
+      ...(typeof (parsed.count_budget ?? parsed.countBudget) === 'boolean'
+        ? {
+            count_budget: Boolean(parsed.count_budget ?? parsed.countBudget),
+            countBudget: Boolean(parsed.count_budget ?? parsed.countBudget)
+          }
+        : {}),
+      ...(typeof (parsed.no_change_count ?? parsed.noChangeCount) === 'number'
+        ? {
+            no_change_count: Number(parsed.no_change_count ?? parsed.noChangeCount),
+            noChangeCount: Number(parsed.no_change_count ?? parsed.noChangeCount)
+          }
+        : {}),
+      ...(typeof (parsed.observation_hash ?? parsed.observationHash) === 'string'
+        ? {
+            observation_hash: String(parsed.observation_hash ?? parsed.observationHash),
+            observationHash: String(parsed.observation_hash ?? parsed.observationHash)
+          }
+        : {}),
+      ...(typeof (parsed.max_repeats ?? parsed.maxRepeats) === 'number'
+        ? {
+            max_repeats: Number(parsed.max_repeats ?? parsed.maxRepeats),
+            maxRepeats: Number(parsed.max_repeats ?? parsed.maxRepeats)
+          }
+        : {}),
+      ...(Array.isArray(parsed.missing_fields ?? parsed.missingFields)
+        ? {
+            missing_fields: [...((parsed.missing_fields ?? parsed.missingFields) as unknown[])]
+              .map((value) => String(value)),
+            missingFields: [...((parsed.missing_fields ?? parsed.missingFields) as unknown[])]
+              .map((value) => String(value))
+          }
+        : {})
+    };
+    return normalized;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

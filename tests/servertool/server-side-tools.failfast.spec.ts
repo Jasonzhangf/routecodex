@@ -5,8 +5,10 @@ import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conve
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
 const TOOL_NAME = 'failfast_test_tool';
+let failfastInvocationCount = 0;
 
 registerServerToolHandler(TOOL_NAME, async () => {
+  failfastInvocationCount += 1;
   throw new Error('boom-from-test-handler');
 });
 
@@ -39,6 +41,10 @@ function makeToolCallResponse(): JsonObject {
 }
 
 describe('server-side-tools tool-error closed loop', () => {
+  beforeEach(() => {
+    failfastInvocationCount = 0;
+  });
+
   test('fails fast through native client-disconnect policy before servertool execution', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-servertool-disconnected-1',
@@ -94,5 +100,6 @@ describe('server-side-tools tool-error closed loop', () => {
       retryable: true
     });
     expect(String(parsed.message || '')).toContain('boom-from-test-handler');
+    expect(failfastInvocationCount).toBe(1);
   });
 });

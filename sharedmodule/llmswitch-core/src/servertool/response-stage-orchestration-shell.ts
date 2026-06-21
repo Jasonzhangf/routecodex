@@ -5,8 +5,9 @@ import { recordStage } from '../conversion/hub/pipeline/stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../conversion/hub/pipeline/hub-stage-timing.js';
 import type { ProviderInvoker } from './types.js';
 import { runServerToolOrchestration } from './engine.js';
-import { isStopEligibleForServerTool } from './stop-gateway-context.js';
 import {
+  runServertoolResponseStageWithNative,
+  planServertoolResponseStageGateWithNative,
   detectProviderResponseShapeWithNative,
   readFollowupClientInjectSourceWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
@@ -70,72 +71,41 @@ function markServertoolResponseOrchestration(adapterContext: AdapterContext): vo
   });
 }
 
-function projectRuntimeControlSideChannel(adapterContext: AdapterContext, runtimeControl: Record<string, unknown> | undefined): void {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext) || !runtimeControl) {
-    return;
-  }
-  const record = adapterContext as Record<string, unknown>;
-  const existing = record.runtime_control && typeof record.runtime_control === 'object' && !Array.isArray(record.runtime_control)
-    ? record.runtime_control as Record<string, unknown>
-    : {};
-  record.runtime_control = {
-    ...existing,
-    ...runtimeControl
-  };
-}
-
 export async function runServertoolResponseStageOrchestrationShell(
   options: ServertoolResponseStageShellOptions
 ): Promise<ServertoolResponseStageShellResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
   const runtimeControl = readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
-  projectRuntimeControlSideChannel(options.adapterContext, runtimeControl);
-  const followupSource = readFollowupClientInjectSourceWithNative(options.adapterContext as Record<string, unknown>);
-  const allowReasoningStopFollowupReentry =
-    followupSource === 'servertool.reasoning_stop_guard'
-    || followupSource === 'servertool.reasoning_stop_continue';
-  const stoplessEligibleFollowup = isStopEligibleForServerTool(options.payload, options.adapterContext);
+  const responseStage = runServertoolResponseStageWithNative(options.payload, options.requestId);
+  const hasServerToolSupport =
+    Boolean(options.providerInvoker) || Boolean(options.reenterPipeline) || Boolean(options.clientInjectDispatch);
+  const gatePlan = planServertoolResponseStageGateWithNative({
+    payload: options.payload,
+    adapterContext: options.adapterContext as Record<string, unknown>,
+    runtimeControl,
+    allowFollowup: options.allowFollowup === true,
+    hasServertoolSupport: hasServerToolSupport
+  });
 
-  if (
-    runtimeControl?.serverToolFollowup === true
-    && options.allowFollowup !== true
-    && !allowReasoningStopFollowupReentry
-    && !stoplessEligibleFollowup
-  ) {
+  if (gatePlan.shouldBypass === true) {
     recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: false,
-      skipReason: 'followup_bypass',
+      skipReason: gatePlan.skipReason || 'followup_bypass',
       inputShape: detectProviderResponseShapeWithNative(options.payload)
     });
     return {
       payload: options.payload,
-      executed: false
+      executed: false,
+      ...(gatePlan.skipReason === 'no_servertool_support' || gatePlan.skipReason === 'followup_bypass'
+        ? { skipReason: gatePlan.skipReason }
+        : {})
     };
   }
-
-  const hasServerToolSupport =
-    Boolean(options.providerInvoker) || Boolean(options.reenterPipeline) || Boolean(options.clientInjectDispatch);
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
-  if (!hasServerToolSupport) {
-    recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
-      executed: false,
-      skipReason: 'no_servertool_support',
-      inputShape
-    });
-    return {
-      payload: options.payload,
-      executed: false,
-      skipReason: 'no_servertool_support'
-    };
-  }
 
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
   const orchestrationStart = Date.now();
   markServertoolResponseOrchestration(options.adapterContext);
-  projectRuntimeControlSideChannel(
-    options.adapterContext,
-    readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>)
-  );
   const orchestration = await runServerToolOrchestration({
     chat: options.payload as JsonObject,
     adapterContext: options.adapterContext,

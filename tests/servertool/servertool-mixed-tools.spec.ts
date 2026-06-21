@@ -93,8 +93,8 @@ describe('servertool: mixed migrated servertool + client tool_calls', () => {
     expect(outToolCalls[0]?.function?.name).toBe('exec_command');
     const projectedCommand = JSON.parse(outToolCalls[0].function.arguments).cmd;
     expect(projectedCommand).toContain("routecodex hook run servertool_fixture --input-json '{\"value\":1}'");
-    expect(projectedCommand).toContain("--session-id 's-mixed-cli'");
-    expect(projectedCommand).toContain("--request-id 'req-mixed-cli-1'");
+    expect(projectedCommand).not.toContain('--session-id');
+    expect(projectedCommand).not.toContain('--request-id');
     expect(outToolCalls[1]).toMatchObject({
       id: 'call_exec_command_1',
       type: 'function',

@@ -1,6 +1,5 @@
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ServerToolBackendPlan, ServerToolBackendResult, ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan } from '../types.js';
-import { registerServerToolHandler } from '../registry.js';
 import { bindServertoolContractWithNative, cloneJson, extractTextFromChatLike } from '../server-side-tools.js';
 import { extractCapturedChatSeed } from '../backend-route-seed.js';
 import { reenterServerToolBackend } from '../backend-route-backend.js';
@@ -17,7 +16,9 @@ const VISION_SYSTEM_PROMPT = bindServertoolContractWithNative(
   '你现在的任务只是描述图片内容，不要回答用户问题，不要提供建议，不要推理求解，不要做工具规划。用户提示词只用于帮助你理解关注重点；你只能描述图片中可见的信息。若有文字、数字、时间、版本号、路径、报错、界面结构，请尽量详细描述。看不清的内容明确说明无法辨认。若有多张图片，请按输入顺序分别输出，格式使用 [Image 1]、[Image 2]。'
 );
 
-const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
+export const visionAutoServerToolHandler: ServerToolHandler = async (
+  ctx: ServerToolHandlerContext
+): Promise<ServerToolHandlerPlan | null> => {
   if (!ctx.capabilities.reenterPipeline) {
     return null;
   }
@@ -108,8 +109,6 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
     }
   };
 };
-
-registerServerToolHandler('vision_auto', handler, { trigger: 'auto', hook: { phase: 'default', priority: 20 } });
 
 export async function executeVisionBackendPlan(args: {
   plan: Extract<ServerToolBackendPlan, { kind: 'vision_analysis' }>;

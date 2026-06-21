@@ -110,6 +110,24 @@ struct ServertoolResponseStageOutput {
     tool_calls: Vec<ServertoolExtractedToolCallOutput>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServertoolResponseStageGateOutput {
+    should_bypass: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServertoolResponseStageGatePlannerInput {
+    payload: Value,
+    adapter_context: Option<Value>,
+    runtime_control: Option<Value>,
+    allow_followup: bool,
+    has_servertool_support: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ServertoolDispatchPlannerInput {
@@ -203,6 +221,8 @@ struct ServertoolOutcomePlanOutput {
     followup_strategy: String,
     requires_pending_injection: bool,
     primary_execution_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolved_followup: Option<Value>,
 }
 
 fn build_pending_injection_messages_resolved(
@@ -613,6 +633,58 @@ fn boolish_true(value: Option<&Value>) -> bool {
         Some(Value::String(text)) => text.trim().eq_ignore_ascii_case("true"),
         _ => false,
     }
+}
+
+fn read_runtime_control_field<'a>(
+    runtime_control: Option<&'a Value>,
+    adapter_context: Option<&'a Value>,
+    key: &str,
+) -> Option<&'a Value> {
+    runtime_control
+        .and_then(Value::as_object)
+        .and_then(|row| row.get(key))
+        .or_else(|| {
+            adapter_context
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("runtime_control"))
+                .and_then(Value::as_object)
+                .and_then(|row| row.get(key))
+        })
+        .or_else(|| {
+            adapter_context
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("__rt"))
+                .and_then(Value::as_object)
+                .and_then(|row| row.get(key))
+        })
+}
+
+fn read_followup_source_from_gate_input(
+    runtime_control: Option<&Value>,
+    adapter_context: Option<&Value>,
+) -> Option<String> {
+    read_runtime_control_field(runtime_control, adapter_context, "serverToolFollowupSource")
+        .and_then(|value| read_optional_trimmed_string(Some(value)))
+        .or_else(|| {
+            adapter_context
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("clientInjectSource"))
+                .and_then(|value| read_optional_trimmed_string(Some(value)))
+        })
+}
+
+fn read_stop_eligible_from_gate_input(
+    payload: &Value,
+    adapter_context: Option<&Value>,
+) -> bool {
+    let adapter_truth = adapter_context
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("__rt"))
+        .and_then(Value::as_object)
+        .and_then(|rt| rt.get("stopGatewayContext"))
+        .and_then(servertool_core::stop_gateway_context::normalize_stop_gateway_context)
+        .map(|context| context.eligible);
+    adapter_truth.unwrap_or_else(|| servertool_core::stop_gateway_context::is_stop_eligible(payload))
 }
 
 fn resolve_provider_response_request_semantics_value(
@@ -1485,6 +1557,54 @@ pub fn run_servertool_response_stage_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi]
+pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResult<String> {
+    let input: ServertoolResponseStageGatePlannerInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let adapter_context = input.adapter_context.as_ref();
+    let runtime_control = input.runtime_control.as_ref();
+    let servertool_followup = boolish_true(read_runtime_control_field(
+        runtime_control,
+        adapter_context,
+        "serverToolFollowup",
+    ));
+    let followup_source = read_followup_source_from_gate_input(runtime_control, adapter_context);
+    let allow_reasoning_stop_followup_reentry = matches!(
+        followup_source.as_deref(),
+        Some("servertool.reasoning_stop_guard" | "servertool.reasoning_stop_continue")
+    );
+    let stop_eligible = read_stop_eligible_from_gate_input(&input.payload, adapter_context);
+    let has_empty_assistant_payload_contract_signal =
+        detect_empty_assistant_payload_contract_signal(&input.payload).is_some();
+
+    let output = if has_empty_assistant_payload_contract_signal && !stop_eligible {
+        ServertoolResponseStageGateOutput {
+            should_bypass: true,
+            skip_reason: Some("empty_assistant_payload".to_string()),
+        }
+    } else if servertool_followup
+        && !input.allow_followup
+        && !allow_reasoning_stop_followup_reentry
+    {
+        ServertoolResponseStageGateOutput {
+            should_bypass: true,
+            skip_reason: Some("followup_bypass".to_string()),
+        }
+    } else if !input.has_servertool_support {
+        ServertoolResponseStageGateOutput {
+            should_bypass: true,
+            skip_reason: Some("no_servertool_support".to_string()),
+        }
+    } else {
+        ServertoolResponseStageGateOutput {
+            should_bypass: false,
+            skip_reason: None,
+        }
+    };
+
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn resolve_apply_patch_dispatch_mode(runtime_metadata: Option<&Value>) -> String {
     let mode = runtime_metadata
         .and_then(|v| v.as_object())
@@ -2161,6 +2281,8 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
             "stop_schema_missing" => StoplessContinuationTrigger::NoSchema,
             "stop_schema_reason_missing"
             | "stop_schema_terminal_missing_fields"
+            | "stop_schema_stopreason_missing_or_non_numeric"
+            | "stop_schema_needs_user_input_missing_next_step"
             | "stop_schema_next_step_missing"
             | "stop_schema_forcestop_reason_missing" => {
                 StoplessContinuationTrigger::InvalidSchema
@@ -2362,6 +2484,7 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
             followup_strategy: "none".to_string(),
             requires_pending_injection: false,
             primary_execution_mode: None,
+            resolved_followup: None,
         };
         return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
@@ -2426,6 +2549,7 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
             followup_strategy: "pending_injection".to_string(),
             requires_pending_injection: true,
             primary_execution_mode,
+            resolved_followup: None,
         };
         return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
@@ -2482,6 +2606,19 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
         },
         requires_pending_injection: false,
         primary_execution_mode,
+        resolved_followup: if use_last_execution_followup {
+            None
+        } else {
+            Some(serde_json::json!({
+                "requestIdSuffix": ":servertool_followup",
+                "injection": {
+                    "ops": [
+                        { "op": "append_assistant_message", "required": true },
+                        { "op": "append_tool_messages_from_tool_outputs", "required": true }
+                    ]
+                }
+            }))
+        },
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -3478,6 +3615,70 @@ mod tests {
             extract_tool_calls_from_chat_payload_mut(&mut payload, "req_exec").unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].id, "good_exec_call");
+    }
+
+    #[test]
+    fn plan_servertool_response_stage_gate_bypasses_non_reasoning_followup() {
+        let raw = plan_servertool_response_stage_gate_json(
+            json!({
+                "payload": {
+                    "choices": [{
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "普通 followup"
+                        }
+                    }]
+                },
+                "adapterContext": {
+                    "clientInjectSource": "servertool.followup"
+                },
+                "runtimeControl": {
+                    "serverToolFollowup": true,
+                    "serverToolFollowupSource": "servertool.followup"
+                },
+                "allowFollowup": false,
+                "hasServertoolSupport": true
+            })
+            .to_string(),
+        )
+        .expect("gate");
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["shouldBypass"], Value::Bool(true));
+        assert_eq!(value["skipReason"], Value::String("followup_bypass".to_string()));
+    }
+
+    #[test]
+    fn plan_servertool_response_stage_gate_allows_reasoning_stop_reentry() {
+        let raw = plan_servertool_response_stage_gate_json(
+            json!({
+                "payload": {
+                    "choices": [{
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "再次停止"
+                        }
+                    }]
+                },
+                "adapterContext": {
+                    "clientInjectSource": "servertool.reasoning_stop_guard"
+                },
+                "runtimeControl": {
+                    "serverToolFollowup": true,
+                    "serverToolFollowupSource": "servertool.reasoning_stop_guard"
+                },
+                "allowFollowup": false,
+                "hasServertoolSupport": true
+            })
+            .to_string(),
+        )
+        .expect("gate");
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["shouldBypass"], Value::Bool(false));
+        assert_eq!(value.get("skipReason"), None);
     }
 
     #[test]

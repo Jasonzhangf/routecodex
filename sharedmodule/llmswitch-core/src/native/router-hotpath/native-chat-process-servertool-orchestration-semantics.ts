@@ -6,10 +6,15 @@ import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-ho
 import { formatUnknownError } from '../../shared/common-utils.js';
 import {
   parseServertoolDispatchPlanPayload,
+  parseServertoolDispatchPlanInputPayload,
   parseServertoolFollowupRuntimePlanPayload,
+  parseServertoolBackendExecutionPlanPayload,
+  parseServertoolHandlerContractPlanPayload,
   parseServertoolAutoHookQueuesPayload,
   parseServertoolOutcomePlanPayload,
-  parseServertoolResponseStagePayload
+  parseServertoolOutcomePlanInputPayload,
+  parseServertoolResponseStagePayload,
+  parseServertoolResponseStageGatePayload
 } from './native-router-hotpath-analysis.js';
 
 export type NativeChatWebSearchPlan = {
@@ -26,11 +31,32 @@ export type NativeServertoolResponseStage = ReturnType<typeof parseServertoolRes
   ? Exclude<T, null>
   : never;
 
+export type NativeServertoolResponseStageGate = Exclude<
+  ReturnType<typeof parseServertoolResponseStageGatePayload>,
+  null
+>;
+
 export type NativeServertoolDispatchPlan = ReturnType<typeof parseServertoolDispatchPlanPayload> extends infer T
   ? Exclude<T, null>
   : never;
 
+export type NativeServertoolDispatchPlanInput = ReturnType<typeof parseServertoolDispatchPlanInputPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
 export type NativeServertoolOutcomePlan = ReturnType<typeof parseServertoolOutcomePlanPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolOutcomePlanInput = ReturnType<typeof parseServertoolOutcomePlanInputPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolHandlerContractPlan = ReturnType<typeof parseServertoolHandlerContractPlanPayload> extends infer T
+  ? Exclude<T, null>
+  : never;
+
+export type NativeServertoolBackendExecutionPlan = ReturnType<typeof parseServertoolBackendExecutionPlanPayload> extends infer T
   ? Exclude<T, null>
   : never;
 
@@ -329,6 +355,31 @@ export function runServertoolResponseStageWithNative(
   }
 }
 
+export function planServertoolResponseStageGateWithNative(input: {
+  payload: unknown;
+  adapterContext?: Record<string, unknown>;
+  runtimeControl?: Record<string, unknown>;
+  allowFollowup?: boolean;
+  hasServertoolSupport: boolean;
+}): NativeServertoolResponseStageGate {
+  const capability = 'planServertoolResponseStageGateJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolResponseStageGate>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
+      payload: input.payload ?? null,
+      adapterContext: input.adapterContext ?? null,
+      runtimeControl: input.runtimeControl ?? null,
+      allowFollowup: input.allowFollowup === true,
+      hasServertoolSupport: input.hasServertoolSupport === true
+    }]);
+    const parsed = parseServertoolResponseStageGatePayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function getDefaultServertoolSkeletonDocumentWithNative(): NativeServertoolSkeletonDocument {
   const capability = 'getDefaultServertoolSkeletonDocumentJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolSkeletonDocument>(capability, reason);
@@ -351,6 +402,89 @@ export function planServertoolSkeletonDerivedConfigWithNative(input: {
     const inputJson = encodeJsonArg(capability, input);
     const raw = invokeNativeStringCapability(capability, [inputJson]);
     const parsed = parseServertoolSkeletonDerivedConfig(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function buildServertoolDispatchPlanInputWithNative(input: {
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  disableToolCallHandlers: boolean;
+  includeToolCallHandlerNames?: string[];
+  excludeToolCallHandlerNames?: string[];
+  adHocRegisteredToolCallHandlers?: Array<{
+    name: string;
+    executionMode: string;
+    stripAfterExecute: boolean;
+  }>;
+  runtimeMetadata?: Record<string, unknown>;
+  document?: unknown;
+}): NativeServertoolDispatchPlanInput {
+  const capability = 'buildServertoolDispatchPlanInputJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolDispatchPlanInput>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolDispatchPlanInputPayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function buildServertoolOutcomePlanInputWithNative(input: {
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  executionState: unknown;
+  sessionId?: string;
+  conversationId?: string;
+  toolOutputs?: unknown[];
+  pendingInjectionMessageKinds?: string[];
+}): NativeServertoolOutcomePlanInput {
+  const capability = 'buildServertoolOutcomePlanInputJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolOutcomePlanInput>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolOutcomePlanInputPayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolHandlerContractWithNative(input: {
+  hasFinalizeFunction: boolean;
+  hasChatResponseObject: boolean;
+  hasExecutionObject: boolean;
+  hasExecutionFlowId: boolean;
+  hasPlanMarkers: boolean;
+}): NativeServertoolHandlerContractPlan {
+  const capability = 'planServertoolHandlerContractJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolHandlerContractPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolHandlerContractPlanPayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolBackendExecutionWithNative(input: {
+  kind?: string;
+}): NativeServertoolBackendExecutionPlan {
+  const capability = 'planServertoolBackendExecutionJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolBackendExecutionPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseServertoolBackendExecutionPlanPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

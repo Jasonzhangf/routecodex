@@ -47,10 +47,15 @@ fn assert_no_internal_or_restoration_carrier(value: &serde_json::Value) {
 
 #[test]
 fn stop_message_auto_outputs_rust_owned_schema() {
+    let (session_id, request_id) = unique_identity("schema-output");
     let output = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
             "--input-json",
             r#"{"flowId":"stop_message_flow","continuationPrompt":"继续做下一步","repeatCount":1,"maxRepeats":3}"#,
         ])
@@ -90,6 +95,14 @@ fn stop_message_auto_outputs_rust_owned_schema() {
         );
     }
     assert!(value.get("schemaGuidance").is_some());
+    assert!(value["schemaGuidance"]["schemaOverview"]
+        .as_str()
+        .expect("schema overview")
+        .contains("收尾报告"));
+    assert!(value["schemaGuidance"]["schemaPurpose"]
+        .as_str()
+        .expect("schema purpose")
+        .contains("避免模型只写泛泛的总结"));
     assert_eq!(value["schemaGuidance"]["stopreasonValues"]["finished"], 0);
     assert_eq!(value["schemaGuidance"]["stopreasonValues"]["blocked"], 1);
     assert_eq!(value["schemaGuidance"]["stopreasonValues"]["continueNeeded"], 2);
@@ -98,6 +111,15 @@ fn stop_message_auto_outputs_rust_owned_schema() {
         .expect("required fields")
         .iter()
         .any(|field| field.as_str() == Some("stopreason")));
+    assert!(value["schemaGuidance"]["fieldDescriptions"]
+        .as_array()
+        .expect("field descriptions")
+        .iter()
+        .any(|field| field["field"].as_str() == Some("next_step")));
+    assert!(value["schemaGuidance"]["sample"]
+        .as_str()
+        .expect("sample")
+        .contains("\"stopreason\":2"));
     assert!(value.get("injectedPromptPreview").is_none());
     assert!(value["input"].get("continuationPrompt").is_none());
     assert!(value["input"].get("schemaGuidance").is_none());
@@ -106,10 +128,15 @@ fn stop_message_auto_outputs_rust_owned_schema() {
 
 #[test]
 fn stop_message_auto_explicit_repeat_args_override_input_json() {
+    let (session_id, request_id) = unique_identity("repeat-override");
     let output = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
             "--repeat-count",
             "2",
             "--max-repeats",
@@ -134,10 +161,15 @@ fn stop_message_auto_explicit_repeat_args_override_input_json() {
 
 #[test]
 fn missing_continuation_prompt_still_succeeds_status_only() {
+    let (session_id, request_id) = unique_identity("status-only");
     let output = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
             "--flow",
             "stop_message_flow",
             "--input-json",
@@ -176,7 +208,7 @@ fn missing_continuation_prompt_still_succeeds_status_only() {
 }
 
 #[test]
-fn missing_session_identity_is_allowed() {
+fn missing_session_identity_stays_status_only() {
     let output = Command::new(bin())
         .args([
             "run",
@@ -192,17 +224,24 @@ fn missing_session_identity_is_allowed() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["repeatCount"], 2);
+    assert_eq!(value["toolName"], "stop_message_auto");
+    assert_eq!(value["flowId"], "stop_message_flow");
     assert!(value.get("sessionId").is_none());
     assert!(value.get("requestId").is_none());
+    assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
 fn stopless_repeat_count_depends_only_on_current_input() {
+    let (first_session_id, first_request_id) = unique_identity("repeat-first");
     let first = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
+            "--session-id",
+            &first_session_id,
+            "--request-id",
+            &first_request_id,
             "--input-json",
             r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}"#,
         ])
@@ -213,10 +252,15 @@ fn stopless_repeat_count_depends_only_on_current_input() {
         serde_json::from_slice(&first.stdout).expect("json stdout");
     assert_eq!(first_value["repeatCount"], 2);
 
+    let (second_session_id, second_request_id) = unique_identity("repeat-second");
     let second = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
+            "--session-id",
+            &second_session_id,
+            "--request-id",
+            &second_request_id,
             "--input-json",
             r#"{"flowId":"stop_message_flow","repeatCount":2,"maxRepeats":3}"#,
         ])
@@ -230,10 +274,15 @@ fn stopless_repeat_count_depends_only_on_current_input() {
 
 #[test]
 fn exhausted_stopless_run_stays_terminal_for_current_input() {
+    let (session_id, request_id) = unique_identity("exhausted-current");
     let output = Command::new(bin())
         .args([
             "run",
             "stop_message_auto",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
             "--input-json",
             r#"{"flowId":"stop_message_flow","repeatCount":3,"maxRepeats":3}"#,
         ])
@@ -260,6 +309,44 @@ fn exhausted_stopless_run_stays_terminal_for_current_input() {
         "exhausted stopless input must keep repeatCount=3; got: {}",
         value
     );
+}
+
+#[test]
+fn reasoning_stop_full_terminal_schema_at_budget_edge_must_not_downgrade_to_budget_exhausted() {
+    let (session_id, request_id) = unique_identity("schema-pass-edge");
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "reasoning_stop",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
+            "--repeat-count",
+            "3",
+            "--max-repeats",
+            "3",
+            "--input-json",
+            r#"{"flowId":"stop_message_flow","stopreason":0,"reason":"done","has_evidence":1,"evidence":"ok","issue_cause":"fixed","excluded_factors":"none","diagnostic_order":"1","done_steps":"done","next_step":"无","next_suggested_path":"无","needs_user_input":0,"learned":"x"}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_ne!(
+        value["summary"].as_str(),
+        Some("stopless budget exhausted"),
+        "full terminal schema at budget edge must not be downgraded to budget exhausted: {}",
+        value
+    );
+    assert_eq!(value["schemaGuidance"]["triggerHint"], "schema_pass");
+    assert_eq!(value["input"]["triggerHint"], "schema_pass");
+    assert_eq!(value["repeatCount"], 3);
+    assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
@@ -610,4 +697,128 @@ fn restoration_handle_carrier_fails_fast() {
         );
         assert!(output.stdout.is_empty());
     }
+}
+
+#[test]
+fn reasoning_stop_no_schema_reports_missing_schema_fields() {
+    let (session_id, request_id) = unique_identity("reasoning-no-schema");
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "reasoning_stop",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
+            "--input-json",
+            r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3,"triggerHint":"no_schema","schemaFeedback":{"reasonCode":"stop_schema_missing","missingFields":["stopreason","reason","has_evidence","evidence","issue_cause","excluded_factors","diagnostic_order","done_steps","next_step","next_suggested_path","needs_user_input","learned"]}}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool reasoning_stop");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    let guidance = value["modelGuidance"].as_str().expect("model guidance");
+    assert!(guidance.contains("缺少 stop schema 必填字段"));
+    assert!(guidance.contains("stopreason"));
+    assert!(guidance.contains("reason"));
+    assert!(guidance.contains("evidence"));
+    assert!(guidance.contains("这是什么："));
+    assert!(guidance.contains("为什么要填："));
+    assert!(guidance.contains("怎么理解这个 schema："));
+    assert!(guidance.contains("怎么填："));
+    assert!(guidance.contains("最小可复制样本："));
+    assert_eq!(value["schemaFeedback"]["reasonCode"], "stop_schema_missing");
+    assert!(value["schemaGuidance"]["requiredFields"]
+        .as_array()
+        .expect("required fields")
+        .iter()
+        .any(|field| field.as_str() == Some("stopreason")));
+    assert!(value["schemaGuidance"]["fieldDescriptions"]
+        .as_array()
+        .expect("field descriptions")
+        .iter()
+        .any(|field| field["field"].as_str() == Some("reason")));
+}
+
+#[test]
+fn reasoning_stop_raw_partial_schema_derives_missing_schema_feedback() {
+    let (session_id, request_id) = unique_identity("reasoning-raw-partial");
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "reasoning_stop",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
+            "--input-json",
+            r#"{"stopreason":2,"reason":"第一轮故意缺 schema"}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool reasoning_stop");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["flowId"], "stop_message_flow");
+    assert_eq!(value["input"]["flowId"], "stop_message_flow");
+    let reason_code = value["schemaFeedback"]["reasonCode"]
+        .as_str()
+        .expect("schema reason code");
+    assert!(!reason_code.is_empty());
+    assert_ne!(value["input"]["triggerHint"], "budget_exhausted");
+    assert!(value["schemaFeedback"]["missingFields"]
+        .as_array()
+        .expect("missing fields")
+        .iter()
+        .any(|field| field.as_str() == Some("next_step")));
+    let guidance = value["modelGuidance"].as_str().expect("model guidance");
+    assert!(guidance.contains("next_step") || guidance.contains("缺少 stop schema 必填字段"));
+    assert!(guidance.contains("字段怎么写："));
+    assert!(guidance.contains("怎么理解这个 schema："));
+    assert!(guidance.contains("怎么填："));
+    assert!(guidance.contains("stopreason 取值："));
+    assert!(guidance.contains("最小可复制样本："));
+}
+
+#[test]
+fn reasoning_stop_third_invalid_schema_stops_terminally() {
+    let (session_id, request_id) = unique_identity("reasoning-third-invalid");
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "reasoning_stop",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
+            "--repeat-count",
+            "3",
+            "--max-repeats",
+            "3",
+            "--input-json",
+            r#"{"flowId":"stop_message_flow","repeatCount":3,"maxRepeats":3,"triggerHint":"invalid_schema","schemaFeedback":{"reasonCode":"stop_schema_stopreason_missing_or_non_numeric","missingFields":["stopreason"]}}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool reasoning_stop");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["summary"], "stopless budget exhausted");
+    assert_eq!(value["repeatCount"], 3);
+    assert_eq!(value["maxRepeats"], 3);
+    let guidance = value["modelGuidance"].as_str().expect("model guidance");
+    assert!(
+        guidance.contains("不要再继续执行"),
+        "terminal guidance must tell model to stop, got: {guidance}"
+    );
 }

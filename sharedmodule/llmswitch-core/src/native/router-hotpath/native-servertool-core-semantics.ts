@@ -253,12 +253,14 @@ export interface StoplessOrchestrationActionInput {
   flowId?: string;
   execution: unknown;
   sessionId?: string;
+  adapterContext?: Record<string, unknown>;
 }
 
 export interface StoplessOrchestrationActionPlan {
   action: 'terminal_final' | 'cli_projection';
   isStopMessageFlow: boolean;
   reason: string;
+  sessionId?: string;
 }
 
 export interface ServertoolBackendRoutePolicyInput {
@@ -1372,10 +1374,17 @@ export function planStoplessOrchestrationActionWithNative(
   if (typeof isStopMessageFlow !== 'boolean' || typeof record.reason !== 'string' || !record.reason.trim()) {
     throw new Error('planStoplessOrchestrationActionJson native returned invalid fields');
   }
+  const sessionId =
+    typeof record.sessionId === 'string' && record.sessionId.trim()
+      ? record.sessionId.trim()
+      : typeof record.session_id === 'string' && record.session_id.trim()
+        ? record.session_id.trim()
+        : undefined;
   return {
     action,
     isStopMessageFlow,
-    reason: record.reason.trim()
+    reason: record.reason.trim(),
+    ...(sessionId ? { sessionId } : {})
   };
 }
 

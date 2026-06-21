@@ -1534,7 +1534,7 @@ mod tests {
 
     #[test]
     fn resolves_runtime_stop_message_state_from_adapter_context_via_servertool_core_bridge() {
-        let command = "routecodex servertool run stop_message_auto --input-json '{\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from command\",\"repeatCount\":1,\"maxRepeats\":3}'";
+        let command = "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
         let raw = resolve_runtime_stop_message_state_from_adapter_context_json(
             &json!({
                 "adapterContext": {
@@ -1558,18 +1558,11 @@ mod tests {
         )
         .expect("runtime stop state from adapter context");
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        // New stopless owner is the CLI binary's persisted state write, not
-        // the client tool_output payload. The runtime metadata here only
-        // confirms the flow id / route / persisted session scope; `text`
-        // must therefore be Null.
-        // New stopless owner is the CLI binary's persisted state write, not
-        // the client tool_output payload. The runtime metadata here only
-        // confirms the flow id / route / persisted session scope; the full
-        // snapshot stays Null because the legacy tool_output → state
-        // projection is intentionally removed.
-        assert!(parsed.is_null() || parsed["text"].is_null());
-        assert!(parsed.is_null() || parsed["maxRepeats"].is_null());
-        assert!(parsed.is_null() || parsed["used"].is_null());
+        assert_eq!(parsed["text"], "continue from output");
+        assert_eq!(parsed["maxRepeats"], 4);
+        assert_eq!(parsed["used"], 1);
+        assert_eq!(parsed["source"], "client_exec_result");
+        assert_eq!(parsed["stageMode"], "on");
     }
 
     #[test]
@@ -2197,7 +2190,7 @@ mod tests {
         assert_eq!(plan["repeatCount"], 2);
         assert_eq!(plan["maxRepeats"], 3);
         let command = plan["execCommand"].as_str().expect("exec command");
-        assert!(command.contains("routecodex hook run stop_message_auto"));
+        assert!(command.contains("routecodex hook run reasoning_stop"));
         assert!(!command.contains("continuationPrompt"));
         assert!(!command.contains("schemaGuidance"));
         assert!(!command.contains("stdoutPreview"));

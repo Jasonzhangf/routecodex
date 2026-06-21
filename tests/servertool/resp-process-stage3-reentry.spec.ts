@@ -149,4 +149,25 @@ describe('resp_process stage3 servertool followup reentry', () => {
     expect(result.flowId).toBeUndefined();
     expect(result.payload).toEqual(buildStopResponse('普通 followup'));
   });
+
+  test('response-stage shell does not mirror MetadataCenter runtime control onto adapterContext.runtime_control', async () => {
+    const adapterContext = bindRuntimeControl(
+      {
+        sessionId: 'stage3-runtime-control-no-mirror'
+      },
+      { serverToolFollowup: true, serverToolFollowupSource: 'servertool.followup' }
+    ) as unknown as AdapterContext & Record<string, unknown>;
+
+    const result = await runServertoolResponseStageOrchestrationShell({
+      payload: buildStopResponse('普通 followup') as any,
+      adapterContext,
+      requestId: 'req_stage3_runtime_control_no_mirror',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({ body: buildStopResponse('不会执行') })
+    });
+
+    expect(result.executed).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(adapterContext, 'runtime_control')).toBe(false);
+  });
 });

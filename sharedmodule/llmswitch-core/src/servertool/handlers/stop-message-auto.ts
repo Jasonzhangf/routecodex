@@ -4,7 +4,6 @@ import type {
   ServerToolHandlerContext,
   ServerToolHandlerPlan
 } from '../types.js';
-import { registerServerToolHandler } from '../registry.js';
 import type { ServerToolFollowupPlan } from '../types.js';
 import { isCompactionRequest } from '../../conversion/compaction-detect.js';
 import {
@@ -300,7 +299,7 @@ function debugLog(message: string, extra?: JsonObject): void {
   }
 }
 
-const handler: ServerToolHandler = async (
+export const stopMessageAutoServerToolHandler: ServerToolHandler = async (
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerPlan | null> => {
   if (
@@ -587,5 +586,3 @@ const handler: ServerToolHandler = async (
     attachStopMessageCompareContext(ctx.adapterContext, compare);
   }
 };
-
-registerServerToolHandler('stop_message_auto', handler, { trigger: 'auto', hook: { phase: 'default', priority: 40 } });

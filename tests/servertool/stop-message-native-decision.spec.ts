@@ -194,13 +194,17 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.reason_code).toBe('stop_schema_missing');
     expect(gate.count_budget).toBe(true);
     expect(gate.followup_text).not.toContain('质询');
-    expect(gate.followup_text).toContain('第一轮核对');
-    expect(gate.followup_text).toContain('当前用户目标');
-    expect(gate.followup_text).toContain('证据');
-    expect(gate.followup_text).not.toContain('问题原因');
+    expect(gate.followup_text).toContain('继续做下一步');
+    expect(gate.followup_text).toContain('Stop schema 校验未通过');
+    expect(gate.followup_text).toContain('stopreason');
+    expect(gate.followup_text).toContain('reason');
+    expect(gate.followup_text).toContain('evidence');
     expect(gate.followup_text).toContain('issue_cause');
     expect(gate.followup_text).toContain('excluded_factors');
     expect(gate.followup_text).toContain('diagnostic_order');
+    expect(gate.missing_fields).toEqual(
+      expect.arrayContaining(['stopreason', 'reason', 'evidence', 'next_step'])
+    );
   });
 
   test('malformed schema returns parse feedback and explicit field guidance', () => {
@@ -223,36 +227,54 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('stop schema gate exhausts repeated missing schema loop', () => {
-    const beforeLimit = evaluateStopSchemaGateWithNative({
+    const first = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
-      used: 2,
+      used: 0,
       maxRepeats: 3,
     });
-    expect(beforeLimit.action).toBe('followup');
-    expect(beforeLimit.reason_code).toBe('stop_schema_missing');
+    expect(first.action).toBe('followup');
+    expect(first.reason_code).toBe('stop_schema_missing');
+    expect(first.no_change_count).toBe(1);
+
+    const second = evaluateStopSchemaGateWithNative({
+      assistantText: '还是无法继续，工具被拒绝。',
+      used: 0,
+      maxRepeats: 3,
+      prevObservationHash: first.observation_hash,
+      prevNoChangeCount: first.no_change_count,
+    });
+    expect(second.action).toBe('followup');
+    expect(second.reason_code).toBe('stop_schema_missing');
+    expect(second.no_change_count).toBe(2);
 
     const gate = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
-      used: 3,
+      used: 0,
       maxRepeats: 3,
+      prevObservationHash: second.observation_hash,
+      prevNoChangeCount: second.no_change_count,
     });
     expect(gate.action).toBe('fail_fast');
     expect(gate.reason_code).toBe('stop_schema_budget_exhausted');
     expect(gate.count_budget).toBe(true);
+    expect(gate.no_change_count).toBe(3);
   });
 
   test('stop schema gate requires evidence and diagnostics before terminal stop', () => {
     const shallow = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":"blocked","reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":"0","evidence":"","next_step":""}',
+      assistantText: '{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":0,"evidence":"","next_step":""}',
       used: 0,
       maxRepeats: 3,
     });
     expect(shallow.action).toBe('followup');
-    expect(shallow.reason_code).toBe('stop_schema_has_evidence_missing');
+    expect(shallow.reason_code).toBe('stop_schema_terminal_missing_fields');
     expect(shallow.count_budget).toBe(true);
+    expect(shallow.missing_fields).toEqual(
+      expect.arrayContaining(['issue_cause', 'excluded_factors', 'diagnostic_order', 'done_steps'])
+    );
 
     const gate = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":"blocked","reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":1,"evidence":"exec_command rejected","issue_cause":"客户端拒绝工具权限","excluded_factors":"非模型输出格式问题","diagnostic_order":"工具调用 -> 拒绝日志 -> 阻塞判定","done_steps":"确认工具权限被拒","next_step":""}',
+      assistantText: '{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":1,"evidence":"exec_command rejected","issue_cause":"客户端拒绝工具权限","excluded_factors":"非模型输出格式问题","diagnostic_order":"工具调用 -> 拒绝日志 -> 阻塞判定","done_steps":"确认工具权限被拒","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"需要先确认工具权限"}',
       used: 5,
       maxRepeats: 3,
     });
@@ -283,10 +305,11 @@ describe('stop-message native decision (blackbox)', () => {
       stopEligible: true,
     }));
     expect(decision.action).toBe('trigger');
-    expect(decision.followup_text).toContain('第一轮核对');
-    expect(decision.followup_text).toContain('当前用户目标');
-    expect(decision.followup_text).toContain('证据');
-    expect(decision.followup_text).not.toContain('问题原因');
+    expect(decision.followup_text).toContain('继续当前用户目标');
+    expect(decision.followup_text).toContain('继续做下一步');
+    expect(decision.followup_text).toContain('Stop schema 校验未通过');
+    expect(decision.followup_text).toContain('evidence');
+    expect(decision.followup_text).toContain('stopreason');
   });
 
   test('last default stopless followup asks for final user-facing summary only', () => {
@@ -303,10 +326,10 @@ describe('stop-message native decision (blackbox)', () => {
       }
     });
     expect(decision.action).toBe('trigger');
-    expect(decision.followup_text).toContain('第三轮最终收尾');
+    expect(decision.followup_text).toContain('最终收尾 schema 缺失');
     expect(decision.followup_text).toContain('用户可读 summary');
-    expect(decision.followup_text).toContain('不要开启新一轮执行');
-    expect(decision.followup_text).not.toContain('直接执行下一步');
+    expect(decision.followup_text).toContain('不要复述 stopless/校验过程');
+    expect(decision.followup_text).not.toContain('继续做下一步');
   });
 
   test('default snapshot uses heuristic prompt instead of fixed configured text', () => {
@@ -324,22 +347,39 @@ describe('stop-message native decision (blackbox)', () => {
       }
     });
     expect(decision.action).toBe('trigger');
-    expect(decision.followup_text).toContain('第二轮核对');
-    expect(decision.followup_text).toContain('问题原因');
-    expect(decision.followup_text).toContain('已排除因素');
-    expect(decision.followup_text).toContain('排查顺序');
+    expect(decision.followup_text).toContain('继续当前用户目标');
+    expect(decision.followup_text).toContain('Stop schema 校验未通过');
+    expect(decision.followup_text).toContain('issue_cause');
+    expect(decision.followup_text).toContain('excluded_factors');
+    expect(decision.followup_text).toContain('diagnostic_order');
     expect(decision.followup_text).not.toBe('继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。');
   });
 
   test('stop schema gate exhausts only invalid schema budget', () => {
-    const invalid = evaluateStopSchemaGateWithNative({
-      assistantText: '{"stopreason":2,"reason":"未完成","has_evidence":0,"next_step":"运行测试"}',
-      used: 5,
+    const invalid1 = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":"bad"}',
+      used: 0,
       maxRepeats: 3,
     });
-    expect(invalid.action).toBe('fail_fast');
-    expect(invalid.reason_code).toBe('stop_schema_budget_exhausted');
-    expect(invalid.count_budget).toBe(true);
+    expect(invalid1.action).toBe('followup');
+    const invalid2 = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":"bad"}',
+      used: 0,
+      maxRepeats: 3,
+      prevObservationHash: invalid1.observation_hash,
+      prevNoChangeCount: invalid1.no_change_count,
+    });
+    expect(invalid2.action).toBe('followup');
+    const invalid3 = evaluateStopSchemaGateWithNative({
+      assistantText: '{"stopreason":"bad"}',
+      used: 0,
+      maxRepeats: 3,
+      prevObservationHash: invalid2.observation_hash,
+      prevNoChangeCount: invalid2.no_change_count,
+    });
+    expect(invalid3.action).toBe('fail_fast');
+    expect(invalid3.reason_code).toBe('stop_schema_budget_exhausted');
+    expect(invalid3.count_budget).toBe(true);
 
     const valid = evaluateStopSchemaGateWithNative({
       assistantText: '{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","issue_cause":"实现满足 contract","excluded_factors":"无关配置未参与","diagnostic_order":"单测 -> gate","done_steps":"补齐 Rust gate","next_step":""}',

@@ -150,7 +150,7 @@ describe('servertool CLI projection blackbox', () => {
     }) as Record<string, any>;
     const reasoning = responsesPayload.output.find((item: any) => item.type === 'reasoning');
     expect(reasoning?.summary?.[0]?.type).toBe('summary_text');
-    expect(reasoning?.summary?.[0]?.text).toContain('阶段完成');
+    expect(reasoning?.summary?.[0]?.text).toContain('已定位 stopless 投影问题');
     expect(reasoning?.content).toBeUndefined();
   });
 

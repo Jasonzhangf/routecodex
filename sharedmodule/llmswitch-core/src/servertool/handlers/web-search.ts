@@ -1,7 +1,6 @@
 import type { JsonObject, JsonValue } from '../../conversion/hub/types/json.js';
 import { buildOpenAIChatFromGeminiResponse } from '../../conversion/codecs/gemini-openai-codec.js';
 import type { ServerSideToolEngineOptions, ServerToolBackendPlan, ServerToolBackendResult, ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan, ToolCall } from '../types.js';
-import { registerServerToolHandler } from '../registry.js';
 import { extractTextFromChatLike } from '../server-side-tools.js';
 import {
   extractCapturedChatSeed
@@ -113,7 +112,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
+export const webSearchServerToolHandler: ServerToolHandler = async (
+  ctx: ServerToolHandlerContext
+): Promise<ServerToolHandlerPlan | null> => {
   const toolCall = ctx.toolCall;
   if (!toolCall) {
     return null;
@@ -218,7 +219,6 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
     }
   };
 };
-registerServerToolHandler('web_search', handler);
 function getWebSearchConfig(ctx: unknown): WebSearchConfig | undefined {
   const rt = readRuntimeMetadata(ctx as Record<string, unknown>);
   const raw = rt ? (rt as any).webSearch : undefined;

@@ -20,6 +20,7 @@ import {
 import type { RoutingInstructionState } from "../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js";
 import { resetStopMessageRuntimeConfigCacheForTests } from "../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js";
 
+const METADATA_CENTER_SYMBOL = Symbol.for("routecodex.metadataCenter");
 const SESSION_DIR = path.join(
   process.cwd(),
   "tmp",
@@ -29,6 +30,20 @@ const STOPMESSAGE_CONFIG_PATH = path.join(SESSION_DIR, "stop-message.json");
 const PREV_SESSION_DIR = process.env.ROUTECODEX_SESSION_DIR;
 const PREV_CONFIG_PATH = process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
 const PREV_DEFAULT_ENABLED = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_ENABLED;
+
+function bindRuntimeControl(
+  adapterContext: Record<string, unknown>,
+  runtimeControl: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const stored = { ...runtimeControl };
+  Reflect.set(adapterContext, METADATA_CENTER_SYMBOL, {
+    readRuntimeControl: () => stored,
+    writeRuntimeControl: (key: string, value: unknown) => {
+      stored[key] = value;
+    },
+  });
+  return adapterContext;
+}
 
 function buildStopResponse(content = "done"): JsonObject {
   return {
@@ -104,18 +119,14 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
   };
 }
 
-function expectTransparentStoplessResult(
+function expectCliProjectedStoplessResult(
   result: Awaited<ReturnType<typeof runServerToolOrchestration>>
 ): void {
   expect(result.executed).toBe(true);
   expect(result.flowId).toBe("stop_message_flow");
-  // The reenter pipeline is the only place stop_message_flow may
-  // drive a followup. Client-side `exec_command` projection of
-  // `routecodex servertool run stop_message_auto` is no longer
-  // emitted to the model or the client.
   const serialized = JSON.stringify(result.chat ?? {});
-  expect(serialized).not.toContain("exec_command");
-  expect(serialized).not.toContain("routecodex servertool run");
+  expect(serialized).toContain("exec_command");
+  expect(serialized).toContain("routecodex hook run reasoning_stop");
   expect(serialized).not.toContain("stop_message_auto");
 }
 
@@ -196,7 +207,7 @@ describe("stop_message_flow reentry", () => {
 
     const result = await runServerToolOrchestration({
       chat: buildStopResponse("再次停止"),
-      adapterContext: {
+      adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
           model: "gpt-test",
@@ -212,7 +223,7 @@ describe("stop_message_flow reentry", () => {
           serverToolFollowup: true,
           serverToolLoopState: { flowId: "stop_message_flow", maxRepeats: 3 },
         },
-      } as unknown as AdapterContext,
+      }) as unknown as AdapterContext,
       requestId: "req_stop_message_flow_followup_hop",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
@@ -220,15 +231,10 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expectTransparentStoplessResult(result);
+    expectCliProjectedStoplessResult(result);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(1);
-    // The followup body is a transparent user-role message; the
-    // model receives it as if it were ordinary user input, with
-    // no tool calls attached and no `routecodex servertool run`
-    // / `stop_message_auto` text smuggled in.
-    expectTransparentFollowupUserInput(reenterPipeline.mock.calls[0]?.[0]);
-    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
+    expect(reenterPipeline).not.toHaveBeenCalled();
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
   });
 
   test("tool call response resets consecutive stop_message_flow count", async () => {
@@ -246,7 +252,7 @@ describe("stop_message_flow reentry", () => {
 
     const result = await runServerToolOrchestration({
       chat: buildToolCallsResponse(),
-      adapterContext: {
+      adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
           model: "gpt-test",
@@ -256,7 +262,7 @@ describe("stop_message_flow reentry", () => {
           serverToolFollowup: true,
           serverToolLoopState: { flowId: "stop_message_flow", maxRepeats: 3 },
         },
-      } as unknown as AdapterContext,
+      }) as unknown as AdapterContext,
       requestId: "req_stop_message_flow_tool_call_reset",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
@@ -267,7 +273,7 @@ describe("stop_message_flow reentry", () => {
     expect(result.executed).toBe(false);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
-    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(0);
+    expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(1);
   });
 
   test("non-goal stopless default counts missing schema stops", async () => {
@@ -279,13 +285,13 @@ describe("stop_message_flow reentry", () => {
     for (let index = 0; index < 2; index += 1) {
       const result = await runServerToolOrchestration({
         chat: buildStopResponse(`stop-${index + 1}`),
-        adapterContext: {
+        adapterContext: bindRuntimeControl({
           sessionId,
           capturedChatRequest: {
             model: "gpt-test",
             messages: [{ role: "user", content: "start" }],
           },
-        } as unknown as AdapterContext,
+        }) as unknown as AdapterContext,
         requestId: `req_stopless_default_${index + 1}`,
         entryEndpoint: "/v1/chat/completions",
         providerProtocol: "openai-chat",
@@ -293,18 +299,18 @@ describe("stop_message_flow reentry", () => {
         reenterPipeline,
       });
 
-      expectTransparentStoplessResult(result);
-      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(index + 1);
+      expectCliProjectedStoplessResult(result);
+      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(3);
     }
     const exhausted = await runServerToolOrchestration({
       chat: buildStopResponse("stop-3"),
-      adapterContext: {
+      adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
           model: "gpt-test",
           messages: [{ role: "user", content: "start" }],
         },
-      } as unknown as AdapterContext,
+      }) as unknown as AdapterContext,
       requestId: "req_stopless_default_3",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
@@ -312,16 +318,10 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expectTransparentStoplessResult(exhausted);
+    expectCliProjectedStoplessResult(exhausted);
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(3);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(3);
-    // The third followup is the last transparent reenter; the
-    // followup text is appended as a user-role message with no
-    // tool_calls attached.
-    const thirdCall = reenterPipeline.mock.calls[2]?.[0];
-    expect(thirdCall).toBeDefined();
-    expectTransparentFollowupUserInput(thirdCall);
+    expect(reenterPipeline).not.toHaveBeenCalled();
   });
 
   test("non-goal stopless default counts invalid schema stops then returns final summary", async () => {
@@ -334,13 +334,13 @@ describe("stop_message_flow reentry", () => {
     for (let index = 0; index < 2; index += 1) {
       const result = await runServerToolOrchestration({
         chat: buildStopResponse(invalidSchema),
-        adapterContext: {
+        adapterContext: bindRuntimeControl({
           sessionId,
           capturedChatRequest: {
             model: "gpt-test",
             messages: [{ role: "user", content: "start" }],
           },
-        } as unknown as AdapterContext,
+        }) as unknown as AdapterContext,
         requestId: `req_stopless_invalid_schema_${index + 1}`,
         entryEndpoint: "/v1/chat/completions",
         providerProtocol: "openai-chat",
@@ -348,13 +348,13 @@ describe("stop_message_flow reentry", () => {
         reenterPipeline,
       });
 
-      expectTransparentStoplessResult(result);
-      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(index + 1);
+      expectCliProjectedStoplessResult(result);
+      expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(3);
     }
 
     const exhausted = await runServerToolOrchestration({
       chat: buildStopResponse(invalidSchema),
-      adapterContext: {
+      adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
           model: "gpt-test",
@@ -367,7 +367,7 @@ describe("stop_message_flow reentry", () => {
             { role: "user", content: "按当前目标继续执行；需要操作/验证时调用工具；不要只总结/复述" },
           ],
         },
-      } as unknown as AdapterContext,
+      }) as unknown as AdapterContext,
       requestId: "req_stopless_default_3",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
@@ -375,20 +375,10 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    // All three hops with the same invalid schema followup loop
-    // are still under `used < maxRepeats` so the engine
-    // transparently reenters; the 4th hop (not exercised here)
-    // would cross the no-change-count budget. The contract is
-    // that no client-visible `exec_command` projection of
-    // `routecodex servertool run stop_message_auto` is ever
-    // emitted.
-    expectTransparentStoplessResult(exhausted);
+    expectCliProjectedStoplessResult(exhausted);
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBe(3);
     expect(clientInjectDispatch).not.toHaveBeenCalled();
-    expect(reenterPipeline).toHaveBeenCalledTimes(3);
-    const thirdCall = reenterPipeline.mock.calls[2]?.[0];
-    expect(thirdCall).toBeDefined();
-    expectTransparentFollowupUserInput(thirdCall);
+    expect(reenterPipeline).not.toHaveBeenCalled();
   });
 
   test("stopless writes learned note only when schema allows final stop", async () => {
@@ -401,14 +391,14 @@ describe("stop_message_flow reentry", () => {
     const invalidSchemaWithLearned = '{"stopreason":2,"reason":"未完成","has_evidence":0,"next_step":"继续验证","learned":"不应写入"}';
     const invalid = await runServerToolOrchestration({
       chat: buildStopResponse(invalidSchemaWithLearned),
-      adapterContext: {
+      adapterContext: bindRuntimeControl({
         sessionId,
         workingDirectory: tempWorkdir,
         capturedChatRequest: {
           model: "gpt-test",
           messages: [{ role: "user", content: "start" }],
         },
-      } as unknown as AdapterContext,
+      }) as unknown as AdapterContext,
       requestId: "req_stopless_learned_invalid",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
@@ -421,14 +411,14 @@ describe("stop_message_flow reentry", () => {
     const validSchemaWithLearned = '{"stopreason":0,"reason":"目标完成","has_evidence":1,"evidence":"测试通过","issue_cause":"目标已验证","excluded_factors":"非无证据停止","diagnostic_order":"失败 schema -> 完整 schema -> note 写入","done_steps":"完成验证","next_step":"","learned":"只在真正停止时写 note.md"}';
     const valid = await runServerToolOrchestration({
       chat: buildStopResponse(validSchemaWithLearned),
-      adapterContext: {
+      adapterContext: bindRuntimeControl({
         sessionId,
         workingDirectory: tempWorkdir,
         capturedChatRequest: {
           model: "gpt-test",
           messages: [{ role: "user", content: "start" }],
         },
-      } as unknown as AdapterContext,
+      }) as unknown as AdapterContext,
       requestId: "req_stopless_learned_valid",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
@@ -451,7 +441,7 @@ describe("stop_message_flow reentry", () => {
 
     const result = await runServerToolOrchestration({
       chat: buildStopResponse("apply_patch followup stopped"),
-      adapterContext: {
+      adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
           model: "gpt-test",
@@ -461,7 +451,7 @@ describe("stop_message_flow reentry", () => {
           serverToolFollowup: true,
           serverToolFollowupFlowId: "apply_patch_flow",
         },
-      } as unknown as AdapterContext,
+      }) as unknown as AdapterContext,
       requestId: "req_stopless_after_apply_patch_followup_stop",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
@@ -469,8 +459,8 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expect(result.executed).toBe(false);
-    expect(result.flowId).toBeUndefined();
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe("stop_message_flow");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
     expect(loadRoutingInstructionStateSync(stateKey)?.stopMessageUsed).toBeUndefined();
@@ -485,7 +475,7 @@ describe("stop_message_flow reentry", () => {
 
     const result = await runServerToolOrchestration({
       chat: buildStopResponse("loop-state followup stopped"),
-      adapterContext: {
+      adapterContext: bindRuntimeControl({
         sessionId,
         capturedChatRequest: {
           model: "gpt-test",
@@ -497,7 +487,7 @@ describe("stop_message_flow reentry", () => {
             flowId: "apply_patch_flow",
           },
         },
-      } as unknown as AdapterContext,
+      }) as unknown as AdapterContext,
       requestId: "req_stopless_after_loop_state_followup_stop",
       entryEndpoint: "/v1/responses",
       providerProtocol: "openai-responses",
@@ -505,7 +495,8 @@ describe("stop_message_flow reentry", () => {
       reenterPipeline,
     });
 
-    expect(result.executed).toBe(false);
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe("stop_message_flow");
     expect(clientInjectDispatch).not.toHaveBeenCalled();
     expect(reenterPipeline).not.toHaveBeenCalled();
   });
@@ -519,16 +510,19 @@ describe("stop_message_flow reentry", () => {
 
     const result = await runServertoolResponseStageOrchestrationShell({
       payload: buildStopResponse("apply_patch followup stopped") as any,
-      adapterContext: {
-        sessionId,
-        capturedChatRequest: {
-          model: "gpt-test",
-          messages: [{ role: "user", content: "start" }],
+      adapterContext: bindRuntimeControl(
+        {
+          sessionId,
+          capturedChatRequest: {
+            model: "gpt-test",
+            messages: [{ role: "user", content: "start" }],
+          },
+          __rt: {
+            serverToolFollowup: true,
+          },
         },
-        __rt: {
-          serverToolFollowup: true,
-        },
-      } as unknown as AdapterContext,
+        { serverToolFollowup: true },
+      ) as unknown as AdapterContext,
       requestId: "req_response_stage_apply_patch_followup_stopless",
       entryEndpoint: "/v1/chat/completions",
       providerProtocol: "openai-chat",
@@ -551,19 +545,22 @@ describe("stop_message_flow reentry", () => {
 
     const result = await runServertoolResponseStageOrchestrationShell({
       payload: buildStopResponse("responses relay stopped") as any,
-      adapterContext: {
-        sessionId,
-        entryEndpoint: "/v1/responses",
-        providerProtocol: "openai-responses",
-        capturedChatRequest: {
-          model: "gpt-test",
-          messages: [{ role: "user", content: "start" }],
+      adapterContext: bindRuntimeControl(
+        {
+          sessionId,
+          entryEndpoint: "/v1/responses",
+          providerProtocol: "openai-responses",
+          capturedChatRequest: {
+            model: "gpt-test",
+            messages: [{ role: "user", content: "start" }],
+          },
+          __rt: {
+            serverToolFollowup: true,
+            serverToolLoopState: { flowId: "apply_patch_flow", maxRepeats: 1 },
+          },
         },
-        __rt: {
-          serverToolFollowup: true,
-          serverToolLoopState: { flowId: "apply_patch_flow", maxRepeats: 1 },
-        },
-      } as unknown as AdapterContext,
+        { serverToolFollowup: true },
+      ) as unknown as AdapterContext,
       requestId: "req_responses_relay_chat_completion_stopless",
       entryEndpoint: "/v1/responses",
       providerProtocol: "openai-responses",

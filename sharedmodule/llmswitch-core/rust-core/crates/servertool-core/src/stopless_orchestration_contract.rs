@@ -8,6 +8,8 @@ pub struct StoplessOrchestrationPlanInput {
     pub flow_id: Option<String>,
     pub execution: Value,
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub adapter_context: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -23,6 +25,7 @@ pub struct StoplessOrchestrationPlan {
     pub action: StoplessOrchestrationAction,
     pub is_stop_message_flow: bool,
     pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
 }
 
@@ -41,7 +44,8 @@ fn normalize_stopless_session_id(value: Option<String>) -> Option<String> {
 pub fn plan_stopless_orchestration_action(
     input: StoplessOrchestrationPlanInput,
 ) -> StoplessOrchestrationPlan {
-    let session_id = normalize_stopless_session_id(input.session_id);
+    let session_id = normalize_stopless_session_id(input.session_id)
+        .or_else(|| resolve_stopless_session_id(input.adapter_context.as_ref()));
     let flow_id = input
         .flow_id
         .as_deref()
@@ -96,6 +100,45 @@ pub fn plan_stopless_orchestration_action(
     }
 }
 
+fn resolve_stopless_session_id(adapter_context: Option<&Value>) -> Option<String> {
+    let record = adapter_context?.as_object()?;
+    normalize_stopless_session_id(read_session_id(record))
+        .or_else(|| {
+            record
+                .get("metadata")
+                .and_then(Value::as_object)
+                .and_then(|row| normalize_stopless_session_id(read_session_id(row)))
+        })
+        .or_else(|| {
+            record
+                .get("__rt")
+                .and_then(Value::as_object)
+                .and_then(|row| normalize_stopless_session_id(read_session_id(row)))
+        })
+        .or_else(|| {
+            record
+                .get("__rt")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("__rt"))
+                .and_then(Value::as_object)
+                .and_then(|row| normalize_stopless_session_id(read_session_id(row)))
+        })
+}
+
+fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
+    let trimmed = value?.as_str()?.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn read_session_id(record: &serde_json::Map<String, Value>) -> Option<String> {
+    read_trimmed_string(record.get("sessionId"))
+        .or_else(|| read_trimmed_string(record.get("session_id")))
+}
+
 fn is_stop_message_terminal_final(execution: &Value) -> bool {
     execution
         .get("context")
@@ -134,6 +177,7 @@ mod tests {
             flow_id: Some("stop_message_flow".to_string()),
             execution: json!({ "flowId": "stop_message_flow", "context": {} }),
             session_id: Some("sess-default".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(plan.is_stop_message_flow);
@@ -147,6 +191,7 @@ mod tests {
             flow_id: Some("stop_message_flow".to_string()),
             execution: json!({ "flowId": "stop_message_flow", "context": {} }),
             session_id: None,
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert!(plan.is_stop_message_flow);
@@ -160,6 +205,7 @@ mod tests {
             flow_id: Some("stop_message_flow".to_string()),
             execution: json!({ "flowId": "stop_message_flow", "context": {} }),
             session_id: Some(" unknown ".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert!(plan.is_stop_message_flow);
@@ -176,6 +222,7 @@ mod tests {
                 "context": { "stopMessageTerminalFinal": true }
             }),
             session_id: Some("sess-terminal".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_terminal_final");
@@ -188,6 +235,7 @@ mod tests {
             flow_id: Some("vision_flow".to_string()),
             execution: json!({ "flowId": "vision_flow" }),
             session_id: Some("sess-abc".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(!plan.is_stop_message_flow);
@@ -200,6 +248,7 @@ mod tests {
             flow_id: Some("stop_message_flow".to_string()),
             execution: json!({ "flowId": "stop_message_flow", "context": {} }),
             session_id: Some("sess-xyz".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(plan.is_stop_message_flow);
@@ -215,10 +264,27 @@ mod tests {
                 "context": { "stopMessageTerminalFinal": true }
             }),
             session_id: Some("sess-final".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert!(plan.is_stop_message_flow);
         assert_eq!(plan.session_id.as_deref(), Some("sess-final"));
+    }
+
+    #[test]
+    fn stop_message_flow_reads_camel_case_adapter_context_session_id() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({ "flowId": "stop_message_flow", "context": {} }),
+            session_id: None,
+            adapter_context: Some(json!({
+                "sessionId": "sess-camel-adapter"
+            })),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.reason, "stop_message_cli_projection");
+        assert_eq!(plan.session_id.as_deref(), Some("sess-camel-adapter"));
     }
 
     #[test]
@@ -236,6 +302,7 @@ mod tests {
                 }
             }),
             session_id: Some("sess-budget".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert!(plan.is_stop_message_flow);
@@ -258,6 +325,7 @@ mod tests {
                 }
             }),
             session_id: Some("sess-still-arming".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(plan.is_stop_message_flow);
@@ -281,6 +349,7 @@ mod tests {
                 }
             }),
             session_id: Some("sess-budget".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_budget_exhausted");
@@ -298,7 +367,38 @@ mod tests {
                 "context": {}
             }),
             session_id: Some("sess-still-cli".to_string()),
+            adapter_context: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
+    }
+
+    #[test]
+    fn stop_message_flow_reads_session_id_from_adapter_context_when_input_missing() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({ "flowId": "stop_message_flow", "context": {} }),
+            session_id: None,
+            adapter_context: Some(json!({
+                "metadata": { "sessionId": "sess-meta" }
+            })),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.session_id.as_deref(), Some("sess-meta"));
+    }
+
+    #[test]
+    fn stop_message_flow_reads_snake_case_session_id_from_adapter_context_metadata() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({ "flowId": "stop_message_flow", "context": {} }),
+            session_id: None,
+            adapter_context: Some(json!({
+                "metadata": { "session_id": "sess-snake" }
+            })),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
+        assert!(plan.is_stop_message_flow);
+        assert_eq!(plan.session_id.as_deref(), Some("sess-snake"));
     }
 }

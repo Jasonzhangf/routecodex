@@ -86,6 +86,7 @@ const TS_STOP_MESSAGE_LOOP_PAYLOAD = `${SERVERTOOL_TS_DIR}/stop-message-loop-pay
 const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
 const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block.ts`;
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
+const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
@@ -152,10 +153,19 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
     'tests/servertool/server-side-web-search.spec.ts',
     'tests/servertool/vision-flow.spec.ts',
     'tests/servertool/servertool-mixed-tools.spec.ts',
+    'tests/servertool/server-side-tools.dispatch-native.spec.ts',
+    'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
   ],
   'hub.servertool_stopless_cli_continuation': [
     'tests/servertool/stopless-cli-continuation.spec.ts',
     'tests/servertool/servertool-cli-projection.spec.ts',
+    'tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts',
+  ],
+  'hub.servertool_rust_only_closeout': [
+    'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
+    'tests/servertool/server-side-tools.dispatch-native.spec.ts',
+    'tests/servertool/server-side-tools.auto-hook-config.spec.ts',
+    'tests/servertool/servertool-auto-hook-trace.spec.ts',
   ],
 });
 
@@ -163,6 +173,15 @@ const STOPLESS_SESSION_LOCK_FILES = [
   CLI_PROJECTION,
   `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
   `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+];
+
+const SERVERTOOL_ACTIVE_ORCHESTRATION_AUDIT = `${ROOT}/tests/servertool/servertool-active-orchestration-audit.spec.ts`;
+const SERVERTOOL_ACTIVE_ORCHESTRATION_OWNER_FILES = [
+  `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+  `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
+  `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
+  `${SERVERTOOL_TS_DIR}/engine.ts`,
+  `${SERVERTOOL_TS_DIR}/registry-impl.ts`,
 ];
 
 // ── Issues accumulator ─────────────────────────────────────────
@@ -743,6 +762,28 @@ function checkServertoolCliProjectionMap() {
     `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
     nativeServertoolWrapper,
     'buildClientVisibleProjectionShellWithNative'
+  );
+  const nativeRequiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const nativeStopMessageWrapper = readRequired(
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`
+  );
+  assertContains(
+    'stop-schema-native-export',
+    NATIVE_REQUIRED_EXPORTS,
+    nativeRequiredExports,
+    'evaluateStopSchemaGateJson'
+  );
+  assertContains(
+    'stop-schema-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    '#[napi(js_name = "evaluateStopSchemaGateJson")]'
+  );
+  assertContains(
+    'stop-schema-native-wrapper',
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`,
+    nativeStopMessageWrapper,
+    "const capability = 'evaluateStopSchemaGateJson'"
   );
   for (const [capability, expected] of [
     ['buildClientExecCliProjectionOutputJson', 'buildClientExecCliProjectionOutputJson native error: ${message}'],
@@ -2381,15 +2422,16 @@ function checkOrchestrationPolicyRustOwner() {
   }
   assertContains(
     'server-side-tools-client-disconnect-native-shell',
-    TS_SERVER_SIDE_TOOLS,
-    readRequired(TS_SERVER_SIDE_TOOLS),
+    `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
+    readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`),
     "from './timeout-error-block.js'"
   );
-  const serverSideToolsClientDisconnectBlock = extractFunctionBlock(readRequired(TS_SERVER_SIDE_TOOLS), 'isClientDisconnected');
+  const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
+  const serverSideToolsClientDisconnectBlock = extractFunctionBlock(serverSideToolsImpl, 'isClientDisconnected');
   if (serverSideToolsClientDisconnectBlock) {
     fail(
       'server-side-tools-client-disconnect-native-shell',
-      'server-side-tools.ts must not restore local isClientDisconnected; use timeout-error native wrapper'
+      'server-side-tools-impl.ts must not restore local isClientDisconnected; use timeout-error native wrapper'
     );
   }
   for (const keyword of [
@@ -2397,10 +2439,10 @@ function checkOrchestrationPolicyRustOwner() {
     'clientDisconnected',
     "trim().toLowerCase() === 'true'",
   ]) {
-    if (readRequired(TS_SERVER_SIDE_TOOLS).includes(keyword)) {
+    if (serverSideToolsImpl.includes(keyword)) {
       fail(
         'server-side-tools-client-disconnect-native-shell',
-        `Forbidden server-side-tools TS client disconnect semantic "${keyword}" found`
+        `Forbidden server-side-tools impl TS client disconnect semantic "${keyword}" found`
       );
     }
   }
@@ -2482,6 +2524,37 @@ function checkStopMessageCounterRustOwner() {
     }
   }
   pass('stop-message-counter-no-ts-owner', 'stop-message counter TS file is a native IO shell');
+}
+
+function checkServertoolExecutionDispatchRustOwner() {
+  const executionShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`);
+  assertContains(
+    'servertool-execution-dispatch-rust-owner',
+    `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
+    executionShell,
+    'buildServertoolDispatchPlanInputWithNative'
+  );
+  assertContains(
+    'servertool-execution-dispatch-rust-owner',
+    `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
+    executionShell,
+    'buildServertoolOutcomePlanInputWithNative'
+  );
+  for (const keyword of [
+    'listRegisteredServerToolHandlerRecords()',
+    'registeredToolCallHandlers: listRegisteredServerToolHandlerRecords()',
+  ]) {
+    if (executionShell.includes(keyword)) {
+      fail(
+        'servertool-execution-dispatch-no-ts-registry-truth',
+        `Forbidden TS registry dispatch truth "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`
+      );
+    }
+  }
+  pass(
+    'servertool-execution-dispatch-rust-owner',
+    'execution-dispatch-outcome-shell.ts builds dispatch-plan handler truth from Rust skeleton config'
+  );
 }
 
 // ── Check 13: followup mainline bridge is Rust-owned ──────────
@@ -4107,6 +4180,7 @@ function checkBackendRoutePolicyRustOwner() {
 function checkServertoolTextExtractionRustOwner() {
   const rustTextExtraction = readRequired(RUST_SERVERTOOL_TEXT_EXTRACTION);
   const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
+  const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
   const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
@@ -4135,14 +4209,14 @@ function checkServertoolTextExtractionRustOwner() {
     nativeServertoolWrapper,
     'extractTextFromChatLikeWithNative'
   );
-  assertContains(
-    'servertool-text-extraction-thin-wrapper',
-    TS_SERVER_SIDE_TOOLS,
-    serverSideTools,
-    'extractTextFromChatLikeWithNative(payload)'
-  );
+  if (!serverSideTools.includes('extractTextFromChatLike,') || !serverSideToolsImpl.includes('extractTextFromChatLikeWithNative(payload)')) {
+    fail(
+      'servertool-text-extraction-thin-wrapper',
+      'server-side-tools thin shell must re-export extractTextFromChatLike and impl must delegate to extractTextFromChatLikeWithNative(payload)'
+    );
+  }
 
-  const functionBlock = extractFunctionBlock(serverSideTools, 'extractTextFromChatLike');
+  const functionBlock = extractFunctionBlock(serverSideToolsImpl, 'extractTextFromChatLike');
   if (!functionBlock) {
     fail('servertool-text-extraction-no-ts-owner', 'extractTextFromChatLike function not found');
     return;
@@ -4619,6 +4693,8 @@ function checkServertoolRustOutcomeCloseout() {
   const rustCli = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const resultRestoreSpec = readRequired(`${ROOT}/tests/servertool/servertool-cli-result-restore.spec.ts`);
   const tsProjection = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`);
+  const tsServerSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
+  const tsServerSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
 
   for (const needle of [
     'pub enum ServertoolOutcome',
@@ -4660,8 +4736,334 @@ function checkServertoolRustOutcomeCloseout() {
     fail('servertool-cli-result-restore-thin-shell', 'servertool-cli-result-restore.spec.ts must not reintroduce legacy CLI restoration behavior');
   }
 
+  for (const marker of [
+    "return toolCall.name === 'servertool_fixture';",
+    "return name !== 'servertool_fixture' && name !== 'stop_message_auto';",
+    "return executionMode === 'client_exec_cli_projection' || executionMode === 'client_inject_only';",
+  ]) {
+    if (tsServerSideTools.includes(marker) || tsServerSideToolsImpl.includes(marker)) {
+      fail(
+        'servertool-cli-ts-name-fallback',
+        `server-side-tools*.ts must not retain TS tool-name fallback marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'export const collectAdditionalClientToolCalls = collectAdditionalClientToolCallsImpl;',
+    'export const extractToolCalls = extractToolCallsImpl;',
+  ]) {
+    if (!tsServerSideTools.includes(marker)) {
+      fail(
+        'servertool-cli-projection-thin-shell-guard',
+        `server-side-tools.ts must keep CLI projection thin-shell guard marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'export function isClientExecCliProjectionToolCall(',
+    "return executionMode === 'client_exec_cli_projection';",
+    'export const collectAdditionalClientToolCallsImpl =',
+  ]) {
+    if (!tsServerSideToolsImpl.includes(marker)) {
+      fail(
+        'servertool-cli-projection-thin-shell-guard',
+        `server-side-tools-impl.ts must keep CLI projection impl guard marker ${marker}`
+      );
+    }
+  }
+
+  for (const marker of [
+    'const genericOps = followupConfig.genericInjectionOps',
+    "requestIdSuffix: ':servertool_followup'",
+    'const genericFollowup = {',
+  ]) {
+    if (readRequired(TS_EXECUTION_SHELL).includes(marker)) {
+      fail(
+        'servertool-outcome-ts-generic-followup-fallback',
+        `execution-shell.ts must not retain TS generic followup contract marker ${marker}`
+      );
+    }
+  }
+
+  const executionShell = readRequired(TS_EXECUTION_SHELL);
+  const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
+  for (const marker of [
+    'if (!options.reenterPipeline) return undefined;',
+  ]) {
+    if (executionShell.includes(marker)) {
+      fail(
+        'servertool-backend-ts-silent-fallback',
+        `execution-shell.ts must not retain backend silent fallback marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    "if (plan.kind === 'vision_analysis')",
+    "if (plan.kind === 'web_search')",
+    "typeof (planned as any).finalize === 'function'",
+  ]) {
+    if (executionShell.includes(marker)) {
+      fail(
+        'servertool-execution-shell-ts-orchestration-branch',
+        `execution-shell.ts must not retain TS orchestration branch marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'export const materializeServertoolPlannedResult =',
+    'export const executeServertoolBackendPlan =',
+    'export { runServertoolHandler };',
+  ]) {
+    if (!executionShell.includes(marker)) {
+      fail(
+        'servertool-execution-shell-ts-orchestration-guard',
+        `execution-shell.ts must keep thin-shell guard marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'const servertoolBackendExecutors',
+    'function isServerToolHandlerPlan(',
+    'function isServerToolHandlerResult(',
+    'function assertValidServertoolHandlerContract(',
+  ]) {
+    if (executionMaterializationShell.includes(marker)) {
+      fail(
+        'servertool-execution-shell-ts-orchestration-guard',
+        `execution-handler-materialization-shell.ts must not retain TS materialization guard marker ${marker}`
+      );
+    }
+  }
+  assertContains(
+    'servertool-execution-shell-ts-orchestration-guard',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    executionMaterializationShell,
+    'planServertoolHandlerContractWithNative'
+  );
+  assertContains(
+    'servertool-execution-shell-ts-orchestration-guard',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    executionMaterializationShell,
+    'planServertoolBackendExecutionWithNative'
+  );
+
   pass('servertool-outcome-rust-owner', 'servertool-core owns outcome planning and cli contract');
   pass('servertool-cli-thin-shell', 'TS cli-projection remains a thin shell without legacy restore markers');
+}
+
+function checkResponseStageMetadataCenterOnly() {
+  const responseStageShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-orchestration-shell.ts`);
+  for (const marker of [
+    'function projectRuntimeControlSideChannel(',
+    'record.runtime_control = {',
+    'projectRuntimeControlSideChannel(options.adapterContext, runtimeControl);',
+    'projectRuntimeControlSideChannel(',
+  ]) {
+    if (responseStageShell.includes(marker)) {
+      fail(
+        'servertool-response-stage-runtime-control-mirror',
+        `response-stage-orchestration-shell.ts must not mirror MetadataCenter runtime_control via TS marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'readRuntimeControlFromBoundMetadataCenter(',
+    'writeRuntimeControlToBoundMetadataCenter(',
+    'servertoolResponseOrchestration',
+  ]) {
+    if (!responseStageShell.includes(marker)) {
+      fail(
+        'servertool-response-stage-metadata-center-owner',
+        `response-stage-orchestration-shell.ts must keep MetadataCenter owner marker ${marker}`
+      );
+    }
+  }
+  pass(
+    'servertool-response-stage-metadata-center-owner',
+    'response-stage shell reads/writes servertool runtime control only through MetadataCenter'
+  );
+}
+
+function checkServertoolAutoHookCallerThinShell() {
+  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
+  const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
+  for (const marker of [
+    'const autoHookExecutionList = listAutoServerToolHooks();',
+    'const { optionalQueue, mandatoryQueue } = buildAutoHookQueuesFromConfig({',
+    "const optionalResult = await runAutoHookExecutionQueue({",
+    "const mandatoryResult = await runAutoHookExecutionQueue({",
+  ]) {
+    if (serverSideTools.includes(marker)) {
+      fail(
+        'servertool-auto-hook-caller-inline-orchestration',
+        `server-side-tools.ts must not retain inline auto-hook caller orchestration marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'export const runServertoolAutoHookCaller = runServertoolAutoHookCallerImpl;',
+  ]) {
+    if (!serverSideTools.includes(marker)) {
+      fail(
+        'servertool-auto-hook-caller-thin-shell',
+        `server-side-tools.ts must keep auto-hook caller thin-shell marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'export const runServertoolAutoHookCallerImpl =',
+    'return await runServertoolAutoHookCallerViaThinShell(args);',
+  ]) {
+    if (!serverSideToolsImpl.includes(marker)) {
+      fail(
+        'servertool-auto-hook-caller-thin-shell',
+        `server-side-tools-impl.ts must keep auto-hook caller impl marker ${marker}`
+      );
+    }
+  }
+  pass(
+    'servertool-auto-hook-caller-thin-shell',
+    'server-side-tools.ts routes auto-hook execution through a dedicated thin-shell caller'
+  );
+}
+
+function checkServertoolResponseStageGateThinShell() {
+  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
+  for (const marker of [
+    'detectEmptyAssistantPayloadContractSignalWithNative',
+    'isStopEligibleForServerTool',
+  ]) {
+    if (serverSideTools.includes(marker)) {
+      fail(
+        'servertool-response-stage-gate-inline-semantic',
+        `server-side-tools.ts must not retain response-stage inline semantic marker ${marker}`
+      );
+    }
+  }
+  if (!serverSideTools.includes('planServertoolResponseStageGateWithNative as respStageGateNative')) {
+    fail(
+      'servertool-response-stage-gate-thin-shell',
+      'server-side-tools.ts must route response-stage bypass through native response-stage gate alias'
+    );
+    return;
+  }
+  pass(
+    'servertool-response-stage-gate-thin-shell',
+    'server-side-tools.ts routes response-stage bypass through native response-stage gate alias'
+  );
+}
+
+function checkServertoolEngineStoplessSessionThinShell() {
+  const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
+  for (const marker of [
+    'function normalizeStoplessSessionToken(',
+    'function readStoplessSessionId(',
+  ]) {
+    if (engineSource.includes(marker)) {
+      fail(
+        'servertool-engine-stopless-session-inline-semantic',
+        `engine.ts must not retain stopless session inline semantic marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'adapterContext: options.adapterContext',
+    '...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),',
+  ]) {
+    if (!engineSource.includes(marker)) {
+      fail(
+        'servertool-engine-stopless-session-thin-shell',
+        `engine.ts must keep stopless session thin-shell marker ${marker}`
+      );
+    }
+  }
+  pass(
+    'servertool-engine-stopless-session-thin-shell',
+    'engine.ts reads stopless session truth through native stopless orchestration plan'
+  );
+}
+
+function checkServertoolActiveOrchestrationAuditRedGate() {
+  const forbiddenByFile = new Map([
+    [
+      `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+      [
+        'const SERVERTOOL_BACKEND_EXECUTORS',
+        'const servertoolBackendExecutors',
+        'const materializePlannedServertoolResult',
+        'const executeBackendPlanViaThinShell',
+        'const runServertoolHandlerThinShell',
+        'function materializeServertoolPlannedResult(',
+        'function executeServertoolBackendPlan(',
+        'export async function runServertoolHandler(',
+      ],
+    ],
+    [
+      `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
+      [
+        'const buildDispatchPlanInputViaThinShell',
+        'const buildOutcomePlanInputViaThinShell',
+        'const resolveToolCallExecutionOutcomeViaThinShell',
+        'const runToolCallExecutionLoopViaThinShell',
+        'const resolveHandlerExecutionSpecViaThinShell',
+        'function buildServertoolDispatchPlanInputThinShell(',
+        'function buildServertoolOutcomePlanInputThinShell(',
+        'function resolveToolCallExecutionOutcomeThinShell(',
+        'function runToolCallExecutionLoopThinShell(',
+        'export function resolveServertoolHandlerExecutionSpec(',
+      ],
+    ],
+    [
+      `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
+      [
+        "import './handlers/stop-message-auto.js';",
+        "import './handlers/vision.js';",
+        'export async function runServerSideToolEngineImpl(',
+        'export function extractToolCallsImpl(',
+        'export function collectAdditionalClientToolCallsImpl(',
+        'const gatePlan = planServertoolResponseStageGateWithNative(',
+        'return await runServertoolAutoHookCallerImpl(',
+      ],
+    ],
+    [
+      `${SERVERTOOL_TS_DIR}/engine.ts`,
+      [
+        'function extractStoplessReasoningText(',
+        'function extractStoplessLoopState(',
+        'function readStoplessRouteName(',
+        'function isDirectStoplessDisabled(',
+        'const loopState = extractStoplessLoopState(',
+        'reasoningText: extractStoplessReasoningText(',
+      ],
+    ],
+    [
+      `${SERVERTOOL_TS_DIR}/registry-impl.ts`,
+      [
+        'const toolHandlerRegistryImpl',
+        'const autoHandlerRegistryImpl',
+        'let autoHookOrderImpl = 0',
+        'export function registerServerToolHandlerImpl(',
+        'export function getServerToolHandlerImpl(',
+        'export function listAutoHandlersForRegistryImpl(',
+        'export function collectAutoServerToolHooksImpl(',
+      ],
+    ],
+  ]);
+  for (const [file, markers] of forbiddenByFile) {
+    const source = readRequired(file);
+    for (const marker of markers) {
+      if (source.includes(marker)) {
+        fail(
+          'servertool-active-orchestration-audit',
+          `${file.replace(`${ROOT}/`, '')} still contains active orchestration marker ${marker}; this TS owner must be physically reduced to a thin shell before closeout`
+        );
+      }
+    }
+  }
+  pass(
+    'servertool-active-orchestration-audit',
+    'servertool active orchestration audit is wired as a red gate for the remaining TS active owner residues'
+  );
 }
 
 // ── Check 17: deleted empty_reply_continue path stays absent ───
@@ -4802,6 +5204,7 @@ checkStopGatewayContextRustOwner();
 checkStopMessageCompareContextRustOwner();
 checkOrchestrationPolicyRustOwner();
 checkStopMessageCounterRustOwner();
+checkServertoolExecutionDispatchRustOwner();
 checkFollowupMainlineNativeBridgeRustOwner();
 checkServertoolSkeletonConfigRustOwner();
 checkPendingSessionRustOwner();
@@ -4817,6 +5220,11 @@ checkStopMessageBlockedReportRustOwner();
 checkStoplessLearnedNoteRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkServertoolRustOutcomeCloseout();
+checkResponseStageMetadataCenterOnly();
+checkServertoolAutoHookCallerThinShell();
+checkServertoolResponseStageGateThinShell();
+checkServertoolEngineStoplessSessionThinShell();
+checkServertoolActiveOrchestrationAuditRedGate();
 checkDeletedEmptyReplyContinueAbsent();
 checkDeletedAiFollowupAbsent();
 

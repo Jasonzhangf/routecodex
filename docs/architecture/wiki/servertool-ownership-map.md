@@ -303,6 +303,7 @@ Required tests:
 - `tests/servertool/stopless-vr-route-hint.spec.ts`
 - `tests/responses/responses-openai-bridge.spec.ts`
 - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+- `tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts`
 - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs`
 
@@ -321,6 +322,7 @@ Notes:
 - If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook.
 - When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history.
 - For `/v1/responses`, req-side stopless contract cannot rely on `messages` only: the request mainline must preserve the contract in `instructions`, and the responses bridge must materialize that contract back into the outbound chat/system message before provider wire build.
+- Validation must prove the dual-port full-chain blackbox closes `client in -> provider out -> provider in -> client out` for `no_schema`, `wrong_schema`, and `valid_terminal_schema`.
 - CLI command input stays concise/status-only: `flowId/repeatCount/maxRepeats/triggerHint` plus optional structured `schemaFeedback{reasonCode,missingFields}`; continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string.
 - Client-visible exec_command must use the public stopless alias `reasoning_stop`; the client payload must not leak internal marker `__servertool_cli_projection`.
 - NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only.
@@ -528,6 +530,7 @@ Required tests:
 - `tests/servertool/vision-flow.spec.ts`
 - `tests/servertool/servertool-mixed-tools.spec.ts`
 - `tests/servertool/followup-bootstrap-replay.spec.ts`
+- `tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`

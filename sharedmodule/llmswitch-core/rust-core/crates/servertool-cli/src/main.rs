@@ -23,8 +23,6 @@ enum Command {
         repeat_count: Option<u32>,
         #[arg(long = "max-repeats")]
         max_repeats: Option<u32>,
-        #[arg(long = "session-dir")]
-        session_dir: Option<String>,
         #[arg(long = "session-id")]
         session_id: Option<String>,
         #[arg(long = "request-id")]
@@ -48,7 +46,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             flow,
             repeat_count,
             max_repeats,
-            session_dir,
             session_id,
             request_id,
         } => {
@@ -61,7 +58,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     flow_id: flow,
                     repeat_count,
                     max_repeats,
-                    session_dir: session_dir.clone(),
                     session_id,
                     request_id,
                 },

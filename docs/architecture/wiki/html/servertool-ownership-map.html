@@ -437,6 +437,7 @@
           <li><code>tests/servertool/stopless-vr-route-hint.spec.ts</code></li>
           <li><code>tests/responses/responses-openai-bridge.spec.ts</code></li>
           <li><code>tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts</code></li>
+          <li><code>tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts</code></li>
           <li><code>tests/sharedmodule/native-required-exports-sse-stream.spec.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs</code></li>
         </ul>
@@ -457,6 +458,7 @@
           <li>If <code>finish_reason=stop</code> arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook.</li>
           <li>When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history.</li>
           <li>For <code>/v1/responses</code>, req-side stopless contract cannot rely on <code>messages</code> only: the request mainline must preserve the contract in <code>instructions</code>, and the responses bridge must materialize that contract back into the outbound chat/system message before provider wire build.</li>
+          <li>Validation must prove the dual-port full-chain blackbox closes <code>client in -&gt; provider out -&gt; provider in -&gt; client out</code> for <code>no_schema</code>, <code>wrong_schema</code>, and <code>valid_terminal_schema</code>.</li>
           <li>CLI command input stays concise/status-only: <code>flowId/repeatCount/maxRepeats/triggerHint</code> plus optional structured <code>schemaFeedback{reasonCode,missingFields}</code>; continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string.</li>
           <li>Client-visible exec_command must use the public stopless alias <code>reasoning_stop</code>; the client payload must not leak internal marker <code>__servertool_cli_projection</code>.</li>
           <li>NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only.</li>
@@ -670,6 +672,7 @@
           <li><code>tests/servertool/vision-flow.spec.ts</code></li>
           <li><code>tests/servertool/servertool-mixed-tools.spec.ts</code></li>
           <li><code>tests/servertool/followup-bootstrap-replay.spec.ts</code></li>
+          <li><code>tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts</code></li>
         </ul>
         <p>Required gates:</p>
         <ul>
