@@ -5148,15 +5148,16 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
+  const cliProjectionRuntimeShell = readRequired(`${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`);
   for (const marker of [
     'export function isClientExecCliProjectionToolCall(',
     'return isServertoolClientExecCliProjectionToolCallWithNative({',
     'executionMode: toolCall.executionMode',
   ]) {
-    if (!tsServerSideToolsImpl.includes(marker)) {
+    if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(
         'servertool-cli-projection-thin-shell-guard',
-        `server-side-tools-impl.ts must keep CLI projection impl guard marker ${marker}`
+        `cli-projection-runtime-shell.ts must keep CLI projection impl guard marker ${marker}`
       );
     }
   }
@@ -5178,17 +5179,19 @@ function checkServertoolRustOutcomeCloseout() {
       'server-side-tools.ts must not retain deleted auto-hook caller alias marker runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller'
     );
   }
-  for (const marker of [
-    'export const runServerSideToolEngine =',
-    'export const collectAdditionalClientToolCalls =',
-    'export const extractToolCalls =',
-  ]) {
+  for (const marker of ['export const runServerSideToolEngine =', 'export const extractToolCalls =']) {
     if (!tsServerSideToolsImpl.includes(marker)) {
       fail(
         'servertool-cli-projection-thin-shell-guard',
         `server-side-tools-impl.ts must keep thin-shell owner marker ${marker}`
       );
     }
+  }
+  if (!cliProjectionRuntimeShell.includes('export const collectAdditionalClientToolCalls =')) {
+    fail(
+      'servertool-cli-projection-thin-shell-guard',
+      'cli-projection-runtime-shell.ts must keep thin-shell owner marker export const collectAdditionalClientToolCalls ='
+    );
   }
 
   const executionShell = existsSync(TS_EXECUTION_SHELL) ? readRequired(TS_EXECUTION_SHELL) : '';
@@ -5571,6 +5574,9 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         "'[servertool] client disconnected before servertool execution'",
         '.find(isClientExecCliProjectionToolCall)',
         'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
+        '[servertool] native execution-branch projected missing tool call index:',
+        'buildServertoolCliProjectionForToolCall(',
+        'buildServertoolCliProjectionExecutionContextWithNative(',
         'executionState.executedToolCalls.length > 0',
         "flowId: 'servertool_cli_projection'",
         'servertoolCliProjection: {',

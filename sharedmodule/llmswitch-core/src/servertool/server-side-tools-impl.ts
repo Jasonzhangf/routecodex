@@ -21,9 +21,7 @@ import {
   runServertoolIoExecutionQueue
 } from './execution-dispatch-outcome-shell.js';
 import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
-import { buildServertoolCliProjectionForToolCall } from './cli-projection.js';
 import {
-  buildServertoolCliProjectionExecutionContextWithNative,
   extractTextFromChatLikeWithNative,
   planServertoolEntryPreflightWithNative,
   planServertoolExecutionBranchWithNative
@@ -36,6 +34,11 @@ import {
 } from './orchestration-blocks.js';
 import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
+import {
+  buildServertoolCliProjectionBranchResult,
+  collectAdditionalClientToolCalls,
+  isClientExecCliProjectionToolCall
+} from './cli-projection-runtime-shell.js';
 import {
   createServerToolClientDisconnectedError,
   isAdapterClientDisconnected
@@ -143,35 +146,12 @@ export const runServerSideToolEngine = async (
     executedToolCallsLen: 0
   });
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
-    const cliProjectedToolCall =
-      typeof preExecutionBranchPlan.projectedToolCallIndex === 'number'
-        ? dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]
-        : undefined;
-    if (!cliProjectedToolCall) {
-      throw new Error(
-        `[servertool] native execution-branch projected missing tool call index: ${String(preExecutionBranchPlan.projectedToolCallIndex ?? '')}`
-      );
-    }
-    const additionalToolCalls = collectAdditionalClientToolCalls(baseObject, cliProjectedToolCall.id);
-    const projection = buildServertoolCliProjectionForToolCall({
+    return buildServertoolCliProjectionBranchResult({
       options,
-      toolCall: cliProjectedToolCall,
-      ...(additionalToolCalls.length ? { additionalToolCalls } : {}),
-      reasoningText: `继续执行本地 hook ${cliProjectedToolCall.name}。`
+      base: baseObject,
+      executableToolCalls: dispatchPlan.executableToolCalls,
+      projectedToolCallIndex: preExecutionBranchPlan.projectedToolCallIndex
     });
-    const execution = buildServertoolCliProjectionExecutionContextWithNative({
-      requestId: options.requestId,
-      clientCallId: projection.clientCallId,
-      toolName: projection.toolName
-    });
-    return {
-      mode: 'tool_flow',
-      finalChatResponse: projection.chatResponse,
-      execution: execution as {
-        flowId: string;
-        context?: JsonObject;
-      }
-    };
   }
 
   const executionState = await runServertoolIoExecutionQueue({
@@ -220,19 +200,6 @@ export const runServerSideToolEngine = async (
     return responseStageAutoHook.result;
   }
   return { mode: 'passthrough', finalChatResponse: baseObject };
-};
-
-export function isClientExecCliProjectionToolCall(toolCall: ToolCall & { executionMode?: string }): boolean {
-  return isServertoolClientExecCliProjectionToolCallWithNative({
-    executionMode: toolCall.executionMode
-  });
-}
-
-export const collectAdditionalClientToolCalls = (base: JsonObject, projectedToolCallId: string): JsonValue[] => {
-  return collectServertoolAdditionalClientToolCallsWithNative({
-    base,
-    projectedToolCallId
-  }) as JsonValue[];
 };
 
 export const extractToolCalls = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {

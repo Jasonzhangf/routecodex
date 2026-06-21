@@ -8,6 +8,13 @@ jest.unstable_mockModule(
     extractToolCalls: jest.fn(() => []),
     runServerSideToolEngine: jest.fn(),
     runServertoolAutoHookCaller: jest.fn(),
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.js',
+  () => ({
+    buildServertoolCliProjectionBranchResult: jest.fn(),
     isClientExecCliProjectionToolCall: jest.fn((toolCall: any) =>
       Boolean(
         toolCall &&

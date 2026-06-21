@@ -210,6 +210,10 @@ jest.unstable_mockModule(
       };
     }),
     planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
+    isServertoolClientExecCliProjectionToolCallWithNative: jest.fn((input: any) => {
+      const executionMode = typeof input?.executionMode === 'string' ? input.executionMode.trim() : '';
+      return executionMode === 'client_exec_cli_projection';
+    }),
     isAdapterClientDisconnectedWithNative: jest.fn((adapterContext: unknown) =>
       readDisconnectedFlag(adapterContext as any)
     ),
