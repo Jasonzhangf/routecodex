@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const DELETED_FILES = [
+  'sharedmodule/llmswitch-core/src/servertool/execution-shell.ts',
+] as const;
+
 const TARGETS = [
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts',
@@ -65,23 +69,6 @@ const TARGETS = [
       'args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===',
       'Array.isArray((args.baseForExecution as any).tool_outputs)',
       'const newKeys = new Set(Object.keys(nextChatResponse));',
-    ],
-  },
-  {
-    file: 'sharedmodule/llmswitch-core/src/servertool/execution-shell.ts',
-    forbidden: [
-      'executedToolCalls: [],',
-      'executedIds: new Set<string>()',
-      'executedFlowIds: []',
-      'state.executedToolCalls.push({',
-      'state.executedIds.add(toolCall.id)',
-      'state.executedFlowIds.push(',
-      'state.lastExecution = execution',
-      '[servertool] dispatch spec mismatch:',
-      'buildServertoolDispatchPlanInputThinShell',
-      'buildServertoolOutcomePlanInputThinShell',
-      'resolveToolCallExecutionOutcomeThinShell',
-      'runToolCallExecutionLoopThinShell',
     ],
   },
   {
@@ -249,6 +236,12 @@ function repoPath(relativePath: string): string {
 }
 
 describe('servertool active orchestration audit', () => {
+  for (const file of DELETED_FILES) {
+    test(`${file} must stay physically deleted`, () => {
+      expect(fs.existsSync(repoPath(file))).toBe(false);
+    });
+  }
+
   for (const target of TARGETS) {
     test(`${target.file} must not retain active orchestration owner markers`, () => {
       const source = fs.readFileSync(repoPath(target.file), 'utf8');

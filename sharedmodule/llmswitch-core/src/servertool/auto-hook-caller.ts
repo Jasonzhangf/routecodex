@@ -12,6 +12,10 @@ import {
   planAutoHookExecutionDecisionWithNative,
   planAutoHookQueueProgressWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  materializeServertoolPlannedResult,
+  runServertoolHandler
+} from './execution-handler-materialization-shell.js';
 
 export async function runAutoHookExecutionQueue(args: {
   queueName: ServerToolAutoHookTraceEvent['queue'];
@@ -24,7 +28,6 @@ export async function runAutoHookExecutionQueue(args: {
   options: ServerSideToolEngineOptions;
   contextBase: ServerToolHandlerContext;
 }): Promise<ServerToolHandlerResult | null> {
-  const { runServertoolHandler, materializeServertoolPlannedResult } = await import('./execution-shell.js');
   const queueTotal = args.hooks.length;
   for (let idx = 0; idx < args.hooks.length; idx += 1) {
     const hook = args.hooks[idx];

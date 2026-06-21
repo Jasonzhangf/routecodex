@@ -16,7 +16,7 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   applyPreCommandHooksToToolCalls,
-} from './execution-shell.js';
+} from './pre-command-hooks.js';
 import {
   buildServertoolDispatchPlanInput,
   materializeNativeToolCallExecutionOutcome,

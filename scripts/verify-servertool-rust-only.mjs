@@ -235,6 +235,14 @@ function assertMissing(check, file, content, needle) {
   pass(check, `${file.replace(`${ROOT}/`, '')} does not contain "${needle}"`);
 }
 
+function assertMissingFile(check, file, detail) {
+  if (existsSync(file)) {
+    fail(check, detail);
+    return;
+  }
+  pass(check, `${file.replace(`${ROOT}/`, '')} is physically absent`);
+}
+
 function assertContains(check, file, content, needle) {
   if (!content.includes(needle)) {
     fail(check, `${file} must contain "${needle}"`);
@@ -2643,31 +2651,10 @@ function checkServertoolExecutionDispatchRustOwner() {
     'execution-dispatch-outcome-shell.ts builds dispatch-plan handler truth from Rust skeleton config'
   );
 
-  const reexportShell = readRequired(TS_EXECUTION_SHELL);
-  for (const keyword of [
-    'executedToolCalls: [],',
-    'executedIds: new Set<string>()',
-    'executedFlowIds: []',
-    'state.executedToolCalls.push({',
-    'state.executedIds.add(toolCall.id)',
-    'state.executedFlowIds.push(',
-    'state.lastExecution = execution',
-    '[servertool] dispatch spec mismatch:',
-    'buildServertoolDispatchPlanInputThinShell',
-    'buildServertoolOutcomePlanInputThinShell',
-    'resolveToolCallExecutionOutcomeThinShell',
-    'runToolCallExecutionLoopThinShell',
-  ]) {
-    if (reexportShell.includes(keyword)) {
-      fail(
-        'servertool-execution-shell-no-duplicate-state-owner',
-        `Forbidden TS execution-shell duplicate state semantic "${keyword}" found in ${TS_EXECUTION_SHELL}`
-      );
-    }
-  }
-  pass(
-    'servertool-execution-shell-no-duplicate-state-owner',
-    'execution-shell.ts re-exports native thin-shell state/dispatch helpers without duplicate TS owner semantics'
+  assertMissingFile(
+    'servertool-execution-shell-deleted',
+    TS_EXECUTION_SHELL,
+    'execution-shell.ts must stay physically deleted after moving pre-command wrappers to pre-command-hooks.ts and direct imports to execution-handler-materialization-shell.ts'
   );
 
   for (const [check, file, content, needle] of [
@@ -5178,20 +5165,7 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
 
-  for (const marker of [
-    'const genericOps = followupConfig.genericInjectionOps',
-    "requestIdSuffix: ':servertool_followup'",
-    'const genericFollowup = {',
-  ]) {
-    if (readRequired(TS_EXECUTION_SHELL).includes(marker)) {
-      fail(
-        'servertool-outcome-ts-generic-followup-fallback',
-        `execution-shell.ts must not retain TS generic followup contract marker ${marker}`
-      );
-    }
-  }
-
-  const executionShell = readRequired(TS_EXECUTION_SHELL);
+  const executionShell = existsSync(TS_EXECUTION_SHELL) ? readRequired(TS_EXECUTION_SHELL) : '';
   const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
   const rustExecutionHandlerContract = readRequired(RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
@@ -5200,35 +5174,20 @@ function checkServertoolRustOutcomeCloseout() {
   const nativeCoreWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   for (const marker of [
+    'const genericOps = followupConfig.genericInjectionOps',
+    "requestIdSuffix: ':servertool_followup'",
+    'const genericFollowup = {',
     'if (!options.reenterPipeline) return undefined;',
-  ]) {
-    if (executionShell.includes(marker)) {
-      fail(
-        'servertool-backend-ts-silent-fallback',
-        `execution-shell.ts must not retain backend silent fallback marker ${marker}`
-      );
-    }
-  }
-  for (const marker of [
     "if (plan.kind === 'vision_analysis')",
     "if (plan.kind === 'web_search')",
     "typeof (planned as any).finalize === 'function'",
-  ]) {
-    if (executionShell.includes(marker)) {
-      fail(
-        'servertool-execution-shell-ts-orchestration-branch',
-        `execution-shell.ts must not retain TS orchestration branch marker ${marker}`
-      );
-    }
-  }
-  for (const marker of [
     'materializeServertoolPlannedResult',
     'runServertoolHandler',
   ]) {
-    if (!executionShell.includes(marker)) {
+    if (executionShell.includes(marker)) {
       fail(
-        'servertool-execution-shell-ts-orchestration-guard',
-        `execution-shell.ts must keep thin-shell guard marker ${marker}`
+        'servertool-execution-shell-no-residue',
+        `execution-shell.ts must stay deleted; found residue marker ${marker}`
       );
     }
   }

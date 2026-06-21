@@ -311,6 +311,56 @@ jest.unstable_mockModule(
       }
       return { action: 'invalid_plan_result' };
     }),
+    planServertoolHandlerContractErrorWithNative: jest.fn((input: any) => {
+      const kind = String(input?.kind ?? 'unknown_handler_contract_error');
+      const toolName = String(input?.toolName ?? 'auto');
+      const requestId = String(input?.requestId ?? '');
+      const entryEndpoint = String(input?.entryEndpoint ?? '');
+      const providerProtocol = String(input?.providerProtocol ?? '');
+      const backendKind = String(input?.backendKind ?? '');
+      const error = String(input?.error ?? '');
+      if (kind === 'handler_failed') {
+        return {
+          code: 'SERVERTOOL_HANDLER_FAILED',
+          category: 'INTERNAL_ERROR',
+          status: 502,
+          message: `[servertool] ${toolName} failed: ${error}`,
+          details: {
+            requestId,
+            entryEndpoint,
+            providerProtocol,
+            toolName,
+            error
+          }
+        };
+      }
+      if (kind === 'unsupported_backend_plan_kind') {
+        return {
+          code: 'SERVERTOOL_HANDLER_CONTRACT_ERROR',
+          category: 'INTERNAL_ERROR',
+          status: 500,
+          message: `[servertool] unsupported backend plan kind: ${backendKind}`,
+          details: {
+            requestId,
+            backendKind
+          }
+        };
+      }
+      return {
+        code: 'SERVERTOOL_HANDLER_CONTRACT_ERROR',
+        category: 'INTERNAL_ERROR',
+        status: 500,
+        message: `[servertool] ${kind}`,
+        details: {
+          requestId,
+          entryEndpoint,
+          providerProtocol,
+          toolName,
+          backendKind,
+          error
+        }
+      };
+    }),
     planAutoHookExecutionDecisionWithNative: jest.fn((input: any) => ({
       action: input?.message ? 'rethrow_error' : input?.hasMaterializedResult === true ? 'return_result' : 'continue_queue',
       traceEvent: {
@@ -681,7 +731,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-shell.js',
+  '../../sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.js',
   () => ({
     applyPreCommandHooksToToolCalls: applyPreCommandHooksToToolCallsMock,
   })
