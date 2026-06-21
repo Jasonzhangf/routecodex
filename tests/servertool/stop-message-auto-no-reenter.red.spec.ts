@@ -3,6 +3,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 function buildStopChatResponse(): JsonObject {
   return {
@@ -21,7 +22,7 @@ function buildStopChatResponse(): JsonObject {
 
 function buildAdapterContext(overrides: Partial<AdapterContext> = {}): AdapterContext {
   const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return {
+  const adapterContext = {
     requestId: overrides.requestId ?? `req-no-reenter-${unique}`,
     entryEndpoint: overrides.entryEndpoint ?? '/v1/chat/completions',
     providerProtocol: overrides.providerProtocol ?? 'openai-chat',
@@ -31,6 +32,8 @@ function buildAdapterContext(overrides: Partial<AdapterContext> = {}): AdapterCo
       messages: [{ role: 'user', content: 'diagnose this' }]
     }
   } as any;
+  MetadataCenter.attach(adapterContext);
+  return adapterContext;
 }
 
 describe('stopless must not reenter via append_user_text', () => {
