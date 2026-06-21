@@ -1,3 +1,35 @@
+## 2026-06-21 servertool engine cli-projection-context runtime action rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/engine.ts` 的 post-engine 残余 TS owner。
+- 旧 TS 仍本地 owner 一层 generic cli-projection context 判定：
+  - `const hasServertoolCliProjectionContext = ...`
+  - 本地看 `engineResult.execution.context.servertoolCliProjection`
+  - 再把布尔值喂给 `engine_runtime_action_contract`
+- 现在把这层解读并回现有 Rust owner：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs`
+  - 新 input 增加 `executionContext`
+  - Rust 优先从 `executionContext.servertoolCliProjection` 解读 generic cli-projection contract；旧 `hasServertoolCliProjectionContext` 仅保留兼容输入
+- TS 壳层变化：
+  - `engine.ts` 不再本地判断 `servertoolCliProjection`
+  - 直接传 `executionContext: engineResult.execution.context` 给 native runtime action
+- bridge / gate：
+  - `router-hotpath-napi/src/servertool_core_blocks.rs` 补 bridge 断言，锁 `executionContext.servertoolCliProjection -> return_servertool_cli_projection_final`
+  - `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - `scripts/verify-servertool-rust-only.mjs`
+  - 明确禁止 `const hasServertoolCliProjectionContext =` 与 `.servertoolCliProjection` 在 `engine.ts` 复活
+- focused 验证：
+  - `cargo test -p servertool-core engine_runtime_action_contract -- --nocapture` -> 6 passed
+  - `cargo test -p router-hotpath-napi plans_servertool_engine_runtime_action_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - focused Jest:
+    - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+    - `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 结果：3 suites / 34 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+
 ## 2026-06-21 servertool response-stage gate-plan runtime action rust-owner
 
 - 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 的 response-stage / auto-hook 残余 TS owner。
@@ -9569,3 +9601,19 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
 
 - 用户纠正：priority 模式下，上游即使返回错误形态，也应进入 provider failure 链并切下一个 provider，不应在首 provider 形成假成功后再由 SSE bridge 502。
 - 新问题定义：为什么 `responses` direct 上游 `200 text/html` 没有在 provider/runtime 阶段被判为协议错误并 reroute。
+## 2026-06-21 20:52:11 responses direct html-200 reroute owner lock
+
+- 已按 function-map / verification-map 锁定唯一 owner：
+  - feature: `responses.direct_tool_shape_contract`
+  - 允许修改：`src/providers/core/runtime`，禁止在 `src/server/handlers` 补偿
+- 当前首次污染节点确认：
+  - `src/providers/core/runtime/responses-provider.ts`
+  - `sendDirectSsePassthroughRequest()` / `executeSseStream()`
+  - `upstreamResult.kind === 'response'` 且 `responseKind === 'text'` 时，只 snapshot + `detectResponsesFailure(payload)`
+- 真实缺口：
+  - `detectResponsesFailure()` 只识别 `{status:'failed'}` 或 `{error:{...}}`
+  - 对 `200 text/html` / 纯文本非 SSE 返回 `null`
+  - 于是 provider runtime 不上报 provider failure，后段才掉进 `sse_bridge_error`
+- 本轮修复目标：
+  - 在 provider runtime 前移把 stream 请求收到的非 SSE 文本响应识别成 `MALFORMED_RESPONSE`
+  - 让 request-executor 看到 provider failure，按 priority/default pool 排除当前 provider 并继续切换

@@ -5652,6 +5652,8 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'function isDirectStoplessDisabled(',
         'const loopState = extractStoplessLoopState(',
         'reasoningText: extractStoplessReasoningText(',
+        'const hasServertoolCliProjectionContext =',
+        '.servertoolCliProjection',
       ],
     ],
     [

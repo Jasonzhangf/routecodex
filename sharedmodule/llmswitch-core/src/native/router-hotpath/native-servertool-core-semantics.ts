@@ -2558,6 +2558,7 @@ export function planServertoolEnginePreflightWithNative(input: {
 export function planServertoolEngineRuntimeActionWithNative(input: {
   hasPendingInjection: boolean;
   isStopMessageFlow: boolean;
+  executionContext?: unknown;
   hasServertoolCliProjectionContext: boolean;
   stoplessAction: string;
 }): ServertoolEngineRuntimeActionPlan {

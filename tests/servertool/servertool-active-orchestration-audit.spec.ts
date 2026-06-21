@@ -136,6 +136,8 @@ const TARGETS = [
       'const schemaFeedbackCandidate = [',
       'const repeatCount =',
       'const maxRepeats =',
+      'const hasServertoolCliProjectionContext =',
+      '.servertoolCliProjection',
       'extractCurrentAssistantStopTextWithNative(chatResponse ?? null) ||',
       'if (\n    containsSyntheticRouteCodexControlText(options.chat)\n  )',
       'if (stoplessIsDisabledOnDirectRoute(options.adapterContext))',

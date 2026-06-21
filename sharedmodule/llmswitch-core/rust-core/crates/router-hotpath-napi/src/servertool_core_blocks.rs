@@ -3296,6 +3296,28 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
         serde_json::json!("persist_pending_injection_and_return")
     );
 
+    let cli_projection = plan_servertool_engine_runtime_action_json(
+        &serde_json::json!({
+            "hasPendingInjection": false,
+            "isStopMessageFlow": false,
+            "executionContext": {
+                "servertoolCliProjection": {
+                    "flowId": "servertool_cli_projection"
+                }
+            },
+            "hasServertoolCliProjectionContext": false,
+            "stoplessAction": "continue"
+        })
+        .to_string(),
+    )
+    .expect("engine runtime action cli projection plan");
+    let cli_projection_value: serde_json::Value =
+        serde_json::from_str(&cli_projection).expect("parse cli projection plan");
+    assert_eq!(
+        cli_projection_value["action"],
+        serde_json::json!("return_servertool_cli_projection_final")
+    );
+
     let stopless_cli = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
             "hasPendingInjection": false,

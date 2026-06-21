@@ -16,6 +16,56 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).toContain('...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),');
   });
 
+  test('runServerToolOrchestration does not locally derive stopless CLI projection context', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'utf8'
+    );
+
+    expect(source).toContain('planStoplessCliProjectionContextWithNative');
+    expect(source).not.toContain('const triggerHint = [');
+    expect(source).not.toContain('const schemaFeedbackCandidate = [');
+    expect(source).not.toContain('const repeatCount =');
+    expect(source).not.toContain('const maxRepeats =');
+    expect(source).not.toContain("||\n      '继续推进当前任务。'");
+  });
+
+  test('runServerToolOrchestration routes post-engine branches through native runtime action planning', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'utf8'
+    );
+
+    expect(source).toContain('planServertoolEngineRuntimeActionWithNative');
+    expect(source).not.toContain('if (engineResult.pendingInjection)');
+    expect(source).not.toContain("if (stoplessPlan.action === 'terminal_final')");
+    expect(source).not.toContain("if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow)");
+    expect(source).not.toContain('!stoplessPlan.isStopMessageFlow &&');
+    expect(source).not.toContain('const hasServertoolCliProjectionContext =');
+    expect(source).not.toContain('.servertoolCliProjection');
+  });
+
+  test('runServerToolOrchestration routes synthetic/direct preflight through native planning', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'utf8'
+    );
+
+    expect(source).toContain('planServertoolEnginePreflightWithNative');
+    expect(source).not.toContain('if (\n    containsSyntheticRouteCodexControlText(options.chat)\n  )');
+    expect(source).not.toContain('if (stoplessIsDisabledOnDirectRoute(options.adapterContext))');
+  });
+
+  test('runServerToolOrchestration routes passthrough/no-execution skip through native planning', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'utf8'
+    );
+
+    expect(source).toContain('planServertoolEngineSkipWithNative');
+    expect(source).not.toContain("if (engineResult.mode === 'passthrough' || !engineResult.execution)");
+  });
+
   test('stopless cli projection is not short-circuited by generic servertoolCliProjection context', async () => {
     const adapterContext = {
       sessionId: 'sess-stopless-engine-short-circuit',
@@ -62,6 +112,6 @@ describe('engine stopless session thin-shell guard', () => {
 
     const toolCall = (result.chat as any)?.choices?.[0]?.message?.tool_calls?.[0];
     expect(toolCall?.function?.name).toBe('exec_command');
-    expect(String(toolCall?.function?.arguments || '')).toContain('routecodex hook run reasoning_stop');
+    expect(String(toolCall?.function?.arguments || '')).toContain('routecodex hook run reasoningStop');
   });
 });

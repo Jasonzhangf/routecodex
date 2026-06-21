@@ -159,6 +159,11 @@ describe('servertool CLI native bridge', () => {
       planServertoolEngineRuntimeActionWithNative({
         hasPendingInjection: true,
         isStopMessageFlow: true,
+        executionContext: {
+          servertoolCliProjection: {
+            flowId: 'servertool_cli_projection'
+          }
+        },
         hasServertoolCliProjectionContext: true,
         stoplessAction: 'terminal_final'
       })
@@ -170,7 +175,12 @@ describe('servertool CLI native bridge', () => {
       planServertoolEngineRuntimeActionWithNative({
         hasPendingInjection: false,
         isStopMessageFlow: false,
-        hasServertoolCliProjectionContext: true,
+        executionContext: {
+          servertoolCliProjection: {
+            flowId: 'servertool_cli_projection'
+          }
+        },
+        hasServertoolCliProjectionContext: false,
         stoplessAction: 'cli_projection'
       })
     ).toEqual({

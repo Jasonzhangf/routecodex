@@ -23,6 +23,10 @@ import { runFollowupMainline as runFollowupMainlineShell } from './backend-route
 import { buildServertoolCliProjectionForAutoFlow as buildServertoolCliProjectionForAutoFlowShell } from './cli-projection.js';
 import {
   extractCurrentAssistantStopTextWithNative,
+  planServertoolEnginePreflightWithNative,
+  planServertoolEngineRuntimeActionWithNative,
+  planServertoolEngineSkipWithNative,
+  planStoplessCliProjectionContextWithNative,
   planStoplessOrchestrationActionWithNative as planStoplessOrchestrationActionShell,
   resolveRuntimeStopMessageStateFromAdapterContextWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -167,12 +171,6 @@ function resolveStoplessCliProjectionContext(
   const context = execution?.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
     ? execution.context as Record<string, unknown>
     : {};
-  const state = context
-    ? context.serverToolLoopState
-    : null;
-  const row = state && typeof state === 'object' && !Array.isArray(state)
-    ? state as Record<string, unknown>
-    : {};
   const adapterRecord =
     adapterContext && typeof adapterContext === 'object' && !Array.isArray(adapterContext)
       ? adapterContext as Record<string, unknown>
@@ -193,38 +191,18 @@ function resolveStoplessCliProjectionContext(
     adapterContext: adapterRecord ?? null,
     ...(runtimeMetadata ? { runtimeMetadata } : {})
   });
-  const repeatCount =
-    typeof runtimeSnapshot?.used === 'number'
-      ? Math.max(runtimeSnapshot.used + 1, 1)
-      : typeof row.repeatCount === 'number'
-        ? row.repeatCount
-        : 1;
-  const maxRepeats =
-    typeof runtimeSnapshot?.maxRepeats === 'number' && runtimeSnapshot.maxRepeats > 0
-      ? runtimeSnapshot.maxRepeats
-      : typeof row.maxRepeats === 'number'
-        ? row.maxRepeats
-        : Math.max(repeatCount, 1);
-  const triggerHint = [
-    row.triggerHint,
-    context.stopSchemaTriggerHint,
-    stoplessControl.triggerHint
-  ].find((value) => typeof value === 'string' && value.trim()) as string | undefined;
-  const schemaFeedbackCandidate = [
-    row.schemaFeedback,
-    context.stopSchemaFeedback,
-    stoplessControl.schemaFeedback
-  ].find((value) => value && typeof value === 'object' && !Array.isArray(value)) as JsonObject | undefined;
-  return {
-    reasoningText:
-      extractCurrentAssistantStopTextWithNative(chatResponse ?? null) ||
-      extractCurrentAssistantStopTextWithNative(adapterRecord ?? null) ||
-      '继续推进当前任务。',
-    repeatCount,
-    maxRepeats,
-    ...(typeof triggerHint === 'string' && triggerHint.trim() ? { triggerHint: triggerHint.trim() } : {}),
-    ...(schemaFeedbackCandidate ? { schemaFeedback: schemaFeedbackCandidate } : {})
-  };
+  return planStoplessCliProjectionContextWithNative({
+    executionContext: context,
+    stoplessControl,
+    runtimeSnapshot: runtimeSnapshot
+      ? {
+          used: runtimeSnapshot.used,
+          maxRepeats: runtimeSnapshot.maxRepeats
+        }
+      : undefined,
+    chatStopText: extractCurrentAssistantStopTextWithNative(chatResponse ?? null),
+    adapterStopText: extractCurrentAssistantStopTextWithNative(adapterRecord ?? null)
+  });
 }
 
 function recordServertoolExecutionSnapshot(args: {
@@ -275,15 +253,6 @@ export async function runServerToolOrchestration(
   const GOLD = '\x1b[38;5;220m';
   const RESET = '\x1b[0m';
 
-  if (
-    containsSyntheticRouteCodexControlText(options.chat)
-  ) {
-    return {
-      chat: options.chat,
-      executed: false
-    };
-  }
-
   const {
     logStopEntry,
     logProgress,
@@ -303,9 +272,20 @@ export async function runServerToolOrchestration(
   });
 
   const stopSignal = inspectStopGatewaySignal(options.chat);
+  const preflightAction = planServertoolEnginePreflightWithNative({
+    hasSyntheticControlText: containsSyntheticRouteCodexControlText(options.chat),
+    stopSignalObserved: stopSignal.observed,
+    stoplessDisabledOnDirectRoute: stoplessIsDisabledOnDirectRoute(options.adapterContext)
+  });
+  if (preflightAction.action === 'return_original_chat') {
+    return {
+      chat: options.chat,
+      executed: false
+    };
+  }
   attachStopGatewayContext(options.adapterContext, stopSignal);
   if (stopSignal.observed) {
-    if (stoplessIsDisabledOnDirectRoute(options.adapterContext)) {
+    if (preflightAction.action === 'return_original_chat_direct_passthrough') {
       logStopEntry('trigger', 'skipped_direct_passthrough', {
         reason: stopSignal.reason,
         source: stopSignal.source,
@@ -350,8 +330,15 @@ export async function runServerToolOrchestration(
   const engineResult = await runPrimaryServerToolEngineSelection({
     runEngine
   });
-  if (engineResult.mode === 'passthrough' || !engineResult.execution) {
-    const skipReason = engineResult.mode === 'passthrough' ? 'passthrough' : 'no_execution';
+  const engineSkipPlan = planServertoolEngineSkipWithNative({
+    engineMode: engineResult.mode,
+    hasExecution: Boolean(engineResult.execution)
+  });
+  if (
+    engineSkipPlan.action === 'return_skipped_passthrough' ||
+    engineSkipPlan.action === 'return_skipped_no_execution'
+  ) {
+    const skipReason = engineSkipPlan.skipReason ?? 'no_execution';
     if (stopSignal.observed) {
       logStopEntry('trigger', `skipped_${skipReason}`, {
         reason: stopSignal.reason,
@@ -386,6 +373,13 @@ export async function runServerToolOrchestration(
     execution: engineResult.execution,
     adapterContext: options.adapterContext as Record<string, unknown>
   });
+  const runtimeAction = planServertoolEngineRuntimeActionWithNative({
+    hasPendingInjection: Boolean(engineResult.pendingInjection),
+    isStopMessageFlow: stoplessPlan.isStopMessageFlow,
+    executionContext: engineResult.execution.context,
+    hasServertoolCliProjectionContext: false,
+    stoplessAction: stoplessPlan.action
+  });
   if (stopSignal.observed) {
     logStopEntry('trigger', stoplessPlan.isStopMessageFlow ? 'activated' : 'non_stop_flow', {
       flowId,
@@ -403,7 +397,7 @@ export async function runServerToolOrchestration(
   });
 
   // Mixed tools: persist servertool outputs for next request, but return remaining tool_calls to client.
-  if (engineResult.pendingInjection) {
+  if (runtimeAction.action === 'persist_pending_injection_and_return' && engineResult.pendingInjection) {
     await persistPendingServerToolInjection({
       pendingInjection: engineResult.pendingInjection,
       requestId: options.requestId,
@@ -417,13 +411,7 @@ export async function runServerToolOrchestration(
       flowId: engineResult.execution.flowId
     };
   }
-  if (
-    !stoplessPlan.isStopMessageFlow &&
-    engineResult.execution.context &&
-    typeof engineResult.execution.context === 'object' &&
-    !Array.isArray(engineResult.execution.context) &&
-    (engineResult.execution.context as Record<string, unknown>).servertoolCliProjection
-  ) {
+  if (runtimeAction.action === 'return_servertool_cli_projection_final') {
     logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
     return {
       chat: engineResult.finalChatResponse,
@@ -431,7 +419,7 @@ export async function runServerToolOrchestration(
       flowId: engineResult.execution.flowId
     };
   }
-  if (stoplessPlan.action === 'terminal_final') {
+  if (runtimeAction.action === 'return_stop_message_terminal_final') {
     logProgress(5, totalSteps, 'completed (stop_message_auto final terminal result)', {
       flowId,
       reason: stoplessPlan.reason
@@ -442,7 +430,7 @@ export async function runServerToolOrchestration(
       flowId: engineResult.execution.flowId
     };
   }
-  if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow) {
+  if (runtimeAction.action === 'build_stop_message_cli_projection') {
     const projectionContext = resolveStoplessCliProjectionContext(
       engineResult.execution,
       options.adapterContext,
