@@ -1,22 +1,14 @@
-import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
+import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import {
-  collectServertoolAdditionalClientToolCallsWithNative,
-  isServertoolClientExecCliProjectionToolCallWithNative,
-  planServertoolResponseStageGateWithNative,
-  planServertoolToolCallDispatchWithNative
+  planServertoolResponseStageGateWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  applyPreCommandHooksToToolCalls,
-} from './pre-command-hooks.js';
-import {
-  buildServertoolDispatchPlanInput,
   runServertoolIoExecutionQueue
 } from './execution-dispatch-outcome-shell.js';
 import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
@@ -26,17 +18,14 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   filterOutExecutedToolCalls,
-  patchToolCallArgumentsById,
   stripToolOutputs
 } from './orchestration-blocks.js';
-import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
 import { extractToolCallsFromResponseStage } from './extract-tool-calls-shell.js';
+import { prepareServertoolDispatchStage } from './dispatch-preparation-shell.js';
 import {
-  buildServertoolCliProjectionBranchResult,
-  collectAdditionalClientToolCalls,
-  isClientExecCliProjectionToolCall
+  buildServertoolCliProjectionBranchResult
 } from './cli-projection-runtime-shell.js';
 import { planServertoolExecutionBranchRuntimeAction } from './execution-branch-runtime-shell.js';
 import {
@@ -110,32 +99,14 @@ export const runServerSideToolEngine = async (
   }
 
   const baseForExecution = structuredClone(baseObject);
-  const runtimeMetadata = readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);
-  const runtimePreCommandState = resolveServertoolRuntimePreCommandState({
-    adapterContext: options.adapterContext,
-    runtimeMetadata,
-    requestId: options.requestId,
-    entryEndpoint: options.entryEndpoint,
-    providerProtocol: options.providerProtocol
-  });
-
-  applyPreCommandHooksToToolCalls({
+  const { dispatchPlan } = prepareServertoolDispatchStage({
     options,
     toolCalls,
-    runtimePreCommandState,
-    bases: [baseObject, baseForExecution],
-    patchToolCallArgumentsById
+    baseObject,
+    baseForExecution,
+    includeToolCallNames,
+    excludeToolCallNames
   });
-
-  const dispatchPlan = planServertoolToolCallDispatchWithNative(
-    buildServertoolDispatchPlanInput({
-      toolCalls,
-      disableToolCallHandlers: options.disableToolCallHandlers === true,
-      ...(includeToolCallNames ? { includeToolCallHandlerNames: [...includeToolCallNames] } : {}),
-      ...(excludeToolCallNames ? { excludeToolCallHandlerNames: [...excludeToolCallNames] } : {}),
-      runtimeMetadata
-    })
-  );
 
   const preExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction({
     executableToolCalls: dispatchPlan.executableToolCalls,

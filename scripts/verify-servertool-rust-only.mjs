@@ -104,6 +104,7 @@ const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
 const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch-runtime-shell.ts`;
 const TS_RESPONSE_STAGE_FINALIZE_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`;
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
+const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
@@ -5209,6 +5210,21 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-extract-tool-calls-shell-owner',
         `extract-tool-calls-shell.ts must keep extraction owner marker ${marker}`
+      );
+    }
+  }
+  const dispatchPreparationShell = readRequired(TS_DISPATCH_PREPARATION_SHELL);
+  for (const marker of [
+    'export function prepareServertoolDispatchStage(',
+    'readRuntimeMetadata',
+    'resolveServertoolRuntimePreCommandState',
+    'applyPreCommandHooksToToolCalls',
+    'planServertoolToolCallDispatchWithNative'
+  ]) {
+    if (!dispatchPreparationShell.includes(marker)) {
+      fail(
+        'servertool-dispatch-preparation-shell-owner',
+        `dispatch-preparation-shell.ts must keep dispatch preparation owner marker ${marker}`
       );
     }
   }

@@ -142,6 +142,16 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/dispatch-preparation-shell.ts',
+    forbidden: [],
+    required: [
+      'readRuntimeMetadata',
+      'resolveServertoolRuntimePreCommandState',
+      'applyPreCommandHooksToToolCalls',
+      'planServertoolToolCallDispatchWithNative',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
     forbidden: [
       "import './handlers/stop-message-auto.js';",
@@ -185,6 +195,9 @@ const TARGETS = [
       "if (responseStageAutoHook.action === 'return_passthrough_bypass') {",
       'const stage = runServertoolResponseStageWithNative(chatResponse, requestId);',
       'replaceJsonObjectInPlace(chatResponse, normalizedPayload);',
+      'readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);',
+      'applyPreCommandHooksToToolCalls({',
+      'planServertoolToolCallDispatchWithNative(',
       "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
       'function getArray(value: unknown): JsonValue[] {',
     ],
