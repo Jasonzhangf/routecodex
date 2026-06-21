@@ -29,4 +29,122 @@ describe('normalizeProviderHttpError', () => {
     expect(normalized.response?.data?.error?.code).toBe('ECONNRESET');
     expect(normalized.response?.data?.error?.message).toBe('fetch failed');
   });
+
+  it('applies provider-configured error mapping to raw upstream error bodies before catalog projection', async () => {
+    const error = new Error('HTTP 400: {"error":{"message":"All available accounts exhausted","type":"server_error","param":"","code":null}}') as any;
+    error.status = 400;
+    error.statusCode = 400;
+    error.code = 'HTTP_400';
+    error.response = {
+      raw: '{"error":{"message":"All available accounts exhausted","type":"server_error","param":"","code":null}}'
+    };
+
+    const normalized = await normalizeProviderHttpError({
+      error,
+      processedRequest: {},
+      requestInfo: {
+        endpoint: '/responses',
+        headers: {},
+        targetUrl: 'https://xlapis.com/v1/responses',
+        body: {},
+        wantsSse: true
+      },
+      context: {
+        requestId: 'req_provider_http_error_mapped_exhausted',
+        providerKey: 'XLC.key2.deepseek-v4-pro',
+        providerId: 'XLC',
+        runtimeMetadata: {
+          extensions: {
+            errorMapping: {
+              rules: [
+                {
+                  origin: {
+                    status: 400,
+                    error: {
+                      messageContains: 'All available accounts exhausted',
+                      type: 'server_error'
+                    }
+                  },
+                  to: {
+                    status: 429,
+                    code: 'HTTP_429',
+                    message: 'All available accounts exhausted'
+                  }
+                }
+              ]
+            }
+          }
+        }
+      } as any
+    });
+
+    expect(normalized.statusCode).toBe(429);
+    expect(normalized.status).toBe(429);
+    expect(normalized.code).toBe('HTTP_429');
+    expect(normalized.response?.data?.error?.code).toBe('HTTP_429');
+    expect(normalized.response?.data?.error?.message).toBe('All available accounts exhausted');
+    expect(normalized.response?.data?.error?.status).toBe(429);
+    expect((normalized as any).details?.providerErrorMapping?.originalStatus).toBe(400);
+  });
+
+  it('applies provider-configured error mapping when upstream error JSON is only embedded in Error.message', async () => {
+    const error = new Error('HTTP 400: {"error":{"message":"All available accounts exhausted","type":"server_error","param":"","code":null}}') as any;
+    error.status = 400;
+    error.statusCode = 400;
+    error.code = 'HTTP_400';
+    error.response = {
+      data: {
+        error: {
+          code: 'HTTP_400',
+          status: 400
+        }
+      }
+    };
+
+    const normalized = await normalizeProviderHttpError({
+      error,
+      processedRequest: {},
+      requestInfo: {
+        endpoint: '/responses',
+        headers: {},
+        targetUrl: 'https://xlapis.com/v1/responses',
+        body: {},
+        wantsSse: true
+      },
+      context: {
+        requestId: 'req_provider_http_error_mapped_exhausted_from_message',
+        providerKey: 'XLC.key2.deepseek-v4-pro',
+        providerId: 'XLC',
+        runtimeMetadata: {
+          extensions: {
+            errorMapping: {
+              rules: [
+                {
+                  origin: {
+                    status: 400,
+                    error: {
+                      messageContains: 'All available accounts exhausted',
+                      type: 'server_error'
+                    }
+                  },
+                  to: {
+                    status: 429,
+                    code: 'HTTP_429',
+                    message: 'All available accounts exhausted'
+                  }
+                }
+              ]
+            }
+          }
+        }
+      } as any
+    });
+
+    expect(normalized.statusCode).toBe(429);
+    expect(normalized.status).toBe(429);
+    expect(normalized.code).toBe('HTTP_429');
+    expect(normalized.response?.data?.error?.code).toBe('HTTP_429');
+    expect(normalized.response?.data?.error?.status).toBe(429);
+    expect((normalized as any).details?.providerErrorMapping?.originalStatus).toBe(400);
+  });
 });

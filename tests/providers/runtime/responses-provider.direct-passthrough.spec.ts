@@ -649,6 +649,95 @@ describe('ResponsesProvider direct passthrough', () => {
     });
   });
 
+  test('applies provider-configured error mapping before throwing direct SSE upstream errors', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-configured-error-mapping',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'XLC',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://xlapis.com/v1', endpoint: '/responses' },
+        extensions: {
+          errorMapping: {
+            rules: [
+              {
+                origin: {
+                  status: 400,
+                  error: {
+                    type: 'server_error',
+                    messageContains: 'All available accounts exhausted'
+                  }
+                },
+                to: {
+                  status: 429,
+                  code: 'HTTP_429',
+                  message: 'All available accounts exhausted'
+                }
+              }
+            ]
+          }
+        }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => {
+        const error = Object.assign(
+          new Error('HTTP 400: {"error":{"message":"All available accounts exhausted","type":"server_error","param":"","code":null}}'),
+          {
+            status: 400,
+            statusCode: 400,
+            code: 'HTTP_400',
+            response: {
+              data: {
+                error: {
+                  code: 'HTTP_400',
+                  status: 400
+                }
+              }
+            }
+          }
+        );
+        throw error;
+      }
+    };
+
+    const inbound = {
+      model: 'deepseek-v4-pro',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      providerId: 'XLC',
+      providerKey: 'XLC.key2.deepseek-v4-pro',
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true },
+      extensions: config.config.extensions
+    } as any);
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+      statusCode: 429,
+      status: 429,
+      code: 'HTTP_429',
+      message: 'All available accounts exhausted',
+      response: {
+        data: {
+          error: {
+            code: 'HTTP_429',
+            status: 429,
+            message: 'All available accounts exhausted'
+          }
+        }
+      }
+    });
+  });
+
   test('replays direct HTTP 200 SSE normal frames after filtering advisory codex rate-limit frames', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-200-sse-normal',

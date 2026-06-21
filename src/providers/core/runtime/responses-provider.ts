@@ -45,6 +45,8 @@ import {
   inspectResponsesSseBlockForProviderRateLimit,
   isResponsesSseAdvisoryRateLimitsBlock
 } from './responses-sse-error-guard.js';
+import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
+import type { ProviderErrorAugmented } from './provider-error-types.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'> & Partial<Pick<HttpClient, 'postStreamOrResponse'>>;
 type ResponsesSseConverter = {
@@ -296,6 +298,17 @@ export class ResponsesProvider extends HttpTransportProvider {
     } as ServiceProfile;
   }
 
+  private normalizeConfiguredUpstreamError(error: unknown, context: ProviderContext): ProviderErrorAugmented {
+    const normalizedError = normalizeUpstreamError(error) as ProviderErrorAugmented;
+    const statusCode = normalizedError.statusCode ?? normalizedError.status;
+    applyProviderConfiguredErrorMapping({
+      normalized: normalizedError,
+      context,
+      statusCode
+    });
+    return normalizedError;
+  }
+
   /**
    * 覆写内部发送：/v1/responses 入口时按配置选择上游 SSE 或 JSON。
    * stream 标志主要影响 Host -> Client 是否用 SSE，上游传输模式由 ResponsesStreamingMode 控制。
@@ -388,7 +401,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         httpClient: this.httpClient
       });
     } catch (error) {
-      const normalizedError = normalizeUpstreamError(error);
+      const normalizedError = this.normalizeConfiguredUpstreamError(error, context);
       await this.snapshotPhase(
         'provider-error',
         context,
@@ -460,7 +473,7 @@ export class ResponsesProvider extends HttpTransportProvider {
           skipSanitize: true,
         }) as UnknownObject;
       } catch (error) {
-        const normalizedError = normalizeUpstreamError(error);
+        const normalizedError = this.normalizeConfiguredUpstreamError(error, context);
         await this.snapshotPhase(
           'provider-error',
           context,
@@ -502,7 +515,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         httpClient: this.httpClient
       }) as UnknownObject;
     } catch (error) {
-      const normalizedError = normalizeUpstreamError(error);
+      const normalizedError = this.normalizeConfiguredUpstreamError(error, context);
       await this.snapshotPhase(
         'provider-error',
         context,
@@ -765,7 +778,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     try {
       return await this.executeSseStream({ ...options, body });
     } catch (error) {
-      const normalizedError = normalizeUpstreamError(error);
+      const normalizedError = this.normalizeConfiguredUpstreamError(error, context);
       await this.snapshotPhase(
         'provider-error',
         context,

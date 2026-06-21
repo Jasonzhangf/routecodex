@@ -6,6 +6,7 @@ import type { PreparedHttpRequest } from './http-request-executor.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { extractStatusCodeFromError } from './provider-error-classifier.js';
 import { normalizeKnownProviderError, PROVIDER_NETWORK_CODES } from './provider-error-catalog.js';
+import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import { OAuthRecoveryHandler } from './transport/oauth-recovery-handler.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
@@ -113,19 +114,25 @@ export async function normalizeProviderHttpError(options: {
   const normalized: ProviderErrorAugmented = options.error as ProviderErrorAugmented;
   try {
     const statusCode = extractStatusCodeFromError(normalized);
+    const mappedStatusCode = applyProviderConfiguredErrorMapping({
+      normalized,
+      context: options.context,
+      statusCode
+    });
+    const effectiveStatusCode = mappedStatusCode ?? statusCode;
     const inferredCatalog = normalizeKnownProviderError({
-      statusCode,
+      statusCode: effectiveStatusCode,
       code: normalized.code,
       upstreamCode: normalized.response?.data?.error?.code,
       message: normalized.message
     });
-    if (statusCode && !Number.isNaN(statusCode)) {
-      normalized.statusCode = statusCode;
+    if (effectiveStatusCode && !Number.isNaN(effectiveStatusCode)) {
+      normalized.statusCode = effectiveStatusCode;
       if (!normalized.status) {
-        normalized.status = statusCode;
+        normalized.status = effectiveStatusCode;
       }
       if (!normalized.code) {
-        normalized.code = `HTTP_${statusCode}`;
+        normalized.code = `HTTP_${effectiveStatusCode}`;
       }
     }
     if (inferredCatalog) {
@@ -154,11 +161,15 @@ export async function normalizeProviderHttpError(options: {
     if (!normalized.response.data.error) {
       normalized.response.data.error = {};
     }
-    if (normalized.code && !normalized.response.data.error.code) {
+    const mapped = Boolean(normalized.details?.providerErrorMapping);
+    if (normalized.code && (mapped || !normalized.response.data.error.code)) {
       normalized.response.data.error.code = normalized.code;
     }
-    if (normalized.message && !normalized.response.data.error.message) {
+    if (normalized.message && (mapped || !normalized.response.data.error.message)) {
       normalized.response.data.error.message = normalized.message;
+    }
+    if (typeof normalized.status === 'number' && (mapped || !normalized.response.data.error.status)) {
+      normalized.response.data.error.status = normalized.status;
     }
   } catch {
     // keep original error shape when normalization fails
