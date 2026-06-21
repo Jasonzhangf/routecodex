@@ -1,11 +1,91 @@
-import { describe, expect, test } from '@jest/globals';
-import { runAutoHookExecutionQueue } from '../../sharedmodule/llmswitch-core/src/servertool/execution-shell.js';
+import { beforeAll, describe, expect, jest, test } from '@jest/globals';
 import type {
   ServerSideToolEngineOptions,
   ServerToolAutoHookTraceEvent,
   ServerToolHandlerContext,
 } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
+
+const planAutoHookExecutionDecisionWithNativeMock = jest.fn((input: any) => ({
+  action: input?.message ? 'rethrow_error' : 'continue_queue',
+  traceEvent: {
+    hookId: String(input?.hookId ?? ''),
+    phase: String(input?.phase ?? ''),
+    priority: Number(input?.priority ?? 0),
+    queue: String(input?.queue ?? ''),
+    queueIndex: Number(input?.queueIndex ?? 0),
+    queueTotal: Number(input?.queueTotal ?? 0),
+    result: input?.message ? 'error' : 'miss',
+    reason: input?.message ? String(input?.message ?? 'unknown') : 'predicate_false'
+  }
+}));
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    planAutoHookExecutionDecisionWithNative: planAutoHookExecutionDecisionWithNativeMock,
+    planAutoHookQueueProgressWithNative: jest.fn(() => ({ action: 'return_null' })),
+    planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn(() => []),
+    planServertoolHookScheduleWithNative: jest.fn((input: any) => ({
+      events: (input?.hooks ?? []).map((hook: any) => ({
+        hookId: hook.id,
+        status: 'scheduled',
+        effectKind: hook.effectKind,
+        requiredness: hook.requiredness,
+        noOp: false
+      })),
+      projection: {
+        direction: 'response',
+        phase: 'ServertoolRespHook01Intercepted',
+        inputNode: 'HubRespChatProcess03Governed',
+        outputNode: 'ServertoolRespHook01Intercepted',
+        hookIds: (input?.hooks ?? []).map((hook: any) => hook.id),
+        effectKinds: (input?.hooks ?? []).map((hook: any) => hook.effectKind)
+      }
+    }))
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js',
+  () => ({
+    buildAutoHookQueuesFromConfig: jest.fn((input: any) => ({
+      optionalQueue: [...(input?.hooks ?? [])].filter((hook: any) => hook.priority < 100),
+      mandatoryQueue: [...(input?.hooks ?? [])].filter((hook: any) => hook.priority >= 100)
+    }))
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/registry.js',
+  () => ({
+    listAutoServerToolHooks: jest.fn(() => [])
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-shell.js',
+  () => ({
+    runServertoolHandler: jest.fn(async (handler: any, context: any) => await handler(context)),
+    materializeServertoolPlannedResult: jest.fn(async (planned: any) => {
+      if (!planned) {
+        return null;
+      }
+      if (typeof planned.finalize === 'function') {
+        return await planned.finalize();
+      }
+      return planned;
+    })
+  })
+);
+
+let runAutoHookExecutionQueue: typeof import('../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js').runAutoHookExecutionQueue;
+
+beforeAll(async () => {
+  ({ runAutoHookExecutionQueue } = await import(
+    '../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js'
+  ));
+});
 
 describe('execution-shell auto hook failfast', () => {
   test('does not swallow optional auto-hook errors during primary attempt', async () => {
@@ -66,6 +146,13 @@ describe('execution-shell auto hook failfast', () => {
       })
     ).rejects.toThrow('optional-hook-boom');
 
+    expect(planAutoHookExecutionDecisionWithNativeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hookId: 'failing_primary_optional_hook',
+        queue: 'A_optional',
+        message: 'optional-hook-boom'
+      })
+    );
     expect(traces).toContainEqual(
       expect.objectContaining({
         hookId: 'failing_primary_optional_hook',

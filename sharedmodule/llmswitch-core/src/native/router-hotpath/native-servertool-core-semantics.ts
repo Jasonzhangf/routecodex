@@ -2379,9 +2379,12 @@ export function planAutoHookExecutionDecisionWithNative(input: {
   queue: string;
   queueIndex: number;
   queueTotal: number;
-  outcome: 'error' | 'planned_null' | 'materialized_match' | 'materialized_empty';
+  outcome?: 'error' | 'planned_null' | 'materialized_match' | 'materialized_empty';
+  hasPlannedResult?: boolean;
+  hasMaterializedResult?: boolean;
   message?: string;
   flowId?: string;
+  materializedFlowId?: string;
 }): AutoHookExecutionDecisionPlan {
   const capability = 'planAutoHookExecutionDecisionJson';
   const fn = readNativeFunction(capability);

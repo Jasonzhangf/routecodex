@@ -290,7 +290,7 @@ jest.unstable_mockModule(
       return { action: 'invalid_plan_result' };
     }),
     planAutoHookExecutionDecisionWithNative: jest.fn((input: any) => ({
-      action: input?.outcome === 'error' ? 'rethrow_error' : input?.outcome === 'materialized_match' ? 'return_result' : 'continue_queue',
+      action: input?.message ? 'rethrow_error' : input?.hasMaterializedResult === true ? 'return_result' : 'continue_queue',
       traceEvent: {
         hookId: String(input?.hookId ?? ''),
         phase: String(input?.phase ?? ''),
@@ -298,9 +298,9 @@ jest.unstable_mockModule(
         queue: String(input?.queue ?? ''),
         queueIndex: Number(input?.queueIndex ?? 0),
         queueTotal: Number(input?.queueTotal ?? 0),
-        result: input?.outcome === 'error' ? 'error' : input?.outcome === 'materialized_match' ? 'match' : 'miss',
-        reason: input?.outcome === 'error' ? String(input?.message ?? 'unknown') : input?.outcome === 'materialized_match' ? 'matched' : 'predicate_false',
-        ...(typeof input?.flowId === 'string' ? { flowId: input.flowId } : {})
+        result: input?.message ? 'error' : input?.hasMaterializedResult === true ? 'match' : 'miss',
+        reason: input?.message ? String(input?.message ?? 'unknown') : input?.hasPlannedResult === true ? 'matched' : 'predicate_false',
+        ...(typeof input?.materializedFlowId === 'string' ? { flowId: input.materializedFlowId } : {})
       }
     })),
     planAutoHookQueueProgressWithNative: jest.fn((input: any) => {

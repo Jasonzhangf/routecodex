@@ -2736,8 +2736,9 @@ fn plans_auto_hook_execution_decision_via_servertool_core_bridge() {
             "queue": "A_optional",
             "queueIndex": 1,
             "queueTotal": 1,
-            "outcome": "materialized_match",
-            "flowId": "stop_message_flow"
+            "hasPlannedResult": true,
+            "hasMaterializedResult": true,
+            "materializedFlowId": "stop_message_flow"
         })
         .to_string(),
     )
@@ -2748,6 +2749,28 @@ fn plans_auto_hook_execution_decision_via_servertool_core_bridge() {
     assert_eq!(
         parsed["traceEvent"]["flowId"],
         serde_json::Value::String("stop_message_flow".to_string())
+    );
+
+    let planned_null = plan_auto_hook_execution_decision_json(
+        &serde_json::json!({
+            "hookId": "vision_auto",
+            "phase": "default",
+            "priority": 20,
+            "queue": "A_optional",
+            "queueIndex": 1,
+            "queueTotal": 2,
+            "hasPlannedResult": false,
+            "hasMaterializedResult": false
+        })
+        .to_string(),
+    )
+    .expect("auto-hook planned-null plan");
+    let planned_null_parsed: serde_json::Value =
+        serde_json::from_str(&planned_null).expect("parse planned-null plan");
+    assert_eq!(planned_null_parsed["action"], "continue_queue");
+    assert_eq!(
+        planned_null_parsed["traceEvent"]["reason"],
+        serde_json::Value::String("predicate_false".to_string())
     );
 }
 

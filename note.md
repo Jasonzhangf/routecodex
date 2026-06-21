@@ -1,3 +1,68 @@
+## 2026-06-21 codex-samples stopless legacy shell-history closeout
+
+- Jason 要求“根据样本闭环”，本轮直接以 `~/.rcc/codex-samples/openai-responses/port-5555/req_1782044107054_dbbc0a5f/provider-request.json` 为坏样本真源。
+- 样本真相：
+  - 历史里确实存在 assistant/tool 对：
+    - `exec_command(arguments={\"cmd\":\"reasoningStop\"})`
+    - tool output `zsh:1: command not found: reasoningStop`
+  - 这不是 stop schema 继续缺字段的问题，而是旧 shell 投影污染被带回后续 provider-request。
+- 修复点只落 request-side normalization owner：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs`
+  - 新增 `is_malformed_reasoning_stop_shell_command(...)`
+  - 规则：当请求工具池已经暴露标准 `reasoningStop` 时，若历史里仍出现 shell-like tool 执行裸 `reasoningStop` / `reasoning_stop`，则把这对 assistant/tool 历史项物理删除，不再继续透传。
+- 红测先行：
+  - `drops_legacy_bare_reasoning_stop_shell_history_from_messages`
+  - `drops_legacy_bare_reasoning_stop_shell_history_from_responses_input`
+- focused 验证：
+  - `cargo test -p router-hotpath-napi drops_legacy_bare_reasoning_stop_shell_history_from_messages -- --nocapture` -> PASS
+  - `cargo test -p router-hotpath-napi drops_legacy_bare_reasoning_stop_shell_history_from_responses_input -- --nocapture` -> PASS
+  - 回归：
+    - `rewrites_projected_reasoning_stop_cli_pair_when_call_id_is_not_auto_injected` -> PASS
+    - `reasoning_stop_function_call_output_becomes_guidance_input_item` -> PASS
+    - `test_govern_response_repairs_malformed_exec_command_reasoning_stop_back_to_reasoning_stop` -> PASS
+- 当前结论：
+  - 旧坏样本里的裸 `reasoningStop` shell 历史现在会在 request normalization 被物理移除；
+  - 这次闭环的是“旧 shell 污染不能再带进后续 provider-request”，不是宣称 stopless 全链所有 live loop 已全部完结。
+
+## 2026-06-21 servertool auto-hook outcome classification rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts` 的 auto-hook 执行残余 TS owner。
+- 旧 TS 仍本地 owner 一层 outcome 分类语义：
+  - `planned_null`
+  - `materialized_match`
+  - `materialized_empty`
+  - error 分支显式传 `outcome: 'error'`
+- 现在统一并回现有 Rust owner：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs`
+  - input 新增：
+    - `hasPlannedResult`
+    - `hasMaterializedResult`
+    - `materializedFlowId`
+  - `outcome` 改为兼容字段；Rust 优先从事实输入推导 outcome，旧显式 `outcome` 仅保留兼容
+- TS 壳层变化：
+  - `auto-hook-caller.ts` 不再本地枚举 `planned_null/materialized_match/materialized_empty/error`
+  - TS 只传事实输入：是否拿到 planned、是否 materialize 成功、materialized flowId、error message
+- bridge / gate：
+  - `router-hotpath-napi/src/servertool_core_blocks.rs` 补 bridge 断言
+  - `native-servertool-core-semantics.ts` 补 wrapper input shape
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts` 明确禁止 `auto-hook-caller.ts` 复活：
+    - `outcome: 'error'`
+    - `outcome: 'planned_null'`
+    - `outcome: 'materialized_match'`
+    - `outcome: 'materialized_empty'`
+- focused 验证：
+  - `cargo test -p servertool-core auto_hook_execution_contract -- --nocapture` -> 3 passed
+  - `cargo test -p router-hotpath-napi plans_auto_hook_execution_decision_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - focused Jest:
+    - `tests/servertool/servertool-auto-hook-trace.spec.ts`
+    - `tests/servertool/execution-shell.auto-hook-failfast.spec.ts`
+    - `tests/servertool/server-side-tools.failfast.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 结果：4 suites / 21 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+
 ## 2026-06-21 response-side stop schema harvest / rust-owner audit
 
 - 核查目标：
@@ -9822,3 +9887,62 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
 - 结论：
   - live 探针后的运行时已恢复正常；
   - 5520 默认链当前不再先打到 `llmtoken`，而是按恢复后的 priority 首跳命中 `asxs`。
+
+## 2026-06-21 debug/diag/snapshot/samples/log 关系审计
+
+### 四套存储系统对比
+
+| 系统 | 根路径 | Owner 模块 | 用途 | 状态 |
+|------|--------|-----------|------|------|
+| snapshot (server) | `~/.rcc/snapshots/` | `src/utils/snapshot-writer.ts` | pipeline 阶段快照 | 活跃 |
+| snapshot (provider) | `~/.rcc/snapshots/` | `src/providers/core/utils/snapshot-writer.ts` | provider 请求/响应快照 | 活跃 |
+| errorsamples | `~/.rcc/errorsamples/` | `src/utils/errorsamples.ts` | provider 错误 payload | 活跃 |
+| errorsamples (policy) | `~/.rcc/errorsamples/policy/` | errorsamples 内部 | policy violations | 活跃 |
+| debug snapshots | `~/.rcc/codex-samples/` | `src/debug/snapshot-store.ts` | offline replay/dry-run | 活跃 |
+| policy violations | `~/.rcc/codex-samples/__policy_violations__/` | `src/debug/` | hub policy violations | 活跃 |
+| diag | `~/.rcc/diag/` | rcc-dev-skills reference 提及，源码中未发现实际实现 | 规划/文档层面存在 | 不明 |
+
+### 存储路径冲突风险
+
+1. **server snapshot vs debug snapshot**：server 用 `~/.rcc/snapshots/`，debug 用 `~/.rcc/codex-samples/`。路径已隔离。
+2. **errorsamples policy vs debug policy violations**：前者 `~/.rcc/errorsamples/policy/`，后者 `~/.rcc/codex-samples/__policy_violations__/`。两套 policy violation 存储，互不包含。
+3. **snapshot-stage-policy vs snapshot-local-disk-gate**：阶段过滤 + 本地磁盘写入门控两件套，控制哪些 snapshot 能落盘。
+
+### 功能重叠分析
+
+**重叠点**：
+- `src/utils/snapshot-writer.ts` (server) 和 `src/providers/core/utils/snapshot-writer.ts` (provider) 都在写 `~/.rcc/snapshots/`，但 phase 名不同（server 用 `http-request`/`client-response`，provider 用 `provider-request`/`provider-response`）
+- errorsamples 在 provider snapshot writer 内部被调用（`writeErrorsampleJson`），两者共享 provider error 捕获
+- `src/modules/pipeline/utils/debug-logger.ts`（`PipelineDebugLogger`）和 `src/utils/logger.ts` 都做 pipeline 日志，功能有重叠
+
+**无重叠**：
+- codex samples（`sharedmodule/llmswitch-core/tests/fixtures/codex-samples/`）是 repo 内 golden test fixture，不进运行时存储
+- Rust `diagnostics.rs`（`HubPipelineDiagnostic`）是 minimal struct，无运行时写盘
+
+### 诊断层（diag）缺失
+
+- `references/50-rcc-config-ssot.md` 提 `~/.rcc/diag/`，但 `src/` 和 `sharedmodule/llmswitch-core/src/` 均无实际 diag writer
+- `src/types/debug-types.ts` 导入了 `DebugEvent` from `rcc-debugcenter`，但 rcc-debugcenter 是外部 npm 包（`"rcc-debugcenter": "^0.1.6"`），非本项目实现
+- rcc-debugcenter 包的实现不在本 repo 内
+
+### 日志系统分散
+
+| Logger | 文件 | 用途 |
+|--------|------|------|
+| PipelineDebugLogger | `src/modules/pipeline/utils/debug-logger.ts` | pipeline 阶段日志、request/response 捕获 |
+| ColoredLogger | `src/modules/pipeline/utils/colored-logger.ts` | server 彩色日志 |
+| debug-logger | `src/providers/core/utils/debug-logger.ts` | provider 日志（redirect 到 pipeline） |
+| provider-error-logger | `src/providers/core/utils/provider-error-logger.ts` | provider 错误专用日志 |
+| servertool-runtime-log | `src/server/runtime/http-server/executor/servertool-runtime-log.ts` | servertool 运行时日志 |
+| usage-logger | `src/server/runtime/http-server/executor/usage-logger.ts` | token 使用量日志 |
+| log-rollup | `src/server/runtime/http-server/executor/log-rollup.ts` | 多阶段日志聚合 |
+| non-blocking-error-logger | `src/server/utils/non-blocking-error-logger.ts` | 非阻塞错误日志 |
+| oauth-logger | `src/providers/auth/oauth-logger.ts` | OAuth 日志 |
+
+### 结论
+
+1. **存储不重复但分散**：5 个不同 `~/.rcc/` 子目录，各司其职，无物理重复
+2. **diag 是缺口**：文档提了但无实现，rcc-debugcenter 是外部包
+3. **日志最乱**：7+ 种 logger 分散在多处，部分功能重叠（pipeline debug vs 普通 logger）
+4. **codex samples 是测试 fixture**：与运行时 snapshot 无交集
+5. **建议**：优先补 diag 规划落地、统一 logger 抽象、收拢 pipeline 日志到单一入口

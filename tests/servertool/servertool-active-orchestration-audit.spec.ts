@@ -85,6 +85,10 @@ const TARGETS = [
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts',
     forbidden: [
+      "outcome: 'error'",
+      "outcome: 'planned_null'",
+      "outcome: 'materialized_match'",
+      "outcome: 'materialized_empty'",
       "result: 'error'",
       "reason: 'predicate_false'",
       "reason: 'matched_without_flow'",
