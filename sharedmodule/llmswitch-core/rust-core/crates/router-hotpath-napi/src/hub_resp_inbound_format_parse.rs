@@ -214,34 +214,69 @@ fn parse_openai_responses_response(payload: &Value) -> Result<FormatEnvelope, St
 
 fn materialize_openai_responses_response_payload(payload: &Value) -> Result<Value, String> {
     if is_openai_responses_response_payload(payload) {
-        return Ok(payload.clone());
+        let mut materialized = payload.clone();
+        normalize_openai_responses_tool_calls_arrays(&mut materialized);
+        return Ok(materialized);
     }
     if let Some(body_text) = payload
         .get("bodyText")
         .and_then(Value::as_str)
         .filter(|text| !text.trim().is_empty())
     {
-        return materialize_openai_responses_sse_body_text(body_text);
+        let mut materialized = materialize_openai_responses_sse_body_text(body_text)?;
+        normalize_openai_responses_tool_calls_arrays(&mut materialized);
+        return Ok(materialized);
     }
     if let Some(body) = payload.get("body") {
         if is_openai_responses_response_payload(body) {
-            return Ok(body.clone());
+            let mut materialized = body.clone();
+            normalize_openai_responses_tool_calls_arrays(&mut materialized);
+            return Ok(materialized);
         }
         if let Some(body_text) = body
             .get("bodyText")
             .and_then(Value::as_str)
             .filter(|text| !text.trim().is_empty())
         {
-            return materialize_openai_responses_sse_body_text(body_text);
+            let mut materialized = materialize_openai_responses_sse_body_text(body_text)?;
+            normalize_openai_responses_tool_calls_arrays(&mut materialized);
+            return Ok(materialized);
         }
     }
-    Ok(payload.clone())
+    let mut materialized = payload.clone();
+    normalize_openai_responses_tool_calls_arrays(&mut materialized);
+    Ok(materialized)
 }
 
 fn is_openai_responses_response_payload(value: &Value) -> bool {
     value
         .as_object()
         .is_some_and(|row| row.get("output").and_then(Value::as_array).is_some())
+}
+
+fn normalize_openai_responses_tool_calls_arrays(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(tool_calls) = object.get_mut("tool_calls") {
+                if !tool_calls.is_array() {
+                    let normalized = match std::mem::take(tool_calls) {
+                        Value::Null => Value::Array(Vec::new()),
+                        other => Value::Array(vec![other]),
+                    };
+                    *tool_calls = normalized;
+                }
+            }
+            for child in object.values_mut() {
+                normalize_openai_responses_tool_calls_arrays(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                normalize_openai_responses_tool_calls_arrays(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn parse_openai_chat_response(payload: &Value) -> Result<FormatEnvelope, String> {
@@ -295,7 +330,9 @@ struct OpenAiChatStreamToolCall {
 
 fn materialize_openai_chat_response_payload(payload: &Value) -> Result<Value, String> {
     if payload.get("choices").and_then(Value::as_array).is_some() {
-        return Ok(payload.clone());
+        let mut materialized = payload.clone();
+        normalize_openai_chat_message_tool_calls_arrays(&mut materialized);
+        return Ok(materialized);
     }
     if let Some(body_text) = payload
         .get("bodyText")
@@ -306,7 +343,9 @@ fn materialize_openai_chat_response_payload(payload: &Value) -> Result<Value, St
     }
     if let Some(body) = payload.get("body") {
         if body.get("choices").and_then(Value::as_array).is_some() {
-            return Ok(body.clone());
+            let mut materialized = body.clone();
+            normalize_openai_chat_message_tool_calls_arrays(&mut materialized);
+            return Ok(materialized);
         }
         if let Some(body_text) = body
             .get("bodyText")
@@ -316,7 +355,42 @@ fn materialize_openai_chat_response_payload(payload: &Value) -> Result<Value, St
             return materialize_openai_chat_sse_body_text(body_text);
         }
     }
-    Ok(payload.clone())
+    let mut materialized = payload.clone();
+    normalize_openai_chat_message_tool_calls_arrays(&mut materialized);
+    Ok(materialized)
+}
+
+fn normalize_openai_chat_message_tool_calls_arrays(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(choices) = object.get_mut("choices").and_then(Value::as_array_mut) {
+                for choice in choices {
+                    if let Some(choice_row) = choice.as_object_mut() {
+                        if let Some(message) = choice_row.get_mut("message").and_then(Value::as_object_mut) {
+                            if let Some(tool_calls) = message.get_mut("tool_calls") {
+                                if !tool_calls.is_array() {
+                                    let normalized = match std::mem::take(tool_calls) {
+                                        Value::Null => Value::Array(Vec::new()),
+                                        other => Value::Array(vec![other]),
+                                    };
+                                    *tool_calls = normalized;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for child in object.values_mut() {
+                normalize_openai_chat_message_tool_calls_arrays(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                normalize_openai_chat_message_tool_calls_arrays(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn parse_openai_chat_sse_json_events(body_text: &str) -> Vec<Value> {
@@ -1266,6 +1340,42 @@ mod tests {
         assert_eq!(result.envelope.format, "openai-responses");
         // Model should be empty string when not present
         assert_eq!(result.envelope.metadata.as_ref().unwrap()["model"], "");
+    }
+
+    #[test]
+    fn test_openai_chat_tool_calls_object_is_normalized_to_array() {
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "id": "resp_tool_calls_object_1",
+                "object": "chat.completion",
+                "model": "gpt-test",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": {
+                            "id": "call_reasoning_stop_1",
+                            "type": "function",
+                            "function": {
+                                "name": "reasoningStop",
+                                "arguments": "{\"stopreason\":2,\"reason\":\"continue\"}"
+                            }
+                        }
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            protocol: "openai-chat".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        let tool_calls = result.envelope.payload["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .expect("tool_calls array");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0]["id"], "call_reasoning_stop_1");
+        assert_eq!(tool_calls[0]["function"]["name"], "reasoningStop");
     }
 
     // Critical path test: Model field is not string type
