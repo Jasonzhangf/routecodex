@@ -18,16 +18,31 @@ use servertool_core::backend_route_contract::{
     ServertoolMissingFollowupPayloadErrorPlanInput, ServertoolPreferredFinalResponseInput,
     ServertoolVisionEligibilityInput,
 };
+use servertool_core::auto_hook_execution_contract;
+use servertool_core::auto_hook_queue_contract;
 use servertool_core::blocked_report_contract;
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::cli_result_guard;
+use servertool_core::engine_preflight_contract;
 use servertool_core::engine_selection_contract;
+use servertool_core::engine_runtime_action_contract;
+use servertool_core::engine_skip_contract;
+use servertool_core::execution_branch_contract;
+use servertool_core::execution_dispatch_contract;
+use servertool_core::execution_handler_contract;
+use servertool_core::execution_loop_effect_contract;
+use servertool_core::execution_loop_runtime_action_contract;
+use servertool_core::execution_outcome_runtime_action_contract;
+use servertool_core::execution_state_contract;
+use servertool_core::hook_skeleton_contract;
 use servertool_core::loop_state_contract;
 use servertool_core::orchestration_policy_contract;
 use servertool_core::pending_session_contract;
 use servertool_core::persisted_lookup;
 use servertool_core::pre_command_hook_contract;
+use servertool_core::registry_contract;
+use servertool_core::response_stage_runtime_action_contract;
 use servertool_core::stop_gateway_context;
 use servertool_core::stop_message_compare_context;
 use servertool_core::stop_message_counter;
@@ -37,6 +52,7 @@ use servertool_core::stop_message_persist_plan;
 use servertool_core::stop_visible_text;
 use servertool_core::stopless_decision_context_goal;
 use servertool_core::stopless_decision_context_signals;
+use servertool_core::stopless_cli_projection_context_contract;
 use servertool_core::stopless_goal_state_contract;
 use servertool_core::stopless_learned_note_contract;
 use servertool_core::stopless_orchestration_contract;
@@ -440,6 +456,177 @@ pub fn plan_runtime_pre_command_rule_json(input_json: &str) -> Result<String, St
     .map_err(|e| format!("serialize runtime pre-command rule plan: {e}"))
 }
 
+pub fn plan_runtime_pre_command_state_selection_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: pre_command_hook_contract::RuntimePreCommandStateSelectionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize runtime pre-command state selection input: {e}"))?;
+    serde_json::to_string(
+        &pre_command_hook_contract::plan_runtime_pre_command_state_selection(&input),
+    )
+    .map_err(|e| format!("serialize runtime pre-command state selection plan: {e}"))
+}
+
+pub fn plan_auto_hook_execution_decision_json(input_json: &str) -> Result<String, String> {
+    let input: auto_hook_execution_contract::AutoHookExecutionDecisionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize auto-hook execution decision input: {e}"))?;
+    serde_json::to_string(&auto_hook_execution_contract::plan_auto_hook_execution_decision(input))
+        .map_err(|e| format!("serialize auto-hook execution decision plan: {e}"))
+}
+
+pub fn plan_auto_hook_queue_progress_json(input_json: &str) -> Result<String, String> {
+    let input: auto_hook_queue_contract::AutoHookQueueProgressInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize auto-hook queue progress input: {e}"))?;
+    serde_json::to_string(&auto_hook_queue_contract::plan_auto_hook_queue_progress(input))
+        .map_err(|e| format!("serialize auto-hook queue progress plan: {e}"))
+}
+
+pub fn plan_servertool_execution_branch_json(input_json: &str) -> Result<String, String> {
+    let input: execution_branch_contract::ServertoolExecutionBranchPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool execution branch input: {e}"))?;
+    serde_json::to_string(&execution_branch_contract::plan_servertool_execution_branch(input))
+        .map_err(|e| format!("serialize servertool execution branch plan: {e}"))
+}
+
+pub fn plan_servertool_engine_preflight_json(input_json: &str) -> Result<String, String> {
+    let input: engine_preflight_contract::ServertoolEnginePreflightInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool engine preflight input: {e}"))?;
+    serde_json::to_string(&engine_preflight_contract::plan_servertool_engine_preflight(
+        input,
+    ))
+    .map_err(|e| format!("serialize servertool engine preflight plan: {e}"))
+}
+
+pub fn plan_servertool_engine_runtime_action_json(input_json: &str) -> Result<String, String> {
+    let input: engine_runtime_action_contract::ServertoolEngineRuntimeActionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool engine runtime action input: {e}"))?;
+    serde_json::to_string(&engine_runtime_action_contract::plan_servertool_engine_runtime_action(
+        input,
+    ))
+    .map_err(|e| format!("serialize servertool engine runtime action plan: {e}"))
+}
+
+pub fn plan_servertool_engine_skip_json(input_json: &str) -> Result<String, String> {
+    let input: engine_skip_contract::ServertoolEngineSkipInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool engine skip input: {e}"))?;
+    serde_json::to_string(&engine_skip_contract::plan_servertool_engine_skip(input))
+        .map_err(|e| format!("serialize servertool engine skip plan: {e}"))
+}
+
+pub fn plan_servertool_execution_outcome_runtime_action_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: execution_outcome_runtime_action_contract::ServertoolExecutionOutcomeRuntimeActionInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool execution outcome runtime action input: {e}")
+        })?;
+    serde_json::to_string(
+        &execution_outcome_runtime_action_contract::plan_servertool_execution_outcome_runtime_action(
+            input,
+        ),
+    )
+    .map_err(|e| format!("serialize servertool execution outcome runtime action plan: {e}"))
+}
+
+pub fn plan_servertool_execution_loop_runtime_action_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: execution_loop_runtime_action_contract::ServertoolExecutionLoopRuntimeActionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool execution loop runtime action input: {e}"))?;
+    serde_json::to_string(
+        &execution_loop_runtime_action_contract::plan_servertool_execution_loop_runtime_action(
+            input,
+        ),
+    )
+    .map_err(|e| format!("serialize servertool execution loop runtime action plan: {e}"))
+}
+
+pub fn plan_servertool_execution_loop_effect_json(input_json: &str) -> Result<String, String> {
+    let input: execution_loop_effect_contract::ServertoolExecutionLoopEffectInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool execution loop effect input: {e}"))?;
+    serde_json::to_string(
+        &execution_loop_effect_contract::plan_servertool_execution_loop_effect(input),
+    )
+    .map_err(|e| format!("serialize servertool execution loop effect plan: {e}"))
+}
+
+pub fn plan_servertool_response_stage_runtime_action_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: response_stage_runtime_action_contract::ServertoolResponseStageRuntimeActionInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool response stage runtime action input: {e}")
+        })?;
+    serde_json::to_string(
+        &response_stage_runtime_action_contract::plan_servertool_response_stage_runtime_action(
+            input,
+        ),
+    )
+    .map_err(|e| format!("serialize servertool response stage runtime action plan: {e}"))
+}
+
+pub fn plan_servertool_registry_registration_action_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: registry_contract::ServertoolRegistryRegistrationActionInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool registry registration action input: {e}")
+        })?;
+    serde_json::to_string(
+        &registry_contract::plan_servertool_registry_registration_action(input),
+    )
+    .map_err(|e| format!("serialize servertool registry registration action plan: {e}"))
+}
+
+pub fn plan_servertool_registry_lookup_action_json(input_json: &str) -> Result<String, String> {
+    let input: registry_contract::ServertoolRegistryLookupActionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool registry lookup action input: {e}"))?;
+    serde_json::to_string(&registry_contract::plan_servertool_registry_lookup_action(input))
+        .map_err(|e| format!("serialize servertool registry lookup action plan: {e}"))
+}
+
+pub fn plan_servertool_registry_auto_hook_descriptors_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: Vec<registry_contract::ServertoolRegistryAutoHookDescriptorInput> =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool registry auto hook descriptors input: {e}")
+        })?;
+    let plan = registry_contract::plan_servertool_registry_auto_hook_descriptors(input)
+        .map_err(|e| format!("plan servertool registry auto hook descriptors: {e}"))?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize servertool registry auto hook descriptors plan: {e}"))
+}
+
+pub fn plan_servertool_registry_projection_json(input_json: &str) -> Result<String, String> {
+    let input: registry_contract::ServertoolRegistryProjectionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool registry projection input: {e}"))?;
+    let plan = registry_contract::plan_servertool_registry_projection(input)
+        .map_err(|e| format!("plan servertool registry projection: {e}"))?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize servertool registry projection plan: {e}"))
+}
+
+pub fn plan_stopless_cli_projection_context_json(input_json: &str) -> Result<String, String> {
+    let input: stopless_cli_projection_context_contract::StoplessCliProjectionContextInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize stopless cli projection context input: {e}"))?;
+    serde_json::to_string(
+        &stopless_cli_projection_context_contract::plan_stopless_cli_projection_context(input),
+    )
+    .map_err(|e| format!("serialize stopless cli projection context plan: {e}"))
+}
+
 pub fn plan_engine_selection_start_json(input_json: &str) -> Result<String, String> {
     let input: engine_selection_contract::EngineSelectionStartInput =
         serde_json::from_str(input_json)
@@ -458,6 +645,158 @@ pub fn plan_engine_selection_after_run_json(input_json: &str) -> Result<String, 
         input,
     ))
     .map_err(|e| format!("serialize engine selection after-run plan: {e}"))
+}
+
+pub fn plan_servertool_handler_contract_error_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool handler contract error input: {e}"))?;
+    let kind = input
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    match kind {
+        "handler_failed" => {
+            let parsed: execution_handler_contract::ServertoolHandlerFailedErrorInput =
+                serde_json::from_value(input)
+                    .map_err(|e| format!("deserialize handler failed error input: {e}"))?;
+            serde_json::to_string(
+                &execution_handler_contract::plan_servertool_handler_failed_error(&parsed),
+            )
+            .map_err(|e| format!("serialize handler failed error plan: {e}"))
+        }
+        "backend_requires_reenter_pipeline" => {
+            let parsed: execution_handler_contract::ServertoolBackendRequiresReenterPipelineErrorInput =
+                serde_json::from_value(input).map_err(|e| {
+                    format!("deserialize backend requires reenter pipeline error input: {e}")
+                })?;
+            serde_json::to_string(
+                &execution_handler_contract::plan_servertool_backend_requires_reenter_pipeline_error(
+                    &parsed,
+                ),
+            )
+            .map_err(|e| format!("serialize backend requires reenter pipeline error plan: {e}"))
+        }
+        "unsupported_backend_plan_kind" => {
+            let parsed: execution_handler_contract::ServertoolUnsupportedBackendPlanKindErrorInput =
+                serde_json::from_value(input)
+                    .map_err(|e| format!("deserialize unsupported backend kind input: {e}"))?;
+            serde_json::to_string(
+                &execution_handler_contract::plan_servertool_unsupported_backend_plan_kind_error(
+                    &parsed,
+                ),
+            )
+            .map_err(|e| format!("serialize unsupported backend kind error plan: {e}"))
+        }
+        "invalid_handler_plan_missing_finalize" => {
+            let parsed: execution_handler_contract::ServertoolInvalidHandlerPlanErrorInput =
+                serde_json::from_value(input).map_err(|e| {
+                    format!("deserialize invalid handler plan missing finalize input: {e}")
+                })?;
+            serde_json::to_string(
+                &execution_handler_contract::plan_servertool_invalid_handler_plan_missing_finalize_error(
+                    &parsed,
+                ),
+            )
+            .map_err(|e| format!("serialize invalid handler plan missing finalize error plan: {e}"))
+        }
+        "invalid_handler_plan_result" => {
+            let parsed: execution_handler_contract::ServertoolInvalidHandlerPlanErrorInput =
+                serde_json::from_value(input)
+                    .map_err(|e| format!("deserialize invalid handler plan result input: {e}"))?;
+            serde_json::to_string(
+                &execution_handler_contract::plan_servertool_invalid_handler_plan_result_error(
+                    &parsed,
+                ),
+            )
+            .map_err(|e| format!("serialize invalid handler plan result error plan: {e}"))
+        }
+        _ => Err(format!(
+            "deserialize servertool handler contract error input: unknown kind {kind}"
+        )),
+    }
+}
+
+pub fn plan_servertool_execution_dispatch_error_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool execution-dispatch error input: {e}"))?;
+    let kind = input
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    match kind {
+        "dispatch_spec_mismatch" => {
+            let parsed: execution_dispatch_contract::ServertoolDispatchSpecMismatchErrorInput =
+                serde_json::from_value(input).map_err(|e| {
+                    format!("deserialize dispatch spec mismatch error input: {e}")
+                })?;
+            serde_json::to_string(
+                &execution_dispatch_contract::plan_servertool_dispatch_spec_mismatch_error(&parsed),
+            )
+            .map_err(|e| format!("serialize dispatch spec mismatch error plan: {e}"))
+        }
+        "invalid_mixed_client_tools_outcome" => {
+            let parsed:
+                execution_dispatch_contract::ServertoolInvalidMixedClientToolsOutcomeErrorInput =
+                serde_json::from_value(input).map_err(|e| {
+                    format!("deserialize invalid mixed client tools outcome error input: {e}")
+                })?;
+            serde_json::to_string(
+                &execution_dispatch_contract::plan_servertool_invalid_mixed_client_tools_outcome_error(
+                    &parsed,
+                ),
+            )
+            .map_err(|e| format!("serialize invalid mixed client tools outcome error plan: {e}"))
+        }
+        "missing_followup_contract" => {
+            let parsed:
+                execution_dispatch_contract::ServertoolMissingFollowupContractErrorInput =
+                serde_json::from_value(input).map_err(|e| {
+                    format!("deserialize missing followup contract error input: {e}")
+                })?;
+            serde_json::to_string(
+                &execution_dispatch_contract::plan_servertool_missing_followup_contract_error(
+                    &parsed,
+                ),
+            )
+            .map_err(|e| format!("serialize missing followup contract error plan: {e}"))
+        }
+        _ => Err(format!(
+            "deserialize servertool execution-dispatch error input: unknown kind {kind}"
+        )),
+    }
+}
+
+pub fn plan_servertool_handler_runtime_action_json(input_json: &str) -> Result<String, String> {
+    let input: execution_handler_contract::ServertoolHandlerRuntimeActionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool handler runtime action input: {e}"))?;
+    serde_json::to_string(&execution_handler_contract::plan_servertool_handler_runtime_action(
+        &input,
+    ))
+    .map_err(|e| format!("serialize servertool handler runtime action plan: {e}"))
+}
+
+pub fn create_servertool_execution_loop_state_json() -> Result<String, String> {
+    serde_json::to_string(&execution_state_contract::create_servertool_execution_loop_state())
+        .map_err(|e| format!("serialize servertool execution loop state: {e}"))
+}
+
+pub fn append_servertool_executed_record_json(input_json: &str) -> Result<String, String> {
+    let input: execution_state_contract::ServertoolAppendExecutedRecordInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool append executed record input: {e}"))?;
+    serde_json::to_string(&execution_state_contract::append_executed_tool_record(input))
+        .map_err(|e| format!("serialize servertool appended execution state: {e}"))
+}
+
+pub fn plan_servertool_materialization_progress_json(input_json: &str) -> Result<String, String> {
+    let input: execution_handler_contract::ServertoolMaterializationProgressInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool materialization progress input: {e}"))?;
+    serde_json::to_string(
+        &execution_handler_contract::plan_servertool_materialization_progress(&input),
+    )
+    .map_err(|e| format!("serialize servertool materialization progress plan: {e}"))
 }
 
 pub fn resolve_default_stop_message_snapshot_json(input_json: &str) -> Result<String, String> {
@@ -551,6 +890,16 @@ pub fn plan_servertool_timeout_error_json(input_json: &str) -> Result<String, St
         .map_err(|e| format!("serialize servertool timeout error: {e}"))
 }
 
+pub fn plan_servertool_state_load_failed_error_json(input_json: &str) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolStateLoadFailedErrorInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool state-load error input: {e}"))?;
+    serde_json::to_string(
+        &orchestration_policy_contract::plan_servertool_state_load_failed_error(&input)?,
+    )
+    .map_err(|e| format!("serialize servertool state-load error: {e}"))
+}
+
 pub fn plan_stop_message_fetch_failed_error_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::StopMessageFetchFailedErrorInput =
         serde_json::from_str(input_json)
@@ -625,12 +974,45 @@ pub fn plan_stopless_learned_note_write_json(input_json: &str) -> Result<String,
         .map_err(|e| format!("serialize stopless learned-note plan: {e}"))
 }
 
+pub fn validate_servertool_hook_skeleton_phase_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: hook_skeleton_contract::ServertoolHookSpec = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool hook skeleton spec: {e}"))?;
+    let output = hook_skeleton_contract::validate_servertool_hook_spec(&input)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize servertool hook skeleton projection: {e}"))
+}
+
+pub fn plan_servertool_hook_schedule_json(input_json: &str) -> Result<String, String> {
+    let input: hook_skeleton_contract::ServertoolHookSchedulerInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool hook scheduler input: {e}"))?;
+    let output =
+        hook_skeleton_contract::plan_servertool_hook_schedule(input).map_err(|e| e.to_string())?;
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize servertool hook scheduler plan: {e}"))
+}
+
 pub fn build_client_visible_projection_shell_json(input_json: &str) -> Result<String, String> {
     let input: ServertoolClientVisibleProjectionShellInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize projection shell input: {e}"))?;
     let output =
         cli_contract::build_client_visible_projection_shell(input).map_err(|e| e.to_string())?;
     serde_json::to_string(&output).map_err(|e| format!("serialize projection shell: {e}"))
+}
+
+pub fn build_servertool_cli_projection_execution_context_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: cli_contract::ServertoolCliProjectionExecutionContextInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize cli projection execution context input: {e}"))?;
+    let output = cli_contract::build_servertool_cli_projection_execution_context(input)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize cli projection execution context: {e}"))
 }
 
 pub fn validate_client_exec_command_result_json(raw_output: &str) -> Result<String, String> {
@@ -791,6 +1173,18 @@ pub fn extract_current_assistant_stop_text_json(input_json: &str) -> Result<Stri
         .map_err(|e| format!("deserialize current assistant stop text payload: {e}"))?;
     let text = stop_visible_text::extract_current_assistant_stop_text(&payload);
     serde_json::to_string(&text).map_err(|e| format!("serialize current assistant stop text: {e}"))
+}
+
+pub fn extract_current_assistant_reasoning_stop_arguments_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let payload: serde_json::Value = serde_json::from_str(input_json).map_err(|e| {
+        format!("deserialize current assistant reasoningStop arguments payload: {e}")
+    })?;
+    let arguments = stop_visible_text::extract_current_assistant_reasoning_stop_arguments(&payload);
+    serde_json::to_string(&arguments).map_err(|e| {
+        format!("serialize current assistant reasoningStop arguments: {e}")
+    })
 }
 
 pub fn strip_stop_schema_control_text_json(input_json: &str) -> Result<String, String> {
@@ -1534,7 +1928,7 @@ mod tests {
 
     #[test]
     fn resolves_runtime_stop_message_state_from_adapter_context_via_servertool_core_bridge() {
-        let command = "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
+        let command = "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
         let raw = resolve_runtime_stop_message_state_from_adapter_context_json(
             &json!({
                 "adapterContext": {
@@ -1829,7 +2223,7 @@ mod tests {
     }
 
     #[test]
-    fn plans_pre_command_hooks_via_servertool_core_bridge() {
+fn plans_pre_command_hooks_via_servertool_core_bridge() {
         let config = plan_pre_command_hooks_config_json(
             &json!({
                 "raw": {
@@ -2190,9 +2584,709 @@ mod tests {
         assert_eq!(plan["repeatCount"], 2);
         assert_eq!(plan["maxRepeats"], 3);
         let command = plan["execCommand"].as_str().expect("exec command");
-        assert!(command.contains("routecodex hook run reasoning_stop"));
+        assert!(command.contains("routecodex hook run reasoningStop"));
         assert!(!command.contains("continuationPrompt"));
         assert!(!command.contains("schemaGuidance"));
         assert!(!command.contains("stdoutPreview"));
     }
+}
+
+#[test]
+fn plans_runtime_pre_command_state_selection_via_servertool_core_bridge() {
+    let plan = plan_runtime_pre_command_state_selection_json(
+        &serde_json::json!({
+            "directRuntimePreCommandState": null,
+            "runtimeMetadataPreCommandState": { "preCommandScriptPath": "/tmp/runtime.sh" },
+            "persistedLoadAttempted": false
+        })
+        .to_string(),
+    )
+    .expect("state selection plan");
+    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(parsed["action"], "use_selected");
+    assert_eq!(parsed["source"], "runtime_metadata");
+    assert_eq!(
+        parsed["state"]["preCommandScriptPath"],
+        serde_json::Value::String("/tmp/runtime.sh".to_string())
+    );
+}
+
+#[test]
+fn plans_auto_hook_execution_decision_via_servertool_core_bridge() {
+    let plan = plan_auto_hook_execution_decision_json(
+        &serde_json::json!({
+            "hookId": "stop_message_auto",
+            "phase": "default",
+            "priority": 40,
+            "queue": "A_optional",
+            "queueIndex": 1,
+            "queueTotal": 1,
+            "outcome": "materialized_match",
+            "flowId": "stop_message_flow"
+        })
+        .to_string(),
+    )
+    .expect("auto-hook execution plan");
+    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(parsed["action"], "return_result");
+    assert_eq!(parsed["traceEvent"]["result"], "match");
+    assert_eq!(
+        parsed["traceEvent"]["flowId"],
+        serde_json::Value::String("stop_message_flow".to_string())
+    );
+}
+
+#[test]
+fn plans_auto_hook_queue_progress_via_servertool_core_bridge() {
+    let plan = plan_auto_hook_queue_progress_json(
+        &serde_json::json!({
+            "queueOrder": ["A_optional", "B_mandatory"],
+            "currentQueue": "A_optional",
+            "resultPresent": false
+        })
+        .to_string(),
+    )
+    .expect("auto-hook queue progress plan");
+    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(parsed["action"], "continue_next_queue");
+    assert_eq!(
+        parsed["nextQueue"],
+        serde_json::Value::String("B_mandatory".to_string())
+    );
+}
+
+#[test]
+fn plans_servertool_handler_contract_error_via_servertool_core_bridge() {
+    let plan = plan_servertool_handler_contract_error_json(
+        &serde_json::json!({
+            "kind": "handler_failed",
+            "toolName": "tool_a",
+            "requestId": "req-1",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "error": "boom"
+        })
+        .to_string(),
+    )
+    .expect("handler contract error plan");
+    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(parsed["code"], "SERVERTOOL_HANDLER_FAILED");
+    assert_eq!(parsed["details"]["toolName"], "tool_a");
+}
+
+#[test]
+fn plans_servertool_execution_dispatch_error_via_servertool_core_bridge() {
+    let plan = plan_servertool_execution_dispatch_error_json(
+        &serde_json::json!({
+            "kind": "dispatch_spec_mismatch",
+            "requestId": "req-1",
+            "toolName": "web_search",
+            "nativeExecutionMode": "guarded",
+            "tsExecutionMode": "legacy"
+        })
+        .to_string(),
+    )
+    .expect("execution dispatch error plan");
+    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(parsed["code"], "SERVERTOOL_HANDLER_FAILED");
+    assert_eq!(
+        parsed["message"],
+        "[servertool] dispatch spec mismatch: web_search: native=guarded ts=legacy"
+    );
+}
+
+#[test]
+fn plans_servertool_handler_runtime_action_via_servertool_core_bridge() {
+    let plan = plan_servertool_handler_runtime_action_json(
+        &serde_json::json!({
+            "hasFinalizeFunction": true,
+            "hasChatResponseObject": false,
+            "hasExecutionObject": false,
+            "hasExecutionFlowId": false,
+            "hasPlanMarkers": true,
+            "hasBackendPlan": true,
+            "backendKind": "vision_analysis",
+            "hasReenterPipeline": false
+        })
+        .to_string(),
+    )
+    .expect("handler runtime action plan");
+    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(
+        parsed["action"],
+        serde_json::json!("backend_requires_reenter_pipeline")
+    );
+    assert_eq!(parsed["backendKind"], serde_json::json!("vision_analysis"));
+}
+
+#[test]
+fn plans_servertool_execution_branch_via_servertool_core_bridge() {
+    let cli_projection = plan_servertool_execution_branch_json(
+        &serde_json::json!({
+            "executableToolCalls": [
+                {
+                    "id": " call_cli_1 ",
+                    "name": " servertool_fixture ",
+                    "executionMode": "client_exec_cli_projection"
+                }
+            ],
+            "executedToolCallsLen": 0
+        })
+        .to_string(),
+    )
+    .expect("execution branch cli projection plan");
+    let cli_projection_value: serde_json::Value =
+        serde_json::from_str(&cli_projection).expect("parse cli projection plan");
+    assert_eq!(
+        cli_projection_value["action"],
+        serde_json::json!("client_exec_cli_projection")
+    );
+    assert_eq!(
+        cli_projection_value["projectedToolCallId"],
+        serde_json::json!("call_cli_1")
+    );
+
+    let resolve_outcome = plan_servertool_execution_branch_json(
+        &serde_json::json!({
+            "executableToolCalls": [],
+            "executedToolCallsLen": 1
+        })
+        .to_string(),
+    )
+    .expect("execution branch outcome plan");
+    let resolve_outcome_value: serde_json::Value =
+        serde_json::from_str(&resolve_outcome).expect("parse outcome plan");
+    assert_eq!(
+        resolve_outcome_value["action"],
+        serde_json::json!("resolve_execution_outcome")
+    );
+}
+
+#[test]
+fn plans_servertool_engine_preflight_via_servertool_core_bridge() {
+    let synthetic = plan_servertool_engine_preflight_json(
+        &serde_json::json!({
+            "hasSyntheticControlText": true,
+            "stopSignalObserved": true,
+            "stoplessDisabledOnDirectRoute": true
+        })
+        .to_string(),
+    )
+    .expect("engine preflight synthetic plan");
+    let synthetic_value: serde_json::Value =
+        serde_json::from_str(&synthetic).expect("parse synthetic plan");
+    assert_eq!(
+        synthetic_value["action"],
+        serde_json::json!("return_original_chat")
+    );
+
+    let direct = plan_servertool_engine_preflight_json(
+        &serde_json::json!({
+            "hasSyntheticControlText": false,
+            "stopSignalObserved": true,
+            "stoplessDisabledOnDirectRoute": true
+        })
+        .to_string(),
+    )
+    .expect("engine preflight direct plan");
+    let direct_value: serde_json::Value = serde_json::from_str(&direct).expect("parse direct plan");
+    assert_eq!(
+        direct_value["action"],
+        serde_json::json!("return_original_chat_direct_passthrough")
+    );
+}
+
+#[test]
+fn plans_servertool_engine_skip_via_servertool_core_bridge() {
+    let passthrough = plan_servertool_engine_skip_json(
+        &serde_json::json!({
+            "engineMode": "passthrough",
+            "hasExecution": false
+        })
+        .to_string(),
+    )
+    .expect("engine skip passthrough plan");
+    let passthrough_value: serde_json::Value =
+        serde_json::from_str(&passthrough).expect("parse passthrough plan");
+    assert_eq!(
+        passthrough_value["action"],
+        serde_json::json!("return_skipped_passthrough")
+    );
+
+    let no_execution = plan_servertool_engine_skip_json(
+        &serde_json::json!({
+            "engineMode": "tool_flow",
+            "hasExecution": false
+        })
+        .to_string(),
+    )
+    .expect("engine skip no execution plan");
+    let no_execution_value: serde_json::Value =
+        serde_json::from_str(&no_execution).expect("parse no execution plan");
+    assert_eq!(
+        no_execution_value["action"],
+        serde_json::json!("return_skipped_no_execution")
+    );
+}
+
+#[test]
+fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge() {
+    let mixed = plan_servertool_execution_outcome_runtime_action_json(
+        &serde_json::json!({
+            "outcomeMode": "mixed_client_tools",
+            "requiresPendingInjection": true,
+            "followupStrategy": "pending_injection",
+            "useLastExecutionFollowup": false,
+            "hasLastExecutionFollowup": false,
+            "hasResolvedFollowup": false,
+            "hasLastExecution": false,
+            "executedToolCallsLen": 0
+        })
+        .to_string(),
+    )
+    .expect("execution outcome runtime action mixed plan");
+    let mixed_value: serde_json::Value =
+        serde_json::from_str(&mixed).expect("parse mixed plan");
+    assert_eq!(
+        mixed_value["action"],
+        serde_json::json!("return_mixed_client_tools_pending_injection")
+    );
+    assert_eq!(
+        mixed_value["reuseLastExecutionEnvelope"],
+        serde_json::json!(false)
+    );
+
+    let missing = plan_servertool_execution_outcome_runtime_action_json(
+        &serde_json::json!({
+            "outcomeMode": "servertool_only",
+            "requiresPendingInjection": false,
+            "followupStrategy": "generic",
+            "useLastExecutionFollowup": false,
+            "hasLastExecutionFollowup": false,
+            "hasResolvedFollowup": false,
+            "hasLastExecution": false,
+            "executedToolCallsLen": 0
+        })
+        .to_string(),
+    )
+    .expect("execution outcome runtime action missing plan");
+    let missing_value: serde_json::Value =
+        serde_json::from_str(&missing).expect("parse missing plan");
+    assert_eq!(
+        missing_value["action"],
+        serde_json::json!("missing_followup_contract")
+    );
+
+    let reuse = plan_servertool_execution_outcome_runtime_action_json(
+        &serde_json::json!({
+            "outcomeMode": "servertool_only",
+            "requiresPendingInjection": false,
+            "followupStrategy": "reuse_last_execution",
+            "useLastExecutionFollowup": true,
+            "hasLastExecutionFollowup": true,
+            "hasResolvedFollowup": true,
+            "hasLastExecution": true,
+            "executedToolCallsLen": 1
+        })
+        .to_string(),
+    )
+    .expect("execution outcome runtime action reuse plan");
+    let reuse_value: serde_json::Value =
+        serde_json::from_str(&reuse).expect("parse reuse plan");
+    assert_eq!(
+        reuse_value["action"],
+        serde_json::json!("reuse_last_execution_followup")
+    );
+    assert_eq!(
+        reuse_value["reuseLastExecutionEnvelope"],
+        serde_json::json!(true)
+    );
+}
+
+#[test]
+fn plans_servertool_execution_loop_runtime_action_via_servertool_core_bridge() {
+    let skip = plan_servertool_execution_loop_runtime_action_json(
+        &serde_json::json!({
+            "hasHandlerEntry": false,
+            "hasMaterializedResult": false,
+            "hasHandlerError": false
+        })
+        .to_string(),
+    )
+    .expect("execution loop runtime action skip plan");
+    let skip_value: serde_json::Value = serde_json::from_str(&skip).expect("parse skip plan");
+    assert_eq!(
+        skip_value["action"],
+        serde_json::json!("skip_non_tool_call_handler")
+    );
+
+    let apply_error = plan_servertool_execution_loop_runtime_action_json(
+        &serde_json::json!({
+            "hasHandlerEntry": true,
+            "triggerMode": "tool_call",
+            "hasMaterializedResult": false,
+            "hasHandlerError": true
+        })
+        .to_string(),
+    )
+    .expect("execution loop runtime action error plan");
+    let apply_error_value: serde_json::Value =
+        serde_json::from_str(&apply_error).expect("parse error plan");
+    assert_eq!(
+        apply_error_value["action"],
+        serde_json::json!("apply_handler_error_tool_output")
+    );
+}
+
+#[test]
+fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
+    let handler_error = plan_servertool_execution_loop_effect_json(
+        &serde_json::json!({
+            "mode": "handler_error",
+            "toolCall": {
+                "id": "call_fail_1",
+                "name": "web_search",
+                "arguments": "{}",
+                "executionMode": "guarded",
+                "stripAfterExecute": true
+            }
+        })
+        .to_string(),
+    )
+    .expect("execution loop effect handler_error plan");
+    let handler_error_value: serde_json::Value =
+        serde_json::from_str(&handler_error).expect("parse handler_error plan");
+    assert_eq!(
+        handler_error_value["execution"]["flowId"],
+        serde_json::json!("web_search_error")
+    );
+    assert_eq!(
+        handler_error_value["toolCall"]["executionMode"],
+        serde_json::json!("guarded")
+    );
+
+    let noop = plan_servertool_execution_loop_effect_json(
+        &serde_json::json!({
+            "mode": "noop",
+            "toolCall": {
+                "id": "call_continue_1",
+                "name": "continue_execution",
+                "arguments": "{}",
+                "executionMode": "guarded",
+                "stripAfterExecute": false
+            },
+            "noopFlowId": "continue_execution_flow",
+            "noopFollowup": {
+                "requestIdSuffix": ":continue_execution_followup"
+            },
+            "noopExecutionContext": {
+                "continue_execution": {
+                    "visibleSummary": "继续执行"
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("execution loop effect noop plan");
+    let noop_value: serde_json::Value =
+        serde_json::from_str(&noop).expect("parse noop plan");
+    assert_eq!(
+        noop_value["toolCall"]["executionMode"],
+        serde_json::json!("noop")
+    );
+    assert_eq!(
+        noop_value["toolCall"]["stripAfterExecute"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        noop_value["execution"]["flowId"],
+        serde_json::json!("continue_execution_flow")
+    );
+}
+
+#[test]
+fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
+    let bypass = plan_servertool_response_stage_runtime_action_json(
+        &serde_json::json!({
+            "responseStageNextAction": "bypass",
+            "autoHookEvaluated": false,
+            "hasAutoHookResult": false
+        })
+        .to_string(),
+    )
+    .expect("response-stage runtime action bypass plan");
+    let bypass_value: serde_json::Value =
+        serde_json::from_str(&bypass).expect("parse bypass plan");
+    assert_eq!(
+        bypass_value["action"],
+        serde_json::json!("return_passthrough_bypass")
+    );
+
+    let run_auto_hooks = plan_servertool_response_stage_runtime_action_json(
+        &serde_json::json!({
+            "responseStageNextAction": "run_auto_hooks",
+            "autoHookEvaluated": false,
+            "hasAutoHookResult": false
+        })
+        .to_string(),
+    )
+    .expect("response-stage runtime action pre-auto-hook plan");
+    let run_auto_hooks_value: serde_json::Value =
+        serde_json::from_str(&run_auto_hooks).expect("parse pre-auto-hook plan");
+    assert_eq!(
+        run_auto_hooks_value["action"],
+        serde_json::json!("run_auto_hooks")
+    );
+
+    let passthrough = plan_servertool_response_stage_runtime_action_json(
+        &serde_json::json!({
+            "responseStageNextAction": "run_auto_hooks",
+            "autoHookEvaluated": true,
+            "hasAutoHookResult": false
+        })
+        .to_string(),
+    )
+    .expect("response-stage runtime action passthrough plan");
+    let passthrough_value: serde_json::Value =
+        serde_json::from_str(&passthrough).expect("parse passthrough plan");
+    assert_eq!(
+        passthrough_value["action"],
+        serde_json::json!("return_passthrough_no_auto_hook_result")
+    );
+}
+
+#[test]
+fn plans_servertool_registry_actions_via_servertool_core_bridge() {
+    let builtin = plan_servertool_registry_registration_action_json(
+        &serde_json::json!({
+            "name": " stop_message_auto ",
+            "hasHandler": true,
+            "builtinNameMatched": true,
+            "builtinEntryPresent": true,
+            "registrationAllowedByConfig": true
+        })
+        .to_string(),
+    )
+    .expect("registry builtin registration plan");
+    let builtin_value: serde_json::Value =
+        serde_json::from_str(&builtin).expect("parse builtin registration plan");
+    assert_eq!(
+        builtin_value["action"],
+        serde_json::json!("ignore_builtin_override")
+    );
+    assert_eq!(
+        builtin_value["canonicalName"],
+        serde_json::json!("stop_message_auto")
+    );
+
+    let adhoc = plan_servertool_registry_registration_action_json(
+        &serde_json::json!({
+            "name": " custom_tool ",
+            "hasHandler": true,
+            "builtinNameMatched": false,
+            "builtinEntryPresent": false,
+            "registrationAllowedByConfig": true
+        })
+        .to_string(),
+    )
+    .expect("registry adhoc registration plan");
+    let adhoc_value: serde_json::Value =
+        serde_json::from_str(&adhoc).expect("parse adhoc registration plan");
+    assert_eq!(adhoc_value["action"], serde_json::json!("register_adhoc"));
+    assert_eq!(adhoc_value["canonicalName"], serde_json::json!("custom_tool"));
+
+    let lookup = plan_servertool_registry_lookup_action_json(
+        &serde_json::json!({
+            "name": "custom_tool",
+            "builtinEntryPresent": false,
+            "adHocEntryPresent": true
+        })
+        .to_string(),
+    )
+    .expect("registry lookup plan");
+    let lookup_value: serde_json::Value =
+        serde_json::from_str(&lookup).expect("parse registry lookup plan");
+    assert_eq!(lookup_value["action"], serde_json::json!("return_adhoc"));
+    assert_eq!(lookup_value["canonicalName"], serde_json::json!("custom_tool"));
+
+    let auto_hooks = plan_servertool_registry_auto_hook_descriptors_json(
+        &serde_json::json!([
+            {
+                "id": " stop_message_auto ",
+                "phase": "post",
+                "priority": 999,
+                "order": 7
+            },
+            {
+                "id": "vision_auto",
+                "phase": "invalid"
+            }
+        ])
+        .to_string(),
+    )
+    .expect("registry auto hook descriptors plan");
+    let auto_hooks_value: serde_json::Value =
+        serde_json::from_str(&auto_hooks).expect("parse auto hook descriptors plan");
+    assert_eq!(auto_hooks_value[0]["id"], serde_json::json!("stop_message_auto"));
+    assert_eq!(auto_hooks_value[0]["phase"], serde_json::json!("post"));
+    assert_eq!(auto_hooks_value[1]["id"], serde_json::json!("vision_auto"));
+    assert_eq!(auto_hooks_value[1]["phase"], serde_json::json!("default"));
+
+    let projection = plan_servertool_registry_projection_json(
+        &serde_json::json!({
+            "registeredNames": [" stop_message_auto ", "vision_auto", "stop_message_auto"],
+            "registeredRecords": [
+                { "name": "vision_auto", "trigger": "auto" },
+                { "name": " custom_tool ", "trigger": "tool_call" },
+                { "name": "stop_message_auto", "trigger": "auto" }
+            ],
+            "autoHandlerNames": ["vision_auto", " stop_message_auto "]
+        })
+        .to_string(),
+    )
+    .expect("registry projection plan");
+    let projection_value: serde_json::Value =
+        serde_json::from_str(&projection).expect("parse registry projection plan");
+    assert_eq!(
+        projection_value["registeredNames"],
+        serde_json::json!(["stop_message_auto", "vision_auto"])
+    );
+    assert_eq!(
+        projection_value["registeredRecords"][0],
+        serde_json::json!({ "name": "custom_tool", "trigger": "tool_call" })
+    );
+    assert_eq!(
+        projection_value["autoHandlerNames"],
+        serde_json::json!(["vision_auto", "stop_message_auto"])
+    );
+}
+
+#[test]
+fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
+    let pending = plan_servertool_engine_runtime_action_json(
+        &serde_json::json!({
+            "hasPendingInjection": true,
+            "isStopMessageFlow": true,
+            "hasServertoolCliProjectionContext": true,
+            "stoplessAction": "terminal_final"
+        })
+        .to_string(),
+    )
+    .expect("engine runtime action pending plan");
+    let pending_value: serde_json::Value =
+        serde_json::from_str(&pending).expect("parse pending plan");
+    assert_eq!(
+        pending_value["action"],
+        serde_json::json!("persist_pending_injection_and_return")
+    );
+
+    let stopless_cli = plan_servertool_engine_runtime_action_json(
+        &serde_json::json!({
+            "hasPendingInjection": false,
+            "isStopMessageFlow": true,
+            "hasServertoolCliProjectionContext": false,
+            "stoplessAction": "cli_projection"
+        })
+        .to_string(),
+    )
+    .expect("engine runtime action stopless cli plan");
+    let stopless_cli_value: serde_json::Value =
+        serde_json::from_str(&stopless_cli).expect("parse stopless cli plan");
+    assert_eq!(
+        stopless_cli_value["action"],
+        serde_json::json!("build_stop_message_cli_projection")
+    );
+}
+
+#[test]
+fn plans_stopless_cli_projection_context_via_servertool_core_bridge() {
+    let plan = plan_stopless_cli_projection_context_json(
+        &serde_json::json!({
+            "executionContext": {
+                "serverToolLoopState": {
+                    "repeatCount": 4,
+                    "maxRepeats": 6,
+                    "triggerHint": " loop-hint ",
+                    "schemaFeedback": {
+                        "reason_code": "loop_feedback"
+                    }
+                },
+                "stopSchemaTriggerHint": "context-hint",
+                "stopSchemaFeedback": {
+                    "reason_code": "context_feedback"
+                }
+            },
+            "stoplessControl": {
+                "triggerHint": "control-hint"
+            },
+            "runtimeSnapshot": {
+                "used": 1,
+                "maxRepeats": 3
+            },
+            "chatStopText": "来自 chat 的 stop 文本",
+            "adapterStopText": "来自 adapter 的 stop 文本"
+        })
+        .to_string(),
+    )
+    .expect("stopless cli projection context plan");
+    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(parsed["reasoningText"], serde_json::json!("来自 chat 的 stop 文本"));
+    assert_eq!(parsed["repeatCount"], serde_json::json!(2));
+    assert_eq!(parsed["maxRepeats"], serde_json::json!(3));
+    assert_eq!(parsed["triggerHint"], serde_json::json!("loop-hint"));
+    assert_eq!(
+        parsed["schemaFeedback"],
+        serde_json::json!({
+            "reason_code": "loop_feedback"
+        })
+    );
+}
+
+#[test]
+fn plans_servertool_execution_state_via_servertool_core_bridge() {
+    let created = create_servertool_execution_loop_state_json().expect("create state");
+    let created_value: serde_json::Value = serde_json::from_str(&created).expect("parse created");
+    assert_eq!(created_value["executedToolCalls"], serde_json::json!([]));
+    assert_eq!(created_value["executedIds"], serde_json::json!([]));
+
+    let appended = append_servertool_executed_record_json(
+        &serde_json::json!({
+            "state": serde_json::from_str::<serde_json::Value>(&created).expect("created json"),
+            "toolCall": {
+                "id": " call_1 ",
+                "name": " web_search ",
+                "arguments": "{}",
+                "executionMode": " backend ",
+                "stripAfterExecute": true
+            },
+            "execution": {
+                "flowId": " flow_1 ",
+                "followup": { "requestIdSuffix": ":servertool_followup" }
+            }
+        })
+        .to_string(),
+    )
+    .expect("append record");
+    let appended_value: serde_json::Value = serde_json::from_str(&appended).expect("parse appended");
+    assert_eq!(appended_value["executedIds"], serde_json::json!(["call_1"]));
+    assert_eq!(appended_value["executedFlowIds"], serde_json::json!(["flow_1"]));
+    assert_eq!(appended_value["lastExecution"]["flowId"], serde_json::json!("flow_1"));
+}
+
+#[test]
+fn plans_servertool_materialization_progress_via_servertool_core_bridge() {
+    let plan = plan_servertool_materialization_progress_json(
+        &serde_json::json!({
+            "hasFinalizeFunction": true,
+            "hasChatResponseObject": false,
+            "hasExecutionObject": false,
+            "hasExecutionFlowId": false,
+            "hasPlanMarkers": true,
+            "hasBackendPlan": true
+        })
+        .to_string(),
+    )
+    .expect("materialization progress plan");
+    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(parsed["action"], "execute_backend_then_finalize");
 }

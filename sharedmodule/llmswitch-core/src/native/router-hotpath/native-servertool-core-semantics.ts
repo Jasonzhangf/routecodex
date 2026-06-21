@@ -171,6 +171,27 @@ export interface PreCommandHooksConfigPlan {
   hooks: PreCommandHookRulePlan[];
 }
 
+export interface RuntimePreCommandStateSelectionPlan {
+  action: 'use_selected' | 'load_persisted';
+  source: 'direct_runtime' | 'runtime_metadata' | 'persisted' | 'none';
+  state?: Record<string, unknown>;
+}
+
+export interface AutoHookExecutionDecisionPlan {
+  action: 'continue_queue' | 'return_result' | 'rethrow_error';
+  traceEvent: {
+    hookId: string;
+    phase: string;
+    priority: number;
+    queue: string;
+    queueIndex: number;
+    queueTotal: number;
+    result: 'miss' | 'match' | 'error';
+    reason: string;
+    flowId?: string;
+  };
+}
+
 export interface EngineSelectionOverridesPlan {
   disableToolCallHandlers?: boolean;
   includeAutoHookIds?: string[];
@@ -218,6 +239,126 @@ export interface ClientVisibleProjectionShellInput {
   additionalToolCalls?: unknown[];
 }
 
+export interface ServertoolCliProjectionExecutionContextInput {
+  requestId: string;
+  clientCallId: string;
+  toolName: string;
+}
+
+export interface ServertoolCliProjectionExecutionContextOutput {
+  flowId: string;
+  context: Record<string, unknown>;
+}
+
+export interface NativeServertoolExecutionSummary {
+  flowId: string;
+  followup?: unknown;
+  context?: unknown;
+}
+
+export interface NativeServertoolExecutedToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+  executionMode: string;
+  stripAfterExecute: boolean;
+}
+
+export interface NativeServertoolExecutedRecord {
+  toolCall: NativeServertoolExecutedToolCall;
+  execution?: NativeServertoolExecutionSummary;
+}
+
+export interface NativeServertoolExecutionLoopState {
+  executedToolCalls: NativeServertoolExecutedRecord[];
+  executedIds: string[];
+  executedFlowIds: string[];
+  lastExecution?: NativeServertoolExecutionSummary;
+}
+
+export interface ServertoolExecutionBranchPlan {
+  action: 'client_exec_cli_projection' | 'resolve_execution_outcome' | 'continue_response_stage';
+  projectedToolCallId?: string;
+}
+
+export interface ServertoolEnginePreflightPlan {
+  action:
+    | 'return_original_chat'
+    | 'return_original_chat_direct_passthrough'
+    | 'continue_to_engine';
+}
+
+export interface ServertoolEngineRuntimeActionPlan {
+  action:
+    | 'persist_pending_injection_and_return'
+    | 'return_servertool_cli_projection_final'
+    | 'return_stop_message_terminal_final'
+    | 'build_stop_message_cli_projection'
+    | 'continue_followup_mainline';
+}
+
+export interface ServertoolEngineSkipPlan {
+  action:
+    | 'return_skipped_passthrough'
+    | 'return_skipped_no_execution'
+    | 'continue_matched_flow';
+  skipReason?: string;
+}
+
+export interface ServertoolExecutionOutcomeRuntimeActionPlan {
+  action:
+    | 'return_mixed_client_tools_pending_injection'
+    | 'invalid_mixed_client_tools_outcome'
+    | 'reuse_last_execution_followup'
+    | 'use_resolved_followup'
+    | 'missing_followup_contract';
+  reuseLastExecutionEnvelope?: boolean;
+}
+
+export interface ServertoolExecutionLoopRuntimeActionPlan {
+  action:
+    | 'skip_non_tool_call_handler'
+    | 'apply_materialized_result'
+    | 'apply_handler_error_tool_output'
+    | 'continue_without_effect';
+}
+
+export interface ServertoolExecutionLoopEffectPlan {
+  toolCall: {
+    id: string;
+    name: string;
+    arguments: string;
+    executionMode?: string;
+    stripAfterExecute?: boolean;
+  };
+  execution: {
+    flowId: string;
+    followup?: unknown;
+    context?: unknown;
+  };
+}
+
+export interface ServertoolResponseStageRuntimeActionPlan {
+  action:
+    | 'return_passthrough_bypass'
+    | 'run_auto_hooks'
+    | 'return_auto_hook_result'
+    | 'return_passthrough_no_auto_hook_result';
+}
+
+export interface ServertoolHandlerRuntimeActionPlan {
+  action:
+    | 'execute_backend_vision_analysis_then_finalize'
+    | 'execute_backend_web_search_then_finalize'
+    | 'finalize_without_backend'
+    | 'return_handler_result'
+    | 'invalid_plan_missing_finalize'
+    | 'invalid_plan_result'
+    | 'backend_requires_reenter_pipeline'
+    | 'unsupported_backend_plan_kind';
+  backendKind?: string;
+}
+
 export interface StoplessGoalStateSyncPlanInput {
   latestUserText: string;
   currentState?: unknown;
@@ -261,6 +402,19 @@ export interface StoplessOrchestrationActionPlan {
   isStopMessageFlow: boolean;
   reason: string;
   sessionId?: string;
+}
+
+export interface StoplessCliProjectionContextRuntimeSnapshot {
+  used?: number;
+  maxRepeats?: number;
+}
+
+export interface StoplessCliProjectionContextPlan {
+  reasoningText: string;
+  repeatCount: number;
+  maxRepeats: number;
+  triggerHint?: string;
+  schemaFeedback?: Record<string, unknown>;
 }
 
 export interface ServertoolBackendRoutePolicyInput {
@@ -595,12 +749,84 @@ export interface ServertoolErrorPlan {
   details: Record<string, unknown>;
 }
 
+export interface ServertoolMaterializationProgressPlan {
+  action:
+    | 'execute_backend_then_finalize'
+    | 'finalize_without_backend'
+    | 'return_handler_result'
+    | 'invalid_plan_missing_finalize'
+    | 'invalid_plan_result';
+}
+
 export interface StopMessageBlockedReport {
   summary: string;
   blocker: string;
   impact?: string;
   nextAction?: string;
   evidence: string[];
+}
+
+export type ServertoolHookDirection = 'request' | 'response';
+
+export type ServertoolHookRequiredness = 'required' | 'optional';
+
+export type ServertoolReqHookPhase =
+  | 'servertoolReqHook01ResultParsed'
+  | 'servertoolReqHook02TextRewritten'
+  | 'servertoolReqHook03ToolInjected'
+  | 'servertoolReqHook04RequestFinalized';
+
+export type ServertoolRespHookPhase =
+  | 'servertoolRespHook01Intercepted'
+  | 'servertoolRespHook02SchemaValidated'
+  | 'servertoolRespHook03HookResponseInjected'
+  | 'servertoolRespHook04FollowupPlanned'
+  | 'servertoolRespHook05ReenterDispatched'
+  | 'servertoolRespHook06ProjectionFinalized';
+
+export interface ServertoolHookSpec {
+  id: string;
+  direction: ServertoolHookDirection;
+  reqPhase?: ServertoolReqHookPhase;
+  respPhase?: ServertoolRespHookPhase;
+  requiredness: ServertoolHookRequiredness;
+  priority: number;
+  order: number;
+  ownerFeatureId: string;
+  inputNode: string;
+  outputNode: string;
+  effectKind: string;
+  enabled?: boolean;
+}
+
+export interface ServertoolHookSchedulerInput {
+  direction: ServertoolHookDirection;
+  reqPhase?: ServertoolReqHookPhase;
+  respPhase?: ServertoolRespHookPhase;
+  hooks: ServertoolHookSpec[];
+  requireAtLeastOneRequiredHook?: boolean;
+}
+
+export interface ServertoolHookEvent {
+  hookId: string;
+  status: string;
+  effectKind: string;
+  requiredness: ServertoolHookRequiredness;
+  noOp: boolean;
+}
+
+export interface ServertoolHookProjection {
+  direction: ServertoolHookDirection;
+  phase: string;
+  inputNode: string;
+  outputNode: string;
+  hookIds: string[];
+  effectKinds: string[];
+}
+
+export interface ServertoolHookEffectPlan {
+  events: ServertoolHookEvent[];
+  projection: ServertoolHookProjection;
 }
 
 // ── Stop gateway context ────────────────────────────────────────────────────
@@ -1388,6 +1614,58 @@ export function planStoplessOrchestrationActionWithNative(
   };
 }
 
+export function planStoplessCliProjectionContextWithNative(input: {
+  executionContext?: unknown;
+  stoplessControl?: unknown;
+  runtimeSnapshot?: StoplessCliProjectionContextRuntimeSnapshot;
+  chatStopText?: string;
+  adapterStopText?: string;
+}): StoplessCliProjectionContextPlan {
+  const capability = 'planStoplessCliProjectionContextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStoplessCliProjectionContextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStoplessCliProjectionContextJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planStoplessCliProjectionContextJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.reasoningText !== 'string' || !record.reasoningText.trim()) {
+    throw new Error('planStoplessCliProjectionContextJson native returned invalid reasoningText');
+  }
+  if (typeof record.repeatCount !== 'number' || !Number.isFinite(record.repeatCount) || record.repeatCount < 1) {
+    throw new Error('planStoplessCliProjectionContextJson native returned invalid repeatCount');
+  }
+  if (typeof record.maxRepeats !== 'number' || !Number.isFinite(record.maxRepeats) || record.maxRepeats < 1) {
+    throw new Error('planStoplessCliProjectionContextJson native returned invalid maxRepeats');
+  }
+  if (record.triggerHint !== undefined && typeof record.triggerHint !== 'string') {
+    throw new Error('planStoplessCliProjectionContextJson native returned invalid triggerHint');
+  }
+  if (
+    record.schemaFeedback !== undefined &&
+    (!record.schemaFeedback || typeof record.schemaFeedback !== 'object' || Array.isArray(record.schemaFeedback))
+  ) {
+    throw new Error('planStoplessCliProjectionContextJson native returned invalid schemaFeedback');
+  }
+  return {
+    reasoningText: record.reasoningText,
+    repeatCount: record.repeatCount,
+    maxRepeats: record.maxRepeats,
+    ...(typeof record.triggerHint === 'string' && record.triggerHint.trim()
+      ? { triggerHint: record.triggerHint }
+      : {}),
+    ...(record.schemaFeedback && typeof record.schemaFeedback === 'object' && !Array.isArray(record.schemaFeedback)
+      ? { schemaFeedback: record.schemaFeedback as Record<string, unknown> }
+      : {})
+  };
+}
+
 export function planStoplessGoalStateSyncWithNative(
   input: StoplessGoalStateSyncPlanInput,
 ): StoplessGoalStateSyncPlan {
@@ -1454,6 +1732,101 @@ export function planStoplessLearnedNoteWriteWithNative(
   return record as unknown as StoplessLearnedNoteWritePlan;
 }
 
+export function validateServertoolHookSkeletonPhaseWithNative(
+  input: ServertoolHookSpec,
+): ServertoolHookProjection {
+  const capability = 'validateServertoolHookSkeletonPhaseJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('validateServertoolHookSkeletonPhaseJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`validateServertoolHookSkeletonPhaseJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseServertoolHookProjectionPayload(resultJson, capability);
+}
+
+export function planServertoolHookScheduleWithNative(
+  input: ServertoolHookSchedulerInput,
+): ServertoolHookEffectPlan {
+  const capability = 'planServertoolHookScheduleJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolHookScheduleJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolHookScheduleJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parseServertoolHookEffectPlanPayload(resultJson, capability);
+}
+
+function parseServertoolHookEffectPlanPayload(
+  resultJson: string,
+  capability: string,
+): ServertoolHookEffectPlan {
+  const raw = JSON.parse(resultJson) as unknown;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${capability} native returned invalid effect plan`);
+  }
+  const record = raw as Record<string, unknown>;
+  if (!Array.isArray(record.events)) {
+    throw new Error(`${capability} native returned invalid events`);
+  }
+  return {
+    events: record.events.map((event) => parseServertoolHookEvent(event, capability)),
+    projection: parseServertoolHookProjectionRecord(record.projection, capability),
+  };
+}
+
+function parseServertoolHookProjectionPayload(
+  resultJson: string,
+  capability: string,
+): ServertoolHookProjection {
+  return parseServertoolHookProjectionRecord(JSON.parse(resultJson) as unknown, capability);
+}
+
+function parseServertoolHookProjectionRecord(
+  raw: unknown,
+  capability: string,
+): ServertoolHookProjection {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${capability} native returned invalid projection`);
+  }
+  const record = raw as Record<string, unknown>;
+  if (
+    (record.direction !== 'request' && record.direction !== 'response') ||
+    typeof record.phase !== 'string' ||
+    typeof record.inputNode !== 'string' ||
+    typeof record.outputNode !== 'string' ||
+    !Array.isArray(record.hookIds) ||
+    !record.hookIds.every((value) => typeof value === 'string') ||
+    !Array.isArray(record.effectKinds) ||
+    !record.effectKinds.every((value) => typeof value === 'string')
+  ) {
+    throw new Error(`${capability} native returned invalid projection fields`);
+  }
+  return record as unknown as ServertoolHookProjection;
+}
+
+function parseServertoolHookEvent(raw: unknown, capability: string): ServertoolHookEvent {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${capability} native returned invalid hook event`);
+  }
+  const record = raw as Record<string, unknown>;
+  if (
+    typeof record.hookId !== 'string' ||
+    typeof record.status !== 'string' ||
+    typeof record.effectKind !== 'string' ||
+    (record.requiredness !== 'required' && record.requiredness !== 'optional') ||
+    typeof record.noOp !== 'boolean'
+  ) {
+    throw new Error(`${capability} native returned invalid hook event fields`);
+  }
+  return record as unknown as ServertoolHookEvent;
+}
+
 export function buildClientVisibleProjectionShellWithNative(
   input: ClientVisibleProjectionShellInput,
 ): Record<string, unknown> {
@@ -1478,6 +1851,36 @@ export function buildClientVisibleProjectionShellWithNative(
     throw new Error('buildClientVisibleProjectionShellJson native returned invalid projection shell');
   }
   return parsed as Record<string, unknown>;
+}
+
+export function buildServertoolCliProjectionExecutionContextWithNative(
+  input: ServertoolCliProjectionExecutionContextInput,
+): ServertoolCliProjectionExecutionContextOutput {
+  const capability = 'buildServertoolCliProjectionExecutionContextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('buildServertoolCliProjectionExecutionContextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
+    const nativeError = resultJson as Record<string, unknown>;
+    const message = typeof nativeError.message === 'string' && nativeError.message.trim()
+      ? nativeError.message.trim()
+      : JSON.stringify(nativeError);
+    throw new Error(`buildServertoolCliProjectionExecutionContextJson native error: ${message}`);
+  }
+  if (typeof resultJson !== 'string') {
+    throw new Error(`buildServertoolCliProjectionExecutionContextJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('buildServertoolCliProjectionExecutionContextJson native returned invalid projection context');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.flowId !== 'servertool_cli_projection' || !record.context || typeof record.context !== 'object' || Array.isArray(record.context)) {
+    throw new Error('buildServertoolCliProjectionExecutionContextJson native returned invalid projection context fields');
+  }
+  return record as ServertoolCliProjectionExecutionContextOutput;
 }
 
 export function validateClientExecCommandResultWithNative(rawOutput: string): Record<string, unknown> {
@@ -1839,6 +2242,717 @@ export function planRuntimePreCommandRuleWithNative(input: {
     return null;
   }
   return parsePreCommandHookRulePlan(parsed, capability);
+}
+
+export function planRuntimePreCommandStateSelectionWithNative(input: {
+  directRuntimePreCommandState?: unknown;
+  runtimeMetadataPreCommandState?: unknown;
+  persistedState?: unknown;
+  persistedLoadAttempted: boolean;
+}): RuntimePreCommandStateSelectionPlan {
+  const capability = 'planRuntimePreCommandStateSelectionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planRuntimePreCommandStateSelectionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planRuntimePreCommandStateSelectionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planRuntimePreCommandStateSelectionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.action !== 'use_selected' && record.action !== 'load_persisted') {
+    throw new Error('planRuntimePreCommandStateSelectionJson native returned invalid action');
+  }
+  if (
+    record.source !== 'direct_runtime' &&
+    record.source !== 'runtime_metadata' &&
+    record.source !== 'persisted' &&
+    record.source !== 'none'
+  ) {
+    throw new Error('planRuntimePreCommandStateSelectionJson native returned invalid source');
+  }
+  const state = record.state;
+  if (state !== undefined && (typeof state !== 'object' || state === null || Array.isArray(state))) {
+    throw new Error('planRuntimePreCommandStateSelectionJson native returned invalid state');
+  }
+  return {
+    action: record.action,
+    source: record.source,
+    ...(state ? { state: state as Record<string, unknown> } : {})
+  };
+}
+
+export function planAutoHookExecutionDecisionWithNative(input: {
+  hookId: string;
+  phase: string;
+  priority: number;
+  queue: string;
+  queueIndex: number;
+  queueTotal: number;
+  outcome: 'error' | 'planned_null' | 'materialized_match' | 'materialized_empty';
+  message?: string;
+  flowId?: string;
+}): AutoHookExecutionDecisionPlan {
+  const capability = 'planAutoHookExecutionDecisionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planAutoHookExecutionDecisionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planAutoHookExecutionDecisionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planAutoHookExecutionDecisionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'continue_queue' &&
+    record.action !== 'return_result' &&
+    record.action !== 'rethrow_error'
+  ) {
+    throw new Error('planAutoHookExecutionDecisionJson native returned invalid action');
+  }
+  const traceEvent = record.traceEvent;
+  if (!traceEvent || typeof traceEvent !== 'object' || Array.isArray(traceEvent)) {
+    throw new Error('planAutoHookExecutionDecisionJson native returned invalid traceEvent');
+  }
+  const trace = traceEvent as Record<string, unknown>;
+  if (
+    typeof trace.hookId !== 'string' ||
+    typeof trace.phase !== 'string' ||
+    typeof trace.priority !== 'number' ||
+    typeof trace.queue !== 'string' ||
+    typeof trace.queueIndex !== 'number' ||
+    typeof trace.queueTotal !== 'number' ||
+    (trace.result !== 'miss' && trace.result !== 'match' && trace.result !== 'error') ||
+    typeof trace.reason !== 'string'
+  ) {
+    throw new Error('planAutoHookExecutionDecisionJson native returned malformed traceEvent');
+  }
+  return {
+    action: record.action,
+    traceEvent: {
+      hookId: trace.hookId,
+      phase: trace.phase,
+      priority: trace.priority,
+      queue: trace.queue,
+      queueIndex: trace.queueIndex,
+      queueTotal: trace.queueTotal,
+      result: trace.result,
+      reason: trace.reason,
+      ...(typeof trace.flowId === 'string' && trace.flowId.trim()
+        ? { flowId: trace.flowId.trim() }
+        : {})
+    }
+  };
+}
+
+export function planAutoHookQueueProgressWithNative(input: {
+  queueOrder: string[];
+  currentQueue: string;
+  resultPresent: boolean;
+}): {
+  action: 'return_result' | 'continue_next_queue' | 'return_null';
+  nextQueue?: string;
+} {
+  const capability = 'planAutoHookQueueProgressJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planAutoHookQueueProgressJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planAutoHookQueueProgressJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planAutoHookQueueProgressJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'return_result' &&
+    record.action !== 'continue_next_queue' &&
+    record.action !== 'return_null'
+  ) {
+    throw new Error('planAutoHookQueueProgressJson native returned invalid action');
+  }
+  if (record.nextQueue !== undefined && typeof record.nextQueue !== 'string') {
+    throw new Error('planAutoHookQueueProgressJson native returned invalid nextQueue');
+  }
+  return {
+    action: record.action,
+    ...(typeof record.nextQueue === 'string' && record.nextQueue.trim()
+      ? { nextQueue: record.nextQueue }
+      : {})
+  };
+}
+
+export function planServertoolExecutionBranchWithNative(input: {
+  executableToolCalls: Array<{
+    id: string;
+    name: string;
+    executionMode?: string;
+  }>;
+  executedToolCallsLen: number;
+}): ServertoolExecutionBranchPlan {
+  const capability = 'planServertoolExecutionBranchJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolExecutionBranchJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolExecutionBranchJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolExecutionBranchJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'client_exec_cli_projection' &&
+    record.action !== 'resolve_execution_outcome' &&
+    record.action !== 'continue_response_stage'
+  ) {
+    throw new Error('planServertoolExecutionBranchJson native returned invalid action');
+  }
+  if (record.projectedToolCallId !== undefined && typeof record.projectedToolCallId !== 'string') {
+    throw new Error('planServertoolExecutionBranchJson native returned invalid projectedToolCallId');
+  }
+  return {
+    action: record.action,
+    ...(typeof record.projectedToolCallId === 'string' && record.projectedToolCallId.trim()
+      ? { projectedToolCallId: record.projectedToolCallId }
+      : {})
+  };
+}
+
+export function planServertoolEnginePreflightWithNative(input: {
+  hasSyntheticControlText: boolean;
+  stopSignalObserved: boolean;
+  stoplessDisabledOnDirectRoute: boolean;
+}): ServertoolEnginePreflightPlan {
+  const capability = 'planServertoolEnginePreflightJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEnginePreflightJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEnginePreflightJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'return_original_chat' &&
+    record.action !== 'return_original_chat_direct_passthrough' &&
+    record.action !== 'continue_to_engine'
+  ) {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid action');
+  }
+  return {
+    action: record.action
+  };
+}
+
+export function planServertoolEngineRuntimeActionWithNative(input: {
+  hasPendingInjection: boolean;
+  isStopMessageFlow: boolean;
+  hasServertoolCliProjectionContext: boolean;
+  stoplessAction: string;
+}): ServertoolEngineRuntimeActionPlan {
+  const capability = 'planServertoolEngineRuntimeActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEngineRuntimeActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEngineRuntimeActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEngineRuntimeActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'persist_pending_injection_and_return' &&
+    record.action !== 'return_servertool_cli_projection_final' &&
+    record.action !== 'return_stop_message_terminal_final' &&
+    record.action !== 'build_stop_message_cli_projection' &&
+    record.action !== 'continue_followup_mainline'
+  ) {
+    throw new Error('planServertoolEngineRuntimeActionJson native returned invalid action');
+  }
+  return {
+    action: record.action
+  };
+}
+
+export function planServertoolEngineSkipWithNative(input: {
+  engineMode: string;
+  hasExecution: boolean;
+}): ServertoolEngineSkipPlan {
+  const capability = 'planServertoolEngineSkipJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEngineSkipJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEngineSkipJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEngineSkipJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'return_skipped_passthrough' &&
+    record.action !== 'return_skipped_no_execution' &&
+    record.action !== 'continue_matched_flow'
+  ) {
+    throw new Error('planServertoolEngineSkipJson native returned invalid action');
+  }
+  if (record.skipReason !== undefined && typeof record.skipReason !== 'string') {
+    throw new Error('planServertoolEngineSkipJson native returned invalid skipReason');
+  }
+  return {
+    action: record.action,
+    ...(typeof record.skipReason === 'string' && record.skipReason.trim()
+      ? { skipReason: record.skipReason }
+      : {})
+  };
+}
+
+export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
+  outcomeMode: string;
+  requiresPendingInjection: boolean;
+  followupStrategy: string;
+  useLastExecutionFollowup: boolean;
+  hasLastExecutionFollowup: boolean;
+  hasResolvedFollowup: boolean;
+  hasLastExecution: boolean;
+  executedToolCallsLen: number;
+}): ServertoolExecutionOutcomeRuntimeActionPlan {
+  const capability = 'planServertoolExecutionOutcomeRuntimeActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolExecutionOutcomeRuntimeActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'return_mixed_client_tools_pending_injection' &&
+    record.action !== 'invalid_mixed_client_tools_outcome' &&
+    record.action !== 'reuse_last_execution_followup' &&
+    record.action !== 'use_resolved_followup' &&
+    record.action !== 'missing_followup_contract'
+  ) {
+    throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native returned invalid action');
+  }
+  return {
+    action: record.action,
+    reuseLastExecutionEnvelope: record.reuseLastExecutionEnvelope === true
+  };
+}
+
+export function planServertoolExecutionLoopRuntimeActionWithNative(input: {
+  hasHandlerEntry: boolean;
+  triggerMode?: string;
+  hasMaterializedResult: boolean;
+  hasHandlerError: boolean;
+}): ServertoolExecutionLoopRuntimeActionPlan {
+  const capability = 'planServertoolExecutionLoopRuntimeActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolExecutionLoopRuntimeActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolExecutionLoopRuntimeActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolExecutionLoopRuntimeActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'skip_non_tool_call_handler' &&
+    record.action !== 'apply_materialized_result' &&
+    record.action !== 'apply_handler_error_tool_output' &&
+    record.action !== 'continue_without_effect'
+  ) {
+    throw new Error('planServertoolExecutionLoopRuntimeActionJson native returned invalid action');
+  }
+  return {
+    action: record.action
+  };
+}
+
+export function planServertoolExecutionLoopEffectWithNative(input: {
+  mode: string;
+  toolCall: {
+    id: string;
+    name: string;
+    arguments: string;
+    executionMode?: string;
+    stripAfterExecute?: boolean;
+  };
+  noopFlowId?: string;
+  noopFollowup?: unknown;
+  noopExecutionContext?: unknown;
+}): ServertoolExecutionLoopEffectPlan {
+  const capability = 'planServertoolExecutionLoopEffectJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolExecutionLoopEffectJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolExecutionLoopEffectJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolExecutionLoopEffectJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (!record.toolCall || typeof record.toolCall !== 'object' || Array.isArray(record.toolCall)) {
+    throw new Error('planServertoolExecutionLoopEffectJson native returned invalid toolCall');
+  }
+  if (!record.execution || typeof record.execution !== 'object' || Array.isArray(record.execution)) {
+    throw new Error('planServertoolExecutionLoopEffectJson native returned invalid execution');
+  }
+  const toolCall = record.toolCall as Record<string, unknown>;
+  const execution = record.execution as Record<string, unknown>;
+  if (typeof toolCall.id !== 'string' || typeof toolCall.name !== 'string' || typeof toolCall.arguments !== 'string') {
+    throw new Error('planServertoolExecutionLoopEffectJson native returned invalid toolCall shape');
+  }
+  if (typeof execution.flowId !== 'string') {
+    throw new Error('planServertoolExecutionLoopEffectJson native returned invalid execution flowId');
+  }
+  return {
+    toolCall: {
+      id: toolCall.id,
+      name: toolCall.name,
+      arguments: toolCall.arguments,
+      ...(typeof toolCall.executionMode === 'string' ? { executionMode: toolCall.executionMode } : {}),
+      ...(typeof toolCall.stripAfterExecute === 'boolean' ? { stripAfterExecute: toolCall.stripAfterExecute } : {})
+    },
+    execution: {
+      flowId: execution.flowId,
+      ...(execution.followup !== undefined ? { followup: execution.followup } : {}),
+      ...(execution.context !== undefined ? { context: execution.context } : {})
+    }
+  };
+}
+
+export function planServertoolResponseStageRuntimeActionWithNative(input: {
+  responseStageNextAction?: string;
+  autoHookEvaluated: boolean;
+  hasAutoHookResult: boolean;
+}): ServertoolResponseStageRuntimeActionPlan {
+  const capability = 'planServertoolResponseStageRuntimeActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolResponseStageRuntimeActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolResponseStageRuntimeActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'return_passthrough_bypass' &&
+    record.action !== 'run_auto_hooks' &&
+    record.action !== 'return_auto_hook_result' &&
+    record.action !== 'return_passthrough_no_auto_hook_result'
+  ) {
+    throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid action');
+  }
+  return {
+    action: record.action
+  };
+}
+
+export type ServertoolRegistryRegistrationActionPlan = {
+  action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'register_adhoc';
+  canonicalName?: string;
+};
+
+export function planServertoolRegistryRegistrationActionWithNative(input: {
+  name: string;
+  hasHandler: boolean;
+  builtinNameMatched: boolean;
+  builtinEntryPresent: boolean;
+  registrationAllowedByConfig: boolean;
+}): ServertoolRegistryRegistrationActionPlan {
+  const capability = 'planServertoolRegistryRegistrationActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolRegistryRegistrationActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolRegistryRegistrationActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolRegistryRegistrationActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'ignore_invalid' &&
+    record.action !== 'ignore_builtin_override' &&
+    record.action !== 'ignore_disabled' &&
+    record.action !== 'register_adhoc'
+  ) {
+    throw new Error('planServertoolRegistryRegistrationActionJson native returned invalid action');
+  }
+  if (record.canonicalName !== undefined && typeof record.canonicalName !== 'string') {
+    throw new Error('planServertoolRegistryRegistrationActionJson native returned invalid canonicalName');
+  }
+  return {
+    action: record.action,
+    ...(typeof record.canonicalName === 'string' && record.canonicalName.trim()
+      ? { canonicalName: record.canonicalName }
+      : {})
+  };
+}
+
+export type ServertoolRegistryLookupActionPlan = {
+  action: 'return_builtin' | 'return_adhoc' | 'return_none';
+  canonicalName?: string;
+};
+
+export function planServertoolRegistryLookupActionWithNative(input: {
+  name: string;
+  builtinEntryPresent: boolean;
+  adHocEntryPresent: boolean;
+}): ServertoolRegistryLookupActionPlan {
+  const capability = 'planServertoolRegistryLookupActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolRegistryLookupActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolRegistryLookupActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolRegistryLookupActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'return_builtin' &&
+    record.action !== 'return_adhoc' &&
+    record.action !== 'return_none'
+  ) {
+    throw new Error('planServertoolRegistryLookupActionJson native returned invalid action');
+  }
+  if (record.canonicalName !== undefined && typeof record.canonicalName !== 'string') {
+    throw new Error('planServertoolRegistryLookupActionJson native returned invalid canonicalName');
+  }
+  return {
+    action: record.action,
+    ...(typeof record.canonicalName === 'string' && record.canonicalName.trim()
+      ? { canonicalName: record.canonicalName }
+      : {})
+  };
+}
+
+export type ServertoolRegistryAutoHookDescriptorPlan = {
+  id: string;
+  phase: 'pre' | 'default' | 'post';
+  priority: number;
+  order: number;
+};
+
+export function planServertoolRegistryAutoHookDescriptorsWithNative(input: {
+  hooks: Array<{
+    id: string;
+    phase?: string;
+    priority?: number;
+    order?: number;
+  }>;
+}): ServertoolRegistryAutoHookDescriptorPlan[] {
+  const capability = 'planServertoolRegistryAutoHookDescriptorsJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolRegistryAutoHookDescriptorsJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input.hooks));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolRegistryAutoHookDescriptorsJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid plan');
+  }
+  return parsed.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid descriptor');
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.id !== 'string' || !record.id.trim()) {
+      throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid id');
+    }
+    if (record.phase !== 'pre' && record.phase !== 'default' && record.phase !== 'post') {
+      throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid phase');
+    }
+    if (typeof record.priority !== 'number' || !Number.isFinite(record.priority)) {
+      throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid priority');
+    }
+    if (typeof record.order !== 'number' || !Number.isFinite(record.order)) {
+      throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid order');
+    }
+    return {
+      id: record.id,
+      phase: record.phase,
+      priority: record.priority,
+      order: record.order
+    };
+  });
+}
+
+export type ServertoolRegistryProjectionRecordPlan = {
+  name: string;
+  trigger: 'tool_call' | 'auto';
+};
+
+export type ServertoolRegistryProjectionPlan = {
+  registeredNames: string[];
+  registeredRecords: ServertoolRegistryProjectionRecordPlan[];
+  autoHandlerNames: string[];
+};
+
+export function planServertoolRegistryProjectionWithNative(input: {
+  registeredNames: string[];
+  registeredRecords: Array<{
+    name: string;
+    trigger: string;
+  }>;
+  autoHandlerNames: string[];
+}): ServertoolRegistryProjectionPlan {
+  const capability = 'planServertoolRegistryProjectionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolRegistryProjectionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolRegistryProjectionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolRegistryProjectionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    !Array.isArray(record.registeredNames) ||
+    !Array.isArray(record.registeredRecords) ||
+    !Array.isArray(record.autoHandlerNames)
+  ) {
+    throw new Error('planServertoolRegistryProjectionJson native returned invalid plan arrays');
+  }
+  return {
+    registeredNames: record.registeredNames.map((name) => {
+      if (typeof name !== 'string' || !name.trim()) {
+        throw new Error('planServertoolRegistryProjectionJson native returned invalid registered name');
+      }
+      return name;
+    }),
+    registeredRecords: record.registeredRecords.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('planServertoolRegistryProjectionJson native returned invalid registered record');
+      }
+      const item = entry as Record<string, unknown>;
+      if (typeof item.name !== 'string' || !item.name.trim()) {
+        throw new Error('planServertoolRegistryProjectionJson native returned invalid registered record name');
+      }
+      if (item.trigger !== 'tool_call' && item.trigger !== 'auto') {
+        throw new Error('planServertoolRegistryProjectionJson native returned invalid registered record trigger');
+      }
+      return {
+        name: item.name,
+        trigger: item.trigger
+      };
+    }),
+    autoHandlerNames: record.autoHandlerNames.map((name) => {
+      if (typeof name !== 'string' || !name.trim()) {
+        throw new Error('planServertoolRegistryProjectionJson native returned invalid auto handler name');
+      }
+      return name;
+    })
+  };
+}
+
+export function planServertoolHandlerRuntimeActionWithNative(input: {
+  hasFinalizeFunction: boolean;
+  hasChatResponseObject: boolean;
+  hasExecutionObject: boolean;
+  hasExecutionFlowId: boolean;
+  hasPlanMarkers: boolean;
+  hasBackendPlan: boolean;
+  backendKind?: string;
+  hasReenterPipeline: boolean;
+}): ServertoolHandlerRuntimeActionPlan {
+  const capability = 'planServertoolHandlerRuntimeActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolHandlerRuntimeActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolHandlerRuntimeActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolHandlerRuntimeActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'execute_backend_vision_analysis_then_finalize' &&
+    record.action !== 'execute_backend_web_search_then_finalize' &&
+    record.action !== 'finalize_without_backend' &&
+    record.action !== 'return_handler_result' &&
+    record.action !== 'invalid_plan_missing_finalize' &&
+    record.action !== 'invalid_plan_result' &&
+    record.action !== 'backend_requires_reenter_pipeline' &&
+    record.action !== 'unsupported_backend_plan_kind'
+  ) {
+    throw new Error('planServertoolHandlerRuntimeActionJson native returned invalid action');
+  }
+  if (record.backendKind !== undefined && typeof record.backendKind !== 'string') {
+    throw new Error('planServertoolHandlerRuntimeActionJson native returned invalid backendKind');
+  }
+  return {
+    action: record.action,
+    ...(typeof record.backendKind === 'string' && record.backendKind.trim()
+      ? { backendKind: record.backendKind }
+      : {})
+  };
 }
 
 export function planEngineSelectionStartWithNative(input: {
@@ -2275,6 +3389,147 @@ export function planServertoolTimeoutErrorWithNative(input: {
   );
 }
 
+export function planServertoolStateLoadFailedErrorWithNative(input: {
+  requestId: string;
+  stickyKey: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  error: string;
+}): ServertoolErrorPlan {
+  return parseServertoolErrorPlan(
+    callServertoolErrorPlanNative('planServertoolStateLoadFailedErrorJson', input),
+    'planServertoolStateLoadFailedErrorJson'
+  );
+}
+
+export function planServertoolHandlerContractErrorWithNative(input:
+  | {
+      kind: 'handler_failed';
+      toolName: string;
+      requestId: string;
+      entryEndpoint: string;
+      providerProtocol: string;
+      error: string;
+    }
+  | {
+      kind: 'backend_requires_reenter_pipeline';
+      requestId: string;
+      backendKind: string;
+    }
+  | {
+      kind: 'unsupported_backend_plan_kind';
+      requestId: string;
+      backendKind: string;
+    }
+  | {
+      kind: 'invalid_handler_plan_missing_finalize';
+      requestId: string;
+    }
+  | {
+      kind: 'invalid_handler_plan_result';
+      requestId: string;
+    }
+): ServertoolErrorPlan {
+  return parseServertoolErrorPlan(
+    callServertoolErrorPlanNative('planServertoolHandlerContractErrorJson', input),
+    'planServertoolHandlerContractErrorJson'
+  );
+}
+
+export function planServertoolExecutionDispatchErrorWithNative(input:
+  | {
+      kind: 'dispatch_spec_mismatch';
+      requestId: string;
+      toolName: string;
+      nativeExecutionMode: string;
+      tsExecutionMode: string;
+    }
+  | {
+      kind: 'invalid_mixed_client_tools_outcome';
+      requestId: string;
+      outcomeMode: string;
+      followupStrategy: string;
+      requiresPendingInjection: boolean;
+    }
+  | {
+      kind: 'missing_followup_contract';
+      requestId: string;
+      outcomeMode: string;
+      followupStrategy: string;
+      useLastExecutionFollowup: boolean;
+      useGenericFollowup: boolean;
+    }
+): ServertoolErrorPlan {
+  return parseServertoolErrorPlan(
+    callServertoolErrorPlanNative('planServertoolExecutionDispatchErrorJson', input),
+    'planServertoolExecutionDispatchErrorJson'
+  );
+}
+
+export function createServertoolExecutionLoopStateWithNative(): NativeServertoolExecutionLoopState {
+  const capability = 'createServertoolExecutionLoopStateJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native unavailable`);
+  }
+  const resultJson = fn();
+  if (typeof resultJson !== 'string') {
+    throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
+  }
+  return parseServertoolExecutionLoopState(resultJson, capability);
+}
+
+export function appendServertoolExecutedRecordWithNative(input: {
+  state?: NativeServertoolExecutionLoopState;
+  toolCall: NativeServertoolExecutedToolCall;
+  execution?: NativeServertoolExecutionSummary;
+}): NativeServertoolExecutionLoopState {
+  const capability = 'appendServertoolExecutedRecordJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native unavailable`);
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
+  }
+  return parseServertoolExecutionLoopState(resultJson, capability);
+}
+
+export function planServertoolMaterializationProgressWithNative(input: {
+  hasFinalizeFunction: boolean;
+  hasChatResponseObject: boolean;
+  hasExecutionObject: boolean;
+  hasExecutionFlowId: boolean;
+  hasPlanMarkers: boolean;
+  hasBackendPlan: boolean;
+}): ServertoolMaterializationProgressPlan {
+  const capability = 'planServertoolMaterializationProgressJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolMaterializationProgressJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolMaterializationProgressJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolMaterializationProgressJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'execute_backend_then_finalize' &&
+    record.action !== 'finalize_without_backend' &&
+    record.action !== 'return_handler_result' &&
+    record.action !== 'invalid_plan_missing_finalize' &&
+    record.action !== 'invalid_plan_result'
+  ) {
+    throw new Error('planServertoolMaterializationProgressJson native returned invalid action');
+  }
+  return { action: record.action };
+}
+
 export function planStopMessageFetchFailedErrorWithNative(input: {
   requestId: string;
   reason: 'loop_limit';
@@ -2324,6 +3579,32 @@ function parseServertoolErrorPlan(resultJson: string, capability: string): Serve
     category: record.category,
     status: record.status as number,
     details: record.details as Record<string, unknown>
+  };
+}
+
+function parseServertoolExecutionLoopState(
+  resultJson: string,
+  capability: string
+): NativeServertoolExecutionLoopState {
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid execution state`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    !Array.isArray(record.executedToolCalls) ||
+    !Array.isArray(record.executedIds) ||
+    !Array.isArray(record.executedFlowIds)
+  ) {
+    throw new Error(`${capability} native returned malformed execution state`);
+  }
+  return {
+    executedToolCalls: record.executedToolCalls as NativeServertoolExecutedRecord[],
+    executedIds: record.executedIds.map((value) => String(value)),
+    executedFlowIds: record.executedFlowIds.map((value) => String(value)),
+    ...(record.lastExecution && typeof record.lastExecution === 'object' && !Array.isArray(record.lastExecution)
+      ? { lastExecution: record.lastExecution as NativeServertoolExecutionSummary }
+      : {})
   };
 }
 
@@ -3017,6 +4298,32 @@ export function extractCurrentAssistantStopTextWithNative(payload: unknown): str
   const parsed = JSON.parse(resultJson) as unknown;
   if (typeof parsed !== 'string') {
     throw new Error(`extractCurrentAssistantStopTextJson native returned invalid payload: ${typeof parsed}`);
+  }
+  return parsed;
+}
+
+export function extractCurrentAssistantReasoningStopArgumentsWithNative(
+  payload: unknown
+): string | null {
+  const capability = 'extractCurrentAssistantReasoningStopArgumentsJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('extractCurrentAssistantReasoningStopArgumentsJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(payload));
+  if (typeof resultJson !== 'string') {
+    throw new Error(
+      `extractCurrentAssistantReasoningStopArgumentsJson native returned non-string: ${typeof resultJson}`
+    );
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed == null) {
+    return null;
+  }
+  if (typeof parsed !== 'string') {
+    throw new Error(
+      `extractCurrentAssistantReasoningStopArgumentsJson native returned invalid payload: ${typeof parsed}`
+    );
   }
   return parsed;
 }

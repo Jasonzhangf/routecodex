@@ -18,6 +18,12 @@ import {
   listAdHocToolCallHandlerSpecs,
   registerAdHocHandlerForTests
 } from './adhoc-handler-test-support.js';
+import {
+  planServertoolRegistryAutoHookDescriptorsWithNative,
+  planServertoolRegistryLookupActionWithNative,
+  planServertoolRegistryProjectionWithNative,
+  planServertoolRegistryRegistrationActionWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 type TriggerMode = 'tool_call' | 'auto';
 type AutoHookPhase = 'pre' | 'default' | 'post';
@@ -47,17 +53,14 @@ export interface ServerToolAutoHookDescriptor {
 }
 
 function isRegistrationAllowedByConfig(name: string): boolean {
+  if (!listBuiltinHandlerNames().includes(name)) {
+    return true;
+  }
   const spec = getServertoolToolSpec(name);
   if (!spec) {
     return true;
   }
   return spec.enabled !== false;
-}
-
-function resolveAutoHookPhaseRank(phase: AutoHookPhase): number {
-  if (phase === 'pre') return 0;
-  if (phase === 'post') return 2;
-  return 1;
 }
 
 export const registerServerToolHandlerImpl = (
@@ -73,32 +76,50 @@ export const registerServerToolHandlerImpl = (
     };
   }
 ): void => {
-  if (!name || typeof name !== 'string' || typeof handler !== 'function') {
-    return;
-  }
-  const builtinEntry = getBuiltinHandlerEntry(name);
-  if (builtinEntry) {
-    return;
-  }
-  if (!isRegistrationAllowedByConfig(name.trim().toLowerCase())) {
+  const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
+  const builtinNameMatched = listBuiltinHandlerNames().includes(canonicalName);
+  const builtinEntry = builtinNameMatched
+    ? getBuiltinHandlerEntry(canonicalName)
+    : undefined;
+  const actionPlan = planServertoolRegistryRegistrationActionWithNative({
+    name: typeof name === 'string' ? name : '',
+    hasHandler: typeof handler === 'function',
+    builtinNameMatched,
+    builtinEntryPresent: Boolean(builtinEntry),
+    registrationAllowedByConfig: canonicalName ? isRegistrationAllowedByConfig(canonicalName) : true
+  });
+  if (actionPlan.action !== 'register_adhoc') {
     return;
   }
   registerAdHocHandlerForTests(name, handler, options);
 };
 
 export const getServerToolHandlerImpl = (name: string): ServerToolHandlerEntry | undefined => {
-  if (!name || typeof name !== 'string') return undefined;
-  const builtinEntry = getBuiltinHandlerEntry(name);
-  if (builtinEntry) {
+  const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
+  const builtinEntry = listBuiltinHandlerNames().includes(canonicalName)
+    ? getBuiltinHandlerEntry(canonicalName)
+    : undefined;
+  const adHocEntry = canonicalName ? getAdHocHandlerEntry(canonicalName) : undefined;
+  const actionPlan = planServertoolRegistryLookupActionWithNative({
+    name: typeof name === 'string' ? name : '',
+    builtinEntryPresent: Boolean(builtinEntry),
+    adHocEntryPresent: Boolean(adHocEntry)
+  });
+  if (actionPlan.action === 'return_builtin') {
     return builtinEntry;
   }
-  return getAdHocHandlerEntry(name);
+  if (actionPlan.action === 'return_adhoc') {
+    return adHocEntry;
+  }
+  return undefined;
 };
 
 export function listRegisteredToolHandlerNamesImpl(): string[] {
-  return Array.from(
-    new Set([...listBuiltinHandlerNames(), ...listAdHocHandlerNames()])
-  ).sort();
+  return planServertoolRegistryProjectionWithNative({
+    registeredNames: [...listBuiltinHandlerNames(), ...listAdHocHandlerNames()],
+    registeredRecords: [],
+    autoHandlerNames: []
+  }).registeredNames;
 }
 
 export function listAdHocRegisteredToolCallHandlerSpecsImpl(): Array<{
@@ -111,39 +132,51 @@ export function listAdHocRegisteredToolCallHandlerSpecsImpl(): Array<{
 }
 
 export const listAutoHandlersForRegistryImpl = (): ServerToolHandlerEntry[] => {
-  return [...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()].sort((left, right) => {
-    const leftHook = left.autoHook;
-    const rightHook = right.autoHook;
-    const phaseRankDiff =
-      resolveAutoHookPhaseRank(leftHook?.phase ?? 'default') -
-      resolveAutoHookPhaseRank(rightHook?.phase ?? 'default');
-    if (phaseRankDiff !== 0) {
-      return phaseRankDiff;
+  const entries = [...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()];
+  const entryByName = new Map(
+    entries.map((entry) => [entry.name.trim().toLowerCase(), entry] as const)
+  );
+  return planServertoolRegistryProjectionWithNative({
+    registeredNames: [],
+    registeredRecords: [],
+    autoHandlerNames: entries.map((entry) => entry.name)
+  }).autoHandlerNames.map((name) => {
+    const entry = entryByName.get(name.trim().toLowerCase());
+    if (!entry) {
+      throw new Error(`[servertool] native registry auto handler order missing entry for name: ${name}`);
     }
-
-    const priorityDiff = (leftHook?.priority ?? 100) - (rightHook?.priority ?? 100);
-    if (priorityDiff !== 0) {
-      return priorityDiff;
-    }
-
-    const orderDiff = (leftHook?.order ?? 0) - (rightHook?.order ?? 0);
-    if (orderDiff !== 0) {
-      return orderDiff;
-    }
-
-    return left.name.localeCompare(right.name);
+    return entry;
   });
 };
 
 export const collectAutoServerToolHooksImpl = (): ServerToolAutoHookDescriptor[] => {
-  return listAutoHandlersForRegistryImpl().map((entry) => ({
-    id: entry.name,
-    phase: entry.autoHook?.phase ?? 'default',
-    priority: entry.autoHook?.priority ?? 100,
-    order: entry.autoHook?.order ?? 0,
-    registration: entry.registration,
-    handler: entry.handler
-  }));
+  const entries = listAutoHandlersForRegistryImpl();
+  const entryById = new Map(
+    entries.map((entry) => [entry.name.trim().toLowerCase(), entry] as const)
+  );
+  return planServertoolRegistryAutoHookDescriptorsWithNative({
+    hooks: entries.map((entry) => ({
+      id: entry.name,
+      phase: entry.autoHook?.phase,
+      priority: entry.autoHook?.priority,
+      order: entry.autoHook?.order
+    }))
+  }).map((descriptor) => {
+    const entry = entryById.get(descriptor.id.trim().toLowerCase());
+    if (!entry) {
+      throw new Error(
+        `[servertool] native registry auto-hook descriptor missing entry for id: ${descriptor.id}`
+      );
+    }
+    return {
+      id: descriptor.id,
+      phase: descriptor.phase,
+      priority: descriptor.priority,
+      order: descriptor.order,
+      registration: entry.registration,
+      handler: entry.handler
+    };
+  });
 };
 
 export function isRegisteredToolNameImpl(name: string): boolean {
@@ -154,19 +187,45 @@ export function listRegisteredToolHandlerRecordsImpl(): ServerToolRegisteredHand
   const builtinEntries = listBuiltinHandlerNames()
     .map((name) => getBuiltinHandlerEntry(name))
     .filter((entry): entry is ServerToolHandlerEntry => Boolean(entry));
-  const toolCallHandlers = [
-    ...builtinEntries.filter((entry) => entry.registration.trigger === 'tool_call'),
-    ...listAdHocHandlerRecords().filter((entry) => entry.registration.trigger === 'tool_call')
-  ].map((entry) => ({
-    registration: entry.registration,
-    handler: entry.handler
-  }));
-  const autoHandlers = [
-    ...builtinEntries.filter((entry) => entry.registration.trigger === 'auto'),
-    ...listAdHocHandlerRecords().filter((entry) => entry.registration.trigger === 'auto')
-  ].map((entry) => ({
-    registration: entry.registration,
-    handler: entry.handler
-  }));
-  return [...toolCallHandlers, ...autoHandlers];
+  const rawRecords = [
+    ...builtinEntries.map((entry) => ({
+      name: entry.name,
+      trigger: entry.registration.trigger,
+      registration: entry.registration,
+      handler: entry.handler
+    })),
+    ...listAdHocHandlerRecords().map((entry) => ({
+      name: entry.registration.name,
+      trigger: entry.registration.trigger,
+      registration: entry.registration,
+      handler: entry.handler
+    }))
+  ];
+  const projection = planServertoolRegistryProjectionWithNative({
+    registeredNames: [],
+    registeredRecords: rawRecords.map((entry) => ({
+      name: entry.name,
+      trigger: entry.trigger
+    })),
+    autoHandlerNames: []
+  });
+  const used = new Set<number>();
+  return projection.registeredRecords.map((recordPlan) => {
+    const matchIndex = rawRecords.findIndex((entry, index) => (
+      !used.has(index) &&
+      entry.name.trim().toLowerCase() === recordPlan.name.trim().toLowerCase() &&
+      entry.trigger === recordPlan.trigger
+    ));
+    if (matchIndex < 0) {
+      throw new Error(
+        `[servertool] native registry record order missing entry for ${recordPlan.trigger}:${recordPlan.name}`
+      );
+    }
+    used.add(matchIndex);
+    const entry = rawRecords[matchIndex];
+    return {
+      registration: entry.registration,
+      handler: entry.handler
+    };
+  });
 }

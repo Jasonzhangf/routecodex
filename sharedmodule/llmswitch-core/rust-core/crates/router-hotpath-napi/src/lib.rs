@@ -1200,17 +1200,37 @@ pub fn decide_stop_message_action(ctx_json: String) -> NapiResult<String> {
         .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageDecision: {e}")))
 }
 
-#[napi]
+#[napi(js_name = "evaluateStopSchemaGateJson")]
 pub fn evaluate_stop_schema_gate_json(
     assistant_text: String,
     used: u32,
     max_repeats: u32,
     prev_observation_hash: String,
     prev_no_change_count: u32,
+    reasoning_stop_arguments: Option<String>,
 ) -> NapiResult<String> {
-    let decision =
-        stop_message_auto_blocks::evaluate_stop_schema(&assistant_text, used, max_repeats, &prev_observation_hash, prev_no_change_count);
-    serde_json::to_string(&decision)
+    let decision = stop_message_auto_blocks::evaluate_stop_schema(
+        &assistant_text,
+        reasoning_stop_arguments.as_deref(),
+        used,
+        max_repeats,
+        &prev_observation_hash,
+        prev_no_change_count,
+    );
+    let output = serde_json::json!({
+        "action": decision.action,
+        "reason_code": decision.reason_code,
+        "summary_prefix": decision.summary_prefix,
+        "followup_text": decision.followup_text,
+        "count_budget": decision.count_budget,
+        "max_repeats": decision.max_repeats,
+        "missing_fields": decision.missing_fields,
+        "no_change_count": decision.no_change_count,
+        "observation_hash": decision.observation_hash,
+        "parsed": decision.parsed,
+        "feedback_history": decision.feedback_history,
+    });
+    serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("serialize StopSchemaGateDecision: {e}")))
 }
 
@@ -1504,6 +1524,110 @@ pub fn plan_runtime_pre_command_rule_json(input_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn plan_runtime_pre_command_state_selection_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_runtime_pre_command_state_selection_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_auto_hook_execution_decision_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_auto_hook_execution_decision_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_auto_hook_queue_progress_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_auto_hook_queue_progress_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_execution_branch_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_execution_branch_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_engine_preflight_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_engine_preflight_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_engine_runtime_action_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_engine_runtime_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_engine_skip_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_engine_skip_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_execution_outcome_runtime_action_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_execution_outcome_runtime_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_execution_loop_runtime_action_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_execution_loop_runtime_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_execution_loop_effect_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_execution_loop_effect_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_response_stage_runtime_action_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_response_stage_runtime_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_registry_registration_action_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_registry_registration_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_registry_lookup_action_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_registry_lookup_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_registry_auto_hook_descriptors_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_registry_auto_hook_descriptors_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_registry_projection_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_registry_projection_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_stopless_cli_projection_context_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_stopless_cli_projection_context_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_engine_selection_start_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_engine_selection_start_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1512,6 +1636,42 @@ pub fn plan_engine_selection_start_json(input_json: String) -> NapiResult<String
 #[napi]
 pub fn plan_engine_selection_after_run_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_engine_selection_after_run_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_handler_contract_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_handler_contract_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_execution_dispatch_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_execution_dispatch_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_handler_runtime_action_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_handler_runtime_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn create_servertool_execution_loop_state_json() -> NapiResult<String> {
+    servertool_core_blocks::create_servertool_execution_loop_state_json()
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn append_servertool_executed_record_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::append_servertool_executed_record_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_materialization_progress_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_materialization_progress_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -1578,6 +1738,12 @@ pub fn plan_servertool_timeout_error_json(input_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn plan_servertool_state_load_failed_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_state_load_failed_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_stop_message_fetch_failed_error_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stop_message_fetch_failed_error_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1626,8 +1792,28 @@ pub fn plan_stopless_learned_note_write_json(input_json: String) -> NapiResult<S
 }
 
 #[napi]
+pub fn validate_servertool_hook_skeleton_phase_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::validate_servertool_hook_skeleton_phase_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_hook_schedule_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_hook_schedule_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn build_client_visible_projection_shell_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::build_client_visible_projection_shell_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn build_servertool_cli_projection_execution_context_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::build_servertool_cli_projection_execution_context_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -1750,6 +1936,14 @@ pub fn extract_servertool_text_from_chat_like_json(input_json: String) -> NapiRe
 #[napi]
 pub fn extract_current_assistant_stop_text_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::extract_current_assistant_stop_text_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn extract_current_assistant_reasoning_stop_arguments_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::extract_current_assistant_reasoning_stop_arguments_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

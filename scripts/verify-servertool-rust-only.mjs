@@ -61,6 +61,19 @@ const RUST_SERVERTOOL_STOPLESS_GOAL_STATE = `${ROOT}/sharedmodule/llmswitch-core
 const RUST_SERVERTOOL_STOPLESS_LEARNED_NOTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_learned_note_contract.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const RUST_SERVERTOOL_BLOCKED_REPORT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/blocked_report_contract.rs`;
+const RUST_SERVERTOOL_HOOK_SKELETON = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs`;
+const RUST_SERVERTOOL_AUTO_HOOK_EXECUTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs`;
+const RUST_SERVERTOOL_AUTO_HOOK_QUEUE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs`;
+const RUST_SERVERTOOL_REGISTRY_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs`;
+const RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs`;
+const RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs`;
+const RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs`;
+const RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs`;
+const RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs`;
+const RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs`;
+const RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs`;
+const RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs`;
+const RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_PENDING_INJECTION = `${SERVERTOOL_TS_DIR}/pending-injection-block.ts`;
 const TS_PENDING_SESSION = `${SERVERTOOL_TS_DIR}/pending-session.ts`;
@@ -183,6 +196,11 @@ const SERVERTOOL_ACTIVE_ORCHESTRATION_OWNER_FILES = [
   `${SERVERTOOL_TS_DIR}/engine.ts`,
   `${SERVERTOOL_TS_DIR}/registry-impl.ts`,
 ];
+const SERVERTOOL_DISPATCH_OUTCOME_FORBIDDEN_MARKERS = [
+  'args.appendToolOutput(',
+  'JSON.stringify({',
+  'retryable: true',
+];
 
 // ── Issues accumulator ─────────────────────────────────────────
 const issues = [];
@@ -205,6 +223,14 @@ function readRequired(path) {
     return '';
   }
   return readFileSync(path, 'utf8');
+}
+
+function assertMissing(check, file, content, needle) {
+  if (content.includes(needle)) {
+    fail(check, `${file} must not contain "${needle}"`);
+    return;
+  }
+  pass(check, `${file.replace(`${ROOT}/`, '')} does not contain "${needle}"`);
 }
 
 function assertContains(check, file, content, needle) {
@@ -826,6 +852,11 @@ function checkServertoolCliProjectionMap() {
     ['cli-projection-output-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_client_exec_cli_projection_output_json'],
     ['cli-projection-output-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildClientExecCliProjectionOutputJson'],
     ['cli-projection-output-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildClientExecCliProjectionOutputWithNative'],
+    ['cli-projection-execution-context-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, 'pub fn build_servertool_cli_projection_execution_context'],
+    ['cli-projection-execution-context-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'build_servertool_cli_projection_execution_context_json'],
+    ['cli-projection-execution-context-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_servertool_cli_projection_execution_context_json'],
+    ['cli-projection-execution-context-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildServertoolCliProjectionExecutionContextJson'],
+    ['cli-projection-execution-context-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildServertoolCliProjectionExecutionContextWithNative'],
   ]) {
     assertContains(check, file, content, needle);
   }
@@ -853,6 +884,16 @@ function checkServertoolCliProjectionMap() {
     rustCliContract,
     'validate_no_internal_carrier(&value)'
   );
+  const rustPolicy = readRequired(RUST_SERVERTOOL_ORCHESTRATION_POLICY);
+  for (const [check, file, content, needle] of [
+    ['servertool-state-load-error-rust-owner', RUST_SERVERTOOL_ORCHESTRATION_POLICY, rustPolicy, 'pub fn plan_servertool_state_load_failed_error'],
+    ['servertool-state-load-error-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_state_load_failed_error_json'],
+    ['servertool-state-load-error-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_state_load_failed_error_json'],
+    ['servertool-state-load-error-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolStateLoadFailedErrorJson'],
+    ['servertool-state-load-error-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'planServertoolStateLoadFailedErrorWithNative'],
+  ]) {
+    assertContains(check, file, content, needle);
+  }
   const cliDeniedCarrierBlock = extractConstArrayBlock(rustCliContract, 'DENIED_INTERNAL_CARRIER_KEYS');
   const cliDeniedCarrierTextBlock = extractConstArrayBlock(rustCliContract, 'DENIED_INTERNAL_CARRIER_TEXT');
   for (const privateCarrier of [
@@ -2528,6 +2569,16 @@ function checkStopMessageCounterRustOwner() {
 
 function checkServertoolExecutionDispatchRustOwner() {
   const executionShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`);
+  const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
+  const rustExecutionBranch = readRequired(RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT);
+  const rustExecutionLoopRuntimeAction = readRequired(RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT);
+  const rustExecutionOutcomeRuntimeAction = readRequired(RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT);
+  const rustExecutionState = readRequired(RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeCoreWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   assertContains(
     'servertool-execution-dispatch-rust-owner',
     `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
@@ -2543,6 +2594,23 @@ function checkServertoolExecutionDispatchRustOwner() {
   for (const keyword of [
     'listRegisteredServerToolHandlerRecords()',
     'registeredToolCallHandlers: listRegisteredServerToolHandlerRecords()',
+    '[servertool] dispatch spec mismatch:',
+    '[servertool] invalid native mixed-client-tools outcome contract',
+    '[servertool] missing native followup contract for servertool-only outcome',
+    "if (outcomePlan.outcomeMode === 'mixed_client_tools')",
+    "outcomePlan.followupStrategy === 'reuse_last_execution'",
+    '? args.executionState.lastExecution.followup',
+    "if (!entry || entry.trigger !== 'tool_call')",
+    'if (result) {',
+    'if (lastErr) {',
+    'executedToolCalls: [],',
+    'executedIds: new Set<string>()',
+    'executedFlowIds: []',
+    'state.executedToolCalls.push({',
+    'state.executedIds.add(toolCall.id)',
+    'state.executedFlowIds.push(',
+    'state.lastExecution = execution',
+    'const newKeys = new Set(Object.keys(nextChatResponse));',
   ]) {
     if (executionShell.includes(keyword)) {
       fail(
@@ -2555,6 +2623,105 @@ function checkServertoolExecutionDispatchRustOwner() {
     'servertool-execution-dispatch-rust-owner',
     'execution-dispatch-outcome-shell.ts builds dispatch-plan handler truth from Rust skeleton config'
   );
+
+  const reexportShell = readRequired(TS_EXECUTION_SHELL);
+  for (const keyword of [
+    'executedToolCalls: [],',
+    'executedIds: new Set<string>()',
+    'executedFlowIds: []',
+    'state.executedToolCalls.push({',
+    'state.executedIds.add(toolCall.id)',
+    'state.executedFlowIds.push(',
+    'state.lastExecution = execution',
+    '[servertool] dispatch spec mismatch:',
+  ]) {
+    if (reexportShell.includes(keyword)) {
+      fail(
+        'servertool-execution-shell-no-duplicate-state-owner',
+        `Forbidden TS execution-shell duplicate state semantic "${keyword}" found in ${TS_EXECUTION_SHELL}`
+      );
+    }
+  }
+  pass(
+    'servertool-execution-shell-no-duplicate-state-owner',
+    'execution-shell.ts re-exports native thin-shell state/dispatch helpers without duplicate TS owner semantics'
+  );
+
+  for (const [check, file, content, needle] of [
+    ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'feature_id: hub.servertool_execution_branch_contract'],
+    ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'pub fn plan_servertool_execution_branch'],
+    ['servertool-execution-branch-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_branch_contract'],
+    ['servertool-execution-branch-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_execution_branch_json'],
+    ['servertool-execution-branch-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_branch_json'],
+    ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchJson'],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
+    ['servertool-execution-branch-ts-thin-shell', `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`, serverSideToolsImpl, 'planServertoolExecutionBranchWithNative'],
+    ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'feature_id: hub.servertool_engine_preflight_contract'],
+    ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'pub fn plan_servertool_engine_preflight'],
+    ['servertool-engine-preflight-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_preflight_contract'],
+    ['servertool-engine-preflight-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_engine_preflight_json'],
+    ['servertool-engine-preflight-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_preflight_json'],
+    ['servertool-engine-preflight-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEnginePreflightJson'],
+    ['servertool-engine-preflight-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEnginePreflightWithNative'],
+    ['servertool-engine-preflight-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`), 'planServertoolEnginePreflightWithNative'],
+    ['servertool-engine-skip-rust-owner', RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT), 'feature_id: hub.servertool_engine_skip_contract'],
+    ['servertool-engine-skip-rust-owner', RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT), 'pub fn plan_servertool_engine_skip'],
+    ['servertool-engine-skip-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_skip_contract'],
+    ['servertool-engine-skip-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_engine_skip_json'],
+    ['servertool-engine-skip-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_skip_json'],
+    ['servertool-engine-skip-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEngineSkipJson'],
+    ['servertool-engine-skip-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineSkipWithNative'],
+    ['servertool-engine-skip-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`), 'planServertoolEngineSkipWithNative'],
+    ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'feature_id: hub.servertool_engine_runtime_action_contract'],
+    ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'pub fn plan_servertool_engine_runtime_action'],
+    ['servertool-engine-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_runtime_action_contract'],
+    ['servertool-engine-runtime-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_engine_runtime_action_json'],
+    ['servertool-engine-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_runtime_action_json'],
+    ['servertool-engine-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEngineRuntimeActionJson'],
+    ['servertool-engine-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineRuntimeActionWithNative'],
+    ['servertool-engine-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`), 'planServertoolEngineRuntimeActionWithNative'],
+    ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'feature_id: hub.servertool_execution_loop_runtime_action_contract'],
+    ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'pub fn plan_servertool_execution_loop_runtime_action'],
+    ['servertool-execution-loop-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_loop_runtime_action_contract'],
+    ['servertool-execution-loop-runtime-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_execution_loop_runtime_action_json'],
+    ['servertool-execution-loop-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_loop_runtime_action_json'],
+    ['servertool-execution-loop-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionLoopRuntimeActionJson'],
+    ['servertool-execution-loop-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionLoopRuntimeActionWithNative'],
+    ['servertool-execution-loop-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'planServertoolExecutionLoopRuntimeActionWithNative'],
+    ['servertool-execution-outcome-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT, rustExecutionOutcomeRuntimeAction, 'feature_id: hub.servertool_execution_outcome_runtime_action_contract'],
+    ['servertool-execution-outcome-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT, rustExecutionOutcomeRuntimeAction, 'pub fn plan_servertool_execution_outcome_runtime_action'],
+    ['servertool-execution-outcome-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_outcome_runtime_action_contract'],
+    ['servertool-execution-outcome-runtime-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_execution_outcome_runtime_action_json'],
+    ['servertool-execution-outcome-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_outcome_runtime_action_json'],
+    ['servertool-execution-outcome-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionOutcomeRuntimeActionJson'],
+    ['servertool-execution-outcome-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
+    ['servertool-execution-outcome-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
+    ['servertool-stopless-cli-projection-context-rust-owner', RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT, readRequired(RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT), 'feature_id: hub.servertool_stopless_cli_projection_context'],
+    ['servertool-stopless-cli-projection-context-rust-owner', RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT, readRequired(RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT), 'pub fn plan_stopless_cli_projection_context'],
+    ['servertool-stopless-cli-projection-context-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod stopless_cli_projection_context_contract'],
+    ['servertool-stopless-cli-projection-context-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_cli_projection_context_json'],
+    ['servertool-stopless-cli-projection-context-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_cli_projection_context_json'],
+    ['servertool-stopless-cli-projection-context-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessCliProjectionContextJson'],
+    ['servertool-stopless-cli-projection-context-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planStoplessCliProjectionContextWithNative'],
+    ['servertool-stopless-cli-projection-context-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`), 'planStoplessCliProjectionContextWithNative'],
+    ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'feature_id: hub.servertool_execution_state_contract'],
+    ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn create_servertool_execution_loop_state'],
+    ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn append_executed_tool_record'],
+    ['servertool-execution-state-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_state_contract'],
+    ['servertool-execution-state-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'create_servertool_execution_loop_state_json'],
+    ['servertool-execution-state-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'append_servertool_executed_record_json'],
+    ['servertool-execution-state-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn create_servertool_execution_loop_state_json'],
+    ['servertool-execution-state-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn append_servertool_executed_record_json'],
+    ['servertool-execution-state-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'createServertoolExecutionLoopStateJson'],
+    ['servertool-execution-state-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'appendServertoolExecutedRecordJson'],
+    ['servertool-execution-state-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'createServertoolExecutionLoopStateWithNative'],
+    ['servertool-execution-state-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'appendServertoolExecutedRecordWithNative'],
+    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'createServertoolExecutionLoopStateWithNative'],
+    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'appendServertoolExecutedRecordWithNative'],
+    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'replaceJsonObjectInPlace(baseForExecution, nextChatResponse)'],
+  ]) {
+    assertContains(check, file, content, needle);
+  }
 }
 
 // ── Check 13: followup mainline bridge is Rust-owned ──────────
@@ -2685,6 +2852,66 @@ function checkServertoolSkeletonConfigRustOwner() {
     );
   }
   pass('servertool-skeleton-config-no-ts-owner', 'skeleton-config.ts is native-only shell for derived config and registration semantics');
+}
+
+function checkServertoolHookSkeletonRustOwner() {
+  const rustHookSkeleton = readRequired(RUST_SERVERTOOL_HOOK_SKELETON);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+
+  for (const needle of [
+    'pub enum ServertoolHookDirection',
+    'pub enum ServertoolReqHookPhase',
+    'pub enum ServertoolRespHookPhase',
+    'pub enum ServertoolHookRequiredness',
+    'pub struct ServertoolHookSpec',
+    'pub struct ServertoolHookSchedulerInput',
+    'pub struct ServertoolHookEffectPlan',
+    'pub struct ServertoolHookEvent',
+    'pub struct ServertoolHookProjection',
+    'pub fn validate_servertool_hook_spec',
+    'pub fn plan_servertool_hook_schedule',
+    'DuplicateHookId',
+    'MissingRequiredHookForPhase',
+    '#[cfg(test)]',
+    'fn schedules_hooks_by_priority_order_then_id()',
+    'fn emits_noop_event_for_skipped_optional_hook()',
+  ]) {
+    assertContains('servertool-hook-skeleton-rust-owner', RUST_SERVERTOOL_HOOK_SKELETON, rustHookSkeleton, needle);
+  }
+
+  for (const needle of [
+    'pub fn validate_servertool_hook_skeleton_phase_json',
+    'pub fn plan_servertool_hook_schedule_json',
+  ]) {
+    assertContains('servertool-hook-skeleton-napi-blocks', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, needle);
+  }
+
+  for (const needle of [
+    'pub fn validate_servertool_hook_skeleton_phase_json(input_json: String) -> NapiResult<String>',
+    'pub fn plan_servertool_hook_schedule_json(input_json: String) -> NapiResult<String>',
+  ]) {
+    assertContains('servertool-hook-skeleton-napi-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, needle);
+  }
+
+  for (const needle of [
+    'export function validateServertoolHookSkeletonPhaseWithNative(',
+    'export function planServertoolHookScheduleWithNative(',
+    'function parseServertoolHookEffectPlanPayload(',
+  ]) {
+    assertContains('servertool-hook-skeleton-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, needle);
+  }
+
+  for (const needle of [
+    '"validateServertoolHookSkeletonPhaseJson"',
+    '"planServertoolHookScheduleJson"',
+  ]) {
+    assertContains('servertool-hook-skeleton-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, needle);
+  }
+
+  pass('servertool-hook-skeleton-rust-owner', 'servertool hook skeleton contract is Rust-owned with native export surface');
 }
 
 function checkPendingSessionRustOwner() {
@@ -2855,6 +3082,7 @@ function checkPreCommandHooksRustOwner() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const preCommandShell = readRequired(TS_PRE_COMMAND_HOOKS);
+  const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
 
   for (const needle of [
     'feature_id: hub.servertool_pre_command_hooks',
@@ -2863,8 +3091,11 @@ function checkPreCommandHooksRustOwner() {
     'pub struct PreCommandHookRulePlan',
     'pub struct PreCommandRegexPlan',
     'pub struct RuntimePreCommandRulePlanInput',
+    'pub struct RuntimePreCommandStateSelectionInput',
+    'pub struct RuntimePreCommandStateSelectionPlan',
     'pub fn plan_pre_command_hooks_config',
     'pub fn plan_runtime_pre_command_rule',
+    'pub fn plan_runtime_pre_command_state_selection',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-rust-owner',
@@ -2882,6 +3113,7 @@ function checkPreCommandHooksRustOwner() {
   for (const needle of [
     'plan_pre_command_hooks_config_json',
     'plan_runtime_pre_command_rule_json',
+    'plan_runtime_pre_command_state_selection_json',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-export',
@@ -2893,6 +3125,7 @@ function checkPreCommandHooksRustOwner() {
   for (const needle of [
     'pub fn plan_pre_command_hooks_config_json',
     'pub fn plan_runtime_pre_command_rule_json',
+    'pub fn plan_runtime_pre_command_state_selection_json',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-export',
@@ -2904,6 +3137,7 @@ function checkPreCommandHooksRustOwner() {
   for (const needle of [
     'planPreCommandHooksConfigJson',
     'planRuntimePreCommandRuleJson',
+    'planRuntimePreCommandStateSelectionJson',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-required-export',
@@ -2929,6 +3163,12 @@ function checkPreCommandHooksRustOwner() {
       needle
     );
   }
+  assertContains(
+    'servertool-pre-command-hooks-runtime-selection-thin-shell',
+    `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
+    serverSideToolsImpl,
+    'planRuntimePreCommandStateSelectionWithNative({'
+  );
   for (const keyword of [
     'function normalizePreCommandHookRule',
     'function sanitizeHookId',
@@ -2955,6 +3195,164 @@ function checkPreCommandHooksRustOwner() {
   pass(
     'servertool-pre-command-hooks-no-ts-owner',
     'pre-command-hooks.ts is native-plan shell for config/rule normalization, hook id, tools, regex plan, timeout, and priority policy'
+  );
+}
+
+function checkAutoHookExecutionRustOwner() {
+  const rustAutoHookExecution = readRequired(RUST_SERVERTOOL_AUTO_HOOK_EXECUTION);
+  const rustAutoHookQueue = readRequired(RUST_SERVERTOOL_AUTO_HOOK_QUEUE);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
+
+  for (const needle of [
+    'feature_id: hub.servertool_auto_hook_execution',
+    'pub struct AutoHookExecutionDecisionInput',
+    'pub struct AutoHookExecutionDecisionPlan',
+    'pub struct AutoHookTraceEventPlan',
+    'pub fn plan_auto_hook_execution_decision',
+  ]) {
+    assertContains('servertool-auto-hook-execution-rust-owner', RUST_SERVERTOOL_AUTO_HOOK_EXECUTION, rustAutoHookExecution, needle);
+  }
+  for (const needle of [
+    'feature_id: hub.servertool_auto_hook_queue_progress',
+    'pub struct AutoHookQueueProgressInput',
+    'pub struct AutoHookQueueProgressPlan',
+    'pub fn plan_auto_hook_queue_progress',
+  ]) {
+    assertContains('servertool-auto-hook-execution-rust-owner', RUST_SERVERTOOL_AUTO_HOOK_QUEUE, rustAutoHookQueue, needle);
+  }
+  assertContains(
+    'servertool-auto-hook-execution-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod auto_hook_execution_contract'
+  );
+  assertContains(
+    'servertool-auto-hook-execution-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod auto_hook_queue_contract'
+  );
+  for (const needle of [
+    'plan_auto_hook_execution_decision_json',
+    'plan_auto_hook_queue_progress_json',
+  ]) {
+    assertContains('servertool-auto-hook-execution-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, needle);
+    assertContains('servertool-auto-hook-execution-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, `pub fn ${needle}`);
+  }
+  assertContains('servertool-auto-hook-execution-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planAutoHookExecutionDecisionJson');
+  assertContains('servertool-auto-hook-execution-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planAutoHookQueueProgressJson');
+  assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookExecutionDecisionWithNative');
+  assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookQueueProgressWithNative');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'planAutoHookExecutionDecisionWithNative({');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'planAutoHookQueueProgressWithNative({');
+  for (const keyword of [
+    "result: 'error'",
+    "reason: 'predicate_false'",
+    "reason: 'matched_without_flow'",
+    "reason: 'empty_materialized_result'",
+    'if (!planned) {',
+    'if (result) {',
+    'if (optionalResult) {',
+    'if (mandatoryResult) {',
+  ]) {
+    if (autoHookCaller.includes(keyword)) {
+      fail(
+        'servertool-auto-hook-execution-no-ts-owner',
+        `Forbidden TS auto-hook execution semantic "${keyword}" found in auto-hook-caller.ts`
+      );
+    }
+  }
+  pass(
+    'servertool-auto-hook-execution-no-ts-owner',
+    'auto-hook-caller.ts delegates attempt outcome and optional->mandatory queue progression semantics to Rust native plan'
+  );
+}
+
+function checkServertoolRegistryRustOwner() {
+  const rustRegistry = readRequired(RUST_SERVERTOOL_REGISTRY_CONTRACT);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const registryImpl = readRequired(`${SERVERTOOL_TS_DIR}/registry-impl.ts`);
+
+  for (const needle of [
+    'feature_id: hub.servertool_registry_contract',
+    'pub struct ServertoolRegistryRegistrationActionInput',
+    'pub enum ServertoolRegistryRegistrationAction',
+    'pub fn plan_servertool_registry_registration_action',
+    'pub struct ServertoolRegistryLookupActionInput',
+    'pub enum ServertoolRegistryLookupAction',
+    'pub fn plan_servertool_registry_lookup_action',
+    'pub struct ServertoolRegistryAutoHookDescriptorInput',
+    'pub struct ServertoolRegistryAutoHookDescriptorPlan',
+    'pub fn plan_servertool_registry_auto_hook_descriptors',
+    'pub struct ServertoolRegistryProjectionInput',
+    'pub struct ServertoolRegistryProjectionPlan',
+    'pub fn plan_servertool_registry_projection',
+  ]) {
+    assertContains('servertool-registry-rust-owner', RUST_SERVERTOOL_REGISTRY_CONTRACT, rustRegistry, needle);
+  }
+  assertContains(
+    'servertool-registry-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod registry_contract'
+  );
+  for (const needle of [
+    'plan_servertool_registry_registration_action_json',
+    'plan_servertool_registry_lookup_action_json',
+    'plan_servertool_registry_auto_hook_descriptors_json',
+    'plan_servertool_registry_projection_json',
+  ]) {
+    assertContains('servertool-registry-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, needle);
+    assertContains('servertool-registry-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, `pub fn ${needle}`);
+  }
+  for (const needle of [
+    'planServertoolRegistryRegistrationActionJson',
+    'planServertoolRegistryLookupActionJson',
+    'planServertoolRegistryAutoHookDescriptorsJson',
+    'planServertoolRegistryProjectionJson',
+  ]) {
+    assertContains('servertool-registry-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, needle);
+  }
+  for (const needle of [
+    'planServertoolRegistryRegistrationActionWithNative',
+    'planServertoolRegistryLookupActionWithNative',
+    'planServertoolRegistryAutoHookDescriptorsWithNative',
+    'planServertoolRegistryProjectionWithNative',
+  ]) {
+    assertContains('servertool-registry-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, needle);
+    assertContains('servertool-registry-ts-thin-shell', `${SERVERTOOL_TS_DIR}/registry-impl.ts`, registryImpl, needle);
+  }
+  for (const keyword of [
+    'if (builtinEntry) {',
+    'return getAdHocHandlerEntry(canonicalName);',
+    "phase: entry.autoHook?.phase ?? 'default'",
+    "priority: entry.autoHook?.priority ?? 100",
+    "order: entry.autoHook?.order ?? 0",
+    'new Set([...listBuiltinHandlerNames(), ...listAdHocHandlerNames()])',
+    '.sort()',
+    'return [...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()]',
+    "entry.registration.trigger === 'tool_call'",
+    "entry.registration.trigger === 'auto'",
+  ]) {
+    if (registryImpl.includes(keyword)) {
+      fail(
+        'servertool-registry-no-ts-owner',
+        `Forbidden TS registry selection semantic "${keyword}" found in registry-impl.ts`
+      );
+    }
+  }
+  pass(
+    'servertool-registry-no-ts-owner',
+    'registry-impl.ts delegates register/get action selection to Rust native plan'
   );
 }
 
@@ -4761,7 +5159,8 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     'export function isClientExecCliProjectionToolCall(',
-    "return executionMode === 'client_exec_cli_projection';",
+    'return isServertoolClientExecCliProjectionToolCallWithNative({',
+    'executionMode: toolCall.executionMode',
     'export const collectAdditionalClientToolCallsImpl =',
   ]) {
     if (!tsServerSideToolsImpl.includes(marker)) {
@@ -4787,6 +5186,12 @@ function checkServertoolRustOutcomeCloseout() {
 
   const executionShell = readRequired(TS_EXECUTION_SHELL);
   const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
+  const rustExecutionHandlerContract = readRequired(RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeCoreWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   for (const marker of [
     'if (!options.reenterPipeline) return undefined;',
   ]) {
@@ -4826,6 +5231,14 @@ function checkServertoolRustOutcomeCloseout() {
     'function isServerToolHandlerPlan(',
     'function isServerToolHandlerResult(',
     'function assertValidServertoolHandlerContract(',
+    'planServertoolHandlerContractWithNative',
+    'planServertoolBackendExecutionWithNative',
+    '[servertool] invalid handler plan contract: missing finalize',
+    '[servertool] invalid handler plan/result contract',
+    '[servertool] handler failed:',
+    '[servertool] vision_analysis backend requires reenterPipeline',
+    '[servertool] unsupported backend plan kind:',
+    "if (planHandlerMaterializationAction(planned, options) === 'handler_plan')",
   ]) {
     if (executionMaterializationShell.includes(marker)) {
       fail(
@@ -4838,13 +5251,121 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-shell-ts-orchestration-guard',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    'planServertoolHandlerContractWithNative'
+    'planServertoolHandlerRuntimeActionWithNative'
   );
   assertContains(
-    'servertool-execution-shell-ts-orchestration-guard',
+    'servertool-execution-handler-contract-rust-owner',
+    RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT,
+    rustExecutionHandlerContract,
+    'feature_id: hub.servertool_execution_handler_contract'
+  );
+  for (const needle of [
+    'pub struct ServertoolHandlerContractInput',
+    'pub fn plan_servertool_handler_contract',
+    'pub fn plan_servertool_materialization_progress',
+    'pub struct ServertoolHandlerRuntimeActionInput',
+    'pub struct ServertoolHandlerRuntimeActionPlan',
+    'pub fn plan_servertool_handler_runtime_action',
+    'pub fn plan_servertool_handler_failed_error',
+    'pub fn plan_servertool_backend_requires_reenter_pipeline_error',
+    'pub fn plan_servertool_unsupported_backend_plan_kind_error',
+  ]) {
+    assertContains(
+      'servertool-execution-handler-contract-rust-owner',
+      RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT,
+      rustExecutionHandlerContract,
+      needle
+    );
+  }
+  assertContains(
+    'servertool-execution-handler-contract-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod execution_handler_contract'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'plan_servertool_handler_contract_error_json'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'plan_servertool_handler_runtime_action_json'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'plan_servertool_materialization_progress_json'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn plan_servertool_handler_contract_error_json'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn plan_servertool_handler_runtime_action_json'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn plan_servertool_materialization_progress_json'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planServertoolHandlerContractErrorJson'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planServertoolHandlerRuntimeActionJson'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planServertoolMaterializationProgressJson'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
+    'planServertoolHandlerContractErrorWithNative'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
+    'planServertoolHandlerRuntimeActionWithNative'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
+    'planServertoolMaterializationProgressWithNative'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-ts-thin-shell',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    'planServertoolBackendExecutionWithNative'
+    'planServertoolHandlerContractErrorWithNative'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-ts-thin-shell',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    executionMaterializationShell,
+    'planServertoolHandlerRuntimeActionWithNative'
   );
 
   pass('servertool-outcome-rust-owner', 'servertool-core owns outcome planning and cli contract');
@@ -5011,6 +5532,7 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'function resolveToolCallExecutionOutcomeThinShell(',
         'function runToolCallExecutionLoopThinShell(',
         'export function resolveServertoolHandlerExecutionSpec(',
+        ...SERVERTOOL_DISPATCH_OUTCOME_FORBIDDEN_MARKERS,
       ],
     ],
     [
@@ -5023,6 +5545,19 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'export function collectAdditionalClientToolCallsImpl(',
         'const gatePlan = planServertoolResponseStageGateWithNative(',
         'return await runServertoolAutoHookCallerImpl(',
+        'hasServertoolSupport:',
+        "typeof options.providerInvoker === 'function' || typeof options.reenterPipeline === 'function'",
+        "return name !== 'stop_message_auto';",
+        "'SERVERTOOL_CLIENT_DISCONNECTED'",
+        "'[servertool] client disconnected before servertool execution'",
+        '.find(isClientExecCliProjectionToolCall)',
+        'executionState.executedToolCalls.length > 0',
+        "flowId: 'servertool_cli_projection'",
+        'servertoolCliProjection: {',
+        "code: 'SERVERTOOL_STATE_LOAD_FAILED'",
+        '[servertool] sticky routing state load failed:',
+        'asObject(directRuntime?.preCommandState) ??',
+        'asObject((runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState)',
       ],
     ],
     [
@@ -5042,6 +5577,11 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'const toolHandlerRegistryImpl',
         'const autoHandlerRegistryImpl',
         'let autoHookOrderImpl = 0',
+        'function resolveAutoHookPhaseRank(',
+        '.sort((left, right) => {',
+        'const phaseRankDiff =',
+        'const priorityDiff =',
+        'const orderDiff =',
         'export function registerServerToolHandlerImpl(',
         'export function getServerToolHandlerImpl(',
         'export function listAutoHandlersForRegistryImpl(',
@@ -5207,8 +5747,11 @@ checkStopMessageCounterRustOwner();
 checkServertoolExecutionDispatchRustOwner();
 checkFollowupMainlineNativeBridgeRustOwner();
 checkServertoolSkeletonConfigRustOwner();
+checkServertoolHookSkeletonRustOwner();
 checkPendingSessionRustOwner();
 checkPreCommandHooksRustOwner();
+checkAutoHookExecutionRustOwner();
+checkServertoolRegistryRustOwner();
 checkEngineSelectionRustOwner();
 checkServertoolFlowPresentationRustOwner();
 checkBackendRoutePolicyRustOwner();
