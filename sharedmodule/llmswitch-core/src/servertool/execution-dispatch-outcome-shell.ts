@@ -73,13 +73,6 @@ export function assertDispatchExecutionMode(
   );
 }
 
-export function applyServertoolExecutionResult(
-  baseForExecution: JsonObject,
-  nextChatResponse: JsonObject
-): void {
-  replaceJsonObjectInPlace(baseForExecution, nextChatResponse);
-}
-
 export const buildServertoolDispatchPlanInputThinShell = (args: {
   toolCalls: ToolCall[];
   disableToolCallHandlers: boolean;
@@ -260,7 +253,7 @@ export async function runServertoolIoExecutionQueue(args: {
       hasHandlerError: Boolean(lastErr)
     });
     if (resultLoopActionPlan.action === 'apply_materialized_result') {
-      applyServertoolExecutionResult(args.baseForExecution, result.chatResponse as JsonObject);
+      replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse as JsonObject);
       appendExecutedToolRecord(executionState, toolCall, result.execution);
       continue;
     }
@@ -272,10 +265,7 @@ export async function runServertoolIoExecutionQueue(args: {
         toolName: toolCall.name,
         message
       }) as JsonObject;
-      applyServertoolExecutionResult(
-        args.baseForExecution,
-        toolOutputPayload
-      );
+      replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
       const errorEffectPlan = planServertoolExecutionLoopEffectWithNative({
         mode: 'handler_error',
         toolCall: {
@@ -307,10 +297,7 @@ export async function runServertoolIoExecutionQueue(args: {
       executionContext: noopExecutionContext
     } = noopResult;
 
-    applyServertoolExecutionResult(
-      args.baseForExecution,
-      noopResult.chatResponse as JsonObject
-    );
+    replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse as JsonObject);
 
     const noopEffectPlan = planServertoolExecutionLoopEffectWithNative({
       mode: 'noop',

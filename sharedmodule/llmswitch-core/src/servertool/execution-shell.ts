@@ -1,49 +1,24 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineOptions,
-  ServerToolAutoHookTraceEvent,
-  ServerToolHandler,
-  ServerToolHandlerContext,
-  ServerToolHandlerResult,
   ToolCall
 } from './types.js';
 import { runPreCommandHooks } from './pre-command-hooks.js';
-import {
-  materializeServertoolPlannedResult as materializeServertoolPlannedResultShell,
+export {
+  materializeServertoolPlannedResult,
   runServertoolHandler,
   type ServertoolExecutedRecord,
   type ServertoolExecutionLoopState
 } from './execution-handler-materialization-shell.js';
-import {
-  applyServertoolExecutionResult as applyServertoolExecutionResultShell,
-  appendExecutedToolRecord as appendExecutedToolRecordShell,
-  assertDispatchExecutionMode as assertDispatchExecutionModeShell,
-  buildServertoolDispatchPlanInputThinShell as buildServertoolDispatchPlanInputThinShellShell,
-  buildServertoolOutcomePlanInputThinShell as buildServertoolOutcomePlanInputThinShellShell,
-  createServertoolExecutionLoopState as createServertoolExecutionLoopStateShell,
-  resolveToolCallExecutionOutcomeThinShell as resolveToolCallExecutionOutcomeThinShellShell,
-  runToolCallExecutionLoopThinShell as runToolCallExecutionLoopThinShellShell
+export {
+  appendExecutedToolRecord,
+  assertDispatchExecutionMode,
+  buildServertoolDispatchPlanInputThinShell,
+  buildServertoolOutcomePlanInputThinShell,
+  createServertoolExecutionLoopState,
+  materializeNativeToolCallExecutionOutcome as resolveToolCallExecutionOutcomeThinShell,
+  runServertoolIoExecutionQueue as runToolCallExecutionLoopThinShell
 } from './execution-dispatch-outcome-shell.js';
-
-export type { ServertoolExecutedRecord, ServertoolExecutionLoopState };
-
-export interface ServertoolAutoHookDescriptor {
-  id: string;
-  phase: string;
-  priority: number;
-  handler: ServerToolHandler;
-}
-
-export const createServertoolExecutionLoopState = createServertoolExecutionLoopStateShell;
-
-export const appendExecutedToolRecord = appendExecutedToolRecordShell;
-
-export const assertDispatchExecutionMode = assertDispatchExecutionModeShell;
-
-export const materializeServertoolPlannedResult =
-  materializeServertoolPlannedResultShell;
-
-export { runServertoolHandler };
 
 export function applyPreCommandHooksToToolCall(args: {
   options: ServerSideToolEngineOptions;
@@ -96,28 +71,4 @@ export function applyPreCommandHooksToToolCalls(args: {
       patchToolCallArgumentsById: args.patchToolCallArgumentsById
     });
   }
-}
-
-export const applyServertoolExecutionResult = applyServertoolExecutionResultShell;
-
-export const buildServertoolDispatchPlanInputThinShell =
-  buildServertoolDispatchPlanInputThinShellShell;
-
-export const buildServertoolOutcomePlanInputThinShell =
-  buildServertoolOutcomePlanInputThinShellShell;
-
-export const resolveToolCallExecutionOutcomeThinShell =
-  resolveToolCallExecutionOutcomeThinShellShell;
-
-export const runToolCallExecutionLoopThinShell =
-  runToolCallExecutionLoopThinShellShell;
-
-export async function runAutoHookExecutionQueue(args: {
-  queueName: ServerToolAutoHookTraceEvent['queue'];
-  hooks: ServertoolAutoHookDescriptor[];
-  options: ServerSideToolEngineOptions;
-  contextBase: ServerToolHandlerContext;
-}): Promise<ServerToolHandlerResult | null> {
-  const { runAutoHookExecutionQueue } = await import('./auto-hook-caller.js');
-  return await runAutoHookExecutionQueue(args as never);
 }

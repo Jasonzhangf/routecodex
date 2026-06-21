@@ -892,10 +892,15 @@ function checkServertoolCliProjectionMap() {
   const rustPolicy = readRequired(RUST_SERVERTOOL_ORCHESTRATION_POLICY);
   for (const [check, file, content, needle] of [
     ['servertool-state-load-error-rust-owner', RUST_SERVERTOOL_ORCHESTRATION_POLICY, rustPolicy, 'pub fn plan_servertool_state_load_failed_error'],
+    ['servertool-required-response-hook-empty-rust-owner', RUST_SERVERTOOL_ORCHESTRATION_POLICY, rustPolicy, 'pub fn plan_servertool_required_response_hook_empty_error'],
     ['servertool-state-load-error-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_state_load_failed_error_json'],
+    ['servertool-required-response-hook-empty-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_required_response_hook_empty_error_json'],
     ['servertool-state-load-error-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_state_load_failed_error_json'],
+    ['servertool-required-response-hook-empty-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_required_response_hook_empty_error_json'],
     ['servertool-state-load-error-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolStateLoadFailedErrorJson'],
+    ['servertool-required-response-hook-empty-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolRequiredResponseHookEmptyErrorJson'],
     ['servertool-state-load-error-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'planServertoolStateLoadFailedErrorWithNative'],
+    ['servertool-required-response-hook-empty-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'planServertoolRequiredResponseHookEmptyErrorWithNative'],
   ]) {
     assertContains(check, file, content, needle);
   }
@@ -2723,10 +2728,15 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-state-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'appendServertoolExecutedRecordWithNative'],
     ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'createServertoolExecutionLoopStateWithNative'],
     ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'appendServertoolExecutedRecordWithNative'],
-    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'replaceJsonObjectInPlace(baseForExecution, nextChatResponse)'],
   ]) {
     assertContains(check, file, content, needle);
   }
+  assertMissing(
+    'servertool-execution-state-ts-thin-shell-deleted-wrapper-guard',
+    `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
+    executionShell,
+    'export function applyServertoolExecutionResult('
+  );
 }
 
 // ── Check 13: followup mainline bridge is Rust-owned ──────────
@@ -5135,7 +5145,6 @@ function checkServertoolRustOutcomeCloseout() {
     'collectAdditionalClientToolCallsViaImplThinShell as collectAdditionalClientToolCalls',
     'extractToolCallsViaImplThinShell as extractToolCalls',
     'runServerSideToolEngineViaThinShell as runServerSideToolEngine',
-    'runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller',
   ]) {
     if (!tsServerSideTools.includes(marker)) {
       fail(
@@ -5143,6 +5152,12 @@ function checkServertoolRustOutcomeCloseout() {
         `server-side-tools.ts must keep CLI projection thin-shell guard marker ${marker}`
       );
     }
+  }
+  if (tsServerSideTools.includes('runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller')) {
+    fail(
+      'servertool-cli-projection-thin-shell-guard',
+      'server-side-tools.ts must not retain deleted auto-hook caller alias marker runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller'
+    );
   }
   for (const marker of [
     'export const runServerSideToolEngineViaThinShell =',
@@ -5409,10 +5424,10 @@ function checkServertoolAutoHookCallerThinShell() {
   for (const marker of [
     'runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller',
   ]) {
-    if (!serverSideTools.includes(marker)) {
+    if (serverSideTools.includes(marker)) {
       fail(
         'servertool-auto-hook-caller-thin-shell',
-        `server-side-tools.ts must keep auto-hook caller thin-shell marker ${marker}`
+        `server-side-tools.ts must not retain deleted auto-hook caller alias marker ${marker}`
       );
     }
   }
@@ -5434,7 +5449,7 @@ function checkServertoolAutoHookCallerThinShell() {
   }
   pass(
     'servertool-auto-hook-caller-thin-shell',
-    'server-side-tools.ts routes auto-hook execution through a dedicated thin-shell caller'
+    'server-side-tools.ts keeps auto-hook caller on the thin-shell path without alias wrapper residue'
   );
 }
 

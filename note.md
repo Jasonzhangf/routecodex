@@ -1,3 +1,17 @@
+## 2026-06-22 reasoningStop live closeout probe
+
+- 5555 live probe 已重放，当前结论明确：
+  - 首轮 `/v1/responses` 进入 managed stopless path 后，客户端拿到的是 `exec_command` 投影；
+  - `hasExecCommand=true`、`hasReasoningStop=false`；
+  - shell 命令是 `routecodex hook run reasoningStop --input-json ...`，不是 raw `reasoningStop` tool 透传给客户端；
+  - CLI 输出继续带 `stop_message_auto` 的结构化指导和 `schemaGuidance`，这是正常闭环，不是客户端可见 raw tool 注入。
+- 这次 probe 里看到的 `reasoningStop` 只存在于内部 reasoning/日志链路，不是 client-visible payload。
+- 仍然存在的 probe 失败是第二轮 `submit_tool_outputs` 的 `Responses conversation expired or not found`，属于 probe 会话寿命问题，不是 `reasoningStop` 拦截失效。
+- 验证命令：
+  - `node scripts/tests/stopless-5555-live-probe.mjs`
+  - `pnpm exec jest tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`
+  - `cargo test -p servertool-core stopless --lib -- --nocapture`
+
 ## 2026-06-22 submit_tool_outputs second response persistence truth
 
 - 本轮定位到 `/v1/responses.submit_tool_outputs` relay follow-up 的唯一代码缺口在 `src/server/handlers/responses-handler.ts`：
@@ -10749,3 +10763,35 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
 - 调试坑：
   - 并行跑 Jest 时先撞到 `native unavailable`，因为 native build 还没完成；串行重跑后通过。
+
+## 2026-06-22 5520 thinking glm-5.2 1:1 load balancing confirmed
+
+- 现场确认：`~/.rcc/config.toml` 里 `gateway_priority_5520.routing.thinking` 已经是 `fwd.paid.gpt-5.4` + `fwd.glm.glm-5.2`，`weights` 为 `1:1`，`thinking = "high"`。
+- 运行时校验：`routecodex config validate` 通过。
+- 结论：这次不需要改配置；当前真源已经满足“thinking 做 1:1 load balancing”的要求。
+
+## 2026-06-22 server-side-tools auto-hook alias wrapper physical delete
+
+- 物理删除 `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts` 里的纯 alias export `runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller`。
+- 同步把 `scripts/verify-servertool-rust-only.mjs` 里的硬约束从“必须存在 alias”改成“alias 不得复活”。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/server-side-tools.auto-hook-caller-guard.spec.ts --runInBand`
+  - `node scripts/verify-servertool-rust-only.mjs`
+
+## 2026-06-22 engine snapshot record wrapper inline delete
+
+- 物理删除 `sharedmodule/llmswitch-core/src/servertool/engine.ts` 里的纯记录包装函数 `recordServertoolExecutionSnapshot(...)`。
+- 调用点改成直接内联 `stageRecorder.record('servertool.execution', summarizeServertoolExecutionForSnapshot(engineResult))`，没有改 runtime 决策。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/engine.stopless-session-thin-shell.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+  - `node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+
+## 2026-06-22 servertool applyServertoolExecutionResult wrapper physical delete
+
+- 物理删除 `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 里的纯壳 `applyServertoolExecutionResult(baseForExecution, nextChatResponse)`；调用点 3 处全部内联为 `replaceJsonObjectInPlace(...)`，`execution-shell.ts` 的 re-export 列表里也删除该 alias。
+- `scripts/verify-servertool-rust-only.mjs` 的 `servertool-execution-state-ts-thin-shell` 旧断言从“必须包含旧包装”改成 `assertMissing('export function applyServertoolExecutionResult(')`，反向锁死。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/execution-dispatch-outcome-shell.spec.ts tests/servertool/execution-shell.backend-failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+  - `node scripts/build-core.mjs`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
