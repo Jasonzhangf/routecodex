@@ -73,7 +73,7 @@ export function assertDispatchExecutionMode(
   );
 }
 
-export const buildServertoolDispatchPlanInputThinShell = (args: {
+export const buildServertoolDispatchPlanInput = (args: {
   toolCalls: ToolCall[];
   disableToolCallHandlers: boolean;
   includeToolCallHandlerNames?: string[];
@@ -100,7 +100,7 @@ export const buildServertoolDispatchPlanInputThinShell = (args: {
   });
 };
 
-export const buildServertoolOutcomePlanInputThinShell = (args: {
+export const buildServertoolOutcomePlanInput = (args: {
   toolCalls: ToolCall[];
   executionState: ServertoolExecutionLoopState;
   adapterContext?: unknown;
@@ -135,7 +135,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   pendingInjectionMessageKinds: string[];
 }): ServerSideToolEngineResult {
   const outcomePlan = planServertoolOutcomeWithNative(
-    buildServertoolOutcomePlanInputThinShell({
+    buildServertoolOutcomePlanInput({
       toolCalls: args.toolCalls,
       executionState: args.executionState,
       adapterContext: args.options.adapterContext,

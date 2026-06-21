@@ -10925,3 +10925,27 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `node scripts/build-core.mjs`
 - 结论：
   - auto-hook 队列执行真源只有一个，TS 侧不需要再保留“ViaThinShell”这种纯命名壳。
+
+## 2026-06-22 servertool dispatch/outcome input naming shell delete
+
+- `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 把
+  - `buildServertoolDispatchPlanInputThinShell`
+  - `buildServertoolOutcomePlanInputThinShell`
+  收成直接对外名：
+  - `buildServertoolDispatchPlanInput`
+  - `buildServertoolOutcomePlanInput`
+- 调用点/测试同步：
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts`
+  - `tests/servertool/server-side-tools.dispatch-native.spec.ts`
+  - `tests/servertool/server-side-tools.failfast.spec.ts`
+- Gate 同步：
+  - `scripts/verify-servertool-rust-only.mjs` 新增 direct export marker 检查；
+  - 旧 `*ThinShell` 名继续只作为 forbidden marker，防复活。
+- 验证：
+  - `tests/servertool/server-side-tools.dispatch-native.spec.ts`
+  - `tests/servertool/server-side-tools.failfast.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+- 结论：
+  - 这两个函数仍是必要 bridge，但 `ThinShell` 命名已经没有额外语义，保留真函数名即可。

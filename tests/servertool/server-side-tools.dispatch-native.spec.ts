@@ -4,8 +4,8 @@ import {
   planServertoolToolCallDispatchWithNative
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  buildServertoolDispatchPlanInputThinShell,
-  buildServertoolOutcomePlanInputThinShell,
+  buildServertoolDispatchPlanInput,
+  buildServertoolOutcomePlanInput,
   createServertoolExecutionLoopState,
   appendExecutedToolRecord
 } from '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js';
@@ -50,7 +50,7 @@ describe('server-side-tools native dispatch planner', () => {
 
   test('builds dispatch-plan handler truth from Rust skeleton config', () => {
     const spec = executableToolSpec();
-    const input = buildServertoolDispatchPlanInputThinShell({
+    const input = buildServertoolDispatchPlanInput({
       toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
       disableToolCallHandlers: false
     });
@@ -76,7 +76,7 @@ describe('server-side-tools native dispatch planner', () => {
     const spec = executableToolSpec();
 
     const included = planServertoolToolCallDispatchWithNative(
-      buildServertoolDispatchPlanInputThinShell({
+      buildServertoolDispatchPlanInput({
         toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
         disableToolCallHandlers: false,
         includeToolCallHandlerNames: [spec.name]
@@ -85,7 +85,7 @@ describe('server-side-tools native dispatch planner', () => {
     expect(included.executableToolCalls).toHaveLength(1);
 
     const excluded = planServertoolToolCallDispatchWithNative(
-      buildServertoolDispatchPlanInputThinShell({
+      buildServertoolDispatchPlanInput({
         toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
         disableToolCallHandlers: false,
         excludeToolCallHandlerNames: [spec.name]
@@ -97,7 +97,7 @@ describe('server-side-tools native dispatch planner', () => {
   test('disables all tool_call handlers without mutating tool list', () => {
     const spec = executableToolSpec();
     const plan = planServertoolToolCallDispatchWithNative(
-      buildServertoolDispatchPlanInputThinShell({
+      buildServertoolDispatchPlanInput({
         toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
         disableToolCallHandlers: true
       })
@@ -130,7 +130,7 @@ describe('server-side-tools native dispatch planner', () => {
     );
 
     const outcome = planServertoolOutcomeWithNative(
-      buildServertoolOutcomePlanInputThinShell({
+      buildServertoolOutcomePlanInput({
         toolCalls: [
           { id: 'call_dispatch_1', name: spec.name, arguments: '{}' },
           { id: 'call_dispatch_2', name: 'client_side_tool', arguments: '{}' }

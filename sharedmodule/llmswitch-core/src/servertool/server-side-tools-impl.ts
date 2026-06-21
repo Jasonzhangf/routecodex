@@ -18,7 +18,7 @@ import {
   applyPreCommandHooksToToolCalls,
 } from './execution-shell.js';
 import {
-  buildServertoolDispatchPlanInputThinShell,
+  buildServertoolDispatchPlanInput,
   materializeNativeToolCallExecutionOutcome,
   runServertoolIoExecutionQueue
 } from './execution-dispatch-outcome-shell.js';
@@ -197,7 +197,7 @@ export const runServerSideToolEngine = async (
   });
 
   const dispatchPlan = planServertoolToolCallDispatchWithNative(
-    buildServertoolDispatchPlanInputThinShell({
+    buildServertoolDispatchPlanInput({
       toolCalls,
       disableToolCallHandlers: options.disableToolCallHandlers === true,
       ...(includeToolCallNames ? { includeToolCallHandlerNames: [...includeToolCallNames] } : {}),

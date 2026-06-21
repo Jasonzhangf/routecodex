@@ -690,7 +690,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js',
   () => ({
-    buildServertoolDispatchPlanInputThinShell: jest.fn((input: any) => input),
+    buildServertoolDispatchPlanInput: jest.fn((input: any) => input),
     materializeNativeToolCallExecutionOutcome: jest.fn((args: any) => ({
       mode: 'tool_flow',
       finalChatResponse: args.baseForExecution,

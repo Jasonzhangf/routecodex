@@ -2599,6 +2599,17 @@ function checkServertoolExecutionDispatchRustOwner() {
     executionShell,
     'buildServertoolOutcomePlanInputWithNative'
   );
+  for (const marker of [
+    'export const buildServertoolDispatchPlanInput =',
+    'export const buildServertoolOutcomePlanInput =',
+  ]) {
+    if (!executionShell.includes(marker)) {
+      fail(
+        'servertool-execution-dispatch-rust-owner',
+        `execution-dispatch-outcome-shell.ts must keep direct export marker ${marker}`
+      );
+    }
+  }
   for (const keyword of [
     'listRegisteredServerToolHandlerRecords()',
     'registeredToolCallHandlers: listRegisteredServerToolHandlerRecords()',
