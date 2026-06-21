@@ -135,7 +135,7 @@ fn test_govern_response_preserves_requested_shell_command_name_for_openai_chat()
 fn test_govern_response_does_not_repair_reasoning_stop_into_exec_command_when_requested() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
-            "__rcc_tool_governance": { "requestedToolNames": ["exec_command", "reasoning.stop"] },
+            "__rcc_tool_governance": { "requestedToolNames": ["exec_command", "reasoningStop"] },
             "choices": [{
                 "finish_reason": "tool_calls",
                 "message": {
@@ -145,7 +145,7 @@ fn test_govern_response_does_not_repair_reasoning_stop_into_exec_command_when_re
                         "id": "call_reasoning_stop",
                         "type": "function",
                         "function": {
-                            "name": "reasoning.stop",
+                            "name": "reasoningStop",
                             "arguments": "{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"verified\"}"
                         }
                     }]
@@ -159,10 +159,10 @@ fn test_govern_response_does_not_repair_reasoning_stop_into_exec_command_when_re
 
     let governed = govern_response(input).unwrap();
     let call = &governed.governed_payload["choices"][0]["message"]["tool_calls"][0];
-    assert_eq!(call["function"]["name"], "reasoning.stop");
+    assert_eq!(call["function"]["name"], "reasoningStop");
     let args = call["function"]["arguments"].as_str().unwrap_or("");
     assert!(args.contains("\"stopreason\":0"));
-    assert!(!args.contains("\"cmd\":\"reasoning.stop\""));
+    assert!(!args.contains("\"cmd\":\"reasoningStop\""));
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn test_govern_response_does_not_repair_reasoning_stop_into_exec_command_without
                         "id": "call_reasoning_stop_ns",
                         "type": "function",
                         "function": {
-                            "name": "reasoning.stop",
+                            "name": "reasoningStop",
                             "arguments": "{\"stopreason\":2,\"reason\":\"continue\",\"next_step\":\"run focused tests\"}"
                         }
                     }]
@@ -192,10 +192,45 @@ fn test_govern_response_does_not_repair_reasoning_stop_into_exec_command_without
 
     let governed = govern_response(input).unwrap();
     let call = &governed.governed_payload["choices"][0]["message"]["tool_calls"][0];
-    assert_eq!(call["function"]["name"], "reasoning.stop");
+    assert_eq!(call["function"]["name"], "reasoningStop");
     let args = call["function"]["arguments"].as_str().unwrap_or("");
     assert!(args.contains("\"stopreason\":2"));
-    assert!(!args.contains("\"cmd\":\"reasoning.stop\""));
+    assert!(!args.contains("\"cmd\":\"reasoningStop\""));
+}
+
+#[test]
+fn test_govern_response_repairs_malformed_exec_command_reasoning_stop_back_to_reasoning_stop() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "__rcc_tool_governance": { "requestedToolNames": ["exec_command", "reasoningStop"] },
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": "",
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_malformed_reasoning_stop_exec_command",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"reasoningStop\",\"stopreason\":2,\"reason\":\"第一轮故意缺 schema\"}"
+                        }
+                    }]
+                }
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_repair_reasoning_stop_from_exec_command".to_string(),
+    };
+
+    let governed = govern_response(input).unwrap();
+    let call = &governed.governed_payload["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(call["function"]["name"], "reasoningStop");
+    let args = call["function"]["arguments"].as_str().unwrap_or("");
+    assert!(args.contains("\"stopreason\":2"));
+    assert!(args.contains("第一轮故意缺 schema"));
+    assert!(!args.contains("\"cmd\":\"reasoningStop\""));
 }
 
 #[test]

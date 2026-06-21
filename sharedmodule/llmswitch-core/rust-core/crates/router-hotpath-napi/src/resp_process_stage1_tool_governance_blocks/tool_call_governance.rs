@@ -263,6 +263,12 @@ fn maybe_repair_malformed_exec_command_name(
     if should_preserve_structured_tool_name(raw_name.as_str(), requested_tool_name_keys) {
         return false;
     }
+    if normalize_routecodex_tool_name(Some(raw_name.as_str()))
+        .as_deref()
+        .is_some_and(|normalized| normalized == raw_name.as_str())
+    {
+        return false;
+    }
     // Guard: keep canonical snake_case tool identifiers untouched.
     if !raw_name.contains(char::is_whitespace)
         && raw_name.contains('_')
@@ -296,6 +302,47 @@ fn maybe_repair_malformed_exec_command_name(
     function.insert(
         "name".to_string(),
         Value::String("exec_command".to_string()),
+    );
+    function.insert("arguments".to_string(), Value::String(arguments));
+    true
+}
+
+fn maybe_repair_exec_command_reasoning_stop_projection(
+    function: &mut Map<String, Value>,
+    requested_tool_name_keys: &std::collections::HashSet<String>,
+) -> bool {
+    if !requested_tool_name_keys.contains("reasoningstop") {
+        return false;
+    }
+
+    let Some(raw_name) = read_trimmed_string(function.get("name")) else {
+        return false;
+    };
+    let Some(normalized_name) = normalize_routecodex_tool_name(Some(raw_name.as_str())) else {
+        return false;
+    };
+    if normalized_name.to_ascii_lowercase() != "exec_command" {
+        return false;
+    }
+
+    let mut args = parse_json_record(function.get("arguments")).unwrap_or_default();
+    let Some(command) = read_command_from_args(&args) else {
+        return false;
+    };
+    if !normalize_exec_command_text(command.as_str()).eq_ignore_ascii_case("reasoningStop") {
+        return false;
+    }
+
+    for key in ["cmd", "command", "script", "toon"] {
+        args.remove(key);
+    }
+
+    let Ok(arguments) = serde_json::to_string(&Value::Object(args)) else {
+        return false;
+    };
+    function.insert(
+        "name".to_string(),
+        Value::String("reasoningStop".to_string()),
     );
     function.insert("arguments".to_string(), Value::String(arguments));
     true
@@ -391,6 +438,10 @@ pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_p
                 }
             }
 
+            let _ = maybe_repair_exec_command_reasoning_stop_projection(
+                function,
+                &requested_tool_name_keys,
+            );
             let _ =
                 maybe_repair_malformed_exec_command_name(function, &requested_tool_name_keys);
             let Some(name) = read_trimmed_string(function.get("name")) else {
