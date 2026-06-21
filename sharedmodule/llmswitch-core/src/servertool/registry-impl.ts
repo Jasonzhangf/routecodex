@@ -3,7 +3,8 @@ import {
   type ServertoolAutoHookPhase,
   type ServerToolHandlerRegistrationSpec,
   type ServerToolRegisteredHandlerRecord,
-  getServertoolToolSpec
+  getServertoolToolSpec,
+  isServertoolEnabledByConfig
 } from './skeleton-config.js';
 import {
   getBuiltinHandlerEntry,
@@ -52,17 +53,6 @@ export interface ServerToolAutoHookDescriptor {
   handler: ServerToolHandler;
 }
 
-function isRegistrationAllowedByConfig(name: string): boolean {
-  if (!listBuiltinHandlerNames().includes(name)) {
-    return true;
-  }
-  const spec = getServertoolToolSpec(name);
-  if (!spec) {
-    return true;
-  }
-  return spec.enabled !== false;
-}
-
 export const registerServerToolHandlerImpl = (
   name: string,
   handler: ServerToolHandler,
@@ -86,7 +76,7 @@ export const registerServerToolHandlerImpl = (
     hasHandler: typeof handler === 'function',
     builtinNameMatched,
     builtinEntryPresent: Boolean(builtinEntry),
-    registrationAllowedByConfig: canonicalName ? isRegistrationAllowedByConfig(canonicalName) : true
+    registrationAllowedByConfig: canonicalName ? isServertoolEnabledByConfig(canonicalName) : true
   });
   if (actionPlan.action !== 'register_adhoc') {
     return;

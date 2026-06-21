@@ -51,6 +51,7 @@ import {
   buildStopMessageTerminalVisiblePayloadWithNative,
   extractCurrentAssistantReasoningStopArgumentsWithNative,
   extractCurrentAssistantStopTextWithNative,
+  normalizeStoplessTriggerHintForMetadataWithNative,
   planStoplessLearnedNoteWriteWithNative
 } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 import {
@@ -258,40 +259,9 @@ function attachStoplessRuntimeControlToMetadata(metadata: Record<string, unknown
 }
 
 export function normalizeStoplessTriggerHintForMetadata(triggerHint: unknown): string | undefined {
-  if (typeof triggerHint !== 'string') {
-    return undefined;
-  }
-  const normalized = triggerHint.trim();
-  if (!normalized) {
-    return undefined;
-  }
-  switch (normalized) {
-    case 'stop_schema_missing':
-      return 'no_schema';
-    case 'stop_schema_reason_missing':
-    case 'stop_schema_terminal_missing_fields':
-    case 'stop_schema_stopreason_missing_or_non_numeric':
-    case 'stop_schema_needs_user_input_missing_next_step':
-    case 'stop_schema_next_step_missing':
-    case 'stop_schema_forcestop_reason_missing':
-    case 'invalid_schema':
-      return 'invalid_schema';
-    case 'stop_schema_continue_without_next_step':
-    case 'stop_schema_continue_next_step':
-    case 'non_terminal_schema':
-      return 'non_terminal_schema';
-    case 'stop_schema_budget_exhausted':
-    case 'budget_exhausted':
-      return 'budget_exhausted';
-    case 'stop_schema_finished':
-    case 'stop_schema_blocked':
-    case 'stop_schema_needs_user_input':
-    case 'stop_schema_forcestop':
-    case 'schema_pass':
-      return 'schema_pass';
-    default:
-      return 'no_schema';
-  }
+  return typeof triggerHint === 'string' && triggerHint.trim()
+    ? normalizeStoplessTriggerHintForMetadataWithNative(triggerHint)
+    : undefined;
 }
 
 function bindMetadataCenterFromRecordToMetadata(

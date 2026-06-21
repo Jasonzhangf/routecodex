@@ -164,7 +164,6 @@ describe('servertool CLI native bridge', () => {
             flowId: 'servertool_cli_projection'
           }
         },
-        hasServertoolCliProjectionContext: true,
         stoplessAction: 'terminal_final'
       })
     ).toEqual({
@@ -180,7 +179,6 @@ describe('servertool CLI native bridge', () => {
             flowId: 'servertool_cli_projection'
           }
         },
-        hasServertoolCliProjectionContext: false,
         stoplessAction: 'cli_projection'
       })
     ).toEqual({
@@ -191,7 +189,6 @@ describe('servertool CLI native bridge', () => {
       planServertoolEngineRuntimeActionWithNative({
         hasPendingInjection: false,
         isStopMessageFlow: true,
-        hasServertoolCliProjectionContext: false,
         stoplessAction: 'cli_projection'
       })
     ).toEqual({
@@ -228,6 +225,20 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'continue_to_engine'
+    });
+
+    expect(
+      planServertoolEnginePreflightWithNative({
+        hasSyntheticControlText: false,
+        stopSignalObserved: true,
+        adapterContext: {
+          metadata: {
+            routeName: 'provider-direct/live'
+          }
+        }
+      })
+    ).toEqual({
+      action: 'return_original_chat_direct_passthrough'
     });
   });
 
@@ -484,7 +495,8 @@ describe('servertool CLI native bridge', () => {
       planServertoolResponseStageRuntimeActionWithNative({
         responseStageNextAction: 'bypass',
         autoHookEvaluated: false,
-        hasAutoHookResult: false
+        hasAutoHookResult: false,
+        responseHookRequired: false
       })
     ).toEqual({
       action: 'return_passthrough_bypass'
@@ -494,7 +506,8 @@ describe('servertool CLI native bridge', () => {
       planServertoolResponseStageRuntimeActionWithNative({
         responseStageNextAction: 'run_auto_hooks',
         autoHookEvaluated: false,
-        hasAutoHookResult: false
+        hasAutoHookResult: false,
+        responseHookRequired: false
       })
     ).toEqual({
       action: 'run_auto_hooks'
@@ -507,7 +520,8 @@ describe('servertool CLI native bridge', () => {
           nextAction: 'run_auto_hooks'
         },
         autoHookEvaluated: true,
-        hasAutoHookResult: true
+        hasAutoHookResult: true,
+        responseHookRequired: false
       })
     ).toEqual({
       action: 'return_auto_hook_result'
@@ -517,7 +531,8 @@ describe('servertool CLI native bridge', () => {
       planServertoolResponseStageRuntimeActionWithNative({
         responseStageNextAction: 'run_auto_hooks',
         autoHookEvaluated: true,
-        hasAutoHookResult: true
+        hasAutoHookResult: true,
+        responseHookRequired: false
       })
     ).toEqual({
       action: 'return_auto_hook_result'
@@ -527,10 +542,22 @@ describe('servertool CLI native bridge', () => {
       planServertoolResponseStageRuntimeActionWithNative({
         responseStageNextAction: 'run_auto_hooks',
         autoHookEvaluated: true,
-        hasAutoHookResult: false
+        hasAutoHookResult: false,
+        responseHookRequired: false
       })
     ).toEqual({
       action: 'return_passthrough_no_auto_hook_result'
+    });
+
+    expect(
+      planServertoolResponseStageRuntimeActionWithNative({
+        responseStageNextAction: 'run_auto_hooks',
+        autoHookEvaluated: true,
+        hasAutoHookResult: false,
+        responseHookRequired: true
+      })
+    ).toEqual({
+      action: 'return_required_response_hook_empty'
     });
   });
 

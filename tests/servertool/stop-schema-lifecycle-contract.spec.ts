@@ -50,6 +50,21 @@ describe('stop schema lifecycle contract', () => {
     expect(gate.followup_text).toContain('rerun failing command');
   });
 
+  test('json code fence stop schema is harvested as the same stop contract', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText:
+        '继续执行。\n```json\n{"stopreason":2,"reason":"未完成","has_evidence":1,"evidence":"partial logs","issue_cause":"need more verification","excluded_factors":"syntax fixed","diagnostic_order":"read->run","done_steps":"checked logs","next_step":"rerun failing command","next_suggested_path":"","needs_user_input":false,"learned":""}\n```',
+      used: 0,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('followup');
+    expect(gate.reason_code).toBe('stop_schema_continue_next_step');
+    expect(gate.parsed).toMatchObject({
+      stopreason: 2,
+      next_step: 'rerun failing command',
+    });
+  });
+
   test('fence invalid json returns invalid_json guidance', () => {
     const gate = evaluateStopSchemaGateWithNative({
       assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',

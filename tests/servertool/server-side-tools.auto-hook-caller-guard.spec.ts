@@ -12,6 +12,6 @@ describe('server-side-tools auto-hook caller guard', () => {
     expect(source).not.toContain('const { optionalQueue, mandatoryQueue } = buildAutoHookQueuesFromConfig({');
     expect(source).not.toContain("const optionalResult = await runAutoHookExecutionQueue({");
     expect(source).not.toContain("const mandatoryResult = await runAutoHookExecutionQueue({");
-    expect(source).toContain('export const runServertoolAutoHookCaller = runServertoolAutoHookCallerImpl;');
+    expect(source).not.toContain('runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller');
   });
 });

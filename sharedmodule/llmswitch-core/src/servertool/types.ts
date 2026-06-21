@@ -2,27 +2,6 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
 
 /**
- * ProviderInvoker 由 Host 注入，用于在 llmswitch-core 内部发起二次 provider 请求。
- * 该接口对 ServerTool 框架是抽象的，不关心 HTTP 细节。
- */
-export type ProviderInvoker = (options: {
-  providerKey: string;
-  providerType?: string;
-  modelId?: string;
-  providerProtocol: string;
-  payload: JsonObject;
-  entryEndpoint: string;
-  requestId: string;
-  /**
-   * 可选的路由提示，用于在 Host 侧强制通过虚拟路由命中特定 route
-   *（例如 web_search），保持所有二次请求仍然走标准 HubPipeline。
-   */
-  routeHint?: string;
-}) => Promise<{
-  providerResponse: JsonObject;
-}>;
-
-/**
  * ToolCall：对齐 OpenAI style 的工具调用表示。
  */
 export interface ToolCall {
@@ -58,7 +37,6 @@ export interface ServerSideToolEngineOptions {
   excludeAutoHookIds?: string[];
   includeToolCallHandlerNames?: string[];
   excludeToolCallHandlerNames?: string[];
-  providerInvoker?: ProviderInvoker;
   reenterPipeline?: (options: {
     entryEndpoint: string;
     requestId: string;

@@ -13,25 +13,6 @@ import {
   planAutoHookQueueProgressWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
-function toEngineResult(result: ServerToolHandlerResult): ServerSideToolEngineResult {
-  return {
-    mode: 'tool_flow',
-    finalChatResponse: result.chatResponse,
-    execution: result.execution
-  };
-}
-
-function emitAutoHookTrace(
-  options: ServerSideToolEngineOptions,
-  traceEvent: ServerToolAutoHookTraceEvent,
-): void {
-  try {
-    options.onAutoHookTrace?.(traceEvent);
-  } catch {
-    // best-effort
-  }
-}
-
 export async function runAutoHookExecutionQueue(args: {
   queueName: ServerToolAutoHookTraceEvent['queue'];
   hooks: Array<{
@@ -65,7 +46,11 @@ export async function runAutoHookExecutionQueue(args: {
         ...traceBase,
         message
       });
-      emitAutoHookTrace(args.options, decision.traceEvent as ServerToolAutoHookTraceEvent);
+      try {
+        args.options.onAutoHookTrace?.(decision.traceEvent as ServerToolAutoHookTraceEvent);
+      } catch {
+        // best-effort
+      }
       if (decision.action !== 'rethrow_error') {
         throw new Error(
           `[servertool] invalid native auto-hook execution error action: ${String(decision.action)}`,
@@ -88,7 +73,11 @@ export async function runAutoHookExecutionQueue(args: {
         ? { materializedFlowId: result.execution.flowId.trim() }
         : {})
     });
-    emitAutoHookTrace(args.options, decision.traceEvent as ServerToolAutoHookTraceEvent);
+    try {
+      args.options.onAutoHookTrace?.(decision.traceEvent as ServerToolAutoHookTraceEvent);
+    } catch {
+      // best-effort
+    }
 
     if (decision.action === 'return_result') {
       if (!result) {
@@ -148,7 +137,11 @@ export async function runServertoolAutoHookCallerViaThinShell(args: {
       if (!queueResult) {
         throw new Error('[servertool] native auto-hook queue progress requested result but queue result was empty');
       }
-      return toEngineResult(queueResult);
+      return {
+        mode: 'tool_flow',
+        finalChatResponse: queueResult.chatResponse,
+        execution: queueResult.execution
+      };
     }
     if (progressPlan.action === 'continue_next_queue') {
       continue;

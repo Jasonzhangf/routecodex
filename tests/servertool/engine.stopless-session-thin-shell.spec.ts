@@ -54,6 +54,8 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).toContain('planServertoolEnginePreflightWithNative');
     expect(source).not.toContain('if (\n    containsSyntheticRouteCodexControlText(options.chat)\n  )');
     expect(source).not.toContain('if (stoplessIsDisabledOnDirectRoute(options.adapterContext))');
+    expect(source).not.toContain("from './direct-stopless-route-guard.js'");
+    expect(source).toContain('adapterContext: options.adapterContext as Record<string, unknown>');
   });
 
   test('runServerToolOrchestration routes passthrough/no-execution skip through native planning', () => {

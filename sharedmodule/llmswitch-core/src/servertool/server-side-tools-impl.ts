@@ -1,4 +1,3 @@
-import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineOptions,
@@ -339,10 +338,6 @@ export const extractToolCalls = (chatResponse: JsonObject, requestId = ''): Tool
 
 function asObject(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : null;
-}
-
-function getArray(value: unknown): JsonValue[] {
-  return Array.isArray(value) ? (value as JsonValue[]) : [];
 }
 
 export function extractTextFromChatLike(payload: JsonObject): string {

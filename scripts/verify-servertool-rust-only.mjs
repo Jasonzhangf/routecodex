@@ -5570,6 +5570,8 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'if (!persistentScopeKey) {',
         'asObject(directRuntime?.preCommandState) ??',
         'asObject((runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState)',
+        "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
+        'function getArray(value: unknown): JsonValue[] {',
       ],
     ],
     [

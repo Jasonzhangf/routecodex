@@ -4,11 +4,13 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
 import {
   resetStopMessageRuntimeConfigCacheForTests,
-  resolveStopMessageDefaultMaxRepeats
+  resolveStopMessageDefaultMaxRepeats,
+  resolveStopMessageExecutionPromptForRound
 } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.js';
 
 describe('stop_message runtime config precedence', () => {
   const prevConfigPath = process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH;
+  const prevCwd = process.cwd();
   let tempDir = '';
 
   beforeEach(() => {
@@ -23,6 +25,7 @@ describe('stop_message runtime config precedence', () => {
     } else {
       process.env.ROUTECODEX_STOPMESSAGE_CONFIG_PATH = prevConfigPath;
     }
+    process.chdir(prevCwd);
     resetStopMessageRuntimeConfigCacheForTests();
   });
 
@@ -44,5 +47,14 @@ describe('stop_message runtime config precedence', () => {
     resetStopMessageRuntimeConfigCacheForTests();
 
     expect(resolveStopMessageDefaultMaxRepeats()).toBe(3);
+  });
+
+  test('loads stop-message prompt asset from module-relative path regardless of cwd', () => {
+    process.chdir(tempDir);
+    resetStopMessageRuntimeConfigCacheForTests();
+
+    expect(resolveStopMessageExecutionPromptForRound(0)).toContain('第一轮核对');
+    expect(resolveStopMessageExecutionPromptForRound(1)).toContain('第二轮核对');
+    expect(resolveStopMessageExecutionPromptForRound(2)).toContain('第三轮最终收尾');
   });
 });

@@ -252,6 +252,24 @@
   - 旧坏样本里的裸 `reasoningStop` shell 历史现在会在 request normalization 被物理移除；
   - 这次闭环的是“旧 shell 污染不能再带进后续 provider-request”，不是宣称 stopless 全链所有 live loop 已全部完结。
 
+## 2026-06-22 stop-message prompt asset module-path root cause
+
+- 04:43 的 5555 live probe 新证据已确认：首轮三次都不是 raw `reasoningStop` 泄漏，也不是 provider 业务错误，而是 response hook 在 `convert.bridge` 阶段直接失败：
+  - `STOP_MESSAGE_PROMPT_ASSET_FAILED: ENOENT ... /opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/src/servertool/assets/stop-message-prompts.md`
+- 真根因在 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.ts`：
+  - prompt asset 解析写成了 `process.cwd()/dist/servertool/assets/...`；
+  - 全局安装后 `cwd` 指向主包根目录，这条路径与 llmswitch-core 模块实际 dist 路径不一致；
+  - `PROMPT_DIST_PATH` miss 后又回退到 `PROMPT_SOURCE_PATH`，而发布包里本来就不带 `sharedmodule/llmswitch-core/src/...`，所以最终必然 ENOENT。
+- 这不是“缺资产复制”本身：
+  - 本地 `sharedmodule/llmswitch-core/dist/servertool/assets/stop-message-prompts.md` 存在；
+  - `scripts/copy-compat-assets.mjs` 也已经负责复制该资产。
+- 修复方向已锁定为骨架级路径真源：
+  - prompt asset 按模块相对路径解析，源码与 dist 共用同一规则；
+  - 不再依赖 `process.cwd()` 推断 llmswitch-core 的 dist 资产位置。
+- 红绿测试已补：
+  - `tests/servertool/stop-message-auto.config-precedence.spec.ts`
+  - 新断言：切换到临时空 `cwd` 后，`resolveStopMessageExecutionPromptForRound(0/1/2)` 仍能正确加载 prompt asset。
+
 ## 2026-06-21 servertool auto-hook outcome classification rust-owner
 
 - 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts` 的 auto-hook 执行残余 TS owner。
@@ -10832,3 +10850,21 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/config/virtual-router-builder.forwarder-10000.spec.ts --runInBand`
 - 当前结论：
   - 这项已完成，无需再改代码或配置；运行时、builder、test 三层口径已经一致。
+
+## 2026-06-22 servertool direct-stopless preflight Rust-owned slice
+
+- 当前已验证的收口点：
+  - `sharedmodule/llmswitch-core/src/servertool/direct-stopless-route-guard.ts` 已物理删除。
+  - `sharedmodule/llmswitch-core/src/servertool/engine.ts` 不再依赖本地 direct-route guard helper，而是直接把 `adapterContext` 传给 `planServertoolEnginePreflightWithNative(...)`。
+  - `sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts` 新增 `createServertoolRequiredResponseHookEmptyError(...)`，对应 Rust `planServertoolRequiredResponseHookEmptyErrorWithNative(...)`。
+  - `sharedmodule/llmswitch-core/src/servertool/types.ts` 去掉了 `ProviderInvoker`，把 servertool 执行 options 收缩为现行 Rust-owned 路径需要的字段。
+- 验证：
+  - `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+  - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - `tests/servertool/stop-schema-lifecycle-contract.spec.ts`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+- 反模式：
+  - 不再保留单独 TS direct-route preflight helper 作为第二真源。
+  - required response hook empty 必须走 Rust error plan，不回到 TS 本地 if/throw 分支。

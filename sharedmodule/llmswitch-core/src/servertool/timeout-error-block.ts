@@ -8,6 +8,7 @@ import {
   isAdapterClientDisconnectedWithNative,
   planClientDisconnectWatcherWithNative,
   planServertoolClientDisconnectedErrorWithNative,
+  planServertoolRequiredResponseHookEmptyErrorWithNative,
   planServertoolStateLoadFailedErrorWithNative,
   planServertoolTimeoutErrorWithNative,
   planServertoolTimeoutWatcherWithNative,
@@ -142,6 +143,15 @@ export function createServertoolStateLoadFailedError(options: {
   error: string;
 }): ProviderProtocolError & { status?: number } {
   return buildProviderProtocolError(planServertoolStateLoadFailedErrorWithNative(options));
+}
+
+export function createServertoolRequiredResponseHookEmptyError(options: {
+  requestId: string;
+  responseHookName: string;
+}): ProviderProtocolError & { status?: number } {
+  return buildProviderProtocolError(
+    planServertoolRequiredResponseHookEmptyErrorWithNative(options)
+  );
 }
 
 export function createServertoolProviderProtocolErrorFromPlan(

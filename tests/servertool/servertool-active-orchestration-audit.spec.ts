@@ -142,6 +142,8 @@ const TARGETS = [
       'asObject((runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState)',
       'planRuntimePreCommandStateSelectionWithNative({',
       'createServertoolStateLoadFailedError(',
+      "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
+      'function getArray(value: unknown): JsonValue[] {',
     ],
   },
   {

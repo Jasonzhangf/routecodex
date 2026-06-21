@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { resolveRccPath } from '../../../runtime/user-data-paths.js';
 
@@ -24,11 +25,44 @@ const CONFIG_ENV_KEYS = [
 ] as const;
 const CONFIG_CACHE_TTL_MS = 1000;
 
-const PROMPT_SOURCE_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../assets/stop-message-prompts.md'
-);
-const PROMPT_DIST_PATH = path.resolve(process.cwd(), 'dist/servertool/assets/stop-message-prompts.md');
+function resolveModuleDir(): string {
+  const importMetaUrl = (() => {
+    try {
+      return Function('return import.meta.url')() as string | undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  try {
+    if (typeof importMetaUrl === 'string' && importMetaUrl.startsWith('file:')) {
+      return path.dirname(fileURLToPath(importMetaUrl));
+    }
+  } catch {
+    // Jest/CJS transforms may not expose import.meta.
+  }
+  if (typeof __dirname === 'string' && __dirname.length > 0) {
+    return __dirname;
+  }
+  try {
+    const require = createRequire(importMetaUrl || pathToFileURL(path.join(process.cwd(), 'noop.mjs')).href);
+    const promptAssetPkg = require.resolve('@jsonstudio/llms/servertool/handlers/stop-message-auto/config.js');
+    return path.dirname(promptAssetPkg);
+  } catch {
+    // ignore: caller will fall back to source/dir lookup
+  }
+  try {
+    const require = createRequire(importMetaUrl || pathToFileURL(path.join(process.cwd(), 'noop.mjs')).href);
+    const promptAssetPkg = require.resolve('@jsonstudio/llms/package.json');
+    return path.resolve(path.dirname(promptAssetPkg), 'src/servertool/handlers/stop-message-auto');
+  } catch {
+    // ignore: caller will fall back to source/dir lookup
+  }
+  return path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto');
+}
+
+const PROMPT_BUNDLED_PATH = path.resolve(resolveModuleDir(), '../../assets/stop-message-prompts.md');
+const PROMPT_SOURCE_PATH = path.resolve(resolveModuleDir(), '../../../../src/servertool/assets/stop-message-prompts.md');
+const PROMPT_DIST_FALLBACK_PATH = path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/servertool/assets/stop-message-prompts.md');
 const PROMPT_CACHE_TTL_MS = 1000;
 let cachedPrompts:
   | {
@@ -54,7 +88,13 @@ function parseStopMessagePromptAsset(raw: string): { round1: string; round2: str
 }
 
 function resolveStopMessagePromptAssetPath(): string {
-  return fs.existsSync(PROMPT_DIST_PATH) ? PROMPT_DIST_PATH : PROMPT_SOURCE_PATH;
+  if (fs.existsSync(PROMPT_BUNDLED_PATH)) {
+    return PROMPT_BUNDLED_PATH;
+  }
+  if (fs.existsSync(PROMPT_DIST_FALLBACK_PATH)) {
+    return PROMPT_DIST_FALLBACK_PATH;
+  }
+  return PROMPT_SOURCE_PATH;
 }
 
 function loadStopMessagePromptAsset(): { round1: string; round2: string; round3: string } {
