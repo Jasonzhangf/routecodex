@@ -258,8 +258,8 @@ const runServerSideToolEngineViaThinShell = async (
     autoHookEvaluated: true,
     hasAutoHookResult: Boolean(autoHookResult)
   });
-  if (postAutoHookRuntimeAction.action === 'return_auto_hook_result' && autoHookResult) {
-    return autoHookResult;
+  if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
+    return autoHookResult as ServerSideToolEngineResult;
   }
   return { mode: 'passthrough', finalChatResponse: baseObject };
 };

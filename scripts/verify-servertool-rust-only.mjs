@@ -5619,6 +5619,7 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         "return name !== 'stop_message_auto';",
         'if (!base) {',
         'if (isAdapterClientDisconnected(options.adapterContext)) {',
+        "postAutoHookRuntimeAction.action === 'return_auto_hook_result' && autoHookResult",
         "'SERVERTOOL_CLIENT_DISCONNECTED'",
         "'[servertool] client disconnected before servertool execution'",
         '.find(isClientExecCliProjectionToolCall)',
