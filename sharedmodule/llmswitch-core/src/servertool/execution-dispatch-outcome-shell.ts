@@ -1,5 +1,4 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
@@ -23,11 +22,11 @@ import {
   planServertoolExecutionOutcomeRuntimeActionWithNative,
   createServertoolExecutionLoopStateWithNative,
   appendServertoolExecutedRecordWithNative,
-  type NativeServertoolExecutionLoopState,
-  type ServertoolErrorPlan
+  type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { materializeServertoolPlannedResult, type ServertoolExecutedRecord, type ServertoolExecutionLoopState, runServertoolHandler } from './execution-handler-materialization-shell.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
+import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
 export type { ServertoolExecutedRecord, ServertoolExecutionLoopState };
 
@@ -62,11 +61,11 @@ function assertDispatchExecutionMode(
   if (tsExecutionMode === nativeExecutionMode) {
     return;
   }
-  throw buildProviderProtocolError(
-    planServertoolExecutionDispatchErrorWithNative({
-      kind: 'dispatch_spec_mismatch',
-      requestId: options.requestId,
-      toolName,
+    throw createServertoolProviderProtocolErrorFromPlan(
+      planServertoolExecutionDispatchErrorWithNative({
+        kind: 'dispatch_spec_mismatch',
+        requestId: options.requestId,
+        toolName,
       nativeExecutionMode,
       tsExecutionMode
     })
@@ -179,7 +178,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   }
 
   if (outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome') {
-    throw buildProviderProtocolError(
+    throw createServertoolProviderProtocolErrorFromPlan(
       planServertoolExecutionDispatchErrorWithNative({
         kind: 'invalid_mixed_client_tools_outcome',
         requestId: args.options.requestId,
@@ -192,7 +191,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
 
   const followup = outcomeRuntimeActionPlan.selectedFollowup as ServerToolFollowupPlan | undefined;
   if (!followup) {
-    throw buildProviderProtocolError(
+    throw createServertoolProviderProtocolErrorFromPlan(
       planServertoolExecutionDispatchErrorWithNative({
         kind: 'missing_followup_contract',
         requestId: args.options.requestId,
@@ -319,16 +318,6 @@ export async function runServertoolIoExecutionQueue(args: {
   }
 
   return executionState;
-}
-
-function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {
-  const err = new ProviderProtocolError(plan.message, {
-    code: plan.code as any,
-    category: plan.category as any,
-    details: plan.details
-  }) as ProviderProtocolError & { status?: number };
-  err.status = plan.status;
-  return err;
 }
 
 function hydrateExecutionLoopState(state: NativeServertoolExecutionLoopState): ServertoolExecutionLoopState {

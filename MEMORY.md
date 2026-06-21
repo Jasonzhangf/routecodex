@@ -1,5 +1,7 @@
 # RouteCodex Memory
 
+- 2026-06-22: `execution-dispatch-outcome-shell.ts` 的 `ProviderProtocolError` 本地重复包装已进一步收口，现统一走 `timeout-error-block.ts::createServertoolProviderProtocolErrorFromPlan(...)`。可复用规则：servertool TS 壳层里凡是“native 已返回标准 error plan -> TS 再 new ProviderProtocolError”的重复 helper，优先复用已有 shared error projector，不要在每个壳文件各留一份。验证通过 focused Jest（`execution-dispatch-outcome-shell` / `server-side-tools.dispatch-native` / `servertool-active-orchestration-audit`）、`verify-servertool-rust-only` 和 `build-core`。
+
 - 2026-06-22: `sharedmodule/llmswitch-core/src/servertool/execution-shell.ts` 去掉了纯命名别名层 `*ShellShell`，相关导出现在直接指向 `execution-dispatch-outcome-shell.ts` 的真函数名。验证通过 `execution-shell.auto-hook-failfast`、`server-side-tools.failfast`、`execution-dispatch-outcome-shell`、`servertool-active-orchestration-audit`、`servertool-cli-native-bridge`、`server-side-tools.cli-projection-guard`、`verify-servertool-rust-only` 和 `build-core`。
 
 - 2026-06-22: `servertool/execution-shell.ts` 里的 `ServertoolAutoHookDescriptor` + `runAutoHookExecutionQueue(...)` wrapper 已物理删除，auto-hook 队列执行唯一真源保留在 `auto-hook-caller.ts`。验证通过 `execution-shell.auto-hook-failfast`、`server-side-tools.cli-projection-guard`、`server-side-tools.failfast`、`servertool-active-orchestration-audit`、`servertool-cli-native-bridge`、`verify-servertool-rust-only` 和 `build-core`。

@@ -1,3 +1,16 @@
+## 2026-06-22 servertool execution-dispatch error wrapper collapse
+
+- 本轮 slice：`sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 不再本地构造 `ProviderProtocolError`，统一改用 `timeout-error-block.ts::createServertoolProviderProtocolErrorFromPlan(...)`。
+- 这不是闭环完成；只是把 Phase B 里的重复错误投影 helper 再收一层，减少 TS 重复语义。
+- 连带修复 focused Jest mock：`execution-dispatch-outcome-shell.spec.ts` 因间接引入 `timeout-error-block.ts`，需要一并 mock `planClientDisconnectWatcherWithNative`、`planServertoolTimeoutWatcherWithNative`、`planServertoolTimeoutErrorWithNative`、`planServertoolStateLoadFailedErrorWithNative`、`planServertoolRequiredResponseHookEmptyErrorWithNative`、`planStopMessageFetchFailedErrorWithNative`、`planServertoolClientDisconnectedErrorWithNative`、`isAdapterClientDisconnectedWithNative`。
+- 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/execution-dispatch-outcome-shell.spec.ts tests/servertool/server-side-tools.dispatch-native.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+  - `node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+- 当前仍未完成项：
+  - `execution-dispatch-outcome-shell.ts` 还保留 `runServertoolIoExecutionQueue(...)`、`materializeNativeToolCallExecutionOutcome(...)`、`hydrateExecutionLoopState(...)` / `dehydrateExecutionLoopState(...)` 这些桥接/编排面；
+  - `servertool.hook_skeleton.mainline` 仍是 `binding pending`，不能宣称 Rust-only 主线闭环。
+
 ## 2026-06-22 reasoningStop live closeout probe
 
 - 5555 live probe 已重放，当前结论明确：

@@ -76,7 +76,45 @@ jest.unstable_mockModule(
     planServertoolExecutionLoopRuntimeActionWithNative,
     planServertoolExecutionOutcomeRuntimeActionWithNative,
     createServertoolExecutionLoopStateWithNative,
-    appendServertoolExecutedRecordWithNative
+    appendServertoolExecutedRecordWithNative,
+    isAdapterClientDisconnectedWithNative: jest.fn(() => false),
+    planClientDisconnectWatcherWithNative: jest.fn(() => ({ intervalMs: 50 })),
+    planServertoolClientDisconnectedErrorWithNative: jest.fn((input: any) => ({
+      code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: '[servertool] client disconnected',
+      details: input ?? {}
+    })),
+    planServertoolRequiredResponseHookEmptyErrorWithNative: jest.fn((input: any) => ({
+      code: 'SERVERTOOL_HANDLER_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: '[servertool] required response hook empty',
+      details: input ?? {}
+    })),
+    planServertoolStateLoadFailedErrorWithNative: jest.fn((input: any) => ({
+      code: 'SERVERTOOL_HANDLER_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: '[servertool] state load failed',
+      details: input ?? {}
+    })),
+    planServertoolTimeoutErrorWithNative: jest.fn((input: any) => ({
+      code: 'SERVERTOOL_TIMEOUT',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: '[servertool] timeout',
+      details: input ?? {}
+    })),
+    planServertoolTimeoutWatcherWithNative: jest.fn(() => ({ armed: false, timeoutMs: 50 })),
+    planStopMessageFetchFailedErrorWithNative: jest.fn((input: any) => ({
+      code: 'SERVERTOOL_HANDLER_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: '[servertool] stop message fetch failed',
+      details: input ?? {}
+    }))
   })
 );
 
