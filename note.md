@@ -10821,3 +10821,14 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/server-side-tools.cli-projection-guard.spec.ts tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
   - `node scripts/build-core.mjs`
+
+## 2026-06-22 5520 thinking glm-5.2 1:1 复核（repo + runtime + tests）
+
+- 现场复核三处：
+  - `~/.rcc/config.toml` 里 `gateway_priority_5520.routing.thinking` 已经是 `fwd.paid.gpt-5.4 + fwd.glm.glm-5.2`，`weights = { "fwd.paid.gpt-5.4" = 1, "fwd.glm.glm-5.2" = 1 }`，`thinking = "high"`。
+  - `src/config/virtual-router-builder.ts` 把 `fwd.glm.glm-5.2` 展开为 `XLC.key1.glm-5.2` + `XLC.key2.glm-5.2`；`fwd.paid.gpt-5.4` 展开为 `asxs/1token/XL` 三个 provider。
+  - 仓库断言已就位：`tests/config/virtual-router-builder.forwarder-10000.spec.ts` 的 `5520 thinking keeps GPT and GLM balanced 1:1` 锁住 `targets` 和 `weights = { gpt:1, glm:1 }`，并断言 `thinking=high`。
+- focused Jest 全绿（9/9）：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/config/virtual-router-builder.forwarder-10000.spec.ts --runInBand`
+- 当前结论：
+  - 这项已完成，无需再改代码或配置；运行时、builder、test 三层口径已经一致。
