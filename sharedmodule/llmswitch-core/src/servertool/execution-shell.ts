@@ -13,11 +13,7 @@ export {
 export {
   appendExecutedToolRecord,
   assertDispatchExecutionMode,
-  buildServertoolDispatchPlanInputThinShell,
-  buildServertoolOutcomePlanInputThinShell,
   createServertoolExecutionLoopState,
-  materializeNativeToolCallExecutionOutcome as resolveToolCallExecutionOutcomeThinShell,
-  runServertoolIoExecutionQueue as runToolCallExecutionLoopThinShell
 } from './execution-dispatch-outcome-shell.js';
 
 export function applyPreCommandHooksToToolCall(args: {

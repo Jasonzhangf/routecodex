@@ -8,7 +8,7 @@ import {
   buildServertoolOutcomePlanInputThinShell,
   createServertoolExecutionLoopState,
   appendExecutedToolRecord
-} from '../../sharedmodule/llmswitch-core/src/servertool/execution-shell.js';
+} from '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js';
 import { buildServertoolDispatchPlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { listServertoolToolSpecs } from '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js';
 

@@ -2642,6 +2642,10 @@ function checkServertoolExecutionDispatchRustOwner() {
     'state.executedFlowIds.push(',
     'state.lastExecution = execution',
     '[servertool] dispatch spec mismatch:',
+    'buildServertoolDispatchPlanInputThinShell',
+    'buildServertoolOutcomePlanInputThinShell',
+    'resolveToolCallExecutionOutcomeThinShell',
+    'runToolCallExecutionLoopThinShell',
   ]) {
     if (reexportShell.includes(keyword)) {
       fail(

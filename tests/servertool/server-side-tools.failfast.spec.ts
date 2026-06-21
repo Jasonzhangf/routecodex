@@ -20,10 +20,24 @@ const planServertoolResponseStageRuntimeActionWithNativeMock = jest.fn((input: a
   if (input?.autoHookEvaluated !== true) {
     return { action: 'run_auto_hooks' };
   }
-  return input?.hasAutoHookResult === true
-    ? { action: 'return_auto_hook_result' }
-    : { action: 'return_passthrough_no_auto_hook_result' };
+  if (input?.hasAutoHookResult === true) {
+    return { action: 'return_auto_hook_result' };
+  }
+  if (input?.responseHookRequired === true) {
+    return { action: 'return_required_response_hook_empty' };
+  }
+  return { action: 'return_passthrough_no_auto_hook_result' };
 });
+const planServertoolRequiredResponseHookEmptyErrorWithNativeMock = jest.fn((input: any) => ({
+  code: 'SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY',
+  category: 'INTERNAL_ERROR',
+  status: 500,
+  message: `[servertool] required response hook produced no result: ${String(input?.responseHookName ?? '')}`,
+  details: {
+    requestId: String(input?.requestId ?? ''),
+    responseHookName: String(input?.responseHookName ?? '')
+  }
+}));
 const planServertoolExecutionBranchWithNativeMock = jest.fn((input: any) => {
   const executableToolCalls = Array.isArray(input?.executableToolCalls) ? input.executableToolCalls : [];
   const cliProjected = executableToolCalls.find((toolCall: any) => {
@@ -242,6 +256,8 @@ jest.unstable_mockModule(
         error: String(input?.error ?? '')
       }
     })),
+    planServertoolRequiredResponseHookEmptyErrorWithNative:
+      planServertoolRequiredResponseHookEmptyErrorWithNativeMock,
     planStopMessageFetchFailedErrorWithNative: jest.fn(() => ({
       code: 'SERVERTOOL_HANDLER_FAILED',
       category: 'INTERNAL_ERROR',
@@ -668,8 +684,14 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-shell.js',
   () => ({
     applyPreCommandHooksToToolCalls: applyPreCommandHooksToToolCallsMock,
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js',
+  () => ({
     buildServertoolDispatchPlanInputThinShell: jest.fn((input: any) => input),
-    resolveToolCallExecutionOutcomeThinShell: jest.fn((args: any) => ({
+    materializeNativeToolCallExecutionOutcome: jest.fn((args: any) => ({
       mode: 'tool_flow',
       finalChatResponse: args.baseForExecution,
       execution: {
@@ -688,7 +710,7 @@ jest.unstable_mockModule(
         }
       }
     })),
-    runToolCallExecutionLoopThinShell: jest.fn(async (args: any) => {
+    runServertoolIoExecutionQueue: jest.fn(async (args: any) => {
       const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry.js');
       const state = {
         executedToolCalls: [],
@@ -724,7 +746,7 @@ jest.unstable_mockModule(
         }
       }
       return state;
-    })
+    }),
   })
 );
 
@@ -856,6 +878,17 @@ describe('server-side-tools tool-error closed loop', () => {
       nextAction: 'run_auto_hooks'
     });
     planServertoolResponseStageRuntimeActionWithNativeMock.mockReset();
+    planServertoolRequiredResponseHookEmptyErrorWithNativeMock.mockReset();
+    planServertoolRequiredResponseHookEmptyErrorWithNativeMock.mockImplementation((input: any) => ({
+      code: 'SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: `[servertool] required response hook produced no result: ${String(input?.responseHookName ?? '')}`,
+      details: {
+        requestId: String(input?.requestId ?? ''),
+        responseHookName: String(input?.responseHookName ?? '')
+      }
+    }));
     planServertoolResponseStageRuntimeActionWithNativeMock.mockImplementation((input: any) => {
       const nextAction = String(input?.responseStageGatePlan?.nextAction ?? input?.responseStageNextAction ?? '').trim();
       if (nextAction === 'bypass') {
@@ -864,9 +897,13 @@ describe('server-side-tools tool-error closed loop', () => {
       if (input?.autoHookEvaluated !== true) {
         return { action: 'run_auto_hooks' };
       }
-      return input?.hasAutoHookResult === true
-        ? { action: 'return_auto_hook_result' }
-        : { action: 'return_passthrough_no_auto_hook_result' };
+      if (input?.hasAutoHookResult === true) {
+        return { action: 'return_auto_hook_result' };
+      }
+      if (input?.responseHookRequired === true) {
+        return { action: 'return_required_response_hook_empty' };
+      }
+      return { action: 'return_passthrough_no_auto_hook_result' };
     });
     planServertoolExecutionBranchWithNativeMock.mockClear();
     planServertoolEntryPreflightWithNativeMock.mockClear();
@@ -1116,7 +1153,8 @@ describe('server-side-tools tool-error closed loop', () => {
         nextAction: 'run_auto_hooks'
       },
       autoHookEvaluated: false,
-      hasAutoHookResult: false
+      hasAutoHookResult: false,
+      responseHookRequired: false
     });
     expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(2, {
       responseStageGatePlan: {
@@ -1124,8 +1162,47 @@ describe('server-side-tools tool-error closed loop', () => {
         nextAction: 'run_auto_hooks'
       },
       autoHookEvaluated: true,
-      hasAutoHookResult: false
+      hasAutoHookResult: false,
+      responseHookRequired: false
     });
+  });
+
+  test('projects required response hook empty through native orchestration-policy error plan', async () => {
+    planServertoolResponseStageGateWithNativeMock.mockReturnValue({
+      shouldBypass: false,
+      nextAction: 'run_auto_hooks',
+      responseHookMatched: true,
+      responseHookRequired: true,
+      responseHookName: 'stop_message_auto'
+    });
+    const plan = planServertoolResponseStageRuntimeActionWithNativeMock({
+      responseStageGatePlan: {
+        shouldBypass: false,
+        nextAction: 'run_auto_hooks',
+        responseHookMatched: true,
+        responseHookRequired: true,
+        responseHookName: 'stop_message_auto'
+      },
+      autoHookEvaluated: true,
+      hasAutoHookResult: false,
+      responseHookRequired: true
+    });
+    expect(plan).toEqual({
+      action: 'return_required_response_hook_empty'
+    });
+    const errorPlan = planServertoolRequiredResponseHookEmptyErrorWithNativeMock({
+      requestId: 'req-servertool-required-response-hook-empty-1',
+      responseHookName: 'stop_message_auto'
+    });
+    expect(errorPlan).toEqual(
+      expect.objectContaining({
+        code: 'SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY',
+        details: {
+          requestId: 'req-servertool-required-response-hook-empty-1',
+          responseHookName: 'stop_message_auto'
+        }
+      })
+    );
   });
 
   test('loads persisted routing state only after native selection requests it', async () => {

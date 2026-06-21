@@ -17,10 +17,12 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   applyPreCommandHooksToToolCalls,
-  buildServertoolDispatchPlanInputThinShell,
-  resolveToolCallExecutionOutcomeThinShell,
-  runToolCallExecutionLoopThinShell
 } from './execution-shell.js';
+import {
+  buildServertoolDispatchPlanInputThinShell,
+  materializeNativeToolCallExecutionOutcome,
+  runServertoolIoExecutionQueue
+} from './execution-dispatch-outcome-shell.js';
 import { buildServertoolCliProjectionForToolCall } from './cli-projection.js';
 import {
   buildServertoolCliProjectionExecutionContextWithNative,
@@ -41,6 +43,7 @@ import { runServertoolAutoHookCallerViaThinShell } from './auto-hook-caller.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import {
   createServertoolProviderProtocolErrorFromPlan,
+  createServertoolRequiredResponseHookEmptyError,
   createServerToolClientDisconnectedError,
   isAdapterClientDisconnected
 } from './timeout-error-block.js';
@@ -101,7 +104,8 @@ export const runServerSideToolEngineViaThinShell = async (
     const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
       responseStageGatePlan: responseHookStagePlan,
       autoHookEvaluated: false,
-      hasAutoHookResult: false
+      hasAutoHookResult: false,
+      responseHookRequired: responseHookStagePlan.responseHookRequired === true
     });
     if (preAutoHookRuntimeAction.action !== 'return_passthrough_bypass') {
       const autoHookResult = await runServertoolAutoHookCallerViaThinShell({
@@ -113,19 +117,17 @@ export const runServerSideToolEngineViaThinShell = async (
       const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
         responseStageGatePlan: responseHookStagePlan,
         autoHookEvaluated: true,
-        hasAutoHookResult: Boolean(autoHookResult)
+        hasAutoHookResult: Boolean(autoHookResult),
+        responseHookRequired: responseHookStagePlan.responseHookRequired === true
       });
+      if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
+        throw createServertoolRequiredResponseHookEmptyError({
+          requestId: options.requestId,
+          responseHookName: responseHookStagePlan.responseHookName ?? 'unknown'
+        });
+      }
       if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
         return autoHookResult as ServerSideToolEngineResult;
-      }
-      if (responseHookStagePlan.responseHookRequired) {
-        throw Object.assign(
-          new Error(`[servertool] required response hook produced no result: ${responseHookStagePlan.responseHookName ?? 'unknown'}`),
-          {
-            code: 'SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY',
-            status: 500
-          }
-        );
       }
     }
   }
@@ -245,7 +247,7 @@ export const runServerSideToolEngineViaThinShell = async (
     };
   }
 
-  const executionState = await runToolCallExecutionLoopThinShell({
+  const executionState = await runServertoolIoExecutionQueue({
     dispatchPlan,
     options,
     contextBase,
@@ -262,7 +264,7 @@ export const runServerSideToolEngineViaThinShell = async (
     executedToolCallsLen: executionState.executedToolCalls.length
   });
   if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {
-    return resolveToolCallExecutionOutcomeThinShell({
+    return materializeNativeToolCallExecutionOutcome({
       base: baseObject,
       baseForExecution,
       options,
@@ -281,7 +283,8 @@ export const runServerSideToolEngineViaThinShell = async (
   const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: responseStagePlan,
     autoHookEvaluated: false,
-    hasAutoHookResult: false
+    hasAutoHookResult: false,
+    responseHookRequired: responseStagePlan.responseHookRequired === true
   });
   if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass') {
     return { mode: 'passthrough', finalChatResponse: baseObject };
@@ -295,8 +298,15 @@ export const runServerSideToolEngineViaThinShell = async (
   const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: responseStagePlan,
     autoHookEvaluated: true,
-    hasAutoHookResult: Boolean(autoHookResult)
+    hasAutoHookResult: Boolean(autoHookResult),
+    responseHookRequired: responseStagePlan.responseHookRequired === true
   });
+  if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
+    throw createServertoolRequiredResponseHookEmptyError({
+      requestId: options.requestId,
+      responseHookName: responseStagePlan.responseHookName ?? 'unknown'
+    });
+  }
   if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
     return autoHookResult as ServerSideToolEngineResult;
   }

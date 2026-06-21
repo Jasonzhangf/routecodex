@@ -78,6 +78,10 @@ const TARGETS = [
       'state.executedFlowIds.push(',
       'state.lastExecution = execution',
       '[servertool] dispatch spec mismatch:',
+      'buildServertoolDispatchPlanInputThinShell',
+      'buildServertoolOutcomePlanInputThinShell',
+      'resolveToolCallExecutionOutcomeThinShell',
+      'runToolCallExecutionLoopThinShell',
     ],
   },
   {

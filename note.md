@@ -10795,3 +10795,16 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/execution-dispatch-outcome-shell.spec.ts tests/servertool/execution-shell.backend-failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
   - `node scripts/build-core.mjs`
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+
+## 2026-06-22 execution-shell re-export alias direct-owner closeout
+
+- `sharedmodule/llmswitch-core/src/servertool/execution-shell.ts` 不再 re-export `buildServertoolDispatchPlanInputThinShell`、`buildServertoolOutcomePlanInputThinShell`、`resolveToolCallExecutionOutcomeThinShell`、`runToolCallExecutionLoopThinShell` 这组 alias。
+- `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 改成直接 import `execution-dispatch-outcome-shell.ts` 的真实 owner 导出：`buildServertoolDispatchPlanInputThinShell`、`materializeNativeToolCallExecutionOutcome`、`runServertoolIoExecutionQueue`。
+- focused test / mock 同步到真实 owner 文件：
+  - `tests/servertool/server-side-tools.failfast.spec.ts`
+  - `tests/servertool/server-side-tools.dispatch-native.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts` 和 `scripts/verify-servertool-rust-only.mjs` 新增反向锁，禁止这些 alias 回到 `execution-shell.ts`。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/server-side-tools.dispatch-native.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
