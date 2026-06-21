@@ -3370,3 +3370,11 @@ Tags: startupExcludedProviderKeys, virtual-router-config, direct_model, ecodev, 
 - 2026-06-22: 当 handler error tool output 已经完全由 native `buildServertoolHandlerErrorToolOutputPayloadWithNative(...)` 生成时，`runServertoolIoExecutionQueue(...)` 的 `appendToolOutput` 参数和 `orchestration-blocks.ts` 的 `appendToolOutput(...)` helper 都属于死 TS 语义，必须物理删除并补 gate 防复活，不能为了“保留一个通用 helper”继续留在 TS。验证：`tests/servertool/execution-dispatch-outcome-shell.spec.ts`、`tests/servertool/server-side-tools.failfast.spec.ts`、`tests/servertool/servertool-active-orchestration-audit.spec.ts`、`node scripts/verify-servertool-rust-only.mjs`。
 
 - 2026-06-22: `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 里的 execution-loop state bridge（`createServertoolExecutionLoopState` / `appendExecutedToolRecord` + `hydrateExecutionLoopState` / `dehydrateExecutionLoopState`）应归回 `execution-handler-materialization-shell.ts`，因为 `ServertoolExecutionLoopState` 这个 owner 类型在那里；调用侧只保留 `createServertoolExecutionLoopStateFromNative(...)` / `appendExecutedToolRecordFromNative(...)` 两条入口。改完后 `scripts/verify-servertool-rust-only.mjs` 的 thin-shell gate 必须从脚本既有的 `readRequired()` 取内容，禁止再新造 `read()` / `readText()` 等 helper（脚本本身就只定义了 `readRequired()`，凭空调用 `read()` 会导致 `ReferenceError` 把 gate 全部切断）。
+
+- 2026-06-22: `materializeNativeToolCallExecutionOutcome(...)` 与 `buildServertoolOutcomePlanInput(...)` 的 owner 也不能继续留在 `execution-dispatch-outcome-shell.ts`。这两块语义依赖 `ServertoolExecutionLoopState`、`materializeServertoolPlannedResult(...)`、outcome runtime action 和 followup envelope 选择，天然属于 `execution-handler-materialization-shell.ts` 这条 materialization owner 线；dispatch shell 只该保留 dispatch-plan facade 与 handler IO queue。迁移后必须同时把 focused 测试按 owner 切开：dispatch spec 只测 dispatch/IO queue，outcome materialization 单独落到 owner spec；否则 mock 面会继续把 dispatch 与 outcome 两条责任揉在一起，下一轮很容易误判“dispatch 文件还持有活语义”。
+### 2026-06-22 responses SSE keepalive protocol
+
+- `/v1/responses` 客户端 SSE 面只允许标准 Responses 事件和 SSE 注释 keepalive，禁止透出自造 `event: ping` / `{"type":"ping"}`。
+- 若旧测试/桩仍绑定 `ping`，必须物理删除或更新，不得保留“兼容用例”。
+- `install:global` 依赖 wiki/html sync；若门禁报 `servertool-ownership-map` 或 HTML out of sync，先重渲染 review 面再继续。
+- 这轮还确认：stopless live probe 里 `reasoningStop` 仍只投影为标准 `exec_command(routecodex hook run reasoningStop ...)`，客户端未见 raw reasoningStop。

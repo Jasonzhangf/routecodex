@@ -34,6 +34,8 @@ const TARGETS = [
       'const resolveHandlerExecutionSpecViaThinShell',
       'function buildServertoolDispatchPlanInputThinShell(',
       'function buildServertoolOutcomePlanInputThinShell(',
+      'export const buildServertoolOutcomePlanInput =',
+      'export function materializeNativeToolCallExecutionOutcome(',
       'export function createServertoolExecutionLoopState(',
       'export function appendExecutedToolRecord(',
       'export function assertDispatchExecutionMode(',

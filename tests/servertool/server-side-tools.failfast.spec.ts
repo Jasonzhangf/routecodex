@@ -741,25 +741,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js',
   () => ({
     buildServertoolDispatchPlanInput: jest.fn((input: any) => input),
-    materializeNativeToolCallExecutionOutcome: jest.fn((args: any) => ({
-      mode: 'tool_flow',
-      finalChatResponse: args.baseForExecution,
-      execution: {
-        flowId:
-          args.executionState?.lastExecution?.flowId ??
-          args.executionState?.executedToolCalls?.[0]?.execution?.flowId ??
-          'servertool_unknown',
-        followup: {
-          requestIdSuffix: ':servertool_followup',
-          injection: {
-            ops: [
-              { op: 'append_assistant_message', required: true },
-              { op: 'append_tool_messages_from_tool_outputs', required: true }
-            ]
-          }
-        }
-      }
-    })),
     runServertoolIoExecutionQueue: jest.fn(async (args: any) => {
       const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry.js');
       const state = {
@@ -798,6 +779,47 @@ jest.unstable_mockModule(
       }
       return state;
     }),
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
+  () => ({
+    buildServertoolOutcomePlanInput: jest.fn((input: any) => input),
+    materializeServertoolPlannedResult: jest.fn(async (planned: any) => planned),
+    materializeNativeToolCallExecutionOutcome: jest.fn((args: any) => ({
+      mode: 'tool_flow',
+      finalChatResponse: args.baseForExecution,
+      execution: {
+        flowId:
+          args.executionState?.lastExecution?.flowId ??
+          args.executionState?.executedToolCalls?.[0]?.execution?.flowId ??
+          'servertool_unknown',
+        followup: {
+          requestIdSuffix: ':servertool_followup',
+          injection: {
+            ops: [
+              { op: 'append_assistant_message', required: true },
+              { op: 'append_tool_messages_from_tool_outputs', required: true }
+            ]
+          }
+        }
+      }
+    })),
+    runServertoolHandler: jest.fn(async (handler: any, ctx: any) => await handler(ctx)),
+    createServertoolExecutionLoopStateFromNative: jest.fn(() => ({
+      executedToolCalls: [],
+      executedIds: new Set<string>(),
+      executedFlowIds: []
+    })),
+    appendExecutedToolRecordFromNative: jest.fn((state: any, toolCall: any, execution?: any) => {
+      state.executedToolCalls.push({ toolCall, ...(execution ? { execution } : {}) });
+      state.executedIds.add(toolCall.id);
+      if (execution?.flowId) {
+        state.executedFlowIds.push(execution.flowId);
+        state.lastExecution = execution;
+      }
+    })
   })
 );
 

@@ -2602,14 +2602,13 @@ function checkServertoolExecutionDispatchRustOwner() {
     'buildServertoolDispatchPlanInputWithNative'
   );
   assertContains(
-    'servertool-execution-dispatch-rust-owner',
-    `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
-    executionShell,
+    'servertool-execution-handler-outcome-rust-owner',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
     'buildServertoolOutcomePlanInputWithNative'
   );
   for (const marker of [
-    'export const buildServertoolDispatchPlanInput =',
-    'export const buildServertoolOutcomePlanInput =',
+    'export const buildServertoolDispatchPlanInput ='
   ]) {
     if (!executionShell.includes(marker)) {
       fail(
@@ -2637,6 +2636,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     '[servertool] dispatch spec mismatch:',
     '[servertool] invalid native mixed-client-tools outcome contract',
     '[servertool] missing native followup contract for servertool-only outcome',
+    'export const buildServertoolOutcomePlanInput =',
+    'export function materializeNativeToolCallExecutionOutcome(',
     "if (outcomePlan.outcomeMode === 'mixed_client_tools')",
     "outcomePlan.followupStrategy === 'reuse_last_execution'",
     '? args.executionState.lastExecution.followup',
@@ -2720,7 +2721,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-outcome-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_outcome_runtime_action_json'],
     ['servertool-execution-outcome-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionOutcomeRuntimeActionJson'],
     ['servertool-execution-outcome-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
-    ['servertool-execution-outcome-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
+    ['servertool-execution-outcome-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
     ['servertool-stopless-cli-projection-context-rust-owner', RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT, readRequired(RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT), 'feature_id: hub.servertool_stopless_cli_projection_context'],
     ['servertool-stopless-cli-projection-context-rust-owner', RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT, readRequired(RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT), 'pub fn plan_stopless_cli_projection_context'],
     ['servertool-stopless-cli-projection-context-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod stopless_cli_projection_context_contract'],

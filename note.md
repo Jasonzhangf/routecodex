@@ -22,6 +22,25 @@
   - `node scripts/verify-servertool-rust-only.mjs`
   - `node scripts/build-core.mjs`
 
+## 2026-06-22 responses SSE standard-protocol keepalive cleanup
+
+- 本轮把 `/v1/responses` 客户端 SSE 面的非标准 `event: ping` 物理移除，只保留 SSE 注释 keepalive `: keepalive`。
+- 过时断言已清掉或更新：
+  - 删除 `tests/server/handlers/handler-response-utils.responses-keepalive-ping.spec.ts`
+  - 新增 `tests/server/handlers/handler-response-utils.responses-keepalive-protocol.spec.ts`
+  - 更新 `responses-sse-client-contract.blackbox.spec.ts`、`handler-response-utils.force-sse-json-responses.spec.ts`、`handler-response-utils.required-action-split-frame.spec.ts`
+- live/probe 证据：
+  - `stopless-5555-live-probe.mjs` 输出里首轮仍是标准 `exec_command(routecodex hook run reasoningStop ...)`
+  - `/tmp/stopless-5555-live-probe.json` 中 `containsPing=false`、`containsPingType=false`
+  - SSE 原文只保留 `: keepalive`，没有 `event: ping`
+- install/build 证据：
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:servertool-rust-only` PASS
+  - `npm run install:global` PASS，版本抬到 `0.90.3252`
+- 新门禁教训：
+  - `scripts/verify-servertool-rust-only.mjs` 里有过时 `read(...)` 引用，当前已收敛到 `readRequired(...)`
+  - `docs/architecture/wiki/servertool-ownership-map.md` 和对应 HTML review 面必须和生成器同步，否则 `install:global` 会卡在 wiki sync/html sync
+
 ## 2026-06-22 servertool execution-dispatch error wrapper collapse
 
 - 本轮 slice：`sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 不再本地构造 `ProviderProtocolError`，统一改用 `timeout-error-block.ts::createServertoolProviderProtocolErrorFromPlan(...)`。
@@ -11009,3 +11028,8 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 待补 live：全局安装 + `routecodex restart --port 5555` + `node scripts/tests/stopless-5555-live-probe.mjs`。
 
 - 2026-06-22: `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 里的 execution-loop state bridge 已物理迁回 `execution-handler-materialization-shell.ts`，`execution-dispatch-outcome-shell.ts` 只保留调用；`scripts/verify-servertool-rust-only.mjs` 的对应 gate 必须用现成 `readRequired()`，不能再引入不存在的 `read()`。验证：`node scripts/verify-servertool-rust-only.mjs`、`tests/servertool/execution-dispatch-outcome-shell.spec.ts`、`tests/servertool/servertool-cli-native-bridge.spec.ts`、`tests/servertool/servertool-active-orchestration-audit.spec.ts`、`node scripts/build-core.mjs`。
+
+- 2026-06-22: `materializeNativeToolCallExecutionOutcome(...)` 和 `buildServertoolOutcomePlanInput(...)` 已从 `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 收回 `execution-handler-materialization-shell.ts`；dispatch 文件现在只剩 dispatch-plan facade + IO queue。测试也按 owner 切开：`execution-dispatch-outcome-shell.spec.ts` 只测 dispatch/IO queue，新增 `execution-handler-materialization-shell.spec.ts` 专门锁 outcome materialization。同步更新：`server-side-tools-impl.ts` import、`server-side-tools.dispatch-native.spec.ts`、`server-side-tools.failfast.spec.ts`、`servertool-active-orchestration-audit.spec.ts`、`scripts/verify-servertool-rust-only.mjs`。验证：`tests/servertool/execution-dispatch-outcome-shell.spec.ts`、`tests/servertool/execution-handler-materialization-shell.spec.ts`、`tests/servertool/server-side-tools.dispatch-native.spec.ts`、`tests/servertool/server-side-tools.failfast.spec.ts`、`tests/servertool/servertool-active-orchestration-audit.spec.ts`、`node scripts/verify-servertool-rust-only.mjs`、`node scripts/build-core.mjs`。
+## 2026-06-22 responses request-context merge for port-scoped continuation
+- root cause candidate confirmed in code: resolveResponsesRequestContextForHttp previously replaced fallback with MetadataCenter whole object, which could drop matchedPort/routingPolicyGroup on submit_tool_outputs follow-up SSE persist.
+- fix: merge metadata requestContext with fallback so port scope survives when metadata copy omits it; added red tests in request-context-resolution + responses-store-integration.

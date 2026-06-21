@@ -19,9 +19,9 @@ import {
 } from './pre-command-hooks.js';
 import {
   buildServertoolDispatchPlanInput,
-  materializeNativeToolCallExecutionOutcome,
   runServertoolIoExecutionQueue
 } from './execution-dispatch-outcome-shell.js';
+import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
 import { buildServertoolCliProjectionForToolCall } from './cli-projection.js';
 import {
   buildServertoolCliProjectionExecutionContextWithNative,
