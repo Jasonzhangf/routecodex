@@ -5,6 +5,7 @@ use crate::outcome_contract::{
     build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03,
     ServertoolHubRespChatProcess03Input, ServertoolOutcomeError,
 };
+use crate::orchestration_policy_contract::ServertoolErrorPlan;
 use crate::persisted_lookup::STOP_MESSAGE_FOLLOWUP_FLOW_ID;
 
 // feature_id: hub.servertool_backend_route_runtime
@@ -164,6 +165,18 @@ pub struct ServertoolFollowupAutoLimitPlan {
     pub category: Option<String>,
     pub reason: Option<String>,
     pub repeat_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolFollowupAutoLimitErrorPlanInput {
+    pub flow_id: Option<String>,
+    pub request_id: String,
+    pub repeat_count: Option<i64>,
+    pub reason: Option<String>,
+    pub status: Option<u16>,
+    pub code: Option<String>,
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -738,6 +751,64 @@ pub fn plan_followup_runtime_action(
                 None
             },
         },
+    })
+}
+
+pub fn plan_followup_auto_limit_error(
+    input: ServertoolFollowupAutoLimitErrorPlanInput,
+) -> Result<ServertoolErrorPlan, ServertoolOutcomeError> {
+    let request_id = input.request_id.trim();
+    if request_id.is_empty() {
+        return Err(ServertoolOutcomeError::InvalidField("requestId"));
+    }
+    let status = input.status.unwrap_or(502);
+    let code = input
+        .code
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("SERVERTOOL_FOLLOWUP_FAILED");
+    let category = input
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("INTERNAL_ERROR");
+    let reason = input
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("followup_auto_limit_hit");
+    let flow_id = input
+        .flow_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    let mut details = serde_json::Map::new();
+    details.insert(
+        "requestId".to_string(),
+        Value::String(request_id.to_string()),
+    );
+    details.insert("reason".to_string(), Value::String(reason.to_string()));
+    if let Some(flow_id_value) = flow_id.clone() {
+        details.insert("flowId".to_string(), Value::String(flow_id_value));
+    }
+    if let Some(repeat_count) = input.repeat_count {
+        details.insert(
+            "repeatCount".to_string(),
+            Value::Number(serde_json::Number::from(repeat_count)),
+        );
+    }
+    Ok(ServertoolErrorPlan {
+        message:
+            "[servertool] followup auto limit reached before stopless contract was satisfied"
+                .to_string(),
+        code: code.to_string(),
+        category: category.to_string(),
+        status,
+        details: Value::Object(details),
     })
 }
 
@@ -2235,6 +2306,31 @@ mod tests {
         .expect("runtime action");
         assert!(!plan.client_inject_metadata.force);
         assert!(plan.client_inject_metadata.source.is_none());
+    }
+
+    #[test]
+    fn followup_auto_limit_error_plan_projects_provider_error_contract() {
+        let plan = plan_followup_auto_limit_error(ServertoolFollowupAutoLimitErrorPlanInput {
+            flow_id: Some("continue_execution_flow".to_string()),
+            request_id: "req-auto-limit".to_string(),
+            repeat_count: Some(3),
+            reason: Some("followup_auto_limit_hit".to_string()),
+            status: Some(502),
+            code: Some("SERVERTOOL_FOLLOWUP_FAILED".to_string()),
+            category: Some("INTERNAL_ERROR".to_string()),
+        })
+        .expect("followup auto-limit error plan");
+        assert_eq!(
+            plan.message,
+            "[servertool] followup auto limit reached before stopless contract was satisfied"
+        );
+        assert_eq!(plan.code, "SERVERTOOL_FOLLOWUP_FAILED");
+        assert_eq!(plan.category, "INTERNAL_ERROR");
+        assert_eq!(plan.status, 502);
+        assert_eq!(plan.details["flowId"], json!("continue_execution_flow"));
+        assert_eq!(plan.details["requestId"], json!("req-auto-limit"));
+        assert_eq!(plan.details["repeatCount"], json!(3));
+        assert_eq!(plan.details["reason"], json!("followup_auto_limit_hit"));
     }
 
     #[test]

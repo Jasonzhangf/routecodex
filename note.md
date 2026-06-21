@@ -9946,3 +9946,47 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
 3. **日志最乱**：7+ 种 logger 分散在多处，部分功能重叠（pipeline debug vs 普通 logger）
 4. **codex samples 是测试 fixture**：与运行时 snapshot 无交集
 5. **建议**：优先补 diag 规划落地、统一 logger 抽象、收拢 pipeline 日志到单一入口
+## 2026-06-21 servertool followup auto-limit error rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts` 的 followup auto-limit 错误投影残余 TS owner。
+- 旧 TS 仍本地 owner 一层 auto-limit provider error 语义：
+  - 拼错误文案 `"[servertool] followup auto limit reached before stopless contract was satisfied"`
+  - 本地拼 `code/category/details/status`
+  - 再包成 `ProviderProtocolError`
+- 现在把错误投影 contract 下沉到 Rust owner：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`
+  - 新 contract / input：
+    - `ServertoolFollowupAutoLimitErrorPlanInput`
+    - `plan_followup_auto_limit_error(...) -> ServertoolErrorPlan`
+- bridge / thin shell 收口：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+  - `backend-route-runtime-block.ts` 不再本地拼 followup auto-limit 错误 message/details；TS 只消费 native `ServertoolErrorPlan`，再包薄壳 `ProviderProtocolError`
+- focused tests / gate：
+  - Rust unit:
+    - `followup_auto_limit_error_plan_projects_provider_error_contract`
+  - bridge:
+    - `plans_followup_auto_limit_error_via_servertool_core_bridge`
+  - Jest:
+    - `tests/servertool/backend-route-runtime-block.spec.ts`
+    - `tests/servertool/followup-bootstrap-replay.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - audit 明确禁止 `backend-route-runtime-block.ts` 复活：
+    - `"[servertool] followup auto limit reached before stopless contract was satisfied"`
+    - `code: plan.autoLimit.code`
+    - `category: plan.autoLimit.category`
+    - `repeatCount: plan.autoLimit.repeatCount`
+    - `reason: plan.autoLimit.reason`
+- 串行验证：
+  - `cargo test -p servertool-core followup_auto_limit_error_plan_projects_provider_error_contract -- --nocapture` -> PASS
+  - `cargo test -p router-hotpath-napi plans_followup_auto_limit_error_via_servertool_core_bridge -- --nocapture` -> PASS
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/backend-route-runtime-block.spec.ts tests/servertool/followup-bootstrap-replay.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` -> 3 suites / 10 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+- 当前结论：
+  - followup auto-limit 错误 message/code/category/status/details 现在由 Rust owner 产出；
+  - `backend-route-runtime-block.ts` 仅保留 native plan 消费 + `ProviderProtocolError` 外壳；
+  - 不能宣称 followup/reenter 整体 Rust-only 完成，当前只是 `backend-route-runtime-block` 下的一块错误投影 slice 收口。

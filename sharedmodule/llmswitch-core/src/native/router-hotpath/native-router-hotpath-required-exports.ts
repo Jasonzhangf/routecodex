@@ -329,6 +329,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "decorateServertoolFinalChatJson",
   "shouldShortCircuitRequiresActionFollowupJson",
   "planFollowupExecutionModeJson",
+  "planFollowupAutoLimitErrorJson",
   "planFollowupRuntimeActionJson",
   "planFollowupRuntimeMetadataJson",
   "planFollowupMaterializationJson",

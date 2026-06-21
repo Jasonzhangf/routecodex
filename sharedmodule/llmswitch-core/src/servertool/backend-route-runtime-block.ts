@@ -1,8 +1,13 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
+import type {
+  ProviderErrorCategory,
+  ProviderProtocolErrorCode
+} from '../conversion/provider-protocol-error.js';
 import { ensureRuntimeMetadata, readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import {
+  planFollowupAutoLimitErrorWithNative,
   planFollowupExecutionModeWithNative,
   planFollowupMaterializationWithNative,
   planFollowupRuntimeMetadataWithNative,
@@ -142,20 +147,22 @@ export function assertAutoLimitNotExceeded(args: {
   ) {
     throw new Error('planFollowupRuntimeActionJson native returned incomplete autoLimit failure plan');
   }
-  const wrapped = new ProviderProtocolError(
-    '[servertool] followup auto limit reached before stopless contract was satisfied',
-    {
-      code: plan.autoLimit.code,
-      category: plan.autoLimit.category,
-      details: {
-        flowId: args.flowId,
-        requestId: args.requestId,
-        repeatCount: plan.autoLimit.repeatCount,
-        reason: plan.autoLimit.reason
-      }
-    }
-  ) as ProviderProtocolError & { status?: number };
-  wrapped.status = plan.autoLimit.status;
+  const autoLimit = plan.autoLimit;
+  const errorPlan = planFollowupAutoLimitErrorWithNative({
+    flowId: args.flowId,
+    requestId: args.requestId,
+    repeatCount: autoLimit.repeatCount,
+    reason: autoLimit.reason,
+    status: autoLimit.status,
+    code: autoLimit.code,
+    category: autoLimit.category
+  });
+  const wrapped = new ProviderProtocolError(errorPlan.message, {
+    code: errorPlan.code as ProviderProtocolErrorCode,
+    category: errorPlan.category as ProviderErrorCategory,
+    details: errorPlan.details
+  }) as ProviderProtocolError & { status?: number };
+  wrapped.status = errorPlan.status;
   throw wrapped;
 }
 

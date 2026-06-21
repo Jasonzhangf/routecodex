@@ -1882,6 +1882,12 @@ pub fn plan_followup_runtime_action_json(input_json: String) -> NapiResult<Strin
 }
 
 #[napi]
+pub fn plan_followup_auto_limit_error_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_followup_auto_limit_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_followup_runtime_metadata_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_followup_runtime_metadata_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

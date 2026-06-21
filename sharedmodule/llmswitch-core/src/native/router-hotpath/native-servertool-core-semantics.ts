@@ -4057,6 +4057,49 @@ export function planFollowupRuntimeActionWithNative(
   };
 }
 
+export function planFollowupAutoLimitErrorWithNative(input: {
+  flowId?: string;
+  requestId: string;
+  repeatCount?: number;
+  reason?: string;
+  status?: number;
+  code?: 'SERVERTOOL_FOLLOWUP_FAILED';
+  category?: 'INTERNAL_ERROR';
+}): ServertoolErrorPlan {
+  const capability = 'planFollowupAutoLimitErrorJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planFollowupAutoLimitErrorJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planFollowupAutoLimitErrorJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planFollowupAutoLimitErrorJson native returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.message !== 'string' ||
+    typeof record.code !== 'string' ||
+    typeof record.category !== 'string' ||
+    !Number.isInteger(record.status) ||
+    typeof record.details !== 'object' ||
+    record.details === null ||
+    Array.isArray(record.details)
+  ) {
+    throw new Error('planFollowupAutoLimitErrorJson native returned malformed error plan');
+  }
+  return {
+    message: record.message,
+    code: record.code,
+    category: record.category,
+    status: record.status as number,
+    details: record.details as Record<string, unknown>
+  };
+}
+
 export function planFollowupRuntimeMetadataWithNative(
   input: ServertoolFollowupRuntimeMetadataInput,
 ): ServertoolFollowupRuntimeMetadataPlan {

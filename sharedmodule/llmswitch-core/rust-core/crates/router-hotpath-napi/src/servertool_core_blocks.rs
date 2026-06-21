@@ -3,6 +3,7 @@
 
 use servertool_core::backend_route_contract::{
     decorate_servertool_final_chat_with_context, plan_bootstrap_replay, plan_empty_followup_error,
+    plan_followup_auto_limit_error,
     plan_followup_append_user_text, plan_followup_error_envelope, plan_followup_execution_mode,
     plan_followup_materialization, plan_followup_payload_stream, plan_followup_runtime_action,
     plan_followup_runtime_metadata, plan_hub_followup_policy_shadow,
@@ -11,6 +12,7 @@ use servertool_core::backend_route_contract::{
     should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
     ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
     ServertoolBootstrapReplayPlanInput, ServertoolEmptyFollowupErrorPlanInput,
+    ServertoolFollowupAutoLimitErrorPlanInput,
     ServertoolFollowupAppendUserTextInput, ServertoolFollowupErrorPlanInput,
     ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
     ServertoolFollowupPayloadStreamPlanInput, ServertoolFollowupRuntimeActionInput,
@@ -1108,6 +1110,14 @@ pub fn plan_followup_runtime_action_json(input_json: &str) -> Result<String, Str
     serde_json::to_string(&output).map_err(|e| format!("serialize runtime action plan: {e}"))
 }
 
+pub fn plan_followup_auto_limit_error_json(input_json: &str) -> Result<String, String> {
+    let input: ServertoolFollowupAutoLimitErrorPlanInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize followup auto-limit error input: {e}"))?;
+    let output = plan_followup_auto_limit_error(input).map_err(|e| e.to_string())?;
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize followup auto-limit error: {e}"))
+}
+
 pub fn plan_followup_runtime_metadata_json(input_json: &str) -> Result<String, String> {
     let input: ServertoolFollowupRuntimeMetadataInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize followup runtime metadata input: {e}"))?;
@@ -1565,6 +1575,35 @@ mod tests {
             parsed["clientInjectMetadata"]["source"],
             "servertool.continue_execution"
         );
+    }
+
+    #[test]
+    fn plans_followup_auto_limit_error_via_servertool_core_bridge() {
+        let raw = plan_followup_auto_limit_error_json(
+            &json!({
+                "flowId": "continue_execution_flow",
+                "requestId": "req-auto-limit",
+                "repeatCount": 3,
+                "reason": "followup_auto_limit_hit",
+                "status": 502,
+                "code": "SERVERTOOL_FOLLOWUP_FAILED",
+                "category": "INTERNAL_ERROR"
+            })
+            .to_string(),
+        )
+        .expect("followup auto-limit error bridge");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(
+            parsed["message"],
+            "[servertool] followup auto limit reached before stopless contract was satisfied"
+        );
+        assert_eq!(parsed["code"], "SERVERTOOL_FOLLOWUP_FAILED");
+        assert_eq!(parsed["category"], "INTERNAL_ERROR");
+        assert_eq!(parsed["status"], 502);
+        assert_eq!(parsed["details"]["flowId"], "continue_execution_flow");
+        assert_eq!(parsed["details"]["requestId"], "req-auto-limit");
+        assert_eq!(parsed["details"]["repeatCount"], 3);
+        assert_eq!(parsed["details"]["reason"], "followup_auto_limit_hit");
     }
 
     #[test]

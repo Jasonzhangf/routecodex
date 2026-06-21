@@ -47,6 +47,13 @@ jest.unstable_mockModule(
       autoLimit: { exceeded: false },
       clientInjectMetadata: { force: false }
     })),
+    planFollowupAutoLimitErrorWithNative: jest.fn(() => ({
+      message: '[servertool] followup auto limit reached before stopless contract was satisfied',
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 502,
+      details: {}
+    })),
     planFollowupRuntimeMetadataWithNative: jest.fn((input: any) => ({
       rootSet: {},
       rootDelete: [],
