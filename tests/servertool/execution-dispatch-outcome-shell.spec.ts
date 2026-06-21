@@ -285,8 +285,6 @@ describe('execution-dispatch-outcome-shell', () => {
     const baseForExecution: Record<string, unknown> = {
       id: 'chatcmpl-test'
     };
-    const appendToolOutput = jest.fn();
-
     const result = await runServertoolIoExecutionQueue({
       dispatchPlan: {
         executableToolCalls: [
@@ -310,8 +308,7 @@ describe('execution-dispatch-outcome-shell', () => {
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses'
       } as any,
-      baseForExecution: baseForExecution as any,
-      appendToolOutput
+      baseForExecution: baseForExecution as any
     });
 
     expect(buildServertoolHandlerErrorToolOutputPayloadWithNative).toHaveBeenCalledTimes(1);
@@ -323,7 +320,6 @@ describe('execution-dispatch-outcome-shell', () => {
     expect((buildServertoolHandlerErrorToolOutputPayloadWithNative.mock.calls[0]?.[0] as any)?.base?.id).toBe(
       'chatcmpl-test'
     );
-    expect(appendToolOutput).not.toHaveBeenCalled();
     expect((baseForExecution as any).tool_outputs).toEqual([
       {
         tool_call_id: 'call_fail_1',
@@ -713,8 +709,7 @@ describe('execution-dispatch-outcome-shell', () => {
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses'
       } as any,
-      baseForExecution: { id: 'chatcmpl-skip' } as any,
-      appendToolOutput: jest.fn()
+      baseForExecution: { id: 'chatcmpl-skip' } as any
     });
 
     expect(planServertoolExecutionLoopRuntimeActionWithNative).toHaveBeenCalledWith({
@@ -764,8 +759,7 @@ describe('execution-dispatch-outcome-shell', () => {
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses'
       } as any,
-      baseForExecution: { id: 'chatcmpl-base' } as any,
-      appendToolOutput: jest.fn()
+      baseForExecution: { id: 'chatcmpl-base' } as any
     });
 
     expect(planServertoolExecutionLoopEffectWithNative).toHaveBeenCalledWith({

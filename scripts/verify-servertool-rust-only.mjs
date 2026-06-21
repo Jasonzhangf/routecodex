@@ -2739,6 +2739,18 @@ function checkServertoolExecutionDispatchRustOwner() {
     executionShell,
     'export function applyServertoolExecutionResult('
   );
+  assertMissing(
+    'servertool-orchestration-blocks-no-ts-append-tool-output',
+    `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
+    readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
+    'export function appendToolOutput('
+  );
+  assertMissing(
+    'servertool-orchestration-blocks-no-ts-append-tool-output',
+    `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
+    readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
+    "nativeRecord({ op: 'append_tool_output'"
+  );
 }
 
 // ── Check 13: followup mainline bridge is Rust-owned ──────────

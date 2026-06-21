@@ -221,7 +221,6 @@ export async function runServertoolIoExecutionQueue(args: {
   options: ServerSideToolEngineOptions;
   contextBase: Omit<import('./types.js').ServerToolHandlerContext, 'toolCall'>;
   baseForExecution: JsonObject;
-  appendToolOutput: (base: JsonObject, toolCallId: string, name: string, content: string) => void;
 }): Promise<ServertoolExecutionLoopState> {
   const executionState = createServertoolExecutionLoopState();
 

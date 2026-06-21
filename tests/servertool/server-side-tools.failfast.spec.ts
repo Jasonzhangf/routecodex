@@ -777,17 +777,18 @@ jest.unstable_mockModule(
           await entry.handler({ ...args.contextBase, base: args.baseForExecution, toolCall });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-          args.appendToolOutput(
-            args.baseForExecution,
-            toolCall.id,
-            toolCall.name,
-            JSON.stringify({
-              ok: false,
-              tool: toolCall.name,
-              message,
-              retryable: true
-            })
-          );
+          (args.baseForExecution as Record<string, unknown>).tool_outputs = [
+            {
+              tool_call_id: toolCall.id,
+              name: toolCall.name,
+              content: JSON.stringify({
+                ok: false,
+                tool: toolCall.name,
+                message,
+                retryable: true
+              })
+            }
+          ];
           const execution = { flowId: `${toolCall.name}_error` };
           state.executedToolCalls.push({ toolCall, execution });
           state.executedIds.add(toolCall.id);

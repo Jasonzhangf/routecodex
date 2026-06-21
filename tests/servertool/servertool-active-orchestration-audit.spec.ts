@@ -72,6 +72,13 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts',
+    forbidden: [
+      'export function appendToolOutput(',
+      "nativeRecord({ op: 'append_tool_output'",
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts',
     forbidden: [
       "outcome: 'error'",

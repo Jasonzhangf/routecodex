@@ -124,10 +124,6 @@ export function buildAssistantToolCallMessage(toolCalls: ToolCall[]): JsonObject
   return nativeRecord({ op: 'build_assistant_tool_call_message', toolCalls });
 }
 
-export function appendToolOutput(base: JsonObject, toolCallId: string, name: string, content: string): void {
-  replaceJsonObjectInPlaceInternal(base, nativeRecord({ op: 'append_tool_output', base, toolCallId, name, content }));
-}
-
 export function buildToolMessagesFromOutputs(base: JsonObject, allowIds: Set<string>): JsonObject[] {
   return nativeArray({ op: 'build_tool_messages_from_outputs', base, allowIds: [...allowIds] });
 }

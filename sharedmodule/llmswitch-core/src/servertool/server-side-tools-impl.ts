@@ -32,7 +32,6 @@ import {
   planServertoolResponseStageRuntimeActionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  appendToolOutput,
   filterOutExecutedToolCalls,
   patchToolCallArgumentsById,
   replaceJsonObjectInPlace,
@@ -250,8 +249,7 @@ export const runServerSideToolEngine = async (
     dispatchPlan,
     options,
     contextBase,
-    baseForExecution,
-    appendToolOutput
+    baseForExecution
   });
 
   const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({
