@@ -2956,7 +2956,14 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
             "hasLastExecutionFollowup": false,
             "hasResolvedFollowup": false,
             "hasLastExecution": false,
-            "executedToolCallsLen": 0
+            "executedToolCallsLen": 0,
+            "flowId": "servertool_mixed",
+            "pendingSessionId": "sess_1",
+            "aliasSessionIds": ["alias_1"],
+            "remainingToolCallIds": ["call_2"],
+            "pendingInjectionMessagesResolved": [{
+                "role": "assistant"
+            }]
         })
         .to_string(),
     )
@@ -2970,6 +2977,18 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
     assert_eq!(
         mixed_value["reuseLastExecutionEnvelope"],
         serde_json::json!(false)
+    );
+    assert_eq!(mixed_value["executionFlowId"], serde_json::json!("servertool_mixed"));
+    assert_eq!(
+        mixed_value["pendingInjection"],
+        serde_json::json!({
+            "sessionId": "sess_1",
+            "aliasSessionIds": ["alias_1"],
+            "afterToolCallIds": ["call_2"],
+            "messages": [{
+                "role": "assistant"
+            }]
+        })
     );
 
     let missing = plan_servertool_execution_outcome_runtime_action_json(
@@ -3002,7 +3021,20 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
             "hasLastExecutionFollowup": true,
             "hasResolvedFollowup": true,
             "hasLastExecution": true,
-            "executedToolCallsLen": 1
+            "executedToolCallsLen": 1,
+            "flowId": "servertool_multi",
+            "lastExecution": {
+                "flowId": "flow_1",
+                "followup": {
+                    "requestIdSuffix": ":reuse"
+                },
+                "context": {
+                    "kept": true
+                }
+            },
+            "resolvedFollowup": {
+                "requestIdSuffix": ":resolved"
+            }
         })
         .to_string(),
     )
@@ -3016,6 +3048,25 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
     assert_eq!(
         reuse_value["reuseLastExecutionEnvelope"],
         serde_json::json!(true)
+    );
+    assert_eq!(reuse_value["executionFlowId"], serde_json::json!("servertool_multi"));
+    assert_eq!(
+        reuse_value["selectedFollowup"],
+        serde_json::json!({
+            "requestIdSuffix": ":reuse"
+        })
+    );
+    assert_eq!(
+        reuse_value["selectedExecutionEnvelope"],
+        serde_json::json!({
+            "flowId": "flow_1",
+            "followup": {
+                "requestIdSuffix": ":reuse"
+            },
+            "context": {
+                "kept": true
+            }
+        })
     );
 }
 

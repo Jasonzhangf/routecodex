@@ -322,6 +322,10 @@ export interface ServertoolExecutionOutcomeRuntimeActionPlan {
     | 'use_resolved_followup'
     | 'missing_followup_contract';
   reuseLastExecutionEnvelope?: boolean;
+  selectedFollowup?: unknown;
+  selectedExecutionEnvelope?: unknown;
+  pendingInjection?: unknown;
+  executionFlowId: string;
 }
 
 export interface ServertoolExecutionLoopRuntimeActionPlan {
@@ -2635,6 +2639,13 @@ export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
   hasResolvedFollowup: boolean;
   hasLastExecution: boolean;
   executedToolCallsLen: number;
+  lastExecution?: unknown;
+  resolvedFollowup?: unknown;
+  flowId?: string;
+  pendingSessionId?: string;
+  aliasSessionIds?: string[];
+  remainingToolCallIds?: string[];
+  pendingInjectionMessagesResolved?: unknown[];
 }): ServertoolExecutionOutcomeRuntimeActionPlan {
   const capability = 'planServertoolExecutionOutcomeRuntimeActionJson';
   const fn = readNativeFunction(capability);
@@ -2661,7 +2672,22 @@ export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
   }
   return {
     action: record.action,
-    reuseLastExecutionEnvelope: record.reuseLastExecutionEnvelope === true
+    reuseLastExecutionEnvelope: record.reuseLastExecutionEnvelope === true,
+    ...(record.selectedFollowup !== undefined
+      ? { selectedFollowup: record.selectedFollowup }
+      : {}),
+    ...(record.selectedExecutionEnvelope !== undefined
+      ? { selectedExecutionEnvelope: record.selectedExecutionEnvelope }
+      : {}),
+    ...(record.pendingInjection !== undefined
+      ? { pendingInjection: record.pendingInjection }
+      : {}),
+    executionFlowId:
+      typeof record.executionFlowId === 'string' && record.executionFlowId.trim()
+        ? record.executionFlowId
+        : input.outcomeMode === 'mixed_client_tools'
+          ? 'servertool_mixed'
+          : 'servertool_multi'
   };
 }
 

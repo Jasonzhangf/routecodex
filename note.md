@@ -1,3 +1,73 @@
+## 2026-06-21 response-side stop schema harvest / rust-owner audit
+
+- 核查目标：
+  - response 侧是否“正确找到 fence 进行 harvest”
+  - 这段 stopless / reasoningStop 语义在 rust 化后是否已经不是 TS owner
+- 文件证据：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/tool_call_governance.rs`
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/mainline-call-map.yml`
+  - `docs/architecture/verification-map.yml`
+- 当前真相 1：response 侧并不存在“看到任意 JSON/fence 就 harvest stop schema”的通用逻辑。
+  - `strip_stop_schema_control_text()` 只移除 `<rcc_stop_schema>...</rcc_stop_schema>` 控制块，以及可见文本里的“停止原因:”行。
+  - `preserves_non_fenced_json_and_unclosed_json()` 明确锁死：裸 JSON、未闭合 JSON 不会被当成 stop schema 剥离或 harvest。
+  - `extract_current_assistant_reasoning_stop_arguments()` 只从结构化 `reasoningStop` tool call / function call 读取 `arguments`，不是从普通文本里抓裸 JSON。
+- 当前真相 2：response/tool governance 仍有另一类“tool call harvest”，但那是 Rust chat-process/tool-governance 的通用 wrapper/tool-call 收割，不等于 stop schema fence harvest。
+  - `tool_call_governance.rs` 里的 `maybe_harvest_empty_tool_calls_from_json_content()` 走的是 `harvest_explicit_wrapper_only_tool_calls_from_payload(...)`。
+  - 它解决的是 payload 里显式 wrapper/tool-call 结构补全与治理，不是 stop schema 可见文本解析真源。
+- 当前真相 3：这段 stopless 关键语义现在主要是 Rust owner，不是 TS owner。
+  - stop schema 可见文本剥离 / `reasoningStop` arguments 提取：Rust `servertool-core/src/stop_visible_text.rs`
+  - response 侧 malformed `exec_command(cmd=\"reasoningStop\")` 修复：Rust `router-hotpath-napi/.../tool_call_governance.rs`
+  - stopless CLI projection / repeatCount 递进 / schema feedback：Rust `servertool-core/src/cli_contract.rs`
+  - stopless projection context 恢复：Rust `servertool-core/src/stopless_cli_projection_context_contract.rs`
+  - request 里从当前 tool_output 恢复 stopless snapshot：Rust `servertool-core/src/persisted_lookup.rs`
+- 边界说明：
+  - TS `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` 仍是活壳层/编排层，负责调用 native、metadata carrier 绑定、plan 组合；
+  - 不能宣称整个 stopless mainline 已“完全无 TS”。`note.md` 既有结论仍成立：局部语义 Rust owner 已很多，但 hook skeleton/mainline 是否完全 Rust-only 仍需按 `binding pending` 口径处理。
+- 对 Jason 当前截图症状的直接含义：
+  - 如果 live 响应里只是普通文本、裸 JSON、旧 fenced json，而不是 `<rcc_stop_schema>` 或结构化 `reasoningStop.arguments`，当前 response 真源不会把它当 stop schema harvest 成功。
+  - 所以这轮问题不能再假设“response 侧会自动从任意文本 schema 补 harvest”；要么请求注入明确要求 canonical `<rcc_stop_schema>` / structured `reasoningStop`，要么继续查 loop state restore 为何退回 `repeatCount=1`。
+
+## 2026-06-21 servertool outcome-runtime selection rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 的 outcome materialization 残余 TS owner。
+- 旧 TS 仍本地 owner 三段选择/组装语义：
+  - followup 选择：`lastExecution.followup` vs `resolvedFollowup`
+  - execution envelope 选择：`reuseLastExecutionEnvelope ? lastExecution : { flowId }`
+  - mixed-client-tools `pendingInjection` 组装：`sessionId/aliasSessionIds/afterToolCallIds/messages`
+- 现在统一下沉到 Rust owner：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs`
+  - contract output 新增：
+    - `selectedFollowup`
+    - `selectedExecutionEnvelope`
+    - `pendingInjection`
+    - `executionFlowId`
+- bridge / thin shell 收口：
+  - `router-hotpath-napi/src/servertool_core_blocks.rs` 补 bridge 断言
+  - `native-servertool-core-semantics.ts` 补 wrapper input/output shape
+  - `execution-dispatch-outcome-shell.ts` 不再本地选择 followup / envelope，也不再本地组装 pendingInjection；TS 只消费 native runtime action plan
+- focused tests / gate：
+  - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+  - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - audit 明确禁止：
+    - `args.executionState.lastExecution?.followup as`
+    - `outcomePlan.resolvedFollowup as`
+    - `const injectionMessages = outcomePlan.pendingInjectionMessagesResolved`
+    - `pendingInjection: {`
+- 串行验证：
+  - `cargo test -p servertool-core execution_outcome_runtime_action_contract -- --nocapture` -> 6 passed
+  - `cargo test -p router-hotpath-napi plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - focused Jest:
+    - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+    - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 结果：3 suites / 38 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+
 ## 2026-06-21 servertool outcome-plan input extraction rust-owner
 
 - 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 的 outcome-plan 输入提炼残余 TS owner。

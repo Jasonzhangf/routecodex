@@ -168,7 +168,21 @@ describe('execution-dispatch-outcome-shell', () => {
               input?.followupStrategy === 'pending_injection'
             ? 'return_mixed_client_tools_pending_injection'
             : 'invalid_mixed_client_tools_outcome',
-          reuseLastExecutionEnvelope: false
+          reuseLastExecutionEnvelope: false,
+          pendingInjection:
+            input?.pendingSessionId && Array.isArray(input?.pendingInjectionMessagesResolved) && input.pendingInjectionMessagesResolved.length > 0
+              ? {
+                  sessionId: input.pendingSessionId,
+                  ...(Array.isArray(input.aliasSessionIds) && input.aliasSessionIds.length > 0
+                    ? { aliasSessionIds: input.aliasSessionIds }
+                    : {}),
+                  afterToolCallIds: Array.isArray(input.remainingToolCallIds)
+                    ? input.remainingToolCallIds
+                    : [],
+                  messages: input.pendingInjectionMessagesResolved
+                }
+              : undefined,
+          executionFlowId: String(input?.flowId ?? 'servertool_mixed')
         };
       }
       if (
@@ -179,13 +193,28 @@ describe('execution-dispatch-outcome-shell', () => {
         return {
           action: 'reuse_last_execution_followup',
           reuseLastExecutionEnvelope:
+            input?.hasLastExecution === true && Number(input?.executedToolCallsLen ?? 0) === 1,
+          selectedFollowup: input?.lastExecution?.followup,
+          selectedExecutionEnvelope:
             input?.hasLastExecution === true && Number(input?.executedToolCallsLen ?? 0) === 1
+              ? input?.lastExecution
+              : undefined,
+          executionFlowId: String(input?.flowId ?? 'servertool_multi')
         };
       }
       if (input?.hasResolvedFollowup === true) {
-        return { action: 'use_resolved_followup', reuseLastExecutionEnvelope: false };
+        return {
+          action: 'use_resolved_followup',
+          reuseLastExecutionEnvelope: false,
+          selectedFollowup: input?.resolvedFollowup,
+          executionFlowId: String(input?.flowId ?? 'servertool_multi')
+        };
       }
-      return { action: 'missing_followup_contract', reuseLastExecutionEnvelope: false };
+      return {
+        action: 'missing_followup_contract',
+        reuseLastExecutionEnvelope: false,
+        executionFlowId: String(input?.flowId ?? 'servertool_multi')
+      };
     });
     createServertoolExecutionLoopStateWithNative.mockReturnValue({
       executedToolCalls: [],
@@ -432,7 +461,14 @@ describe('execution-dispatch-outcome-shell', () => {
       hasLastExecutionFollowup: false,
       hasResolvedFollowup: false,
       hasLastExecution: false,
-      executedToolCallsLen: 0
+      executedToolCallsLen: 0,
+      lastExecution: undefined,
+      resolvedFollowup: undefined,
+      flowId: undefined,
+      pendingSessionId: '',
+      aliasSessionIds: [],
+      remainingToolCallIds: [],
+      pendingInjectionMessagesResolved: []
     });
     expect(planServertoolExecutionDispatchErrorWithNative).toHaveBeenCalledWith({
       kind: 'invalid_mixed_client_tools_outcome',
@@ -483,7 +519,14 @@ describe('execution-dispatch-outcome-shell', () => {
       hasLastExecutionFollowup: false,
       hasResolvedFollowup: false,
       hasLastExecution: false,
-      executedToolCallsLen: 0
+      executedToolCallsLen: 0,
+      lastExecution: undefined,
+      resolvedFollowup: null,
+      flowId: 'servertool_multi',
+      pendingSessionId: '',
+      aliasSessionIds: [],
+      remainingToolCallIds: [],
+      pendingInjectionMessagesResolved: []
     });
     expect(planServertoolExecutionDispatchErrorWithNative).toHaveBeenCalledWith({
       kind: 'missing_followup_contract',
@@ -555,7 +598,18 @@ describe('execution-dispatch-outcome-shell', () => {
       hasLastExecutionFollowup: true,
       hasResolvedFollowup: true,
       hasLastExecution: true,
-      executedToolCallsLen: 1
+      executedToolCallsLen: 1,
+      lastExecution: {
+        flowId: 'flow_1',
+        followup: { requestIdSuffix: ':reuse_last_execution' },
+        context: { kept: true }
+      },
+      resolvedFollowup: { requestIdSuffix: ':should_not_win' },
+      flowId: 'servertool_multi',
+      pendingSessionId: '',
+      aliasSessionIds: [],
+      remainingToolCallIds: [],
+      pendingInjectionMessagesResolved: []
     });
     expect(result.execution).toMatchObject({
       flowId: 'servertool_multi',
@@ -566,6 +620,65 @@ describe('execution-dispatch-outcome-shell', () => {
         kept: true
       }
     });
+  });
+
+  test('uses Rust-owned pending-injection projection instead of TS local assembly', () => {
+    planServertoolOutcomeWithNative.mockReturnValue({
+      outcomeMode: 'mixed_client_tools',
+      followupStrategy: 'pending_injection',
+      requiresPendingInjection: true,
+      pendingInjectionMessagesResolved: [{ role: 'assistant', content: 'queued' }],
+      pendingSessionId: 'sess_pending_1',
+      aliasSessionIds: ['alias_pending_1'],
+      remainingToolCallIds: ['call_pending_2'],
+      useLastExecutionFollowup: false,
+      useGenericFollowup: false,
+      flowId: 'servertool_mixed'
+    });
+
+    const filterOutExecutedToolCalls = jest.fn();
+    const stripToolOutputs = jest.fn();
+    const result = materializeNativeToolCallExecutionOutcome({
+      base: { id: 'base-pending-1' } as any,
+      baseForExecution: { id: 'base-pending-1' } as any,
+      options: { requestId: 'req-pending-injection-1', adapterContext: {} } as any,
+      toolCalls: [],
+      executionState: {
+        executedToolCalls: [],
+        executedIds: new Set<string>(),
+        executedFlowIds: []
+      },
+      filterOutExecutedToolCalls,
+      stripToolOutputs,
+      pendingInjectionMessageKinds: []
+    });
+
+    expect(result.execution).toEqual({ flowId: 'servertool_mixed' });
+    expect(result.pendingInjection).toEqual({
+      sessionId: 'sess_pending_1',
+      aliasSessionIds: ['alias_pending_1'],
+      afterToolCallIds: ['call_pending_2'],
+      messages: [{ role: 'assistant', content: 'queued' }]
+    });
+    expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
+      outcomeMode: 'mixed_client_tools',
+      requiresPendingInjection: true,
+      followupStrategy: 'pending_injection',
+      useLastExecutionFollowup: false,
+      hasLastExecutionFollowup: false,
+      hasResolvedFollowup: false,
+      hasLastExecution: false,
+      executedToolCallsLen: 0,
+      lastExecution: undefined,
+      resolvedFollowup: undefined,
+      flowId: 'servertool_mixed',
+      pendingSessionId: 'sess_pending_1',
+      aliasSessionIds: ['alias_pending_1'],
+      remainingToolCallIds: ['call_pending_2'],
+      pendingInjectionMessagesResolved: [{ role: 'assistant', content: 'queued' }]
+    });
+    expect(filterOutExecutedToolCalls).toHaveBeenCalledTimes(1);
+    expect(stripToolOutputs).toHaveBeenCalledTimes(1);
   });
 
   test('uses Rust-owned execution loop runtime action planning to skip non-tool-call handlers', async () => {

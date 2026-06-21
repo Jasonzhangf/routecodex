@@ -334,33 +334,59 @@ describe('servertool CLI native bridge', () => {
       planServertoolExecutionOutcomeRuntimeActionWithNative({
         outcomeMode: 'mixed_client_tools',
         requiresPendingInjection: true,
-      followupStrategy: 'pending_injection',
-      useLastExecutionFollowup: false,
-      hasLastExecutionFollowup: false,
-      hasResolvedFollowup: false,
-      hasLastExecution: false,
-      executedToolCallsLen: 0
-    })
-  ).toEqual({
-    action: 'return_mixed_client_tools_pending_injection',
-    reuseLastExecutionEnvelope: false
-  });
+        followupStrategy: 'pending_injection',
+        useLastExecutionFollowup: false,
+        hasLastExecutionFollowup: false,
+        hasResolvedFollowup: false,
+        hasLastExecution: false,
+        executedToolCallsLen: 0,
+        pendingSessionId: 'sess_1',
+        aliasSessionIds: ['alias_1'],
+        remainingToolCallIds: ['call_2'],
+        pendingInjectionMessagesResolved: [{ role: 'assistant' }],
+        flowId: 'servertool_mixed'
+      })
+    ).toEqual({
+      action: 'return_mixed_client_tools_pending_injection',
+      reuseLastExecutionEnvelope: false,
+      pendingInjection: {
+        sessionId: 'sess_1',
+        aliasSessionIds: ['alias_1'],
+        afterToolCallIds: ['call_2'],
+        messages: [{ role: 'assistant' }]
+      },
+      executionFlowId: 'servertool_mixed'
+    });
 
     expect(
       planServertoolExecutionOutcomeRuntimeActionWithNative({
         outcomeMode: 'servertool_only',
         requiresPendingInjection: false,
-      followupStrategy: 'reuse_last_execution',
-      useLastExecutionFollowup: true,
-      hasLastExecutionFollowup: true,
-      hasResolvedFollowup: true,
-      hasLastExecution: true,
-      executedToolCallsLen: 1
-    })
-  ).toEqual({
-    action: 'reuse_last_execution_followup',
-    reuseLastExecutionEnvelope: true
-  });
+        followupStrategy: 'reuse_last_execution',
+        useLastExecutionFollowup: true,
+        hasLastExecutionFollowup: true,
+        hasResolvedFollowup: true,
+        hasLastExecution: true,
+        executedToolCallsLen: 1,
+        lastExecution: {
+          flowId: 'flow_1',
+          followup: { requestIdSuffix: ':reuse' },
+          context: { kept: true }
+        },
+        resolvedFollowup: { requestIdSuffix: ':resolved' },
+        flowId: 'servertool_multi'
+      })
+    ).toEqual({
+      action: 'reuse_last_execution_followup',
+      reuseLastExecutionEnvelope: true,
+      selectedFollowup: { requestIdSuffix: ':reuse' },
+      selectedExecutionEnvelope: {
+        flowId: 'flow_1',
+        followup: { requestIdSuffix: ':reuse' },
+        context: { kept: true }
+      },
+      executionFlowId: 'servertool_multi'
+    });
   });
 
   it('uses Rust-owned execution loop runtime action planning', () => {

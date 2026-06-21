@@ -159,26 +159,27 @@ export function materializeNativeToolCallExecutionOutcome(args: {
     hasLastExecutionFollowup: Boolean(args.executionState.lastExecution?.followup),
     hasResolvedFollowup: Boolean(outcomePlan.resolvedFollowup),
     hasLastExecution: Boolean(args.executionState.lastExecution),
-    executedToolCallsLen: args.executionState.executedToolCalls.length
+    executedToolCallsLen: args.executionState.executedToolCalls.length,
+    lastExecution: args.executionState.lastExecution,
+    resolvedFollowup: outcomePlan.resolvedFollowup,
+    flowId: outcomePlan.flowId,
+    pendingSessionId: outcomePlan.pendingSessionId,
+    aliasSessionIds: outcomePlan.aliasSessionIds,
+    remainingToolCallIds: outcomePlan.remainingToolCallIds,
+    pendingInjectionMessagesResolved: outcomePlan.pendingInjectionMessagesResolved
   });
 
   if (outcomeRuntimeActionPlan.action === 'return_mixed_client_tools_pending_injection') {
     const clientResponse = JSON.parse(JSON.stringify(args.base)) as JsonObject;
     args.filterOutExecutedToolCalls(clientResponse, args.executionState.executedIds);
     args.stripToolOutputs(clientResponse);
-    const injectionMessages = outcomePlan.pendingInjectionMessagesResolved as JsonObject[];
     return {
       mode: 'tool_flow',
       finalChatResponse: clientResponse,
-      execution: { flowId: outcomePlan.flowId || 'servertool_mixed' },
-      ...(outcomePlan.pendingSessionId && injectionMessages.length
+      execution: { flowId: outcomeRuntimeActionPlan.executionFlowId },
+      ...(outcomeRuntimeActionPlan.pendingInjection
         ? {
-            pendingInjection: {
-              sessionId: outcomePlan.pendingSessionId,
-              ...(outcomePlan.aliasSessionIds.length ? { aliasSessionIds: outcomePlan.aliasSessionIds } : {}),
-              afterToolCallIds: outcomePlan.remainingToolCallIds,
-              messages: injectionMessages
-            }
+            pendingInjection: outcomeRuntimeActionPlan.pendingInjection as ServerSideToolEngineResult['pendingInjection']
           }
         : {})
     };
@@ -196,12 +197,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
     );
   }
 
-  const followup =
-    outcomeRuntimeActionPlan.action === 'reuse_last_execution_followup'
-      ? (args.executionState.lastExecution?.followup as ServerToolFollowupPlan | undefined)
-      : outcomeRuntimeActionPlan.action === 'use_resolved_followup'
-        ? (outcomePlan.resolvedFollowup as ServerToolFollowupPlan | undefined)
-        : undefined;
+  const followup = outcomeRuntimeActionPlan.selectedFollowup as ServerToolFollowupPlan | undefined;
   if (!followup) {
     throw buildProviderProtocolError(
       planServertoolExecutionDispatchErrorWithNative({
@@ -214,15 +210,14 @@ export function materializeNativeToolCallExecutionOutcome(args: {
       })
     );
   }
-  const flowId = outcomePlan.flowId || 'servertool_multi';
   return {
     mode: 'tool_flow',
     finalChatResponse: args.baseForExecution,
     execution: {
       ...(outcomeRuntimeActionPlan.reuseLastExecutionEnvelope === true
-        ? args.executionState.lastExecution
-        : ({ flowId } as any)),
-      flowId,
+        ? (outcomeRuntimeActionPlan.selectedExecutionEnvelope as Record<string, unknown> | undefined)
+        : ({ flowId: outcomeRuntimeActionPlan.executionFlowId } as any)),
+      flowId: outcomeRuntimeActionPlan.executionFlowId,
       followup
     }
   };
