@@ -3,10 +3,20 @@ use crate::hub_pipeline_blocks::metadata::{
 };
 // feature_id: hub.route_metadata_surface
 use crate::hub_pipeline_blocks::responses_resume::{
-    read_continuation_from_semantics_node, read_responses_resume_from_semantics_node,
+    read_continuation_from_semantics_node, read_responses_resume_from_metadata,
+    read_responses_resume_from_semantics_node,
     synthesize_continuation_from_responses_resume,
 };
 use serde_json::{Map, Value};
+
+fn read_continuation_owner(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(|node| node.as_object())
+        .and_then(|row| row.get("continuationOwner"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
 
 pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String> {
     let row = input
@@ -53,6 +63,7 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
         .unwrap_or(false);
     let responses_resume_from_semantics =
         read_responses_resume_from_semantics_node(request_semantics);
+    let responses_resume_from_metadata = read_responses_resume_from_metadata(metadata_node);
     let responses_resume_from_input = row.get("responsesResume").cloned().and_then(|value| {
         if value.is_null() {
             None
@@ -62,10 +73,13 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
     });
     let responses_resume_for_output = responses_resume_from_input
         .clone()
+        .or_else(|| responses_resume_from_metadata.clone())
         .or_else(|| responses_resume_from_semantics.clone());
     let continuation = read_continuation_from_semantics_node(request_semantics).or_else(|| {
         synthesize_continuation_from_responses_resume(responses_resume_for_output.as_ref())
     });
+    let continuation_owner = read_continuation_owner(continuation.as_ref());
+    let responses_resume_owner = read_continuation_owner(responses_resume_for_output.as_ref());
 
     let mut out = Map::<String, Value>::new();
     out.insert("requestId".to_string(), Value::String(request_id));
@@ -83,6 +97,24 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+        .or_else(|| {
+            continuation
+                .as_ref()
+                .and_then(|value| value.as_object())
+                .and_then(|cont| cont.get("routeHint"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            responses_resume_for_output
+                .as_ref()
+                .and_then(|value| value.as_object())
+                .and_then(|resume| resume.get("routeHint"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
     {
         out.insert("routeHint".to_string(), Value::String(route_hint));
     }
@@ -99,6 +131,24 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+        .or_else(|| {
+            continuation
+                .as_ref()
+                .and_then(|value| value.as_object())
+                .and_then(|cont| cont.get("sessionId"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            responses_resume_for_output
+                .as_ref()
+                .and_then(|value| value.as_object())
+                .and_then(|resume| resume.get("sessionId"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
     {
         out.insert("sessionId".to_string(), Value::String(session_id));
     }
@@ -107,6 +157,24 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+        .or_else(|| {
+            continuation
+                .as_ref()
+                .and_then(|value| value.as_object())
+                .and_then(|cont| cont.get("conversationId"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            responses_resume_for_output
+                .as_ref()
+                .and_then(|value| value.as_object())
+                .and_then(|resume| resume.get("conversationId"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
     {
         out.insert("conversationId".to_string(), Value::String(conversation_id));
     }
@@ -117,8 +185,8 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
     {
         out.insert("serverToolRequired".to_string(), Value::Bool(true));
     }
-    if let Some(continuation) = continuation {
-        out.insert("continuation".to_string(), continuation);
+    if let Some(continuation) = continuation.as_ref() {
+        out.insert("continuation".to_string(), continuation.clone());
     }
     if let Some(stop_obj) = stop_message_metadata.as_object() {
         for (key, value) in stop_obj {
@@ -131,6 +199,56 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
                 out.insert("estimatedInputTokens".to_string(), value.clone());
             }
         }
+    }
+
+    if let Some(retry_provider_key) = metadata_node
+        .as_object()
+        .and_then(|metadata_obj| {
+            metadata_obj
+                .get("runtime_control")
+                .and_then(|value| value.as_object())
+                .and_then(|rt| rt.get("retryProviderKey"))
+                .or_else(|| {
+                    metadata_obj
+                        .get("__rt")
+                        .and_then(|v| v.as_object())
+                        .and_then(|rt| rt.get("retryProviderKey"))
+                })
+        })
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            if continuation_owner.as_deref() == Some("relay") {
+                None
+            } else {
+                continuation
+                    .as_ref()
+                    .and_then(|value| value.as_object())
+                    .and_then(|cont| cont.get("providerKey"))
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            }
+        })
+        .or_else(|| {
+            if responses_resume_owner.as_deref() == Some("relay") {
+                None
+            } else {
+                responses_resume_for_output
+                    .as_ref()
+                    .and_then(|value| value.as_object())
+                    .and_then(|resume| resume.get("providerKey"))
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            }
+        })
+    {
+        out.insert(
+            "retryProviderKey".to_string(),
+            Value::String(retry_provider_key),
+        );
     }
 
     if let Some(metadata_obj) = metadata_node.as_object() {
@@ -205,28 +323,6 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
             out.insert(
                 "__shadowCompareForcedProviderKey".to_string(),
                 Value::String(forced_provider_key),
-            );
-        }
-
-        let runtime_control = metadata_obj
-            .get("runtime_control")
-            .and_then(|value| value.as_object());
-
-        if let Some(retry_provider_key) = runtime_control
-            .and_then(|rt| rt.get("retryProviderKey"))
-            .or_else(|| {
-                metadata_obj
-                    .get("__rt")
-                    .and_then(|v| v.as_object())
-                    .and_then(|rt| rt.get("retryProviderKey"))
-            })
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-        {
-            out.insert(
-                "retryProviderKey".to_string(),
-                Value::String(retry_provider_key),
             );
         }
 

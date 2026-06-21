@@ -11,6 +11,8 @@ import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
 type MetadataCenterLike = {
+  readRequestTruth: () => Record<string, unknown> | undefined;
+  readContinuationContext: () => Record<string, unknown> | undefined;
   readRuntimeControl: () => Record<string, unknown> | undefined;
 };
 
@@ -19,6 +21,8 @@ function isMetadataCenterLike(value: unknown): value is MetadataCenterLike {
     value
     && typeof value === 'object'
     && !Array.isArray(value)
+    && typeof (value as { readRequestTruth?: unknown }).readRequestTruth === 'function'
+    && typeof (value as { readContinuationContext?: unknown }).readContinuationContext === 'function'
     && typeof (value as { readRuntimeControl?: unknown }).readRuntimeControl === 'function'
   );
 }
@@ -72,6 +76,66 @@ function readRuntimeControlFromMetadataCenter(metadata: Record<string, unknown>)
   return out;
 }
 
+function readRequestTruthFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
+  const symbolCenterCandidate = Reflect.get(metadata, METADATA_CENTER_SYMBOL);
+  if (isMetadataCenterLike(symbolCenterCandidate)) {
+    const requestTruth = symbolCenterCandidate.readRequestTruth();
+    if (requestTruth && typeof requestTruth === 'object' && !Array.isArray(requestTruth)) {
+      return { ...requestTruth };
+    }
+  }
+  const center = metadata.__metadataCenter && typeof metadata.__metadataCenter === 'object' && !Array.isArray(metadata.__metadataCenter)
+    ? metadata.__metadataCenter as Record<string, unknown>
+    : undefined;
+  const requestTruth = center?.requestTruth && typeof center.requestTruth === 'object' && !Array.isArray(center.requestTruth)
+    ? center.requestTruth as Record<string, unknown>
+    : undefined;
+  if (!requestTruth) {
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, slot] of Object.entries(requestTruth)) {
+    if (!slot || typeof slot !== 'object' || Array.isArray(slot)) {
+      continue;
+    }
+    const value = (slot as Record<string, unknown>).value;
+    if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function readContinuationContextFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
+  const symbolCenterCandidate = Reflect.get(metadata, METADATA_CENTER_SYMBOL);
+  if (isMetadataCenterLike(symbolCenterCandidate)) {
+    const continuationContext = symbolCenterCandidate.readContinuationContext();
+    if (continuationContext && typeof continuationContext === 'object' && !Array.isArray(continuationContext)) {
+      return { ...continuationContext };
+    }
+  }
+  const center = metadata.__metadataCenter && typeof metadata.__metadataCenter === 'object' && !Array.isArray(metadata.__metadataCenter)
+    ? metadata.__metadataCenter as Record<string, unknown>
+    : undefined;
+  const continuationContext = center?.continuationContext && typeof center.continuationContext === 'object' && !Array.isArray(center.continuationContext)
+    ? center.continuationContext as Record<string, unknown>
+    : undefined;
+  if (!continuationContext) {
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, slot] of Object.entries(continuationContext)) {
+    if (!slot || typeof slot !== 'object' || Array.isArray(slot)) {
+      continue;
+    }
+    const value = (slot as Record<string, unknown>).value;
+    if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
@@ -90,6 +154,61 @@ function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unkn
   return out;
 }
 
+function projectRouterInputMetadata(args: {
+  metadata: Record<string, unknown>;
+  requestTruth: Record<string, unknown>;
+  runtimeControl: Record<string, unknown>;
+  continuationContext: Record<string, unknown>;
+}): Record<string, unknown> {
+  const metadata = { ...args.metadata };
+  const requestTruth = args.requestTruth;
+  const runtimeControl = args.runtimeControl;
+  const continuationContext = args.continuationContext;
+  if (typeof requestTruth.sessionId === 'string' && requestTruth.sessionId.trim()) {
+    metadata.sessionId = requestTruth.sessionId.trim();
+  }
+  if (typeof requestTruth.conversationId === 'string' && requestTruth.conversationId.trim()) {
+    metadata.conversationId = requestTruth.conversationId.trim();
+  }
+  const routeHint = typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
+    ? runtimeControl.routeHint.trim()
+    : typeof continuationContext.responsesResume === 'object'
+      && continuationContext.responsesResume !== null
+      && !Array.isArray(continuationContext.responsesResume)
+      && typeof (continuationContext.responsesResume as Record<string, unknown>).routeHint === 'string'
+      && String((continuationContext.responsesResume as Record<string, unknown>).routeHint).trim()
+        ? String((continuationContext.responsesResume as Record<string, unknown>).routeHint).trim()
+        : undefined;
+  if (routeHint) {
+    metadata.routeHint = routeHint;
+  }
+  const responsesResume =
+    continuationContext.responsesResume
+    && typeof continuationContext.responsesResume === 'object'
+    && !Array.isArray(continuationContext.responsesResume)
+      ? { ...(continuationContext.responsesResume as Record<string, unknown>) }
+      : undefined;
+  if (responsesResume) {
+    metadata.responsesResume = responsesResume;
+  }
+  const resumeContinuationOwner =
+    typeof responsesResume?.continuationOwner === 'string'
+      ? responsesResume.continuationOwner.trim()
+      : undefined;
+  const retryProviderKey = typeof runtimeControl.retryProviderKey === 'string' && runtimeControl.retryProviderKey.trim()
+    ? runtimeControl.retryProviderKey.trim()
+    : resumeContinuationOwner !== 'relay'
+      && responsesResume
+      && typeof responsesResume.providerKey === 'string'
+      && responsesResume.providerKey.trim()
+      ? responsesResume.providerKey.trim()
+      : undefined;
+  if (retryProviderKey) {
+    metadata.retryProviderKey = retryProviderKey;
+  }
+  return metadata;
+}
+
 // feature_id: hub.request_stage_pipeline_bridge
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
@@ -101,6 +220,8 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   const entryMode = args.entryMode ?? "request_stage";
   const legacyRuntimeProjection = readRuntimeMetadataControl(normalized.metadata);
   const runtimeControlPayload = readRuntimeControlPayload(normalized.metadata);
+  const requestTruthPayload = readRequestTruthFromMetadataCenter(normalized.metadata);
+  const continuationContextPayload = readContinuationContextFromMetadataCenter(normalized.metadata);
   const metadataCenterRuntimeControl = readRuntimeControlFromMetadataCenter(normalized.metadata);
   const nativeTopLevelRuntimeControl = projectNativeTopLevelRuntimeControl({
     ...legacyRuntimeProjection,
@@ -111,13 +232,36 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     ...runtimeControlPayload,
     ...metadataCenterRuntimeControl,
   };
-  const route = mergedRuntimeControl.preselectedRoute
-    ?? legacyRuntimeProjection.preselectedRoute
-    ?? routerEngine.route(normalized.payload as never, normalized.metadata as never);
   const legacyRuntimeProjectionWithoutRouteControl =
     stripRouteControlProjection(legacyRuntimeProjection);
-  const metadata = {
+  const metadataBase = {
     ...normalized.metadata,
+    ...(typeof requestTruthPayload.sessionId === 'string' && requestTruthPayload.sessionId.trim()
+      ? { sessionId: requestTruthPayload.sessionId.trim() }
+      : {}),
+    ...(typeof requestTruthPayload.conversationId === 'string' && requestTruthPayload.conversationId.trim()
+      ? { conversationId: requestTruthPayload.conversationId.trim() }
+      : {}),
+    ...(typeof mergedRuntimeControl.routeHint === 'string' && mergedRuntimeControl.routeHint.trim()
+      ? { routeHint: mergedRuntimeControl.routeHint.trim() }
+      : {}),
+    ...(continuationContextPayload.responsesResume
+      && typeof continuationContextPayload.responsesResume === 'object'
+      && !Array.isArray(continuationContextPayload.responsesResume)
+      ? { responsesResume: continuationContextPayload.responsesResume }
+      : {}),
+  } as Record<string, unknown>;
+  const routerMetadata = projectRouterInputMetadata({
+    metadata: metadataBase,
+    requestTruth: requestTruthPayload,
+    runtimeControl: mergedRuntimeControl,
+    continuationContext: continuationContextPayload,
+  });
+  const route = mergedRuntimeControl.preselectedRoute
+    ?? legacyRuntimeProjection.preselectedRoute
+    ?? routerEngine.route(normalized.payload as never, routerMetadata as never);
+  const metadata = {
+    ...metadataBase,
     runtime_control: {
       ...mergedRuntimeControl,
       preselectedRoute: route,

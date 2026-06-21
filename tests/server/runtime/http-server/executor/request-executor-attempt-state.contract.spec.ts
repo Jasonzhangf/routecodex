@@ -51,6 +51,124 @@ describe('request-executor attempt-state contract', () => {
       .toBe('retry.provider.gpt-5.5');
   });
 
+  it('promotes responsesResume providerKey from MetadataCenter continuation truth into runtime_control retry pin', () => {
+    const initialMetadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(initialMetadata);
+    center.writeContinuationContext(
+      'responsesResume',
+      {
+        providerKey: 'primary.key1.gpt-test',
+        restoredFromResponseId: 'resp_prev_1',
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'promotes responsesResume providerKey from MetadataCenter continuation truth into runtime_control retry pin',
+        stage: 'test_setup'
+      }
+    );
+    const input = {
+      requestId: 'req-attempt-1',
+      body: { model: 'gpt-test', input: [] },
+    } as never;
+
+    const result = prepareRequestExecutorAttemptState({
+      input,
+      providerRequestId: 'req-attempt-2',
+      retryPayloadSeed: { mode: 'none' },
+      attempt: 1,
+      initialMetadata,
+      excludedProviderKeys: new Set<string>(),
+      inboundClientHeaders: undefined,
+      clientRequestId: 'client-req-1',
+      throwIfClientAbortSignalAborted: () => {},
+    });
+
+    expect(MetadataCenter.read(result.metadataForAttempt)?.readRuntimeControl().retryProviderKey)
+      .toBe('primary.key1.gpt-test');
+  });
+
+  it('does not promote relay responsesResume providerKey into retry pin or clear excluded providers', () => {
+    const initialMetadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(initialMetadata);
+    center.writeContinuationContext(
+      'responsesResume',
+      {
+        providerKey: 'primary.key1.gpt-test',
+        continuationOwner: 'relay',
+        restoredFromResponseId: 'resp_prev_1',
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'does not promote relay responsesResume providerKey into retry pin or clear excluded providers',
+        stage: 'test_setup'
+      }
+    );
+    const input = {
+      requestId: 'req-attempt-relay-1',
+      body: { model: 'gpt-test', input: [] },
+    } as never;
+
+    const result = prepareRequestExecutorAttemptState({
+      input,
+      providerRequestId: 'req-attempt-relay-2',
+      retryPayloadSeed: { mode: 'none' },
+      attempt: 2,
+      initialMetadata,
+      excludedProviderKeys: new Set<string>(['primary.key1.gpt-test']),
+      inboundClientHeaders: undefined,
+      clientRequestId: 'client-req-relay-1',
+      throwIfClientAbortSignalAborted: () => {},
+    });
+
+    expect(MetadataCenter.read(result.metadataForAttempt)?.readRuntimeControl().retryProviderKey)
+      .toBeUndefined();
+    expect(result.metadataForAttempt.excludedProviderKeys).toEqual(['primary.key1.gpt-test']);
+  });
+
+  it('preserves resumed relay session scope from MetadataCenter request truth into attempt metadata', () => {
+    const initialMetadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(initialMetadata);
+    center.writeRequestTruth(
+      'sessionId',
+      'sess-stopless-live-1',
+      {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'preserves resumed relay session scope from MetadataCenter request truth into attempt metadata',
+        stage: 'test_setup'
+      }
+    );
+    center.writeRequestTruth(
+      'conversationId',
+      'conv-stopless-live-1',
+      {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'preserves resumed relay session scope from MetadataCenter request truth into attempt metadata',
+        stage: 'test_setup'
+      }
+    );
+    const input = {
+      requestId: 'req-attempt-1',
+      body: { model: 'gpt-test', input: [] },
+    } as never;
+
+    const result = prepareRequestExecutorAttemptState({
+      input,
+      providerRequestId: 'req-attempt-2',
+      retryPayloadSeed: { mode: 'none' },
+      attempt: 1,
+      initialMetadata,
+      excludedProviderKeys: new Set<string>(),
+      inboundClientHeaders: undefined,
+      clientRequestId: 'client-req-1',
+      throwIfClientAbortSignalAborted: () => {},
+    });
+
+    expect(MetadataCenter.read(result.metadataForAttempt)?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-stopless-live-1',
+      conversationId: 'conv-stopless-live-1'
+    });
+  });
+
   it('writes retry provider pin to MetadataCenter runtime_control instead of flat metadata', () => {
     const source = fs.readFileSync(ATTEMPT_STATE_PATH, 'utf8');
     const prepareBlock = sliceBetween(

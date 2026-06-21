@@ -469,6 +469,20 @@ function readResponsesRequestContext(metadata: Record<string, unknown> | undefin
     : undefined;
 }
 
+function readRequestTruth(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const value = MetadataCenter.read(metadata)?.readRequestTruth();
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function readRuntimeControl(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const value = MetadataCenter.read(metadata)?.readRuntimeControl();
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -781,6 +795,308 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 responses handler 整链验证' }]
       }));
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('RED: plain /v1/responses previous_response_id must lookup continuation owner and mark direct remote continuation for same-protocol routing', async () => {
+    const mockLookupResponsesContinuationByResponseId =
+      (await import('../../../src/modules/llmswitch/bridge/runtime-integrations.js'))
+        .lookupResponsesContinuationByResponseId as jest.Mock;
+    mockLookupResponsesContinuationByResponseId.mockResolvedValueOnce({
+      responseId: 'resp_prev_http_direct_1',
+      providerKey: 'dibittai.crsa.gpt-5.4',
+      continuationOwner: 'direct',
+      entryKind: 'responses',
+      requestId: 'req_prev_http_direct_1',
+    });
+
+    const pipelineExecute = jest.fn(async (input: any) => ({
+      providerPayload: {
+        model: 'gpt-5.4',
+        previous_response_id: input?.payload?.previous_response_id ?? null,
+        input: input?.payload?.input ?? [],
+      },
+      standardizedRequest: {
+        model: 'gpt-5.4',
+        previous_response_id: input?.payload?.previous_response_id ?? null,
+        input: input?.payload?.input ?? [],
+      },
+      processedRequest: {
+        model: 'gpt-5.4',
+        previous_response_id: input?.payload?.previous_response_id ?? null,
+        input: input?.payload?.input ?? [],
+      },
+      target: {
+        providerKey: 'dibittai.crsa.gpt-5.4',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:openai:responses',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {
+        capturedChatRequest: {
+          model: 'gpt-5.4',
+          input: input?.payload?.input ?? [],
+        }
+      }
+    }));
+
+    const processIncoming = jest.fn(async (_payload: Record<string, unknown>) => ({
+      status: 200,
+      data: {
+        id: 'resp_prev_http_direct_1_next',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'plain previous_response_id direct continuation' }]
+          }
+        ]
+      }
+    }));
+
+    const handle = createProviderHandle({
+      runtimeKey: 'runtime:openai:responses',
+      providerKey: 'dibittai.crsa.gpt-5.4',
+      providerType: 'openai',
+      providerProtocol: 'openai-responses',
+      processIncoming
+    });
+
+    const executor = createRequestExecutor({
+      runtimeManager: createSingleHandleRuntimeManager(handle),
+      getHubPipeline: () => ({
+        execute: pipelineExecute,
+        updateVirtualRouterConfig: jest.fn(),
+        dispose: jest.fn()
+      } as any),
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => ({ success: true }))
+        }
+      } as any),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(req as any, res as any, {
+        executePipeline: (input) => executor.execute(input as any),
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const result = await fetchJson(baseUrl, '/v1/responses', {
+        model: 'gpt-5.4',
+        stream: false,
+        previous_response_id: 'resp_prev_http_direct_1',
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续 direct continuation' }]
+          }
+        ]
+      });
+
+      expect(result.status).toBe(200);
+      expect(pipelineExecute).toHaveBeenCalledTimes(1);
+      expect(mockLookupResponsesContinuationByResponseId).toHaveBeenCalledWith(
+        'resp_prev_http_direct_1',
+        expect.objectContaining({ entryKind: 'responses' }),
+      );
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(readResponsesResume(pipelineInput.metadata)).toMatchObject({
+        responseId: 'resp_prev_http_direct_1',
+        continuationOwner: 'direct',
+        providerKey: 'dibittai.crsa.gpt-5.4',
+        restored: false,
+      });
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('RED: plain /v1/responses previous_response_id with relay owner must materialize local full input and skip direct remote continuation', async () => {
+    const mockLookupResponsesContinuationByResponseId =
+      (await import('../../../src/modules/llmswitch/bridge/runtime-integrations.js'))
+        .lookupResponsesContinuationByResponseId as jest.Mock;
+    mockLookupResponsesContinuationByResponseId.mockResolvedValueOnce({
+      responseId: 'resp_prev_http_relay_1',
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+      requestId: 'req_prev_http_relay_1',
+    });
+    mockMaterializeLatestResponsesContinuationByScope.mockResolvedValueOnce({
+      payload: {
+        model: 'gpt-5.5',
+        input: [
+          {
+            type: 'function_call',
+            id: 'fc_prev_http_relay_1',
+            call_id: 'call_prev_http_relay_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+          },
+          {
+            type: 'function_call_output',
+            id: 'fc_prev_http_relay_1',
+            call_id: 'call_prev_http_relay_1',
+            output: '/tmp',
+          },
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续 relay continuation' }],
+          },
+        ],
+        tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object' } }],
+      },
+      meta: {
+        restoredFromResponseId: 'resp_prev_http_relay_1',
+        previousRequestId: 'req_prev_http_relay_1',
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        continuationOwner: 'relay',
+        materialized: true,
+        materializedMode: 'local_full_input',
+      }
+    });
+
+    const pipelineExecute = jest.fn(async (input: any) => {
+      const firstInput = input?.payload?.input?.[0];
+      if (firstInput?.type === 'function_call_output') {
+        throw new Error('orphan_tool_result: first item must not start with output-only replay');
+      }
+      return {
+        providerPayload: {
+          model: 'gpt-5.5',
+          input: input?.payload?.input ?? [],
+        },
+        standardizedRequest: {
+          model: 'gpt-5.5',
+          input: input?.payload?.input ?? [],
+        },
+        processedRequest: {
+          model: 'gpt-5.5',
+          input: input?.payload?.input ?? [],
+        },
+        target: {
+          providerKey: 'minimonth.key1.MiniMax-M2.7',
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'runtime:openai:responses',
+          processMode: 'standard'
+        },
+        processMode: 'standard',
+        metadata: {
+          capturedChatRequest: {
+            model: 'gpt-5.5',
+            input: input?.payload?.input ?? [],
+          }
+        }
+      };
+    });
+
+    const processIncoming = jest.fn(async (_payload: Record<string, unknown>) => ({
+      status: 200,
+      data: {
+        id: 'resp_prev_http_relay_1_next',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'plain previous_response_id relay continuation' }]
+          }
+        ]
+      }
+    }));
+
+    const handle = createProviderHandle({
+      runtimeKey: 'runtime:openai:responses',
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      providerType: 'openai',
+      providerProtocol: 'openai-responses',
+      processIncoming
+    });
+
+    const executor = createRequestExecutor({
+      runtimeManager: createSingleHandleRuntimeManager(handle),
+      getHubPipeline: () => ({
+        execute: pipelineExecute,
+        updateVirtualRouterConfig: jest.fn(),
+        dispose: jest.fn()
+      } as any),
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => ({ success: true }))
+        }
+      } as any),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses', (req, res) => {
+      void handleResponses(req as any, res as any, {
+        executePipeline: (input) => executor.execute(input as any),
+        errorHandling: null
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const result = await fetchJson(baseUrl, '/v1/responses', {
+        model: 'gpt-5.5',
+        stream: false,
+        previous_response_id: 'resp_prev_http_relay_1',
+        input: [
+          {
+            type: 'function_call_output',
+            call_id: 'call_prev_http_relay_1',
+            output: '/tmp',
+          },
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续 relay continuation' }],
+          }
+        ]
+      });
+
+      expect(result.status).toBe(200);
+      expect(mockLookupResponsesContinuationByResponseId).toHaveBeenCalledWith(
+        'resp_prev_http_relay_1',
+        expect.objectContaining({ entryKind: 'responses' }),
+      );
+      expect(mockMaterializeLatestResponsesContinuationByScope).toHaveBeenCalledTimes(1);
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(pipelineInput.payload?.previous_response_id).toBeUndefined();
+      expect(pipelineInput.payload?.input).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'function_call', call_id: 'call_prev_http_relay_1' }),
+          expect.objectContaining({ type: 'function_call_output', call_id: 'call_prev_http_relay_1', output: '/tmp' }),
+          expect.objectContaining({ role: 'user' }),
+        ]),
+      );
+      expect(readResponsesResume(pipelineInput.metadata)).toMatchObject({
+        restoredFromResponseId: 'resp_prev_http_relay_1',
+        continuationOwner: 'relay',
+        materialized: true,
+        materializedMode: 'local_full_input',
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+      });
     } finally {
       await closeServer(server);
     }
@@ -1181,14 +1497,19 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.endpoint).toBe('/v1/responses');
       expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
       expect(readStreamIntent(pipelineInput.metadata)).toBe('non_stream');
+      expect(readRequestTruth(pipelineInput.metadata)).toEqual({});
       expect(pipelineInput.metadata?.inboundStream).toBeUndefined();
       expect(readResponsesResume(pipelineInput.metadata)).toEqual({
         previousRequestId: 'req_chain_submit_1',
         restoredFromResponseId: 'resp_submit_prev_1',
         routeHint: 'thinking'
       });
+      expect(readRuntimeControl(pipelineInput.metadata)).toMatchObject({
+        streamIntent: 'non_stream',
+        routeHint: 'thinking'
+      });
       expect(pipelineInput.metadata?.entryEndpoint).toBe('/v1/responses');
-      expect(pipelineInput.metadata?.routeHint).toBeUndefined();
+      expect(pipelineInput.metadata?.routeHint).toBe('thinking');
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_1');
       expect(pipelineInput.payload?.tool_outputs).toEqual([{ tool_call_id: 'call_submit_1', output: 'ok' }]);
       expect(readResponsesRequestContext(pipelineInput.metadata)?.payload).toMatchObject({
@@ -1201,6 +1522,148 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 submit_tool_outputs 整链验证' }]
       }));
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('preserves resumed relay session scope and provider pin through request executor before hub pipeline', async () => {
+    mockResumeResponsesConversation.mockResolvedValue({
+      payload: {
+        model: 'gpt-5.5',
+        previous_response_id: 'resp_submit_truth_1',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行 submit truth 整链验证' }] }],
+        tool_outputs: [{ tool_call_id: 'call_submit_truth_1', output: 'ok' }]
+      },
+      meta: {
+        previousRequestId: 'req_chain_submit_truth_1',
+        restoredFromResponseId: 'resp_submit_truth_1',
+        routeHint: 'search/gateway-priority-5555-priority-search',
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        sessionId: 'sess-submit-truth-1',
+        conversationId: 'conv-submit-truth-1',
+        continuationOwner: 'relay'
+      }
+    });
+
+    const pipelineExecute = jest.fn(async (_input: any) => ({
+      providerPayload: {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: '继续执行 submit truth 整链验证' }]
+      },
+      standardizedRequest: {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: '继续执行 submit truth 整链验证' }]
+      },
+      processedRequest: {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: '继续执行 submit truth 整链验证' }]
+      },
+      target: {
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:openai:responses',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {
+        capturedChatRequest: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: '继续执行 submit truth 整链验证' }]
+        }
+      }
+    }));
+
+    const processIncoming = jest.fn(async (payload: Record<string, unknown>) => ({
+      status: 200,
+      data: {
+        id: 'msg_http_submit_truth_1',
+        type: 'message',
+        role: 'assistant',
+        model: 'gpt-5.5',
+        content: [{ type: 'text', text: `submit truth 响应: ${JSON.stringify(payload)}` }],
+        stop_reason: 'end_turn'
+      }
+    }));
+
+    const handle = createProviderHandle({
+      runtimeKey: 'runtime:openai:responses',
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      providerType: 'openai',
+      providerProtocol: 'openai-responses',
+      processIncoming
+    });
+
+    const executor = createRequestExecutor({
+      runtimeManager: createSingleHandleRuntimeManager(handle),
+      getHubPipeline: () => ({
+        execute: pipelineExecute,
+        updateVirtualRouterConfig: jest.fn(),
+        dispose: jest.fn()
+      } as any),
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => ({ success: true }))
+        }
+      } as any),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    });
+
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    app.post('/v1/responses/:id/submit_tool_outputs', (req, res) => {
+      void handleResponses(
+        req as any,
+        res as any,
+        {
+          executePipeline: (input: any) => executor.execute(input),
+          errorHandling: null
+        },
+        {
+          entryEndpoint: '/v1/responses.submit_tool_outputs',
+          responseIdFromPath: (req as any).params.id
+        }
+      );
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+
+    try {
+      const result = await fetchJson(baseUrl, '/v1/responses/resp_submit_truth_1/submit_tool_outputs', {
+        stream: false,
+        tool_outputs: [{ tool_call_id: 'call_submit_truth_1', output: 'ok' }]
+      });
+
+      expect(result.status).toBe(200);
+      expect(result.payload).toMatchObject({
+        object: 'response',
+        previous_response_id: 'resp_submit_truth_1',
+        status: 'completed'
+      });
+
+      expect(pipelineExecute).toHaveBeenCalledTimes(1);
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(pipelineInput.endpoint).toBe('/v1/responses');
+      expect(readRequestTruth(pipelineInput.metadata)).toMatchObject({
+        sessionId: 'sess-submit-truth-1',
+        conversationId: 'conv-submit-truth-1'
+      });
+      expect(readResponsesResume(pipelineInput.metadata)).toMatchObject({
+        previousRequestId: 'req_chain_submit_truth_1',
+        restoredFromResponseId: 'resp_submit_truth_1',
+        routeHint: 'search/gateway-priority-5555-priority-search',
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        sessionId: 'sess-submit-truth-1',
+        conversationId: 'conv-submit-truth-1',
+        continuationOwner: 'relay'
+      });
+      expect(readRuntimeControl(pipelineInput.metadata)).toMatchObject({
+        streamIntent: 'non_stream',
+        routeHint: 'search/gateway-priority-5555-priority-search'
+      });
+      expect(readRuntimeControl(pipelineInput.metadata).retryProviderKey).toBeUndefined();
     } finally {
       await closeServer(server);
     }

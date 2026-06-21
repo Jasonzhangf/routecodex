@@ -180,6 +180,42 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     ...(args.resumeMeta ? { responsesResume: args.resumeMeta } : {}),
   };
   const center = MetadataCenter.attach(metadata);
+  const resumeSessionId =
+    typeof args.resumeMeta?.sessionId === 'string' && args.resumeMeta.sessionId.trim()
+      ? args.resumeMeta.sessionId.trim()
+      : typeof args.requestContext.sessionId === 'string' && args.requestContext.sessionId.trim()
+        ? args.requestContext.sessionId.trim()
+        : undefined;
+  const resumeConversationId =
+    typeof args.resumeMeta?.conversationId === 'string' && args.resumeMeta.conversationId.trim()
+      ? args.resumeMeta.conversationId.trim()
+      : typeof args.requestContext.conversationId === 'string' && args.requestContext.conversationId.trim()
+        ? args.requestContext.conversationId.trim()
+        : undefined;
+  if (resumeSessionId) {
+    center.writeRequestTruth(
+      'sessionId',
+      resumeSessionId,
+      {
+        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+        symbol: 'buildResponsesPipelineMetadataForHttp',
+        stage: 'MetaReq02RequestTruthBound'
+      },
+      'responses relay resumed session scope'
+    );
+  }
+  if (resumeConversationId) {
+    center.writeRequestTruth(
+      'conversationId',
+      resumeConversationId,
+      {
+        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+        symbol: 'buildResponsesPipelineMetadataForHttp',
+        stage: 'MetaReq02RequestTruthBound'
+      },
+      'responses relay resumed conversation scope'
+    );
+  }
   center.writeContinuationContext(
     'responsesRequestContext',
     args.requestContext,
@@ -210,6 +246,38 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     'responses handler client abort state'
   );
   if (args.resumeMeta) {
+    if (typeof args.resumeMeta.routeHint === 'string' && args.resumeMeta.routeHint.trim()) {
+      center.writeRuntimeControl(
+        'routeHint',
+        args.resumeMeta.routeHint.trim(),
+        {
+          module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+          symbol: 'buildResponsesPipelineMetadataForHttp',
+          stage: 'MetaReq04RuntimeControlBound'
+        },
+        'responses relay resumed route hint'
+      );
+    }
+    const continuationOwner =
+      typeof args.resumeMeta.continuationOwner === 'string'
+        ? args.resumeMeta.continuationOwner.trim()
+        : undefined;
+    if (
+      continuationOwner !== 'relay'
+      && typeof args.resumeMeta.providerKey === 'string'
+      && args.resumeMeta.providerKey.trim()
+    ) {
+      center.writeRuntimeControl(
+        'retryProviderKey',
+        args.resumeMeta.providerKey.trim(),
+        {
+          module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+          symbol: 'buildResponsesPipelineMetadataForHttp',
+          stage: 'MetaReq04RuntimeControlBound'
+        },
+        'responses relay resumed provider pin'
+      );
+    }
     center.writeContinuationContext(
       'responsesResume',
       args.resumeMeta,
@@ -481,6 +549,18 @@ export function shouldProjectResponsesResumeClientErrorForHttp(args: {
   return typeof args.origin === 'string' && args.origin.trim() === 'client';
 }
 
+function isProviderOwnedSubmitToolOutputsResumePayload(payload: AnyRecord): boolean {
+  const responseId =
+    typeof payload.response_id === 'string' && payload.response_id.trim()
+      ? payload.response_id.trim()
+      : undefined;
+  const toolOutputs = Array.isArray(payload.tool_outputs) ? payload.tool_outputs : [];
+  const hasChatHistory =
+    (Array.isArray(payload.input) && payload.input.length > 0)
+    || (Array.isArray(payload.messages) && payload.messages.length > 0);
+  return Boolean(responseId && toolOutputs.length > 0 && !hasChatHistory);
+}
+
 export async function buildResponsesRequestContextForHttp(args: {
   payload: AnyRecord;
   requestId?: string;
@@ -492,12 +572,24 @@ export async function buildResponsesRequestContextForHttp(args: {
     args.payload.metadata && typeof args.payload.metadata === 'object' && !Array.isArray(args.payload.metadata)
       ? (args.payload.metadata as Record<string, unknown>)
       : undefined;
+  const payloadForPersistence = stripRequestBodyMetadataForPipelineForHttp(args.payload);
+  if (isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)) {
+    return {
+      payload: payloadForPersistence,
+      context: {
+        input: [],
+      },
+      sessionId: readResponsesSessionIdFromHttp(args.metadata),
+      conversationId: readResponsesConversationIdFromHttp(args.metadata),
+      ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
+      ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
+    };
+  }
   const captured = await captureReqInboundResponsesContextSnapshot({
     rawRequest: args.payload,
     requestId: args.requestId,
     toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
   });
-  const payloadForPersistence = stripRequestBodyMetadataForPipelineForHttp(args.payload);
   const capturedInput = Array.isArray(captured.input) ? captured.input : [];
   const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : undefined;
   return {
@@ -583,6 +675,50 @@ export async function prepareResponsesHandlerEntryForHttp(
       isSubmitToolOutputs,
       resumeMeta: resumeResult.meta,
     };
+  }
+
+  const previousResponseId =
+    typeof payload.previous_response_id === 'string' && payload.previous_response_id.trim()
+      ? payload.previous_response_id.trim()
+      : undefined;
+  if (args.entryEndpoint === '/v1/responses' && previousResponseId) {
+    const continuation = await lookupResponsesContinuationByResponseId(previousResponseId, {
+      entryKind: 'responses',
+      matchedPort: args.matchedPort,
+      routingPolicyGroup: args.routingPolicyGroup,
+    });
+    if (continuation?.continuationOwner === 'relay' && plannedEntry.mode === 'scope_materialize') {
+      const materialized = await materializeLatestResponsesContinuationByScope({
+        payload,
+        requestId: args.requestId,
+        sessionId: args.sessionId,
+        conversationId: args.conversationId,
+        entryKind: 'responses',
+        continuationOwner: 'relay',
+        matchedPort: args.matchedPort,
+        routingPolicyGroup: args.routingPolicyGroup,
+      });
+      if (!materialized) {
+        return { kind: 'scope_continuation_expired' };
+      }
+      return {
+        kind: 'ok',
+        payload: (materialized.payload ?? {}) as AnyRecord,
+        pipelineEntryEndpoint,
+        plannedEntryMode: plannedEntry.mode,
+        isSubmitToolOutputs,
+        resumeMeta: materialized.meta,
+      };
+    }
+    if (continuation?.continuationOwner === 'direct' || continuation?.continuationOwner === 'relay') {
+      resumeMeta = {
+        responseId: previousResponseId,
+        restored: false,
+        continuationOwner: continuation.continuationOwner,
+        ...(continuation.providerKey ? { providerKey: continuation.providerKey } : {}),
+        ...(continuation.requestId ? { previousRequestId: continuation.requestId } : {}),
+      };
+    }
   }
 
   if (plannedEntry.mode === 'scope_materialize') {

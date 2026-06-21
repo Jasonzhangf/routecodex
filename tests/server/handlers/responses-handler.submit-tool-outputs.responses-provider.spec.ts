@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockResumeResponsesConversation = jest.fn();
 const mockLookupResponsesContinuationByResponseId = jest.fn();
@@ -407,6 +408,8 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
         restoredFromResponseId: 'resp_submit_same_provider_pin_1',
         routeHint: 'thinking',
         providerKey: 'dibittai.crsa.gpt-5.4',
+        sessionId: 'sess-submit-same-provider-pin-1',
+        conversationId: 'conv-submit-same-provider-pin-1',
       },
     });
 
@@ -483,5 +486,121 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     );
     const pipelineInput = executePipeline.mock.calls[0]?.[0];
     expect(pipelineInput.metadata?.responsesResume?.routeHint).toBe('thinking');
+    expect(pipelineInput.metadata?.responsesResume?.sessionId).toBe('sess-submit-same-provider-pin-1');
+    expect(pipelineInput.metadata?.responsesResume?.conversationId).toBe('conv-submit-same-provider-pin-1');
+  });
+
+  it('binds resumed relay request truth and runtime pin into MetadataCenter before executePipeline', async () => {
+    const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
+
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue({
+      responseId: 'resp_submit_metadata_center_1',
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+    });
+    mockResumeResponsesConversation.mockResolvedValue({
+      payload: {
+        model: 'gpt-5.5',
+        previous_response_id: 'resp_submit_metadata_center_1',
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续执行 submit_tool_outputs metadata center 续轮' }],
+          },
+          {
+            type: 'function_call',
+            id: 'fc_submit_metadata_center_1',
+            call_id: 'call_submit_metadata_center_1',
+            name: 'reasoning.stop',
+            arguments: '{"reason":"第一轮故意缺 schema","stopreason":2}',
+          },
+          {
+            type: 'function_call_output',
+            id: 'fc_submit_metadata_center_1',
+            call_id: 'call_submit_metadata_center_1',
+            output: '{"ok":true}',
+          },
+        ],
+      },
+      meta: {
+        restoredFromResponseId: 'resp_submit_metadata_center_1',
+        routeHint: 'search/gateway-priority-5555-priority-search',
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        sessionId: 'sess-submit-metadata-center-1',
+        conversationId: 'conv-submit-metadata-center-1',
+        continuationOwner: 'relay',
+      },
+    });
+
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: {
+        id: 'resp_after_submit_metadata_center_1',
+        object: 'response',
+        status: 'completed',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }],
+      },
+    }));
+
+    const req = {
+      method: 'POST',
+      body: {
+        tool_outputs: [{ call_id: 'call_submit_metadata_center_1', output: 'ok' }],
+      },
+      headers: {},
+      query: {},
+      path: '/v1/responses/resp_submit_metadata_center_1/submit_tool_outputs',
+      originalUrl: '/v1/responses/resp_submit_metadata_center_1/submit_tool_outputs',
+      params: { id: 'resp_submit_metadata_center_1' },
+      socket: { localPort: 5555 },
+      on: jest.fn(),
+      once: jest.fn(),
+      off: jest.fn(),
+      removeListener: jest.fn(),
+    } as any;
+
+    const res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn().mockReturnThis(),
+      setHeader: jest.fn(),
+      writeHead: jest.fn(),
+      write: jest.fn(),
+      end: jest.fn(),
+      headersSent: false,
+      on: jest.fn(),
+      once: jest.fn(),
+    } as any;
+
+    await handleResponses(
+      req,
+      res,
+      {
+        executePipeline,
+        errorHandling: null,
+      },
+      {
+        entryEndpoint: '/v1/responses.submit_tool_outputs',
+        responseIdFromPath: 'resp_submit_metadata_center_1',
+      },
+    );
+
+    const pipelineInput = executePipeline.mock.calls[0]?.[0];
+    const center = MetadataCenter.read(pipelineInput.metadata);
+    expect(center?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-submit-metadata-center-1',
+      conversationId: 'conv-submit-metadata-center-1'
+    });
+    expect(center?.readContinuationContext().responsesResume).toMatchObject({
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      routeHint: 'search/gateway-priority-5555-priority-search',
+      sessionId: 'sess-submit-metadata-center-1',
+      conversationId: 'conv-submit-metadata-center-1',
+      continuationOwner: 'relay'
+    });
+    expect(center?.readRuntimeControl()).toMatchObject({
+      routeHint: 'search/gateway-priority-5555-priority-search'
+    });
+    expect(center?.readRuntimeControl().retryProviderKey).toBeUndefined();
   });
 });

@@ -48,6 +48,7 @@ export function prepareRequestExecutorAttemptState(args: {
     args.attempt,
     args.excludedProviderKeys
   );
+  const metadataCenter = MetadataCenter.attach(metadataForAttempt);
   const clientAbortSignal = resolveClientAbortSignalFromCarrier(metadataForAttempt);
   args.throwIfClientAbortSignalAborted(clientAbortSignal);
 
@@ -57,10 +58,27 @@ export function prepareRequestExecutorAttemptState(args: {
   if (Object.prototype.hasOwnProperty.call(metadataForAttempt, '__routecodexRetryProviderKey')) {
     delete metadataForAttempt.__routecodexRetryProviderKey;
   }
-  if (args.retryProviderKey) {
-    MetadataCenter.attach(metadataForAttempt).writeRuntimeControl(
+  const responsesResume =
+    metadataCenter.readContinuationContext().responsesResume
+    && typeof metadataCenter.readContinuationContext().responsesResume === 'object'
+    && !Array.isArray(metadataCenter.readContinuationContext().responsesResume)
+      ? (metadataCenter.readContinuationContext().responsesResume as Record<string, unknown>)
+      : undefined;
+  const resumeContinuationOwner =
+    typeof responsesResume?.continuationOwner === 'string'
+      ? responsesResume.continuationOwner.trim()
+      : undefined;
+  const resumeRetryProviderKey =
+    resumeContinuationOwner === 'relay'
+      ? undefined
+      : typeof responsesResume?.providerKey === 'string' && responsesResume.providerKey.trim()
+        ? responsesResume.providerKey.trim()
+        : undefined;
+  const effectiveRetryProviderKey = args.retryProviderKey?.trim() || resumeRetryProviderKey;
+  if (effectiveRetryProviderKey) {
+    metadataCenter.writeRuntimeControl(
       'retryProviderKey',
-      args.retryProviderKey,
+      effectiveRetryProviderKey,
       ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
       'request executor retry provider pin'
     );

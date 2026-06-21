@@ -85,7 +85,7 @@ describe('HubPipeline preselected route ownership', () => {
     expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
       request: expect.objectContaining({
         metadata: expect.objectContaining({
-          __rt: expect.objectContaining({
+          runtime_control: expect.objectContaining({
             preselectedRoute,
           }),
         }),
@@ -107,7 +107,7 @@ describe('HubPipeline preselected route ownership', () => {
     expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
       request: expect.objectContaining({
         metadata: expect.objectContaining({
-          __rt: expect.objectContaining({
+          runtime_control: expect.objectContaining({
             preselectedRoute,
           }),
         }),
@@ -154,7 +154,7 @@ describe('HubPipeline preselected route ownership', () => {
         metadata: expect.objectContaining({
           stopMessageEnabled: true,
           routecodexPortStopMessageEnabled: true,
-          __rt: expect.objectContaining({
+          runtime_control: expect.objectContaining({
             preselectedRoute,
             stopMessageEnabled: true,
           }),
@@ -211,13 +211,13 @@ describe('HubPipeline preselected route ownership', () => {
     expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
       request: expect.objectContaining({
         metadata: expect.objectContaining({
-          __rt: expect.objectContaining({
+          runtime_control: expect.objectContaining({
             preselectedRoute,
           }),
         }),
       }),
     }));
-    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.__rt?.preselectedRoute?.target?.providerKey)
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.preselectedRoute?.target?.providerKey)
       .toBe('preselected.key1.gpt-5.5');
   });
 
@@ -275,7 +275,8 @@ describe('HubPipeline preselected route ownership', () => {
             repeatCount: 2,
             maxRepeats: 3,
           }),
-          __rt: expect.objectContaining({
+          runtime_control: expect.objectContaining({
+            preselectedRoute,
             stopless: expect.objectContaining({
               sessionId: 'sess-stopless-1',
               flowId: 'stop_message_flow',
@@ -285,6 +286,199 @@ describe('HubPipeline preselected route ownership', () => {
           }),
         }),
       }),
+    }));
+  });
+
+  it('projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata', async () => {
+    const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+          __metadataCenter: {
+            version: 1,
+            requestTruth: {
+              sessionId: {
+                value: 'sess-resume-1',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
+                  stage: 'test'
+                }
+              },
+              conversationId: {
+                value: 'conv-resume-1',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
+                  stage: 'test'
+                }
+              }
+            },
+            continuationContext: {
+              responsesResume: {
+                value: {
+                  responseId: 'resp-resume-1',
+                  routeHint: 'search/gateway-priority-5555-priority-search',
+                  providerKey: 'minimonth.key1.MiniMax-M2.7',
+                  sessionId: 'sess-resume-1',
+                  conversationId: 'conv-resume-1',
+                  continuationOwner: 'relay'
+                },
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
+                  stage: 'test'
+                }
+              }
+            },
+            providerObservation: {},
+            runtimeControl: {
+              routeHint: {
+                value: 'search/gateway-priority-5555-priority-search',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
+                  stage: 'test'
+                }
+              }
+            }
+          },
+          __rt: {
+            preselectedRoute,
+          },
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        metadata: expect.objectContaining({
+          sessionId: 'sess-resume-1',
+          conversationId: 'conv-resume-1',
+          routeHint: 'search/gateway-priority-5555-priority-search',
+          responsesResume: expect.objectContaining({
+            responseId: 'resp-resume-1',
+            providerKey: 'minimonth.key1.MiniMax-M2.7',
+            routeHint: 'search/gateway-priority-5555-priority-search',
+            sessionId: 'sess-resume-1',
+            conversationId: 'conv-resume-1',
+            continuationOwner: 'relay'
+          }),
+          runtime_control: expect.objectContaining({
+            routeHint: 'search/gateway-priority-5555-priority-search',
+            preselectedRoute,
+          }),
+        }),
+      }),
+    }));
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.retryProviderKey)
+      .toBeUndefined();
+  });
+
+  it('hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata', async () => {
+    const routedMetadataSnapshots: Record<string, unknown>[] = [];
+    const routerEngine = {
+      route: jest.fn((_payload: unknown, metadata: unknown) => {
+        if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+          routedMetadataSnapshots.push({ ...(metadata as Record<string, unknown>) });
+        }
+        return preselectedRoute;
+      })
+    };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+          __metadataCenter: {
+            version: 1,
+            requestTruth: {
+              sessionId: {
+                value: 'sess-route-1',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
+                  stage: 'test'
+                }
+              },
+              conversationId: {
+                value: 'conv-route-1',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
+                  stage: 'test'
+                }
+              }
+            },
+            continuationContext: {
+              responsesResume: {
+                value: {
+                  responseId: 'resp-route-1',
+                  routeHint: 'search/gateway-priority-5555-priority-search',
+                  providerKey: 'minimonth.key1.MiniMax-M2.7',
+                  sessionId: 'sess-route-1',
+                  conversationId: 'conv-route-1',
+                  continuationOwner: 'relay'
+                },
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
+                  stage: 'test'
+                }
+              }
+            },
+            providerObservation: {},
+            runtimeControl: {
+              routeHint: {
+                value: 'search/gateway-priority-5555-priority-search',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
+                  stage: 'test'
+                }
+              },
+              retryProviderKey: {
+                value: 'minimonth.key1.MiniMax-M2.7',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
+                  stage: 'test'
+                }
+              }
+            }
+          },
+          __rt: {},
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(routerEngine.route).toHaveBeenCalledTimes(1);
+    expect(routedMetadataSnapshots[0]).toEqual(expect.objectContaining({
+      sessionId: 'sess-route-1',
+      conversationId: 'conv-route-1',
+      routeHint: 'search/gateway-priority-5555-priority-search',
+      responsesResume: expect.objectContaining({
+        responseId: 'resp-route-1',
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        sessionId: 'sess-route-1',
+        conversationId: 'conv-route-1',
+        continuationOwner: 'relay'
+      })
     }));
   });
 });

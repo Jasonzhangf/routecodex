@@ -239,6 +239,13 @@ fn test_invalid_protocol_error() {
 }
 
 #[test]
+fn test_empty_provider_protocol_fails_fast() {
+    let result = resolve_provider_protocol("   ");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("requires providerProtocol"));
+}
+
+#[test]
 fn test_resolve_hub_client_protocol() {
     assert_eq!(
         resolve_hub_client_protocol("/v1/responses"),
@@ -290,12 +297,12 @@ fn test_extract_model_hint_from_metadata_ignores_blank_values() {
 }
 
 #[test]
-fn test_resolve_sse_protocol_prefers_explicit_metadata() {
+fn test_resolve_sse_protocol_ignores_metadata_protocol_override() {
     let metadata = json!({
         "sseProtocol": "anthropic"
     });
     let output = resolve_sse_protocol(&metadata, "openai-responses");
-    assert_eq!(output, "anthropic-messages");
+    assert_eq!(output, "openai-responses");
 }
 
 #[test]
@@ -640,6 +647,147 @@ fn test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_decl
 }
 
 #[test]
+fn test_execute_hub_pipeline_live_slice_keeps_public_catalog_tool_result_before_stopless_followup() {
+    let input_json = json!({
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "minimax.key1.MiniMax-M2.7",
+                    "providerType": "anthropic",
+                    "outboundProfile": "anthropic-messages",
+                    "runtimeKey": "minimax.key1",
+                    "compatibilityProfile": "anthropic:claude-code"
+                },
+                "routeName": "search/gateway-priority-5555-priority-search"
+            }
+        },
+        "request": {
+            "requestId": "req_live_minimax_2013_full_pipeline",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "stream": true,
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound",
+            "payload": {
+                "model": "gpt-5.4",
+                "previous_response_id": "resp_live_minimax_2013",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Nginx 18080 proxies only `/api/` and `/admin-storage/`. `/health` is not proxied, hence 404. That's fine. The deploy health check uses port 19190. The external curl to 19190 failed because it's bound to localhost only. That's expected. The public access is via nginx at 18080, but `/health` isn't proxied.\n\nLet me verify the public API via 18080:"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"curl -s http://159.75.134.56:18080/api/catalog/products 2>&1 | head -3\",\"justification\":\"Verify public API via nginx after deployment\",\"login\":false,\"max_output_tokens\":10000,\"prefix_rule\":[\"curl\"],\"sandbox_permissions\":\"use_default\",\"shell\":\"zsh\",\"tty\":false,\"workdir\":\"/Volumes/extension/code/OneStop\",\"yield_time_ms\":10000}",
+                        "call_id": "call_FsQloAYsPGPhG38vIczxbsIL"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_FsQloAYsPGPhG38vIczxbsIL",
+                        "output": "Chunk ID: 2c17eb\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 17\nOutput:\n{\"owner\":\"backend\",\"source\":\"db\",\"type\":\"all\",\"items\":[],\"count\":0}\n"
+                    },
+                    {
+                        "type": "reasoning",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": "**Thinking** 部署成功！Public API 响应正常。现在 push data 让远端有种子数据："
+                            }
+                        ],
+                        "content": null,
+                        "encrypted_content": null
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"maxRepeats\\\":3,\\\"repeatCount\\\":1,\\\"schemaFeedback\\\":{\\\"missingFields\\\":[\\\"stopreason\\\",\\\"reason\\\",\\\"has_evidence\\\",\\\"evidence\\\",\\\"issue_cause\\\",\\\"excluded_factors\\\",\\\"diagnostic_order\\\",\\\"done_steps\\\",\\\"next_step\\\",\\\"next_suggested_path\\\",\\\"needs_user_input\\\",\\\"learned\\\"],\\\"reasonCode\\\":\\\"stop_schema_missing\\\"},\\\"triggerHint\\\":\\\"no_schema\\\"}' --session-id '019eab9e-0f13-75d1-98f9-a55c738f1ac0' --request-id 'openai-responses-minimax.key1-MiniMax-M3-20260619T172042043-371246-2005' --repeat-count '1' --max-repeats '3'\"}",
+                        "call_id": "call_servertool_cli_d43015a8d61d4ebe8ee96efd993abbde"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_servertool_cli_d43015a8d61d4ebe8ee96efd993abbde",
+                        "output": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\"}"
+                    },
+                    {
+                        "type": "reasoning",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": "**Thinking** Public API works! 0 products because nothing is listed yet. Let me push local data:"
+                            }
+                        ],
+                        "content": null,
+                        "encrypted_content": null
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            },
+            "metadata": {
+                "stream": true,
+                "providerProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }
+        }
+    })
+    .to_string();
+
+    let result = execute_hub_pipeline_json(input_json).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(output["success"], json!(true));
+    let messages = output["payload"]["messages"]
+        .as_array()
+        .expect("provider messages");
+    let tool_use_index = messages
+        .iter()
+        .position(|message| {
+            message["role"] == json!("assistant")
+                && message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            && part["id"].as_str() == Some("call_FsQloAYsPGPhG38vIczxbsIL")
+                    })
+                })
+        })
+        .expect("public catalog tool_use exists");
+    let result_message = messages
+        .get(tool_use_index + 1)
+        .expect("tool_result must immediately follow public catalog tool_use");
+    assert_eq!(
+        result_message["role"],
+        json!("user"),
+        "live pipeline must keep tool_result turn adjacent before later stopless reasoning/tool calls"
+    );
+    assert_eq!(result_message["content"][0]["type"], json!("tool_result"));
+    assert_eq!(
+        result_message["content"][0]["tool_use_id"],
+        json!("call_FsQloAYsPGPhG38vIczxbsIL")
+    );
+    assert!(
+        result_message["content"][0]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("\"owner\":\"backend\""),
+        "live pipeline must not replace public catalog tool result with placeholder text"
+    );
+}
+
+#[test]
 fn test_resolve_stop_message_router_metadata_prefers_client_tmux_and_sets_aliases() {
     let metadata = json!({
         "runtime_control": {
@@ -879,6 +1027,95 @@ fn test_build_router_metadata_input_prefers_runtime_control_retry_provider_key()
     assert_eq!(
         row.get("retryProviderKey").and_then(|v| v.as_str()),
         Some("runtime.provider.gpt-5.5")
+    );
+}
+
+#[test]
+fn test_build_router_metadata_input_uses_responses_resume_provider_key_as_retry_pin() {
+    let input = json!({
+        "requestId": "req-responses-resume-retry-pin",
+        "responsesResume": {
+            "providerKey": " XLC.key1.glm-5.2 ",
+            "restoredFromResponseId": "resp_prev_1",
+            "previousRequestId": "req_prev_1"
+        },
+        "metadata": {}
+    });
+    let output = build_router_metadata_input(&input).expect("router metadata input");
+    let row = output.as_object().expect("output object");
+    assert_eq!(
+        row.get("retryProviderKey").and_then(|v| v.as_str()),
+        Some("XLC.key1.glm-5.2")
+    );
+}
+
+#[test]
+fn test_build_router_metadata_input_uses_metadata_responses_resume_for_route_scope_and_retry_pin() {
+    let input = json!({
+        "requestId": "req-responses-resume-metadata-route-scope",
+        "metadata": {
+            "responsesResume": {
+                "providerKey": " minimonth.key1.MiniMax-M2.7 ",
+                "routeHint": " search ",
+                "sessionId": " stopless-live-123 ",
+                "conversationId": " stopless-live-123 "
+            }
+        }
+    });
+    let output = build_router_metadata_input(&input).expect("router metadata input");
+    let row = output.as_object().expect("output object");
+    assert_eq!(
+        row.get("retryProviderKey").and_then(|v| v.as_str()),
+        Some("minimonth.key1.MiniMax-M2.7")
+    );
+    assert_eq!(row.get("routeHint").and_then(|v| v.as_str()), Some("search"));
+    assert_eq!(
+        row.get("sessionId").and_then(|v| v.as_str()),
+        Some("stopless-live-123")
+    );
+    assert_eq!(
+        row.get("conversationId").and_then(|v| v.as_str()),
+        Some("stopless-live-123")
+    );
+}
+
+#[test]
+fn test_build_router_metadata_input_keeps_relay_continuation_scope_without_retry_pin() {
+    let input = json!({
+        "requestId": "req-responses-relay-continuation-route-scope",
+        "entryEndpoint": "/v1/responses",
+        "processMode": "chat",
+        "stream": false,
+        "direction": "request",
+        "providerProtocol": "openai-responses",
+        "requestSemantics": {
+            "continuation": {
+                "chainId": "req_prev_1",
+                "continuationOwner": "relay",
+                "routeHint": " search ",
+                "providerKey": " minimonth.key1.MiniMax-M2.7 ",
+                "sessionId": " stopless-live-123 ",
+                "conversationId": " stopless-live-123 ",
+                "resumeFrom": {
+                    "requestId": "req_prev_1",
+                    "responseId": "resp_prev_1",
+                    "protocol": "openai-responses"
+                }
+            }
+        },
+        "metadata": {}
+    });
+    let output = build_router_metadata_input(&input).expect("router metadata input");
+    let row = output.as_object().expect("output object");
+    assert!(row.get("retryProviderKey").is_none());
+    assert_eq!(row.get("routeHint").and_then(|v| v.as_str()), Some("search"));
+    assert_eq!(
+        row.get("sessionId").and_then(|v| v.as_str()),
+        Some("stopless-live-123")
+    );
+    assert_eq!(
+        row.get("conversationId").and_then(|v| v.as_str()),
+        Some("stopless-live-123")
     );
 }
 
@@ -1532,6 +1769,74 @@ fn test_coerce_standardized_request_from_payload_allows_submit_tool_output_with_
             .get("previous_response_id")
             .and_then(|v| v.as_str()),
         Some("resp_prev_1")
+    );
+}
+
+#[test]
+fn test_coerce_standardized_request_from_payload_derives_model_from_retry_provider_pin_for_submit_tool_outputs(
+) {
+    let input = json!({
+        "payload": {
+            "response_id": "resp_prev_1",
+            "tool_outputs": [
+                {
+                    "call_id": "native:run_command:3",
+                    "output": "/Users/fanzhang/Documents/github/routecodex"
+                }
+            ],
+            "parameters": {}
+        },
+        "normalized": {
+            "id": "req-submit-tool-output-pinned-model",
+            "entryEndpoint": "/v1/responses.submit_tool_outputs",
+            "stream": false,
+            "processMode": "chat",
+            "routeHint": "coding",
+            "metadata": {
+                "responsesResume": {
+                    "providerKey": "primary.key1.gpt-test",
+                    "continuationOwner": "direct",
+                    "responseId": "resp_prev_1"
+                },
+                "retryProviderKey": "primary.key1.gpt-test"
+            }
+        }
+    });
+
+    let output = coerce_standardized_request_from_payload(&input)
+        .expect("coerce standardized request output");
+    let row = output.as_object().expect("output object");
+    let standardized = row
+        .get("standardizedRequest")
+        .and_then(|v| v.as_object())
+        .expect("standardizedRequest object");
+    let first_message = standardized
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .and_then(|v| v.first())
+        .and_then(|v| v.as_object())
+        .expect("first message object");
+
+    assert_eq!(
+        standardized.get("model").and_then(|v| v.as_str()),
+        Some("gpt-test")
+    );
+    assert_eq!(
+        first_message.get("role").and_then(|v| v.as_str()),
+        Some("tool")
+    );
+    assert_eq!(
+        first_message.get("tool_call_id").and_then(|v| v.as_str()),
+        Some("native:run_command:3")
+    );
+    assert_eq!(
+        standardized
+            .get("semantics")
+            .and_then(|v| v.as_object())
+            .and_then(|row| row.get("input"))
+            .and_then(|v| v.as_array())
+            .map(|entries| entries.len()),
+        None
     );
 }
 
@@ -2350,6 +2655,43 @@ fn test_lift_responses_resume_into_semantics_injects_when_missing_and_clears_met
             .and_then(|v| v.get("other"))
             .and_then(|v| v.as_bool()),
         Some(true)
+    );
+}
+
+#[test]
+fn test_lift_responses_resume_into_semantics_preserves_resume_scope_fields_from_metadata() {
+    let request = json!({
+        "messages": [],
+        "semantics": {}
+    });
+    let metadata = json!({
+        "routeHint": "search",
+        "responsesResume": {
+            "response_id": "resp_1",
+            "providerKey": " minimonth.key1.MiniMax-M2.7 ",
+            "sessionId": " stopless-live-123 ",
+            "conversationId": " stopless-live-123 "
+        }
+    });
+    let output = lift_responses_resume_into_semantics(&request, &metadata);
+    let resume = output
+        .get("request")
+        .and_then(|v| v.get("semantics"))
+        .and_then(|v| v.get("responses"))
+        .and_then(|v| v.get("resume"))
+        .expect("responses resume");
+    assert_eq!(
+        resume.get("providerKey").and_then(|v| v.as_str()),
+        Some(" minimonth.key1.MiniMax-M2.7 ")
+    );
+    assert_eq!(resume.get("routeHint").and_then(|v| v.as_str()), Some("search"));
+    assert_eq!(
+        resume.get("sessionId").and_then(|v| v.as_str()),
+        Some(" stopless-live-123 ")
+    );
+    assert_eq!(
+        resume.get("conversationId").and_then(|v| v.as_str()),
+        Some(" stopless-live-123 ")
     );
 }
 
