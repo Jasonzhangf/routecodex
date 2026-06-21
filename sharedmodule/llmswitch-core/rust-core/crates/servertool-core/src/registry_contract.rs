@@ -78,6 +78,7 @@ pub struct ServertoolRegistryAutoHookDescriptorPlan {
 pub struct ServertoolRegistryProjectionRecordInput {
     pub name: String,
     pub trigger: String,
+    pub source_index: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -93,6 +94,7 @@ pub struct ServertoolRegistryProjectionInput {
 pub struct ServertoolRegistryProjectionRecordPlan {
     pub name: String,
     pub trigger: String,
+    pub source_index: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -236,6 +238,7 @@ pub fn plan_servertool_registry_projection(
                 "auto" => "auto".to_string(),
                 other => return Err(format!("invalid registered record trigger: {other}")),
             },
+            source_index: record.source_index,
         };
         if plan.trigger == "tool_call" {
             tool_call_records.push(plan);
@@ -409,14 +412,17 @@ mod tests {
                 ServertoolRegistryProjectionRecordInput {
                     name: "vision_auto".to_string(),
                     trigger: "auto".to_string(),
+                    source_index: 0,
                 },
                 ServertoolRegistryProjectionRecordInput {
                     name: " custom_tool ".to_string(),
                     trigger: "tool_call".to_string(),
+                    source_index: 1,
                 },
                 ServertoolRegistryProjectionRecordInput {
                     name: "stop_message_auto".to_string(),
                     trigger: "auto".to_string(),
+                    source_index: 2,
                 },
             ],
             auto_handler_names: vec![
@@ -435,14 +441,17 @@ mod tests {
                 ServertoolRegistryProjectionRecordPlan {
                     name: "custom_tool".to_string(),
                     trigger: "tool_call".to_string(),
+                    source_index: 1,
                 },
                 ServertoolRegistryProjectionRecordPlan {
                     name: "vision_auto".to_string(),
                     trigger: "auto".to_string(),
+                    source_index: 0,
                 },
                 ServertoolRegistryProjectionRecordPlan {
                     name: "stop_message_auto".to_string(),
                     trigger: "auto".to_string(),
+                    source_index: 2,
                 },
             ]
         );

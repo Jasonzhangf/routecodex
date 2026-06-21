@@ -2993,6 +2993,7 @@ export function planServertoolRegistryAutoHookDescriptorsWithNative(input: {
 export type ServertoolRegistryProjectionRecordPlan = {
   name: string;
   trigger: 'tool_call' | 'auto';
+  sourceIndex: number;
 };
 
 export type ServertoolRegistryProjectionPlan = {
@@ -3006,6 +3007,7 @@ export function planServertoolRegistryProjectionWithNative(input: {
   registeredRecords: Array<{
     name: string;
     trigger: string;
+    sourceIndex: number;
   }>;
   autoHandlerNames: string[];
 }): ServertoolRegistryProjectionPlan {
@@ -3048,9 +3050,17 @@ export function planServertoolRegistryProjectionWithNative(input: {
       if (item.trigger !== 'tool_call' && item.trigger !== 'auto') {
         throw new Error('planServertoolRegistryProjectionJson native returned invalid registered record trigger');
       }
+      if (
+        typeof item.sourceIndex !== 'number' ||
+        !Number.isInteger(item.sourceIndex) ||
+        (item.sourceIndex as number) < 0
+      ) {
+        throw new Error('planServertoolRegistryProjectionJson native returned invalid sourceIndex');
+      }
       return {
         name: item.name,
-        trigger: item.trigger
+        trigger: item.trigger,
+        sourceIndex: item.sourceIndex
       };
     }),
     autoHandlerNames: record.autoHandlerNames.map((name) => {
@@ -3852,6 +3862,23 @@ export function hasStopMessageAutoCliResultInRequestWithNative(input: {
     return false;
   }
   throw new Error(`hasStopMessageAutoCliResultInRequestJson native returned invalid bool: ${resultJson}`);
+}
+
+export function extractServertoolCliResultRouteHintFromRequestWithNative(input: {
+  adapterContext: unknown;
+  runtimeMetadata?: unknown;
+}): string | undefined {
+  const capability = 'extractServertoolCliResultRouteHintFromRequestJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('extractServertoolCliResultRouteHintFromRequestJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`extractServertoolCliResultRouteHintFromRequestJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
 }
 
 export function planServertoolBackendRoutePolicyWithNative(

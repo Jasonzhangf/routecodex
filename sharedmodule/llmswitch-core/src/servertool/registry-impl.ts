@@ -203,26 +203,24 @@ export function listRegisteredToolHandlerRecordsImpl(): ServerToolRegisteredHand
   ];
   const projection = planServertoolRegistryProjectionWithNative({
     registeredNames: [],
-    registeredRecords: rawRecords.map((entry) => ({
+    registeredRecords: rawRecords.map((entry, sourceIndex) => ({
       name: entry.name,
-      trigger: entry.trigger
+      trigger: entry.trigger,
+      sourceIndex
     })),
     autoHandlerNames: []
   });
-  const used = new Set<number>();
   return projection.registeredRecords.map((recordPlan) => {
-    const matchIndex = rawRecords.findIndex((entry, index) => (
-      !used.has(index) &&
-      entry.name.trim().toLowerCase() === recordPlan.name.trim().toLowerCase() &&
-      entry.trigger === recordPlan.trigger
-    ));
-    if (matchIndex < 0) {
+    const entry = rawRecords[recordPlan.sourceIndex];
+    if (
+      !entry ||
+      entry.name.trim().toLowerCase() !== recordPlan.name.trim().toLowerCase() ||
+      entry.trigger !== recordPlan.trigger
+    ) {
       throw new Error(
-        `[servertool] native registry record order missing entry for ${recordPlan.trigger}:${recordPlan.name}`
+        `[servertool] native registry record projection mismatch at sourceIndex=${recordPlan.sourceIndex} for ${recordPlan.trigger}:${recordPlan.name}`
       );
     }
-    used.add(matchIndex);
-    const entry = rawRecords[matchIndex];
     return {
       registration: entry.registration,
       handler: entry.handler

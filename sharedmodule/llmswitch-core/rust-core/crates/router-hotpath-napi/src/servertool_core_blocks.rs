@@ -61,11 +61,16 @@ use servertool_core::stopless_learned_note_contract;
 use servertool_core::stopless_orchestration_contract;
 use servertool_core::text_extraction;
 
+use crate::servertool_skeleton_config::build_default_response_hook_gate_config_value;
+
 /// Inspect a response payload and return the stop gateway context as JSON.
 pub fn inspect_stop_gateway_signal(payload_json: &str) -> Result<String, String> {
     let payload: serde_json::Value =
         serde_json::from_str(payload_json).map_err(|e| format!("deserialize payload: {e}"))?;
-    let context = stop_gateway_context::inspect(&payload);
+    let context = stop_gateway_context::inspect_with_internal_stop_tool_names(
+        &payload,
+        &configured_internal_stop_tool_names(),
+    );
     serde_json::to_string(&context).map_err(|e| format!("serialize context: {e}"))
 }
 
@@ -73,8 +78,53 @@ pub fn inspect_stop_gateway_signal(payload_json: &str) -> Result<String, String>
 pub fn is_stop_eligible(payload_json: &str) -> Result<String, String> {
     let payload: serde_json::Value =
         serde_json::from_str(payload_json).map_err(|e| format!("deserialize payload: {e}"))?;
-    let eligible = stop_gateway_context::is_stop_eligible(&payload);
+    let eligible = stop_gateway_context::is_stop_eligible_with_internal_stop_tool_names(
+        &payload,
+        &configured_internal_stop_tool_names(),
+    );
     Ok(if eligible { "true" } else { "false" }.to_string())
+}
+
+fn configured_internal_stop_tool_names() -> Vec<String> {
+    let config = build_default_response_hook_gate_config_value();
+    let mut names = Vec::new();
+    let hooks = config
+        .get("hooks")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for hook in hooks {
+        let arms = hook
+            .get("arms")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for arm in arms {
+            if arm.get("kind").and_then(serde_json::Value::as_str) != Some("tool_call") {
+                continue;
+            }
+            let schema_source = arm
+                .get("schemaSource")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            if schema_source != "tool_call_arguments" {
+                continue;
+            }
+            if let Some(tool_names) = arm.get("toolNames").and_then(serde_json::Value::as_array) {
+                names.extend(
+                    tool_names
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string),
+                );
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 pub fn normalize_stop_gateway_context_json(input_json: &str) -> Result<String, String> {
@@ -1060,6 +1110,17 @@ pub fn has_stop_message_auto_cli_result_in_request_json(
     )
 }
 
+pub fn extract_servertool_cli_result_route_hint_from_request_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let payload: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize cli result route hint input: {e}"))?;
+    serde_json::to_string(
+        &cli_result_guard::extract_servertool_cli_result_route_hint_from_request(&payload),
+    )
+    .map_err(|e| format!("serialize cli result route hint: {e}"))
+}
+
 pub fn plan_servertool_backend_route_policy_json(input_json: &str) -> Result<String, String> {
     let input: ServertoolBackendRoutePolicyInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize backend route input: {e}"))?;
@@ -1273,6 +1334,64 @@ mod tests {
     }
 
     #[test]
+    fn stop_gateway_bridge_uses_skeleton_response_hook_internal_stop_tools() {
+        let raw = inspect_stop_gateway_signal(
+            &json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_reasoning_stop_1",
+                            "function": {
+                                "name": "reasoningStop",
+                                "arguments": "{\"reason\":\"missing\",\"stopreason\":2}"
+                            }
+                        }]
+                    }
+                }]
+            })
+            .to_string(),
+        )
+        .expect("stop gateway");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["observed"], true);
+        assert_eq!(parsed["eligible"], true);
+        assert_eq!(parsed["reason"], "finish_reason_tool_calls_internal_stop_tool");
+    }
+
+    #[test]
+    fn stop_gateway_bridge_keeps_unregistered_tool_calls_ineligible() {
+        let raw = inspect_stop_gateway_signal(
+            &json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_exec_1",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        }]
+                    }
+                }]
+            })
+            .to_string(),
+        )
+        .expect("stop gateway");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(parsed["observed"], true);
+        assert_eq!(parsed["eligible"], false);
+        assert_eq!(parsed["reason"], "finish_reason_tool_calls");
+    }
+
+    #[test]
     fn normalizes_stop_message_compare_context_via_servertool_core_bridge() {
         let raw = normalize_stop_message_compare_context_json(
             &json!({
@@ -1311,21 +1430,16 @@ mod tests {
     }
 
     #[test]
-    fn plans_backend_route_policy_via_servertool_core_bridge() {
-        let raw = plan_servertool_backend_route_policy_json(
+    fn backend_route_policy_for_web_search_is_retired_at_servertool_core_bridge() {
+        let err = plan_servertool_backend_route_policy_json(
             &json!({
                 "toolName": "web_search",
                 "input": { "query": "routecodex" }
             })
             .to_string(),
         )
-        .expect("backend route policy");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["toolName"], "web_search");
-        assert_eq!(parsed["flowId"], "web_search_flow");
-        assert_eq!(parsed["routeHint"], "servertool_backend_route:web_search");
-        assert_eq!(parsed["executionMode"], "reenter");
-        assert_eq!(parsed["shapeGuard"]["failOnMissingPayload"], true);
+        .expect_err("web_search backend route must be retired");
+        assert!(err.contains("SERVERTOOL_OUTCOME_MISMATCH"));
     }
 
     #[test]
@@ -2898,7 +3012,7 @@ fn plans_servertool_handler_runtime_action_via_servertool_core_bridge() {
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
     assert_eq!(
         parsed["action"],
-        serde_json::json!("backend_requires_reenter_pipeline")
+        serde_json::json!("unsupported_backend_plan_kind")
     );
     assert_eq!(parsed["backendKind"], serde_json::json!("vision_analysis"));
 }
@@ -3372,9 +3486,9 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
         &serde_json::json!({
             "registeredNames": [" stop_message_auto ", "vision_auto", "stop_message_auto"],
             "registeredRecords": [
-                { "name": "vision_auto", "trigger": "auto" },
-                { "name": " custom_tool ", "trigger": "tool_call" },
-                { "name": "stop_message_auto", "trigger": "auto" }
+                { "name": "vision_auto", "trigger": "auto", "sourceIndex": 0 },
+                { "name": " custom_tool ", "trigger": "tool_call", "sourceIndex": 1 },
+                { "name": "stop_message_auto", "trigger": "auto", "sourceIndex": 2 }
             ],
             "autoHandlerNames": ["vision_auto", " stop_message_auto "]
         })
@@ -3389,7 +3503,7 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
     );
     assert_eq!(
         projection_value["registeredRecords"][0],
-        serde_json::json!({ "name": "custom_tool", "trigger": "tool_call" })
+        serde_json::json!({ "name": "custom_tool", "trigger": "tool_call", "sourceIndex": 1 })
     );
     assert_eq!(
         projection_value["autoHandlerNames"],

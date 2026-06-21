@@ -10072,6 +10072,49 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
 - evidence: references/50-rcc-config-ssot.md 锁 ~/.rcc/config.toml 为运行时真源；当前 5520 thinking = fwd.paid.gpt-5.4 + fwd.glm.glm-5.2 weighted 1:1，search/multimodal = fwd.paid.gpt-5.4-mini + fwd.minimax.MiniMax-M3 weighted 1:1；AGENTS.md 硬护栏 #3 「非授权不破坏」；note.md 6 月各轮记录显示 servertool 切片前都先确认配置 + 路由 + tests。
 
 任何对 ~/.rcc/config.toml 改 forwarder / routing / weights 的操作都属于运行时真源变更，必须先确认意图与命名（m3 vs MiniMax-M3），再按 references/50-rcc-config-ssot.md 的 edit → validate → restart → health → live probe 串行执行；不要在命名冲突未消除时直接 restart 5520。
+
+## 2026-06-22 registry projection sourceIndex rust-owner closeout
+
+- 本轮 slice 目标：把 `sharedmodule/llmswitch-core/src/servertool/registry-impl.ts` 里 `listRegisteredToolHandlerRecordsImpl()` 的“native projection -> rawRecords 重新匹配”活语义下沉到 Rust owner。
+- 旧 TS 活语义：
+  - `const used = new Set<number>()`
+  - `rawRecords.findIndex(...)`
+  - 本地按 `name + trigger` 重新找 entry，再自己处理重复占用。
+- 新 contract：
+  - Rust `servertool-core/src/registry_contract.rs::plan_servertool_registry_projection(...)` 的 `registered_records` input/output 新增 `source_index`；
+  - Rust 负责在 `tool_call`/`auto` 分组后的 projection 里保留原始 `source_index`；
+  - TS 只按 `recordPlan.sourceIndex` 绑定 `registration/handler`，不再自己 `findIndex + used set`。
+- 变更点：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`
+  - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+  - `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
+  - `tests/servertool/server-side-tools.failfast.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- audit gate 收紧：
+  - `registry-impl.ts` 新增禁止：
+    - `const used = new Set<number>()`
+    - `.findIndex((entry, index) => (`
+    - `native registry record order missing entry for`
+- 串行验证：
+  - `cargo test -p servertool-core registry_projection_normalizes_names_groups_records_and_rejects_duplicate_auto_handlers -- --nocapture` -> PASS
+  - `cargo test -p router-hotpath-napi plans_servertool_registry_actions_via_servertool_core_bridge -- --nocapture` -> PASS
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - focused Jest:
+    - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+    - `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    -> 3 suites / 37 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+- 验证边界：
+  - `tests/servertool/server-side-tools.failfast.spec.ts` 当前仍有 2 个非本 slice 失败（`tool_flow` vs `passthrough`、response-stage capabilities providerInvoker 断言）。从调用面看与本次 registry projection sourceIndex contract 无直接因果，先不把它宣称为本轮回归；若后续继续动 response-stage/failfast owner，再单独收口。
+- 结论：
+  - `listRegisteredToolHandlerRecordsImpl()` 现在是“native sourceIndex plan -> JS binding”薄壳；
+  - `registry-impl.ts` 又少掉一层 TS 活语义；
+  - 这轮还不能宣称 registry/mainline 已完全 Rust-only，但这块 record projection matching 已转成 Rust owner。
 ## 2026-06-22 adhoc-handler-test-support native-defaults closeout
 
 - 本轮 slice 目标：把 `sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts` 的本地 `buildAdHocRegistration` 默认值层移除，让 adhoc 注册默认全部走 native `normalize_servertool_registration_spec_json`。

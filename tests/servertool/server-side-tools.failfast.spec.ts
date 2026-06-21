@@ -175,12 +175,18 @@ jest.unstable_mockModule(
         ? input.registeredRecords
             .map((record: any) => ({
               name: String(record?.name ?? '').trim().toLowerCase(),
-              trigger: String(record?.trigger ?? '').trim()
+              trigger: String(record?.trigger ?? '').trim(),
+              sourceIndex: Number(record?.sourceIndex)
             }))
-            .filter((record: any) => record.name && (record.trigger === 'tool_call' || record.trigger === 'auto'))
+            .filter((record: any) =>
+              record.name &&
+              (record.trigger === 'tool_call' || record.trigger === 'auto') &&
+              Number.isInteger(record.sourceIndex) &&
+              record.sourceIndex >= 0
+            )
             .sort((left: any, right: any) => {
               const rank = (value: string) => (value === 'tool_call' ? 0 : 1);
-              return rank(left.trigger) - rank(right.trigger);
+              return rank(left.trigger) - rank(right.trigger) || left.sourceIndex - right.sourceIndex;
             })
         : [];
       return {

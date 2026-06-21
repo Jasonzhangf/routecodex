@@ -646,32 +646,45 @@ describe('servertool CLI native bridge', () => {
       planServertoolRegistryProjectionWithNative({
         registeredNames: [' stop_message_auto ', 'vision_auto', 'stop_message_auto'],
         registeredRecords: [
-          { name: 'vision_auto', trigger: 'auto' },
-          { name: ' custom_tool ', trigger: 'tool_call' },
-          { name: 'stop_message_auto', trigger: 'auto' }
+          { name: 'vision_auto', trigger: 'auto', sourceIndex: 0 },
+          { name: ' custom_tool ', trigger: 'tool_call', sourceIndex: 1 },
+          { name: 'stop_message_auto', trigger: 'auto', sourceIndex: 2 }
         ],
         autoHandlerNames: ['vision_auto', ' stop_message_auto ']
       })
     ).toEqual({
       registeredNames: ['stop_message_auto', 'vision_auto'],
       registeredRecords: [
-        { name: 'custom_tool', trigger: 'tool_call' },
-        { name: 'vision_auto', trigger: 'auto' },
-        { name: 'stop_message_auto', trigger: 'auto' }
+        { name: 'custom_tool', trigger: 'tool_call', sourceIndex: 1 },
+        { name: 'vision_auto', trigger: 'auto', sourceIndex: 0 },
+        { name: 'stop_message_auto', trigger: 'auto', sourceIndex: 2 }
       ],
       autoHandlerNames: ['vision_auto', 'stop_message_auto']
     });
   });
 
-  it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(
-    'rejects %s as client exec CLI projection at the Rust bridge',
-    (toolName) => {
-      expect(() => buildClientExecCliProjectionOutputWithNative({
+  it.each([
+    ['web_search', 'web_search'],
+    ['vision_auto', 'multimodal']
+  ])(
+    'projects %s as client exec CLI projection with route hint %s',
+    (toolName, routeHint) => {
+      expect(buildClientExecCliProjectionOutputWithNative({
         toolName,
         input: { query: 'x' }
-      })).toThrow(`SERVERTOOL_UNSUPPORTED_TOOL: ${toolName}`);
+      })).toMatchObject({
+        toolName,
+        routeHint
+      });
     }
   );
+
+  it('rejects fake_exec as client exec CLI projection at the Rust bridge', () => {
+    expect(() => buildClientExecCliProjectionOutputWithNative({
+      toolName: 'fake_exec',
+      input: { query: 'x' }
+    })).toThrow('SERVERTOOL_DENIED_TOOL: fake_exec');
+  });
 
   it('rejects additional servertool calls in the client-visible shell', () => {
     const nativeProjection = buildClientExecCliProjectionOutputWithNative({
