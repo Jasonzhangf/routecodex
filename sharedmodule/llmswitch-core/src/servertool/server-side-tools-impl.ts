@@ -14,7 +14,6 @@ import {
 import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
 import {
   extractTextFromChatLikeWithNative,
-  planServertoolEntryPreflightWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   filterOutExecutedToolCalls,
@@ -28,10 +27,7 @@ import {
   buildServertoolCliProjectionBranchResult
 } from './cli-projection-runtime-shell.js';
 import { planServertoolExecutionBranchRuntimeAction } from './execution-branch-runtime-shell.js';
-import {
-  createServerToolClientDisconnectedError,
-  isAdapterClientDisconnected
-} from './timeout-error-block.js';
+import { runServertoolEntryPreflight } from './entry-preflight-shell.js';
 
 function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | null {
   if (!Array.isArray(values) || values.length === 0) {
@@ -55,19 +51,14 @@ export const runServerSideToolEngine = async (
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> => {
   const base = asObject(options.chatResponse);
-  const entryPreflightPlan = planServertoolEntryPreflightWithNative({
-    hasBaseObject: Boolean(base),
-    adapterClientDisconnected: isAdapterClientDisconnected(options.adapterContext)
+  const entryPreflight = runServertoolEntryPreflight({
+    options,
+    base
   });
-  if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {
-    return { mode: 'passthrough', finalChatResponse: options.chatResponse };
+  if (entryPreflight.action === 'return_result') {
+    return entryPreflight.result;
   }
-  if (entryPreflightPlan.action === 'throw_client_disconnected') {
-    throw createServerToolClientDisconnectedError({
-      requestId: options.requestId
-    });
-  }
-  const baseObject = base as JsonObject;
+  const baseObject = entryPreflight.baseObject;
   const toolCalls = extractToolCallsFromResponseStage(baseObject, options.requestId);
   const contextBase: Omit<ServerToolHandlerContext, 'toolCall'> = {
     base: baseObject,

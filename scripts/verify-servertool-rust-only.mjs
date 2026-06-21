@@ -105,6 +105,7 @@ const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch
 const TS_RESPONSE_STAGE_FINALIZE_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`;
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
+const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
@@ -2483,8 +2484,8 @@ function checkOrchestrationPolicyRustOwner() {
   }
   assertContains(
     'server-side-tools-client-disconnect-native-shell',
-    `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`),
+    TS_ENTRY_PREFLIGHT_SHELL,
+    readRequired(TS_ENTRY_PREFLIGHT_SHELL),
     "from './timeout-error-block.js'"
   );
   const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
@@ -3466,8 +3467,8 @@ function checkServertoolEntryPreflightRustOwner() {
   );
   assertContains(
     'servertool-entry-preflight-ts-thin-shell',
-    `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
-    serverSideToolsImpl,
+    TS_ENTRY_PREFLIGHT_SHELL,
+    readRequired(TS_ENTRY_PREFLIGHT_SHELL),
     'planServertoolEntryPreflightWithNative'
   );
   for (const keyword of [
@@ -5225,6 +5226,20 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-dispatch-preparation-shell-owner',
         `dispatch-preparation-shell.ts must keep dispatch preparation owner marker ${marker}`
+      );
+    }
+  }
+  const entryPreflightShell = readRequired(TS_ENTRY_PREFLIGHT_SHELL);
+  for (const marker of [
+    'export function runServertoolEntryPreflight(',
+    'planServertoolEntryPreflightWithNative',
+    'createServerToolClientDisconnectedError',
+    "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }"
+  ]) {
+    if (!entryPreflightShell.includes(marker)) {
+      fail(
+        'servertool-entry-preflight-shell-owner',
+        `entry-preflight-shell.ts must keep entry preflight owner marker ${marker}`
       );
     }
   }
