@@ -70,6 +70,27 @@ describe('Provider business error detection', () => {
     });
   });
 
+  describe('400 account-pool exhaustion is normalised to quota class', () => {
+    it('maps HTTP 400 with "All available accounts exhausted" to INSUFFICIENT_QUOTA', () => {
+      const normalized = normalizeKnownProviderError({
+        statusCode: 400,
+        message: 'All available accounts exhausted',
+      });
+      expect(normalized?.code).toBe('429.2000');
+      expect(normalized?.class).toBe('unrecoverable');
+      expect(normalized?.key).toBe('INSUFFICIENT_QUOTA');
+    });
+
+    it('does NOT mis-map a generic HTTP 400 without pool/exhaustion hints', () => {
+      const normalized = normalizeKnownProviderError({
+        statusCode: 400,
+        message: 'Invalid request payload: missing field "input"',
+      });
+      expect(normalized?.key).toBe('HTTP_400');
+      expect(normalized?.class).toBe('special_400');
+    });
+  });
+
   describe('resolveProviderBusinessResponseError generically detects business errors', () => {
     it('RED: detects provider errors wrapped in transport data envelope', () => {
       const responseWithDataEnvelope = {
@@ -132,6 +153,26 @@ describe('Provider business error detection', () => {
 
       expect(result).toBeInstanceOf(Error);
       expect((result as Record<string, unknown>).upstreamCode).toBe('provider_status_2056');
+    });
+
+    it('detects OpenAI-compatible SSE error payload with string type', () => {
+      const responseWithOpenAiError = {
+        error: {
+          message: '',
+          type: 'server_error'
+        }
+      };
+
+      const result = resolveProviderBusinessResponseError({
+        response: responseWithOpenAiError,
+        runtimeMetadata: undefined,
+        familyProfile: undefined,
+      });
+
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Record<string, unknown>).code).toBe('MALFORMED_RESPONSE');
+      expect((result as Record<string, unknown>).upstreamCode).toBe('server_error');
+      expect((result as Error).message).toContain('server_error');
     });
 
     it('detects top-level error_code in response body without family profile', () => {
