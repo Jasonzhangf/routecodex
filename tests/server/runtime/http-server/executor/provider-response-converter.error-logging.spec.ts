@@ -16,6 +16,7 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () =>
   deriveFinishReasonNative: () => undefined,
   updateResponsesContractProbeFromSseChunkNative: () => ({}),
   buildResponsesTerminalSseFramesFromProbeNative: () => [],
+  resolveRelayResponsesClientSseStreamForHttp: () => undefined,
   requireCoreDist: () => ({}),
   importCoreDist: async () => ({})
 }));
@@ -68,6 +69,166 @@ describe('provider-response-converter error logging', () => {
       code: 'HTTP_502',
       upstreamCode: 'UPSTREAM_UNAVAILABLE',
       statusCode: 502
+    });
+
+    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
+  });
+
+  it('applies provider configured error mapping before throwing SSE wrapper errors', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+    logStageSpy.mockReset();
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        providerType: 'responses',
+        providerFamily: 'responses',
+        providerKey: 'XLC.key2.deepseek-v4-pro',
+        requestId: 'req_sse_wrapper_error_mapping_1',
+        processMode: 'chat',
+        wantsStream: true,
+        serverToolsEnabled: true,
+        response: {
+          status: 200,
+          body: {
+            mode: 'sse',
+            error: {
+              message: 'All available accounts exhausted',
+              code: 'HTTP_400',
+              statusCode: 400,
+              type: 'server_error',
+              param: ''
+            }
+          }
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: (providerKey?: string) => providerKey,
+          getHandleByRuntimeKey: () => ({
+            runtime: {
+              extensions: {
+                errorMapping: {
+                  rules: [
+                    {
+                      origin: {
+                        status: 400,
+                        error: {
+                          type: 'server_error',
+                          messageContains: 'All available accounts exhausted'
+                        }
+                      },
+                      to: {
+                        status: 429,
+                        code: 'HTTP_429',
+                        message: 'All available accounts exhausted'
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          })
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    )).rejects.toMatchObject({
+      code: 'HTTP_429',
+      upstreamCode: 'HTTP_400',
+      status: 429,
+      statusCode: 429,
+      message: 'All available accounts exhausted',
+      response: {
+        status: 429,
+        data: {
+          error: {
+            code: 'HTTP_429',
+            status: 429,
+            message: 'All available accounts exhausted'
+          }
+        }
+      },
+      details: {
+        providerErrorMapping: {
+          originalStatus: 400,
+          originalCode: 'SSE_DECODE_ERROR',
+          mappedStatus: 429,
+          mappedCode: 'HTTP_429'
+        }
+      }
+    });
+
+    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
+  });
+
+  it('does not map SSE wrapper errors without provider runtime errorMapping', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+    logStageSpy.mockReset();
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        providerType: 'responses',
+        providerFamily: 'responses',
+        providerKey: 'XLC.key2.deepseek-v4-pro',
+        requestId: 'req_sse_wrapper_error_unmapped_1',
+        processMode: 'chat',
+        wantsStream: true,
+        serverToolsEnabled: true,
+        response: {
+          status: 200,
+          body: {
+            mode: 'sse',
+            error: {
+              message: 'All available accounts exhausted',
+              code: 'HTTP_400',
+              statusCode: 400,
+              type: 'server_error',
+              param: ''
+            }
+          }
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    )).rejects.toMatchObject({
+      code: 'SSE_DECODE_ERROR',
+      upstreamCode: 'HTTP_400',
+      status: 400,
+      statusCode: 400,
+      response: {
+        status: 400,
+        data: {
+          error: {
+            code: 'HTTP_400',
+            status: 400,
+            message: 'All available accounts exhausted'
+          }
+        }
+      }
     });
 
     expect(mockConvertProviderResponse).not.toHaveBeenCalled();

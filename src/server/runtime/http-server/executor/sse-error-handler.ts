@@ -12,6 +12,13 @@ export type SseWrapperErrorInfo = {
   errorCode?: string;
   statusCode?: number;
   retryable: boolean;
+  upstreamError?: {
+    code?: string;
+    message?: string;
+    status?: number;
+    type?: string;
+    param?: string;
+  };
 };
 
 /**
@@ -137,7 +144,12 @@ function normalizeSseWrapperErrorValue(
       message: trimmed,
       ...(bracketCode ? { errorCode: bracketCode } : {}),
       ...(parsedStatus !== undefined ? { statusCode: parsedStatus } : {}),
-      retryable: isRetryableSseWrapperError(trimmed, bracketCode || undefined, parsedStatus)
+      retryable: isRetryableSseWrapperError(trimmed, bracketCode || undefined, parsedStatus),
+      upstreamError: {
+        message: trimmed,
+        ...(bracketCode ? { code: bracketCode } : {}),
+        ...(parsedStatus !== undefined ? { status: parsedStatus } : {})
+      }
     };
   }
 
@@ -176,7 +188,12 @@ function normalizeSseWrapperErrorValue(
           message: nestedInfo.message,
           ...(mergedCode ? { errorCode: mergedCode } : {}),
           ...(mergedStatus !== undefined ? { statusCode: mergedStatus } : {}),
-          retryable
+          retryable,
+          upstreamError: {
+            ...(nestedInfo.upstreamError ?? {}),
+            ...(mergedCode ? { code: mergedCode } : {}),
+            ...(mergedStatus !== undefined ? { status: mergedStatus } : {})
+          }
         };
       }
     }
@@ -187,7 +204,14 @@ function normalizeSseWrapperErrorValue(
       message: directMessage,
       ...(directCode ? { errorCode: directCode } : {}),
       ...(directStatus !== undefined ? { statusCode: directStatus } : {}),
-      retryable: isRetryableSseWrapperError(directMessage, directCode, directStatus)
+      retryable: isRetryableSseWrapperError(directMessage, directCode, directStatus),
+      upstreamError: {
+        message: directMessage,
+        ...(directCode ? { code: directCode } : {}),
+        ...(directStatus !== undefined ? { status: directStatus } : {}),
+        ...(typeof record.type === 'string' ? { type: record.type } : {}),
+        ...(typeof record.param === 'string' ? { param: record.param } : {})
+      }
     };
   }
 
@@ -198,7 +222,14 @@ function normalizeSseWrapperErrorValue(
         message: serialized,
         ...(directCode ? { errorCode: directCode } : {}),
         ...(directStatus !== undefined ? { statusCode: directStatus } : {}),
-        retryable: isRetryableSseWrapperError(serialized, directCode, directStatus)
+        retryable: isRetryableSseWrapperError(serialized, directCode, directStatus),
+        upstreamError: {
+          message: serialized,
+          ...(directCode ? { code: directCode } : {}),
+          ...(directStatus !== undefined ? { status: directStatus } : {}),
+          ...(typeof record.type === 'string' ? { type: record.type } : {}),
+          ...(typeof record.param === 'string' ? { param: record.param } : {})
+        }
       };
     }
   } catch {

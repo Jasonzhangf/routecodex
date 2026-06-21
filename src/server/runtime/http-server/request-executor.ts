@@ -1271,6 +1271,7 @@ export class HubRequestExecutor implements RequestExecutor {
               providerProtocol: handle.providerProtocol || providerProtocol,
               providerType: handle.providerType,
               providerFamily: handle.providerFamily,
+              providerKey: target.providerKey,
               requestId: input.requestId,
               serverToolsEnabled,
               wantsStream: wantsStreamBase,
@@ -1549,6 +1550,7 @@ export class HubRequestExecutor implements RequestExecutor {
     providerProtocol: string;
     providerType?: string;
     providerFamily?: string;
+    providerKey?: string;
     requestId: string;
     serverToolsEnabled?: boolean;
     wantsStream: boolean;

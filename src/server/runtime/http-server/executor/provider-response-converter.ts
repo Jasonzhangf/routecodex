@@ -21,6 +21,9 @@ import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.j
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
+import { applyProviderConfiguredErrorMapping } from '../../../../providers/core/runtime/provider-configured-error-mapping.js';
+import type { ProviderContext } from '../../../../providers/core/api/provider-types.js';
+import type { ProviderErrorAugmented } from '../../../../providers/core/runtime/provider-error-types.js';
 import {
   isEmptyOpenAiChatSseBridgeError,
   remapBridgeSseErrorToHttp
@@ -599,6 +602,32 @@ export type ConvertProviderResponseDeps = {
   executeNested(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 };
 
+function buildProviderContextForResponseConversion(
+  options: ConvertProviderResponseOptions,
+  deps: ConvertProviderResponseDeps
+): ProviderContext {
+  const runtimeKey = deps.runtimeManager.resolveRuntimeKey(options.providerKey, options.providerKey);
+  const handle = deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
+  const runtimeExtensions = asRecord(handle?.runtime?.extensions);
+  const metadataExtensions = asRecord(options.pipelineMetadata?.extensions);
+  const extensions = runtimeExtensions ?? metadataExtensions;
+  const runtimeMetadata = {
+    ...(asRecord(options.pipelineMetadata) ?? {}),
+    ...(extensions ? { extensions } : {})
+  };
+  return {
+    requestId: options.requestId,
+    providerType: (options.providerType || 'unknown') as ProviderContext['providerType'],
+    providerFamily: options.providerFamily,
+    providerKey: options.providerKey,
+    providerProtocol: options.providerProtocol,
+    startTime: Date.now(),
+    runtimeMetadata,
+    extensions,
+    ...(handle?.runtime ? { target: handle.runtime as unknown as ProviderContext['target'] } : {})
+  };
+}
+
 export async function convertProviderResponseIfNeeded(
   options: ConvertProviderResponseOptions,
   deps: ConvertProviderResponseDeps
@@ -608,7 +637,7 @@ export async function convertProviderResponseIfNeeded(
     const wrapperError = extractSseWrapperError(body as Record<string, unknown>);
     if (wrapperError) {
       const codeSuffix = wrapperError.errorCode ? ` [${wrapperError.errorCode}]` : '';
-      const error = new Error(`Upstream SSE error event${codeSuffix}: ${wrapperError.message}`) as Error & {
+      const error = new Error(`Upstream SSE error event${codeSuffix}: ${wrapperError.message}`) as ProviderErrorAugmented & {
         code?: string;
         status?: number;
         statusCode?: number;
@@ -618,6 +647,18 @@ export async function convertProviderResponseIfNeeded(
       };
       error.code = 'SSE_DECODE_ERROR';
       error.requestExecutorProviderErrorStage = 'provider.sse_decode';
+      error.response = {
+        data: {
+          error: {
+            code: wrapperError.errorCode,
+            message: wrapperError.upstreamError?.message ?? wrapperError.message,
+            status: wrapperError.statusCode,
+            type: wrapperError.upstreamError?.type,
+            param: wrapperError.upstreamError?.param
+          }
+        },
+        status: wrapperError.statusCode
+      };
       if (wrapperError.errorCode) {
         error.upstreamCode = wrapperError.errorCode;
       }
@@ -652,6 +693,14 @@ export async function convertProviderResponseIfNeeded(
       } else if (wrapperError.retryable && error.statusCode === undefined) {
         error.status = 503;
         error.statusCode = 503;
+      }
+      const mappedStatus = applyProviderConfiguredErrorMapping({
+        normalized: error,
+        context: buildProviderContextForResponseConversion(options, deps),
+        statusCode: error.statusCode ?? error.status
+      });
+      if (mappedStatus !== undefined) {
+        error.retryable = mappedStatus === 429 || error.retryable;
       }
       throw error;
     }
