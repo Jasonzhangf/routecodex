@@ -252,10 +252,7 @@ const runServerSideToolEngineViaThinShell = async (
     }
   });
   const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-    responseStageNextAction:
-      responseStagePlan && typeof responseStagePlan === 'object' && !Array.isArray(responseStagePlan)
-        ? (responseStagePlan as Record<string, unknown>).nextAction as string | undefined
-        : undefined,
+    responseStageGatePlan: responseStagePlan,
     autoHookEvaluated: false,
     hasAutoHookResult: false
   });
@@ -269,10 +266,7 @@ const runServerSideToolEngineViaThinShell = async (
     excludeAutoHookIds
   });
   const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-    responseStageNextAction:
-      responseStagePlan && typeof responseStagePlan === 'object' && !Array.isArray(responseStagePlan)
-        ? (responseStagePlan as Record<string, unknown>).nextAction as string | undefined
-        : undefined,
+    responseStageGatePlan: responseStagePlan,
     autoHookEvaluated: true,
     hasAutoHookResult: Boolean(autoHookResult)
   });

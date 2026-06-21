@@ -1,3 +1,109 @@
+## 2026-06-21 servertool response-stage gate-plan runtime action rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 的 response-stage / auto-hook 残余 TS owner。
+- 旧 TS 仍本地 owner 一层 gate-plan 解读语义：
+  - 先拿 `responseStagePlan`
+  - 再本地拆 `nextAction`
+  - pre/post auto-hook 两次把 `nextAction` 喂回 runtime action contract
+- 现在把这层解读并回同一个 Rust owner：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs`
+  - 新 input 增加 `responseStageGatePlan`
+  - Rust 先从 `responseStageGatePlan.nextAction` 读 action；旧 `responseStageNextAction` 仅保留兼容输入
+- TS 壳层变化：
+  - `server-side-tools-impl.ts` 不再本地拆 `responseStagePlan.nextAction`
+  - pre/post auto-hook 都直接传 `responseStageGatePlan: responseStagePlan` 给 native
+- gate 收紧：
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+  - `scripts/verify-servertool-rust-only.mjs`
+  - 明确禁止 `responseStageNextAction:` 与 `(responseStagePlan as Record<string, unknown>).nextAction` 在 `server-side-tools-impl.ts` 复活
+- focused 验证：
+  - `cargo test -p servertool-core response_stage_runtime_action_contract -- --nocapture` -> 6 passed
+  - `cargo test -p router-hotpath-napi plans_servertool_response_stage_runtime_action_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - focused Jest:
+    - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+    - `tests/servertool/server-side-tools.failfast.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 结果：3 suites / 37 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+
+## 2026-06-21 servertool pre-command persisted-load runtime action rust-owner
+
+- 本轮继续收缩 `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 的 pre-command persisted state 路径。
+- 旧 TS 仍本地 owner 一段 persisted load failure 语义：
+  - `loadRoutingInstructionStateSync(...)` 失败后，TS 自己决定 state-load-failed error 投影；
+  - 同时 persisted load 前后各自再本地拼一段 selection 分支。
+- 现在把这层统一收进同一个 Rust owner 文件：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs`
+  - 新 contract：`plan_runtime_pre_command_state_runtime_action(...)`
+  - action：
+    - `use_selected`
+    - `load_persisted`
+    - `throw_state_load_failed`
+- 新 bridge / 壳层变化：
+  - NAPI: `plan_runtime_pre_command_state_runtime_action_json`
+  - TS wrapper: `planRuntimePreCommandStateRuntimeActionWithNative(...)`
+  - `server-side-tools-impl.ts` 现在不再本地 owner persisted-load error shape；TS 只做 persisted state IO 和 native errorPlan -> `ProviderProtocolError` 壳。
+- focused 验证：
+  - `cargo test -p servertool-core pre_command_hook_contract -- --nocapture` -> 7 passed
+  - `cargo test -p router-hotpath-napi plans_runtime_pre_command_state_runtime_action_via_servertool_core_bridge -- --nocapture` -> 1 passed
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - focused Jest:
+    - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+    - `tests/servertool/server-side-tools.failfast.spec.ts`
+    - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 结果：3 suites / 37 tests passed
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+
+## 2026-06-21 stopless malformed exec_command(reasoningStop) response-governance repair
+
+- 继续处理 5555 live `exec_command(cmd="reasoningStop")` 泄漏。
+- 先按真实线上坏样本补红测：
+  - `resp_process_stage1_tool_governance_tests.rs::test_govern_response_repairs_malformed_exec_command_reasoning_stop_back_to_reasoning_stop`
+  - 当前先红：输出仍是 `function.name = "exec_command"`，未归一回 `reasoningStop`。
+- 唯一修复点确认在响应治理 owner：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/tool_call_governance.rs`
+  - 新增 `maybe_repair_exec_command_reasoning_stop_projection(...)`
+  - 仅在 `requestedToolNames` 确实暴露了 `reasoningStop` 且模型把它误发成 `exec_command(cmd="reasoningStop")` 时，归一为真正的 `reasoningStop` tool call，并物理移除 `cmd/command/script/toon` 壳字段。
+- focused 验证：
+  - `cargo test -p router-hotpath-napi test_govern_response_repairs_malformed_exec_command_reasoning_stop_back_to_reasoning_stop -- --nocapture` -> PASS
+  - `cargo test -p router-hotpath-napi test_govern_response_does_not_repair_reasoning_stop_into_exec_command_when_requested -- --nocapture` -> PASS
+- 文案真源同步：
+  - `docs/design/servertool-rust-only-architecture.md` 当前态别名改为 `reasoningStop`
+  - `docs/stop-message-auto.md` 补明“优先路径是主动调用 reasoningStop function tool + 完整 schema”
+
+## 2026-06-21 servertool build-core type-boundary follow-up
+
+- 当前 servertool gate 已过，新的阻塞点是 `node scripts/build-core.mjs` 的 4 个 TS 类型错误，不是 function-map / wiki / rust-only gate 回退。
+- 待收口文件：
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`
+- 处理原则：
+  - 只做 TS 类型边界与 parser 对齐；
+  - 不在 TS 新增 servertool 业务分支；
+  - 若 contract 真源在 Rust/Native，TS 仅补显式 narrowing 或 payload shape 对齐。
+
+## 2026-06-21 ecodev force-sse chat-completions bridge gap
+
+- 继续收口 live `5555` 的 `ecodev` 可用性。
+- 已确认上一轮 `406` 根因已消失：`ecodev` upstream 请求现在是 `/v2/no-stream/chat/completions` + `Accept: application/json` + `stream:false`，上游返回 `200`。
+- 当前真实 blocker 不在 provider，而在 HTTP handler 投影层：
+  - 入口：`/v1/chat/completions`
+  - 条件：client `stream:true`，provider family 强制 non-stream upstream
+  - 现象：pipeline `result.sseStream === undefined`，上游 JSON 成功，但 handler 只会把 `/v1/responses` JSON 桥成 SSE，导致 client 收到本地 `sse_bridge_error`
+- 代码证据：
+  - `src/server/handlers/handler-response-sse.ts` 在 `forceSSE && result.sseStream === undefined` 时先走 `dispatchResponsesJsonAsSse(...)`
+  - `src/modules/llmswitch/bridge/responses-response-bridge.ts#prepareResponsesJsonBodyForSseBridgeForHttp` 仅支持 `/v1/responses` 和 `/v1/responses.submit_tool_outputs`，`/v1/chat/completions` 直接返回 `null`
+- 共享真源已存在，不能再造一套：
+  - `sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts`
+- 本轮先补红测：
+  - `tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts`
+  - 新样本锁 `/v1/chat/completions` + `forceSSE` + `chat.completion` JSON 必须出 chat SSE，而不是 `sse_bridge_error`
+
 ## 2026-06-21 reasoningStop single-ssot rename closeout
 
 - 本轮继续追查 stopless/public tool rename 是否真的“从头到尾改完”。
@@ -9410,3 +9516,56 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
 - 对 RouteCodex 的直接含义：
   - 若要让 Codex 在 Responses 路径上对 `gpt-5.5` 拿到完整模型级能力，`/v1/models` 必须稳定列出 `gpt-5.5`，且带完整 `ModelInfo`；
   - 不能指望 provider capability read 或实际端口默认路由到别的模型来补偿。
+## 2026-06-21 ecodev 406 global-install + live replay
+
+- 用户纠正当前活跃二进制是真正的全局 dev install，不是 `~/.rcc/install/current` snapshot。
+- 复核 shim 真相：
+  - `~/.local/bin/routecodex` / `rcc` 是 dev shim。
+  - 安装前 `npm root -g` 下不存在 `routecodex` 包，所以 CLI 实际 fallback 到 snapshot；这也是“明明改了但 live 还不对”的直接原因。
+- 官方 `npm run install:global` 仍被 repo 现有架构 gate 挡住：
+  - `verify:architecture-feature-map-growth-discipline`
+  - 一批已存在 `servertool_*_contract.rs` 缺少 `function-map / verification-map` 条目。
+  - 这不是 ecodev 406 真因，但会阻塞标准全局安装脚本。
+- 为满足“必须全局安装后重启在线验证”，本轮用当前已存在 `dist/` 走全局包等价安装：
+  - `npm pack`
+  - `npm install -g <tarball> --ignore-scripts ...`
+  - `node scripts/ensure-cli-executable.mjs`
+  - `node scripts/ensure-cli-command-shim.mjs`
+  - 安装后 `routecodex --version` / `rcc --version` 均为 `0.90.3236`，且不再打印 snapshot fallback 提示。
+- live restart:
+  - `routecodex restart --port 5555`
+  - `curl http://127.0.0.1:5555/health` -> `ready=true version=0.90.3236`
+- 在线强制命中 `ecodev.default.GLM-5.1` 的 chat 样本：
+  - request id: `req_1782041859628_1a3d5be2`
+  - provider snapshot: `~/.rcc/codex-samples/openai-chat/port-5555/req_1782041859628_1a3d5be2/provider-request_1.json`
+  - 证据：
+    - `providerKey = ecodev.default.GLM-5.1`
+    - `url = .../v2/no-stream/chat/completions`
+    - `Accept = application/json`
+    - `body.stream = false`
+  - 上游响应：`provider-response.json` 显示 `status=200`，正文 `"OK"`。
+- 结论：
+  - 旧 406 真因（streaming 请求仍向 ecodev 上游发 `Accept: text/event-stream`）在 live global runtime 上已消失。
+  - 当前剩余失败已变成另一条后段问题，不是 406：
+    - client-visible `502 sse_bridge_error`
+    - 原因：chat streaming 下游仍期待 SSE，但 ecodev 当前被 profile 正确降成 no-stream JSON，上游成功后本地 chat SSE bridge 没有把 JSON 投成 SSE。
+- 当前未完成：
+  - `/v1/responses` 入口还没构造出一个稳定“强制命中 ecodev”的最小 curl；但共享 provider runtime 的 live snapshot 已证明 406 根因消失。
+  - 若继续收口，下一步应追 `chat/completions` / generic force-SSE JSON bridge，而不是再盯 ecodev 上游 406。
+
+## 2026-06-21 20:23:30 5520 responses continuation/direct failure audit
+
+- 症状：5520 `/v1/responses` 首次与后续请求都走 router-direct，但用户反馈“期待后请求直接用不了”。
+- 已知日志：20:21:55 tools route -> gpt-5.4-mini；20:21:56/20:22:06 longcontext route -> gpt-5.5。
+- 下一步：先查 5520 codex samples，确认 client/provider payload、previous_response_id/continuationOwner、direct/relay 真相。
+
+## 2026-06-21 20:26:37 llmtoken responses baseURL fix
+
+- 根因：`~/.rcc/provider/llmtoken/config.v2.toml` 的 `baseURL=https://llmtoken.io` 缺 `/v1`，responses runtime 正常拼成 `/responses`，实际请求命中站点 HTML。
+- 修复：改为 `https://llmtoken.io/v1`，使 Responses provider 目标 URL 变为 `.../v1/responses`。
+- 待验证：config validate + restart 5520 + live `/v1/responses` probe，不再出现 `SSE stream missing from pipeline result`。
+
+## 2026-06-21 20:38:03 html-200 should reroute audit
+
+- 用户纠正：priority 模式下，上游即使返回错误形态，也应进入 provider failure 链并切下一个 provider，不应在首 provider 形成假成功后再由 SSE bridge 502。
+- 新问题定义：为什么 `responses` direct 上游 `200 text/html` 没有在 provider/runtime 阶段被判为协议错误并 reroute。

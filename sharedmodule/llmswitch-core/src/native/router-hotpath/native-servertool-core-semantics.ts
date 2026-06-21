@@ -2755,6 +2755,7 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
 }
 
 export function planServertoolResponseStageRuntimeActionWithNative(input: {
+  responseStageGatePlan?: unknown;
   responseStageNextAction?: string;
   autoHookEvaluated: boolean;
   hasAutoHookResult: boolean;

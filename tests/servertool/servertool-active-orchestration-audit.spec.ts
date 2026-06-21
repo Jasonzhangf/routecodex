@@ -99,6 +99,8 @@ const TARGETS = [
       'if (!base) {',
       'if (isAdapterClientDisconnected(options.adapterContext)) {',
       "responseStagePlan?.nextAction === 'bypass'",
+      'responseStageNextAction:',
+      "(responseStagePlan as Record<string, unknown>).nextAction",
       'if (autoHookResult) {',
       "postAutoHookRuntimeAction.action === 'return_auto_hook_result' && autoHookResult",
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',

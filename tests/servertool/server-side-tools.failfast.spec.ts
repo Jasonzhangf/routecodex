@@ -13,7 +13,8 @@ const planServertoolResponseStageGateWithNativeMock = jest.fn(() => ({
   nextAction: 'run_auto_hooks'
 }));
 const planServertoolResponseStageRuntimeActionWithNativeMock = jest.fn((input: any) => {
-  if (String(input?.responseStageNextAction ?? '').trim() === 'bypass') {
+  const nextAction = String(input?.responseStageGatePlan?.nextAction ?? input?.responseStageNextAction ?? '').trim();
+  if (nextAction === 'bypass') {
     return { action: 'return_passthrough_bypass' };
   }
   if (input?.autoHookEvaluated !== true) {
@@ -828,7 +829,8 @@ describe('server-side-tools tool-error closed loop', () => {
     });
     planServertoolResponseStageRuntimeActionWithNativeMock.mockReset();
     planServertoolResponseStageRuntimeActionWithNativeMock.mockImplementation((input: any) => {
-      if (String(input?.responseStageNextAction ?? '').trim() === 'bypass') {
+      const nextAction = String(input?.responseStageGatePlan?.nextAction ?? input?.responseStageNextAction ?? '').trim();
+      if (nextAction === 'bypass') {
         return { action: 'return_passthrough_bypass' };
       }
       if (input?.autoHookEvaluated !== true) {
@@ -1084,12 +1086,18 @@ describe('server-side-tools tool-error closed loop', () => {
       })
     );
     expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(1, {
-      responseStageNextAction: 'run_auto_hooks',
+      responseStageGatePlan: {
+        shouldBypass: false,
+        nextAction: 'run_auto_hooks'
+      },
       autoHookEvaluated: false,
       hasAutoHookResult: false
     });
     expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(2, {
-      responseStageNextAction: 'run_auto_hooks',
+      responseStageGatePlan: {
+        shouldBypass: false,
+        nextAction: 'run_auto_hooks'
+      },
       autoHookEvaluated: true,
       hasAutoHookResult: false
     });
