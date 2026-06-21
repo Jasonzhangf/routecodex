@@ -10,8 +10,11 @@ export type ProviderErrorAugmented = ProviderError & {
         code?: string;
         message?: string;
         status?: number;
+        type?: string;
+        param?: string;
       };
     };
+    raw?: string;
     status?: number;
   };
   details?: Record<string, unknown>;

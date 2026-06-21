@@ -214,6 +214,7 @@ export interface ProviderContext {
   routeName?: string;
   target?: TargetMetadata;
   runtimeMetadata?: ProviderRuntimeMetadata;
+  extensions?: Record<string, unknown>;
   pipelineId?: string;
   profile?: ServiceProfile;
   abortSignal?: AbortSignal;

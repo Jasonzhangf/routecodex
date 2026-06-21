@@ -13,7 +13,7 @@ import type { ProviderHandle, ProviderProtocol } from './types.js';
 export interface ProviderDirectPipelineOptions {
   portConfig: PortConfig;
   resolveProvider: (bindingKey: string) => ProviderHandle | undefined;
-  detectInboundProtocol: (req: { path?: string; headers?: Record<string, string | string[] | undefined> }) => ProviderProtocol;
+  resolveInboundProtocol: (entryPath: string | undefined) => ProviderProtocol;
   preparePayload?: (
     payload: Record<string, unknown>,
     context: { port: number; providerKey: string; protocol: ProviderProtocol; actualBehavior: 'direct' | 'relay' },
@@ -45,10 +45,10 @@ export interface ProviderDirectPipelineResult {
 
 export async function executeProviderDirectPipeline(
   requestPayload: Record<string, unknown>,
-  requestInfo: { path?: string; headers?: Record<string, string | string[] | undefined> },
+  entryPath: string | undefined,
   options: ProviderDirectPipelineOptions,
 ): Promise<ProviderDirectPipelineResult> {
-  const { portConfig, resolveProvider, detectInboundProtocol } = options;
+  const { portConfig, resolveProvider, resolveInboundProtocol } = options;
   const { providerBinding, protocolBehavior } = portConfig;
 
   if (!providerBinding) {
@@ -60,7 +60,7 @@ export async function executeProviderDirectPipeline(
     throw new Error(`Provider not found for binding: ${providerBinding}`);
   }
 
-  const inboundProtocol = detectInboundProtocol(requestInfo);
+  const inboundProtocol = resolveInboundProtocol(entryPath);
   const behavior = protocolBehavior ?? 'auto';
   const actualBehavior = resolveActualBehavior(behavior, inboundProtocol, providerHandle.providerProtocol);
 
@@ -130,10 +130,10 @@ export async function executeProviderDirectPipeline(
   };
 }
 
-export function detectInboundProtocolFromRequest(
-  req: { path?: string; headers?: Record<string, string | string[] | undefined> },
+export function resolveInboundProtocolFromEntryPath(
+  entryPath: string | undefined
 ): ProviderProtocol {
-  const path = (req.path ?? '').toLowerCase();
+  const path = (entryPath ?? '').toLowerCase();
   if (path.startsWith('/v1/messages') || path.startsWith('/v1/anthropic')) {
     return 'anthropic-messages';
   }
@@ -143,5 +143,8 @@ export function detectInboundProtocolFromRequest(
   if (path.includes('/gemini') || path.includes('/v1beta')) {
     return 'gemini-chat';
   }
-  return 'openai-chat';
+  if (path.startsWith('/v1/chat/completions') || path.startsWith('/chat/completions')) {
+    return 'openai-chat';
+  }
+  throw new Error(`Unsupported inbound protocol entry path: ${entryPath ?? ''}`);
 }
