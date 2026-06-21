@@ -2618,6 +2618,18 @@ function checkServertoolExecutionDispatchRustOwner() {
       );
     }
   }
+  for (const marker of [
+    'export function createServertoolExecutionLoopState(',
+    'export function appendExecutedToolRecord(',
+    'export function assertDispatchExecutionMode(',
+  ]) {
+    if (executionShell.includes(marker)) {
+      fail(
+        'servertool-execution-dispatch-no-ts-test-only-exports',
+        `execution-dispatch-outcome-shell.ts must not re-export test-only thin-shell marker ${marker}`
+      );
+    }
+  }
   for (const keyword of [
     'listRegisteredServerToolHandlerRecords()',
     'registeredToolCallHandlers: listRegisteredServerToolHandlerRecords()',

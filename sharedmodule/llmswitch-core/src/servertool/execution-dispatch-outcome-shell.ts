@@ -31,11 +31,11 @@ import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 
 export type { ServertoolExecutedRecord, ServertoolExecutionLoopState };
 
-export function createServertoolExecutionLoopState(): ServertoolExecutionLoopState {
+function createServertoolExecutionLoopState(): ServertoolExecutionLoopState {
   return hydrateExecutionLoopState(createServertoolExecutionLoopStateWithNative());
 }
 
-export function appendExecutedToolRecord(
+function appendExecutedToolRecord(
   state: ServertoolExecutionLoopState,
   toolCall: ServertoolExecutedRecord['toolCall'],
   execution?: ServerToolExecution
@@ -53,7 +53,7 @@ export function appendExecutedToolRecord(
   state.lastExecution = next.lastExecution;
 }
 
-export function assertDispatchExecutionMode(
+function assertDispatchExecutionMode(
   options: ServerSideToolEngineOptions,
   toolName: string,
   nativeExecutionMode: string,

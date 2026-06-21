@@ -5,9 +5,7 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   buildServertoolDispatchPlanInput,
-  buildServertoolOutcomePlanInput,
-  createServertoolExecutionLoopState,
-  appendExecutedToolRecord
+  buildServertoolOutcomePlanInput
 } from '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js';
 import { buildServertoolDispatchPlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { listServertoolToolSpecs } from '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js';
@@ -114,20 +112,27 @@ describe('server-side-tools native dispatch planner', () => {
 
   test('returns skeleton-driven mixed outcome contract for executed subset', () => {
     const spec = executableToolSpec();
-    const executionState = createServertoolExecutionLoopState();
-    appendExecutedToolRecord(
-      executionState,
-      {
-        id: 'call_dispatch_1',
-        name: spec.name,
-        arguments: '{}',
-        executionMode: spec.executionMode,
-        stripAfterExecute: spec.stripAfterExecute
-      },
-      {
+    const executionState = {
+      executedToolCalls: [
+        {
+          toolCall: {
+            id: 'call_dispatch_1',
+            name: spec.name,
+            arguments: '{}',
+            executionMode: spec.executionMode,
+            stripAfterExecute: spec.stripAfterExecute
+          },
+          execution: {
+            flowId: `${spec.name}_ok`
+          }
+        }
+      ],
+      executedIds: new Set(['call_dispatch_1']),
+      executedFlowIds: [`${spec.name}_ok`],
+      lastExecution: {
         flowId: `${spec.name}_ok`
-      } as any
-    );
+      }
+    };
 
     const outcome = planServertoolOutcomeWithNative(
       buildServertoolOutcomePlanInput({

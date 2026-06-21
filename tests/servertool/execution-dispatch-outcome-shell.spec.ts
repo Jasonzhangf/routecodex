@@ -93,9 +93,6 @@ jest.unstable_mockModule(
 );
 
 const {
-  appendExecutedToolRecord,
-  assertDispatchExecutionMode,
-  createServertoolExecutionLoopState,
   materializeNativeToolCallExecutionOutcome,
   runServertoolIoExecutionQueue
 } = await import(
@@ -357,16 +354,42 @@ describe('execution-dispatch-outcome-shell', () => {
     });
   });
 
-  test('uses native dispatch contract error for execution-mode mismatch', () => {
-    expect(() =>
-      assertDispatchExecutionMode(
-        { requestId: 'req-dispatch-mismatch-1', adapterContext: {} } as any,
-        'web_search',
-        'guarded',
-        'legacy'
-      )
-    ).toThrow('[native-dispatch-contract] dispatch_spec_mismatch');
+  test('uses native dispatch contract error for execution-mode mismatch inside runtime loop', async () => {
+    getServerToolHandler.mockReturnValue({
+      trigger: 'tool_call',
+      registration: { executionMode: 'legacy' },
+      handler: jest.fn()
+    });
 
+    await expect(
+      runServertoolIoExecutionQueue({
+        dispatchPlan: {
+          executableToolCalls: [
+            {
+              id: 'call_mismatch_1',
+              name: 'web_search',
+              arguments: '{}',
+              executionMode: 'guarded',
+              stripAfterExecute: true
+            }
+          ],
+          noopToolCalls: []
+        },
+        options: {
+          requestId: 'req-dispatch-mismatch-1',
+          adapterContext: {}
+        } as any,
+        contextBase: {
+          adapterContext: {},
+          requestId: 'req-dispatch-mismatch-1',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses'
+        } as any,
+        baseForExecution: { id: 'chatcmpl-mismatch' } as any
+      })
+    ).rejects.toThrow('[native-dispatch-contract] dispatch_spec_mismatch');
+
+    expect(createServertoolExecutionLoopStateWithNative).toHaveBeenCalledTimes(1);
     expect(planServertoolExecutionDispatchErrorWithNative).toHaveBeenCalledWith({
       kind: 'dispatch_spec_mismatch',
       requestId: 'req-dispatch-mismatch-1',
@@ -374,51 +397,6 @@ describe('execution-dispatch-outcome-shell', () => {
       nativeExecutionMode: 'guarded',
       tsExecutionMode: 'legacy'
     });
-  });
-
-  test('creates and appends execution loop state through native state contract', () => {
-    const state = createServertoolExecutionLoopState();
-    expect(createServertoolExecutionLoopStateWithNative).toHaveBeenCalledTimes(1);
-    expect(state.executedToolCalls).toEqual([]);
-    expect([...state.executedIds]).toEqual([]);
-    expect(state.executedFlowIds).toEqual([]);
-
-    appendExecutedToolRecord(
-      state,
-      {
-        id: 'call_1',
-        name: 'web_search',
-        arguments: '{}',
-        executionMode: 'backend',
-        stripAfterExecute: true
-      },
-      {
-        flowId: 'flow_1',
-        followup: { requestIdSuffix: ':servertool_followup' }
-      } as any
-    );
-
-    expect(appendServertoolExecutedRecordWithNative).toHaveBeenCalledWith({
-      state: {
-        executedToolCalls: [],
-        executedIds: [],
-        executedFlowIds: []
-      },
-      toolCall: {
-        id: 'call_1',
-        name: 'web_search',
-        arguments: '{}',
-        executionMode: 'backend',
-        stripAfterExecute: true
-      },
-      execution: {
-        flowId: 'flow_1',
-        followup: { requestIdSuffix: ':servertool_followup' }
-      }
-    });
-    expect([...state.executedIds]).toEqual(['call_1']);
-    expect(state.executedFlowIds).toEqual(['flow_1']);
-    expect(state.lastExecution).toMatchObject({ flowId: 'flow_1' });
   });
 
   test('uses native dispatch contract error for invalid mixed-client-tools outcome contract', () => {
