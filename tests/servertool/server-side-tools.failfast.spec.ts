@@ -49,7 +49,7 @@ const planServertoolEntryPreflightWithNativeMock = jest.fn((input: any) => {
   }
   return { action: 'continue_to_tool_flow' };
 });
-const planRuntimePreCommandStateSelectionWithNativeMock = jest.fn((input: any) => {
+const planRuntimePreCommandStateRuntimeActionWithNativeMock = jest.fn((input: any) => {
   const direct = input?.directRuntimePreCommandState;
   if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
     return {
@@ -64,6 +64,25 @@ const planRuntimePreCommandStateSelectionWithNativeMock = jest.fn((input: any) =
       action: 'use_selected',
       source: 'runtime_metadata',
       state: runtime
+    };
+  }
+  if (typeof input?.persistedLoadError === 'string' && input.persistedLoadError.trim()) {
+    return {
+      action: 'throw_state_load_failed',
+      source: 'none',
+      errorPlan: {
+        code: 'SERVERTOOL_STATE_LOAD_FAILED',
+        category: 'INTERNAL_ERROR',
+        status: 500,
+        message: `[servertool] sticky routing state load failed: ${String(input?.stickyKey ?? '')}: ${String(input?.persistedLoadError ?? '')}`,
+        details: {
+          stickyKey: String(input?.stickyKey ?? ''),
+          requestId: String(input?.requestId ?? ''),
+          entryEndpoint: String(input?.entryEndpoint ?? ''),
+          providerProtocol: String(input?.providerProtocol ?? ''),
+          error: String(input?.persistedLoadError ?? '')
+        }
+      }
     };
   }
   if (!input?.persistedLoadAttempted && input?.hasPersistentScopeKey !== true) {
@@ -228,7 +247,7 @@ jest.unstable_mockModule(
       hooks: []
     })),
     planRuntimePreCommandRuleWithNative: jest.fn(() => null),
-    planRuntimePreCommandStateSelectionWithNative: planRuntimePreCommandStateSelectionWithNativeMock,
+    planRuntimePreCommandStateRuntimeActionWithNative: planRuntimePreCommandStateRuntimeActionWithNativeMock,
     planServertoolMaterializationProgressWithNative: jest.fn((input: any) => {
       if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
         return { action: 'execute_backend_then_finalize' };
@@ -710,6 +729,18 @@ jest.unstable_mockModule(
   })
 );
 
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.js',
+  () => ({
+    buildProviderProtocolErrorWithNative: jest.fn((input: any) => ({
+      protocol: input?.protocol,
+      providerType: input?.providerType,
+      category: input?.category ?? 'INTERNAL_ERROR',
+      details: input?.details
+    }))
+  })
+);
+
 let runServerSideToolEngine: any;
 let registerServerToolHandler: any;
 
@@ -809,7 +840,7 @@ describe('server-side-tools tool-error closed loop', () => {
     });
     planServertoolExecutionBranchWithNativeMock.mockClear();
     planServertoolEntryPreflightWithNativeMock.mockClear();
-    planRuntimePreCommandStateSelectionWithNativeMock.mockClear();
+    planRuntimePreCommandStateRuntimeActionWithNativeMock.mockClear();
   });
 
   test('fails fast through native client-disconnect policy before servertool execution', async () => {
@@ -940,7 +971,7 @@ describe('server-side-tools tool-error closed loop', () => {
     });
 
     expect(loadRoutingInstructionStateSyncMock).not.toHaveBeenCalled();
-    expect(planRuntimePreCommandStateSelectionWithNativeMock).toHaveBeenCalledWith({
+    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenCalledWith({
       directRuntimePreCommandState: {
         preCommandScriptPath: '/tmp/direct-pre-command.sh'
       },
@@ -978,7 +1009,7 @@ describe('server-side-tools tool-error closed loop', () => {
     });
 
     expect(loadRoutingInstructionStateSyncMock).not.toHaveBeenCalled();
-    expect(planRuntimePreCommandStateSelectionWithNativeMock).toHaveBeenCalledWith({
+    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenCalledWith({
       directRuntimePreCommandState: undefined,
       runtimeMetadataPreCommandState: {
         preCommandScriptPath: '/tmp/runtime-pre-command.sh'
@@ -1012,7 +1043,7 @@ describe('server-side-tools tool-error closed loop', () => {
 
     expect(resolveServertoolPersistentScopeKeyMock).toHaveBeenCalledWith(adapterContext);
     expect(loadRoutingInstructionStateSyncMock).not.toHaveBeenCalled();
-    expect(planRuntimePreCommandStateSelectionWithNativeMock).toHaveBeenCalledWith({
+    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenCalledWith({
       directRuntimePreCommandState: undefined,
       runtimeMetadataPreCommandState: undefined,
       hasPersistentScopeKey: false,
@@ -1084,13 +1115,13 @@ describe('server-side-tools tool-error closed loop', () => {
     });
 
     expect(loadRoutingInstructionStateSyncMock).toHaveBeenCalledWith('session:servertool-precommand');
-    expect(planRuntimePreCommandStateSelectionWithNativeMock).toHaveBeenNthCalledWith(1, {
+    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(1, {
       directRuntimePreCommandState: undefined,
       runtimeMetadataPreCommandState: undefined,
       hasPersistentScopeKey: true,
       persistedLoadAttempted: false
     });
-    expect(planRuntimePreCommandStateSelectionWithNativeMock).toHaveBeenNthCalledWith(2, {
+    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(2, {
       directRuntimePreCommandState: undefined,
       runtimeMetadataPreCommandState: undefined,
       hasPersistentScopeKey: true,
@@ -1106,5 +1137,44 @@ describe('server-side-tools tool-error closed loop', () => {
         }
       })
     );
+  });
+
+  test('projects persisted routing state load failure through native pre-command runtime action', async () => {
+    resolveServertoolPersistentScopeKeyMock.mockReturnValue('session:servertool-precommand-fail');
+    loadRoutingInstructionStateSyncMock.mockImplementation(() => {
+      throw new Error('ENOENT no state');
+    });
+
+    await expect(
+      runServerSideToolEngine({
+        chatResponse: makeToolCallResponse(),
+        adapterContext: {
+          requestId: 'req-servertool-precommand-fail-1',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses'
+        } as any,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-servertool-precommand-fail-1',
+        providerProtocol: 'openai-responses'
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_STATE_LOAD_FAILED',
+      details: {
+        stickyKey: 'session:servertool-precommand-fail',
+        requestId: 'req-servertool-precommand-fail-1'
+      }
+    });
+
+    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(2, {
+      directRuntimePreCommandState: undefined,
+      runtimeMetadataPreCommandState: undefined,
+      hasPersistentScopeKey: true,
+      persistedLoadAttempted: true,
+      persistedLoadError: 'ENOENT no state',
+      requestId: 'req-servertool-precommand-fail-1',
+      stickyKey: 'session:servertool-precommand-fail',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
   });
 });

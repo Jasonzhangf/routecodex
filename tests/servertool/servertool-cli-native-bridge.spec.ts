@@ -11,6 +11,7 @@ import {
   planServertoolExecutionLoopRuntimeActionWithNative,
   planServertoolExecutionOutcomeRuntimeActionWithNative,
   planServertoolEntryPreflightWithNative,
+  planRuntimePreCommandStateRuntimeActionWithNative,
   planServertoolResponseStageRuntimeActionWithNative,
   planServertoolRegistryAutoHookDescriptorsWithNative,
   planServertoolRegistryLookupActionWithNative,
@@ -481,6 +482,42 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'return_passthrough_no_auto_hook_result'
+    });
+  });
+
+  it('uses Rust-owned pre-command runtime action planning', () => {
+    expect(
+      planRuntimePreCommandStateRuntimeActionWithNative({
+        runtimeMetadataPreCommandState: {
+          preCommandScriptPath: '/tmp/runtime-pre-command.sh'
+        },
+        hasPersistentScopeKey: false,
+        persistedLoadAttempted: false
+      })
+    ).toEqual({
+      action: 'use_selected',
+      source: 'runtime_metadata',
+      state: {
+        preCommandScriptPath: '/tmp/runtime-pre-command.sh'
+      }
+    });
+
+    expect(
+      planRuntimePreCommandStateRuntimeActionWithNative({
+        hasPersistentScopeKey: true,
+        persistedLoadAttempted: true,
+        persistedLoadError: 'ENOENT no state',
+        requestId: 'req-1',
+        stickyKey: 'session:abc',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses'
+      })
+    ).toMatchObject({
+      action: 'throw_state_load_failed',
+      source: 'none',
+      errorPlan: {
+        code: 'SERVERTOOL_STATE_LOAD_FAILED'
+      }
     });
   });
 

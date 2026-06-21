@@ -178,6 +178,13 @@ export interface RuntimePreCommandStateSelectionPlan {
   state?: Record<string, unknown>;
 }
 
+export interface RuntimePreCommandStateRuntimeActionPlan {
+  action: 'use_selected' | 'load_persisted' | 'throw_state_load_failed';
+  source: 'direct_runtime' | 'runtime_metadata' | 'persisted' | 'none';
+  state?: Record<string, unknown>;
+  errorPlan?: ServertoolErrorPlan;
+}
+
 export interface AutoHookExecutionDecisionPlan {
   action: 'continue_queue' | 'return_result' | 'rethrow_error';
   traceEvent: {
@@ -2301,6 +2308,63 @@ export function planRuntimePreCommandStateSelectionWithNative(input: {
     action: record.action,
     source: record.source,
     ...(state ? { state: state as Record<string, unknown> } : {})
+  };
+}
+
+export function planRuntimePreCommandStateRuntimeActionWithNative(input: {
+  directRuntimePreCommandState?: unknown;
+  runtimeMetadataPreCommandState?: unknown;
+  hasPersistentScopeKey?: boolean;
+  persistedState?: unknown;
+  persistedLoadAttempted: boolean;
+  persistedLoadError?: string;
+  requestId?: string;
+  stickyKey?: string;
+  entryEndpoint?: string;
+  providerProtocol?: string;
+}): RuntimePreCommandStateRuntimeActionPlan {
+  const capability = 'planRuntimePreCommandStateRuntimeActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planRuntimePreCommandStateRuntimeActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planRuntimePreCommandStateRuntimeActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planRuntimePreCommandStateRuntimeActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'use_selected' &&
+    record.action !== 'load_persisted' &&
+    record.action !== 'throw_state_load_failed'
+  ) {
+    throw new Error('planRuntimePreCommandStateRuntimeActionJson native returned invalid action');
+  }
+  if (
+    record.source !== 'direct_runtime' &&
+    record.source !== 'runtime_metadata' &&
+    record.source !== 'persisted' &&
+    record.source !== 'none'
+  ) {
+    throw new Error('planRuntimePreCommandStateRuntimeActionJson native returned invalid source');
+  }
+  const state = record.state;
+  if (state !== undefined && (typeof state !== 'object' || state === null || Array.isArray(state))) {
+    throw new Error('planRuntimePreCommandStateRuntimeActionJson native returned invalid state');
+  }
+  const errorPlan =
+    record.errorPlan !== undefined
+      ? parseServertoolErrorPlan(JSON.stringify(record.errorPlan), 'planRuntimePreCommandStateRuntimeActionJson')
+      : undefined;
+  return {
+    action: record.action,
+    source: record.source,
+    ...(state ? { state: state as Record<string, unknown> } : {}),
+    ...(errorPlan ? { errorPlan } : {})
   };
 }
 

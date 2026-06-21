@@ -3096,9 +3096,12 @@ function checkPreCommandHooksRustOwner() {
     'pub struct RuntimePreCommandRulePlanInput',
     'pub struct RuntimePreCommandStateSelectionInput',
     'pub struct RuntimePreCommandStateSelectionPlan',
+    'pub struct RuntimePreCommandStateRuntimeActionInput',
+    'pub struct RuntimePreCommandStateRuntimeActionPlan',
     'pub fn plan_pre_command_hooks_config',
     'pub fn plan_runtime_pre_command_rule',
     'pub fn plan_runtime_pre_command_state_selection',
+    'pub fn plan_runtime_pre_command_state_runtime_action',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-rust-owner',
@@ -3117,6 +3120,7 @@ function checkPreCommandHooksRustOwner() {
     'plan_pre_command_hooks_config_json',
     'plan_runtime_pre_command_rule_json',
     'plan_runtime_pre_command_state_selection_json',
+    'plan_runtime_pre_command_state_runtime_action_json',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-export',
@@ -3129,6 +3133,7 @@ function checkPreCommandHooksRustOwner() {
     'pub fn plan_pre_command_hooks_config_json',
     'pub fn plan_runtime_pre_command_rule_json',
     'pub fn plan_runtime_pre_command_state_selection_json',
+    'pub fn plan_runtime_pre_command_state_runtime_action_json',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-export',
@@ -3141,6 +3146,7 @@ function checkPreCommandHooksRustOwner() {
     'planPreCommandHooksConfigJson',
     'planRuntimePreCommandRuleJson',
     'planRuntimePreCommandStateSelectionJson',
+    'planRuntimePreCommandStateRuntimeActionJson',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-required-export',
@@ -3170,7 +3176,7 @@ function checkPreCommandHooksRustOwner() {
     'servertool-pre-command-hooks-runtime-selection-thin-shell',
     `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
     serverSideToolsImpl,
-    'planRuntimePreCommandStateSelectionWithNative({'
+    'planRuntimePreCommandStateRuntimeActionWithNative({'
   );
   for (const keyword of [
     'function normalizePreCommandHookRule',

@@ -8,6 +8,7 @@ import {
   isAdapterClientDisconnectedWithNative,
   planClientDisconnectWatcherWithNative,
   planServertoolClientDisconnectedErrorWithNative,
+  planServertoolStateLoadFailedErrorWithNative,
   planServertoolTimeoutErrorWithNative,
   planServertoolTimeoutWatcherWithNative,
   planStopMessageFetchFailedErrorWithNative,
@@ -131,6 +132,22 @@ export function createStopMessageFetchFailedError(options: {
   maxAttempts?: number;
 }): ProviderProtocolError & { status?: number } {
   return buildProviderProtocolError(planStopMessageFetchFailedErrorWithNative(options));
+}
+
+export function createServertoolStateLoadFailedError(options: {
+  requestId: string;
+  stickyKey: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  error: string;
+}): ProviderProtocolError & { status?: number } {
+  return buildProviderProtocolError(planServertoolStateLoadFailedErrorWithNative(options));
+}
+
+export function createServertoolProviderProtocolErrorFromPlan(
+  plan: ServertoolErrorPlan
+): ProviderProtocolError & { status?: number } {
+  return buildProviderProtocolError(plan);
 }
 
 function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {

@@ -117,6 +117,8 @@ const TARGETS = [
       'if (!persistentScopeKey) {',
       'asObject(directRuntime?.preCommandState) ??',
       'asObject((runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState)',
+      'planRuntimePreCommandStateSelectionWithNative({',
+      'createServertoolStateLoadFailedError(',
     ],
   },
   {

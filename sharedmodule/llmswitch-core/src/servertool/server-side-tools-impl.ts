@@ -27,7 +27,7 @@ import {
   extractTextFromChatLikeWithNative,
   planServertoolEntryPreflightWithNative,
   planServertoolExecutionBranchWithNative,
-  planRuntimePreCommandStateSelectionWithNative,
+  planRuntimePreCommandStateRuntimeActionWithNative,
   planServertoolResponseStageRuntimeActionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
@@ -40,7 +40,7 @@ import {
 import { runServertoolAutoHookCallerViaThinShell } from './auto-hook-caller.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import {
-  createServertoolStateLoadFailedError,
+  createServertoolProviderProtocolErrorFromPlan,
   createServerToolClientDisconnectedError,
   isAdapterClientDisconnected
 } from './timeout-error-block.js';
@@ -103,34 +103,52 @@ const runServerSideToolEngineViaThinShell = async (
   const persistentScopeKey = resolveServertoolPersistentScopeKey(options.adapterContext);
   const runtimePreCommandState = (() => {
     const directRuntime = asObject((options.adapterContext as Record<string, unknown> | undefined)?.__rt);
-    const initialSelection = planRuntimePreCommandStateSelectionWithNative({
+    const runtimeActionBase = {
       directRuntimePreCommandState: directRuntime?.preCommandState,
       runtimeMetadataPreCommandState: (runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState,
-      hasPersistentScopeKey: Boolean(persistentScopeKey),
+      hasPersistentScopeKey: Boolean(persistentScopeKey)
+    };
+    const initialAction = planRuntimePreCommandStateRuntimeActionWithNative({
+      ...runtimeActionBase,
       persistedLoadAttempted: false
     });
-    if (initialSelection.action === 'use_selected') {
-      return initialSelection.state as JsonObject | undefined;
+    if (initialAction.action === 'use_selected') {
+      return initialAction.state as JsonObject | undefined;
     }
     try {
       const persistedState = loadRoutingInstructionStateSync(persistentScopeKey);
-      const persistedSelection = planRuntimePreCommandStateSelectionWithNative({
-        directRuntimePreCommandState: directRuntime?.preCommandState,
-        runtimeMetadataPreCommandState: (runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState,
+      const persistedAction = planRuntimePreCommandStateRuntimeActionWithNative({
+        ...runtimeActionBase,
         hasPersistentScopeKey: true,
         persistedState: persistedState ? (JSON.parse(JSON.stringify(persistedState)) as JsonObject) : undefined,
         persistedLoadAttempted: true
       });
-      return persistedSelection.state as JsonObject | undefined;
+      if (persistedAction.action !== 'use_selected') {
+        throw new Error(
+          `[servertool] invalid native pre-command runtime action after persisted load: ${String(persistedAction.action)}`
+        );
+      }
+      return persistedAction.state as JsonObject | undefined;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-      const wrapped = createServertoolStateLoadFailedError({
-        stickyKey: persistentScopeKey,
+      const failedAction = planRuntimePreCommandStateRuntimeActionWithNative({
+        ...runtimeActionBase,
+        hasPersistentScopeKey: true,
+        persistedLoadAttempted: true,
+        persistedLoadError: message,
         requestId: options.requestId,
+        stickyKey: persistentScopeKey ?? '',
         entryEndpoint: options.entryEndpoint,
-        providerProtocol: options.providerProtocol,
-        error: message
-      }) as ReturnType<typeof createServertoolStateLoadFailedError> & { cause?: unknown };
+        providerProtocol: options.providerProtocol
+      });
+      if (failedAction.action !== 'throw_state_load_failed' || !failedAction.errorPlan) {
+        throw new Error(
+          `[servertool] invalid native pre-command runtime action for persisted load error: ${String(failedAction.action)}`
+        );
+      }
+      const wrapped = createServertoolProviderProtocolErrorFromPlan(
+        failedAction.errorPlan
+      ) as ReturnType<typeof createServertoolProviderProtocolErrorFromPlan> & { cause?: unknown };
       wrapped.status = 500;
       wrapped.cause = error;
       throw wrapped;
