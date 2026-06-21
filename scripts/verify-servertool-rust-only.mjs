@@ -101,6 +101,7 @@ const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
 const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block.ts`;
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
+const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch-runtime-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
@@ -2671,6 +2672,13 @@ function checkServertoolExecutionDispatchRustOwner() {
     'execution-shell.ts must stay physically deleted after moving pre-command wrappers to pre-command-hooks.ts and direct imports to execution-handler-materialization-shell.ts'
   );
 
+  assertContains(
+    'servertool-execution-branch-runtime-shell-owner',
+    TS_EXECUTION_BRANCH_RUNTIME_SHELL,
+    readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL),
+    'planServertoolExecutionBranchWithNative'
+  );
+
   for (const [check, file, content, needle] of [
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'feature_id: hub.servertool_execution_branch_contract'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'pub fn plan_servertool_execution_branch'],
@@ -2679,7 +2687,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_branch_json'],
     ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchJson'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
-    ['servertool-execution-branch-ts-thin-shell', `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`, serverSideToolsImpl, 'planServertoolExecutionBranchWithNative'],
+    ['servertool-execution-branch-ts-thin-shell', `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`, serverSideToolsImpl, 'planServertoolExecutionBranchRuntimeAction('],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_BRANCH_RUNTIME_SHELL, readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL), 'planServertoolExecutionBranchWithNative('],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'projected_tool_call_index'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCallIndex'],
     ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'feature_id: hub.servertool_engine_preflight_contract'],

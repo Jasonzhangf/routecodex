@@ -23,8 +23,7 @@ import {
 import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
 import {
   extractTextFromChatLikeWithNative,
-  planServertoolEntryPreflightWithNative,
-  planServertoolExecutionBranchWithNative
+  planServertoolEntryPreflightWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   filterOutExecutedToolCalls,
@@ -39,6 +38,7 @@ import {
   collectAdditionalClientToolCalls,
   isClientExecCliProjectionToolCall
 } from './cli-projection-runtime-shell.js';
+import { planServertoolExecutionBranchRuntimeAction } from './execution-branch-runtime-shell.js';
 import {
   createServerToolClientDisconnectedError,
   isAdapterClientDisconnected
@@ -137,12 +137,8 @@ export const runServerSideToolEngine = async (
     })
   );
 
-  const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({
-    executableToolCalls: dispatchPlan.executableToolCalls.map((toolCall) => ({
-      id: toolCall.id,
-      name: toolCall.name,
-      executionMode: toolCall.executionMode
-    })),
+  const preExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction({
+    executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: 0
   });
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
@@ -161,12 +157,8 @@ export const runServerSideToolEngine = async (
     baseForExecution
   });
 
-  const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({
-    executableToolCalls: dispatchPlan.executableToolCalls.map((toolCall) => ({
-      id: toolCall.id,
-      name: toolCall.name,
-      executionMode: toolCall.executionMode
-    })),
+  const postExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction({
+    executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: executionState.executedToolCalls.length
   });
   if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {

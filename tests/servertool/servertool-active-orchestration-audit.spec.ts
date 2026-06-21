@@ -116,6 +116,14 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/execution-branch-runtime-shell.ts',
+    forbidden: [],
+    required: [
+      'planServertoolExecutionBranchWithNative',
+      'executableToolCalls.map(',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
     forbidden: [
       "import './handlers/stop-message-auto.js';",
@@ -133,6 +141,7 @@ const TARGETS = [
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
       '[servertool] native execution-branch projected missing tool call id:',
       '[servertool] native execution-branch projected missing tool call index:',
+      'planServertoolExecutionBranchWithNative(',
       'buildServertoolCliProjectionForToolCall(',
       'buildServertoolCliProjectionExecutionContextWithNative(',
       'capabilities: runtimeCapabilities',
@@ -279,6 +288,12 @@ describe('servertool active orchestration audit', () => {
       const source = fs.readFileSync(repoPath(target.file), 'utf8');
       const hits = target.forbidden.filter((marker) => source.includes(marker));
       expect(hits).toEqual([]);
+      if (Array.isArray((target as { required?: string[] }).required)) {
+        const misses = ((target as { required?: string[] }).required ?? []).filter(
+          (marker) => !source.includes(marker)
+        );
+        expect(misses).toEqual([]);
+      }
     });
   }
 });

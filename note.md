@@ -11036,3 +11036,21 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 ## 2026-06-22 responses request-context merge for port-scoped continuation
 - root cause candidate confirmed in code: resolveResponsesRequestContextForHttp previously replaced fallback with MetadataCenter whole object, which could drop matchedPort/routingPolicyGroup on submit_tool_outputs follow-up SSE persist.
 - fix: merge metadata requestContext with fallback so port scope survives when metadata copy omits it; added red tests in request-context-resolution + responses-store-integration.
+
+## 2026-06-22 servertool execution-branch runtime shell 下沉
+
+- 本轮把 `server-side-tools-impl.ts` 里 pre/post execution branch 计划（`planServertoolExecutionBranchWithNative(...)` 两次相邻调用）整体抽到新文件 `sharedmodule/llmswitch-core/src/servertool/execution-branch-runtime-shell.ts`。
+- 唯一对外 helper：`planServertoolExecutionBranchRuntimeAction({ executableToolCalls, executedToolCallsLen })`，内部仍调 `planServertoolExecutionBranchWithNative(...)`。
+- `server-side-tools-impl.ts` 不再持有 `planServertoolExecutionBranchWithNative(...)` 的 inline 调用；只保留两次 helper 消费。
+- 同步新增 `tests/servertool/execution-branch-runtime-shell.spec.ts`，覆盖 source owner marker 和 cli / outcome 两条 plan 行为。
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts` 现在支持 `required` markers，并把 `execution-branch-runtime-shell.ts` 锁成必须含 native planner；`server-side-tools-impl.ts` 新增 forbidden：`planServertoolExecutionBranchWithNative(`。
+- `scripts/verify-servertool-rust-only.mjs` 新增 `TS_EXECUTION_BRANCH_RUNTIME_SHELL`，并把 execution-branch thin-shell 检查改成：
+  - `server-side-tools-impl.ts` 必须含 `planServertoolExecutionBranchRuntimeAction(`
+  - `execution-branch-runtime-shell.ts` 必须含 `planServertoolExecutionBranchWithNative(`
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/execution-branch-runtime-shell.spec.ts tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/server-side-tools.cli-projection-guard.spec.ts tests/servertool/execution-dispatch-outcome-shell.spec.ts --runInBand` => 5 suites / 33 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` => PASS
+  - `node scripts/build-core.mjs` => PASS
+- 当前状态：
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 已降到 214 行
+  - 仍未完成 Rust-only closeout，`binding pending` 不变；下一刀仍应优先看 response-stage gate/finalize 或 `extractToolCalls(...)` 这类残余编排 owner
