@@ -39,6 +39,7 @@ import {
 } from './orchestration-blocks.js';
 import { runServertoolAutoHookCallerViaThinShell } from './auto-hook-caller.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
+import { deriveServertoolRuntimeCapabilities } from './runtime-capabilities.js';
 import {
   createServertoolProviderProtocolErrorFromPlan,
   createServerToolClientDisconnectedError,
@@ -81,6 +82,7 @@ const runServerSideToolEngineViaThinShell = async (
   }
   const baseObject = base as JsonObject;
   const toolCalls = extractToolCallsImpl(baseObject, options.requestId);
+  const runtimeCapabilities = deriveServertoolRuntimeCapabilities(options);
   const contextBase: Omit<ServerToolHandlerContext, 'toolCall'> = {
     base: baseObject,
     toolCalls,
@@ -89,14 +91,51 @@ const runServerSideToolEngineViaThinShell = async (
     entryEndpoint: options.entryEndpoint,
     providerProtocol: options.providerProtocol,
     capabilities: {
-      reenterPipeline: typeof options.reenterPipeline === 'function',
-      providerInvoker: typeof options.providerInvoker === 'function'
+      reenterPipeline: runtimeCapabilities.reenterPipeline,
+      providerInvoker: runtimeCapabilities.providerInvoker
     }
   };
   const includeToolCallNames = normalizeFilterTokenSet(options.includeToolCallHandlerNames);
   const excludeToolCallNames = normalizeFilterTokenSet(options.excludeToolCallHandlerNames);
   const includeAutoHookIds = normalizeFilterTokenSet(options.includeAutoHookIds);
   const excludeAutoHookIds = normalizeFilterTokenSet(options.excludeAutoHookIds);
+  const responseHookStagePlan = planServertoolResponseStageGateWithNative({
+    payload: baseObject,
+    adapterContext: options.adapterContext as Record<string, unknown>,
+    capabilities: runtimeCapabilities
+  });
+  if (responseHookStagePlan.responseHookMatched) {
+    const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+      responseStageGatePlan: responseHookStagePlan,
+      autoHookEvaluated: false,
+      hasAutoHookResult: false
+    });
+    if (preAutoHookRuntimeAction.action !== 'return_passthrough_bypass') {
+      const autoHookResult = await runServertoolAutoHookCallerImpl({
+        options,
+        contextBase: contextBase as ServerToolHandlerContext,
+        includeAutoHookIds,
+        excludeAutoHookIds
+      });
+      const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+        responseStageGatePlan: responseHookStagePlan,
+        autoHookEvaluated: true,
+        hasAutoHookResult: Boolean(autoHookResult)
+      });
+      if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
+        return autoHookResult as ServerSideToolEngineResult;
+      }
+      if (responseHookStagePlan.responseHookRequired) {
+        throw Object.assign(
+          new Error(`[servertool] required response hook produced no result: ${responseHookStagePlan.responseHookName ?? 'unknown'}`),
+          {
+            code: 'SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY',
+            status: 500
+          }
+        );
+      }
+    }
+  }
 
   const baseForExecution = cloneJson(baseObject) as JsonObject;
   const runtimeMetadata = readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);
@@ -242,14 +281,10 @@ const runServerSideToolEngineViaThinShell = async (
     });
   }
 
-  const responseStagePlan = planServertoolResponseStageGateWithNative({
+  const responseStagePlan = responseHookStagePlan.responseHookMatched ? responseHookStagePlan : planServertoolResponseStageGateWithNative({
     payload: baseObject,
     adapterContext: options.adapterContext as Record<string, unknown>,
-    capabilities: {
-      providerInvoker: typeof options.providerInvoker === 'function',
-      reenterPipeline: typeof options.reenterPipeline === 'function',
-      clientInjectDispatch: false
-    }
+    capabilities: runtimeCapabilities
   });
   const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: responseStagePlan,

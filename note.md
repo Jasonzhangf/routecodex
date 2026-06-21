@@ -1,3 +1,28 @@
+## 2026-06-22 reasoningStop response-hook tool_call closure
+
+- 样本边界已重新锁定：`reasoningStop` 是 response hook 的 internal stop tool，不是 client-visible tool；客户端最终只能看到 `exec_command(routecodex hook run reasoningStop ...)`。
+- 这轮先后排除了两个假因：
+  - 只修 `HubPipeline` effect 去重不够，client-visible payload 仍会看到 raw `reasoningStop`；
+  - 直接在 `build_responses_payload_from_chat_core()` 里跳过 `reasoningStop` 是错修，会把 `/v1/responses` payload 变成 `output=[]` 并触发 `EMPTY_ASSISTANT_RESPONSE`。
+- 真根因链：
+  - `HubPipeline` 原本把 `stop_eligible_followup` 也绑在 `should_plan_servertool_runtime_action(metadata.runtimeEffects.*)` 上；
+  - `/v1/responses` 的 response hook CLI projection 不依赖 providerInvoker/reenter/clientInject callback，所以 live/blackbox 中根本没产出 `servertoolRuntimeAction`；
+  - 补完后又暴露第二层骨架问题：planner 把 `stop_eligible_followup` 当成普通 `requireRuntimeExecutor`，在无 executor callback 时抛 `Rust HubPipeline servertoolRuntimeAction requires runtime executor`。
+- 正确修复：
+  - `hub_pipeline_lib/engine.rs`：`stop_eligible_followup` 独立于 runtime callbacks 规划；
+  - `hub_pipeline_lib/engine.rs` + `effect_plan.rs`：新增/启用 `requireResponseHookRuntime` 动作类型，供 response required hook 本地执行，不再借用 `requireRuntimeExecutor`。
+- 关键验证：
+  - Rust focused：
+    - `responses_reasoning_stop_tool_call_emits_stop_runtime_action_without_runtime_callbacks` -> PASS
+    - `plans_servertool_runtime_action_execution_in_rust` -> PASS
+  - native rebuild：`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - 黑盒：`tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts --runInBand` -> 4/4 PASS
+  - 黑盒日志真相：
+    - `tool=stop_message_auto ... finish_reason=tool_calls_internal_stop_tool eligible=true match=activated ...`
+    - 说明 `reasoningStop tool_call` 已被 response hook 正常拦截并进入 CLI projection 闭环。
+- 测试边界纠偏：
+  - 新增过一条 `convertProviderResponse` focused unit，但它不是最终 client-visible boundary，和黑盒边界不一致；已物理删除，避免留下过时断言。
+
 ## 2026-06-21 codex-samples stopless legacy shell-history closeout
 
 - Jason 要求“根据样本闭环”，本轮直接以 `~/.rcc/codex-samples/openai-responses/port-5555/req_1782044107054_dbbc0a5f/provider-request.json` 为坏样本真源。
@@ -10142,3 +10167,26 @@ ecodev profile 强依赖 stream 字段决定 endpoint，直连测试必须传 st
   - `adhoc-handler-test-support.ts` 已经是 native-only 薄壳；
   - 这次的修复属于“测试契约 → 现有 native 真相”的对齐，不是 runtime 改造；
   - 不要把 `"trigger === 'auto'"` 重新塞进 audit；后续若 native 行为变化，改 `normalize_servertool_registration_spec_json` 的 Rust 真源，顺势把 mock 与断言同步。
+
+## 2026-06-22 response-stage runtime capabilities thin-shell closeout
+
+- 本轮 slice 目标：收口 `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 里 response-stage capabilities 的残余 TS 假值，让 response hook gate 只消费“当前 runtime 是否真的具备该能力”的薄壳探测结果。
+- 已确认根因：
+  - `tests/servertool/server-side-tools.failfast.spec.ts` 之前把 `normalizeServertoolRegistrationSpecWithNative` mock 成 `() => null`，导致 `failfast_test_tool` 根本没注册进去；
+  - `server-side-tools-impl.ts` 之前把 response-stage `capabilities` 硬编码成 `false/false/false`，与 focused failfast 里“providerInvoker 存在时应视为可用”的当前 contract 冲突。
+- 变更点：
+  - 新增 `sharedmodule/llmswitch-core/src/servertool/runtime-capabilities.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts`
+  - `tests/servertool/server-side-tools.failfast.spec.ts`
+- 关键收口：
+  - response-stage gate 改为走 `deriveServertoolRuntimeCapabilities(...)`；
+  - helper 改成接受 `unknown` 做 duck-typing 探测，不再在调用点把 `ServerSideToolEngineOptions` 假装成 `Record<string, unknown>`；
+  - failfast spec 的 native mock 对齐 Rust registration 默认真相：`tool_call -> guarded`，`auto -> auto_hook + default autoHook descriptor`。
+- 串行验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` -> 2 suites / 18 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` -> PASS
+  - `node scripts/build-core.mjs` -> PASS
+- 结论：
+  - response-stage capabilities 不再由 TS 壳层伪造固定 false；
+  - 这轮还只是 response-stage/failfast slice 收口，不代表整个 hook skeleton 已 anchored；
+  - 后续继续审计 `server-side-tools-impl.ts` / `engine.ts` / execution shells 里剩余 TS 活语义时，focused Jest mock 必须继续跟 native registration 真相同源。

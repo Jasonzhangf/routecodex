@@ -638,7 +638,29 @@ jest.unstable_mockModule(
     visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
     visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
     resolveServertoolToolSpecWithNative: jest.fn(() => null),
-    normalizeServertoolRegistrationSpecWithNative: jest.fn(() => null)
+    normalizeServertoolRegistrationSpecWithNative: jest.fn((input: any) => {
+      const name = String(input?.name ?? '').trim().toLowerCase();
+      if (!name) {
+        return null;
+      }
+      const trigger = input?.options?.trigger === 'auto' ? 'auto' : 'tool_call';
+      return {
+        name,
+        enabled: true,
+        trigger,
+        executionMode: trigger === 'auto' ? 'auto_hook' : 'guarded',
+        stripAfterExecute: true,
+        ...(trigger === 'auto'
+          ? {
+              autoHook: {
+                id: name,
+                phase: 'default',
+                priority: 100
+              }
+            }
+          : {})
+      };
+    })
   })
 );
 
