@@ -11054,3 +11054,34 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 当前状态：
   - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 已降到 214 行
   - 仍未完成 Rust-only closeout，`binding pending` 不变；下一刀仍应优先看 response-stage gate/finalize 或 `extractToolCalls(...)` 这类残余编排 owner
+
+## 2026-06-22 servertool response-stage finalize shell 下沉
+
+- 本轮把 `server-side-tools-impl.ts` 尾部 response-stage finalize 编排抽到新文件 `sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts`。
+- 新 helper：`finalizeServertoolResponseStage({ options, baseObject, contextBase, includeAutoHookIds, excludeAutoHookIds, initialResponseStageGatePlan })`
+  - 复用已匹配的 `initialResponseStageGatePlan`
+  - 若初始 plan 未命中，则在 helper 内统一补 `planServertoolResponseStageGateWithNative(...)`
+  - 统一收口 `return_passthrough_bypass` / `return_auto_hook_result` / 默认 passthrough
+- `server-side-tools-impl.ts` 不再持有：
+  - `const responseStagePlan = responseHookStagePlan.responseHookMatched ? ...`
+  - 尾部 `responseStageAutoHook.action === 'return_passthrough_bypass'`
+  - 尾部默认 `return { mode: 'passthrough', finalChatResponse: baseObject }`
+- 同步新增 `tests/servertool/response-stage-finalize-shell.spec.ts`，覆盖：
+  - 已命中 gate plan 复用，不重复规划
+  - 未命中时 helper 内补 gate
+  - auto-hook result / bypass passthrough 两条 finalize 行为
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts` 新增 `response-stage-finalize-shell.ts` required markers：
+  - `planServertoolResponseStageGateWithNative`
+  - `runServertoolResponseStageAutoHookPass`
+  - `return { mode: 'passthrough', finalChatResponse: args.baseObject };`
+- `scripts/verify-servertool-rust-only.mjs` 新增 `TS_RESPONSE_STAGE_FINALIZE_SHELL`，并锁：
+  - 新 shell 必须含 `planServertoolResponseStageGateWithNative`
+  - 新 shell 必须含 `runServertoolResponseStageAutoHookPass`
+  - `server-side-tools-impl.ts` 禁止复活尾部 `responseStagePlan` 选择和 bypass 分支
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/response-stage-finalize-shell.spec.ts tests/servertool/response-stage-auto-hook-shell.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/server-side-tools.failfast.spec.ts --runInBand` => 4 suites / 31 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` => PASS
+  - `node scripts/build-core.mjs` => PASS
+- 当前状态：
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 已降到 205 行
+  - 仍未完成 Rust-only closeout；下一刀候选更集中到 `extractToolCalls(...)` 或 response-stage pre-pass / dispatch tail 的残余编排

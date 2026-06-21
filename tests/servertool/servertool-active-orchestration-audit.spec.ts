@@ -124,6 +124,15 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts',
+    forbidden: [],
+    required: [
+      'planServertoolResponseStageGateWithNative',
+      'runServertoolResponseStageAutoHookPass',
+      "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
     forbidden: [
       "import './handlers/stop-message-auto.js';",
@@ -163,6 +172,8 @@ const TARGETS = [
       'directRuntime?.preCommandState',
       'runtimeMetadataPreCommandState:',
       'planRuntimePreCommandStateRuntimeActionWithNative({',
+      'const responseStagePlan = responseHookStagePlan.responseHookMatched ? responseHookStagePlan : planServertoolResponseStageGateWithNative(',
+      "if (responseStageAutoHook.action === 'return_passthrough_bypass') {",
       "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
       'function getArray(value: unknown): JsonValue[] {',
     ],

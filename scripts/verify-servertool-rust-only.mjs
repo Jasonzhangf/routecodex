@@ -102,6 +102,7 @@ const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
 const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch-runtime-shell.ts`;
+const TS_RESPONSE_STAGE_FINALIZE_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
@@ -5500,6 +5501,20 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-gate-thin-shell',
     'server-side-tools.ts does not retain response-stage wrapper alias'
   );
+
+  const responseStageFinalizeShell = readRequired(TS_RESPONSE_STAGE_FINALIZE_SHELL);
+  assertContains(
+    'servertool-response-stage-finalize-shell-owner',
+    TS_RESPONSE_STAGE_FINALIZE_SHELL,
+    responseStageFinalizeShell,
+    'planServertoolResponseStageGateWithNative'
+  );
+  assertContains(
+    'servertool-response-stage-finalize-shell-owner',
+    TS_RESPONSE_STAGE_FINALIZE_SHELL,
+    responseStageFinalizeShell,
+    'runServertoolResponseStageAutoHookPass'
+  );
 }
 
 function checkServertoolEngineStoplessSessionThinShell() {
@@ -5575,6 +5590,8 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'if (isAdapterClientDisconnected(options.adapterContext)) {',
         'responseStageNextAction:',
         "(responseStagePlan as Record<string, unknown>).nextAction",
+        'const responseStagePlan = responseHookStagePlan.responseHookMatched ? responseHookStagePlan : planServertoolResponseStageGateWithNative(',
+        "if (responseStageAutoHook.action === 'return_passthrough_bypass') {",
         "postAutoHookRuntimeAction.action === 'return_auto_hook_result' && autoHookResult",
         "const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative(",
         "const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative(",

@@ -33,6 +33,7 @@ import {
 } from './orchestration-blocks.js';
 import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
+import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
 import {
   buildServertoolCliProjectionBranchResult,
   collectAdditionalClientToolCalls,
@@ -174,24 +175,14 @@ export const runServerSideToolEngine = async (
     });
   }
 
-  const responseStagePlan = responseHookStagePlan.responseHookMatched ? responseHookStagePlan : planServertoolResponseStageGateWithNative({
-    payload: baseObject,
-    adapterContext: options.adapterContext as Record<string, unknown>
-  });
-  const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
+  return finalizeServertoolResponseStage({
     options,
+    baseObject,
     contextBase: contextBase as ServerToolHandlerContext,
     includeAutoHookIds,
     excludeAutoHookIds,
-    responseStageGatePlan: responseStagePlan as Record<string, unknown>
+    initialResponseStageGatePlan: responseHookStagePlan as Record<string, unknown>
   });
-  if (responseStageAutoHook.action === 'return_passthrough_bypass') {
-    return { mode: 'passthrough', finalChatResponse: baseObject };
-  }
-  if (responseStageAutoHook.action === 'return_auto_hook_result') {
-    return responseStageAutoHook.result;
-  }
-  return { mode: 'passthrough', finalChatResponse: baseObject };
 };
 
 export const extractToolCalls = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {
