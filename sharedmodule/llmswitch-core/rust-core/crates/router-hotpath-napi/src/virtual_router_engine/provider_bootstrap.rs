@@ -490,12 +490,16 @@ fn build_provider_profiles(
                 target_key, parsed.provider_id
             )
         })?;
-        let canonical_model_id = resolve_canonical_model_id(&parsed.model_id, model_info).ok_or_else(|| {
-            format!(
-                "Routing target {} references unknown model {} for provider {}",
-                target_key, parsed.model_id, parsed.provider_id
-            )
-        })?;
+        let canonical_model_id = if model_info.declared {
+            resolve_canonical_model_id(&parsed.model_id, model_info).ok_or_else(|| {
+                format!(
+                    "Routing target {} references unknown model {} for provider {}",
+                    target_key, parsed.model_id, parsed.provider_id
+                )
+            })?
+        } else {
+            parsed.model_id.clone()
+        };
 
         let model_streaming_pref = runtime
             .model_streaming

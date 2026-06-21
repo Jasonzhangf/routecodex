@@ -222,14 +222,14 @@ pub(crate) fn expand_routing_table_impl(
                 }
 
                 let canonical_model_id = if let Some(model_info) = model_index.get(&parsed.provider_id) {
-                    let canonical_model_id = resolve_canonical_model_id(&parsed.model_id, model_info)
-                        .ok_or_else(|| {
-                            format!(
-                                "Route \"{}\" references unknown model \"{}\" for provider \"{}\"",
-                                route_name, parsed.model_id, parsed.provider_id
-                            )
-                        })?;
                     if model_info.declared {
+                        let canonical_model_id = resolve_canonical_model_id(&parsed.model_id, model_info)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Route \"{}\" references unknown model \"{}\" for provider \"{}\"",
+                                    route_name, parsed.model_id, parsed.provider_id
+                                )
+                            })?;
                         if canonical_model_id.trim().is_empty() {
                             return Err(format!(
                                 "Route \"{}\" references empty model id for provider \"{}\"",
@@ -248,8 +248,10 @@ pub(crate) fn expand_routing_table_impl(
                                 route_name, parsed.model_id, parsed.provider_id
                             ));
                         }
+                        canonical_model_id
+                    } else {
+                        parsed.model_id.clone()
                     }
-                    canonical_model_id
                 } else {
                     parsed.model_id.clone()
                 };
