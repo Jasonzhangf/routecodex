@@ -10,44 +10,6 @@ const adHocToolHandlerRegistry: Record<string, ServerToolHandlerEntry> = Object.
 const adHocAutoHandlerRegistry: ServerToolHandlerEntry[] = [];
 let adHocAutoHookOrder = 0;
 
-function buildAdHocRegistration(
-  name: string,
-  options?: {
-    trigger?: TriggerMode;
-    priority?: number;
-    phase?: AutoHookPhase | string;
-    hook?: {
-      priority?: number;
-      phase?: AutoHookPhase | string;
-    };
-  }
-): ServerToolHandlerRegistrationSpec {
-  const canonicalName = name.trim().toLowerCase();
-  const trigger = options?.trigger === 'auto' ? 'auto' : 'tool_call';
-  const hookPhase = options?.hook?.phase === 'pre' || options?.hook?.phase === 'post'
-    ? options.hook.phase
-    : 'default';
-  const hookPriority = Number.isFinite(options?.hook?.priority)
-    ? Number(options?.hook?.priority)
-    : 100;
-  return {
-    name: canonicalName,
-    enabled: true,
-    trigger,
-    executionMode: 'guarded',
-    stripAfterExecute: true,
-    ...(trigger === 'auto'
-      ? {
-          autoHook: {
-            id: canonicalName,
-            phase: hookPhase,
-            priority: hookPriority
-          }
-        }
-      : {})
-  };
-}
-
 export function registerAdHocHandlerForTests(
   name: string,
   handler: ServerToolHandler,
@@ -62,9 +24,7 @@ export function registerAdHocHandlerForTests(
   }
 ): void {
   if (!name || typeof name !== 'string' || typeof handler !== 'function') return;
-  const registration =
-    normalizeServerToolRegistrationSpec(name, options) ??
-    buildAdHocRegistration(name, options);
+  const registration = normalizeServerToolRegistrationSpec(name, options);
   if (!registration || !registration.enabled) {
     return;
   }
@@ -88,11 +48,8 @@ export function registerAdHocHandlerForTests(
 }
 
 export function getAdHocHandlerEntry(name: string): ServerToolHandlerEntry | undefined {
-  const registration = normalizeServerToolRegistrationSpec(name) ?? buildAdHocRegistration(name);
-  if (!registration) {
-    return undefined;
-  }
-  return adHocToolHandlerRegistry[registration.name];
+  const canonicalName = name.trim().toLowerCase();
+  return canonicalName ? adHocToolHandlerRegistry[canonicalName] : undefined;
 }
 
 export function listAdHocHandlerNames(): string[] {

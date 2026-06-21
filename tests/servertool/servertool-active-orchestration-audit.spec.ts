@@ -100,6 +100,16 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts',
+    forbidden: [
+      'function buildAdHocRegistration(',
+      "executionMode: 'guarded'",
+      'stripAfterExecute: true',
+      "phase: hookPhase",
+      'priority: hookPriority',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
     forbidden: [
       "import './handlers/stop-message-auto.js';",

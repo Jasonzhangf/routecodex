@@ -159,13 +159,29 @@ jest.unstable_mockModule(
       }
       const toolSpec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
       const trigger = toolSpec?.trigger?.type ?? input.options?.trigger ?? 'tool_call';
-      const executionMode = toolSpec?.execution?.mode ?? input.options?.executionMode ?? 'guarded';
+      const executionMode =
+        toolSpec?.execution?.mode ??
+        input.options?.executionMode ??
+        (trigger === 'auto' ? 'auto_hook' : 'guarded');
       return {
         name,
         enabled: toolSpec?.enabled ?? true,
         trigger,
         executionMode,
-        stripAfterExecute: toolSpec?.execution?.stripAfterExecute ?? true
+        stripAfterExecute: toolSpec?.execution?.stripAfterExecute ?? true,
+        ...(trigger === 'auto'
+          ? {
+              autoHook: {
+                id: name,
+                phase: toolSpec?.trigger?.phase ?? input.options?.hook?.phase ?? input.options?.phase ?? 'default',
+                priority:
+                  toolSpec?.trigger?.priority ??
+                  input.options?.hook?.priority ??
+                  input.options?.priority ??
+                  100
+              }
+            }
+          : {})
       };
     }),
     resolveServertoolToolSpecWithNative: jest.fn((input: any) => {
@@ -284,13 +300,29 @@ jest.unstable_mockModule(
       }
       const toolSpec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
       const trigger = toolSpec?.trigger?.type ?? input.options?.trigger ?? 'tool_call';
-      const executionMode = toolSpec?.execution?.mode ?? input.options?.executionMode ?? 'guarded';
+      const executionMode =
+        toolSpec?.execution?.mode ??
+        input.options?.executionMode ??
+        (trigger === 'auto' ? 'auto_hook' : 'guarded');
       return {
         name,
         enabled: toolSpec?.enabled ?? true,
         trigger,
         executionMode,
-        stripAfterExecute: toolSpec?.execution?.stripAfterExecute ?? true
+        stripAfterExecute: toolSpec?.execution?.stripAfterExecute ?? true,
+        ...(trigger === 'auto'
+          ? {
+              autoHook: {
+                id: name,
+                phase: toolSpec?.trigger?.phase ?? input.options?.hook?.phase ?? input.options?.phase ?? 'default',
+                priority:
+                  toolSpec?.trigger?.priority ??
+                  input.options?.hook?.priority ??
+                  input.options?.priority ??
+                  100
+              }
+            }
+          : {})
       };
     }),
     resolveServertoolToolSpecWithNative: jest.fn((input: any) => {
@@ -592,9 +624,7 @@ describe('servertool skeleton config', () => {
 
     expect(listRegisteredServerToolHandlerNames()).toEqual([
       'custom_registry_tool',
-      'stop_message_auto',
-      'vision_auto',
-      'web_search'
+      'stop_message_auto'
     ]);
     expect(
       listRegisteredServerToolHandlerRecords().map((entry: any) => ({
@@ -604,9 +634,45 @@ describe('servertool skeleton config', () => {
     ).toEqual([
       { name: 'custom_registry_tool', trigger: 'tool_call' },
       { name: 'stop_message_auto', trigger: 'auto' },
-      { name: 'vision_auto', trigger: 'auto' },
       { name: 'custom_registry_auto', trigger: 'auto' }
     ]);
+  });
+
+  test('adhoc registration defaults also come from native normalization', async () => {
+    registerServerToolHandler('custom_native_defaults_tool', async () => null);
+    registerServerToolHandler('custom_native_defaults_auto', async () => null, {
+      trigger: 'auto'
+    });
+
+    const records = listRegisteredServerToolHandlerRecords().map((entry: any) => ({
+      name: entry.registration.name,
+      trigger: entry.registration.trigger,
+      executionMode: entry.registration.executionMode,
+      stripAfterExecute: entry.registration.stripAfterExecute,
+      autoHook: entry.registration.autoHook
+    }));
+
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'custom_native_defaults_tool',
+          trigger: 'tool_call',
+          executionMode: 'guarded',
+          stripAfterExecute: true
+        }),
+        expect.objectContaining({
+          name: 'custom_native_defaults_auto',
+          trigger: 'auto',
+          executionMode: 'auto_hook',
+          stripAfterExecute: true,
+          autoHook: expect.objectContaining({
+            id: 'custom_native_defaults_auto',
+            phase: 'default',
+            priority: 100
+          })
+        })
+      ])
+    );
   });
 
   test('auto hook queue order is finalized by native hook skeleton scheduler', () => {
