@@ -3378,3 +3378,5 @@ Tags: startupExcludedProviderKeys, virtual-router-config, direct_model, ecodev, 
 - 若旧测试/桩仍绑定 `ping`，必须物理删除或更新，不得保留“兼容用例”。
 - `install:global` 依赖 wiki/html sync；若门禁报 `servertool-ownership-map` 或 HTML out of sync，先重渲染 review 面再继续。
 - 这轮还确认：stopless live probe 里 `reasoningStop` 仍只投影为标准 `exec_command(routecodex hook run reasoningStop ...)`，客户端未见 raw reasoningStop。
+
+- 2026-06-22: 当 `server-side-tools-impl.ts` 同时在前置 response-stage 和后置 response-stage 各写一遍 `planServertoolResponseStageRuntimeActionWithNative(...) -> runServertoolAutoHookCaller(...) -> required empty / return result`，这已经不是“编排层复用”，而是活业务语义重复。当前最小合规收口方式是把这段重复调度抽成单独的 TS IO shell（本轮是 `response-stage-auto-hook-shell.ts`），让 `server-side-tools-impl.ts` 只消费统一 helper；并且必须同步把 active audit / rust-only verify 锁成 `server-side-tools-impl.ts` 禁止再直接持有这串 inline 流程。否则下一轮很容易继续在同一文件里补第二份 response-stage 判定。

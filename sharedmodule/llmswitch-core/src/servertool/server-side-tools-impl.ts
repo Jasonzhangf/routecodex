@@ -28,8 +28,7 @@ import {
   extractTextFromChatLikeWithNative,
   planServertoolEntryPreflightWithNative,
   planServertoolExecutionBranchWithNative,
-  planRuntimePreCommandStateRuntimeActionWithNative,
-  planServertoolResponseStageRuntimeActionWithNative
+  planRuntimePreCommandStateRuntimeActionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   filterOutExecutedToolCalls,
@@ -37,11 +36,10 @@ import {
   replaceJsonObjectInPlace,
   stripToolOutputs
 } from './orchestration-blocks.js';
-import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
+import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import {
   createServertoolProviderProtocolErrorFromPlan,
-  createServertoolRequiredResponseHookEmptyError,
   createServerToolClientDisconnectedError,
   isAdapterClientDisconnected
 } from './timeout-error-block.js';
@@ -99,34 +97,15 @@ export const runServerSideToolEngine = async (
     adapterContext: options.adapterContext as Record<string, unknown>
   });
   if (responseHookStagePlan.responseHookMatched) {
-    const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-      responseStageGatePlan: responseHookStagePlan,
-      autoHookEvaluated: false,
-      hasAutoHookResult: false,
-      responseHookRequired: responseHookStagePlan.responseHookRequired === true
+    const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
+      options,
+      contextBase: contextBase as ServerToolHandlerContext,
+      includeAutoHookIds,
+      excludeAutoHookIds,
+      responseStageGatePlan: responseHookStagePlan as Record<string, unknown>
     });
-    if (preAutoHookRuntimeAction.action !== 'return_passthrough_bypass') {
-    const autoHookResult = await runServertoolAutoHookCaller({
-        options,
-        contextBase: contextBase as ServerToolHandlerContext,
-        includeAutoHookIds,
-        excludeAutoHookIds
-      });
-      const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-        responseStageGatePlan: responseHookStagePlan,
-        autoHookEvaluated: true,
-        hasAutoHookResult: Boolean(autoHookResult),
-        responseHookRequired: responseHookStagePlan.responseHookRequired === true
-      });
-      if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
-        throw createServertoolRequiredResponseHookEmptyError({
-          requestId: options.requestId,
-          responseHookName: responseHookStagePlan.responseHookName ?? 'unknown'
-        });
-      }
-      if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
-        return autoHookResult as ServerSideToolEngineResult;
-      }
+    if (responseStageAutoHook.action === 'return_auto_hook_result') {
+      return responseStageAutoHook.result;
     }
   }
 
@@ -277,35 +256,18 @@ export const runServerSideToolEngine = async (
     payload: baseObject,
     adapterContext: options.adapterContext as Record<string, unknown>
   });
-  const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-    responseStageGatePlan: responseStagePlan,
-    autoHookEvaluated: false,
-    hasAutoHookResult: false,
-    responseHookRequired: responseStagePlan.responseHookRequired === true
-  });
-  if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass') {
-    return { mode: 'passthrough', finalChatResponse: baseObject };
-  }
-    const autoHookResult = await runServertoolAutoHookCaller({
+  const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
     options,
     contextBase: contextBase as ServerToolHandlerContext,
     includeAutoHookIds,
-    excludeAutoHookIds
+    excludeAutoHookIds,
+    responseStageGatePlan: responseStagePlan as Record<string, unknown>
   });
-  const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-    responseStageGatePlan: responseStagePlan,
-    autoHookEvaluated: true,
-    hasAutoHookResult: Boolean(autoHookResult),
-    responseHookRequired: responseStagePlan.responseHookRequired === true
-  });
-  if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
-    throw createServertoolRequiredResponseHookEmptyError({
-      requestId: options.requestId,
-      responseHookName: responseStagePlan.responseHookName ?? 'unknown'
-    });
+  if (responseStageAutoHook.action === 'return_passthrough_bypass') {
+    return { mode: 'passthrough', finalChatResponse: baseObject };
   }
-  if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
-    return autoHookResult as ServerSideToolEngineResult;
+  if (responseStageAutoHook.action === 'return_auto_hook_result') {
+    return responseStageAutoHook.result;
   }
   return { mode: 'passthrough', finalChatResponse: baseObject };
 };
