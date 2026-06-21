@@ -66,7 +66,7 @@ function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | nu
   return normalized.size > 0 ? normalized : null;
 }
 
-export const runServerSideToolEngineViaThinShell = async (
+export const runServerSideToolEngine = async (
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> => {
   const base = asObject(options.chatResponse);
@@ -83,7 +83,7 @@ export const runServerSideToolEngineViaThinShell = async (
     });
   }
   const baseObject = base as JsonObject;
-  const toolCalls = extractToolCallsViaImplThinShell(baseObject, options.requestId);
+  const toolCalls = extractToolCalls(baseObject, options.requestId);
   const contextBase: Omit<ServerToolHandlerContext, 'toolCall'> = {
     base: baseObject,
     toolCalls,
@@ -225,7 +225,7 @@ export const runServerSideToolEngineViaThinShell = async (
         `[servertool] native execution-branch projected missing tool call index: ${String(preExecutionBranchPlan.projectedToolCallIndex ?? '')}`
       );
     }
-    const additionalToolCalls = collectAdditionalClientToolCallsViaImplThinShell(baseObject, cliProjectedToolCall.id);
+    const additionalToolCalls = collectAdditionalClientToolCalls(baseObject, cliProjectedToolCall.id);
     const projection = buildServertoolCliProjectionForToolCall({
       options,
       toolCall: cliProjectedToolCall,
@@ -319,14 +319,14 @@ export function isClientExecCliProjectionToolCall(toolCall: ToolCall & { executi
   });
 }
 
-export const collectAdditionalClientToolCallsViaImplThinShell = (base: JsonObject, projectedToolCallId: string): JsonValue[] => {
+export const collectAdditionalClientToolCalls = (base: JsonObject, projectedToolCallId: string): JsonValue[] => {
   return collectServertoolAdditionalClientToolCallsWithNative({
     base,
     projectedToolCallId
   }) as JsonValue[];
 };
 
-export const extractToolCallsViaImplThinShell = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {
+export const extractToolCalls = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {
   const stage = runServertoolResponseStageWithNative(chatResponse, requestId);
   const normalizedPayload = asObject(stage.normalizedPayload) ?? chatResponse;
   replaceJsonObjectInPlace(chatResponse, normalizedPayload);

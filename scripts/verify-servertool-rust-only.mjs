@@ -5146,9 +5146,9 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'collectAdditionalClientToolCallsViaImplThinShell as collectAdditionalClientToolCalls',
-    'extractToolCallsViaImplThinShell as extractToolCalls',
-    'runServerSideToolEngineViaThinShell as runServerSideToolEngine',
+    'collectAdditionalClientToolCalls,',
+    'extractToolCalls,',
+    'runServerSideToolEngine',
   ]) {
     if (!tsServerSideTools.includes(marker)) {
       fail(
@@ -5164,9 +5164,9 @@ function checkServertoolRustOutcomeCloseout() {
     );
   }
   for (const marker of [
-    'export const runServerSideToolEngineViaThinShell =',
-    'export const collectAdditionalClientToolCallsViaImplThinShell =',
-    'export const extractToolCallsViaImplThinShell =',
+    'export const runServerSideToolEngine =',
+    'export const collectAdditionalClientToolCalls =',
+    'export const extractToolCalls =',
   ]) {
     if (!tsServerSideToolsImpl.includes(marker)) {
       fail(

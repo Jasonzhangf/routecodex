@@ -10808,3 +10808,16 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/server-side-tools.dispatch-native.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
   - `node scripts/build-core.mjs`
+
+## 2026-06-22 server-side-tools impl export-name shell delete
+
+- `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 不再保留 `runServerSideToolEngineViaThinShell`、`collectAdditionalClientToolCallsViaImplThinShell`、`extractToolCallsViaImplThinShell` 这组命名壳，改成直接导出 `runServerSideToolEngine`、`collectAdditionalClientToolCalls`、`extractToolCalls`。
+- `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts` 同步改成 direct re-export，不再做二次 alias。
+- focused mock / guard 同步：
+  - `tests/servertool/server-side-tools.cli-projection-guard.spec.ts`
+  - `tests/servertool/server-side-tools.failfast.spec.ts`
+- `scripts/verify-servertool-rust-only.mjs` 改成检查新的 direct re-export / impl export marker，不再要求旧 `ViaThinShell` / `ViaImplThinShell` 名字存在。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/server-side-tools.cli-projection-guard.spec.ts tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`

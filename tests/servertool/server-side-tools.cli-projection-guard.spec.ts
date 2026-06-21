@@ -3,12 +3,11 @@ import { describe, expect, jest, test } from '@jest/globals';
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js',
   () => ({
-    bindServertoolContractWithNative: jest.fn((value: unknown) => value),
     cloneJson: jest.fn((value: unknown) => JSON.parse(JSON.stringify(value))),
     extractTextFromChatLike: jest.fn(() => ''),
-    extractToolCallsImpl: jest.fn(() => []),
-    runServerSideToolEngineImpl: jest.fn(),
-    runServertoolAutoHookCallerImpl: jest.fn(),
+    extractToolCalls: jest.fn(() => []),
+    runServerSideToolEngine: jest.fn(),
+    runServertoolAutoHookCallerViaThinShell: jest.fn(),
     isClientExecCliProjectionToolCall: jest.fn((toolCall: any) =>
       Boolean(
         toolCall &&
@@ -16,7 +15,7 @@ jest.unstable_mockModule(
           toolCall.executionMode.trim() === 'client_exec_cli_projection'
       )
     ),
-    collectAdditionalClientToolCallsImpl: jest.fn((base: any, projectedToolCallId: string) => {
+    collectAdditionalClientToolCalls: jest.fn((base: any, projectedToolCallId: string) => {
       const choices = Array.isArray(base?.choices) ? base.choices : [];
       const first = choices[0] ?? {};
       const message = first?.message ?? {};

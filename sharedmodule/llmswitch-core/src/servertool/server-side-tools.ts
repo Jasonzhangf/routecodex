@@ -1,8 +1,7 @@
 export {
-  collectAdditionalClientToolCallsViaImplThinShell as collectAdditionalClientToolCalls,
+  collectAdditionalClientToolCalls,
   extractTextFromChatLike,
-  extractToolCallsViaImplThinShell as extractToolCalls,
+  extractToolCalls,
   isClientExecCliProjectionToolCall,
-  runServerSideToolEngineViaThinShell as runServerSideToolEngine
+  runServerSideToolEngine
 } from './server-side-tools-impl.js';
-export { runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller } from './auto-hook-caller.js';
