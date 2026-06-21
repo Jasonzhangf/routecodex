@@ -235,6 +235,33 @@ describe('log rollup', () => {
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(false);
   });
 
+  it('dedupes repeated realtime virtual-router-hit lines within a short window', async () => {
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';
+    process.env.ROUTECODEX_LOG_VR_REALTIME = '1';
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    const { recordVirtualRouterHitRollup } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
+
+    const event = {
+      routeName: 'thinking',
+      poolId: 'thinking-primary',
+      providerKey: 'XLC.key1',
+      model: 'glm-5.2',
+      sessionId: 'sid-dedupe',
+      projectPath: '/tmp/project-dedupe',
+      reason: 'thinking:user-input',
+      activeInFlight: 1,
+      maxInFlight: 4
+    };
+    recordVirtualRouterHitRollup(event);
+    recordVirtualRouterHitRollup(event);
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.filter((line) => line.includes('[virtual-router-hit][rt]'))).toHaveLength(1);
+    nowSpy.mockRestore();
+  });
+
   it('limits token provider rollup output to top 5 entries', async () => {
     process.env.ROUTECODEX_LOG_ROLLUP = '1';
     process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '0';
@@ -308,5 +335,38 @@ describe('log rollup', () => {
     expect(lines.some((line) => line.includes('[session-request][rt] session=sid-cache-rt'))).toBe(true);
     expect(lines.some((line) => line.replace(/\u001b\[[0-9;]*m/g, '').includes('cache.hit=75.0%'))).toBe(true);
     expect(lines.some((line) => line.includes('usage('))).toBe(true);
+  });
+
+  it('suppresses realtime session-request line when caller marks usage line as primary', async () => {
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { recordUsageRollup } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
+
+    recordUsageRollup({
+      requestId: 'req-cache-rt-suppressed',
+      routeName: 'thinking',
+      poolId: 'thinking-deepseek-web-primary',
+      providerKey: 'deepseek-web.clary',
+      model: 'deepseek-v4-pro',
+      sessionId: 'sid-cache-rt-suppressed',
+      projectPath: '/tmp/project-cache-rt',
+      latencyMs: 10000,
+      internalLatencyMs: 1000,
+      externalLatencyMs: 3000,
+      sseDecodeMs: 6000,
+      providerAttemptCount: 1,
+      retryCount: 0,
+      finishReason: 'stop',
+      promptTokens: 1000,
+      completionTokens: 200,
+      cacheReadTokens: 750,
+      cacheCreationTokens: 125,
+      totalTokens: 1200,
+      suppressRealtimeSessionLog: true
+    });
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.some((line) => line.includes('[session-request][rt] session=sid-cache-rt-suppressed'))).toBe(false);
   });
 });

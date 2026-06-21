@@ -52,7 +52,7 @@ import { PortRegistry } from './port-registry.js';
 import type { PortConfig } from './port-config-types.js';
 import { normalizePortsConfig, validatePortConfigs } from './port-config-validator.js';
 import {
-  detectInboundProtocolFromRequest,
+  resolveInboundProtocolFromEntryPath,
   executeProviderDirectPipeline,
 } from './provider-direct-pipeline.js';
 import {
@@ -89,6 +89,7 @@ import { resolveSessionLogColorKey } from '../../../utils/session-log-color.js';
 import {
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
+  planResponsesContinuationCloseActionForHttp,
   recordResponsesResponseForRequest,
 } from '../../../modules/llmswitch/bridge.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
@@ -173,11 +174,25 @@ function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sess
 }
 
 function readSessionIdForUsageLog(metadata: Record<string, unknown>): string | undefined {
-  return readRuntimeRequestTruthIdentifiers(metadata).sessionId;
+  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata).sessionId;
+  if (requestTruth) {
+    return requestTruth;
+  }
+  return readTrimmedString(metadata.sessionId)
+    ?? readTrimmedString(metadata.session_id)
+    ?? readTrimmedString(metadata.clientTmuxSessionId)
+    ?? readTrimmedString(metadata.client_tmux_session_id)
+    ?? readTrimmedString(metadata.tmuxSessionId)
+    ?? readTrimmedString(metadata.tmux_session_id);
 }
 
 function readConversationIdForUsageLog(metadata: Record<string, unknown>): string | undefined {
-  return readRuntimeRequestTruthIdentifiers(metadata).conversationId;
+  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata).conversationId;
+  if (requestTruth) {
+    return requestTruth;
+  }
+  return readTrimmedString(metadata.conversationId)
+    ?? readTrimmedString(metadata.conversation_id);
 }
 
 import {
@@ -1409,10 +1424,7 @@ export class RouteCodexHttpServer {
     if (!handle) {
       throw new Error(`Provider not found for binding: ${portConfig.providerBinding ?? ''}`);
     }
-    const inboundProtocol = detectInboundProtocolFromRequest({
-      path: input.entryEndpoint,
-      headers: input.headers as Record<string, string | string[] | undefined>,
-    });
+    const inboundProtocol = resolveInboundProtocolFromEntryPath(input.entryEndpoint);
     const behavior = portConfig.protocolBehavior ?? 'auto';
     const shouldUseDirect =
       behavior === 'direct' || (behavior === 'auto' && inboundProtocol === handle.providerProtocol);
@@ -1497,10 +1509,7 @@ export class RouteCodexHttpServer {
     }
 
     const rawDirectPayload = requireDirectPassthroughPayloadObject(input.body);
-    const inboundProtocol = detectInboundProtocolFromRequest({
-      path: input.entryEndpoint,
-      headers: input.headers as Record<string, string | string[] | undefined>,
-    });
+    const inboundProtocol = resolveInboundProtocolFromEntryPath(input.entryEndpoint);
     const applyPatchMode =
       this.userConfig
       && typeof this.userConfig === 'object'
@@ -2037,6 +2046,39 @@ export class RouteCodexHttpServer {
     }
   }
 
+  private async persistOrClearResponsesDirectContinuation(args: {
+    requestId?: string;
+    entryEndpoint: '/v1/responses' | '/v1/responses.submit_tool_outputs';
+    responseBody: unknown;
+    providerKey?: string;
+    sessionId?: string;
+    conversationId?: string;
+    routingPolicyGroup?: string;
+  }): Promise<void> {
+    if (!args.requestId) return;
+    const closeAction = planResponsesContinuationCloseActionForHttp({
+      entryEndpoint: args.entryEndpoint,
+      requestContextPresent: true,
+      probe: args.responseBody,
+    });
+    if (closeAction.action !== 'persist_continuation') {
+      await clearResponsesConversationByRequestId(args.requestId);
+      return;
+    }
+    await recordResponsesResponseForRequest({
+      requestId: args.requestId,
+      response: args.responseBody as Record<string, unknown>,
+      providerKey: args.providerKey,
+      sessionId: args.sessionId,
+      conversationId: args.conversationId,
+      routingPolicyGroup: args.routingPolicyGroup,
+      allowScopeContinuation: true,
+    });
+    await finalizeResponsesConversationRequestRetention(args.requestId, {
+      keepForSubmitToolOutputs: closeAction.keepForSubmitToolOutputs,
+    });
+  }
+
   /**
    * Build a PipelineExecutionResult from a router-direct outcome.
    * Contract: router-direct is provider passthrough + hooks only.
@@ -2077,10 +2119,11 @@ export class RouteCodexHttpServer {
         || normalized.sseStream !== undefined
       ) {
         await clearResponsesConversationByRequestId(input.requestId);
-      } else if (finishReason === 'tool_calls') {
-        await recordResponsesResponseForRequest({
+      } else {
+        await this.persistOrClearResponsesDirectContinuation({
           requestId: input.requestId,
-          response: responseBody as Record<string, unknown>,
+          entryEndpoint: '/v1/responses',
+          responseBody,
           providerKey: auditContext.providerKey,
           sessionId: readSessionIdForUsageLog(inputMetadata),
           conversationId: readConversationIdForUsageLog(inputMetadata),
@@ -2089,13 +2132,7 @@ export class RouteCodexHttpServer {
             && typeof directResult.pipelineMetadata.routecodexRoutingPolicyGroup === 'string'
               ? directResult.pipelineMetadata.routecodexRoutingPolicyGroup
               : undefined,
-          allowScopeContinuation: true,
         });
-        await finalizeResponsesConversationRequestRetention(input.requestId, {
-          keepForSubmitToolOutputs: true,
-        });
-      } else {
-        await clearResponsesConversationByRequestId(input.requestId);
       }
     }
     const baseResult: PipelineExecutionResult = {
@@ -2181,20 +2218,15 @@ export class RouteCodexHttpServer {
         || normalized.sseStream !== undefined
       ) {
         await clearResponsesConversationByRequestId(input.requestId);
-      } else if (finishReason === 'tool_calls') {
-        await recordResponsesResponseForRequest({
+      } else {
+        await this.persistOrClearResponsesDirectContinuation({
           requestId: input.requestId,
-          response: responseBody as Record<string, unknown>,
+          entryEndpoint: '/v1/responses',
+          responseBody,
           providerKey: providerBinding,
           sessionId: readSessionIdForUsageLog(inputMetadata),
           conversationId: readConversationIdForUsageLog(inputMetadata),
-          allowScopeContinuation: true,
         });
-        await finalizeResponsesConversationRequestRetention(input.requestId, {
-          keepForSubmitToolOutputs: finishReason === 'tool_calls',
-        });
-      } else {
-        await clearResponsesConversationByRequestId(input.requestId);
       }
     }
     return {
@@ -2258,14 +2290,11 @@ export class RouteCodexHttpServer {
 
     const directResult = await executeProviderDirectPipeline(
       payload,
-      {
-        path: input.entryEndpoint,
-        headers: input.headers as Record<string, string | string[] | undefined>,
-      },
+      input.entryEndpoint,
       {
         portConfig,
         resolveProvider: (bindingKey: string) => this.resolveProviderHandleForBinding(bindingKey, metadata),
-        detectInboundProtocol: detectInboundProtocolFromRequest,
+        resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
         preparePayload: (providerPayload, context) => {
           const handle = this.resolveProviderHandleForBinding(context.providerKey, metadata);
           if (!handle) {

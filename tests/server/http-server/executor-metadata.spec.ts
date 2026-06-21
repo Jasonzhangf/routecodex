@@ -274,6 +274,87 @@ describe('executor metadata session daemon extraction', () => {
     expect(snapshot?.requestTruth.sessionId?.history.length).toBeGreaterThan(0);
   });
 
+  it('preserves prebound metadata center request truth from handler metadata for resumed relay requests', () => {
+    const upstreamMetadata: Record<string, unknown> = {
+      routeHint: 'search/gateway-priority-5555-priority-search',
+    };
+    const center = MetadataCenter.attach(upstreamMetadata);
+    center.writeRequestTruth(
+      'sessionId',
+      'sess-prebound-relay-1',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'preserves prebound metadata center request truth from handler metadata for resumed relay requests',
+        stage: 'test'
+      }
+    );
+    center.writeRequestTruth(
+      'conversationId',
+      'conv-prebound-relay-1',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'preserves prebound metadata center request truth from handler metadata for resumed relay requests',
+        stage: 'test'
+      }
+    );
+    center.writeContinuationContext(
+      'responsesResume',
+      {
+        responseId: 'resp-prebound-relay-1',
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        routeHint: 'search/gateway-priority-5555-priority-search',
+        sessionId: 'sess-prebound-relay-1',
+        conversationId: 'conv-prebound-relay-1',
+        continuationOwner: 'relay'
+      },
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'preserves prebound metadata center request truth from handler metadata for resumed relay requests',
+        stage: 'test'
+      }
+    );
+    center.writeRuntimeControl(
+      'retryProviderKey',
+      'minimonth.key1.MiniMax-M2.7',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'preserves prebound metadata center request truth from handler metadata for resumed relay requests',
+        stage: 'test'
+      }
+    );
+
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      method: 'POST',
+      requestId: 'req-prebound-relay-1',
+      headers: {},
+      query: {},
+      body: {
+        response_id: 'resp-prebound-relay-1',
+        tool_outputs: [{ call_id: 'call-1', output: 'ok' }],
+      },
+      metadata: upstreamMetadata
+    } as any);
+
+    const rebound = MetadataCenter.read(metadata);
+    expect(rebound).toBe(center);
+    expect(rebound?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-prebound-relay-1',
+      conversationId: 'conv-prebound-relay-1'
+    });
+    expect(rebound?.readContinuationContext().responsesResume).toMatchObject({
+      responseId: 'resp-prebound-relay-1',
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      routeHint: 'search/gateway-priority-5555-priority-search',
+      sessionId: 'sess-prebound-relay-1',
+      conversationId: 'conv-prebound-relay-1',
+      continuationOwner: 'relay'
+    });
+    expect(rebound?.readRuntimeControl()).toMatchObject({
+      retryProviderKey: 'minimonth.key1.MiniMax-M2.7'
+    });
+  });
+
   it('writes stopMessageEnabled runtime control when latest responses user input carries stopless directive', () => {
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/responses',
@@ -596,6 +677,199 @@ describe('executor metadata session daemon extraction', () => {
     expect(MetadataCenter.read(mergedMetadata)?.readRequestTruth()).toMatchObject({
       sessionId: 'sess-center-attempt-clone-1',
       conversationId: 'conv-center-attempt-clone-1'
+    });
+  });
+
+  it('inherits continuation context MetadataCenter truth from input metadata instead of creating a fresh center', () => {
+    const inputMetadata: Record<string, unknown> = {};
+    const inputCenter = MetadataCenter.attach(inputMetadata);
+    inputCenter.writeContinuationContext(
+      'responsesResume',
+      {
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        restoredFromResponseId: 'resp_prev_1',
+      },
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'inherits continuation context MetadataCenter truth from input metadata instead of creating a fresh center',
+        stage: 'test'
+      }
+    );
+
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-center-continuation-inherit-1',
+      headers: {
+        session_id: 'sess-center-continuation-inherit-1',
+        conversation_id: 'conv-center-continuation-inherit-1'
+      },
+      query: {},
+      body: {
+        input: []
+      },
+      metadata: inputMetadata
+    } as any);
+
+    expect(MetadataCenter.read(metadata)).toBe(inputCenter);
+    expect(MetadataCenter.read(metadata)?.readContinuationContext().responsesResume).toMatchObject({
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      restoredFromResponseId: 'resp_prev_1'
+    });
+  });
+
+  it('projects resume routeHint and providerKey into flat metadata for submit_tool_outputs replay requests', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      method: 'POST',
+      requestId: 'req-center-submit-resume-1',
+      headers: {},
+      query: {},
+      body: {
+        input: [{ type: 'function_call_output', call_id: 'call_1', output: 'ok' }],
+        metadata: {
+          responsesResume: {
+            routeHint: 'search/gateway-priority-5555-priority-search',
+            providerKey: 'minimonth.key1.MiniMax-M2.7',
+            sessionId: 'sess-submit-resume-1',
+            conversationId: 'conv-submit-resume-1'
+          }
+        }
+      },
+      metadata: {
+        requestId: 'req-center-submit-resume-1',
+        __metadataCenter: {
+          version: 1,
+          requestTruth: {
+            sessionId: {
+              value: 'sess-submit-resume-1',
+              status: 'active',
+              writer: {
+                module: 'tests/server/http-server/executor-metadata.spec.ts',
+                symbol: 'projects resume routeHint and providerKey into flat metadata for submit_tool_outputs replay requests',
+                stage: 'test'
+              }
+            },
+            conversationId: {
+              value: 'conv-submit-resume-1',
+              status: 'active',
+              writer: {
+                module: 'tests/server/http-server/executor-metadata.spec.ts',
+                symbol: 'projects resume routeHint and providerKey into flat metadata for submit_tool_outputs replay requests',
+                stage: 'test'
+              }
+            }
+          },
+          continuationContext: {
+            responsesResume: {
+              value: {
+                routeHint: 'search/gateway-priority-5555-priority-search',
+                providerKey: 'minimonth.key1.MiniMax-M2.7',
+                sessionId: 'sess-submit-resume-1',
+                conversationId: 'conv-submit-resume-1'
+              },
+              status: 'active',
+              writer: {
+                module: 'tests/server/http-server/executor-metadata.spec.ts',
+                symbol: 'projects resume routeHint and providerKey into flat metadata for submit_tool_outputs replay requests',
+                stage: 'test'
+              }
+            }
+          },
+          providerObservation: {},
+          runtimeControl: {
+            routeHint: {
+              value: 'search/gateway-priority-5555-priority-search',
+              status: 'active',
+              writer: {
+                module: 'tests/server/http-server/executor-metadata.spec.ts',
+                symbol: 'projects resume routeHint and providerKey into flat metadata for submit_tool_outputs replay requests',
+                stage: 'test'
+              }
+            },
+            retryProviderKey: {
+              value: 'minimonth.key1.MiniMax-M2.7',
+              status: 'active',
+              writer: {
+                module: 'tests/server/http-server/executor-metadata.spec.ts',
+                symbol: 'projects resume routeHint and providerKey into flat metadata for submit_tool_outputs replay requests',
+                stage: 'test'
+              }
+            }
+          }
+        }
+      }
+    } as any);
+
+    expect(metadata.routeHint).toBe('search/gateway-priority-5555-priority-search');
+    expect(metadata.retryProviderKey).toBe('minimonth.key1.MiniMax-M2.7');
+    expect(metadata.responsesResume).toMatchObject({
+      routeHint: 'search/gateway-priority-5555-priority-search',
+      providerKey: 'minimonth.key1.MiniMax-M2.7'
+    });
+  });
+
+  it('projects resumed responsesResume session truth and route pin into flat metadata when request truth is only carried by MetadataCenter', () => {
+    const requestMetadata: Record<string, unknown> = {};
+    const requestCenter = MetadataCenter.attach(requestMetadata);
+    requestCenter.writeContinuationContext(
+      'responsesResume',
+      {
+        routeHint: 'search/gateway-priority-5555-priority-search',
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        sessionId: 'sess-submit-resume-center-1',
+        conversationId: 'conv-submit-resume-center-1'
+      },
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'projects resumed responsesResume session truth and route pin into flat metadata when request truth is only carried by MetadataCenter',
+        stage: 'test'
+      }
+    );
+    requestCenter.writeRuntimeControl(
+      'routeHint',
+      'search/gateway-priority-5555-priority-search',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'projects resumed responsesResume session truth and route pin into flat metadata when request truth is only carried by MetadataCenter',
+        stage: 'test'
+      }
+    );
+    requestCenter.writeRuntimeControl(
+      'retryProviderKey',
+      'minimonth.key1.MiniMax-M2.7',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'projects resumed responsesResume session truth and route pin into flat metadata when request truth is only carried by MetadataCenter',
+        stage: 'test'
+      }
+    );
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      method: 'POST',
+      requestId: 'req-center-submit-resume-center-1',
+      headers: {},
+      query: {},
+      body: {
+        response_id: 'resp-submit-resume-center-1',
+        tool_outputs: [{ call_id: 'call_1', output: 'ok' }],
+      },
+      metadata: requestMetadata
+    } as any);
+
+    expect(metadata.sessionId).toBe('sess-submit-resume-center-1');
+    expect(metadata.conversationId).toBe('conv-submit-resume-center-1');
+    expect(metadata.routeHint).toBe('search/gateway-priority-5555-priority-search');
+    expect(metadata.retryProviderKey).toBe('minimonth.key1.MiniMax-M2.7');
+    expect(metadata.responsesResume).toMatchObject({
+      routeHint: 'search/gateway-priority-5555-priority-search',
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      sessionId: 'sess-submit-resume-center-1',
+      conversationId: 'conv-submit-resume-center-1'
+    });
+    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-submit-resume-center-1',
+      conversationId: 'conv-submit-resume-center-1'
     });
   });
 

@@ -144,8 +144,20 @@ export function formatRoutePool(routeName: string, poolId: string): string {
   return poolId !== '-' ? `${routeName}/${poolId}` : routeName;
 }
 
+export function formatRouteName(routeName: string): string {
+  return normalizeLabel(routeName, 'route');
+}
+
 export function formatProvider(providerKey: string, model: string): string {
   return model !== '-' ? `${providerKey}.${model}` : providerKey;
+}
+
+export function formatProjectPort(projectPath: string | undefined, entryPort?: number): string {
+  const project = trimPathForLog(projectPath && projectPath.trim() ? projectPath.trim() : '-', 56);
+  if (typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0) {
+    return `${project}:${Math.floor(entryPort)}`;
+  }
+  return project;
 }
 
 export function shortSessionId(value: string): string {
@@ -158,10 +170,18 @@ export function shortSessionId(value: string): string {
 
 export function shortRequestId(value: string): string {
   const normalized = normalizeLabel(value, 'unknown-request');
-  if (normalized.length <= 42) {
+  if (normalized.length <= 12) {
     return normalized;
   }
-  return `${normalized.slice(0, 20)}…${normalized.slice(-14)}`;
+  return `…${normalized.slice(-10)}`;
+}
+
+export function shortRequestIdTail(value: string): string {
+  const normalized = normalizeLabel(value, 'unknown-request');
+  if (normalized.length <= 8) {
+    return normalized;
+  }
+  return normalized.slice(-8);
 }
 
 export function trimPathForLog(value: string, maxLen = 96): string {

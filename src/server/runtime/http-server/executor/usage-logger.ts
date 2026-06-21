@@ -5,7 +5,12 @@ import { buildProviderLabel } from './provider-response-utils.js';
 import { registerRequestLogContext, resolveRequestLogColorToken } from '../../../utils/request-log-color.js';
 import { formatRequestTimingSummary, isUsageTimingOutputEnabled } from '../../../utils/stage-logger.js';
 import { recordUsageRollup } from './log-rollup.js';
-import { recordTokens, getTokenTotals } from './token-stats-store.js';
+import { recordTokens } from './token-stats-store.js';
+import {
+  formatProjectPort,
+  formatRouteName,
+  shortRequestIdTail,
+} from './log-rollup-format-blocks.js';
 
 type DailyProviderStat = {
   calls: number;
@@ -13,8 +18,6 @@ type DailyProviderStat = {
   totalLatencyMs: number;
 };
 
-const dailyProviderStats = new Map<string, DailyProviderStat>();
-let dailyProviderStatsDate = new Date().toISOString().slice(0, 10);
 const ANSI_RESET = '\x1b[0m';
 const ANSI_WHITE = '\x1b[97m';
 
@@ -29,6 +32,16 @@ type HubStageTopEntry = {
 const DEFAULT_HUB_STAGE_TOP_N = 5;
 const USAGE_DETAIL_TIMING_MIN_MS = 100;
 
+export function resolveLocalDayKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+const dailyProviderStats = new Map<string, DailyProviderStat>();
+let dailyProviderStatsDate = resolveLocalDayKey();
+
 function readTopN(): number {
   const raw = process.env.ROUTECODEX_USAGE_HUB_TOP_N ?? process.env.RCC_USAGE_HUB_TOP_N;
   const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
@@ -40,6 +53,10 @@ function readTopN(): number {
 
 function formatMs(value: number): string {
   return `${Math.max(0, Math.round(value))}ms`;
+}
+
+function padLabel(label: string, width = 7): string {
+  return label.length >= width ? label : `${label}${' '.repeat(width - label.length)}`;
 }
 
 function hiPair(key: string, value: string | number, _baseColor: string): string {
@@ -89,16 +106,6 @@ function formatTimingSuffix(raw: string, baseColor: string): string {
   return ` timing ${colorizeNumericValues(slowParts.join(', '), baseColor)}`;
 }
 
-function formatMemoryHealth(): string {
-  const memory = process.memoryUsage();
-  const heapTotal = memory.heapTotal > 0 ? memory.heapTotal : 1;
-  const heapRatio = memory.heapUsed / heapTotal;
-  const heapMb = Math.round(memory.heapUsed / 1024 / 1024);
-  const rssMb = Math.round(memory.rss / 1024 / 1024);
-  const state = heapRatio >= 0.9 ? 'high' : heapRatio >= 0.75 ? 'watch' : 'ok';
-  return `${state}(heap=${heapMb}MB/${Math.round(heapRatio * 100)}% rss=${rssMb}MB)`;
-}
-
 function updateDailyProviderStat(args: {
   providerKey?: string;
   model?: string;
@@ -108,7 +115,7 @@ function updateDailyProviderStat(args: {
   retryCount: number;
   finishReason?: string;
 }): { calls: number; failures: number; avgMs: number } {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = resolveLocalDayKey();
   if (dailyProviderStatsDate !== today) {
     dailyProviderStatsDate = today;
     dailyProviderStats.clear();
@@ -154,8 +161,10 @@ export function logUsageSummary(
   info: {
     providerKey?: string;
     model?: string;
+    requestModel?: string;
     routeName?: string;
     poolId?: string;
+    entryPort?: number;
     finishReason?: string;
     usage?: UsageMetrics;
     externalLatencyMs?: number;
@@ -278,7 +287,8 @@ export function logUsageSummary(
     firstContentAtMs: info.firstContentAtMs,
     lastContentAtMs: info.lastContentAtMs,
     requestStartedAtMs: info.requestStartedAtMs,
-    logSessionColorKey
+    logSessionColorKey,
+    suppressRealtimeSessionLog: true
   });
   // Record token consumption for persistent cumulative tracking
   {
@@ -291,7 +301,6 @@ export function logUsageSummary(
     }
   }
   const hubStageTopSuffix = isUsageTimingOutputEnabled() ? formatHubStageTop(info.hubStageTop) : '';
-  const cumulativeTotals = getTokenTotals();
   const dailyProviderStat = updateDailyProviderStat({
     providerKey: info.providerKey,
     model: info.model,
@@ -302,24 +311,31 @@ export function logUsageSummary(
     finishReason: info.finishReason
   });
   const cacheRatio = computeCacheHitRatio(info.usage);
-  const cacheValue = cacheRatio !== undefined ? `${(cacheRatio * 100).toFixed(1)}%` : 'n/a';
+  const cacheValue = cacheRatio !== undefined ? `${(cacheRatio * 100).toFixed(1)}%` : '-';
   const sampleId =
     (typeof info.providerRequestId === 'string' && info.providerRequestId.trim())
       ? info.providerRequestId.trim()
       : (typeof info.inputRequestId === 'string' && info.inputRequestId.trim())
         ? info.inputRequestId.trim()
         : requestId;
-  const tokenSuffix = cumulativeTotals.alltimeTokens > 0
-    ? ` tokens.day=${cumulativeTotals.dailyTokens} tokens.all=${cumulativeTotals.alltimeTokens}`
-    : '';
   const requestColor = resolveRequestLogColorToken(requestId, requestLogContext) ?? '';
   const finishReason = info.finishReason && info.finishReason.trim() ? info.finishReason.trim() : 'unknown';
   const usage = info.usage;
   const inputTokens = usage?.prompt_tokens ?? 'n/a';
   const outputTokens = usage?.completion_tokens ?? 'n/a';
   const totalTokens = usage?.total_tokens ?? 'n/a';
+  const cacheReadTokens = usage?.cache_read_input_tokens ?? 'n/a';
   const route = info.routeName ?? '-';
-  const pool = info.poolId ?? '-';
+  const entryPort = typeof info.entryPort === 'number' ? info.entryPort : undefined;
+  const requestModel = typeof info.requestModel === 'string' && info.requestModel.trim() ? info.requestModel.trim() : '-';
+  const hitModel = info.model ?? '-';
+  const project = typeof info.projectPath === 'string' && info.projectPath.trim()
+    ? info.projectPath.trim()
+    : undefined;
+  const projectPort = formatProjectPort(project, entryPort);
+  const routeLabel = formatRouteName(route);
+  const shortReq = shortRequestIdTail(requestId);
+  const cacheSummary = `${cacheReadTokens}/${inputTokens}(${cacheValue})`;
   const formattedTimingSuffix = formatTimingSuffix(timingSuffix, requestColor);
   const diagTimings = [
     hiMsPairIfSlow('wait.traffic', trafficWaitMs, requestColor),
@@ -336,13 +352,20 @@ export function logUsageSummary(
   const shouldPrintDiag = diagParts.length > 0;
   const lines = [
     `${requestColor}${colorizeNumericValues(
-      `[usage] req=${requestId} route=${route}/${pool} -> provider=${providerLabel} total=${latency}ms internal=${formatMs(internalLatencyMs)} external=${formatMs(externalLatencyMs)} finish_reason=${finishReason}`,
-      requestColor
-    )}${ANSI_RESET}`,
-    `${requestColor}${colorizeNumericValues(
-      `        attempts=${providerAttemptCount} retries=${retryCount} in=${inputTokens} out=${outputTokens} total=${totalTokens} cache=${cacheValue} day.calls=${dailyProviderStat.calls} day.fail=${dailyProviderStat.failures} day.avg=${formatMs(dailyProviderStat.avgMs)}${tokenSuffix}${shouldPrintDiag ? ` diag mem=${formatMemoryHealth()} sample=${sampleId}${diagParts.length > 0 ? ` ${diagParts.join(' ')}` : ''}` : ''}`,
+      `[usage] req=${shortReq} project=${projectPort} route=${routeLabel} model=${requestModel}->${hitModel} usage=in:${inputTokens} out:${outputTokens} cache=${cacheSummary} total=${totalTokens} time=i:${formatMs(internalLatencyMs)} e:${formatMs(externalLatencyMs)} t:${latency}ms finish_reason=${finishReason}`,
       requestColor
     )}${ANSI_RESET}`
   ];
+  const detailParts = [
+    `req=${requestId}`,
+    sampleId && sampleId !== requestId ? `sample=${sampleId}` : '',
+    providerAttemptCount > 1 ? `attempts=${providerAttemptCount}` : '',
+    retryCount > 0 ? `retries=${retryCount}` : '',
+    dailyProviderStat.calls > 1 ? `day.calls=${dailyProviderStat.calls}` : '',
+    diagParts.length > 0 ? `diag=${diagParts.join(' ')}` : ''
+  ].filter(Boolean);
+  if (detailParts.length > 0) {
+    lines.push(`${requestColor}${colorizeNumericValues(`        ${detailParts.join(' ')}`, requestColor)}${ANSI_RESET}`);
+  }
   console.log(lines.join('\n'));
 }

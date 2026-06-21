@@ -648,7 +648,8 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     requestTruthSource.__rt = rt;
   }
   const sessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
-  if (sessionIdentifiers.sessionId) {
+  const currentRequestTruth = center.readRequestTruth();
+  if (sessionIdentifiers.sessionId && !currentRequestTruth.sessionId) {
     center.writeRequestTruth(
       'sessionId',
       sessionIdentifiers.sessionId,
@@ -659,7 +660,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       }
     );
   }
-  if (sessionIdentifiers.conversationId) {
+  if (sessionIdentifiers.conversationId && !currentRequestTruth.conversationId) {
     center.writeRequestTruth(
       'conversationId',
       sessionIdentifiers.conversationId,
@@ -669,6 +670,85 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         stage: 'ServerReqInbound01ClientRaw'
       }
     );
+  }
+  const responsesResumeSource =
+    (bodyMeta.responsesResume && typeof bodyMeta.responsesResume === 'object' && !Array.isArray(bodyMeta.responsesResume)
+      ? bodyMeta.responsesResume as Record<string, unknown>
+      : undefined)
+    ?? (userMeta.responsesResume && typeof userMeta.responsesResume === 'object' && !Array.isArray(userMeta.responsesResume)
+      ? userMeta.responsesResume as Record<string, unknown>
+      : undefined)
+    ?? (metadata.responsesResume && typeof metadata.responsesResume === 'object' && !Array.isArray(metadata.responsesResume)
+      ? metadata.responsesResume as Record<string, unknown>
+      : undefined)
+    ?? (center.readContinuationContext().responsesResume && typeof center.readContinuationContext().responsesResume === 'object' && !Array.isArray(center.readContinuationContext().responsesResume)
+      ? center.readContinuationContext().responsesResume as Record<string, unknown>
+      : undefined);
+  if (responsesResumeSource) {
+    center.writeContinuationContext(
+      'responsesResume',
+      responsesResumeSource,
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'HubReqInbound02Standardized'
+      },
+      'responses resume request truth'
+    );
+    metadata.responsesResume = responsesResumeSource;
+    const responsesResumeSessionId =
+      typeof responsesResumeSource.sessionId === 'string' && responsesResumeSource.sessionId.trim()
+        ? responsesResumeSource.sessionId.trim()
+        : undefined;
+    const responsesResumeConversationId =
+      typeof responsesResumeSource.conversationId === 'string' && responsesResumeSource.conversationId.trim()
+        ? responsesResumeSource.conversationId.trim()
+        : undefined;
+    if (responsesResumeSessionId && !currentRequestTruth.sessionId) {
+      center.writeRequestTruth(
+        'sessionId',
+        responsesResumeSessionId,
+        {
+          module: 'src/server/runtime/http-server/executor-metadata.ts',
+          symbol: 'buildRequestMetadata',
+          stage: 'HubReqInbound02Standardized'
+        },
+        'responses relay resumed session truth'
+      );
+      metadata.sessionId = responsesResumeSessionId;
+    }
+    if (responsesResumeConversationId && !currentRequestTruth.conversationId) {
+      center.writeRequestTruth(
+        'conversationId',
+        responsesResumeConversationId,
+        {
+          module: 'src/server/runtime/http-server/executor-metadata.ts',
+          symbol: 'buildRequestMetadata',
+          stage: 'HubReqInbound02Standardized'
+        },
+        'responses relay resumed conversation truth'
+      );
+      metadata.conversationId = responsesResumeConversationId;
+    }
+    const runtimeControl = center.readRuntimeControl();
+    const projectedRouteHint =
+      typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
+        ? runtimeControl.routeHint.trim()
+        : typeof responsesResumeSource.routeHint === 'string' && responsesResumeSource.routeHint.trim()
+          ? responsesResumeSource.routeHint.trim()
+          : undefined;
+    if (projectedRouteHint) {
+      metadata.routeHint = projectedRouteHint;
+    }
+    const projectedRetryProviderKey =
+      typeof runtimeControl.retryProviderKey === 'string' && runtimeControl.retryProviderKey.trim()
+        ? runtimeControl.retryProviderKey.trim()
+        : typeof responsesResumeSource.providerKey === 'string' && responsesResumeSource.providerKey.trim()
+          ? responsesResumeSource.providerKey.trim()
+          : undefined;
+    if (projectedRetryProviderKey) {
+      metadata.retryProviderKey = projectedRetryProviderKey;
+    }
   }
   const continuationIdentifiers = extractContinuationContextSessionIdentifiersFromMetadata({
     ...bodyMeta,

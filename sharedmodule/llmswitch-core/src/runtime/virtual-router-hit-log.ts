@@ -12,6 +12,16 @@ import type { VirtualRouterHitEvent } from '../telemetry/stats-center.js';
 
 const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
 
+type StopMessageRoutingStateView = Pick<
+  RoutingInstructionState,
+  | 'stopMessageText'
+  | 'stopMessageMaxRepeats'
+  | 'stopMessageUsed'
+  | 'stopMessageUpdatedAt'
+  | 'stopMessageLastUsedAt'
+  | 'stopMessageStageMode'
+>;
+
 type LoggingDeps = {
   providers: Record<string, ProviderProfile>;
   contextRouting: VirtualRouterContextRoutingConfig | undefined;
@@ -49,7 +59,43 @@ export type VirtualRouterHitEventMeta = {
   entryEndpoint?: string;
 };
 
-function summarizeStopMessageRuntime(state?: RoutingInstructionState): StopMessageRuntimeSummary {
+export type VirtualRouterHitLogOmitField =
+  | 'requestId'
+  | 'sessionId'
+  | 'model'
+  | 'reason'
+  | 'continuation'
+  | 'requestTokens'
+  | 'selectionPenalty'
+  | 'stopMessage';
+
+export type VirtualRouterHitLogConfig = {
+  omit?: VirtualRouterHitLogOmitField[];
+};
+
+const HIT_LOG_OMIT_FIELDS = new Set<VirtualRouterHitLogOmitField>([
+  'requestId',
+  'sessionId',
+  'model',
+  'reason',
+  'continuation',
+  'requestTokens',
+  'selectionPenalty',
+  'stopMessage'
+]);
+
+function normalizeHitLogOmit(config?: VirtualRouterHitLogConfig): Set<VirtualRouterHitLogOmitField> {
+  const out = new Set<VirtualRouterHitLogOmitField>();
+  const raw = Array.isArray(config?.omit) ? config.omit : [];
+  for (const field of raw) {
+    if (HIT_LOG_OMIT_FIELDS.has(field)) {
+      out.add(field);
+    }
+  }
+  return out;
+}
+
+function summarizeStopMessageRuntime(state?: StopMessageRoutingStateView): StopMessageRuntimeSummary {
   if (!state) {
     return {
       hasAny: false,
@@ -126,7 +172,7 @@ export function createVirtualRouterHitRecord(input: {
   modelId?: string;
   hitReason?: string;
   continuationScope?: string;
-  routingState?: RoutingInstructionState;
+  routingState?: StopMessageRoutingStateView;
   requestTokens?: number;
   selectionPenalty?: number;
   timestampMs?: number;
@@ -399,7 +445,8 @@ export function buildHitReason(
   return base;
 }
 
-export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
+export function formatVirtualRouterHit(record: VirtualRouterHitRecord, config?: VirtualRouterHitLogConfig): string {
+  const omit = normalizeHitLogOmit(config);
   try {
     const now = new Date(record.timestampMs);
     const hours = String(now.getHours()).padStart(2, '0');
@@ -414,27 +461,27 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
     const timeLabel = `${timeColor}${timestamp}${reset}`;
     const { providerLabel, resolvedModel } = describeTargetProvider(record.providerKey, record.modelId);
     const routeLabel = record.poolId ? `${record.routeName}/${record.poolId}` : record.routeName;
-    const targetLabel = `${routeLabel} -> ${providerLabel}${resolvedModel ? '.' + resolvedModel : ''}`;
+    const targetLabel = `${routeLabel} -> ${providerLabel}${resolvedModel && !omit.has('model') ? '.' + resolvedModel : ''}`;
     const requestId = typeof record.requestId === 'string' ? record.requestId : '';
-    const requestLabel = requestId && !requestId.includes('unknown') ? ` req=${requestId}` : '';
+    const requestLabel = !omit.has('requestId') && requestId && !requestId.includes('unknown') ? ` req=${requestId}` : '';
     const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
-    const sessionLabel = sessionId ? ` sid=${sessionId}` : '';
+    const sessionLabel = !omit.has('sessionId') && sessionId ? ` sid=${sessionId}` : '';
     const routeColor = resolveSessionColor(sessionId) || resolveRouteColor(record.routeName);
     const prefix = `${routeColor}[virtual-router-hit]${reset}`;
     const continuationText = formatContinuationScope(record.continuationScope);
-    const continuationLabel = continuationText ? ` ${continuationColor}[continuation:${continuationText}]${reset}` : '';
-    const reasonLabel = record.hitReason ? ` reason=${record.hitReason}` : '';
+    const continuationLabel = !omit.has('continuation') && continuationText ? ` ${continuationColor}[continuation:${continuationText}]${reset}` : '';
+    const reasonLabel = !omit.has('reason') && record.hitReason ? ` reason=${record.hitReason}` : '';
     const requestTokenLabel =
-      typeof record.requestTokens === 'number' && Number.isFinite(record.requestTokens)
+      !omit.has('requestTokens') && typeof record.requestTokens === 'number' && Number.isFinite(record.requestTokens)
         ? ` reqTokens=${Math.max(0, Math.round(record.requestTokens))}`
         : '';
     const penaltyLabel =
-      typeof record.selectionPenalty === 'number' && Number.isFinite(record.selectionPenalty) && record.selectionPenalty > 0
+      !omit.has('selectionPenalty') && typeof record.selectionPenalty === 'number' && Number.isFinite(record.selectionPenalty) && record.selectionPenalty > 0
         ? ` penalty=${Math.floor(record.selectionPenalty)}`
         : '';
     let stopLabel = '';
     const stop = record.stopMessage;
-    if (stop.hasAny) {
+    if (!omit.has('stopMessage') && stop.hasAny) {
       const parts: string[] = [
         stop.safeText ? `"${stop.safeText}"` : '"(mode-only)"',
         `mode=${stop.mode}`,
@@ -456,27 +503,27 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
     const timestamp = now.toLocaleTimeString('zh-CN', { hour12: false });
     const routeLabel = record.poolId ? `${record.routeName}/${record.poolId}` : record.routeName;
     const continuationText = formatContinuationScope(record.continuationScope);
-    const continuationLabel = continuationText ? ` [continuation:${continuationText}]` : '';
+    const continuationLabel = !omit.has('continuation') && continuationText ? ` [continuation:${continuationText}]` : '';
     const requestId = typeof record.requestId === 'string' ? record.requestId : '';
-    const requestLabel = requestId && !requestId.includes('unknown') ? ` req=${requestId}` : '';
+    const requestLabel = !omit.has('requestId') && requestId && !requestId.includes('unknown') ? ` req=${requestId}` : '';
     const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
-    const sessionLabel = sessionId ? ` sid=${sessionId}` : '';
+    const sessionLabel = !omit.has('sessionId') && sessionId ? ` sid=${sessionId}` : '';
     const requestTokenLabel =
-      typeof record.requestTokens === 'number' && Number.isFinite(record.requestTokens)
+      !omit.has('requestTokens') && typeof record.requestTokens === 'number' && Number.isFinite(record.requestTokens)
         ? ` reqTokens=${Math.max(0, Math.round(record.requestTokens))}`
         : '';
     const penaltyLabel =
-      typeof record.selectionPenalty === 'number' && Number.isFinite(record.selectionPenalty) && record.selectionPenalty > 0
+      !omit.has('selectionPenalty') && typeof record.selectionPenalty === 'number' && Number.isFinite(record.selectionPenalty) && record.selectionPenalty > 0
         ? ` penalty=${Math.floor(record.selectionPenalty)}`
         : '';
     let stopLabel = '';
     const stop = record.stopMessage;
-    if (stop.hasAny) {
+    if (!omit.has('stopMessage') && stop.hasAny) {
       const safeText = stop.safeText ? `"${stop.safeText}"` : '"(mode-only)"';
       const rounds = stop.maxRepeats > 0 ? `${stop.used}/${stop.maxRepeats}` : `${stop.used}/-`;
       const left = stop.remaining >= 0 ? String(stop.remaining) : 'n/a';
       stopLabel = ` [stopMessage:${safeText} mode=${stop.mode} round=${rounds} active=${stop.active ? 'yes' : 'no'} left=${left}]`;
     }
-    return `[virtual-router-hit] ${timestamp}${requestLabel}${sessionLabel} ${routeLabel} -> ${record.providerKey}${record.modelId ? '.' + record.modelId : ''}${continuationLabel}${record.hitReason ? ` reason=${record.hitReason}` : ''}${requestTokenLabel}${penaltyLabel}${stopLabel}`;
+    return `[virtual-router-hit] ${timestamp}${requestLabel}${sessionLabel} ${routeLabel} -> ${record.providerKey}${record.modelId && !omit.has('model') ? '.' + record.modelId : ''}${continuationLabel}${!omit.has('reason') && record.hitReason ? ` reason=${record.hitReason}` : ''}${requestTokenLabel}${penaltyLabel}${stopLabel}`;
   }
 }

@@ -63,10 +63,7 @@ function resolvePortPrefix(context: PortRequestContext | undefined, port: number
   if (!context || !port) {
     return '';
   }
-  const group = typeof context.routingPolicyGroup === 'string' && context.routingPolicyGroup.trim()
-    ? ` group:${context.routingPolicyGroup.trim()}`
-    : '';
-  return `[port:${port}${group}]`;
+  return `[${port}]`;
 }
 
 function prefixArgsWithPort(args: unknown[], prefix: string): unknown[] {

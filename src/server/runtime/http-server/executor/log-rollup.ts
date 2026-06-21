@@ -18,7 +18,9 @@ import {
   colorize,
   highlightLogKeyValues,
   formatRoutePool,
+  formatRouteName,
   formatProvider,
+  formatProjectPort,
   shortSessionId,
   shortRequestId,
   trimPathForLog,
@@ -81,6 +83,7 @@ type UsageRollupRecord = {
   lastContentAtMs?: number;
   requestStartedAtMs?: number;
   logSessionColorKey?: string;
+  suppressRealtimeSessionLog?: boolean;
 };
 
 type SessionRequestEvent = {
@@ -186,6 +189,8 @@ let windowStartedAtMs = Date.now();
 let lastSessionTtlCleanAtMs = Date.now();
 let beforeExitHook: (() => void) | undefined;
 let exitHook: (() => void) | undefined;
+const RECENT_VR_LOGS = new Map<string, number>();
+const REALTIME_VR_DEDUPE_MS = 1500;
 
 const virtualRouterHits = new Map<string, VirtualRouterHitAgg>();
 const usageRollups = new Map<string, UsageRollupAgg>();
@@ -320,6 +325,7 @@ function clearWindow(nowMs: number): void {
   usageRollups.clear();
   sessionRollups.clear();
   sessionRequestEvents.clear();
+  RECENT_VR_LOGS.clear();
   windowStartedAtMs = nowMs;
 }
 
@@ -328,6 +334,15 @@ function shouldDropBucket(map: Map<string, unknown>, key: string): boolean {
     return false;
   }
   return map.size >= resolveMaxBuckets();
+}
+
+function shouldEmitRealtimeVirtualRouterLog(key: string, nowMs: number): boolean {
+  const previous = RECENT_VR_LOGS.get(key);
+  RECENT_VR_LOGS.set(key, nowMs);
+  if (previous === undefined) {
+    return true;
+  }
+  return nowMs - previous >= REALTIME_VR_DEDUPE_MS;
 }
 
 
@@ -354,8 +369,8 @@ function emitRealtimeSessionRequestLog(args: {
   });
   const sessionLabel = shortSessionId(args.sessionId);
   const projectResolution = resolveProjectPathWithSource(args.sessionId, args.projectPath);
-  const project = trimPathForLog(projectResolution.path || '-');
-  const routePool = formatRoutePool(args.event.routeName, args.event.poolId);
+  const project = formatProjectPort(projectResolution.path);
+  const routeName = formatRouteName(args.event.routeName);
   const provider = formatProvider(args.event.providerKey, args.event.model);
   const requestLabel = shortRequestId(args.event.requestId);
   const sessionAgg = sessionRollups.get(args.sessionId);
@@ -375,7 +390,8 @@ function emitRealtimeSessionRequestLog(args: {
   const parts = [
     `[session-request][rt] session=${sessionLabel}`,
     `req=${requestLabel}`,
-    `${routePool}->${provider}`,
+    `route=${routeName}`,
+    `provider=${provider}`,
     `total=${formatMs(args.event.latencyMs)}`,
     `internal=${formatMs(coreInternalMs)}`,
     `external=${formatMs(args.event.externalLatencyMs)}`,
@@ -482,8 +498,8 @@ function emitRealtimeVirtualRouterHitLog(args: {
   });
   const sessionLabel = shortSessionId(args.sessionId);
   const projectResolution = resolveProjectPathWithSource(args.sessionId, args.projectPath);
-  const project = trimPathForLog(projectResolution.path || '-');
-  const routePool = formatRoutePool(args.routeName, args.poolId);
+  const project = formatProjectPort(projectResolution.path);
+  const routeName = formatRouteName(args.routeName);
   const provider = formatProvider(args.providerKey, args.model);
   const active = Math.max(0, Math.floor(args.activeInFlight));
   const max = Math.max(0, Math.floor(args.maxInFlight));
@@ -493,7 +509,8 @@ function emitRealtimeVirtualRouterHitLog(args: {
   const summary = [
     '[virtual-router-hit][rt]',
     `session=${sessionLabel}`,
-    `${routePool}->${provider}`,
+    `route=${routeName}`,
+    `provider=${provider}`,
     `concurrency=${active}/${max}`,
     `hits=${Math.max(0, Math.floor(args.sessionVirtualHits))}`,
     `project=${project}`
@@ -574,6 +591,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
   const providerKey = normalizeLabel(event.providerKey, 'unknown-provider');
   const model = normalizeLabel(event.model, '-');
   const key = buildKey(routeName, poolId, providerKey, model);
+  const nowMs = Date.now();
   if (shouldDropBucket(virtualRouterHits, key)) {
     return;
   }
@@ -598,11 +616,12 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
     });
   }
   const sessionId = normalizeSessionId(event.sessionId);
+  const realtimeLogKey = `${sessionId}\u0000${key}\u0000${normalizeLabel(event.reason, '')}`;
   const sessionExisting = sessionRollups.get(sessionId);
   if (sessionExisting) {
     sessionExisting.virtualHits += 1;
     updateSessionProjectPath(sessionId, event.projectPath);
-    if (isRealtimeRollupEnabled() && isRealtimeVirtualRouterLogEnabled()) {
+    if (isRealtimeRollupEnabled() && isRealtimeVirtualRouterLogEnabled() && shouldEmitRealtimeVirtualRouterLog(realtimeLogKey, nowMs)) {
       emitRealtimeVirtualRouterHitLog({
         sessionId,
         projectPath: sessionExisting.projectPath,
@@ -651,7 +670,7 @@ export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): voi
     maxRetryCount: 0
   });
   updateSessionProjectPath(sessionId, event.projectPath);
-  if (isRealtimeRollupEnabled() && isRealtimeVirtualRouterLogEnabled()) {
+  if (isRealtimeRollupEnabled() && isRealtimeVirtualRouterLogEnabled() && shouldEmitRealtimeVirtualRouterLog(realtimeLogKey, nowMs)) {
     emitRealtimeVirtualRouterHitLog({
       sessionId,
       projectPath: sessionRollups.get(sessionId)?.projectPath,
@@ -828,7 +847,7 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     sessionExisting.maxProviderAttemptCount = Math.max(sessionExisting.maxProviderAttemptCount, providerAttemptCount);
     sessionExisting.maxRetryCount = Math.max(sessionExisting.maxRetryCount, retryCount);
     updateSessionProjectPath(sessionId, event.projectPath);
-    if (isRealtimeRollupEnabled()) {
+    if (isRealtimeRollupEnabled() && event.suppressRealtimeSessionLog !== true) {
       emitRealtimeSessionRequestLog({
         sessionId,
         projectPath: sessionExisting.projectPath,
@@ -862,7 +881,7 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     maxRetryCount: retryCount
   });
   updateSessionProjectPath(sessionId, event.projectPath);
-  if (isRealtimeRollupEnabled()) {
+  if (isRealtimeRollupEnabled() && event.suppressRealtimeSessionLog !== true) {
     emitRealtimeSessionRequestLog({
       sessionId,
       projectPath: sessionRollups.get(sessionId)?.projectPath,

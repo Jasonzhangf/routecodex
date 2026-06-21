@@ -11,7 +11,7 @@ import { parseResolvedStopMessageInstructionWithNative } from '../native/router-
 import {
   resolveStopMessageScope,
 } from '../native/router-hotpath/native-virtual-router-routing-state.js';
-import { resolveRouteColor, resolveSessionColor, resolveSessionLogColorKey } from './virtual-router-hit-log.js';
+import { formatVirtualRouterHit, createVirtualRouterHitRecord, resolveSessionLogColorKey, type VirtualRouterHitLogConfig } from './virtual-router-hit-log.js';
 import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import type { RoutingInstruction, RoutingInstructionState } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import { mergeStopMessageFromPersisted } from '../native/router-hotpath/native-virtual-router-routing-state.js';
@@ -139,6 +139,7 @@ function extractStopMessageText(content: unknown): string {
 export function createVirtualRouterRouteHostEffects(args: {
   request: StandardizedRequest | ProcessedRequest | Record<string, unknown>;
   metadata: RouterMetadataInput | Record<string, unknown>;
+  hitLog?: VirtualRouterHitLogConfig;
 }): VirtualRouterRouteHostEffects {
   const metadata = coerceRouterMetadata(args.metadata);
   const parseLog = buildStopMessageMarkerParseLog(args.request as StandardizedRequest | ProcessedRequest, metadata);
@@ -158,7 +159,8 @@ export function createVirtualRouterRouteHostEffects(args: {
           sessionId: resolveVirtualRouterLogSessionId(metadata),
           stopScope,
           stopState,
-          forceStopStatusLabel
+          forceStopStatusLabel,
+          hitLog: args.hitLog
         });
       }
     }
@@ -322,32 +324,34 @@ function emitVirtualRouterHitLog(result: {
   stopScope?: string;
   stopState?: StopMessageStateSnapshot | null;
   forceStopStatusLabel?: boolean;
+  hitLog?: VirtualRouterHitLogConfig;
 }): void {
-  const reset = '\x1b[0m';
-  const timeColor = '\x1b[90m';
-  const stopColor = '\x1b[38;5;214m';
-  const now = new Date();
-  const timestamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-  const routeLabel = result.decision.poolId
-    ? `${result.decision.routeName}/${result.decision.poolId}`
-    : result.decision.routeName;
-  const routeColor = resolveSessionColor(options?.sessionId) || resolveRouteColor(result.decision.routeName);
-  const prefix = `${routeColor}[virtual-router-hit]${reset}`;
   const providerKey = result.decision.providerKey || result.target.providerKey;
-  const modelSuffix = result.target.modelId ? `.${result.target.modelId}` : '';
-  const reason = result.decision.reasoning ? ` reason=${result.decision.reasoning}` : '';
-  const stopStatusLabel = formatStopMessageStatusLabel(
-    options?.stopState ?? null,
-    options?.stopScope,
-    Boolean(options?.forceStopStatusLabel)
-  );
-  const requestId = typeof options?.requestId === 'string' ? options.requestId : '';
-  const requestLabel = requestId && !requestId.includes('unknown') ? ` req=${requestId}` : '';
-  const sessionId = typeof options?.sessionId === 'string' ? options.sessionId.trim() : '';
-  const sessionLabel = sessionId ? ` sid=${sessionId}` : '';
-  console.log(
-    `${prefix} ${timeColor}${timestamp}${reset}${requestLabel}${sessionLabel} ${routeColor}${routeLabel} -> ${providerKey}${modelSuffix}${reason}${reset}${stopStatusLabel ? ` ${stopColor}${stopStatusLabel}${reset}` : ''}`
-  );
+  const stopState = options?.stopState ?? null;
+  const record = createVirtualRouterHitRecord({
+    requestId: options?.requestId,
+    sessionId: options?.sessionId,
+    routeName: result.decision.routeName,
+    poolId: result.decision.poolId,
+    providerKey,
+    modelId: result.target.modelId,
+    hitReason: result.decision.reasoning,
+    routingState: stopState
+      ? {
+          stopMessageText: stopState.stopMessageText,
+          stopMessageMaxRepeats: stopState.stopMessageMaxRepeats,
+          stopMessageUsed: stopState.stopMessageUsed,
+          stopMessageUpdatedAt: stopState.stopMessageUpdatedAt,
+          stopMessageLastUsedAt: stopState.stopMessageLastUsedAt,
+          stopMessageStageMode: stopState.stopMessageStageMode
+        }
+      : undefined
+  });
+  const line = formatVirtualRouterHit(record, options?.hitLog);
+  const forcedStopStatusLabel = options?.forceStopStatusLabel && !stopState
+    ? formatStopMessageStatusLabel(null, options?.stopScope, true)
+    : '';
+  console.log(forcedStopStatusLabel ? `${line} ${forcedStopStatusLabel}` : line);
 }
 
 function resolveVirtualRouterLogRequestId(metadata: RouterMetadataInput): string | undefined {

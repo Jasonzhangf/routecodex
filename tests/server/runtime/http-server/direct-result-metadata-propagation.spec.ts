@@ -59,13 +59,16 @@ const {
   clearAllResponsesConversationState,
   responsesConversationStore,
   resumeLatestResponsesContinuationByScope,
+  resumeResponsesConversation,
 } = await import('../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
 
 const RESPONSES_REQUEST_IDS = [
   'req-router-direct-retention-success',
   'req-router-direct-retention-http-502',
+  'req-router-direct-retention-required-action-only',
   'req-router-direct-retention-sse-wrapper',
   'req-provider-direct-retention-success',
+  'req-provider-direct-retention-required-action-only',
   'req-provider-direct-retention-http-502',
   'req-provider-direct-retention-sse-wrapper',
 ];
@@ -500,6 +503,83 @@ describe('http-server direct result metadata propagation', () => {
     expect(restored?.payload.previous_response_id).toBe('resp-provider-direct-success');
   });
 
+  it('RED: provider-direct responses retain submit_tool_outputs continuation when response only exposes required_action', async () => {
+    captureResponsesRequestContext({
+      requestId: 'req-provider-direct-retention-required-action-only',
+      sessionId: 'sess-provider-direct-required-action-only',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+    });
+
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.4';
+    await server.buildProviderDirectResult({
+      response: {
+        status: 200,
+        data: {
+          id: 'resp-provider-direct-required-action-only',
+          object: 'response',
+          status: 'requires_action',
+          output: [],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: 'call_provider_direct_required_action_only',
+                  type: 'function_call',
+                  name: 'exec_command',
+                  arguments: '{"cmd":"pwd"}',
+                },
+              ],
+            },
+          },
+        },
+      },
+      providerProtocol: 'openai-responses',
+      providerHandle: { providerType: 'openai' },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
+    }, {
+      requestId: 'req-provider-direct-retention-required-action-only',
+      body: { model: 'gpt-5.3-codex', stream: true },
+      metadata: {
+        sessionId: 'sess-provider-direct-required-action-only',
+      }
+    }, {}, 'test.key1');
+
+    const stats = responsesConversationStore.getDebugStats();
+    expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
+    expect(stats.responseIndexSize).toBe(1);
+
+    const resumed = resumeResponsesConversation('resp-provider-direct-required-action-only', {
+      tool_outputs: [
+        {
+          call_id: 'call_provider_direct_required_action_only',
+          output: '/tmp',
+        },
+      ],
+    });
+    expect(resumed.payload.previous_response_id).toBe('resp-provider-direct-required-action-only');
+  });
+
   it('provider-direct result clears captured responses request on upstream 502', async () => {
     captureResponsesRequestContext({
       requestId: 'req-provider-direct-retention-http-502',
@@ -596,5 +676,79 @@ describe('http-server direct result metadata propagation', () => {
 
     expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
     expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+  });
+
+  it('RED: router-direct responses retain submit_tool_outputs continuation when response only exposes required_action', async () => {
+    captureResponsesRequestContext({
+      requestId: 'req-router-direct-retention-required-action-only',
+      sessionId: 'sess-router-direct-required-action-only',
+      payload: {
+        model: 'gpt-5.3-codex',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'hello' }],
+          },
+        ],
+      },
+    });
+
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    await server.buildRouterDirectResult({
+      response: {
+        status: 200,
+        data: {
+          id: 'resp-router-direct-required-action-only',
+          object: 'response',
+          status: 'requires_action',
+          output: [],
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: 'call_router_direct_required_action_only',
+                  type: 'function_call',
+                  name: 'exec_command',
+                  arguments: '{"cmd":"pwd"}',
+                },
+              ],
+            },
+          },
+        },
+      },
+      providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
+      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
+    }, {
+      requestId: 'req-router-direct-retention-required-action-only',
+      body: { model: 'gpt-5.3-codex', stream: true },
+      metadata: {},
+    });
+
+    const stats = responsesConversationStore.getDebugStats();
+    expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
+    expect(stats.responseIndexSize).toBe(1);
+
+    const resumed = resumeResponsesConversation('resp-router-direct-required-action-only', {
+      tool_outputs: [
+        {
+          call_id: 'call_router_direct_required_action_only',
+          output: '/tmp',
+        },
+      ],
+    });
+    expect(resumed.payload.previous_response_id).toBe('resp-router-direct-required-action-only');
   });
 });

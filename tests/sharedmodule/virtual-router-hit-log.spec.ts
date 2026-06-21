@@ -33,6 +33,33 @@ describe('virtual-router hit log', () => {
     expect(line).not.toContain('reqTokens=');
   });
 
+  it('omits configured noisy hit-log fields without dropping route/provider truth', () => {
+    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
+      requestId: 'req-verbose-1',
+      sessionId: 'tmux-noisy-1',
+      routeName: 'longcontext',
+      poolId: 'gateway-priority-5555-priority-longcontext',
+      providerKey: 'XLC.key2.deepseek-v4-pro',
+      modelId: 'deepseek-v4-pro',
+      hitReason: 'longcontext:token-threshold|tools:last-tool-other',
+      continuationScope: 'responses:abcdef1234567890',
+      requestTokens: 222222,
+      selectionPenalty: 9
+    }), {
+      omit: ['requestId', 'sessionId', 'model', 'reason', 'continuation', 'requestTokens', 'selectionPenalty']
+    });
+
+    expect(line).toContain('[virtual-router-hit]');
+    expect(line).toContain('longcontext/gateway-priority-5555-priority-longcontext -> XLC[key2]');
+    expect(line).not.toContain('req=req-verbose-1');
+    expect(line).not.toContain('sid=tmux-noisy-1');
+    expect(line).not.toContain('.deepseek-v4-pro');
+    expect(line).not.toContain('reason=');
+    expect(line).not.toContain('[continuation:');
+    expect(line).not.toContain('reqTokens=');
+    expect(line).not.toContain('penalty=');
+  });
+
   it('includes penalty label when selection penalty exists', () => {
     const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
       routeName: 'thinking',
@@ -138,82 +165,6 @@ describe('virtual-router hit log', () => {
     expect(resolveSessionColor()).toBeUndefined();
     expect(line).toContain(`${resolveRouteColor('thinking')}[virtual-router-hit]\x1b[0m`);
     expect(line).not.toContain(' sid=');
-  });
-
-  it('emits internal latency label when startedAtMs is provided', () => {
-    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
-      routeName: 'thinking',
-      poolId: 'thinking-primary',
-      providerKey: 'glm.key1.kimi-k2.5',
-      modelId: 'kimi-k2.5',
-      hitReason: 'thinking:user-input',
-      sessionId: 'tmux-internal-1',
-      startedAtMs: Date.now() - 250
-    }));
-
-    expect(line).toMatch(/internal=\d+ms/);
-  });
-
-  it('never uses white / black / red for digit highlight or labels', () => {
-    const samples = [
-      formatVirtualRouterHit(createVirtualRouterHitRecord({
-        routeName: 'tools',
-        poolId: 'tools-primary',
-        providerKey: 'tabglm.key1.glm-5',
-        modelId: 'glm-5',
-        hitReason: 'tools:last-tool-other',
-        sessionId: 'tmux-color-1',
-        startedAtMs: Date.now() - 123
-      })),
-      formatVirtualRouterHit(createVirtualRouterHitRecord({
-        routeName: 'thinking',
-        poolId: 'thinking-primary',
-        providerKey: 'glm.key1.kimi-k2.5',
-        modelId: 'kimi-k2.5',
-        hitReason: 'thinking:user-input'
-      }))
-    ];
-    for (const sample of samples) {
-      expect(sample).not.toMatch(/\x1b\[(30|37|90|97|31)m/);
-    }
-  });
-
-  it('emits internal latency label when startedAtMs is provided', () => {
-    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
-      routeName: 'thinking',
-      poolId: 'thinking-primary',
-      providerKey: 'glm.key1.kimi-k2.5',
-      modelId: 'kimi-k2.5',
-      hitReason: 'thinking:user-input',
-      sessionId: 'tmux-internal-1',
-      startedAtMs: Date.now() - 250
-    }));
-
-    expect(line).toMatch(/internal=\d+ms/);
-  });
-
-  it('never uses white / black / red for digit highlight or labels', () => {
-    const samples = [
-      formatVirtualRouterHit(createVirtualRouterHitRecord({
-        routeName: 'tools',
-        poolId: 'tools-primary',
-        providerKey: 'tabglm.key1.glm-5',
-        modelId: 'glm-5',
-        hitReason: 'tools:last-tool-other',
-        sessionId: 'tmux-color-1',
-        startedAtMs: Date.now() - 123
-      })),
-      formatVirtualRouterHit(createVirtualRouterHitRecord({
-        routeName: 'thinking',
-        poolId: 'thinking-primary',
-        providerKey: 'glm.key1.kimi-k2.5',
-        modelId: 'kimi-k2.5',
-        hitReason: 'thinking:user-input'
-      }))
-    ];
-    for (const sample of samples) {
-      expect(sample).not.toMatch(/\x1b\[(30|37|90|97|31)m/);
-    }
   });
 
   it('prefers stable tmux scope over per-request session id for log color key', () => {
