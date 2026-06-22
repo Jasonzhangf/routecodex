@@ -208,7 +208,15 @@ export function inspectProviderConfig(
   const authType = readString(authNode?.type);
   const routeTargets = {
     default: defaultModel ? `${providerId}.${defaultModel}` : providerId,
-    ...(providerId === 'deepseek-web' ? { tools: 'deepseek-web.deepseek-v4-flash-nothinking' } : {}),
+    // Per Jason 2026-06-20, route targets must be canonical model keys declared
+    // in `provider.models`. Aliases like `deepseek-v4-flash-nothinking` are
+    // display-only and must not flow into VR routed targets. Fall back to the
+    // provider's default canonical model so deepseek-web tools route stays
+    // valid for both `deepseek-chat` (chat) and `deepseek-reasoner` (reasoner)
+    // declared entries.
+    ...(providerId === 'deepseek-web' && defaultModel
+      ? { tools: `${providerId}.${defaultModel}` }
+      : {}),
     ...(webSearchSummary?.routeTarget ? { webSearch: String(webSearchSummary.routeTarget) } : {}),
     ...(metadata.multimodalRouteTarget ? { multimodal: metadata.multimodalRouteTarget } : {})
   };

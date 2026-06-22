@@ -130,7 +130,7 @@ export async function detectLocalServerInstanceDetailed(): Promise<DetectLocalSe
       port,
       timeoutMs: 1500
     });
-    if (!probe.ok) {
+    if (!probe.ok && probe.kind !== 'starting') {
       logServerUtilsNonBlocking('detect_local_server', 'health_probe', describeHealthProbeFailure(probe), {
         host,
         port,

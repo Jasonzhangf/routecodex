@@ -45,6 +45,30 @@ describe('http-health-probe', () => {
     }
   });
 
+  it('classifies routecodex starting body distinctly without treating it as bad_status', async () => {
+    const probe = await probeRouteCodexHealth({
+      fetchImpl: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          server: 'routecodex',
+          status: 'starting',
+          ready: false,
+          pipelineReady: false
+        })
+      })) as any,
+      host: '127.0.0.1',
+      port: 5520,
+      timeoutMs: 10
+    });
+
+    expect(probe.ok).toBe(false);
+    if (!probe.ok) {
+      expect(probe.kind).toBe('starting');
+      expect(probe.status).toBe(200);
+    }
+  });
+
   it('classifies guardian auth_error distinctly', async () => {
     const probe = await probeGuardianHealth({
       fetchImpl: (async () => ({

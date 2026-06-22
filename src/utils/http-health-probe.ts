@@ -5,6 +5,7 @@ type ProbeFailureKind =
   | 'timeout'
   | 'network_error'
   | 'auth_error'
+  | 'starting'
   | 'bad_status'
   | 'bad_json'
   | 'not_routecodex'
@@ -168,9 +169,17 @@ function isRouteCodexHealthy(body: RouteCodexHealthBody): boolean {
     );
 }
 
+function isRouteCodexStarting(body: RouteCodexHealthBody): boolean {
+  const status = typeof body?.status === 'string' ? body.status.toLowerCase() : '';
+  return body?.server === 'routecodex'
+    && status === 'starting'
+    && body?.ready !== true
+    && body?.pipelineReady !== true;
+}
+
 export function describeHealthProbeFailure(result: ProbeFailure): string {
   if (
-    result.kind === 'bad_status'
+    (result.kind === 'bad_status' || result.kind === 'starting')
     && typeof result.bodySnippet === 'string'
     && /"status"\s*:\s*"starting"/i.test(result.bodySnippet)
   ) {
@@ -235,6 +244,16 @@ export async function probeRouteCodexHealth(args: {
     return {
       ok: false,
       kind: 'not_routecodex',
+      status: request.status,
+      parseOk: true,
+      bodySnippet: body.bodySnippet
+    };
+  }
+
+  if (isRouteCodexStarting(healthBody)) {
+    return {
+      ok: false,
+      kind: 'starting',
       status: request.status,
       parseOk: true,
       bodySnippet: body.bodySnippet

@@ -64,14 +64,17 @@ describe('provider inspect', () => {
     );
 
     expect(inspection.routeTargets.default).toBe('deepseek-web.deepseek-chat');
-    expect(inspection.routeTargets.tools).toBe('deepseek-web.deepseek-v4-flash-nothinking');
-    expect(inspection.routeTargets.webSearch).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
-    expect(inspection.routeTargets.multimodal).toBe('deepseek-web.deepseek-v4-vision');
+    // Per Jason 2026-06-20, route targets must reference canonical model
+    // keys declared in `provider.models`. Aliases like
+    // `deepseek-v4-flash-search-nothinking` are display-only.
+    expect(inspection.routeTargets.tools).toBe('deepseek-web.deepseek-chat');
+    expect(inspection.routeTargets.webSearch).toBe('deepseek-web.deepseek-chat');
+    expect(inspection.routeTargets.multimodal).toBe('deepseek-web.deepseek-chat');
     expect(inspection.webSearch).toMatchObject({
       engineId: 'deepseek:web_search',
-      routeTarget: 'deepseek-web.deepseek-v4-flash-search-nothinking',
-      providerKey: 'deepseek-web.deepseek-v4-flash-search-nothinking',
-      modelId: 'deepseek-v4-flash-search-nothinking',
+      routeTarget: 'deepseek-web.deepseek-chat',
+      providerKey: 'deepseek-web.deepseek-chat',
+      modelId: 'deepseek-chat',
       executionMode: 'direct'
     });
     expect(inspection.capabilities).toMatchObject({
@@ -84,7 +87,7 @@ describe('provider inspect', () => {
         {
           id: 'tools-primary',
           loadBalancing: {
-            weights: { 'deepseek-web.deepseek-v4-flash-nothinking': 1 }
+            weights: { 'deepseek-web.deepseek-chat': 1 }
           }
         }
       ],
@@ -92,7 +95,7 @@ describe('provider inspect', () => {
         {
           id: 'multimodal-primary',
           loadBalancing: {
-            weights: { 'deepseek-web.deepseek-v4-vision': 1 }
+            weights: { 'deepseek-web.deepseek-chat': 1 }
           }
         }
       ],
@@ -100,7 +103,7 @@ describe('provider inspect', () => {
         {
           id: 'web_search-primary',
           loadBalancing: {
-            weights: { 'deepseek-web.deepseek-v4-flash-search-nothinking': 1 }
+            weights: { 'deepseek-web.deepseek-chat': 1 }
           }
         }
       ]
