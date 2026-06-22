@@ -10,6 +10,7 @@ import {
   normalizeProviderType,
   providerTypeToProtocol
 } from '../utils/provider-type-utils.js';
+import { resolveProviderContextExtensions } from './provider-runtime-utils.js';
 
 type RequestEnvelope = UnknownObject & { data?: UnknownObject };
 
@@ -38,13 +39,19 @@ export function createProviderContext(options: {
   runtimeProfile?: ProviderRuntimeProfile;
   configProviderId?: string;
   configProviderType?: string;
+  configExtensions?: Record<string, unknown>;
 }): { context: ProviderContext; runtimeMetadata?: ProviderRuntimeMetadata } {
   const runtimeMetadata = extractProviderRuntimeMetadata(options.request);
   const payload = unwrapRequestPayload(options.request);
-  const runtimeModel = typeof runtimeMetadata?.target?.model === 'string'
-    ? runtimeMetadata.target.model
-    : undefined;
+  const runtimeModel = typeof runtimeMetadata?.target?.modelId === 'string'
+    ? runtimeMetadata.target.modelId
+    : typeof runtimeMetadata?.target?.model === 'string'
+      ? runtimeMetadata.target.model
+      : typeof runtimeMetadata?.modelId === 'string'
+        ? runtimeMetadata.modelId
+        : undefined;
   const payloadModel = typeof payload.model === 'string' ? payload.model : undefined;
+  const contextModel = runtimeModel ?? payloadModel;
   const providerType = normalizeProviderType(
     runtimeMetadata?.providerType ||
     options.runtimeProfile?.providerType ||
@@ -68,7 +75,7 @@ export function createProviderContext(options: {
     providerType,
     providerFamily,
     startTime: Date.now(),
-    model: payloadModel ?? runtimeModel,
+    model: contextModel,
     hasTools: hasTools(payload),
     metadata: runtimeMetadata?.metadata || {},
     providerId: runtimeMetadata?.providerId || runtimeMetadata?.providerKey || options.runtimeProfile?.providerId,
@@ -77,6 +84,11 @@ export function createProviderContext(options: {
     routeName: runtimeMetadata?.routeName,
     target: runtimeMetadata?.target,
     runtimeMetadata,
+    extensions: resolveProviderContextExtensions({
+      runtime: runtimeMetadata,
+      runtimeProfileExtensions: options.runtimeProfile?.extensions,
+      configExtensions: options.configExtensions
+    }),
     pipelineId: runtimeMetadata?.pipelineId,
     abortSignal:
       runtimeMetadata?.abortSignal && typeof runtimeMetadata.abortSignal === 'object'

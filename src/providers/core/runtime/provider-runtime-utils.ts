@@ -2,6 +2,12 @@ import type { ProviderContext, ProviderType, ServiceProfile } from '../api/provi
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
 export function resolveProviderProfileKey(options: {
   moduleType: string;
   providerType: string;
@@ -51,6 +57,8 @@ export function createProviderRuntimeContext(options: {
   runtime?: ProviderRuntimeMetadata;
   serviceProfile: ServiceProfile;
   providerType: string;
+  runtimeProfileExtensions?: Record<string, unknown>;
+  configExtensions?: Record<string, unknown>;
 }): ProviderContext {
   const { runtime, serviceProfile, providerType } = options;
   return {
@@ -65,10 +73,26 @@ export function createProviderRuntimeContext(options: {
     metadata: runtime?.metadata,
     target: runtime?.target,
     runtimeMetadata: runtime,
+    extensions: resolveProviderContextExtensions({
+      runtime,
+      runtimeProfileExtensions: options.runtimeProfileExtensions,
+      configExtensions: options.configExtensions
+    }),
     pipelineId: runtime?.pipelineId,
     abortSignal:
       runtime?.abortSignal && typeof runtime.abortSignal === 'object'
         ? (runtime.abortSignal as AbortSignal)
         : undefined
   };
+}
+
+export function resolveProviderContextExtensions(options: {
+  runtime?: ProviderRuntimeMetadata;
+  runtimeProfileExtensions?: Record<string, unknown>;
+  configExtensions?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const runtimeRecord = asRecord(options.runtime);
+  const runtimeExtensions = asRecord(runtimeRecord?.extensions);
+  const targetExtensions = asRecord(asRecord(runtimeRecord?.target)?.extensions);
+  return runtimeExtensions ?? options.runtimeProfileExtensions ?? options.configExtensions ?? targetExtensions;
 }

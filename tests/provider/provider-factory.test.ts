@@ -68,6 +68,37 @@ describe('ProviderFactory no fallback', () => {
     expect(provider?.config?.config?.maxRetries).toBe(7);
   });
 
+  test('runtime preserves generic provider extensions for error mapping', () => {
+    const runtime: any = {
+      runtimeKey: 'XLC.key2',
+      providerId: 'XLC',
+      providerType: 'openai',
+      endpoint: 'https://xlapis.com/v1',
+      auth: { type: 'apikey', value: '12345678901' },
+      extensions: {
+        errorMapping: {
+          rules: [
+            {
+              origin: {
+                status: 400,
+                error: {
+                  messageContains: 'All available accounts exhausted'
+                }
+              },
+              to: {
+                status: 429,
+                code: 'HTTP_429'
+              }
+            }
+          ]
+        }
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.extensions?.errorMapping).toEqual(runtime.extensions.errorMapping);
+  });
+
   test('deepseek account runtime maps into extensions and apikey auth payload', () => {
     const runtime: any = {
       runtimeKey: 'deepseek.key1',

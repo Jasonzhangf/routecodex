@@ -241,6 +241,10 @@ export class HttpTransportProvider extends BaseProvider {
     return authBootstrap.authProvider;
   }
 
+  public getAuthProvider(): IAuthProvider | null {
+    return this.authProvider;
+  }
+
   protected createHttpClient(): void {
     this.httpClient = createTransportHttpClient({
       config: this.config,
@@ -359,7 +363,12 @@ export class HttpTransportProvider extends BaseProvider {
     const effectiveContext = context ?? createProviderRuntimeContext({
       runtime: this.getCurrentRuntimeMetadata(),
       serviceProfile: this.serviceProfile,
-      providerType: this.providerType
+      providerType: this.providerType,
+      runtimeProfileExtensions: this.getRuntimeProfile()?.extensions,
+      configExtensions:
+        this.config.config.extensions && typeof this.config.config.extensions === 'object'
+          ? this.config.config.extensions as Record<string, unknown>
+          : undefined
     });
     familyProfile?.prepareStreamBody?.({
       body,
@@ -545,7 +554,12 @@ export class HttpTransportProvider extends BaseProvider {
     return createProviderRuntimeContext({
       runtime: this.getCurrentRuntimeMetadata(),
       serviceProfile: this.serviceProfile,
-      providerType: this.providerType
+      providerType: this.providerType,
+      runtimeProfileExtensions: this.getRuntimeProfile()?.extensions,
+      configExtensions:
+        this.config.config.extensions && typeof this.config.config.extensions === 'object'
+          ? this.config.config.extensions as Record<string, unknown>
+          : undefined
     });
   }
 

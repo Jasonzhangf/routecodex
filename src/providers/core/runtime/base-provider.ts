@@ -326,7 +326,11 @@ export abstract class BaseProvider implements IProviderV2 {
       providerType: this.providerType,
       runtimeProfile,
       configProviderId: this.config.config.providerId,
-      configProviderType: this.config.config.providerType
+      configProviderType: this.config.config.providerType,
+      configExtensions:
+        this.config.config.extensions && typeof this.config.config.extensions === 'object'
+          ? this.config.config.extensions as Record<string, unknown>
+          : undefined
     });
     this.lastRuntimeMetadata = runtimeMetadata;
     return context;

@@ -9,6 +9,8 @@ import type { ApiKeyAuth } from '../core/api/provider-config.js';
 
 import type { ApiKeyEntry, ApiKeyAuthConfig } from '../profile/provider-profile.js';
 
+export type ApiKeySelectionMode = 'round-robin' | 'priority';
+
 /**
  * API Key认证提供者
  *
@@ -210,9 +212,11 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 export class ApiKeyRotator {
   private entries: ApiKeyEntry[] = [];
   private currentIndex = 0;
+  private readonly selectionMode: ApiKeySelectionMode;
 
-  constructor(entries: ApiKeyEntry[]) {
+  constructor(entries: ApiKeyEntry[], selectionMode: ApiKeySelectionMode = 'round-robin') {
     this.entries = entries;
+    this.selectionMode = selectionMode;
     if (entries.length > 1) {
       try {
         console.log(`[key-rotator] initialized providerKey=${entries.map(e => e.alias || '?').join(',')}`);
@@ -384,6 +388,6 @@ export function createApiKeyRotator(config: ApiKeyAuthConfig): ApiKeyRotator | n
   if (entries.length === 0) {
     return null;
   }
-  
-  return new ApiKeyRotator(entries);
+
+  return new ApiKeyRotator(entries, config.selectionMode ?? 'round-robin');
 }

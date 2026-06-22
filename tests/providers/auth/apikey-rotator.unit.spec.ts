@@ -50,6 +50,24 @@ describe('ApiKeyRotator', () => {
       expect(rotator.getCurrentKey()).toBeUndefined();
       expect(rotator.rotate()).toBeUndefined();
     });
+
+    it('priority 模式应固定首个可用 key，只有 rotate 时才切到下一个', () => {
+      const rotator = new ApiKeyRotator(
+        [
+          { alias: 'key1', apiKey: 'sk-test1' },
+          { alias: 'key2', apiKey: 'sk-test2' },
+          { alias: 'key3', apiKey: 'sk-test3' }
+        ],
+        'priority'
+      );
+
+      expect(rotator.getCurrentKey()).toBe('sk-test1');
+      expect(rotator.getCurrentKey()).toBe('sk-test1');
+      expect(rotator.getCurrentEntry()?.alias).toBe('key1');
+
+      expect(rotator.rotate()).toBe('sk-test2');
+      expect(rotator.getCurrentKey()).toBe('sk-test2');
+    });
   });
 
   describe('按别名选择', () => {
@@ -174,6 +192,23 @@ describe('createApiKeyRotator', () => {
     expect(rotator).not.toBeNull();
     expect(rotator?.getEntryCount()).toBe(2);
     expect(rotator?.getCurrentKey()).toBe('sk-1');
+  });
+
+  it('应该支持显式 priority selectionMode', () => {
+    const config: ApiKeyAuthConfig = {
+      kind: 'apikey',
+      selectionMode: 'priority',
+      entries: [
+        { alias: 'k1', apiKey: 'sk-1' },
+        { alias: 'k2', apiKey: 'sk-2' }
+      ]
+    };
+
+    const rotator = createApiKeyRotator(config);
+    expect(rotator).not.toBeNull();
+    expect(rotator?.getCurrentKey()).toBe('sk-1');
+    expect(rotator?.getCurrentKey()).toBe('sk-1');
+    expect(rotator?.rotate()).toBe('sk-2');
   });
 
   it('应该兼容单 key 模式', () => {

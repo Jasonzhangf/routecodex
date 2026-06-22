@@ -248,7 +248,13 @@ export class ProviderFactory {
       headers: runtime.headers,
       ...(endpointOverride ? { endpoint: endpointOverride } : {})
     };
-    const extensions: Record<string, unknown> = {};
+    const runtimeExtensions =
+      runtime.extensions && typeof runtime.extensions === 'object'
+        ? runtime.extensions as Record<string, unknown>
+        : undefined;
+    const extensions: Record<string, unknown> = {
+      ...(runtimeExtensions ?? {})
+    };
     if (runtime.auth?.oauthProviderId) {
       extensions.oauthProviderId = runtime.auth.oauthProviderId;
     }
@@ -257,7 +263,7 @@ export class ProviderFactory {
     }
     const deepseekOptions = readDeepSeekProviderRuntimeOptions({
       runtimeOptions: runtime.deepseek,
-      extensions: (runtime as unknown as { extensions?: Record<string, unknown> }).extensions,
+      extensions: runtimeExtensions,
       metadata: (runtime as unknown as { metadata?: Record<string, unknown> }).metadata
     });
     const isDeepSeekAccountAuth = authConfig.rawType === 'deepseek-account';
