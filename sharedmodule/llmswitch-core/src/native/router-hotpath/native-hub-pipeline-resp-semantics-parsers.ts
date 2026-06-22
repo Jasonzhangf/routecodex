@@ -268,6 +268,10 @@ export function parseResponsesClientSseFrameProjection(raw: string): ResponsesCl
   };
 }
 
+export function parseRespFormatEnvelopeResult(raw: string): Record<string, unknown> | null {
+  return parseRecord(raw, 'parseRespFormatEnvelopeResult');
+}
+
 export function parseAnthropicStopReasonResolution(raw: string): AnthropicStopReasonResolution | null {
   const row = parseRecord(raw, 'parseAnthropicStopReasonResolution');
   if (

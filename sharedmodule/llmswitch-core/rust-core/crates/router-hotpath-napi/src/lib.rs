@@ -655,6 +655,11 @@ pub fn build_chat_response_from_responses_full_json(input_json: String) -> NapiR
     shared_responses_response_utils::build_chat_response_from_responses_full_json(input_json)
 }
 
+#[napi(js_name = "parseRespFormatEnvelopeJson")]
+pub fn parse_resp_format_envelope_json_bridge(input_json: String) -> NapiResult<String> {
+    hub_resp_inbound_format_parse::parse_resp_format_envelope_json(input_json)
+}
+
 #[napi(js_name = "updateResponsesContractProbeFromSseChunkJson")]
 pub fn update_responses_contract_probe_from_sse_chunk_json_bridge(
     chunk_json: String,
@@ -1758,6 +1763,14 @@ pub fn plan_servertool_state_load_failed_error_json(input_json: String) -> NapiR
 }
 
 #[napi]
+pub fn plan_servertool_required_response_hook_empty_error_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_required_response_hook_empty_error_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_stop_message_fetch_failed_error_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stop_message_fetch_failed_error_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1796,6 +1809,14 @@ pub fn build_client_exec_cli_projection_output_json(input_json: String) -> NapiR
 #[napi]
 pub fn plan_stopless_orchestration_action_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stopless_orchestration_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi(js_name = "normalizeStoplessTriggerHintForMetadataJson")]
+pub fn normalize_stopless_trigger_hint_for_metadata_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::normalize_stopless_trigger_hint_for_metadata_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -1840,6 +1861,14 @@ pub fn validate_client_exec_command_result_json(raw_output: String) -> NapiResul
 #[napi]
 pub fn has_stop_message_auto_cli_result_in_request_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::has_stop_message_auto_cli_result_in_request_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn extract_servertool_cli_result_route_hint_from_request_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::extract_servertool_cli_result_route_hint_from_request_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

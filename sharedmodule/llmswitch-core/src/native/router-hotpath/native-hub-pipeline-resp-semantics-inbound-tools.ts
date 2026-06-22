@@ -4,6 +4,7 @@ import {
   parseClientToolsRaw,
   parseContextLengthDiagnostics,
   parseProviderSseStreamReadErrorDescriptor,
+  parseRespFormatEnvelopeResult,
   parseRecord,
   parseRespInboundSseErrorDescriptor,
   parseStringOrUndefined,
@@ -430,9 +431,10 @@ export function buildRespInboundSseErrorDescriptorWithNative(input: unknown): Re
   }
 }
 
-export function parseRespFormatEnvelopeWithNative(
-  input: { payload: unknown; protocol: string }
-): Record<string, unknown> {
+export function parseRespFormatEnvelopeWithNative(input: {
+  payload: unknown;
+  protocol: string;
+}): Record<string, unknown> {
   const capability = 'parseRespFormatEnvelopeJson';
   const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
   if (isNativeDisabledByEnv()) {
@@ -442,7 +444,7 @@ export function parseRespFormatEnvelopeWithNative(
   if (!fn) {
     return fail();
   }
-  const inputJson = safeStringify(input ?? { payload: null, protocol: '' });
+  const inputJson = safeStringify(input ?? null);
   if (!inputJson) {
     return fail('json stringify failed');
   }
@@ -451,7 +453,7 @@ export function parseRespFormatEnvelopeWithNative(
     if (typeof raw !== 'string' || !raw) {
       return fail('empty result');
     }
-    return parseRecord(raw, 'parseRespFormatEnvelopeWithNative') ?? fail('invalid payload');
+    return parseRespFormatEnvelopeResult(raw) ?? fail('invalid payload');
   } catch (error) {
     return fail(extractNativeErrorMessage(error));
   }
