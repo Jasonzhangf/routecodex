@@ -1,7 +1,7 @@
 import type {
   ServerToolAutoHookDescriptor,
   ServerToolHandlerEntry
-} from './registry-impl.js';
+} from './registry-types.js';
 import type {
   ServerToolRegisteredHandlerRecord
 } from './skeleton-config.js';

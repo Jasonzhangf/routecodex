@@ -1,7 +1,7 @@
 export type {
   ServerToolAutoHookDescriptor,
   ServerToolHandlerEntry
-} from './registry-impl.js';
+} from './registry-orchestration-shell.js';
 export {
   listAutoServerToolHooks,
   getServerToolHandler,
@@ -11,4 +11,4 @@ export {
   listRegisteredServerToolHandlerNames,
   listRegisteredServerToolHandlerRecords,
   registerServerToolHandler
-} from './registry-impl.js';
+} from './registry-orchestration-shell.js';

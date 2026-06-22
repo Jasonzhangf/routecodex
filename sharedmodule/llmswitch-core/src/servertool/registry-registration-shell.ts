@@ -1,5 +1,5 @@
 import type { ServerToolHandler } from './types.js';
-import type { ServerToolHandlerEntry } from './registry-impl.js';
+import type { ServerToolHandlerEntry } from './registry-types.js';
 import {
   getBuiltinHandlerEntry,
   listBuiltinHandlerNames

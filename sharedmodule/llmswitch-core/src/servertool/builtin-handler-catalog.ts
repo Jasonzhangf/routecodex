@@ -1,5 +1,5 @@
 import type { ServerToolHandler } from './types.js';
-import type { ServerToolHandlerEntry } from './registry-impl.js';
+import type { ServerToolHandlerEntry } from './registry-types.js';
 import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
 import { getServertoolToolSpec } from './skeleton-config.js';
 
