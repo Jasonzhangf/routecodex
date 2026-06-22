@@ -518,8 +518,14 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Pro
     entryEndpoint: input.endpoint,
     entryPort: input.entryPort,
     data: input.payload,
+    rawPayload: input.payload,
     verbosity: 'verbose',
   });
+  try {
+    await mirrorSnapshotToLocalDisk(input);
+  } catch (error) {
+    logSnapshotNonBlockingError(`mirrorSnapshot:${input.stage}`, error);
+  }
 }
 
 function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions): ProviderSnapshotPersistInput {

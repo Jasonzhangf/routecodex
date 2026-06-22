@@ -102,4 +102,56 @@ describe('snapshot writer error spill in release mode', () => {
       await fs.rm(errorsDir, { recursive: true, force: true });
     }
   });
+
+  it('writes provider-error to errorsamples under default stage policy', async () => {
+    const previousSnapshotFlag = runtimeFlags.snapshotsEnabled;
+    const previousSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
+    const previousErrorsamplesDir = process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+    const previousStages = process.env.ROUTECODEX_SNAPSHOT_STAGES;
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-snapshot-default-error-spill-'));
+    const errorsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-default-provider-'));
+
+    process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsDir;
+    delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+    setRuntimeFlag('snapshotsEnabled', false);
+    __resetProviderSnapshotErrorBufferForTests();
+
+    try {
+      await writeProviderSnapshot({
+        phase: 'provider-error',
+        requestId: 'req_default_err_spill',
+        clientRequestId: 'req_default_err_spill',
+        providerKey: 'glm.2-173.kimi-k2.5',
+        entryEndpoint: '/v1/responses',
+        data: { step: 'error', message: 'boom-default' }
+      });
+
+      const files = await listFilesRecursively(tempDir);
+      expect(files).toHaveLength(0);
+
+      const errorSampleFiles = await listFilesRecursively(errorsDir);
+      expect(errorSampleFiles.some((file) => file.includes('/provider-error/'))).toBe(true);
+    } finally {
+      __resetProviderSnapshotErrorBufferForTests();
+      setRuntimeFlag('snapshotsEnabled', previousSnapshotFlag);
+      if (previousSnapshotDir === undefined) {
+        delete process.env.ROUTECODEX_SNAPSHOT_DIR;
+      } else {
+        process.env.ROUTECODEX_SNAPSHOT_DIR = previousSnapshotDir;
+      }
+      if (previousErrorsamplesDir === undefined) {
+        delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+      } else {
+        process.env.ROUTECODEX_ERRORSAMPLES_DIR = previousErrorsamplesDir;
+      }
+      if (previousStages === undefined) {
+        delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+      } else {
+        process.env.ROUTECODEX_SNAPSHOT_STAGES = previousStages;
+      }
+      await fs.rm(tempDir, { recursive: true, force: true });
+      await fs.rm(errorsDir, { recursive: true, force: true });
+    }
+  });
 });

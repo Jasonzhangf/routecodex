@@ -46,6 +46,7 @@ export interface SnapshotWriteInput {
   headers?: Record<string, unknown>;
   url?: string;
   extraMeta?: Record<string, unknown>;
+  rawPayload?: unknown;
 }
 
 // --- internal helpers ---
@@ -211,7 +212,8 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
   const providerToken = normalizeProviderToken(input.providerKey);
   const folder = mapEndpointToFolder(input.entryEndpoint);
   const stageSafe = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
-  const payload = coerceSnapshotPayloadForWrite(input.stage, buildSnapshotPayload(input));
+  const builtPayload = input.rawPayload ?? buildSnapshotPayload(input);
+  const payload = coerceSnapshotPayloadForWrite(input.stage, builtPayload);
   if (payload === undefined) return;
 
   // 1) Call hook bridge first (for llmswitch-core debug consumption)
@@ -241,6 +243,8 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
     endpoint: input.entryEndpoint || '/v1/chat/completions',
     requestId: input.requestId,
     groupRequestId,
+    providerKey: input.providerKey,
+    ...(typeof input.entryPort === 'number' ? { entryPort: input.entryPort, matchedPort: input.entryPort } : {}),
   });
 
   try {

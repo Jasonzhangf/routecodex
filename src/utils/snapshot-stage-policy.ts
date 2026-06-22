@@ -3,6 +3,7 @@ const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
   'provider-request',
   'provider-request-contract',
   'provider-response',
+  'provider-error',
   'provider-response-contract',
   'client-response',
   'client-response.error'

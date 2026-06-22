@@ -110,6 +110,56 @@ function createExecutorWithPreparedJsonBodyLabelledSse() {
   };
 }
 
+function createExecutorWithPreparedSseErrorFrame() {
+  const wrapUpstreamSseResponse = jest.fn(async () => {
+    throw new Error('MUST_NOT_PARSE_ERROR_SSE_AS_CHAT');
+  });
+  const resolveBusinessResponseError = jest.fn((response: unknown) => {
+    const errorNode = response && typeof response === 'object'
+      ? (response as Record<string, any>).error
+      : undefined;
+    if (errorNode?.type === 'server_error') {
+      return Object.assign(new Error('[provider] Upstream provider returned business error: server_error'), {
+        code: 'MALFORMED_RESPONSE',
+        upstreamCode: 'server_error',
+        statusCode: 200
+      });
+    }
+    return undefined;
+  });
+  const deps = {
+    wantsUpstreamSse: () => true,
+    getEffectiveEndpoint: () => '/v1/chat/completions',
+    resolveRequestEndpoint: (_req: any, defaultEndpoint: string) => defaultEndpoint,
+    buildRequestHeaders: async () => ({ Accept: 'text/event-stream' }),
+    finalizeRequestHeaders: async (headers: Record<string, string>) => headers,
+    applyStreamModeHeaders: (headers: Record<string, string>) => headers,
+    getEffectiveBaseUrl: () => 'https://example.test',
+    buildHttpRequestBody: () => ({ model: 'deepseek-v4-pro', stream: true, messages: [] }),
+    prepareSseRequestBody: () => {},
+    getEntryEndpointFromPayload: () => '/v1/responses',
+    getClientRequestIdFromContext: () => 'req_client_error_sse',
+    wrapUpstreamSseResponse,
+    executePreparedRequest: async () => ({
+      sseStream: Readable.from([
+        'data: {"error":{"message":"","type":"server_error"}}\n\n',
+        'data: [DONE]\n\n'
+      ]),
+      headers: { 'content-type': 'text/event-stream' },
+      status: 200,
+      statusText: 'OK'
+    }),
+    resolveBusinessResponseError,
+    normalizeHttpError: async (error: unknown) => error
+  } as any;
+
+  return {
+    executor: new HttpRequestExecutor({} as any, deps),
+    wrapUpstreamSseResponse,
+    resolveBusinessResponseError
+  };
+}
+
 describe('HttpRequestExecutor SSE snapshot finalization', () => {
   const originalSnapshotsEnabled = runtimeFlags.snapshotsEnabled;
 
@@ -242,5 +292,30 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
 
     expect(wrapUpstreamSseResponse).not.toHaveBeenCalled();
     expect((result as any).data.choices[0].message.content).toBe('prepared-json-ok');
+  });
+
+  it('raises prepared-request SSE error frame before chat SSE conversion', async () => {
+    shouldCaptureProviderStreamSnapshots.mockReturnValue(true);
+    const { executor, wrapUpstreamSseResponse, resolveBusinessResponseError } = createExecutorWithPreparedSseErrorFrame();
+
+    await expect(executor.execute(
+      {} as any,
+      {
+        requestId: 'req_prepared_sse_error_frame',
+        startTime: Date.now(),
+        profile: {} as any,
+        providerKey: 'tokenrelay.key1.deepseek-v4-pro',
+        providerId: 'tokenrelay'
+      } as any
+    )).rejects.toMatchObject({
+      code: 'MALFORMED_RESPONSE',
+      upstreamCode: 'server_error',
+      statusCode: 200
+    });
+    expect(resolveBusinessResponseError).toHaveBeenCalledWith(
+      { error: { message: '', type: 'server_error' } },
+      expect.objectContaining({ providerKey: 'tokenrelay.key1.deepseek-v4-pro' })
+    );
+    expect(wrapUpstreamSseResponse).not.toHaveBeenCalled();
   });
 });

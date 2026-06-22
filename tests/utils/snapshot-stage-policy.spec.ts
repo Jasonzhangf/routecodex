@@ -18,9 +18,9 @@ describe('snapshot-stage-policy', () => {
       expect(shouldCaptureSnapshotStage('client-request')).toBe(true);
       expect(shouldCaptureSnapshotStage('provider-request')).toBe(true);
       expect(shouldCaptureSnapshotStage('provider-response')).toBe(true);
+      expect(shouldCaptureSnapshotStage('provider-error')).toBe(true);
       expect(shouldCaptureSnapshotStage('client-response')).toBe(true);
       expect(shouldCaptureSnapshotStage('client-response.error')).toBe(true);
-      expect(shouldCaptureSnapshotStage('provider-error')).toBe(false);
       expect(shouldCaptureSnapshotStage('provider-request.retry')).toBe(false);
       expect(shouldCaptureSnapshotStage('chat_process.req.stage2.semantic_map')).toBe(false);
       expect(shouldCaptureSnapshotStage('chat_process.resp.stage8.finalize')).toBe(false);
