@@ -102,7 +102,7 @@ function buildVirtualRouterConfig() {
         type: 'openai',
         baseURL: 'mock://primary',
         auth: { type: 'apikey', apiKey: 'primary-key' },
-        responses: { process: 'chat', streaming: 'always' },
+        responses: { streaming: 'always' },
         models: { 'gpt-test': {} }
       },
       secondary: {
@@ -111,7 +111,7 @@ function buildVirtualRouterConfig() {
         type: 'openai',
         baseURL: 'mock://secondary',
         auth: { type: 'apikey', apiKey: 'secondary-key' },
-        responses: { process: 'chat', streaming: 'always' },
+        responses: { streaming: 'always' },
         models: { 'gpt-test': {} }
       }
     },

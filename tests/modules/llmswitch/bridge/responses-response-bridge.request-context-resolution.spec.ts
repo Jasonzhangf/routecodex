@@ -44,7 +44,7 @@ beforeAll(async () => {
 });
 
 describe('responses-response-bridge request-context resolution', () => {
-  it('prefers MetadataCenter continuation_context responsesRequestContext over server fallback context', () => {
+  it('prefers current handler fallback context over stale MetadataCenter continuation_context responsesRequestContext', () => {
     const metadata: Record<string, unknown> = {};
     const requestContext = {
       payload: { model: 'gpt-5.5', store: true },
@@ -65,16 +65,16 @@ describe('responses-response-bridge request-context resolution', () => {
     const resolved = resolveResponsesRequestContextForHttp({
       metadata,
       fallback: {
-        payload: { model: 'fallback-model' },
-        context: { input: [] },
+        payload: { model: 'fallback-model', store: true },
+        context: { input: [{ type: 'message', role: 'user' }] },
         sessionId: 'sess_fallback',
       },
     });
 
     expect(resolved).toEqual(
       expect.objectContaining({
-        sessionId: 'sess_meta',
-        payload: expect.objectContaining({ model: 'gpt-5.5' }),
+        sessionId: 'sess_fallback',
+        payload: expect.objectContaining({ model: 'fallback-model' }),
       }),
     );
   });
@@ -117,6 +117,47 @@ describe('responses-response-bridge request-context resolution', () => {
       expect.objectContaining({
         conversationId: 'conv_fallback',
         payload: expect.objectContaining({ model: 'gpt-5.4-mini' }),
+      }),
+    );
+  });
+
+  it('RED: merges fallback port scope when MetadataCenter responsesRequestContext omits matchedPort and routingPolicyGroup', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeContinuationContext(
+      'responsesRequestContext',
+      {
+        payload: { model: 'gpt-5.5', store: true },
+        context: { input: [{ type: 'message', role: 'user' }] },
+        sessionId: 'sess_meta_scope_merge',
+        conversationId: 'conv_meta_scope_merge',
+      },
+      {
+        module: 'tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts',
+        symbol: 'RED: merges fallback port scope when MetadataCenter responsesRequestContext omits matchedPort and routingPolicyGroup',
+        stage: 'test',
+      }
+    );
+
+    const resolved = resolveResponsesRequestContextForHttp({
+      metadata,
+      fallback: {
+        payload: { model: 'fallback-model', store: true },
+        context: { input: [] },
+        sessionId: 'sess_fallback_scope_merge',
+        conversationId: 'conv_fallback_scope_merge',
+        matchedPort: 5555,
+        routingPolicyGroup: 'gateway_priority_5555',
+      },
+    });
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        sessionId: 'sess_fallback_scope_merge',
+        conversationId: 'conv_fallback_scope_merge',
+        matchedPort: 5555,
+        routingPolicyGroup: 'gateway_priority_5555',
+        payload: expect.objectContaining({ model: 'fallback-model' }),
       }),
     );
   });

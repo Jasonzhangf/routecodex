@@ -80,6 +80,26 @@ describe('responses-provider-helpers provider failure policy bridge', () => {
     expect(failure?.recoverable).toBe(true);
   });
 
+  it('treats HTTP 200 text/html stream fallback as malformed provider failure', () => {
+    const failure = detectResponsesFailure(
+      '<!doctype html><html><body>wrong upstream</body></html>',
+      undefined,
+      {
+        expectedMode: 'sse',
+        responseKind: 'text',
+        contentType: 'text/html; charset=utf-8',
+        statusCode: 200
+      }
+    );
+
+    expect(failure).not.toBeNull();
+    expect(failure?.code).toBe('MALFORMED_RESPONSE');
+    expect(failure?.statusCode).toBe(200);
+    expect(failure?.recoverable).toBe(true);
+    expect(failure?.affectsHealth).toBe(true);
+    expect(failure?.message).toContain('HTML instead of SSE');
+  });
+
   it('does not reinterpret relay materialized previous_response_id input as native submit_tool_outputs', () => {
     const submit = extractSubmitToolOutputsPayload({
       model: 'gpt-5.5',

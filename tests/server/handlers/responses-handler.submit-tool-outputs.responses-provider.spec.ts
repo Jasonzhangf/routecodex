@@ -82,7 +82,7 @@ const createResponsesBridgeMock = () => ({
   ...createBridgeHttpServerMock(),
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(() => undefined),
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(() => undefined),
-  buildClientSseKeepaliveFrameForHttp: jest.fn(() => 'event: ping\ndata: {}\n\n'),
+  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn(() => ({
     type: 'error',
     error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' },
@@ -106,6 +106,9 @@ const createResponsesBridgeMock = () => ({
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async () => ({})
   })),
+  createChatJsonToSseConverterForHttp: jest.fn(async () => ({
+    convertResponseToJsonToSse: async () => ({})
+  })),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
   importResponsesHandlerCoreDist: jest.fn(async () => ({})),
   inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn(() => ({ sawTerminalChunk: false })),
@@ -125,7 +128,11 @@ const createResponsesBridgeMock = () => ({
     sanitizedBody: args.body,
     finishReason: undefined,
   })),
-  prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async () => null),
+  prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async (args: { responsesPayload?: unknown }) => ({
+    normalizedPayload: args.responsesPayload,
+    sanitizedPayload: args.responsesPayload,
+    finishReason: 'tool_calls',
+  })),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn(() => undefined),
   resolveResponsesRequestContextForHttp: jest.fn((args: { fallback?: unknown }) => args.fallback),
   resolveResponsesConversationClearReasonForHttp: jest.fn((reason: string) => reason),
@@ -490,6 +497,151 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     expect(pipelineInput.metadata?.responsesResume?.conversationId).toBe('conv-submit-same-provider-pin-1');
   });
 
+  it('RED: relay submit_tool_outputs follow-up requires_action must persist the new response id for the next submit', async () => {
+    const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
+    const bridge = await import('../../../src/modules/llmswitch/bridge/responses-response-bridge.js');
+
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue({
+      responseId: 'resp_submit_followup_1',
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+      requestId: 'openai-responses-router-submit-followup-1',
+    });
+    mockResumeResponsesConversation.mockResolvedValue({
+      payload: {
+        model: 'gpt-5.5',
+        previous_response_id: 'resp_submit_followup_1',
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: 'continue submit follow-up' }],
+          },
+          {
+            type: 'function_call',
+            id: 'fc_submit_followup_1',
+            call_id: 'call_submit_followup_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{}\\""}',
+          },
+          {
+            type: 'function_call_output',
+            id: 'fc_submit_followup_1',
+            call_id: 'call_submit_followup_1',
+            output: '{"ok":true,"kind":"stop_message_auto"}',
+          },
+        ],
+      },
+      meta: {
+        restoredFromResponseId: 'resp_submit_followup_1',
+        routeHint: 'search',
+        continuationOwner: 'relay',
+        sessionId: 'sess-submit-followup-1',
+        conversationId: 'conv-submit-followup-1',
+      },
+    });
+
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: {
+        id: 'resp_submit_followup_2',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            id: 'fc_submit_followup_2',
+            call_id: 'call_submit_followup_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}',
+          },
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_submit_followup_2',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"pwd"}',
+                tool_call_id: 'call_submit_followup_2',
+              },
+            ],
+          },
+        },
+      },
+      usageLogInfo: {
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        timingRequestIds: ['openai-responses-minimonth.key1-MiniMax-M2.7-20260622T000000000-1-1'],
+        sessionId: 'sess-submit-followup-1',
+        conversationId: 'conv-submit-followup-1',
+      },
+    }));
+
+    const req = {
+      method: 'POST',
+      body: {
+        tool_outputs: [{ call_id: 'call_submit_followup_1', output: '{"ok":true,"kind":"stop_message_auto"}' }],
+      },
+      headers: {},
+      query: {},
+      path: '/v1/responses/resp_submit_followup_1/submit_tool_outputs',
+      originalUrl: '/v1/responses/resp_submit_followup_1/submit_tool_outputs',
+      params: { id: 'resp_submit_followup_1' },
+      socket: { localPort: 5555 },
+      on: jest.fn(),
+      once: jest.fn(),
+      off: jest.fn(),
+      removeListener: jest.fn(),
+    } as any;
+
+    const res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn().mockReturnThis(),
+      setHeader: jest.fn(),
+      writeHead: jest.fn(),
+      write: jest.fn(),
+      end: jest.fn(),
+      headersSent: false,
+      on: jest.fn(),
+      once: jest.fn(),
+    } as any;
+
+    await handleResponses(
+      req,
+      res,
+      {
+        executePipeline,
+        errorHandling: null,
+      },
+      {
+        entryEndpoint: '/v1/responses.submit_tool_outputs',
+        responseIdFromPath: 'resp_submit_followup_1',
+      },
+    );
+
+    expect((bridge.persistResponsesConversationLifecycleForHttp as jest.Mock)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entryEndpoint: '/v1/responses',
+        requestContext: expect.objectContaining({
+          payload: expect.objectContaining({
+            previous_response_id: 'resp_submit_followup_1',
+          }),
+          context: expect.objectContaining({
+            input: expect.any(Array),
+          }),
+        }),
+        body: expect.objectContaining({
+          body: expect.objectContaining({
+            id: 'resp_submit_followup_2',
+            status: 'requires_action',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('binds resumed relay request truth and runtime pin into MetadataCenter before executePipeline', async () => {
     const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
 
@@ -512,7 +664,7 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
             type: 'function_call',
             id: 'fc_submit_metadata_center_1',
             call_id: 'call_submit_metadata_center_1',
-            name: 'reasoning.stop',
+            name: 'reasoningStop',
             arguments: '{"reason":"第一轮故意缺 schema","stopreason":2}',
           },
           {

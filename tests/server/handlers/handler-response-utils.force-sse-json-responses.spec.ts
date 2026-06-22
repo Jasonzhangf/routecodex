@@ -5,11 +5,17 @@ import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
+const finalizeRetentionMock = jest.fn(async (_requestId: string, _options?: unknown) => undefined);
+
+const __resetFinalizeMock = () => {
+  finalizeRetentionMock.mockClear();
+};
+
 const mockBridgeModule = async () => ({
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
   buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
-  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\nevent: ping\ndata: {"type":"ping"}\n\n'),
+  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({
     type: 'error',
     status,
@@ -42,6 +48,64 @@ const mockBridgeModule = async () => ({
       `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
     ];
   }),
+  createChatJsonToSseConverterForHttp: jest.fn(async () => ({
+    convertResponseToJsonToSse: async (payload: Record<string, unknown>) => {
+      const responseId = typeof payload.id === 'string' ? payload.id : 'chatcmpl_mock';
+      const model = typeof payload.model === 'string' ? payload.model : 'gpt-5.4-mini';
+      const choice = Array.isArray(payload.choices) ? payload.choices[0] : undefined;
+      const message =
+        choice && typeof choice === 'object' && !Array.isArray(choice)
+          ? (choice as Record<string, unknown>).message
+          : undefined;
+      const content =
+        message && typeof message === 'object' && !Array.isArray(message)
+          ? (message as Record<string, unknown>).content
+          : '';
+      const text = typeof content === 'string' ? content : '';
+      return Readable.from([
+        `data: ${JSON.stringify({
+          id: responseId,
+          object: 'chat.completion.chunk',
+          created: 1,
+          model,
+          choices: [
+            {
+              index: 0,
+              delta: { role: 'assistant', content: '' },
+              finish_reason: null
+            }
+          ]
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          id: responseId,
+          object: 'chat.completion.chunk',
+          created: 1,
+          model,
+          choices: [
+            {
+              index: 0,
+              delta: { content: text },
+              finish_reason: null
+            }
+          ]
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          id: responseId,
+          object: 'chat.completion.chunk',
+          created: 1,
+          model,
+          choices: [
+            {
+              index: 0,
+              delta: {},
+              finish_reason: 'stop'
+            }
+          ]
+        })}\n\n`,
+        'data: [DONE]\n\n'
+      ]);
+    }
+  })),
   buildResponsesSseErrorPayloadForHttp: jest.fn((args: {
     requestLabel: string;
     status: number;
@@ -120,7 +184,7 @@ const mockBridgeModule = async () => ({
       return Readable.from(chunks);
     }
   })),
-  finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
+  finalizeResponsesConversationRequestRetentionForHttp: finalizeRetentionMock,
   resolveResponsesRequestContextForHttp: jest.fn((args: {
     metadata?: unknown;
     fallback?: Record<string, unknown>;
@@ -528,7 +592,7 @@ async function loadNormalizeResponsesJsonBodyForHttp() {
 }
 
 describe('handler-response-utils forceSSE responses json bridge', () => {
-  it('keeps direct raw SSE frames on the same client-frame metadata guard', async () => {
+  it('rejects direct raw SSE frames that leak internal provider metadata to the client', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/direct-sse-with-provider-metadata', (_req, res) => {
@@ -566,8 +630,11 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       });
       const text = await response.text();
       expect(response.status).toBe(200);
-      expect(text).toContain('"metadata":{"provider":"raw"}');
-      expect(text).not.toContain('sse_bridge_error');
+      expect(text).not.toContain('"metadata":{"provider":"raw"}');
+      expect(text).not.toContain('event: ping');
+      expect(text).not.toContain('"type":"ping"');
+      expect(text).toContain('event: error');
+      expect(text).toContain('sse_stream_error');
       expect(text).not.toContain('internal carrier');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1019,6 +1086,55 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     }
   });
 
+  it('encodes chat.completion JSON into /v1/chat/completions SSE instead of sse_bridge_error', async () => {
+    const sendPipelineResponse = await loadSendPipelineResponse();
+    const app = express();
+    app.get('/chat-sse-from-chat-json', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            id: 'chatcmpl_force_sse_1',
+            object: 'chat.completion',
+            model: 'glm-5.1',
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: 'OK'
+                },
+                finish_reason: 'stop'
+              }
+            ]
+          }
+        } as any,
+        'req_force_sse_chat_completions_bridge',
+        { forceSSE: true, entryEndpoint: '/v1/chat/completions' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/chat-sse-from-chat-json`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+      expect(text).toContain('data: {"id":"chatcmpl_force_sse_1"');
+      expect(text).toContain('"object":"chat.completion.chunk"');
+      expect(text).toContain('[DONE]');
+      expect(text).not.toContain('sse_bridge_error');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('normalizes chat.completion JSON into response object for /v1/responses JSON dispatch', async () => {
     const normalizeResponsesJsonBodyForHttp = await loadNormalizeResponsesJsonBodyForHttp();
     const normalized = await normalizeResponsesJsonBodyForHttp({
@@ -1053,5 +1169,136 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     expect(normalized.object).not.toBe('chat.completion');
     expect(normalized.status).toBe('completed');
     expect(JSON.stringify(normalized)).not.toContain('chat.completion');
+  });
+});
+
+describe('handler-response-utils submit_tool_outputs SSE normal-end retention', () => {
+  beforeEach(() => {
+    __resetFinalizeMock();
+  });
+
+  it('relay submit_tool_outputs follow-up requires_action retains the request id after a normal SSE end', async () => {
+    const sendPipelineResponse = await loadSendPipelineResponse();
+    const app = express();
+    const requestLabel = 'openai-responses-router-stopless-submit-2';
+    app.get('/responses-sse-submit-tool-outputs-retention', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          sseStream: Readable.from([
+            'event: response.created\n',
+            'data: {"type":"response.created","response":{"id":"resp_submit_2_followup","status":"in_progress"}}\n\n',
+            'event: response.output_item.added\n',
+            'data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_submit_2","call_id":"call_submit_2","name":"reasoningStop","arguments":"{\\"flowId\\":\\"stop_message_flow\\"}"}}\n\n',
+            'event: response.function_call_arguments.done\n',
+            'data: {"type":"response.function_call_arguments.done","item_id":"fc_submit_2","output_index":0,"arguments":"{\\"flowId\\":\\"stop_message_flow\\"}"}\n\n',
+            'event: response.output_item.done\n',
+            'data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_submit_2","call_id":"call_submit_2","name":"reasoningStop","arguments":"{\\"flowId\\":\\"stop_message_flow\\"}","status":"in_progress"}}\n\n',
+            'event: response.required_action\n',
+            `data: ${JSON.stringify({
+              type: 'response.required_action',
+              response: {
+                id: 'resp_submit_2_followup',
+                object: 'response',
+                status: 'requires_action',
+                output: [
+                  {
+                    id: 'fc_submit_2',
+                    type: 'function_call',
+                    call_id: 'call_submit_2',
+                    name: 'reasoningStop',
+                    arguments: '{"flowId":"stop_message_flow"}',
+                    status: 'in_progress'
+                  }
+                ],
+                required_action: {
+                  type: 'submit_tool_outputs',
+                  submit_tool_outputs: {
+                    tool_calls: [
+                      {
+                        id: 'call_submit_2',
+                        type: 'function_call',
+                        name: 'reasoningStop',
+                        arguments: '{"flowId":"stop_message_flow"}'
+                      }
+                    ]
+                  }
+                }
+              },
+              required_action: {
+                type: 'submit_tool_outputs',
+                submit_tool_outputs: {
+                  tool_calls: [
+                    {
+                      id: 'call_submit_2',
+                      type: 'function_call',
+                      name: 'reasoningStop',
+                      arguments: '{"flowId":"stop_message_flow"}'
+                    }
+                  ]
+                }
+              }
+            })}\n\n`,
+            'event: response.completed\n',
+            'data: {"type":"response.completed","response":{"id":"resp_submit_2_followup","status":"requires_action"}}\n\n',
+            'event: response.done\n',
+            'data: {"type":"response.done","response":{"id":"resp_submit_2_followup","status":"requires_action"}}\n\n'
+          ]),
+          metadata: {
+            outboundStream: true,
+            responsesRequestContext: {
+              payload: { model: 'gpt-5.4-mini', store: true, input: [] },
+              context: { input: [] },
+              sessionId: 'sess_submit_2',
+              conversationId: 'conv_submit_2',
+              providerKey: 'router-stopless.gpt-5.4-mini'
+            }
+          },
+          continuationOwner: 'relay',
+          usageLogInfo: {
+            routeName: 'thinking',
+            timingRequestIds: [requestLabel]
+          }
+        } as any,
+        requestLabel,
+        {
+          entryEndpoint: '/v1/responses.submit_tool_outputs',
+          responsesRequestContext: {
+            payload: { model: 'gpt-5.4-mini', store: true, input: [] },
+            context: { input: [] },
+            sessionId: 'sess_submit_2',
+            conversationId: 'conv_submit_2',
+            providerKey: 'router-stopless.gpt-5.4-mini'
+          }
+        }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/responses-sse-submit-tool-outputs-retention`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(text).toContain('"status":"requires_action"');
+      expect(text).toContain('event: response.done');
+      // Drain a beat to allow the normal-end cleanup hooks (persist + finalize) to run.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const finalizeCalls = finalizeRetentionMock.mock.calls;
+      const submitRetentionCalls = finalizeCalls.filter(([, options]) => {
+        const opts = options as { keepForSubmitToolOutputs?: boolean } | undefined;
+        return Boolean(opts && opts.keepForSubmitToolOutputs === true);
+      });
+      expect(submitRetentionCalls.length).toBeGreaterThanOrEqual(1);
+      const requestIds = submitRetentionCalls.map(([requestId]) => String(requestId));
+      expect(requestIds).toContain(requestLabel);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

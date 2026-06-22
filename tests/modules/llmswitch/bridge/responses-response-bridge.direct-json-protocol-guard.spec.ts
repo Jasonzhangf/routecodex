@@ -80,4 +80,58 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
     expect(serialized).not.toContain('"status":"in_progress"');
     expect(JSON.stringify((output as { output: unknown[] }).output)).not.toContain('"status":"completed"');
   });
+
+  it('strips response metadata from JSON client projection even when native payload includes it', async () => {
+    const output = await normalizeResponsesClientPayloadForHttp({
+      entryEndpoint: '/v1/responses',
+      metadata: {},
+      payload: {
+        id: 'resp_direct_json_metadata_guard',
+        object: 'response',
+        status: 'completed',
+        metadata: {
+          routeHint: 'thinking',
+          providerKey: 'internal.provider',
+        },
+        output: [
+          {
+            id: 'msg_direct_json_metadata_guard',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            metadata: {
+              routeHint: 'tools',
+            },
+            content: [{ type: 'output_text', text: 'ok' }],
+          },
+        ],
+      },
+      requestContext: {
+        payload: {
+          model: 'gpt-5.4',
+          tools: [],
+        },
+        context: {},
+      },
+    });
+
+    expect(output).toEqual({
+      id: 'resp_direct_json_metadata_guard',
+      object: 'response',
+      status: 'completed',
+      output: [
+        {
+          id: 'msg_direct_json_metadata_guard',
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text: 'ok' }],
+        },
+      ],
+      model: 'gpt-5.4',
+    });
+    expect(JSON.stringify(output)).not.toContain('providerKey');
+    expect(JSON.stringify(output)).not.toContain('routeHint');
+    expect(JSON.stringify(output)).not.toContain('"metadata"');
+  });
 });

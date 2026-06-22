@@ -277,6 +277,77 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
     });
   });
 
+  it('RED: relay wrapped SSE payload response must re-enter bridge instead of collapsing to empty body', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockResolvedValue({
+      body: {
+        id: 'resp_relay_wrapped_bridge_1',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'relay wrapped body' }]
+          }
+        ],
+        output_text: 'relay wrapped body'
+      }
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        providerType: 'openai',
+        requestId: 'req_relay_wrapped_sse_payload_must_bridge',
+        wantsStream: true,
+        response: {
+          body: {
+            clientStream: false,
+            mode: 'sse',
+            payload: {
+              id: 'resp_relay_wrapped_upstream_1',
+              object: 'response',
+              status: 'completed',
+              output: [
+                {
+                  type: 'message',
+                  role: 'assistant',
+                  content: [{ type: 'output_text', text: 'relay wrapped body' }]
+                }
+              ]
+            }
+          },
+          continuationOwner: 'relay'
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    expect((converted as any).body).toMatchObject({
+      id: 'resp_relay_wrapped_bridge_1',
+      object: 'response',
+      status: 'completed',
+      output_text: 'relay wrapped body'
+    });
+  });
+
   it('RED: does not passthrough anthropic raw SSE directly on /v1/responses', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();

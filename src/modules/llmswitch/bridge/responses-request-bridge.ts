@@ -565,6 +565,7 @@ export async function buildResponsesRequestContextForHttp(args: {
   payload: AnyRecord;
   requestId?: string;
   metadata?: Record<string, unknown>;
+  resumeMeta?: Record<string, unknown>;
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<ResponsesRequestContextForHttp> {
@@ -573,6 +574,31 @@ export async function buildResponsesRequestContextForHttp(args: {
       ? (args.payload.metadata as Record<string, unknown>)
       : undefined;
   const payloadForPersistence = stripRequestBodyMetadataForPipelineForHttp(args.payload);
+  const relayResumeFullInput =
+    Array.isArray(args.resumeMeta?.fullInput) ? args.resumeMeta.fullInput : undefined;
+  const relayResumeTools =
+    Array.isArray(args.resumeMeta?.restoredTools) ? args.resumeMeta.restoredTools : undefined;
+  const relayOwnedSubmitToolOutputsResume =
+    args.resumeMeta
+    && typeof args.resumeMeta === 'object'
+    && !Array.isArray(args.resumeMeta)
+    && args.resumeMeta.continuationOwner === 'relay'
+    && isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)
+    && Array.isArray(relayResumeFullInput)
+    && relayResumeFullInput.length > 0;
+  if (relayOwnedSubmitToolOutputsResume) {
+    return {
+      payload: payloadForPersistence,
+      context: {
+        input: relayResumeFullInput,
+        ...(relayResumeTools?.length ? { toolsRaw: relayResumeTools } : {}),
+      },
+      sessionId: readResponsesSessionIdFromHttp(args.metadata),
+      conversationId: readResponsesConversationIdFromHttp(args.metadata),
+      ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
+      ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
+    };
+  }
   if (isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)) {
     return {
       payload: payloadForPersistence,
@@ -803,6 +829,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
         payload,
         requestId: args.requestId,
         metadata: effectiveRequestMetadata,
+        resumeMeta: preparedEntry.resumeMeta,
         matchedPort: args.portScope?.matchedPort,
         routingPolicyGroup: args.portScope?.routingPolicyGroup,
       }),

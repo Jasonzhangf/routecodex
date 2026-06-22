@@ -144,7 +144,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
     expect(converted.sseStream).toBe(sseStream);
   });
 
-  it('preserves reasoning.stop finalized marker state on streamed wrapper bodies', async () => {
+  it('preserves reasoningStop finalized marker state on streamed wrapper bodies', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -161,7 +161,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
             finish_reason: 'stop',
             message: {
               role: 'assistant',
-              content: '[app.finished:reasoning.stop] {\"is_completed\":true}'
+              content: '[app.finished:reasoningStop] {\"is_completed\":true}'
             }
           }
         ]
@@ -206,7 +206,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
         id: 'chatcmpl_reasoning_stop_hidden_marker_only',
         object: 'chat.completion',
         metadata: {
-          hidden: '[app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
+          hidden: '[app.finished:reasoningStop] {"tool":"reasoningStop","completed":true}'
         },
         choices: [
           {

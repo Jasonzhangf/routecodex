@@ -6,6 +6,20 @@ import { MetadataCenter } from './metadata-center/metadata-center.js';
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 
+function resolveEntryProtocolFromEndpoint(entryEndpoint: string): 'openai-responses' | 'anthropic-messages' | 'openai-chat' {
+  const normalized = entryEndpoint.trim().toLowerCase();
+  if (normalized.includes('/v1/responses')) {
+    return 'openai-responses';
+  }
+  if (normalized.includes('/v1/messages')) {
+    return 'anthropic-messages';
+  }
+  if (normalized.includes('/v1/chat/completions')) {
+    return 'openai-chat';
+  }
+  throw new Error(`Unsupported hub pipeline entry endpoint: ${entryEndpoint}`);
+}
+
 function shouldEnableHubStageRecorder(): boolean {
   const raw = String(
     process.env.ROUTECODEX_ENABLE_HUB_STAGE_RECORDER
@@ -75,15 +89,8 @@ export async function runHubPipeline(
 ): Promise<HubPipelineResult> {
   let stageRecorder: unknown;
   if (shouldEnableHubStageRecorder()) {
+    const providerProtocol = resolveEntryProtocolFromEndpoint(input.entryEndpoint);
     try {
-      const providerProtocol =
-        typeof metadata.providerProtocol === 'string' && metadata.providerProtocol.trim()
-          ? metadata.providerProtocol.trim()
-          : input.entryEndpoint.includes('/v1/responses')
-            ? 'openai-responses'
-            : input.entryEndpoint.includes('/v1/messages')
-              ? 'anthropic-messages'
-              : 'openai-chat';
       stageRecorder = await bridgeCreateSnapshotRecorder(
         {
           requestId: input.requestId,

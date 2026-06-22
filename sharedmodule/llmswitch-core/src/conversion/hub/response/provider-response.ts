@@ -18,7 +18,6 @@ import {
 import {
   finalizeResponsesConversationRequestRetention,
 } from '../../shared/responses-conversation-store.js';
-import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
 import {
   resolveProviderResponseContextSignals,
@@ -51,9 +50,9 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
         entryEndpoint: options.entryEndpoint,
         stream: options.wantsStream,
         runtimeEffects: {
-          providerInvoker: Boolean(options.providerInvoker),
-          reenterPipeline: Boolean(options.reenterPipeline),
-          clientInjectDispatch: Boolean(options.clientInjectDispatch)
+          providerInvoker: false,
+          reenterPipeline: false,
+          clientInjectDispatch: false
         }
       },
       stream: options.wantsStream,
@@ -140,17 +139,14 @@ async function executeProviderResponseNativeServertoolEffects(args: {
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
   stageRecorder?: StageRecorder;
-  providerInvoker?: ProviderInvoker;
-  reenterPipeline?: ProviderResponseConversionOptions['reenterPipeline'];
-  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
 }): Promise<HubRespProcessEffectResult> {
   let payload = args.payload;
   let stage: HubRespPayloadStage = 'client_semantic';
   const actionPlan = planProviderResponseServertoolRuntimeActionsWithNative({
     servertoolRuntimeActions: readNativeServertoolRuntimeActionEffects(args.runtimeEffects),
-    providerInvoker: Boolean(args.providerInvoker),
-    reenterPipeline: Boolean(args.reenterPipeline),
-    clientInjectDispatch: Boolean(args.clientInjectDispatch)
+    providerInvoker: false,
+    reenterPipeline: false,
+    clientInjectDispatch: false
   });
   if (actionPlan.error) {
     throwServertoolRuntimeErrorDescriptor(actionPlan.error);
@@ -167,10 +163,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
       entryEndpoint: args.entryEndpoint,
       providerProtocol: args.providerProtocol,
       ...(executionPlan.allowFollowup ? { allowFollowup: true } : {}),
-      stageRecorder: args.stageRecorder,
-      providerInvoker: args.providerInvoker,
-      reenterPipeline: args.reenterPipeline as any,
-      clientInjectDispatch: args.clientInjectDispatch as any
+      stageRecorder: args.stageRecorder
     });
     if (orchestration.executed) {
       payload = orchestration.payload;
@@ -212,9 +205,6 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
   stageRecorder?: StageRecorder;
-  providerInvoker?: ProviderInvoker;
-  reenterPipeline?: ProviderResponseConversionOptions['reenterPipeline'];
-  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
 }): Promise<ProviderResponseConversionResult> {
   let hubRespOutbound04ClientSemantic = args.nativeResponsePlan.payload;
   if (!hubRespOutbound04ClientSemantic || typeof hubRespOutbound04ClientSemantic !== 'object') {
@@ -227,10 +217,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     context: args.context,
     entryEndpoint: args.entryEndpoint,
     providerProtocol: args.providerProtocol,
-    stageRecorder: args.stageRecorder,
-    providerInvoker: args.providerInvoker,
-    reenterPipeline: args.reenterPipeline,
-    clientInjectDispatch: args.clientInjectDispatch
+    stageRecorder: args.stageRecorder
   });
   hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'
     ? projectPostServertoolHubRespOutbound04ClientSemanticWithNative({
@@ -294,25 +281,6 @@ interface ProviderResponseConversionOptions {
    */
   requestSemantics?: JsonObject;
   stageRecorder?: StageRecorder;
-  providerInvoker?: ProviderInvoker;
-  /**
-   * 可选：由 Host 注入的二次请求入口。Server-side 工具在需要发起
-   * followup 请求（例如 web_search 二跳）时，可以通过该回调将构造
-   * 好的请求体交给 Host，由 Host 走完整 HubPipeline + VirtualRouter
-   * 再返回最终客户端响应形状。
-   */
-  reenterPipeline?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<ProviderResponseConversionResult>;
-  clientInjectDispatch?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 interface ProviderResponseConversionResult {
@@ -409,9 +377,6 @@ export async function convertProviderResponse(
     context: options.context,
     entryEndpoint: options.entryEndpoint,
     providerProtocol: options.providerProtocol,
-    stageRecorder: options.stageRecorder,
-    providerInvoker: options.providerInvoker,
-    reenterPipeline: options.reenterPipeline,
-    clientInjectDispatch: options.clientInjectDispatch
+    stageRecorder: options.stageRecorder
   });
 }

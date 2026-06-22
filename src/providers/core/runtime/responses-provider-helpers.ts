@@ -43,6 +43,13 @@ export type ResponsesFailure = {
   normalizedError: NormalizedUpstreamError;
 };
 
+export type ResponsesFailureTransport = {
+  expectedMode?: 'sse';
+  responseKind?: 'json' | 'text';
+  contentType?: string;
+  statusCode?: number;
+};
+
 
 function parseStreamingMode(value: unknown): ResponsesStreamingMode {
   if (typeof value === 'string') {
@@ -211,7 +218,93 @@ export function normalizeUpstreamError(error: unknown): NormalizedUpstreamError 
   return err;
 }
 
-export function detectResponsesFailure(payload: unknown, context?: ProviderContext): ResponsesFailure | null {
+function isHtmlLikeTextPayload(payload: unknown): boolean {
+  if (typeof payload !== 'string') {
+    return false;
+  }
+  const trimmed = payload.trimStart().slice(0, 256).toLowerCase();
+  return trimmed.startsWith('<!doctype html')
+    || trimmed.startsWith('<html')
+    || trimmed.includes('<head')
+    || trimmed.includes('<body');
+}
+
+function buildMalformedStreamingResponseFailure(args: {
+  payload: unknown;
+  transport: ResponsesFailureTransport;
+  context?: ProviderContext;
+}): ResponsesFailure {
+  const contentType = typeof args.transport.contentType === 'string' && args.transport.contentType.trim().length
+    ? args.transport.contentType.trim()
+    : 'unknown';
+  const responseKind = args.transport.responseKind ?? 'text';
+  const htmlLike = isHtmlLikeTextPayload(args.payload);
+  const message = htmlLike
+    ? `Responses streaming request received HTML instead of SSE (${contentType})`
+    : `Responses streaming request received non-SSE ${responseKind} response (${contentType})`;
+  const rawError = {
+    code: 'MALFORMED_RESPONSE',
+    type: 'invalid_response_error',
+    message,
+    content_type: contentType,
+    response_kind: responseKind
+  } as Record<string, unknown>;
+  const syntheticError = Object.assign(new Error(message), {
+    code: 'MALFORMED_RESPONSE',
+    status: args.transport.statusCode ?? 200,
+    statusCode: args.transport.statusCode ?? 200,
+    response: {
+      status: args.transport.statusCode ?? 200,
+      raw: typeof args.payload === 'string' ? args.payload : undefined,
+      data: {
+        error: rawError
+      }
+    }
+  }) as NormalizedUpstreamError;
+  const normalizedError = normalizeUpstreamError(syntheticError);
+  normalizedError.retryable = true;
+  if (args.context) {
+    applyProviderConfiguredErrorMapping({
+      normalized: normalizedError as any,
+      context: args.context,
+      statusCode: normalizedError.statusCode ?? normalizedError.status
+    });
+  }
+  const effectiveStatusCode = normalizedError.statusCode ?? normalizedError.status ?? args.transport.statusCode ?? 200;
+  const outcome = resolveProviderFailureOutcome({
+    error: normalizedError,
+    stage: 'provider.responses',
+    statusCode: effectiveStatusCode,
+    errorCode: normalizedError.code,
+    upstreamCode:
+      typeof normalizedError.response?.data?.error?.code === 'string'
+        ? normalizedError.response.data.error.code
+        : undefined,
+    reason: normalizedError.message
+  });
+  return {
+    message: normalizedError.message,
+    statusCode: effectiveStatusCode,
+    code: normalizedError.code,
+    recoverable: outcome.recoverable,
+    affectsHealth: outcome.affectsHealth,
+    rawError,
+    normalizedError
+  };
+}
+
+export function detectResponsesFailure(
+  payload: unknown,
+  context?: ProviderContext,
+  transport?: ResponsesFailureTransport
+): ResponsesFailure | null {
+  if (transport?.expectedMode === 'sse' && transport.responseKind === 'text') {
+    return buildMalformedStreamingResponseFailure({
+      payload,
+      transport,
+      context
+    });
+  }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return null;
   }

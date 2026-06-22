@@ -5,7 +5,7 @@ import type { ProviderRuntimeProfile } from '../../../providers/core/api/provide
 import { emitProviderErrorAndWait } from '../../../providers/core/utils/provider-error-reporter.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
-import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
+import { normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
 import { resolveLegacyRouteCodexUserDir, resolveRccAuthDirForRead } from '../../../config/user-data-paths.js';
 import { resolveProviderRoutingScope } from './provider-routing-scope.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
@@ -408,10 +408,16 @@ export async function createProviderHandle(
 ): Promise<ProviderHandle> {
   const protocolType = normalizeProviderType(runtime.providerType);
   const providerFamily = runtime.providerFamily || protocolType;
-  const providerProtocol =
-    (typeof runtime.outboundProfile === 'string' && runtime.outboundProfile.trim()
-      ? (runtime.outboundProfile.trim() as ProviderProtocol)
-      : undefined) ?? mapProviderProtocol(protocolType, providerFamily);
+  const providerProtocolRaw =
+    typeof runtime.outboundProfile === 'string' && runtime.outboundProfile.trim()
+      ? runtime.outboundProfile.trim()
+      : '';
+  if (!providerProtocolRaw) {
+    throw new Error(
+      `Provider runtime ${runtimeKey} is missing required outboundProfile protocol truth`
+    );
+  }
+  const providerProtocol = providerProtocolRaw as ProviderProtocol;
   const instance = ProviderFactory.createProviderFromRuntime(runtime, server.getModuleDependencies());
   await instance.initialize();
   const providerId = runtime.providerId || runtimeKey.split('.')[0];

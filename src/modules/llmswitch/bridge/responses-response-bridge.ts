@@ -38,68 +38,6 @@ import {
 } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 
-const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
-  'error',
-  'ping',
-  'response.queued',
-  'response.created',
-  'response.in_progress',
-  'response.incomplete',
-  'response.completed',
-  'response.failed',
-  'response.cancelled',
-  'response.done',
-  'response.metadata',
-  'response.output_item.added',
-  'response.output_item.done',
-  'response.content_part.added',
-  'response.content_part.done',
-  'response.output_text.annotation.added',
-  'response.output_text.delta',
-  'response.output_text.done',
-  'response.audio.delta',
-  'response.audio.done',
-  'response.audio.transcript.delta',
-  'response.audio.transcript.done',
-  'response.refusal.delta',
-  'response.refusal.done',
-  'response.function_call_arguments.delta',
-  'response.function_call_arguments.done',
-  'response.custom_tool_call_input.delta',
-  'response.custom_tool_call_input.done',
-  'response.code_interpreter_call.in_progress',
-  'response.code_interpreter_call.interpreting',
-  'response.code_interpreter_call.completed',
-  'response.code_interpreter_call_code.delta',
-  'response.code_interpreter_call_code.done',
-  'response.file_search_call.in_progress',
-  'response.file_search_call.searching',
-  'response.file_search_call.completed',
-  'response.reasoning_summary_part.added',
-  'response.reasoning_summary_part.done',
-  'response.reasoning_summary_text.delta',
-  'response.reasoning_summary_text.done',
-  'response.reasoning_text.delta',
-  'response.reasoning_text.done',
-  'response.reasoning.delta',
-  'response.reasoning.done',
-  'response.web_search_call.in_progress',
-  'response.web_search_call.searching',
-  'response.web_search_call.completed',
-  'response.image_generation_call.in_progress',
-  'response.image_generation_call.generating',
-  'response.image_generation_call.partial_image',
-  'response.image_generation_call.completed',
-  'response.mcp_call.in_progress',
-  'response.mcp_call_arguments.delta',
-  'response.mcp_call_arguments.done',
-  'response.mcp_call.completed',
-  'response.mcp_call.failed',
-  'response.mcp_list_tools.in_progress',
-  'response.mcp_list_tools.completed',
-  'response.mcp_list_tools.failed',
-]);
-
 export type ResponsesRequestContextForHttp = {
   payload: AnyRecord;
   context: AnyRecord;
@@ -119,7 +57,42 @@ export function resolveResponsesRequestContextForHttp(args: {
       : undefined;
   const fromMetadata = readMetadataCenterContinuationContextForHttp(metadata).responsesRequestContext;
   if (fromMetadata && typeof fromMetadata === 'object' && !Array.isArray(fromMetadata)) {
-    return fromMetadata as ResponsesRequestContextForHttp;
+    const metadataContext = fromMetadata as ResponsesRequestContextForHttp;
+    const fallback = args.fallback;
+    return {
+      payload:
+        fallback?.payload && typeof fallback.payload === 'object' && !Array.isArray(fallback.payload)
+          ? fallback.payload
+          : metadataContext.payload && typeof metadataContext.payload === 'object' && !Array.isArray(metadataContext.payload)
+            ? metadataContext.payload
+            : {},
+      context:
+        fallback?.context && typeof fallback.context === 'object' && !Array.isArray(fallback.context)
+          ? fallback.context
+          : metadataContext.context && typeof metadataContext.context === 'object' && !Array.isArray(metadataContext.context)
+            ? metadataContext.context
+            : {},
+      ...(typeof fallback?.sessionId === 'string' && fallback.sessionId.trim()
+        ? { sessionId: fallback.sessionId.trim() }
+        : typeof metadataContext.sessionId === 'string' && metadataContext.sessionId.trim()
+          ? { sessionId: metadataContext.sessionId.trim() }
+          : {}),
+      ...(typeof fallback?.conversationId === 'string' && fallback.conversationId.trim()
+        ? { conversationId: fallback.conversationId.trim() }
+        : typeof metadataContext.conversationId === 'string' && metadataContext.conversationId.trim()
+          ? { conversationId: metadataContext.conversationId.trim() }
+          : {}),
+      ...(typeof fallback?.matchedPort === 'number'
+        ? { matchedPort: fallback.matchedPort }
+        : typeof metadataContext.matchedPort === 'number'
+          ? { matchedPort: metadataContext.matchedPort }
+          : {}),
+      ...(typeof fallback?.routingPolicyGroup === 'string' && fallback.routingPolicyGroup.trim()
+        ? { routingPolicyGroup: fallback.routingPolicyGroup.trim() }
+        : typeof metadataContext.routingPolicyGroup === 'string' && metadataContext.routingPolicyGroup.trim()
+          ? { routingPolicyGroup: metadataContext.routingPolicyGroup.trim() }
+          : {}),
+    };
   }
   return args.fallback;
 }
@@ -308,12 +281,6 @@ function isResponsesRequiredActionFrame(frame: string): boolean {
 
 export function buildClientSseKeepaliveFrameForHttp(entryEndpoint?: string): string {
   const commentFrame = ': keepalive\n\n';
-  if (
-    entryEndpoint === '/v1/responses'
-    || entryEndpoint === '/v1/responses.submit_tool_outputs'
-  ) {
-    return `${commentFrame}event: ping\ndata: {"type":"ping"}\n\n`;
-  }
   return commentFrame;
 }
 
@@ -341,19 +308,6 @@ export function isDirectPassthroughTransportKeepaliveFrameForHttp(frame: string)
 }
 
 export function assertDirectPassthroughResponsesSseFrameForHttp(frame: string, requestId: string): void {
-  const eventNames = frame
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith('event:'))
-    .map((line) => line.slice('event:'.length).trim())
-    .filter(Boolean);
-  for (const eventName of eventNames) {
-    if (!RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS.has(eventName)) {
-      throw Object.assign(
-        new Error(`[server.response_projection] direct passthrough SSE emitted non-Responses event "${eventName}" (requestId=${requestId})`),
-        { code: 'RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION' }
-      );
-    }
-  }
   if (isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
     return;
   }
@@ -832,6 +786,7 @@ export function inspectResponsesContinuationProbeForHttp(args: {
 }): {
   isToolCallContinuation: boolean;
   hasRequiredAction: boolean;
+  hasHarvestableFunctionCallHistory: boolean;
 } {
   if (
     args.entryEndpoint !== '/v1/responses'
@@ -840,16 +795,19 @@ export function inspectResponsesContinuationProbeForHttp(args: {
     return {
       isToolCallContinuation: false,
       hasRequiredAction: false,
+      hasHarvestableFunctionCallHistory: false,
     };
   }
   if (!args.probe || typeof args.probe !== 'object' || Array.isArray(args.probe)) {
     return {
       isToolCallContinuation: false,
       hasRequiredAction: false,
+      hasHarvestableFunctionCallHistory: false,
     };
   }
   const isToolCallContinuation = isToolCallContinuationResponseForHttp(args.probe);
   const probeRecord = args.probe as Record<string, unknown>;
+  const output = Array.isArray(probeRecord.output) ? probeRecord.output : [];
   return {
     isToolCallContinuation,
     hasRequiredAction:
@@ -859,6 +817,13 @@ export function inspectResponsesContinuationProbeForHttp(args: {
         && typeof probeRecord.required_action === 'object'
         && !Array.isArray(probeRecord.required_action)
       ),
+    hasHarvestableFunctionCallHistory:
+      output.some((item) =>
+        item
+        && typeof item === 'object'
+        && !Array.isArray(item)
+        && (item as Record<string, unknown>).type === 'function_call'
+      ),
   };
 }
 
@@ -866,7 +831,8 @@ export function shouldPersistResponsesContinuationOnProbeUpdateForHttp(args: {
   entryEndpoint?: string;
   probe: unknown;
 }): boolean {
-  return inspectResponsesContinuationProbeForHttp(args).isToolCallContinuation;
+  const probeState = inspectResponsesContinuationProbeForHttp(args);
+  return probeState.isToolCallContinuation && probeState.hasHarvestableFunctionCallHistory;
 }
 
 export function planResponsesContinuationCloseActionForHttp(args: {
@@ -982,6 +948,30 @@ function readResponsesConversationResponseIdForHttp(body: unknown): string | und
   return undefined;
 }
 
+function normalizeResponsesConversationPersistBodyForHttp(
+  body: unknown
+): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return body;
+  }
+  const record = body as Record<string, unknown>;
+  const nested = record.response && typeof record.response === 'object' && !Array.isArray(record.response)
+    ? record.response as Record<string, unknown>
+    : undefined;
+  const topHasCanonicalShape = typeof record.id === 'string'
+    || Array.isArray(record.output)
+    || (record.required_action && typeof record.required_action === 'object');
+  if (topHasCanonicalShape || !nested) {
+    return body;
+  }
+  return {
+    ...(nested as Record<string, unknown>),
+    ...(record.required_action
+      ? { required_action: record.required_action }
+      : {}),
+  };
+}
+
 function resolveResponsesConversationRecordRequestIdsForHttp(args: {
   requestLabel: string;
   timingRequestIds?: string[];
@@ -1054,6 +1044,10 @@ type PersistResponsesConversationLifecycleForHttpArgs = {
   onNonBlockingError?: (operation: string, error: unknown) => void;
 };
 
+export type PersistResponsesConversationLifecycleResultForHttp =
+  | { recorded: true; responseId: string }
+  | { recorded: false; reason: 'not_responses_endpoint' | 'not_continuation' | 'missing_response_id' | 'no_recorded_request_context' };
+
 function resolveResponsesConversationPersistInputsForHttp(
   args: PersistResponsesConversationLifecycleForHttpArgs,
 ): {
@@ -1107,33 +1101,34 @@ function resolveResponsesConversationPersistInputsForHttp(
 
 export async function persistResponsesConversationLifecycleForHttp(
   args: PersistResponsesConversationLifecycleForHttpArgs,
-): Promise<void> {
+): Promise<PersistResponsesConversationLifecycleResultForHttp> {
   if (
     args.entryEndpoint !== '/v1/responses'
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
   ) {
-    return;
+    return { recorded: false, reason: 'not_responses_endpoint' };
   }
 
   const responseId = readResponsesConversationResponseIdForHttp(args.body);
-  const finishReason = deriveFinishReason(args.body);
-  const isContinuation = isToolCallContinuationResponseForHttp(args.body);
+  const canonicalBody = normalizeResponsesConversationPersistBodyForHttp(args.body);
+  const finishReason = deriveFinishReason(canonicalBody);
+  const isContinuation = isToolCallContinuationResponseForHttp(canonicalBody);
   const persisted = resolveResponsesConversationPersistInputsForHttp(args);
   const isToolCallFinish = finishReason === 'tool_calls';
 
   if (
     (isContinuation || isToolCallFinish)
     && shouldPersistResponsesToolCallContinuationRecordForHttp(args.entryEndpoint, args.requestContext)
-    && args.body
-    && typeof args.body === 'object'
-    && !Array.isArray(args.body)
-  ) {
-    if (!responseId) {
-      args.onTrace?.('record.skip_missing_response_id', {
-        providerKey: args.providerKey,
-      });
-      return;
-    }
+    && canonicalBody
+    && typeof canonicalBody === 'object'
+    && !Array.isArray(canonicalBody)
+    ) {
+      if (!responseId) {
+        args.onTrace?.('record.skip_missing_response_id', {
+          providerKey: args.providerKey,
+        });
+        return { recorded: false, reason: 'missing_response_id' };
+      }
     args.onTrace?.('capture.start', {
       responseId,
       providerKey: args.providerKey,
@@ -1175,7 +1170,7 @@ export async function persistResponsesConversationLifecycleForHttp(
       try {
         await recordResponsesResponseForHttpProjection({
           requestId,
-          response: args.body as AnyRecord,
+          response: canonicalBody as AnyRecord,
           sessionId: persisted.sessionId ?? args.requestContext?.sessionId,
           conversationId: persisted.conversationId ?? args.requestContext?.conversationId,
           providerKey: persisted.providerKey,
@@ -1200,7 +1195,7 @@ export async function persistResponsesConversationLifecycleForHttp(
         responseId,
         attemptedRequestIds: recordAttemptIds,
       });
-      return;
+      return { recorded: false, reason: 'no_recorded_request_context' };
     }
 
     await finalizeResponsesConversationRequestRetentionForHttp(recordedRequestId, {
@@ -1215,11 +1210,11 @@ export async function persistResponsesConversationLifecycleForHttp(
     });
 
     args.onTrace?.('record.done', { responseId, retainedRequestIds: [recordedRequestId] });
-    return;
+    return { recorded: true, responseId };
   }
 
   if (isContinuation || isToolCallFinish) {
-    return;
+    return { recorded: false, reason: 'not_continuation' };
   }
 
   const retainRequestIds = resolveResponsesConversationRecordRequestIdsForHttp({
@@ -1234,6 +1229,7 @@ export async function persistResponsesConversationLifecycleForHttp(
       args.onNonBlockingError?.(`responses-conversation-finalize:${retainRequestId}`, error);
     });
   }
+  return { recorded: false, reason: 'not_continuation' };
 }
 
 export async function clearResponsesConversationRequestIdsForHttp(args: {
@@ -1288,6 +1284,43 @@ export async function finalizeResponsesConversationRequestRetentionForHttp(
 
 export async function createResponsesJsonToSseConverterForHttp() {
   return await createResponsesJsonToSseConverter();
+}
+
+type ChatJsonToSseModule = {
+  ChatJsonToSseConverter?: new () => {
+    convertResponseToJsonToSse(
+      payload: unknown,
+      options: AnyRecord,
+    ): Promise<unknown>;
+  };
+};
+
+let cachedChatJsonToSseConverterFactory:
+  | (() => {
+      convertResponseToJsonToSse(
+        payload: unknown,
+        options: AnyRecord,
+      ): Promise<unknown>;
+    })
+  | null = null;
+
+export async function createChatJsonToSseConverterForHttp(): Promise<{
+  convertResponseToJsonToSse(
+    payload: unknown,
+    options: AnyRecord,
+  ): Promise<unknown>;
+}> {
+  if (!cachedChatJsonToSseConverterFactory) {
+    const mod = await importResponsesHandlerCoreDist<ChatJsonToSseModule>(
+      'sse/json-to-sse/index'
+    );
+    const Ctor = mod.ChatJsonToSseConverter;
+    if (typeof Ctor !== 'function') {
+      throw new Error('[handler-response] ChatJsonToSseConverter not available');
+    }
+    cachedChatJsonToSseConverterFactory = () => new Ctor();
+  }
+  return cachedChatJsonToSseConverterFactory();
 }
 
 export function shouldReprojectRelayResponsesSseForHttp(args: {
@@ -1486,7 +1519,7 @@ export async function projectResponsesClientPayloadForClientForHttp(args: {
   toolsRaw: unknown[];
   metadata?: Record<string, unknown>;
 }): Promise<Record<string, unknown>> {
-  return projectResponsesClientPayloadForClientNative(args);
+  return stripClientVisibleMetadataDeep(await projectResponsesClientPayloadForClientNative(args));
 }
 
 function readResponsesClientToolsRawForHttp(requestContext?: {
@@ -1664,6 +1697,24 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
     sanitizedBody: stripInternalKeysDeep(clientBody),
     finishReason: resolveResponsesClientPayloadFinishReasonForHttp(clientBody),
   };
+}
+
+function stripClientVisibleMetadataDeep<T>(value: T): T {
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripClientVisibleMetadataDeep(item)) as T;
+  }
+  const record = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (key === 'metadata') {
+      continue;
+    }
+    out[key] = stripClientVisibleMetadataDeep(entry);
+  }
+  return out as T;
 }
 
 export async function projectResponsesSseFrameForClientForHttp(args: {

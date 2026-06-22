@@ -43,7 +43,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     const semantics = resolveRequestSemantics(
       {
         tools: [
-          { type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }
+          { type: 'function', function: { name: 'reasoningStop', parameters: { type: 'object' } } }
         ]
       } as Record<string, unknown>,
       undefined,
@@ -52,7 +52,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
           tools: {
             clientToolsRaw: [
               { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } },
-              { type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }
+              { type: 'function', function: { name: 'reasoningStop', parameters: { type: 'object' } } }
             ]
           }
         },
@@ -67,7 +67,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     expect(Array.isArray(clientToolsRaw)).toBe(true);
     expect(clientToolsRaw).toHaveLength(2);
     expect(clientToolsRaw[0]?.function?.name).toBe('exec_command');
-    expect(clientToolsRaw[1]?.function?.name).toBe('reasoning.stop');
+    expect(clientToolsRaw[1]?.function?.name).toBe('reasoningStop');
     expect((semantics as any)?.__routecodex).toBeUndefined();
   });
 
@@ -76,7 +76,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
       semantics: {
         tools: {
           clientToolsRaw: [
-            { type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }
+            { type: 'function', function: { name: 'reasoningStop', parameters: { type: 'object' } } }
           ]
         }
       },
@@ -86,7 +86,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
             clientToolsRaw: [
               { type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } },
               { type: 'function', function: { name: 'apply_patch', parameters: { type: 'object' } } },
-              { type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }
+              { type: 'function', function: { name: 'reasoningStop', parameters: { type: 'object' } } }
             ]
           }
         },
@@ -103,15 +103,15 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     expect(clientToolsRaw).toHaveLength(3);
     expect(clientToolsRaw[0]?.function?.name).toBe('exec_command');
     expect(clientToolsRaw[1]?.function?.name).toBe('apply_patch');
-    expect(clientToolsRaw[2]?.function?.name).toBe('reasoning.stop');
+    expect(clientToolsRaw[2]?.function?.name).toBe('reasoningStop');
     expect((semantics as any)?.__routecodex).toBeUndefined();
   });
 
-  it('merges followup root tools into clientToolsRaw so internal reasoning.stop stays declared', () => {
+  it('merges followup root tools into clientToolsRaw so internal reasoningStop stays declared', () => {
     const semantics = resolveRequestSemantics(
       {
         tools: [
-          { type: 'function', function: { name: 'reasoning.stop', parameters: { type: 'object' } } }
+          { type: 'function', function: { name: 'reasoningStop', parameters: { type: 'object' } } }
         ]
       } as Record<string, unknown>,
       undefined,
@@ -124,9 +124,9 @@ describe('provider-response-utils resolveRequestSemantics', () => {
             ]
           }
         },
-        __rt: {
+        runtime_control: {
           serverToolFollowup: true,
-          clientInjectSource: 'servertool.reasoning_stop_guard'
+          serverToolFollowupSource: 'servertool.reasoning_stop_guard'
         }
       }
     );
@@ -136,7 +136,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     expect(clientToolsRaw).toHaveLength(3);
     expect(clientToolsRaw[0]?.function?.name).toBe('exec_command');
     expect(clientToolsRaw[1]?.function?.name).toBe('apply_patch');
-    expect(clientToolsRaw[2]?.function?.name).toBe('reasoning.stop');
+    expect(clientToolsRaw[2]?.function?.name).toBe('reasoningStop');
   });
 
 });

@@ -52,6 +52,13 @@ function expectGpt55CodexContract(model: any): void {
   ]);
 }
 
+function readModelsPayload(body: any): any[] {
+  expect(Array.isArray(body?.models)).toBe(true);
+  expect(Array.isArray(body?.data)).toBe(true);
+  expect(body.models).toEqual(body.data);
+  return body.models;
+}
+
 describe('http routes invalid json handling', () => {
   it('returns structured json instead of express html stack for malformed json bodies', async () => {
     const app = express();
@@ -126,9 +133,7 @@ describe('http routes invalid json handling', () => {
         const response = await fetch(`${baseUrl}/v1/models`);
         expect(response.status).toBe(200);
         const body = await response.json();
-        const target = Array.isArray(body?.data)
-          ? body.data.find((item: any) => item?.id === 'deepseek-web.deepseek-reasoner')
-          : null;
+        const target = readModelsPayload(body).find((item: any) => item?.id === 'deepseek-web.deepseek-reasoner');
         expect(target).toBeTruthy();
         expect(target.context_window).toBe(750000);
       });
@@ -193,7 +198,7 @@ describe('http routes invalid json handling', () => {
         const response = await fetch(`${baseUrl}/v1/models`);
         expect(response.status).toBe(200);
         const body = await response.json();
-        const data = Array.isArray(body?.data) ? body.data : [];
+        const data = readModelsPayload(body);
         const bareAdvanced = data.find((item: any) => item?.id === 'gpt-5.5');
         const minimax = data.find((item: any) => item?.id === 'minimax.MiniMax-M3');
         const advanced = data.find((item: any) => item?.id === 'minimax.gpt-5.5');
@@ -273,7 +278,7 @@ describe('http routes invalid json handling', () => {
         const response = await fetch(`${baseUrl}/v1/models`);
         expect(response.status).toBe(200);
         const body = await response.json();
-        const ids = Array.isArray(body?.data) ? body.data.map((item: any) => item?.id).filter(Boolean) : [];
+        const ids = readModelsPayload(body).map((item: any) => item?.id).filter(Boolean);
         expect(ids).toContain('gpt-5.5');
         expect(ids).toContain('deepseek-web.deepseek-v4-pro');
         expect(ids).toContain('deepseek-web.deepseek-v4-flash');
@@ -352,7 +357,7 @@ describe('http routes invalid json handling', () => {
         const response = await fetch(`${baseUrl}/v1/models`);
         expect(response.status).toBe(200);
         const body = await response.json();
-        const ids = Array.isArray(body?.data) ? body.data.map((item: any) => item.id).sort() : [];
+        const ids = readModelsPayload(body).map((item: any) => item.id).sort();
         expect(ids).toContain('deepseek-v4-pro');
         expect(ids).toContain('deepseek-v4-flash');
         expect(ids).not.toContain('DF.deepseek-v4-pro');

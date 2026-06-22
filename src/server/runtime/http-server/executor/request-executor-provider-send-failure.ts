@@ -90,6 +90,19 @@ type RequestExecutorProviderSendFailureArgs = {
   phase: 'provider_send' | 'provider_response_processing';
   logNonBlockingError: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
   extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;
+  writeProviderSnapshot: (args: {
+    phase: 'provider-error';
+    requestId: string;
+    data: unknown;
+    headers?: Record<string, unknown>;
+    url?: string;
+    entryEndpoint?: string;
+    clientRequestId?: string;
+    providerKey?: string;
+    providerId?: string;
+    forceLocalDiskWriteWhenDisabled?: boolean;
+    metadata?: Record<string, unknown>;
+  }) => Promise<void>;
 };
 
 export type RequestExecutorProviderSendFailureResult = {
@@ -137,6 +150,9 @@ function isRetryableProviderResponseProcessingFailure(args: {
       || statusCode >= 500
     )
   ) {
+    return true;
+  }
+  if (record.requestExecutorProviderErrorStage === 'provider.responses') {
     return true;
   }
   if (
@@ -273,6 +289,50 @@ export async function processProviderSendFailure(
     ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
     attempt: args.attempt
   });
+
+  try {
+    await args.writeProviderSnapshot({
+      phase: 'provider-error',
+      requestId: args.requestId,
+      data: {
+        message: errorMessage,
+        status: retryError.statusCode ?? extractStatusCodeFromError(args.error) ?? null,
+        code: retryError.errorCode ?? (args.error && typeof args.error === 'object' ? (args.error as { code?: unknown }).code : null) ?? null,
+        upstreamCode: retryError.upstreamCode ?? null,
+        requestExecutorProviderErrorStage: resolvedFailureStage,
+        reason: retryError.reason,
+        providerKey: args.providerKey,
+        providerId: args.providerId,
+        providerType: args.providerType,
+        providerFamily: args.providerFamily,
+        providerProtocol: args.providerProtocol,
+        providerModel: args.providerModel,
+        routeName: args.routeName,
+        runtimeKey: args.runtimeKey,
+        attempt: args.attempt,
+        maxAttempts: args.maxAttempts,
+        logicalRequestChainKey: args.logicalRequestChainKey,
+        phase: args.phase
+      },
+      headers: (args.metadata && typeof args.metadata === 'object' ? (args.metadata as Record<string, unknown>).headers as Record<string, unknown> | undefined : undefined),
+      url: undefined,
+      entryEndpoint: typeof (args.metadata as Record<string, unknown> | undefined)?.entryEndpoint === 'string'
+        ? (args.metadata as Record<string, unknown>).entryEndpoint as string
+        : undefined,
+      clientRequestId: typeof (args.metadata as Record<string, unknown> | undefined)?.clientRequestId === 'string'
+        ? (args.metadata as Record<string, unknown>).clientRequestId as string
+        : undefined,
+      providerKey: args.providerKey,
+      providerId: args.providerId,
+      metadata: args.metadata
+    });
+  } catch (snapshotError) {
+    args.logNonBlockingError('writeProviderSnapshot(provider-error)', snapshotError, {
+      requestId: args.requestId,
+      providerKey: args.providerKey,
+      phase: args.phase
+    });
+  }
 
   const status =
     typeof retryError.statusCode === 'number'

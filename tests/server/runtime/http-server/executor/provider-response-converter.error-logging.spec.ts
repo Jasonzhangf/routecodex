@@ -285,4 +285,85 @@ describe('provider-response-converter error logging', () => {
       )
     ).toBe(true);
   });
+
+  it('logs bridge payload diagnostics when choices-array materialization fails on body.data chat sample', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+    logStageSpy.mockReset();
+
+    mockConvertProviderResponse.mockRejectedValueOnce(new Error(
+      'Rust HubPipeline response path failed: hub_pipeline_error: OpenAI chat response must contain choices array'
+    ));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_choices_array_diag_1',
+        wantsStream: true,
+        response: {
+          status: 200,
+          headers: {
+            'content-type': 'application/json'
+          },
+          body: {
+            sseStream: { on() {}, off() {} },
+            data: {
+              id: 'chatcmpl_choices_diag_1',
+              object: 'chat.completion',
+              model: 'glm-5.2',
+              choices: [
+                {
+                  index: 0,
+                  finish_reason: 'tool_calls',
+                  message: {
+                    role: 'assistant',
+                    content: null,
+                    tool_calls: [
+                      {
+                        id: 'call_diag_1',
+                        type: 'function',
+                        function: {
+                          name: 'exec_command',
+                          arguments: JSON.stringify({ cmd: 'pwd' })
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    )).rejects.toThrow('choices array');
+
+    const convertBridgeErrorCall = logStageSpy.mock.calls.find(
+      (call) => call[0] === 'convert.bridge.error' && call[1] === 'req_choices_array_diag_1'
+    );
+    expect(convertBridgeErrorCall).toBeDefined();
+    expect(convertBridgeErrorCall?.[2]).toMatchObject({
+      bridgeProviderProtocol: 'openai-chat',
+      bridgePayloadHasChoices: true,
+      bridgePayloadHasDataChoices: false
+    });
+    expect(convertBridgeErrorCall?.[2]).toEqual(expect.objectContaining({
+      bridgeSeedKeys: expect.arrayContaining(['data', 'sseStream']),
+      bridgePayloadKeys: expect.arrayContaining(['choices', 'id', 'model', 'object'])
+    }));
+  });
 });

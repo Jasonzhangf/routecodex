@@ -205,6 +205,50 @@ describe('responses-request-bridge relay request-context normalization', () => {
     );
   });
 
+  it('treats provider-owned submit_tool_outputs resume payload as context-free request state', async () => {
+    const context = await buildResponsesRequestContextForHttp({
+      payload: {
+        response_id: 'resp_submit_direct_1',
+        tool_outputs: [
+          {
+            call_id: 'call_submit_direct_1',
+            output: '{"ok":true}'
+          }
+        ],
+        metadata: {
+          toolCallIdStyle: 'openai'
+        }
+      },
+      requestId: 'req_submit_direct_context_free_1',
+      metadata: {
+        session_id: 'sess_submit_direct_1',
+        conversation_id: 'conv_submit_direct_1'
+      },
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555',
+    });
+
+    expect(mockCaptureReqInboundResponsesContextSnapshot).not.toHaveBeenCalled();
+    expect(context).toEqual({
+      payload: {
+        response_id: 'resp_submit_direct_1',
+        tool_outputs: [
+          {
+            call_id: 'call_submit_direct_1',
+            output: '{"ok":true}'
+          }
+        ]
+      },
+      context: {
+        input: []
+      },
+      sessionId: 'sess_submit_direct_1',
+      conversationId: 'conv_submit_direct_1',
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    });
+  });
+
   it('materializes request context session truth from factual Codex client headers', async () => {
     mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
       input: [],

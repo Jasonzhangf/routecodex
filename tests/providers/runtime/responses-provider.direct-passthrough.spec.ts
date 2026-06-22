@@ -603,6 +603,54 @@ describe('ResponsesProvider direct passthrough', () => {
     });
   });
 
+  test('maps direct HTTP 200 text/html streaming fallback to malformed provider error before SSE bridge', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-200-text-html-fallback',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStreamOrResponse: async () => ({
+        kind: 'response',
+        responseKind: 'text',
+        response: {
+          data: '<!doctype html><html><body>wrong upstream</body></html>',
+          status: 200,
+          statusText: 'OK',
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+          url: 'https://example.invalid/v1/responses'
+        }
+      })
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+      statusCode: 200,
+      status: 200,
+      code: 'MALFORMED_RESPONSE'
+    });
+  });
+
   test('maps direct HTTP 200 SSE codex.rate_limits limit_reached to retryable provider error', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-200-sse-codex-rate-limits',

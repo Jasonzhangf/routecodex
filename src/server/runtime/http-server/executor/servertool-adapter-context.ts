@@ -174,8 +174,7 @@ export function buildServerToolAdapterContext(args: {
 
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const providerFamily = readNonEmptyString(metadataBag.providerFamily)?.toLowerCase();
-  const clientProtocol = readNonEmptyString(metadataBag.clientProtocol)
-    ?? (args.entryEndpoint.includes('/v1/responses') ? 'openai-responses' : undefined);
+  const clientProtocol = readNonEmptyString(metadataBag.clientProtocol);
   const baseCenter = MetadataCenter.attach(baseContext);
   if (runtimeControl.serverToolFollowup === true) {
     baseCenter.writeRuntimeControl(

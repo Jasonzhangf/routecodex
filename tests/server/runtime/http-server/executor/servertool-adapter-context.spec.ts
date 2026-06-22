@@ -126,6 +126,25 @@ describe('servertool adapter context builder', () => {
     expect(context.routeId).toBe('search');
   });
 
+  it('does not infer clientProtocol from entry endpoint when metadata center did not write one', async () => {
+    jest.resetModules();
+    mockSyncStoplessGoalStateFromRequest.mockClear();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata: {},
+      entryOriginRequest: { model: 'gpt-5.4', input: 'continue' },
+      requestId: 'req-no-client-protocol-infer',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(context.clientProtocol).toBeUndefined();
+  });
+
   it('backfills session and conversation identifiers from entry origin request metadata', async () => {
     jest.resetModules();
     mockSyncStoplessGoalStateFromRequest.mockClear();

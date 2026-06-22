@@ -19,14 +19,14 @@ describe('processSuccessfulProviderResponse legacy stopless contract removal', (
         status: 200,
         body: {
           status: 'completed',
-          output_text: 'done without reasoning.stop'
+          output_text: 'done without reasoningStop'
         }
       } as any,
       converted: {
         status: 200,
         body: {
           status: 'completed',
-          output_text: 'done without reasoning.stop'
+          output_text: 'done without reasoningStop'
         }
       } as any,
       mergedMetadata: {

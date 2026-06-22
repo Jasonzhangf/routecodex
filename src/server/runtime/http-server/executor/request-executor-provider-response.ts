@@ -45,9 +45,11 @@ export function buildProviderExecutionSuccessResult(args: {
   converted: PipelineExecutionResult;
   providerKey: string;
   providerModel?: string;
+  requestModel?: string;
   routeName?: string;
   routingPoolId?: string;
   finishReason?: string;
+  entryPort?: number;
   stoplessMode?: 'on' | 'off' | 'endless';
   stoplessArmed?: boolean;
   aggregatedUsage?: Record<string, unknown>;
@@ -93,8 +95,10 @@ export function buildProviderExecutionSuccessResult(args: {
     usageLogInfo: {
       providerKey: args.providerKey,
       model: args.providerModel,
+      requestModel: args.requestModel,
       routeName: args.routeName,
       poolId: args.routingPoolId,
+      entryPort: typeof args.entryPort === 'number' ? args.entryPort : undefined,
       finishReason: args.finishReason,
       stoplessMode: args.stoplessMode,
       stoplessArmed: args.stoplessArmed,

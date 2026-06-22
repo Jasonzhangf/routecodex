@@ -562,7 +562,12 @@ export class ResponsesProvider extends HttpTransportProvider {
         targetUrl,
         entryEndpoint
       );
-      await this.reportResponsesFailureIfNeeded(upstreamResult.response.data, context);
+      await this.reportResponsesFailureIfNeeded(upstreamResult.response.data, context, {
+        expectedMode: 'sse',
+        responseKind: upstreamResult.responseKind,
+        contentType: upstreamResult.response.headers['content-type'] ?? upstreamResult.response.headers['Content-Type'],
+        statusCode: upstreamResult.response.status
+      });
       return upstreamResult.response;
     }
     const stream = upstreamResult.stream;
@@ -670,7 +675,12 @@ export class ResponsesProvider extends HttpTransportProvider {
         targetUrl,
         entryEndpoint
       );
-      await this.reportResponsesFailureIfNeeded(upstreamResult.response.data, context);
+      await this.reportResponsesFailureIfNeeded(upstreamResult.response.data, context, {
+        expectedMode: 'sse',
+        responseKind: upstreamResult.responseKind,
+        contentType: upstreamResult.response.headers['content-type'] ?? upstreamResult.response.headers['Content-Type'],
+        statusCode: upstreamResult.response.status
+      });
       return upstreamResult.response;
     }
     const stream = upstreamResult.stream;
@@ -900,8 +910,17 @@ export class ResponsesProvider extends HttpTransportProvider {
     return 300_000;
   }
 
-  private async reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): Promise<void> {
-    const failure = detectResponsesFailure(payload, context);
+  private async reportResponsesFailureIfNeeded(
+    payload: unknown,
+    context: ProviderContext,
+    transport?: {
+      expectedMode?: 'sse';
+      responseKind?: 'json' | 'text';
+      contentType?: string;
+      statusCode?: number;
+    }
+  ): Promise<void> {
+    const failure = detectResponsesFailure(payload, context, transport);
     if (!failure) {
       return;
     }

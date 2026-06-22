@@ -473,6 +473,13 @@ export function extractBridgeProviderResponsePayload(
   if (!body || typeof body !== 'object') {
     return undefined;
   }
+  const payload =
+    body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload)
+      ? (body.payload as Record<string, unknown>)
+      : undefined;
+  if (payload) {
+    return payload;
+  }
   const nestedBody =
     body.body && typeof body.body === 'object' && !Array.isArray(body.body)
       ? (body.body as Record<string, unknown>)

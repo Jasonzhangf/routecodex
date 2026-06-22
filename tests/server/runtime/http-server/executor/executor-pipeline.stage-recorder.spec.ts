@@ -69,6 +69,68 @@ describe('executor-pipeline stage recorder injection', () => {
     expect(executeArg.metadata?.__hubStageRecorder).toBe(recorder);
   });
 
+  it('uses the entry endpoint as the only protocol truth for stage recorder setup', async () => {
+    const recorder = { record: jest.fn() };
+    createSnapshotRecorderMock.mockResolvedValue(recorder);
+
+    const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
+
+    const hubPipeline = {
+      execute: jest.fn().mockResolvedValue({
+        providerPayload: { ok: true },
+        target: {
+          providerKey: 'provider.a',
+          providerType: 'openai',
+          outboundProfile: 'openai-chat'
+        },
+        processMode: 'chat',
+        metadata: {}
+      })
+    };
+
+    await runHubPipeline(
+      hubPipeline as any,
+      {
+        requestId: 'req_stage_recorder_entry_truth_1',
+        entryEndpoint: '/v1/responses',
+        headers: {},
+        body: { input: 'hi' },
+        metadata: {}
+      } as any,
+      { providerProtocol: 'openai-chat' }
+    );
+
+    expect(createSnapshotRecorderMock).toHaveBeenCalledWith(
+      {
+        requestId: 'req_stage_recorder_entry_truth_1',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+  });
+
+  it('fails fast when hub pipeline entry endpoint is unsupported', async () => {
+    const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
+
+    const hubPipeline = {
+      execute: jest.fn()
+    };
+
+    await expect(runHubPipeline(
+      hubPipeline as any,
+      {
+        requestId: 'req_stage_recorder_bad_entry_1',
+        entryEndpoint: '/v1/unknown',
+        headers: {},
+        body: { input: 'hi' },
+        metadata: {}
+      } as any,
+      {}
+    )).rejects.toThrow('Unsupported hub pipeline entry endpoint: /v1/unknown');
+
+    expect(hubPipeline.execute).not.toHaveBeenCalled();
+  });
+
   it('preserves MetadataCenter binding without mutating relay metadata', async () => {
     const recorder = { record: jest.fn() };
     createSnapshotRecorderMock.mockResolvedValue(recorder);

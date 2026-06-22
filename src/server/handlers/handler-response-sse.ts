@@ -35,6 +35,7 @@ import {
   buildResponsesSseErrorPayloadForHttp,
   buildResponsesStreamIncompleteErrorPayloadForHttp,
   buildResponsesStructuredSseErrorPayloadForHttp,
+  createChatJsonToSseConverterForHttp,
   buildResponsesTerminalSseFramesFromProbeForHttp,
   createResponsesJsonToSseConverterForHttp,
   isDirectPassthroughTransportKeepaliveFrameForHttp,
@@ -748,6 +749,87 @@ async function streamResponsesJsonAsSse(
   return true;
 }
 
+async function streamChatCompletionsJsonAsSse(
+  args: ResponsesJsonSseDispatchArgs
+): Promise<boolean> {
+  if (
+    args.entryEndpoint !== '/v1/chat/completions'
+    || !args.result.body
+    || typeof args.result.body !== 'object'
+    || Array.isArray(args.result.body)
+  ) {
+    return false;
+  }
+  const record = args.result.body as Record<string, unknown>;
+  if (record.object !== 'chat.completion') {
+    return false;
+  }
+  const flushable = args.res as FlushableResponse;
+  args.res.status(args.status);
+  args.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  args.res.setHeader('Cache-Control', 'no-cache, no-transform');
+  args.res.setHeader('Connection', 'keep-alive');
+  if (typeof flushable.flushHeaders === 'function') {
+    flushable.flushHeaders();
+  } else if (typeof flushable.flush === 'function') {
+    flushable.flush();
+  }
+  try {
+    const converter = await createChatJsonToSseConverterForHttp();
+    const sse = await converter.convertResponseToJsonToSse(args.result.body, {
+      requestId: args.requestLabel,
+    });
+    const stream = toNodeReadable(sse);
+    if (!stream) {
+      sendSseBridgeError(
+        args.res,
+        args.requestLabel,
+        502,
+        args.result.metadata as Record<string, unknown> | undefined,
+        'json_to_sse_bridge_missing_stream_closeout'
+      );
+      return true;
+    }
+    stream.on('end', () => {
+      if (!args.res.writableEnded && !args.res.destroyed) {
+        args.res.end();
+      }
+      releaseMetadataCenterForHttpResponse(args.result.metadata, 'json_to_sse_closeout');
+      args.logResponseCompleted({
+        status: args.status,
+        mode: 'sse',
+        finishReason: deriveFinishReason(args.result.body)
+      });
+    });
+    stream.on('error', (error: Error) => {
+      logResponseNonBlockingError(`response.sse.chat_json_bridge.stream:${args.requestLabel}`, error);
+      if (!args.res.writableEnded && !args.res.destroyed) {
+        sendSseBridgeError(
+          args.res,
+          args.requestLabel,
+          502,
+          args.result.metadata as Record<string, unknown> | undefined,
+          'json_to_sse_stream_error_closeout'
+        );
+      }
+    });
+    stream.pipe(args.res, { end: false });
+    return true;
+  } catch (error) {
+    logResponseNonBlockingError(`response.sse.chat_json_bridge:${args.requestLabel}`, error);
+    if (!args.res.writableEnded && !args.res.destroyed) {
+      sendSseBridgeError(
+        args.res,
+        args.requestLabel,
+        502,
+        args.result.metadata as Record<string, unknown> | undefined,
+        'json_to_sse_bridge_error_closeout'
+      );
+    }
+    return true;
+  }
+}
+
 async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): Promise<boolean> {
   const responsesPayload = await prepareResponsesJsonBodyForSseBridgeForHttp({
     body: args.result.body,
@@ -766,6 +848,17 @@ async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): P
 export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs): Promise<boolean | Error> {
   const { res, result, requestLabel, status, body, forceSSE, expectsStream, entryEndpoint, requestLogContext } = args;
   if (forceSSE && result.sseStream === undefined) {
+    if (await streamChatCompletionsJsonAsSse({
+      res,
+      requestLabel,
+      result,
+      status,
+      entryEndpoint,
+      responsesRequestContext: args.responsesRequestContext,
+      logResponseCompleted: args.logResponseCompleted
+    })) {
+      return true;
+    }
     const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
     if (await dispatchResponsesJsonAsSse({
       res,
@@ -988,7 +1081,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     errorLabel: string,
     options?: { recordSnapshot?: boolean }
   ) => {
-    if (shouldDropClientSseFrameForHttp(frame, entryEndpoint)) {
+    if (
+      result.continuationOwner !== 'direct'
+      && shouldDropClientSseFrameForHttp(frame, entryEndpoint)
+    ) {
       return;
     }
     if (options?.recordSnapshot !== false) {
@@ -1227,6 +1323,24 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       }
     })().catch((error) => {
       logResponseNonBlockingError(`response.sse.client_close.cleanup:${requestLabel}`, error);
+    });
+  };
+
+  const finalizeStreamEndContinuationRetention = async (): Promise<void> => {
+    const closeAction = planResponsesContinuationCloseActionForHttp({
+      entryEndpoint,
+      requestContextPresent: Boolean(effectiveResponsesRequestContext),
+      probe: contractProbe.probe,
+    });
+    if (closeAction.action !== 'persist_continuation') {
+      return;
+    }
+    logResponsesContinuationTrace('stream_end.persist_continuation', requestLabel, {
+      closeBeforeStreamEnd: false,
+      streamEnded: true,
+    });
+    await finalizeResponsesConversationRequestRetentionForHttp(requestLabel, {
+      keepForSubmitToolOutputs: closeAction.keepForSubmitToolOutputs,
     });
   };
 
@@ -1748,6 +1862,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         logResponseNonBlockingError(`responses-conversation-native-sse:${requestLabel}`, error);
       })
       .finally(async () => {
+        await finalizeStreamEndContinuationRetention().catch((error) => {
+          logResponseNonBlockingError(`responses-conversation-native-sse-finalize:${requestLabel}`, error);
+        });
         const closedBeforeTerminalEvent = !finishTracker.seenTerminalEvent;
         const closedBeforeTerminalRepairPlan = planResponsesStreamEndRepairForHttp({
           entryEndpoint,
