@@ -109,6 +109,7 @@ const TS_EXECUTION_STAGE_SHELL = `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
+const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
@@ -5270,6 +5271,23 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-entry-preflight-shell-owner',
         `entry-preflight-shell.ts must keep entry preflight owner marker ${marker}`
+      );
+    }
+  }
+  const entryContextShell = readRequired(TS_ENTRY_CONTEXT_SHELL);
+  for (const marker of [
+    'export function resolveServertoolEntryContext(',
+    'export function asServertoolJsonObject(',
+    'normalizeFilterTokenSet',
+    'includeToolCallNames: normalizeFilterTokenSet',
+    'excludeToolCallNames: normalizeFilterTokenSet',
+    'includeAutoHookIds: normalizeFilterTokenSet',
+    'excludeAutoHookIds: normalizeFilterTokenSet'
+  ]) {
+    if (!entryContextShell.includes(marker)) {
+      fail(
+        'servertool-entry-context-shell-owner',
+        `entry-context-shell.ts must keep entry context owner marker ${marker}`
       );
     }
   }
