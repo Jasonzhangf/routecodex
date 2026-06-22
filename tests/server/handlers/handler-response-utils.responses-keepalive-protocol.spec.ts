@@ -49,8 +49,8 @@ class MockResponse extends PassThrough {
   }
 }
 
-describe('responses SSE keepalive ping', () => {
-  it('emits an explicit ping event for /v1/responses streams before upstream data arrives', async () => {
+describe('responses SSE keepalive protocol', () => {
+  it('keeps transport keepalive as SSE comments and does not inject non-Responses events', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const res = new MockResponse();
     const stream = new PassThrough();
@@ -64,7 +64,7 @@ describe('responses SSE keepalive ping', () => {
         metadata: { outboundStream: true, stream: true },
         sseStream: stream,
       } as any,
-      'req_responses_keepalive_ping',
+      'req_responses_keepalive_protocol',
       {
         forceSSE: true,
         entryEndpoint: '/v1/responses',
@@ -81,7 +81,9 @@ describe('responses SSE keepalive ping', () => {
 
     const output = chunks.join('');
     expect(output).toContain(': keepalive');
-    expect(output).toContain('event: ping');
-    expect(output).toContain('data: {"type":"ping"}');
+    expect(output).not.toContain('event: ping');
+    expect(output).not.toContain('"type":"ping"');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('event: response.done');
   });
 });
