@@ -32,6 +32,13 @@ flowchart LR
   Cont03Materialize -->|cnt-03| Cont04Release
 ```
 
+Save/restore order matters:
+
+- restore must happen before any stopless or hook-side reclassification of the request
+- hook-side response/request rewriting must run on the restored current-turn shape
+- save must persist the finalized canonical continuation truth, not the pre-hook shell shape
+- if a stopless projection or response hook runs before restore, the next turn will replay stale shape and lose the modification context
+
 ## Protocol Modes
 
 | protocol | owner | mode | legal persisted truth | forbidden behavior |

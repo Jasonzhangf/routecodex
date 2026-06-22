@@ -1,3 +1,80 @@
+# 2026-06-22 continuation save/restore ordering aligned to current-turn truth
+
+- 用户纠偏后的明确约束已回写 wiki：
+  - `docs/architecture/wiki/continuation-standard-contract.md`
+  - `docs/architecture/wiki/stopless-session-mainline-source.md`
+  - `docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md`
+- 本轮代码收紧点不是让 stopless 接管 continuation，而是防止 response dispatch 用 stale `responsesRequestContext` 覆盖当前请求真相：
+  - `src/modules/llmswitch/bridge/responses-response-bridge.ts::resolveResponsesRequestContextForHttp(...)`
+  - 新规则：handler/fallback current-turn context 优先；MetadataCenter continuation context 只做缺口补全，不再反向覆盖当前真相。
+- 新 focused 回归：
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts`
+    - 当前 handler fallback 必须压过 stale metadata continuation_context
+    - fallback 仍负责补齐 port scope / routing group
+  - `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts`
+    - `sendPipelineResponse(...)` 持久化后，用 `responseId` 恢复出来的 payload 必须保留 current truth（`model=gpt-current`，首条用户输入=`current`），不能回退到 stale metadata shape
+- focused 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts -t "stale metadata responsesRequestContext must not override current fallback context during persistence" --runInBand`
+- 阶段结论：
+  - 当前已锁住“stale metadata continuation_context 不得盖掉 current handler truth”这层；
+  - 这还不是完整 stopless live 闭环，5555 submit_tool_outputs / terminal 收敛仍需继续在线验证。
+
+# 2026-06-22 stopless client/model/tool-pair contract re-alignment
+
+- 重新对齐 stopless 设计约束：
+  - client-visible 只允许 `exec_command(routecodex hook run reasoningStop ...)`
+  - model-visible 保留 internal `reasoningStop` 语义，不再要求 `message.content` 承载原 stop 文本
+  - 请求/响应工具改写必须成对；响应侧先投 `exec_command`，请求侧再还原 built-in tool/result
+  - `sessionId` 只能从全局真源读取；CLI projection 不得在本地自行补造 `sessionId`
+  - SSE / outbound 不在这轮修改面
+  - stopless exec command 产出的 CLI stdout 必须给后续 VR 提供 `routeHint=thinking`
+  - 无 schema 连续 3 次必须停止；Rust CLI blackbox 已锁 `repeatCount=3,maxRepeats=3` 时 terminal exhausted
+- 本轮实际修复不是 runtime，而是测试/门禁过时：
+  - `tests/servertool/stopless-cli-continuation.spec.ts`
+    - 首轮 projection 改为校验 `exec_command + reasoning_text + CLI stdout(routeHint=thinking, repeatCount/maxRepeats)`
+    - `missing request truth sessionId` 改为校验 terminal，不再错误要求继续投影 CLI
+  - `scripts/verify-servertool-rust-only.mjs`
+    - stopless schema feedback lock 改为锁 `reasoning_text` 和 `cliStdout.routeHint === thinking`
+- 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/engine-observation-shell.spec.ts tests/servertool/engine-mainline-residue.red.spec.ts --runInBand`
+  - `node scripts/verify-servertool-rust-only.mjs`
+
+# 2026-06-22 continuation save/restore vs stopless ordering audit
+
+- 用户追加 concern 已核对：如果 continuation owner 先保存 pre-hook truth，再让 stopless/response hook 去拦截改写，下一轮 restore 时拿到的会是旧 shape，stopless 注入的 `schemaGuidance/repeatCount/schemaFeedback` 会丢。
+- 代码证据：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
+    - `convertProviderResponse(...) -> executeProviderResponseNativeOutboundEffects(...) -> executeProviderResponseNativeServertoolEffects(...) -> runServertoolResponseStageOrchestrationShell(...)`
+    - 说明 response-side servertool/stopless interception 发生在 client dispatch/persist 之前。
+  - `src/server/handlers/handler-response-utils.ts`
+    - `sendPipelineResponse(...)` 在 `persistResponsesConversationLifecycleForHttp(...)` 前已经拿到 `result.body`，该 body 是 response-stage orchestration 之后的最终 client payload。
+  - `src/server/handlers/handler-response-sse.ts`
+    - SSE persist 也在 client projection plan/terminal probe 之后，不是 provider raw payload 直接落 continuation。
+- 当前文档需要更明确写死顺序：
+  - request side：Responses continuation owner 先 restore/materialize 当前请求，再让 stopless 读取当前轮 tool_output/runtime metadata 判定 3 次 no-schema guard。
+  - response side：stopless interception/schema/projection 先完成，再由 continuation owner persist canonical response truth。
+- 已补真源：
+  - `docs/architecture/wiki/continuation-standard-contract.md`
+  - `docs/architecture/wiki/stopless-session-mainline-source.md`
+  - `docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md`
+  - `.agents/skills/rcc-dev-skills/references/23-servertool-hook-dev-debug-flow.md`
+- 已补确定性白盒：
+  - `tests/server/handlers/handler-response-utils.responses-conversation.spec.ts`
+  - 新断言锁 `persistResponsesConversationLifecycleForHttp(...)` 记录的是最终 stopless `exec_command(routecodex hook run reasoningStop ...)` 形状，而不是 internal raw `reasoningStop` payload
+- 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/handler-response-utils.responses-conversation.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/stopless-cli-continuation.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+
+# 2026-06-22 servertool hook/continuation pairing audit
+
+- verified: response-side shell projection stays at `ServertoolRespHook03HookResponseInjected` before client execution.
+- verified: request-side built-in restoration stays at `ServertoolReqHook01ResultParsed -> 02 -> 03 -> 04` before `HubReqChatProcess03Governed`.
+- verified: Responses continuation owner is not the shell/projection owner; it only consumes the finalized request shape after request-side finalization.
+- verified tests: `tests/servertool/stopless-cli-continuation.spec.ts`, `tests/servertool/servertool-cli-result-restore.spec.ts`.
+- remaining watch item: keep `responses_request_bridge` / `responses_response_bridge` from drifting into hook ownership semantics.
+
 ## 2026-06-22 servertool execution queue shell isolated
 
 - 本轮 slice：把 `runServertoolIoExecutionQueue(...)` 和 `buildServertoolDispatchPlanInput(...)` 从 `execution-dispatch-outcome-shell.ts` 物理搬到独立 `execution-queue-shell.ts`。
@@ -118,6 +195,21 @@
   - `node scripts/tests/stopless-5555-live-probe.mjs`
   - `pnpm exec jest tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`
   - `cargo test -p servertool-core stopless --lib -- --nocapture`
+
+## 2026-06-22 stopless goal state sessionDir alignment
+
+- 这轮命中的是测试样本/桥接传参，而不是 Rust contract 退化：
+  - `tests/sharedmodule/stopless-goal-state.spec.ts`
+  - `tests/sharedmodule/state-integrations-stopless-goal.red.spec.ts`
+- 真实问题：
+  - `stopless-goal-state.ts` 需要显式把 `sessionDir` 传给 `loadRoutingInstructionStateSync` / `saveRoutingInstructionStateSync`
+  - 测试只设 env 不够，必须把 `__rt.sessionDir` 挂到 adapter/runtime metadata 上，才能和当前 bridge 一致
+- 结果：
+  - 两个 focused Jest 已转绿
+  - 这条链确认是当前 Rust contract + TS bridge 传参对齐问题，不是 core contract 回退
+- 可复用动作：
+  - servertool 这类持久化/会话态测试，优先显式注入 `__rt.sessionDir`，不要只依赖全局 env
+  - 如果读写走 Rust native store，测试必须把写入和读取都锁到同一个临时 sessionDir，避免撞到默认目录历史态
 
 ## 2026-06-22 submit_tool_outputs second response persistence truth
 
@@ -11533,3 +11625,69 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 当前残留：
   - `registry-impl.ts` 仍保留 builtin/ad-hoc catalog read 和 raw record gathering；这是 IO/catalog glue，不是 registration/lookup native-plan owner。
   - `servertool.hook_skeleton.mainline` 仍是 `binding pending`，不能宣称 Rust-only 闭环完成。
+
+## 2026-06-22 hook/continuation paired boundary review
+
+- review target: 响应端 hook `ServertoolRespHook03HookResponseInjected` 与请求端 hook `ServertoolReqHook01ResultParsed -> 02 -> 03 -> 04` 是否相对 `responses` continuation store/restore 处于正确层。
+- 文档证据：`docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md` 第 40 行起明确把响应端/请求端工具改写定为 paired boundary，`ServertoolReqHook01ResultParsed` 的 restore 只表示“当前轮 shell exec_command -> 模型可见 built-in tool”，不是 continuation store/restore。
+- 代码证据：`sharedmodule/llmswitch-core/src/servertool/engine.ts:220`、`engine-postflight-shell.ts:25` 仍然把 projection context 投影动作收在 `runServertoolEnginePostflight` 内部；`sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts` 与 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs` 是唯一的 continuation owner，servertool hook 文件里没有 `previous_response_id` / `submit_tool_outputs` / `responses-conversation-store` 引用。
+- 焦点验证：`PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-result-restore.spec.ts --runInBand` → 14/14 PASS。
+- paired 关键断言：响应侧首轮拿到 `exec_command(routecodex hook run reasoningStop ...)`，请求侧把同轮 `function_call_output` 还原成 `reasoningStop` built-in shape，下一轮响应侧再次投影时 `repeatCount=2`、chat 不残留 `function_call_output` / `old_cli_`。
+- 结论：响应侧投影位置在 `HubRespChatProcess03Governed` 内；请求侧还原位置在 `HubReqInbound02Standardized` 之后、`HubReqChatProcess03Governed` 之前；`responses` continuation 拥有 `ServertoolReqHook04RequestFinalized` 之后的 request shape，三层没有跨边。
+- 未做：mainline `servertool.hook_skeleton.mainline` 仍 `binding pending`，未把 `hub.servertool_hook_skeleton` owner feature 登记到 function-map。
+
+
+## 2026-06-22 stopless VR/stopless 解耦 first slice
+
+- 目标：把 stopless 业务语义从 VR 拿出来，让 VR 只见通用 `routeHint=thinking`，stopless owner 自己负责计数和 hint 归一。
+- 已落地：
+  - `virtual_router_engine/classifier.rs`：删除 `stopless_followup` 标志；thinking 只看 `latest_message_from_user`。
+  - `virtual_router_engine/engine/route.rs::resolve_route_hint`：删除 `serverToolFollowupSource == servertool.stop_message` 的 stopless 来源屏蔽；只保留通用 `serverToolFollowup && routeHint=tools`。
+  - `servertool-core/src/cli_contract.rs::build_stop_message_auto_run_output`：把 `route_hint` 直接固定为 `thinking`，不再借 `normalize_stopless_trigger_hint_for_metadata` 走 trigger code。
+  - `servertool-core/src/stopless_cli_projection_context_contract.rs`：回滚 `route_hint` 改名，恢复 `trigger_hint`，避免误把 stopless 内部 trigger 泄漏成 VR hint。
+  - `tests/servertool/stopless-vr-route-hint.spec.ts`：改名 `stop-message VR route hint contract`，断言改成通用 followup 语义。
+  - `tests/servertool/stopless-cli-continuation.spec.ts`：新增 `first.routeHint === 'thinking'` 断言，锁住 stopless CLI stdout → VR hint 方向。
+- Rust focused：`cargo test -p servertool-core stop_message_auto` 8/8；`cargo test -p router-hotpath-napi virtual_router_engine` 283/285，留下的 2 个失败是 `http_503_uses_recoverable_three_strike_chain_and_is_not_persisted` 和 `select_provider_returns_error_when_no_providers_available`，与 stopless/VR 隔离无关，是既有选择/事件测试。
+- Jest focused：`tests/servertool/stopless-cli-continuation.spec.ts` 12/12，`tests/servertool/stopless-vr-route-hint.spec.ts` 3/3，`tests/servertool/virtual-router-thinking-longcontext-context-switch.spec.ts` 4/4。
+- Live probe（5555，routecodex 0.90.3253）：
+  - `stopless-live-1782094341855` session 第一轮命中标准 `exec_command(routecodex hook run reasoningStop ...)`，CLI stdout 输出 `repeatCount=2`、`sessionId=stopless-live-1782094341855`、`routeHint` 当前未在 stdout 中（仅 stdout 自身携带 triggerHint，但 stopless owner 已决定 hint=thinking）。
+  - 第二轮 `submit_tool_outputs` 重新发起，CLI stdout 又给出 `repeatCount=2`，但 client 把 sessionId 回传时再次被 `routecodex hook run reasoningStop --input-json ... repeatCount=1` 重置。
+  - 当前未闭环：`sessionId` 在 CLI stdout 已带上，但 servertool owner 仍按 `repeatCount=1` 起算，意味着 stopless 的 `sessionId` 还没真正成为 loop identity；这是 5520 live 计数不前进的下一段真源。
+- 后续路径：
+  - 5520 计数真源：`stopless_orchestration_contract` 仍然只看 `repeatCount`，需把 `sessionId` 作为 loop identity 接入，使同 sessionId 的重复 stop 真正递增 `repeatCount`。
+  - 5520 路由真源：VR 已不读 stopless；但 live 上 `routeHint=thinking` 还需要在 hub metadata 链路上写到 `MetaRoute03RouteCarrier.routeHint`，目前仍依赖 stopless CLI stdout。
+  - continuation store/restore 不在本次改动范围，已确认未受影响。
+
+## 2026-06-22 servertool hook/continuation paired boundary review
+
+- review target: 请求/响应 hook 相对 continuation store/restore 的位置是否正确。
+- 证据链：
+  - `docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md:40-52` 明确 hook skeleton 不是 continuation owner，`responses_resume` / `responses-conversation-store` 才是 continuation store/restore owner。
+  - `docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md:54-116` 锁定响应侧 `HubRespChatProcess03Governed -> ServertoolRespHook01..06 -> HubRespOutbound04ClientSemantic`，请求侧 `HubReqInbound02Standardized -> ServertoolReqHook01..04 -> HubReqChatProcess03Governed`。
+  - `docs/architecture/wiki/stopless-session-mainline-source.md:9-11` 明确 stopless 不 owns `/v1/responses` continuation store/restore，只消费已恢复后的请求形状。
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs:124-187` 先 lift `responsesResume` 再写入 semantics；servertool hook 不在这个 owner 内。
+  - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts:159-173` 在 response pipeline 中调用 servertool response orchestration shell，位置在 continuation restore 之后、HubRespOutbound 之前。
+- 结论：
+  - 响应侧 hook 位置正确：在 continuation restore 之后、客户端投影之前。
+  - 请求侧 hook 位置正确：在客户端执行 shell result 返回之后、HubReqChatProcess 之前。
+  - 两侧都必须围绕同一轮工具结果对称改写，不能跨进 continuation owner。
+- 当前主线残留：
+  - `sharedmodule/llmswitch-core/src/servertool/engine.ts` 仍是最大 TS 活语义 owner。
+  - `sharedmodule/llmswitch-core/src/servertool/registry-impl.ts` 仍持有 builtin/ad-hoc registry glue 与 auto-hook projection glue。
+- 下一步：
+  - 继续收 `engine.ts` / `registry-impl.ts` 的活语义 slice，再补对应白盒/黑盒与 verify gates。
+
+## 2026-06-22 servertool hook vs continuation position review
+
+- verified: request-side servertool hooks sit after Responses continuation restore/materialize and before HubReqChatProcess03Governed. The restore owner is `responses-request-bridge` / `responses-conversation-store`, not servertool hooks.
+- verified: response-side servertool hooks sit inside HubRespChatProcess03Governed and before sendPipelineResponse / persistResponsesConversationLifecycleForHttp. They project CLI or finalize response truth before continuation persistence.
+- verified: hook phases do not own continuation store/restore; they only consume the current request/result shape and must not read or rewrite `previous_response_id` or `responsesRequestContext` as restoration trigger.
+- verified code refs: `src/server/handlers/responses-handler.ts`, `src/server/handlers/handler-response-utils.ts`, `src/modules/llmswitch/bridge/responses-request-bridge.ts`, `sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts`.
+
+
+
+## 2026-06-22 stopless session truth收口
+- stopless 内部 session 字段已物理移除，不再写入 runtime control / plan；唯一真源改为 requestTruth.sessionId。
+- 关键反模式：把 request truth 再复制成 stopless 自己的 sessionId / MetadataCenter 回退拼装 / NAPI plan 返参。
+- 触发信号：缺 requestTruth.sessionId 时 stopless 必须终止；出现本地 metadata.sessionId / runtime.sessionId 回退即违规。
+- 验证：cargo test -p servertool-core stopless_orchestration --lib -- --nocapture；Jest focused stopless tests 4/4 PASS。

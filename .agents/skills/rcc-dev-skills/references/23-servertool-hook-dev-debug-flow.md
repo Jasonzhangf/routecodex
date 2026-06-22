@@ -128,6 +128,13 @@
 - 再 grep Rust symbol / NAPI export / TS thin wrapper。
 - 若 1-2 次查询还定位不到，先补 map，不直接改代码。
 
+4.1 continuation 先判 owner，再判 hook
+- 如果样本是 `/v1/responses.submit_tool_outputs`、`previous_response_id` 或 relay/direct continuation，先回到 Responses continuation owner，确认 `entryKind + continuationOwner + scope`。
+- hook 只看当前请求的 tool result / response event；不要把 continuation store/restore 问题归到 servertool hook。
+- `ServertoolReqHook01ResultParsed` 的“restore”只表示把 shell `exec_command` 的普通 tool result 还原成当前轮模型可见的 hook result，不表示重放历史 continuation。
+- 对称配对要同时检查两侧：如果响应侧 `ServertoolRespHook03HookResponseInjected` 已经投影成 shell，那请求侧就必须在 `ServertoolReqHook01ResultParsed -> 02 -> 03 -> 04` 里把同一轮结果还原成 built-in tool 形状；如果响应侧还没投影，说明不该提前做请求侧恢复。两边错位就是上下文对不上。
+- continuation 与 stopless 顺序锁：必须先 restore/materialize request truth（Responses continuation owner），再做 stopless 3-round no-schema 判定；响应侧必须先做完 stopless interception / schema / projection，再由 continuation owner 写回 canonical context。如果先存后拦，下一轮恢复出来的是旧 shape，注入的 schemaGuidance / repeatCount / feedback 会全丢；如果先拦后恢，3-round no-schema 判定拿不到真实当前轮上下文。判别证据：1）response 端是否产出标准 `exec_command`；2）第二轮 submit 时是否仍能从请求里取到上一轮 stopless 注入的 `schemaFeedback/repeatCount`；3）continuation store 里是否只保存了最终 project 后的 response，而不是原始 provider payload。
+
 5. 最后固化 red test
 - 真实样本先落 fixture 或 focused case。
 - 修复必须让 red -> green，再 replay 旧样本。
@@ -145,6 +152,10 @@
 - stopless / reasoningStop 的 live probe 先判首轮是否产出标准 `exec_command(routecodex hook run reasoningStop ...)`，再判有没有 raw `reasoningStop` 泄漏，最后才看续轮是否因 `Responses conversation expired or not found`、provider 4xx 或样本失活失败。
 - 不要把 probe 进程的最终退出码直接当成骨架回退；首轮命中标准 CLI 投影才是响应 hook 骨架是否工作的主证据。
 - 若续轮失败，先确认是不是会话寿命/样本过期，再决定是否需要重跑样本，而不是先改代码。
+
+8. stopless session 真源只认 request truth
+- `stopless` 的 loop identity 只能来自 `requestTruth.sessionId`；禁止在 runtime control、NAPI stopless plan、CLI projection 或 MetadataCenter side-channel 再复制第二份 `sessionId`。
+- 发现 `metadata.sessionId`、`runtime.sessionId`、adapter 本地字段回退拼装 stopless session，直接按错误实现处理并物理删除。
 
 ## 单轮开发/调试执行模板
 1. 锁目标

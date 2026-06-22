@@ -35,6 +35,23 @@ servertool response decision
 
 Hook skeleton does not execute the client CLI. Hook skeleton governs injection, restore, intercept, schema validation, followup/reenter effect planning, and finalization.
 
+## Hook / Continuation Isolation Boundary
+
+The hook skeleton is a request/response processing surface, not a continuation owner. Continuation store/restore (responses `submit_tool_outputs`, `previous_response_id`, relay/materialize, direct vs relay ownership) belongs to the Responses continuation owner defined in `docs/design/responses-continuation-storage-ownership.md` and lives in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs` plus `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`.
+
+Hard rules:
+
+- Request-side and response-side tool rewriting are a paired boundary, not two independent rewrites. The response side projects the shell command before client execution; the request side restores the ordinary tool result back into model-visible built-in tool shape before the request is finalized. If either side moves across the continuation boundary, the next turn sees the wrong shape and the loop becomes misaligned.
+- For continuation-aware turns, the only legal order is: restore/materialize request truth -> run request-side hook restore/rewrite -> stopless/tool governance judgment -> persist canonical continuation truth when the response owner saves. Saving pre-hook truth and restoring post-hook truth, or the reverse, is invalid because request/response tool shapes no longer match.
+- The response-side pair is `ServertoolRespHook03HookResponseInjected -> client-visible exec_command`; the request-side pair is `client-visible exec_command -> ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized`.
+- The Responses continuation owner may only consume the finalized request shape after `ServertoolReqHook04RequestFinalized`; it must never be asked to reconcile a shell projection into a built-in tool result.
+- `ServertoolReqHook01ResultParsed` consumes only the tool result of the **current** request. It does not look up continuation store state, does not synthesize session identity, and must not call into `responses-conversation-store` / `responses_resume` to decide whether to restore anything. The "restore" verb here means "rewrite shell `exec_command` output into model-visible `reasoningStop -> function_call_output` for this turn", not "rehydrate prior continuation history".
+- `ServertoolRespHook04FollowupPlanned` / `ServertoolRespHook05ReenterDispatched` plan origin-snapshot backend effect. They must not classify the request as a continuation entry; that classification happens before the request reaches `HubRespChatProcess03Governed`, in the Rust responses resume block.
+- `ServertoolRespHook01Intercepted` / `ServertoolRespHook02SchemaValidated` / `ServertoolRespHook03HookResponseInjected` never read continuation store, never rewrite `previous_response_id`, and never emit `submit_tool_outputs` shells. Their client-visible shell is always `routecodex hook run <toolName> --input-json <json>`.
+- Continuation `entryKind` / `continuationOwner` / `sessionId` / `conversationId` keys may be read by hooks only as the current request's metadata context, never as a restoration trigger.
+
+The architecture gate must keep this separation: any hook phase that begins to behave as a continuation owner is a regression and must fail the audit.
+
 ## Response-Side Skeleton
 
 ```text
@@ -130,6 +147,7 @@ Unit tests must cover:
 | required hook missing | fail-fast |
 | optional hook skipped | no-op event |
 | multi-hook same phase | deterministic order and deterministic effect merge |
+| request/response symmetric rewrite | response-side shell projection and request-side built-in restoration stay paired on the same semantic layer |
 
 Blackbox tests must cover:
 

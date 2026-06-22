@@ -277,6 +277,75 @@ describe('responses-response-bridge conversation lifecycle', () => {
     ]);
   });
 
+  it('records the final stopless exec_command projection shape instead of raw internal reasoningStop payload', async () => {
+    const { persistResponsesConversationLifecycleForHttp } = await import('../../../src/modules/llmswitch/bridge/responses-response-bridge.js');
+    await persistResponsesConversationLifecycleForHttp({
+      entryEndpoint: '/v1/responses',
+      requestLabel: 'openai-responses-router-stopless-projection-shape',
+      usageLogInfo: {
+        finishReason: 'tool_calls',
+        routeName: 'thinking',
+        timingRequestIds: ['openai-responses-provider-stopless-projection-shape']
+      } as any,
+      requestContext: {
+        payload: { model: 'gpt-5.4', store: true, input: [], tools: [] },
+        context: { input: [], toolsRaw: [] }
+      } as any,
+      body: {
+        id: 'resp_stopless_exec_projection_1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            name: 'exec_command',
+            arguments: JSON.stringify({
+              cmd: "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}' --session-id 'sess-stopless-projection' --request-id 'req-stopless-projection'"
+            }),
+            call_id: 'call_stopless_exec_1'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_stopless_exec_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: JSON.stringify({
+                  cmd: "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}' --session-id 'sess-stopless-projection' --request-id 'req-stopless-projection'"
+                }),
+                tool_call_id: 'call_stopless_exec_1'
+              }
+            ]
+          }
+        }
+      },
+    });
+
+    expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'resp_stopless_exec_projection_1',
+      response: expect.objectContaining({
+        id: 'resp_stopless_exec_projection_1',
+        status: 'requires_action',
+        required_action: expect.objectContaining({
+          type: 'submit_tool_outputs'
+        }),
+        output: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'function_call',
+            name: 'exec_command',
+            call_id: 'call_stopless_exec_1'
+          })
+        ])
+      })
+    }));
+    const recorded = recordResponseMock.mock.calls.at(-1)?.[0] as { response?: Record<string, unknown> } | undefined;
+    expect(JSON.stringify(recorded?.response ?? {})).toContain('routecodex hook run reasoningStop');
+    expect(JSON.stringify(recorded?.response ?? {})).not.toContain('"name":"reasoningStop"');
+  });
+
   it('RED: continuation persistence retries original request aliases when response-id capture lacks request context', async () => {
     recordResponseMock.mockImplementation((args: unknown) => {
       const requestId = (args as { requestId?: string }).requestId;
