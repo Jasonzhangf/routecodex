@@ -110,6 +110,7 @@ const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-she
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
+const TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL = `${SERVERTOOL_TS_DIR}/run-server-side-tool-engine-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
@@ -5288,6 +5289,22 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-entry-context-shell-owner',
         `entry-context-shell.ts must keep entry context owner marker ${marker}`
+      );
+    }
+  }
+  const runServerSideToolEngineShell = readRequired(TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL);
+  for (const marker of [
+    'export async function orchestrateServertoolEngine(',
+    'runServertoolEntryPreflight',
+    'extractToolCallsFromResponseStage',
+    'resolveServertoolEntryContext',
+    'runServertoolResponseStagePrePass',
+    'runServertoolExecutionStage'
+  ]) {
+    if (!runServerSideToolEngineShell.includes(marker)) {
+      fail(
+        'servertool-run-server-side-tool-engine-shell-owner',
+        `run-server-side-tool-engine-shell.ts must keep engine orchestration owner marker ${marker}`
       );
     }
   }
