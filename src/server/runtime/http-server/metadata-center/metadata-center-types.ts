@@ -65,7 +65,6 @@ export type MetadataCenterContinuationContext = {
 };
 
 export type MetadataCenterStoplessRuntimeControl = {
-  sessionId?: string;
   flowId?: string;
   repeatCount?: number;
   maxRepeats?: number;

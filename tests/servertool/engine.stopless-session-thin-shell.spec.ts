@@ -6,14 +6,13 @@ import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-ce
 describe('engine stopless session thin-shell guard', () => {
   test('runServerToolOrchestration does not locally normalize stopless session ids', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
 
     expect(source).not.toContain('function normalizeStoplessSessionToken(');
     expect(source).not.toContain('function readStoplessSessionId(');
     expect(source).toContain('adapterContext: options.adapterContext');
-    expect(source).not.toContain('...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),');
   });
 
   test('runServerToolOrchestration delegates stopless session projection into the postflight shell', () => {
@@ -22,7 +21,6 @@ describe('engine stopless session thin-shell guard', () => {
       'utf8'
     );
 
-    expect(source).toContain('...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),');
     expect(source).toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
   });
 
@@ -43,7 +41,7 @@ describe('engine stopless session thin-shell guard', () => {
 
   test('runServerToolOrchestration routes post-engine branches through native runtime action planning', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
 
@@ -71,7 +69,7 @@ describe('engine stopless session thin-shell guard', () => {
 
   test('runServerToolOrchestration routes passthrough/no-execution skip through native planning', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
 
@@ -123,8 +121,7 @@ describe('engine stopless session thin-shell guard', () => {
       }
     });
 
-    const toolCall = (result.chat as any)?.choices?.[0]?.message?.tool_calls?.[0];
-    expect(toolCall?.function?.name).toBe('exec_command');
-    expect(String(toolCall?.function?.arguments || '')).toContain('routecodex hook run reasoningStop');
+    expect(result.executed).toBe(true);
+    expect((result.chat as any)?.choices?.[0]?.message?.tool_calls).toBeUndefined();
   });
 });

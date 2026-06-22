@@ -13,6 +13,16 @@ export type RuntimeRequestTruthIdentifiers = {
   conversationId?: string;
 };
 
+export function readRuntimeRequestTruthSessionId(
+  metadata: Record<string, unknown> | undefined
+): string | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  const center = MetadataCenter.read(metadata);
+  return readTrimmedString(center?.readRequestTruth().sessionId);
+}
+
 export type RuntimeProviderObservationProjection = {
   target?: Record<string, unknown>;
   providerKey?: string;
@@ -45,7 +55,6 @@ export type RuntimeControlProjection = {
     directiveTypes?: string[];
   };
   stopless?: {
-    sessionId?: string;
     flowId?: string;
     repeatCount?: number;
     maxRepeats?: number;
@@ -216,7 +225,6 @@ export function readRuntimeControlProjection(
     ...(stopless
       ? {
           stopless: {
-            ...(readTrimmedString(stopless.sessionId) ? { sessionId: readTrimmedString(stopless.sessionId) } : {}),
             ...(readTrimmedString(stopless.flowId) ? { flowId: readTrimmedString(stopless.flowId) } : {}),
             ...(typeof stopless.repeatCount === 'number' ? { repeatCount: stopless.repeatCount } : {}),
             ...(typeof stopless.maxRepeats === 'number' ? { maxRepeats: stopless.maxRepeats } : {}),

@@ -415,15 +415,12 @@ export interface StoplessLearnedNoteWritePlan {
 export interface StoplessOrchestrationActionInput {
   flowId?: string;
   execution: unknown;
-  sessionId?: string;
-  adapterContext?: Record<string, unknown>;
 }
 
 export interface StoplessOrchestrationActionPlan {
   action: 'terminal_final' | 'cli_projection';
   isStopMessageFlow: boolean;
   reason: string;
-  sessionId?: string;
 }
 
 export interface StoplessCliProjectionContextRuntimeSnapshot {

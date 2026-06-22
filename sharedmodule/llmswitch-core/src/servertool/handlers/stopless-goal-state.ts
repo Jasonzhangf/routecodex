@@ -9,6 +9,7 @@ import {
 import { planStoplessGoalStateSyncWithNative } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 import { resolveServertoolPersistentScopeKey } from '../state-scope.js';
 import { writeRuntimeControlToBoundMetadataCenter } from '../stopless-metadata-carrier.js';
+import { readRuntimeMetadata } from '../../conversion/runtime-metadata.js';
 
 type StoplessGoalStateSyncResult = {
   stickyKey: string;
@@ -253,6 +254,19 @@ function requirePersistentStickyKey(adapterContext: unknown): string {
   return stickyKey;
 }
 
+function resolvePersistentSessionDir(adapterContext: unknown): string | undefined {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return undefined;
+  }
+  const runtime = readRuntimeMetadata(adapterContext as Record<string, unknown>);
+  const sessionDir = typeof runtime?.sessionDir === 'string' && runtime.sessionDir.trim()
+    ? runtime.sessionDir.trim()
+    : typeof (adapterContext as Record<string, unknown>).sessionDir === 'string' && String((adapterContext as Record<string, unknown>).sessionDir).trim()
+      ? String((adapterContext as Record<string, unknown>).sessionDir).trim()
+      : undefined;
+  return sessionDir;
+}
+
 function applyGoalStateToAdapterRecord(args: {
   record: Record<string, unknown>;
   state?: StoplessGoalStateSnapshot;
@@ -311,7 +325,7 @@ export function readStoplessGoalState(adapterContext: unknown): StoplessGoalStat
   if (!stickyKey) {
     return { stickyKey: '' };
   }
-  const persisted = loadRoutingInstructionStateSync(stickyKey);
+  const persisted = loadRoutingInstructionStateSync(stickyKey, resolvePersistentSessionDir(adapterContext));
   if (!isStoplessGoalStateSnapshot(persisted?.stoplessGoalState)) {
     return { stickyKey };
   }
@@ -336,11 +350,12 @@ export function persistStoplessGoalStateSnapshot(
 ): StoplessGoalStatePersistResult {
   const record = asRecord(adapterContext);
   const stickyKey = requirePersistentStickyKey(adapterContext);
+  const sessionDir = resolvePersistentSessionDir(adapterContext);
   const currentState =
-    (loadRoutingInstructionStateSync(stickyKey) as LegacyReasoningStopRoutingState | null)
+    (loadRoutingInstructionStateSync(stickyKey, sessionDir) as LegacyReasoningStopRoutingState | null)
     ?? createEmptyRoutingInstructionState();
   currentState.stoplessGoalState = state;
-  saveRoutingInstructionStateSync(stickyKey, currentState);
+  saveRoutingInstructionStateSync(stickyKey, currentState, sessionDir);
   if (record) {
     applyGoalStateToAdapterRecord({
       record,
@@ -389,8 +404,9 @@ export function syncStoplessGoalStateFromRequest(adapterContext: unknown): Stopl
   }
 
   const persistedStickyKey = requirePersistentStickyKey(adapterContext);
+  const sessionDir = resolvePersistentSessionDir(adapterContext);
   const currentState =
-    (loadRoutingInstructionStateSync(persistedStickyKey) as LegacyReasoningStopRoutingState | null)
+    (loadRoutingInstructionStateSync(persistedStickyKey, sessionDir) as LegacyReasoningStopRoutingState | null)
     ?? createEmptyRoutingInstructionState();
   const plan = planStoplessGoalStateSyncWithNative({
     latestUserText,
@@ -429,7 +445,7 @@ export function syncStoplessGoalStateFromRequest(adapterContext: unknown): Stopl
   currentState.reasoningStopFailCount = undefined;
   currentState.reasoningStopGuardTriggerCount = undefined;
   currentState.reasoningStopGuardTriggerAt = undefined;
-  saveRoutingInstructionStateSync(persistedStickyKey, currentState);
+  saveRoutingInstructionStateSync(persistedStickyKey, currentState, sessionDir);
 
   if (textHolder) {
     textHolder.setText(rewrittenText);

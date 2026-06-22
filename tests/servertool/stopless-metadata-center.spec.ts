@@ -13,7 +13,6 @@ describe('stopless metadata center helper', () => {
     writeStoplessRuntimeControl({
       metadata,
       value: {
-        sessionId: 'sess-stopless-bridge-1',
         flowId: 'stop_message_flow',
         repeatCount: 2,
         maxRepeats: 3,
@@ -30,7 +29,6 @@ describe('stopless metadata center helper', () => {
     const center = MetadataCenter.read(metadata);
     expect(center?.readRuntimeControl().stopless).toEqual(
       expect.objectContaining({
-        sessionId: 'sess-stopless-bridge-1',
         flowId: 'stop_message_flow',
         repeatCount: 2,
         maxRepeats: 3,
@@ -38,6 +36,7 @@ describe('stopless metadata center helper', () => {
         active: true
       })
     );
+    expect(center?.readRuntimeControl().stopless).not.toHaveProperty('sessionId');
   });
 
   it('writes through the sharedmodule metadata side-channel when a MetadataCenter is already bound', () => {
@@ -47,7 +46,6 @@ describe('stopless metadata center helper', () => {
     writeStoplessRuntimeControlToBoundMetadataCenter({
       metadata,
       value: {
-        sessionId: 'sess-stopless-sidechannel-1',
         flowId: 'stop_message_flow',
         repeatCount: 1,
         maxRepeats: 3,
@@ -65,7 +63,6 @@ describe('stopless metadata center helper', () => {
     const center = MetadataCenter.read(metadata);
     expect(center?.readRuntimeControl().stopless).toEqual(
       expect.objectContaining({
-        sessionId: 'sess-stopless-sidechannel-1',
         flowId: 'stop_message_flow',
         repeatCount: 1,
         maxRepeats: 3,
@@ -73,6 +70,7 @@ describe('stopless metadata center helper', () => {
         active: true
       })
     );
+    expect(center?.readRuntimeControl().stopless).not.toHaveProperty('sessionId');
   });
 
   it('fails fast when a required stopless runtime control write has no MetadataCenter binding', () => {
@@ -82,7 +80,6 @@ describe('stopless metadata center helper', () => {
       writeStoplessRuntimeControlToBoundMetadataCenter({
         metadata,
         value: {
-          sessionId: 'sess-stopless-required-1',
           flowId: 'stop_message_flow',
           repeatCount: 1,
           maxRepeats: 3,
@@ -148,11 +145,11 @@ describe('stopless metadata center helper', () => {
 
     expect(center.readRuntimeControl().stopless).toEqual(
       expect.objectContaining({
-        sessionId: 'sess-stopless-rootless-center',
         flowId: 'stop_message_flow',
         active: true
       })
     );
+    expect(center.readRuntimeControl().stopless).not.toHaveProperty('sessionId');
   });
 
   it('inherits stopless MetadataCenter binding from adapter root when metadata bag is created during finalize', async () => {
@@ -200,11 +197,11 @@ describe('stopless metadata center helper', () => {
     expect(adapterContext.metadata).toEqual(expect.any(Object));
     expect(center.readRuntimeControl().stopless).toEqual(
       expect.objectContaining({
-        sessionId: 'sess-stopless-root-center',
         flowId: 'stop_message_flow',
         active: true
       })
     );
+    expect(center.readRuntimeControl().stopless).not.toHaveProperty('sessionId');
     expect(MetadataCenter.read(adapterContext.metadata as Record<string, unknown>)).toBe(center);
   });
 

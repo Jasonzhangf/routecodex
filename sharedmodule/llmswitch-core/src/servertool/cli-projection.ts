@@ -50,12 +50,10 @@ export function buildServertoolCliProjectionForAutoFlow(args: {
   reasoningText: string;
   stdoutPreview?: string;
   input?: JsonObject;
-  sessionId?: string;
 }): ServertoolCliProjectionPlan {
   const nativeProjection = buildClientExecCliProjectionOutputWithNative({
     flowId: args.flowId,
     input: args.input ?? {},
-    ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     requestId: args.options.requestId,
     ...(args.stdoutPreview ? { stdoutPreview: args.stdoutPreview } : {})
   });

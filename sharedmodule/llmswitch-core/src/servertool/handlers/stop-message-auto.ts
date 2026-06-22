@@ -226,7 +226,6 @@ function attachStopMessageRuntimeStateToMetadata(metadata: Record<string, unknow
 }
 
 function attachStoplessRuntimeControlToMetadata(metadata: Record<string, unknown>, args: {
-  sessionId?: string;
   flowId: string;
   repeatCount: number;
   maxRepeats: number;
@@ -238,7 +237,6 @@ function attachStoplessRuntimeControlToMetadata(metadata: Record<string, unknown
   writeStoplessRuntimeControlToBoundMetadataCenter({
     metadata,
     value: {
-      ...(args.sessionId ? { sessionId: args.sessionId } : {}),
       flowId: args.flowId,
       repeatCount: args.repeatCount,
       maxRepeats: args.maxRepeats,
@@ -561,7 +559,6 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (
         bindMetadataCenterFromRecordToMetadata(record, metadata);
         const stoplessTriggerHint = normalizeStoplessTriggerHintForMetadata(schemaGate.reason_code);
         attachStoplessRuntimeControlToMetadata(metadata, {
-          sessionId: typeof record.sessionId === 'string' ? record.sessionId : undefined,
           flowId: FLOW_ID,
           repeatCount: persistPlan.nextUsed,
           maxRepeats: persistPlan.nextMaxRepeats,

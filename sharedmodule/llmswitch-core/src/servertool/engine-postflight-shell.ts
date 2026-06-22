@@ -80,7 +80,6 @@ export async function runServertoolEnginePostflight(args: {
   totalSteps: number;
   stoplessPlan: {
     reason: string;
-    sessionId?: string;
     isStopMessageFlow: boolean;
   };
   stageRecorder?: StageRecorder;
@@ -210,7 +209,6 @@ export async function runServertoolEnginePostflight(args: {
       options,
       flowId,
       reasoningText: projectionContext.reasoningText,
-      ...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),
       input: {
         flowId,
         repeatCount: projectionContext.repeatCount,

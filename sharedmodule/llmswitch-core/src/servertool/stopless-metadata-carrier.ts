@@ -7,7 +7,6 @@ type RuntimeControlWriter = {
 };
 
 type StoplessRuntimeControlValue = {
-  sessionId?: string;
   flowId: string;
   repeatCount: number;
   maxRepeats: number;

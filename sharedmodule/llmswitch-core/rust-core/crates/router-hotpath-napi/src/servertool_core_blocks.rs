@@ -701,6 +701,20 @@ pub fn plan_stopless_cli_projection_context_json(input_json: &str) -> Result<Str
     .map_err(|e| format!("serialize stopless cli projection context plan: {e}"))
 }
 
+pub fn normalize_stopless_trigger_hint_for_metadata_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize stopless trigger hint input: {e}"))?;
+    let reason_code = input
+        .get("reasonCode")
+        .or_else(|| input.get("reason_code"))
+        .or_else(|| input.get("triggerHint"))
+        .or_else(|| input.get("trigger_hint"))
+        .and_then(serde_json::Value::as_str);
+    Ok(cli_contract::normalize_stopless_trigger_hint_for_metadata(reason_code).to_string())
+}
+
 pub fn plan_engine_selection_start_json(input_json: &str) -> Result<String, String> {
     let input: engine_selection_contract::EngineSelectionStartInput =
         serde_json::from_str(input_json)
@@ -972,6 +986,19 @@ pub fn plan_servertool_state_load_failed_error_json(input_json: &str) -> Result<
         &orchestration_policy_contract::plan_servertool_state_load_failed_error(&input)?,
     )
     .map_err(|e| format!("serialize servertool state-load error: {e}"))
+}
+
+pub fn plan_servertool_required_response_hook_empty_error_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolRequiredResponseHookEmptyErrorInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool required response hook empty error input: {e}")
+        })?;
+    serde_json::to_string(
+        &orchestration_policy_contract::plan_servertool_required_response_hook_empty_error(&input)?,
+    )
+    .map_err(|e| format!("serialize servertool required response hook empty error: {e}"))
 }
 
 pub fn plan_stop_message_fetch_failed_error_json(input_json: &str) -> Result<String, String> {
@@ -2482,8 +2509,10 @@ fn plans_pre_command_hooks_via_servertool_core_bridge() {
         let cli = plan_stopless_orchestration_action_json(
             &json!({
                 "flowId": "stop_message_flow",
-                "execution": { "flowId": "stop_message_flow" },
-                "sessionId": "sess-cli"
+                "execution": {
+                    "flowId": "stop_message_flow",
+                    "context": { "requestTruth": { "sessionId": "sess-cli" } }
+                }
             })
             .to_string(),
         )
@@ -2491,16 +2520,18 @@ fn plans_pre_command_hooks_via_servertool_core_bridge() {
         let cli_plan: serde_json::Value =
             serde_json::from_str(&cli).expect("stopless cli action json");
         assert_eq!(cli_plan["isStopMessageFlow"], true);
-        assert_eq!(cli_plan["sessionId"], "sess-cli");
+        assert_eq!(cli_plan["reason"], "stop_message_cli_projection");
 
         let terminal = plan_stopless_orchestration_action_json(
             &json!({
                 "flowId": "stop_message_flow",
                 "execution": {
                     "flowId": "stop_message_flow",
-                    "context": { "stopMessageTerminalFinal": true }
-                },
-                "sessionId": "sess-term"
+                    "context": {
+                        "stopMessageTerminalFinal": true,
+                        "requestTruth": { "sessionId": "sess-term" }
+                    }
+                }
             })
             .to_string(),
         )
@@ -2508,7 +2539,7 @@ fn plans_pre_command_hooks_via_servertool_core_bridge() {
         let terminal_plan: serde_json::Value =
             serde_json::from_str(&terminal).expect("stopless terminal action json");
         assert_eq!(terminal_plan["action"], "terminal_final");
-        assert_eq!(terminal_plan["sessionId"], "sess-term");
+        assert_eq!(terminal_plan["reason"], "stop_message_terminal_final");
 
         let followup = plan_stopless_orchestration_action_json(
             &json!({
@@ -2520,8 +2551,6 @@ fn plans_pre_command_hooks_via_servertool_core_bridge() {
         .expect("stopless followup action");
         let followup_plan: serde_json::Value =
             serde_json::from_str(&followup).expect("stopless followup action json");
-        // sessionId is absent when not provided
-        assert!(followup_plan.get("sessionId").is_none());
         assert_eq!(followup_plan["action"], "cli_projection");
         assert_eq!(followup_plan["isStopMessageFlow"], false);
     }
@@ -3360,7 +3389,8 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         &serde_json::json!({
             "responseStageNextAction": "bypass",
             "autoHookEvaluated": false,
-            "hasAutoHookResult": false
+            "hasAutoHookResult": false,
+            "responseHookRequired": false
         })
         .to_string(),
     )
@@ -3376,7 +3406,8 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         &serde_json::json!({
             "responseStageNextAction": "run_auto_hooks",
             "autoHookEvaluated": false,
-            "hasAutoHookResult": false
+            "hasAutoHookResult": false,
+            "responseHookRequired": false
         })
         .to_string(),
     )
@@ -3392,7 +3423,8 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         &serde_json::json!({
             "responseStageNextAction": "run_auto_hooks",
             "autoHookEvaluated": true,
-            "hasAutoHookResult": false
+            "hasAutoHookResult": false,
+            "responseHookRequired": false
         })
         .to_string(),
     )
@@ -3402,6 +3434,23 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
     assert_eq!(
         passthrough_value["action"],
         serde_json::json!("return_passthrough_no_auto_hook_result")
+    );
+
+    let required_empty = plan_servertool_response_stage_runtime_action_json(
+        &serde_json::json!({
+            "responseStageNextAction": "run_auto_hooks",
+            "autoHookEvaluated": true,
+            "hasAutoHookResult": false,
+            "responseHookRequired": true
+        })
+        .to_string(),
+    )
+    .expect("response-stage runtime action required hook empty plan");
+    let required_empty_value: serde_json::Value =
+        serde_json::from_str(&required_empty).expect("parse required hook empty plan");
+    assert_eq!(
+        required_empty_value["action"],
+        serde_json::json!("return_required_response_hook_empty")
     );
 }
 
