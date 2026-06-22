@@ -88,6 +88,29 @@ describe('logRequestError diagnostics', () => {
     expect(firstLine).not.toContain('067332f1228901ab7a06e6c2b2e23f5d');
   });
 
+  it('suppresses verbose http.error.meta line for routine 429 logs', () => {
+    const previousVerbose = process.env.ROUTECODEX_HTTP_ERROR_META_LOG;
+    process.env.ROUTECODEX_HTTP_ERROR_META_LOG = '1';
+    try {
+      const err: any = new Error('HTTP 429');
+      err.statusCode = 429;
+      err.code = 'HTTP_429';
+      err.rawErrorSnippet = '{"error":{"code":"bad_response_status_code"}}';
+
+      logRequestError('/v1/responses.submit_tool_outputs', 'req_429_meta_suppressed', err);
+
+      const rendered = errorSpy.mock.calls.map((call) => String(call[0] ?? ''));
+      expect(rendered.some((line) => line.includes('[http.error.meta]'))).toBe(false);
+      expect(rendered.some((line) => line.includes('Rate limited by upstream provider'))).toBe(true);
+    } finally {
+      if (previousVerbose === undefined) {
+        delete process.env.ROUTECODEX_HTTP_ERROR_META_LOG;
+      } else {
+        process.env.ROUTECODEX_HTTP_ERROR_META_LOG = previousVerbose;
+      }
+    }
+  });
+
   it('does not print upstream 401 provider payload in primary failure line or http error meta', () => {
     const previousVerbose = process.env.ROUTECODEX_HTTP_ERROR_META_LOG;
     process.env.ROUTECODEX_HTTP_ERROR_META_LOG = '1';

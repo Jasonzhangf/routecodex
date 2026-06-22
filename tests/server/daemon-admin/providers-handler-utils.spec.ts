@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { validateProviderIdInput } from '../../../src/server/runtime/http-server/daemon-admin/providers-handler-utils.js';
+import { SUPPORTED_OAUTH_PROVIDERS } from '../../../src/server/runtime/http-server/daemon-admin/credentials-handler-utils.js';
 
 describe('validateProviderIdInput', () => {
   it('accepts safe provider ids', () => {
@@ -30,3 +31,8 @@ describe('validateProviderIdInput', () => {
   });
 });
 
+describe('daemon-admin credential oauth provider allowlist', () => {
+  it('allows ecodev token authorization and refresh routes to use shared OAuth lifecycle', () => {
+    expect(SUPPORTED_OAUTH_PROVIDERS.has('ecodev')).toBe(true);
+  });
+});

@@ -74,4 +74,15 @@ describe('logRequestComplete', () => {
 
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
   });
+
+  it('can preserve timing without printing completed line', () => {
+    logRequestComplete('/v1/responses', 'req-resp-suppressed', 200, {
+      status: 'completed'
+    }, {
+      preserveTimingForUsage: true,
+      suppressCompletedLog: true
+    });
+
+    expect(logSpy).not.toHaveBeenCalled();
+  });
 });
