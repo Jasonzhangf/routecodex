@@ -172,7 +172,10 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
       ? {
         switchAction: retryExecutionPlan.retrySwitchPlan.switchAction,
         ...(retryExecutionPlan.retrySwitchPlan.switchAction === 'retry_same_provider_once' && args.providerKey
-          ? { retryProviderKey: args.providerKey }
+          ? {
+            retryProviderKey: args.providerKey,
+            rotateApiKey: true
+          }
           : {})
       }
       : undefined;

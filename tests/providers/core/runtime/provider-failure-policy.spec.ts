@@ -659,6 +659,48 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('treats OpenAI-compatible SSE server_error payload as recoverable and health-affecting', () => {
+    const error = Object.assign(new Error('[provider] Upstream provider returned business error: server_error'), {
+      code: 'MALFORMED_RESPONSE',
+      upstreamCode: 'server_error',
+      statusCode: 200
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 200,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'server_error',
+      reason: '[provider] Upstream provider returned business error: server_error'
+    });
+
+    expect(classification).toBe('recoverable');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      error,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'server_error',
+      statusCode: 200,
+      classification
+    })).toBe(false);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 200,
+      errorCode: 'MALFORMED_RESPONSE',
+      upstreamCode: 'server_error',
+      reason: '[provider] Upstream provider returned business error: server_error',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: true,
+      blockingRecoverable: true,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative'
+    }));
+  });
+
   it('supports provider-scoped reroute decision labels from the shared policy', () => {
     expect(describeProviderFailureDecision({
       action: 'reroute_explicit_alternative',

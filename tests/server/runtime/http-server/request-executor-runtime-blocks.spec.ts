@@ -184,6 +184,32 @@ describe('request-executor-runtime-blocks', () => {
     })).toBe(true);
   });
 
+  test('does not bypass wrapped sse payloads that still require provider response conversion', () => {
+    expect(shouldBypassProviderResponseConversion({
+      status: 200,
+      body: {
+        mode: 'sse',
+        clientStream: false,
+        payload: {
+          object: 'response',
+          id: 'resp_wrapped_sse_1',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'ok' }]
+            }
+          ]
+        }
+      }
+    }, {
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      serverToolsEnabled: false
+    })).toBe(false);
+  });
+
   test('reads servertool followup request truth from MetadataCenter runtime_control', () => {
     const metadata: Record<string, unknown> = {};
     MetadataCenter.attach(metadata).writeRuntimeControl(

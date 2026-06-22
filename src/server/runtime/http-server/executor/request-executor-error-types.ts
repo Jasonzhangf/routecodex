@@ -133,6 +133,7 @@ export type BlockingRecoverableRouteHoldState = {
 export type RequestLocalProviderRetryState = {
   switchAction?: ProviderRetrySwitchAction;
   retryProviderKey?: string;
+  rotateApiKey?: boolean;
 };
 
 export type ProviderErrorStageLogger = (

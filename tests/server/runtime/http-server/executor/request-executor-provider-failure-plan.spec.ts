@@ -1,3 +1,4 @@
+import { createRequestLocalTransientRetryTracker } from '../../../../../src/server/runtime/http-server/executor/request-executor-transient-retry-tracker.js';
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
@@ -150,5 +151,110 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.retryExecutionPlan.defaultPoolAvailable).toBe(true);
     expect(plan.retryExecutionPlan.policyExhausted).toBe(false);
     expect(plan.retryExecutionPlan.mayProject).toBe(false);
+  });
+
+  test('provider-configured 400->429 mapping must exclude current provider and reroute', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const mappedError = Object.assign(
+      new Error('All available accounts exhausted'),
+      {
+        code: 'HTTP_429',
+        upstreamCode: 'HTTP_429',
+        statusCode: 429,
+        status: 429,
+        response: {
+          data: {
+            error: {
+              code: 'HTTP_429',
+              message: 'All available accounts exhausted',
+              status: 429,
+              type: 'server_error'
+            }
+          }
+        },
+        details: {
+          providerErrorMapping: {
+            originalStatus: 400,
+            originalCode: 'HTTP_400',
+            originalMessage: 'HTTP 400: {"error":{"message":"All available accounts exhausted","type":"server_error"}}',
+            mappedStatus: 429,
+            mappedCode: 'HTTP_429'
+          }
+        }
+      }
+    );
+
+    const plan = await resolveRequestExecutorProviderFailurePlan({
+      error: mappedError,
+      retryError: {
+        statusCode: 429,
+        errorCode: 'HTTP_429',
+        upstreamCode: 'HTTP_429',
+        reason: 'All available accounts exhausted'
+      },
+      requestId: 'req-provider-configured-error-mapping',
+      providerKey: 'XLC.key2.deepseek-v4-pro',
+      providerId: 'XLC',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-responses',
+      runtimeKey: 'XLC.key2',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'logical-provider-configured-error-mapping',
+      logicalChainRetryLimitStageRequestId: 'logical-provider-configured-error-mapping',
+      routePool: ['XLC.key2.deepseek-v4-pro', 'minimax.key1.MiniMax-M3'],
+      excludedProviderKeys,
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(plan.reportPlan.statusCode).toBe(429);
+    expect(plan.reportPlan.errorCode).toBe('HTTP_429');
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
+    expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(excludedProviderKeys.has('XLC.key2.deepseek-v4-pro')).toBe(true);
+  });
+
+  test('retry_same_provider_once should request api key rotation for next same-provider attempt', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const transientRetryTracker = createRequestLocalTransientRetryTracker();
+    const plan = await resolveRequestExecutorProviderFailurePlan({
+      error: Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
+        code: 'HTTP_525',
+        upstreamCode: 'HTTP_525',
+        statusCode: 525
+      }),
+      retryError: {
+        statusCode: 525,
+        errorCode: 'HTTP_525',
+        upstreamCode: 'HTTP_525',
+        reason: 'HTTP 525: upstream SSL handshake failed'
+      },
+      requestId: 'req-same-provider-rotate-apikey',
+      providerKey: 'asxs.gpt-5.4',
+      runtimeKey: 'runtime:asxs',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'logical-same-provider-rotate-apikey',
+      logicalChainRetryLimitStageRequestId: 'logical-same-provider-rotate-apikey',
+      routePool: ['asxs.gpt-5.4'],
+      excludedProviderKeys,
+      transientRetryTracker,
+      isStreamingRequest: false,
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(plan.requestLocalProviderRetryState?.switchAction).toBe('retry_same_provider_once');
+    expect(plan.requestLocalProviderRetryState?.retryProviderKey).toBe('asxs.gpt-5.4');
+    expect(plan.requestLocalProviderRetryState?.rotateApiKey).toBe(true);
   });
 });

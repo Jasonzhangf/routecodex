@@ -438,6 +438,18 @@ export function resolveProviderFailureClassification(args: {
   if (
     (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
     && (
+      protocolUpstreamCode === 'SERVER_ERROR'
+      || upstreamCode === 'SERVER_ERROR'
+      || nestedCode === 'SERVER_ERROR'
+      || nestedType === 'SERVER_ERROR'
+    )
+  ) {
+    return 'recoverable';
+  }
+
+  if (
+    (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
+    && (
       protocolUpstreamCode === 'PROVIDER_STATUS_2013'
       || upstreamCode === 'PROVIDER_STATUS_2013'
       || nestedCode === 'PROVIDER_STATUS_2013'
@@ -457,6 +469,22 @@ export function resolveProviderFailureClassification(args: {
       protocolUpstreamCode,
       providerStatusCode: protocolDetails.providerStatusCode
     })
+  ) {
+    return 'recoverable';
+  }
+
+  if (
+    statusCode === 200
+    && (
+      errorCode === 'MALFORMED_RESPONSE'
+      || upstreamCode === 'MALFORMED_RESPONSE'
+      || nestedCode === 'MALFORMED_RESPONSE'
+    )
+    && (
+      reason.includes('instead of sse')
+      || nestedMessage.includes('instead of sse')
+      || protocolReason.includes('instead of sse')
+    )
   ) {
     return 'recoverable';
   }
@@ -685,6 +713,9 @@ export function isBlockingRecoverableProviderFailure(args: {
     return true;
   }
   if (errorCode === 'MALFORMED_RESPONSE' && upstreamCode === 'PROVIDER_STATUS_2013') {
+    return true;
+  }
+  if (errorCode === 'MALFORMED_RESPONSE' && upstreamCode === 'SERVER_ERROR') {
     return true;
   }
   if (

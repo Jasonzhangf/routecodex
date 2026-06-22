@@ -130,6 +130,13 @@ function isAlreadyClientFinalResponseBody(body: unknown): boolean {
     return false;
   }
   const record = body as Record<string, unknown>;
+  const payload =
+    record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+      ? (record.payload as Record<string, unknown>)
+      : undefined;
+  if (typeof record.mode === 'string' && record.mode.trim().toLowerCase() === 'sse' && payload) {
+    return false;
+  }
   const object = typeof record.object === 'string' ? record.object.trim() : '';
   const baseResp =
     record.base_resp && typeof record.base_resp === 'object' && !Array.isArray(record.base_resp)
