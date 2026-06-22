@@ -1,10 +1,10 @@
 import { FileSnapshotStore } from './snapshot-store.js';
 import { DebugSessionManager } from './session-manager.js';
-import { HarnessRegistry } from './harness-registry.js';
-import { createDefaultHarnessRegistry } from './default-harnesses.js';
-import type { DefaultHarnessOptions } from './default-harnesses.js';
-import { DryRunRunner } from './dry-runner.js';
-import { ReplayRunner } from './replay-runner.js';
+import { HarnessRegistry } from './harness/registry.js';
+import { createDefaultHarnessRegistry } from './harness/defaults.js';
+import type { DefaultHarnessOptions } from './harness/defaults.js';
+import { DryRunRunner } from './harness/dry-runner.js';
+import { ReplayRunner } from './harness/replay-runner.js';
 import {
   readDebugErrorDiagArtifactInternal,
   writeDebugErrorDiagArtifactInternal,
@@ -21,7 +21,7 @@ export interface DebugToolkitOptions extends DefaultHarnessOptions {
 export function createDebugToolkit(options: DebugToolkitOptions = {}) {
   const store = options.store ?? new FileSnapshotStore(options.snapshotDirectory);
   const sessions = new DebugSessionManager(store);
-  const registry = options.registry ?? createDefaultHarnessRegistry({ providerDependencies: options.providerDependencies });
+  const registry = options.registry ?? createDefaultHarnessRegistry(options);
   const dryRunner = new DryRunRunner(sessions, registry);
   const replayRunner = new ReplayRunner(sessions, registry);
   return {
@@ -54,7 +54,9 @@ export async function readDebugErrorDiagArtifact(filePath: string): Promise<Debu
 export * from './types.js';
 export * from './snapshot-store.js';
 export * from './session-manager.js';
-export * from './dry-runner.js';
-export * from './replay-runner.js';
-export * from './default-harnesses.js';
+export * from './harness/index.js';
 export * from './diag/index.js';
+export * from './logger/index.js';
+export * from './snapshot/index.js';
+export * from './hooks/index.js';
+export * from './policy/index.js';

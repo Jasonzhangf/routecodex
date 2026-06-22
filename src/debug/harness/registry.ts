@@ -1,4 +1,4 @@
-import type { ExecutionHarness } from './types.js';
+import type { ExecutionHarness } from '../types.js';
 
 export class HarnessRegistry {
   private readonly harnesses = new Map<string, ExecutionHarness<unknown, unknown>>();

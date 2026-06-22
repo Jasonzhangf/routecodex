@@ -1,7 +1,7 @@
-import { DebugSessionManager } from './session-manager.js';
-import { HarnessRegistry } from './harness-registry.js';
-import type { ProviderDryRunOptions, ProviderDryRunResult } from './types.js';
-import type { ProviderPreprocessHarness } from './harnesses/provider-harness.js';
+import { DebugSessionManager } from '../session-manager.js';
+import { HarnessRegistry } from './registry.js';
+import type { ProviderDryRunOptions, ProviderDryRunResult } from '../types.js';
+import type { ProviderPreprocessHarness } from './provider.js';
 
 export class DryRunRunner {
   constructor(private readonly sessions: DebugSessionManager, private readonly registry: HarnessRegistry) {}

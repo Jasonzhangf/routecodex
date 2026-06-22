@@ -1,6 +1,6 @@
-import type { ModuleDependencies } from '../modules/pipeline/interfaces/pipeline-interfaces.js';
-import { HarnessRegistry } from './harness-registry.js';
-import { ProviderPreprocessHarness } from './harnesses/provider-harness.js';
+import type { ModuleDependencies } from '../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import { HarnessRegistry } from './registry.js';
+import { ProviderPreprocessHarness } from './provider.js';
 
 export interface DefaultHarnessOptions {
   providerDependencies?: ModuleDependencies;

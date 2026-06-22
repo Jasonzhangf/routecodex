@@ -1,13 +1,13 @@
-import { DebugSessionManager } from './session-manager.js';
-import { HarnessRegistry } from './harness-registry.js';
+import { DebugSessionManager } from '../session-manager.js';
+import { HarnessRegistry } from './registry.js';
 import type {
   ProviderHarnessExecuteInput,
   ProviderHarnessMetadata,
   ProviderHarnessRuntime,
   ProviderDryRunResult,
   ProviderHarnessResult
-} from './types.js';
-import type { TargetMetadata } from '../modules/pipeline/orchestrator/pipeline-context.js';
+} from '../types.js';
+import type { TargetMetadata } from '../../modules/pipeline/orchestrator/pipeline-context.js';
 
 export interface ReplayOptions {
   sessionId: string;

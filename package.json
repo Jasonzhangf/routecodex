@@ -85,6 +85,7 @@
     "verify:exec-command": "node scripts/tests/exec-command-loop.mjs",
     "verify:provider-failure-ban-blackbox": "node scripts/tests/provider-failure-ban-blackbox.mjs",
     "verify:errorsamples": "node scripts/verify-codex-error-samples.mjs",
+    "verify:debug-unified-surface": "node scripts/verify-debug-unified-surface.mjs",
     "verify:finalize-empty-sanitize-errorsample": "node sharedmodule/llmswitch-core/scripts/tests/coverage-finalize-empty-sanitize-errorsample.mjs",
     "verify:architecture": "node scripts/architecture/verify-architecture-templates.mjs",
     "verify:architecture-fallback-denylist": "node scripts/architecture/verify-architecture-fallback-denylist.mjs",
