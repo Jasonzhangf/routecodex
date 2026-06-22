@@ -15,6 +15,7 @@ export {
   extractContextLengthDiagnosticsWithNative,
   extractSseWrapperErrorWithNative,
   isContextLengthExceededSignalWithNative,
+  parseRespFormatEnvelopeWithNative,
   normalizeAliasMapWithNative,
   normalizeMessageReasoningPayloadWithNative,
   materializeProviderResponseSsePayloadWithNative,

@@ -430,6 +430,33 @@ export function buildRespInboundSseErrorDescriptorWithNative(input: unknown): Re
   }
 }
 
+export function parseRespFormatEnvelopeWithNative(
+  input: { payload: unknown; protocol: string }
+): Record<string, unknown> {
+  const capability = 'parseRespFormatEnvelopeJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? { payload: null, protocol: '' });
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseRecord(raw, 'parseRespFormatEnvelopeWithNative') ?? fail('invalid payload');
+  } catch (error) {
+    return fail(extractNativeErrorMessage(error));
+  }
+}
+
 export function materializeProviderResponseSsePayloadWithNative(
   input: { payload: unknown; streamBodyText?: string }
 ): Record<string, unknown> {

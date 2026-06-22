@@ -14,8 +14,8 @@ import type {
   ResponsesSseEventStream
 } from '../types/index.js';
 import { ErrorUtils } from '../shared/utils.js';
+import { parseRespFormatEnvelopeWithNative } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import { createSseParser } from './parsers/sse-parser.js';
-import { createResponseBuilder } from './builders/response-builder.js';
 
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
 const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
@@ -71,10 +71,10 @@ export class ResponsesSseToJsonConverterRefactored {
     const context = this.createContext(options);
     this.contexts.set(options.requestId, context);
 
-    let responseBuilder: ReturnType<typeof createResponseBuilder> | null = null;
     const abortSignal = options.abortSignal;
     let abortHandler: (() => void) | null = null;
     let abortableStream: Readable | null = null;
+    const rawSseChunks: string[] = [];
 
     try {
       // 2. 创建解析器
@@ -83,15 +83,7 @@ export class ResponsesSseToJsonConverterRefactored {
         enableEventRecovery: !this.config.strictMode
       });
 
-      // 3. 创建响应构建器
-      responseBuilder = createResponseBuilder({
-        enableStrictValidation: false,
-        enableEventRecovery: !this.config.strictMode,
-        maxOutputItems: 50,
-        maxContentParts: 100
-      });
-
-      // 4. 创建可读流（适配不同的输入源）
+      // 3. 创建可读流（适配不同的输入源）
       const readableStream = this.createReadableStream(sseStream);
       abortableStream = readableStream;
 
@@ -107,7 +99,7 @@ export class ResponsesSseToJsonConverterRefactored {
         abortHandler = () => abortSignal.removeEventListener('abort', onAbort);
       }
 
-      for await (const parseResult of parser.parseStreamAsync(this.chunkStrings(readableStream, context))) {
+      for await (const parseResult of parser.parseStreamAsync(this.chunkStrings(readableStream, context, rawSseChunks))) {
         if (context.isCompleted) {
           break;
         }
@@ -118,13 +110,6 @@ export class ResponsesSseToJsonConverterRefactored {
           // 验证序列号
           if (this.config.enableSequenceValidation && !this.validateSequenceNumber(event, context)) {
             throw new Error(`Invalid sequence number: ${event.sequenceNumber}`);
-          }
-
-          // 处理事件
-          const success = responseBuilder.processEvent(event);
-          if (!success && this.config.strictMode) {
-            const result = responseBuilder.getResult();
-            throw new Error(`Failed to process event: ${result.error?.message}`);
           }
 
           // 更新统计
@@ -157,28 +142,14 @@ export class ResponsesSseToJsonConverterRefactored {
 
       // 6. 获取最终结果
       // Abort check: 客户端已断开且上游未产出完整 response → fail-fast，不返回半成品
-      if (abortSignal?.aborted && responseBuilder.getState() !== 'completed') {
+      if (abortSignal?.aborted && !this.hasSeenTerminalEvent(context)) {
         const reason = (abortSignal as { reason?: unknown }).reason;
         const err = reason instanceof Error ? reason : new Error(String(reason ?? 'CLIENT_DISCONNECTED'));
         Object.assign(err, { code: 'CLIENT_DISCONNECTED', name: 'AbortError' });
         throw err;
       }
 
-      const result = responseBuilder.getResult();
-
-      if (!result.success) {
-        // 容错：若已观察到 response.completed 事件或整体已完成，但构建器仍报告未完成，
-        // 这里按已完成处理，避免上游省略 response.done 导致误报失败。
-        const seenCompleted = context.eventStats.eventTypes['response.completed'] > 0;
-        if (seenCompleted) {
-          const maybe = responseBuilder.getResult();
-          if (maybe.success && maybe.response) {
-            this.attachDecodeStats(maybe.response, context);
-            return maybe.response;
-          }
-        }
-        throw result.error || new Error('Failed to build response');
-      }
+      const response = this.materializeResponseFromNative(rawSseChunks, options.requestId);
 
       // 7. 标记完成
       context.isCompleted = true;
@@ -187,28 +158,28 @@ export class ResponsesSseToJsonConverterRefactored {
 
       // 8. 调用完成回调
       if (options.onCompletion) {
-        options.onCompletion(result.response);
+        options.onCompletion(response);
       }
 
-      this.attachDecodeStats(result.response, context);
-      return result.response;
+      this.attachDecodeStats(response, context);
+      return response;
 
     } catch (error) {
-      // 容错：部分 OpenAI-compatible 上游（例如 LM Studio）在产出 tool_call 后会直接断开 SSE 连接，
-      // undici 会抛出 "terminated"。若此时已聚合出可用 response，则应优先返回而不是把它当作致命错误。
-      if (responseBuilder && this.isTerminatedError(error)) {
+      // 容错：部分上游会在 terminal frame 后直接断开 SSE。
+      // 若 Rust 已能从当前原始 SSE 文本 materialize 出完整 payload，优先返回真源结果。
+      if (rawSseChunks.length > 0 && this.isTerminatedError(error)) {
         try {
-          const salvaged = responseBuilder.getSalvageResult();
-          if (salvaged.success && salvaged.response) {
+          const salvaged = this.materializeResponseFromNative(rawSseChunks, options.requestId);
+          if (salvaged) {
             context.isCompleted = true;
             context.endTime = Date.now();
             context.duration = context.endTime - context.startTime;
-          if (options.onCompletion) {
-            options.onCompletion(salvaged.response);
+            if (options.onCompletion) {
+              options.onCompletion(salvaged);
+            }
+            this.attachDecodeStats(salvaged, context);
+            return salvaged;
           }
-          this.attachDecodeStats(salvaged.response, context);
-          return salvaged.response;
-        }
         } catch {
           // ignore salvage failure, fall through to normal error path
         }
@@ -361,7 +332,11 @@ export class ResponsesSseToJsonConverterRefactored {
     return `event: ${type}\ndata: ${data}\n\n`;
   }
 
-  private async *chunkStrings(stream: Readable, context: SseToResponsesJsonContext): AsyncGenerator<string> {
+  private async *chunkStrings(
+    stream: Readable,
+    context: SseToResponsesJsonContext,
+    rawSseChunks: string[]
+  ): AsyncGenerator<string> {
     const iterator = stream[Symbol.asyncIterator]();
     while (true) {
       const next = await this.readNextStreamChunk(iterator, context);
@@ -373,14 +348,19 @@ export class ResponsesSseToJsonConverterRefactored {
       context.eventStats.firstFrameAtMs ??= now;
       context.eventStats.lastFrameAtMs = now;
       if (typeof chunk === 'string') {
+        rawSseChunks.push(chunk);
         yield chunk;
         continue;
       }
       if (Buffer.isBuffer(chunk)) {
-        yield chunk.toString();
+        const text = chunk.toString();
+        rawSseChunks.push(text);
+        yield text;
         continue;
       }
-      yield this.serializeEventToSSE(chunk as Partial<ResponsesSseEvent> | Record<string, unknown>);
+      const text = this.serializeEventToSSE(chunk as Partial<ResponsesSseEvent> | Record<string, unknown>);
+      rawSseChunks.push(text);
+      yield text;
     }
   }
 
@@ -673,6 +653,32 @@ export class ResponsesSseToJsonConverterRefactored {
    */
   getActiveContexts(): Map<string, SseToResponsesJsonContext> {
     return new Map(this.contexts);
+  }
+
+  private hasSeenTerminalEvent(context: SseToResponsesJsonContext): boolean {
+    return context.eventStats.eventTypes['response.done'] > 0
+      || context.eventStats.eventTypes['response.error'] > 0
+      || context.eventStats.eventTypes['response.cancelled'] > 0;
+  }
+
+  private materializeResponseFromNative(rawSseChunks: string[], requestId: string): ResponsesResponse {
+    const bodyText = rawSseChunks.join('');
+    const parsed = parseRespFormatEnvelopeWithNative({
+      protocol: 'openai-responses',
+      payload: {
+        mode: 'sse',
+        bodyText
+      }
+    });
+    const envelope = parsed.envelope;
+    if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+      throw new Error(`Native response SSE materialize returned invalid envelope for ${requestId}`);
+    }
+    const payload = (envelope as Record<string, unknown>).payload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error(`Native response SSE materialize returned invalid payload for ${requestId}`);
+    }
+    return payload as ResponsesResponse;
   }
 
   private attachDecodeStats(response: ResponsesResponse, context: SseToResponsesJsonContext): void {
