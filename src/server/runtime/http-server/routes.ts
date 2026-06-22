@@ -172,6 +172,12 @@ type ModelListItem = {
   [key: string]: unknown;
 };
 
+type ModelsListResponse = {
+  object: 'list';
+  data: ModelListItem[];
+  models: ModelListItem[];
+};
+
 const DEFAULT_REASONING_LEVELS = [
   { effort: 'low', description: 'Fast responses with lighter reasoning' },
   { effort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
@@ -293,6 +299,14 @@ function buildCodexModelMetadata(
 
 function buildCodexAdvancedModelMetadata(): ModelListItem {
   return buildCodexModelMetadata('openai', 'gpt-5.5', 'gpt-5.5', {}, {});
+}
+
+function buildModelsListResponse(items: ModelListItem[]): ModelsListResponse {
+  return {
+    object: 'list',
+    data: items,
+    models: items
+  };
 }
 
 function collectArtifactModelAliases(artifacts: unknown): ModelListItem[] {
@@ -567,7 +581,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
         `host=${host || 'n/a'} auth=${authPresent ? 'yes' : 'no'} ` +
         `xff=${forwardedFor || 'n/a'} ua=${userAgent || 'n/a'}`
       );
-      res.status(200).json({ object: 'list', data: items });
+      res.status(200).json(buildModelsListResponse(items));
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.log(`[models] path=${req.path} failed error=${message}`);

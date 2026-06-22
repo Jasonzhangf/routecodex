@@ -18,6 +18,13 @@ async function withServer<T>(app: express.Express, run: (baseUrl: string) => Pro
   }
 }
 
+function readModelsPayload(body: any): any[] {
+  expect(Array.isArray(body?.models)).toBe(true);
+  expect(Array.isArray(body?.data)).toBe(true);
+  expect(body.models).toEqual(body.data);
+  return body.models;
+}
+
 describe('models route port scoping', () => {
   it('shows only current port models and uses alias when configured', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-port-scoped-'));
@@ -57,10 +64,11 @@ describe('models route port scoping', () => {
         const response = await fetch(`${baseUrl}/v1/models`);
         expect(response.status).toBe(200);
         const body = await response.json();
-        const ids = Array.isArray(body?.data) ? body.data.map((x: any) => x.id).sort() : [];
+        const models = readModelsPayload(body);
+        const ids = models.map((x: any) => x.id).sort();
         expect(ids).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro', 'gpt-5.5']);
-        expect(body.data.find((x: any) => x.id === 'deepseek-v4-pro').owned_by).toBe('DF');
-        expect(body.data.find((x: any) => x.id === 'deepseek-v4-flash').owned_by).toBe('DF');
+        expect(models.find((x: any) => x.id === 'deepseek-v4-pro').owned_by).toBe('DF');
+        expect(models.find((x: any) => x.id === 'deepseek-v4-flash').owned_by).toBe('DF');
       });
     } finally {
       if (restoreRccHome === undefined) delete process.env.RCC_HOME; else process.env.RCC_HOME = restoreRccHome;
