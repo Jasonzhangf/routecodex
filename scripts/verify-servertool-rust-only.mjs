@@ -105,6 +105,7 @@ const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch
 const TS_RESPONSE_STAGE_FINALIZE_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`;
 const TS_RESPONSE_STAGE_PREPASS_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-prepass-shell.ts`;
 const TS_EXECUTION_QUEUE_SHELL = `${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`;
+const TS_EXECUTION_STAGE_SHELL = `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`;
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
@@ -2720,7 +2721,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_branch_json'],
     ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchJson'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
-    ['servertool-execution-branch-ts-thin-shell', `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`, serverSideToolsImpl, 'planServertoolExecutionBranchRuntimeAction('],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'planServertoolExecutionBranchRuntimeAction('],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_BRANCH_RUNTIME_SHELL, readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL), 'planServertoolExecutionBranchWithNative('],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'projected_tool_call_index'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCallIndex'],
@@ -5269,6 +5270,22 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-entry-preflight-shell-owner',
         `entry-preflight-shell.ts must keep entry preflight owner marker ${marker}`
+      );
+    }
+  }
+  const executionStageShell = readRequired(TS_EXECUTION_STAGE_SHELL);
+  for (const marker of [
+    'export async function runServertoolExecutionStage(',
+    'prepareServertoolDispatchStage',
+    'planServertoolExecutionBranchRuntimeAction',
+    'runServertoolIoExecutionQueue',
+    'materializeNativeToolCallExecutionOutcome',
+    'finalizeServertoolResponseStage'
+  ]) {
+    if (!executionStageShell.includes(marker)) {
+      fail(
+        'servertool-execution-stage-shell-owner',
+        `execution-stage-shell.ts must keep execution stage owner marker ${marker}`
       );
     }
   }

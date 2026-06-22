@@ -189,6 +189,17 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts',
+    forbidden: [],
+    required: [
+      'prepareServertoolDispatchStage',
+      'planServertoolExecutionBranchRuntimeAction',
+      'runServertoolIoExecutionQueue',
+      'materializeNativeToolCallExecutionOutcome',
+      'finalizeServertoolResponseStage',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
     forbidden: [
       "import './handlers/stop-message-auto.js';",
@@ -237,6 +248,13 @@ const TARGETS = [
       'readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);',
       'applyPreCommandHooksToToolCalls({',
       'planServertoolToolCallDispatchWithNative(',
+      'prepareServertoolDispatchStage(',
+      'planServertoolExecutionBranchRuntimeAction(',
+      'buildServertoolCliProjectionBranchResult(',
+      'runServertoolIoExecutionQueue(',
+      'materializeNativeToolCallExecutionOutcome(',
+      'finalizeServertoolResponseStage(',
+      'const baseForExecution = structuredClone(baseObject);',
       'const entryPreflightPlan = planServertoolEntryPreflightWithNative({',
       "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {",
       "if (entryPreflightPlan.action === 'throw_client_disconnected') {",
