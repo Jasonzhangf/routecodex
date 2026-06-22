@@ -14,6 +14,19 @@ function sseStreamChunks(chunks: string[]): Readable {
   return Readable.from(chunks);
 }
 
+function directResponsesTerminalFrames(responseId: string, lineBreak = '\n'): string[] {
+  return [
+    `event: response.completed${lineBreak}data: ${JSON.stringify({
+      type: 'response.completed',
+      response: { id: responseId, object: 'response', status: 'completed' }
+    })}${lineBreak}${lineBreak}`,
+    `event: response.done${lineBreak}data: ${JSON.stringify({
+      type: 'response.done',
+      response: { id: responseId, object: 'response', status: 'completed' }
+    })}${lineBreak}${lineBreak}`,
+  ];
+}
+
 async function requestSse(
   body: Record<string, unknown>,
   options?: {
@@ -95,7 +108,8 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
           `event: response.metadata\ndata: ${JSON.stringify({
             type: 'response.metadata',
             metadata: { provider_event_id: 'evt-provider-1' }
-          })}\n\n`
+          })}\n\n`,
+          ...directResponsesTerminalFrames('resp_provider_metadata_1'),
         ]
       }
     );
@@ -114,7 +128,8 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
           `event: response.metadata\r\ndata: ${JSON.stringify({
             type: 'response.metadata',
             metadata: { provider_event_id: 'evt-provider-crlf' }
-          })}\r\n\r\n`
+          })}\r\n\r\n`,
+          ...directResponsesTerminalFrames('resp_provider_metadata_crlf', '\r\n'),
         ]
       }
     );
@@ -122,6 +137,29 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
     expect(response.status).toBe(200);
     expect(response.text).toContain('\r\n\r\n');
     expect(response.text).toContain('"metadata":{"provider_event_id":"evt-provider-crlf"}');
+    expect(response.text).not.toContain('sse_stream_error');
+  });
+
+  it('RED: strips top-level metadata from non-response.metadata direct passthrough frames before client emission', async () => {
+    const response = await requestSse(
+      {},
+      {
+        continuationOwner: 'direct',
+        chunks: [
+          `event: response.custom_tool_call_input.delta\ndata: ${JSON.stringify({
+            type: 'response.custom_tool_call_input.delta',
+            delta: 'abc',
+            metadata: { provider_event_id: 'evt-provider-nonstandard' }
+          })}\n\n`,
+          ...directResponsesTerminalFrames('resp_custom_tool_input_delta_1'),
+        ]
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('response.custom_tool_call_input.delta');
+    expect(response.text).toContain('"delta":"abc"');
+    expect(response.text).not.toContain('"metadata"');
     expect(response.text).not.toContain('sse_stream_error');
   });
 

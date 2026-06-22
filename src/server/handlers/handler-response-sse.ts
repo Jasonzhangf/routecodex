@@ -545,21 +545,23 @@ function sendStructuredSseError(
   releaseMetadataCenterForHttpResponse(metadata, releaseReason);
 }
 
-async function normalizeResponsesSseFrameForClient(
-  frame: string,
-  entryEndpoint?: string,
-  requestContext?: DispatchOptions['responsesRequestContext'],
-  metadata?: Record<string, unknown>,
-  projectionState?: ResponsesSseClientProjectionState,
-  requestLabel = 'unknown'
-): Promise<string> {
+async function normalizeResponsesSseFrameForClient(args: {
+  frame: string;
+  entryEndpoint?: string;
+  directPassthrough?: boolean;
+  requestContext?: DispatchOptions['responsesRequestContext'];
+  metadata?: Record<string, unknown>;
+  projectionState?: ResponsesSseClientProjectionState;
+  requestLabel?: string;
+}): Promise<string> {
   return await normalizeResponsesSseFrameForClientForHttp({
-    frame,
-    entryEndpoint,
-    requestContext,
-    metadata,
-    projectionState,
-    requestLabel,
+    frame: args.frame,
+    entryEndpoint: args.entryEndpoint,
+    directPassthrough: args.directPassthrough,
+    requestContext: args.requestContext,
+    metadata: args.metadata,
+    projectionState: args.projectionState,
+    requestLabel: args.requestLabel,
   });
 }
 
@@ -586,14 +588,15 @@ function createResponsesClientProjectionStream(args: {
         boundary = /\r?\n\r?\n/.exec(pending);
         continue;
       }
-      const normalizedFrame = await normalizeResponsesSseFrameForClient(
+      const normalizedFrame = await normalizeResponsesSseFrameForClient({
         frame,
-        args.entryEndpoint,
-        args.requestContext,
-        args.metadata,
+        entryEndpoint: args.entryEndpoint,
+        directPassthrough: true,
+        requestContext: args.requestContext,
+        metadata: args.metadata,
         projectionState,
-        args.requestLabel
-      );
+        requestLabel: args.requestLabel,
+      });
       if (!normalizedFrame) {
         boundary = /\r?\n\r?\n/.exec(pending);
         continue;
@@ -623,14 +626,15 @@ function createResponsesClientProjectionStream(args: {
         return;
       }
       void (async () => {
-        const normalizedFrame = await normalizeResponsesSseFrameForClient(
-          pending,
-          args.entryEndpoint,
-          args.requestContext,
-          args.metadata,
+        const normalizedFrame = await normalizeResponsesSseFrameForClient({
+          frame: pending,
+          entryEndpoint: args.entryEndpoint,
+          directPassthrough: true,
+          requestContext: args.requestContext,
+          metadata: args.metadata,
           projectionState,
-          args.requestLabel
-        );
+          requestLabel: args.requestLabel,
+        });
         pending = '';
         if (normalizedFrame) {
           assertClientSseFrameHasNoInternalCarriers(normalizedFrame, args.requestLabel);
@@ -1477,14 +1481,15 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   };
   const projectClientSseFrame = (frame: string, stage: string): Promise<string> =>
     withSseClientProjectionTimeout(
-      normalizeResponsesSseFrameForClient(
+      normalizeResponsesSseFrameForClient({
         frame,
         entryEndpoint,
-        effectiveResponsesRequestContext,
-        responseProjectionMetadata,
-        responsesSseProjectionState,
-        requestLabel
-      ),
+        directPassthrough: isDirectPassthrough,
+        requestContext: effectiveResponsesRequestContext,
+        metadata: responseProjectionMetadata,
+        projectionState: responsesSseProjectionState,
+        requestLabel,
+      }),
       projectionTimeoutMs,
       requestLabel,
       stage

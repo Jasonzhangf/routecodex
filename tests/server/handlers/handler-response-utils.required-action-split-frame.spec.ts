@@ -8,7 +8,7 @@ const mockBridgeModule = async () => ({
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
   buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
-  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\nevent: ping\ndata: {"type":"ping"}\n\n'),
+  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({
     type: 'error',
     status,
@@ -59,6 +59,10 @@ const mockBridgeModule = async () => ({
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async () => Readable.from([])
   })),
+  createChatJsonToSseConverterForHttp: jest.fn(async () => ({
+    convertResponseToJsonToSse: async () => Readable.from([])
+  })),
+  sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
   deriveResponsesConversationProviderKeyForHttp: jest.fn(() => undefined),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
   resolveResponsesRequestContextForHttp: jest.fn((args: {

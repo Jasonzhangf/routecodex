@@ -31,7 +31,10 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
   writeSnapshotViaHooks: jest.fn(),
 }));
 
-const { assertDirectPassthroughResponsesSseMetadataIsolationForHttp } = await import(
+const {
+  assertDirectPassthroughResponsesSseMetadataIsolationForHttp,
+  normalizeResponsesSseFrameForClientForHttp
+} = await import(
   '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'
 );
 
@@ -118,5 +121,61 @@ describe('responses-response-bridge direct SSE metadata guard', () => {
     expect(() => {
       assertDirectPassthroughResponsesSseMetadataIsolationForHttp(frame, 'req_direct_meta_ok');
     }).not.toThrow();
+  });
+
+  it('RED: strips top-level metadata from non-response.metadata direct passthrough frames in outbound normalization', async () => {
+    const frame = [
+      'event: response.custom_tool_call_input.delta',
+      `data: ${JSON.stringify({
+        type: 'response.custom_tool_call_input.delta',
+        delta: 'abc',
+        metadata: {
+          source: 'provider',
+          trace_id: 'trace-ok',
+        },
+      })}`,
+      '',
+      '',
+    ].join('\n');
+
+    const sanitized = await normalizeResponsesSseFrameForClientForHttp({
+      frame,
+      entryEndpoint: '/v1/responses',
+      directPassthrough: true,
+      requestLabel: 'req_direct_custom_tool_input_metadata_strip',
+    });
+
+    expect(sanitized).toContain('event: response.custom_tool_call_input.delta');
+    expect(sanitized).not.toContain('"metadata"');
+    expect(() => {
+      assertDirectPassthroughResponsesSseMetadataIsolationForHttp(
+        sanitized,
+        'req_direct_custom_tool_input_metadata_strip'
+      );
+    }).not.toThrow();
+  });
+
+  it('RED: rejects non-Responses direct passthrough SSE events', () => {
+    const frame = [
+      'event: codex.rate_limits',
+      `data: ${JSON.stringify({
+        type: 'codex.rate_limits',
+        limit_reached: true,
+      })}`,
+      '',
+      '',
+    ].join('\n');
+
+    try {
+      assertDirectPassthroughResponsesSseMetadataIsolationForHttp(
+        frame,
+        'req_direct_non_responses_event'
+      );
+      throw new Error('expected protocol violation');
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error & { code?: string }).code).toBe('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');
+      expect((error as Error).message).toContain('must contain only Responses standard events');
+    }
   });
 });

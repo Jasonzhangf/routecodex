@@ -49,12 +49,11 @@ describe('sendPipelineResponse SSE usage logging', () => {
       {
         status: 200,
         sseStream: Readable.from([
-            'event: message_start\n',
-            'data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
-            'event: message_delta\n',
-            'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":7858,"output_tokens":1160,"cache_read_input_tokens":81024}}\n\n'
-          ])
-        },
+          'event: message_start\n',
+          'data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
+          'event: message_delta\n',
+          'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":7858,"output_tokens":1160,"cache_read_input_tokens":81024}}\n\n'
+        ]),
         usageLogInfo: {
           requestStartedAtMs: Date.now(),
           providerKey: 'mimo.key2.mimo-v2.5',
@@ -95,12 +94,11 @@ describe('sendPipelineResponse SSE usage logging', () => {
         {
           status: 200,
           sseStream: Readable.from([
-              'event: message_start\n',
-              'data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
-              'event: message_delta\n',
-              'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":100,"output_tokens":200}}\n\n'
-            ])
-          },
+            'event: message_start\n',
+            'data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
+            'event: message_delta\n',
+            'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":100,"output_tokens":200}}\n\n'
+          ]),
           usageLogInfo: {
             requestStartedAtMs: fixedNow,
             providerKey: 'mimo.key2.mimo-v2.5',

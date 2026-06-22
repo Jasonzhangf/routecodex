@@ -310,7 +310,9 @@ describe('Responses SSE client contract blackbox', () => {
       const semanticNames = names.filter((name) => name !== 'message');
 
       expect(response.status).toBe(200);
-      expect(semanticNames.slice(0, 2)).toEqual(['ping', 'response.output_text.delta']);
+      expect(semanticNames.slice(0, 2)).toEqual(['response.output_text.delta', 'response.output_text.delta']);
+      expect(rawText).not.toContain('event: ping');
+      expect(rawText).not.toContain('"type":"ping"');
       expect(rawText).toContain('"delta":"first"');
       expect(rawText).toContain('"delta":"second"');
       expect(rawText).not.toContain('response.required_action');
@@ -448,6 +450,7 @@ describe('Responses SSE client contract blackbox', () => {
 
       expect(response.status).toBe(200);
       expect(rawText).not.toContain('event: keepalive');
+      expect(rawText).not.toContain('event: ping');
       expect(rawText).toContain('event: response.completed');
       expect(rawText).toContain('event: response.done');
       expect(rawText).not.toContain('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');

@@ -84,7 +84,7 @@ const createResponsesBridgeMock = () => ({
   ...createBridgeHttpServerMock(),
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(() => undefined),
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(() => undefined),
-  buildClientSseKeepaliveFrameForHttp: jest.fn(() => 'event: ping\ndata: {}\n\n'),
+  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn(() => ({
     type: 'error',
     error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' },
@@ -108,6 +108,10 @@ const createResponsesBridgeMock = () => ({
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async () => ({})
   })),
+  createChatJsonToSseConverterForHttp: jest.fn(async () => ({
+    convertResponseToJsonToSse: async () => ({})
+  })),
+  sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
   finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
   importResponsesHandlerCoreDist: jest.fn(async () => ({})),
   inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn(() => ({ sawTerminalChunk: false })),

@@ -279,6 +279,22 @@ function isResponsesRequiredActionFrame(frame: string): boolean {
   });
 }
 
+function readDirectPassthroughSseEventNames(frame: string): string[] {
+  return frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('event:'))
+    .map((line) => line.slice('event:'.length).trim())
+    .filter(Boolean);
+}
+
+function hasNonResponsesDirectPassthroughEvent(frame: string): boolean {
+  const eventNames = readDirectPassthroughSseEventNames(frame);
+  if (eventNames.length === 0) {
+    return false;
+  }
+  return eventNames.some((eventName) => !eventName.startsWith('response.'));
+}
+
 export function buildClientSseKeepaliveFrameForHttp(entryEndpoint?: string): string {
   const commentFrame = ': keepalive\n\n';
   return commentFrame;
@@ -311,6 +327,12 @@ export function assertDirectPassthroughResponsesSseFrameForHttp(frame: string, r
   if (isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
     return;
   }
+  if (hasNonResponsesDirectPassthroughEvent(frame)) {
+    throw Object.assign(
+      new Error(`[server.response_projection] direct passthrough SSE must contain only Responses standard events (requestId=${requestId})`),
+      { code: 'RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION' }
+    );
+  }
   if (isResponsesRequiredActionFrame(frame)) {
     throw Object.assign(
       new Error(`[server.response_projection] direct passthrough SSE must not rewrite response.required_action into output_item/function_call frames (requestId=${requestId})`),
@@ -327,6 +349,52 @@ function isInternalMetadataCarrierForHttp(value: unknown): boolean {
   return Object.keys(record).some(
     (key) => key.startsWith('__routecodex') || key.startsWith('__rt') || key === 'providerKey'
   );
+}
+
+function sanitizeDirectPassthroughResponsesSseJsonPayloadForHttp(payload: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return payload;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return payload;
+  }
+  const record = parsed as Record<string, unknown>;
+  const eventType = typeof record.type === 'string' ? record.type.trim() : '';
+  if (eventType === 'response.metadata' || !Object.prototype.hasOwnProperty.call(record, 'metadata')) {
+    return payload;
+  }
+  const { metadata: _metadata, ...rest } = record;
+  return JSON.stringify(rest);
+}
+
+function sanitizeDirectPassthroughResponsesSseFrameForHttp(frame: string, requestId: string): string {
+  assertDirectPassthroughResponsesSseFrameForHttp(frame, requestId);
+  if (isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
+    return frame;
+  }
+  const lineBreak = frame.includes('\r\n') ? '\r\n' : '\n';
+  const lines = frame.split(/\r?\n/);
+  let mutated = false;
+  const sanitizedLines = lines.map((line) => {
+    if (!line.startsWith('data:')) {
+      return line;
+    }
+    const prefix = line.startsWith('data: ') ? 'data: ' : 'data:';
+    const payload = line.slice(prefix.length);
+    const sanitizedPayload = sanitizeDirectPassthroughResponsesSseJsonPayloadForHttp(payload);
+    if (sanitizedPayload !== payload) {
+      mutated = true;
+      return `${prefix}${sanitizedPayload}`;
+    }
+    return line;
+  });
+  if (!mutated) {
+    return frame;
+  }
+  return sanitizedLines.join(lineBreak);
 }
 
 export function assertDirectPassthroughResponsesSseMetadataIsolationForHttp(frame: string, requestId: string): void {
@@ -1885,6 +1953,7 @@ async function normalizeNestedResponsesPayloadInSseFrameForHttp(args: {
 export async function normalizeResponsesSseFrameForClientForHttp(args: {
   frame: string;
   entryEndpoint?: string;
+  directPassthrough?: boolean;
   requestContext?: {
     payload: AnyRecord;
     context: AnyRecord;
@@ -1907,11 +1976,14 @@ export async function normalizeResponsesSseFrameForClientForHttp(args: {
   ) {
     return args.frame;
   }
-  const lines = args.frame.split('\n');
+  const directSanitizedFrame = args.directPassthrough === true
+    ? sanitizeDirectPassthroughResponsesSseFrameForHttp(args.frame, args.requestLabel ?? 'unknown')
+    : args.frame;
+  const lines = directSanitizedFrame.split('\n');
   const eventLine = lines.find((line) => line.startsWith('event:'));
   const dataIndex = lines.findIndex((line) => line.startsWith('data:'));
   if (dataIndex < 0 || !eventLine) {
-    return args.frame;
+    return directSanitizedFrame;
   }
   const eventName = eventLine.slice('event:'.length).trim();
   const dataText = lines
@@ -1920,20 +1992,23 @@ export async function normalizeResponsesSseFrameForClientForHttp(args: {
     .map((line) => line.slice(5).trimStart())
     .join('\n');
   if (!dataText || dataText === '[DONE]') {
-    return args.frame;
+    return directSanitizedFrame;
   }
   if (!eventName.startsWith('response.')) {
-    return args.frame;
+    return directSanitizedFrame;
   }
   let data: Record<string, unknown>;
   try {
     const parsed = JSON.parse(dataText);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return args.frame;
+      return directSanitizedFrame;
     }
     data = parsed as Record<string, unknown>;
   } catch {
-    return args.frame;
+    return directSanitizedFrame;
+  }
+  if (args.directPassthrough === true) {
+    return directSanitizedFrame;
   }
   if (shouldSuppressDuplicateApplyPatchSseFrameForHttp({
     eventName,
