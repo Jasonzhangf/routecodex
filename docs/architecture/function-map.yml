@@ -1514,6 +1514,7 @@ owners:
     migration_target: rust
     notes:
       - "Metadata is side-channel only; leak to provider/client payload must fail-fast."
+      - "Protocol truth writes are limited to request entry and VR selection; all later stages may only read the already-written truth from MetadataCenter."
       - "Rust contract help owns the standard control/data split for Hub and VR nodes."
       - "TS JSON helpers are bridge-only `JsonValue` / `JsonObject` / `isJsonObject` / `jsonClone`; zero-consumer `JsonArray` / `isJsonArray` public helpers are retired."
       - "Retired image attachment metadata control surface (`chat_post_governed_normalization_semantics.rs`, `buildImageAttachmentMetadataJson`) is physically deleted; current media semantics belong to live chat process media/Hub mainline owners, not a zero-consumer NAPI export."
@@ -2236,6 +2237,59 @@ owners:
     notes:
       - "This feature is debug-only observation surface; it must not become a normal response metadata owner."
       - "Example hooks may inspect or append debug metadata, but protocol-bearing client/provider payload semantics stay outside this owner."
+
+  - feature_id: debug.unified_surface
+    status: active
+    summary: "debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy"
+    owner_kind: ts_runtime_owner
+    owner_scope: "debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy"
+    owner_module: src/debug
+    canonical_types:
+      - DebugSurface
+      - DebugSession
+      - NodeSnapshot
+      - DebugLogger
+      - DebugHarness
+      - DebugPolicyCarrier
+    canonical_builders:
+      - createDebugToolkit
+      - createDebugSurfaceRegistry
+      - writeDebugErrorDiagArtifact
+      - readDebugErrorDiagArtifact
+    allowed_paths:
+      - src/debug
+      - docs/architecture/wiki/debug-unified-surface-mainline-source.md
+      - docs/architecture/mainline-manifests/debug-unified-surface.mainline.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/audits/2026-06-22-debug-unified-surface-audit.md
+      - docs/goals/debug-unified-surface-goal.md
+    forbidden_paths:
+      - src/providers/core/utils/debug-logger.ts
+      - src/utils/debug-utils.ts
+      - src/types/debug-types.ts
+      - src/providers/core/hooks/debug-example-hooks.ts
+      - src/providers/core/config/provider-debug-hooks.ts
+      - src/modules/pipeline/utils/debug-logger.ts
+    required_tests:
+      - tests/debug/unified-surface.owner.spec.ts
+      - tests/debug/diag.error-artifact-red.spec.ts
+      - tests/debug/snapshot-store-port-isolation.red.spec.ts
+      - tests/modules/pipeline/utils/debug-logger.dev-filter.spec.ts
+      - tests/modules/pipeline/utils/debug-logger.release.spec.ts
+      - tests/providers/core/hooks/debug-example-hooks.spec.ts
+    required_gates:
+      - npm run verify:debug-unified-surface
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-wiki-sync
+      - npm run verify:architecture-review-surface
+    migration_target: rust
+    notes:
+      - "This feature is the M0 governance shell only; runtime implementation still remains distributed until M1-M9 land. Do not treat this registration as runtime closeout."
+      - "diag is not synonymous with runtime diagnostics: error diag artifacts move under src/debug/diag, while VR/Hub/provider runtime diagnostics stay with their existing runtime owners."
+      - "usage inline `diag=` rendering belongs to the logger submodule migration only; do not use debug consolidation to rewrite timing semantics or runtime decision fields."
 
   - feature_id: responses.direct_tool_shape_contract
     status: active
@@ -3371,6 +3425,7 @@ owners:
       - "Responses handler must not keep local stream-intent derivation, request-start stream metadata assembly, or port-scope parsing; those request-side stream/scope decisions must stay behind the single request bridge surface."
       - "Responses handler must not locally assemble protocol-scoped pipeline metadata (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream-intent carrier); that request metadata build must stay behind the single request bridge surface."
       - "Responses handler must not locally read/strip request-body `metadata` or introspect `clientAbortSignal`; request-body preprocessing and abort-signal extraction must stay behind the single request bridge surface."
+      - "Protocol truth is write-once at request entry and VR selection; handler/bridge code must only read MetadataCenter truth and must not infer `providerProtocol` / `clientProtocol` from payload shape or endpoint fallbacks."
   - feature_id: server.responses_sse_bridge_surface
     status: active
     summary: "/v1/responses SSE path is a locked business module with one opaque SSE/body handoff facade only; protocol semantics stay in Hub Pipeline/native owner"

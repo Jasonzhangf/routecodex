@@ -1,0 +1,23 @@
+lifecycle_id: debug.unified_surface.mainline
+summary: Debug unified surface governance shell for diag artifacts, snapshots,
+  logger rendering, harness/replay, and policy observation.
+owner_feature_id: binding pending
+entrypoint:
+  node_id: DebugObs01SurfaceRequested
+  wiki_page: null
+  call_map_chain_id: debug.unified_surface.mainline
+node_ids:
+  - DebugObs01SurfaceRequested
+  - DebugObs07ReplayedOrInspected
+edges:
+  - step_id: dbg-01
+    from_node: DebugObs01SurfaceRequested
+    to_node: DebugObs07ReplayedOrInspected
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: debug.unified_surface.governance_shell
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

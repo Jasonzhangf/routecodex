@@ -10,6 +10,7 @@ import { canWriteSnapshotToLocalDisk } from '../../../utils/snapshot-local-disk-
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { redactSensitiveData } from '../../../utils/sensitive-redaction.js';
 import { coerceSnapshotPayloadForWrite } from '../../../utils/snapshot-payload-guard.js';
+import { writeUnifiedSnapshot } from '../../../debug/snapshot/writer.js';
 import {
   ensureSnapshotRuntimeMarker,
   pruneSnapshotRequestDirsKeepRecent,
@@ -508,27 +509,17 @@ async function mirrorSnapshotToLocalDisk(input: ProviderSnapshotPersistInput): P
 }
 
 async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Promise<void> {
-  try {
-    await writeSnapshotViaHooks({
-      endpoint: input.endpoint,
-      stage: input.stage,
-      requestId: input.requestId,
-      groupRequestId: input.groupRequestId,
-      providerKey: input.providerToken || undefined,
-      entryPort: input.entryPort,
-      data: input.payload,
-      verbosity: 'verbose'
-    });
-    await mirrorSnapshotToLocalDisk(input);
-    return;
-  } catch (error) {
-    logSnapshotNonBlockingError(`writeSnapshotViaHooks:${input.stage}`, error);
-    try {
-      await mirrorSnapshotToLocalDisk(input);
-    } catch (fallbackError) {
-      logSnapshotNonBlockingError(`fallbackWrite:${input.stage}`, fallbackError);
-    }
-  }
+  await writeUnifiedSnapshot({
+    scope: 'provider',
+    stage: input.stage,
+    requestId: input.requestId,
+    groupRequestId: input.groupRequestId,
+    providerKey: input.providerToken || undefined,
+    entryEndpoint: input.endpoint,
+    entryPort: input.entryPort,
+    data: input.payload,
+    verbosity: 'verbose',
+  });
 }
 
 function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions): ProviderSnapshotPersistInput {
@@ -936,14 +927,15 @@ export async function writeClientSnapshot(options: {
       }
     }));
     try {
-      await writeSnapshotViaHooks({
-        endpoint,
+      await writeUnifiedSnapshot({
+        scope: 'client',
         stage,
         requestId,
         groupRequestId,
         providerKey: providerToken || undefined,
+        entryEndpoint: options.entryEndpoint,
         data: payload,
-        verbosity: 'verbose'
+        verbosity: 'verbose',
       });
       await mirrorSnapshotToLocalDisk({
         endpoint,

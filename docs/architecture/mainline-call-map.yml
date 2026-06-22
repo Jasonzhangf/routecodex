@@ -7,6 +7,130 @@ version: 1
 status: seed
 
 chains:
+  - chain_id: servertool.hook_skeleton.mainline
+    summary: "Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks."
+    entry_contract:
+      node: HubRespChatProcess03Governed
+      owner_doc: docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md
+    edges:
+      - step_id: sth-resp-01
+        from_node: HubRespChatProcess03Governed
+        to_node: ServertoolRespHook01Intercepted
+        owner_feature_id: binding pending
+        semantic_input: "canonical provider response after Hub response chat-process parsing"
+        semantic_output: "response interception event for normal response, abnormal/error response, stopless trigger, `finish_reason=stop` schema candidate, `finish_reason=tool_calls` registered internal servertool call candidate, or no-op"
+        status: binding pending
+        binding_pending: true
+        note: "Target standard skeleton edge. Current runtime still uses TS transitional servertool orchestration; do not bind to TS symbols."
+      - step_id: sth-resp-02
+        from_node: ServertoolRespHook01Intercepted
+        to_node: ServertoolRespHook02SchemaValidated
+        owner_feature_id: binding pending
+        semantic_input: "response interception event plus skeleton-selected schema source: assistant text/fence for `finish_reason=stop`, or registered internal servertool arguments for `finish_reason=tool_calls` such as `reasoningStop.arguments`"
+        semantic_output: "single schema validation event covering valid terminal, non-terminal/still-running, empty schema/no_schema, invalid schema, malformed args, already-terminal cases, and client-projection-required cases"
+        status: binding pending
+        binding_pending: true
+        note: "Required for schema-managed flows; missing/invalid schema must not be silently accepted. `reasoningStop` is internal/model-facing and must not be returned to the client as raw required_action."
+      - step_id: sth-resp-03
+        from_node: ServertoolRespHook02SchemaValidated
+        to_node: ServertoolRespHook03HookResponseInjected
+        owner_feature_id: binding pending
+        semantic_input: "schema validation pass/deny/error event"
+        semantic_output: "terminal-stop summary projection when schema passes, or client-visible shell `exec_command(routecodex hook run reasoningStop ...)` projection plan when feedback/client execution is required"
+        status: binding pending
+        binding_pending: true
+        note: "Business execution remains client-visible CLI; hook only plans injection/projection. Client-visible continuation uses shell exec_command only, never raw internal `reasoningStop`."
+      - step_id: sth-resp-04
+        from_node: ServertoolRespHook03HookResponseInjected
+        to_node: ServertoolRespHook04FollowupPlanned
+        owner_feature_id: binding pending
+        semantic_input: "post hook-response projection event plus backend-route/server-side runtime trigger state"
+        semantic_output: "optional origin-snapshot followup effect plan or no-op event"
+        status: binding pending
+        binding_pending: true
+        note: "Optional hook. Must emit no-op when not applicable; must not guess from polluted current payload."
+      - step_id: sth-resp-05
+        from_node: ServertoolRespHook04FollowupPlanned
+        to_node: ServertoolRespHook05ReenterDispatched
+        owner_feature_id: binding pending
+        semantic_input: "optional followup effect plan"
+        semantic_output: "optional reenter/clientInject/providerInvoke IO effect plan or no-op event"
+        status: binding pending
+        binding_pending: true
+        note: "TS may execute IO effect later, but retry/backoff/terminal policy must be Rust-owned."
+      - step_id: sth-resp-06
+        from_node: ServertoolRespHook05ReenterDispatched
+        to_node: ServertoolRespHook06ProjectionFinalized
+        owner_feature_id: binding pending
+        semantic_input: "post-intercept/post-followup governed response candidate plus hook events"
+        semantic_output: "final governed response truth with internal tool stripped and client projection handoff selected"
+        status: binding pending
+        binding_pending: true
+        note: "Required finalize hook; servertool must not have a second response projector."
+      - step_id: sth-resp-07
+        from_node: ServertoolRespHook06ProjectionFinalized
+        to_node: HubRespOutbound04ClientSemantic
+        owner_feature_id: binding pending
+        semantic_input: "final servertool governed response truth"
+        semantic_output: "normal Hub response outbound client semantic"
+        status: binding pending
+        binding_pending: true
+        note: "Must return to normal Hub response chain."
+      - step_id: sth-cli-01
+        from_node: ServertoolRespHook03HookResponseInjected
+        to_node: ServertoolCli04ClientExecuted
+        owner_feature_id: binding pending
+        semantic_input: "client-visible exec_command projection plan"
+        semantic_output: "client executes `routecodex hook run <toolName> --input-json <json>` and returns ordinary tool result"
+        status: binding pending
+        binding_pending: true
+        note: "Business CLI lifecycle edge; hook does not execute client CLI."
+      - step_id: sth-req-01
+        from_node: HubReqInbound02Standardized
+        to_node: ServertoolReqHook01ResultParsed
+        owner_feature_id: binding pending
+        semantic_input: "next request containing ordinary tool result / CLI stdout"
+        semantic_output: "parsed public hook result event, including restoration of shell-executed stop hook results back to model-visible `reasoningStop -> function_call_output`, or no-op when no servertool result exists"
+        status: binding pending
+        binding_pending: true
+        note: "Required when tool result exists."
+      - step_id: sth-req-02
+        from_node: ServertoolReqHook01ResultParsed
+        to_node: ServertoolReqHook02TextRewritten
+        owner_feature_id: binding pending
+        semantic_input: "parsed hook result plus schema guidance/feedback"
+        semantic_output: "optional model-visible text rewrite or no-op event"
+        status: binding pending
+        binding_pending: true
+        note: "Optional hook; must not replay raw historical tool pairs or leak metadata."
+      - step_id: sth-req-03
+        from_node: ServertoolReqHook02TextRewritten
+        to_node: ServertoolReqHook03ToolInjected
+        owner_feature_id: binding pending
+        semantic_input: "request semantic after optional text rewrite"
+        semantic_output: "request tool declarations, stop hook contract, and tool constraints injected for servertool-managed turns"
+        status: binding pending
+        binding_pending: true
+        note: "Required for servertool-managed turns."
+      - step_id: sth-req-04
+        from_node: ServertoolReqHook03ToolInjected
+        to_node: ServertoolReqHook04RequestFinalized
+        owner_feature_id: binding pending
+        semantic_input: "request semantic with parsed result/rewrite/tool injection events"
+        semantic_output: "final request semantic ready for HubReqChatProcess03Governed"
+        status: binding pending
+        binding_pending: true
+        note: "Required request finalize hook."
+      - step_id: sth-req-05
+        from_node: ServertoolReqHook04RequestFinalized
+        to_node: HubReqChatProcess03Governed
+        owner_feature_id: binding pending
+        semantic_input: "final servertool-governed request semantic"
+        semantic_output: "normal Hub request chat-process governed semantic"
+        status: binding pending
+        binding_pending: true
+        note: "Must return to normal Hub request chain."
+
   - chain_id: request.mainline
     summary: "HTTP request enters host, standardizes in Hub, routes via VR, exits through provider wire build."
     entry_contract:
@@ -90,7 +214,7 @@ chains:
         callee_symbol: parse_hub_resp_inbound_02_from_provider_resp_inbound_01
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_resp_inbound_02_parsed.rs
         owner_feature_id: hub.response_provider_sse_materialization
-        semantic_input: "provider canonical/raw response payload after protocol mapping"
+        semantic_input: "provider canonical/raw response payload after entry protocol + VR target have already fixed the response chain"
         semantic_output: "typed Hub resp-inbound parsed payload"
         status: anchored
       - step_id: resp-02
@@ -126,6 +250,22 @@ chains:
         semantic_input: "client semantic body/probe"
         semantic_output: "http json/sse frame"
         status: anchored
+
+  - chain_id: debug.unified_surface.mainline
+    summary: "Debug unified surface governance shell for diag artifacts, snapshots, logger rendering, harness/replay, and policy observation."
+    entry_contract:
+      node: DebugObs01SurfaceRequested
+      owner_doc: docs/architecture/wiki/debug-unified-surface-mainline-source.md
+    edges:
+      - step_id: dbg-01
+        from_node: DebugObs01SurfaceRequested
+        to_node: DebugObs07ReplayedOrInspected
+        binding_pending: true
+        split_binding_id: debug.unified_surface.governance_shell
+        owner_feature_id: binding pending
+        semantic_input: "debug surface request entering the unified debug owner shell"
+        semantic_output: "debug surface request handed to the M0/M1 governance shell pending deeper module split anchoring"
+        note: "M0/M1 governance shell only. Keep the edge pending until the intermediate debug nodes are anchored to concrete runtime and typed symbols."
 
   - chain_id: error.mainline
     summary: "Provider/runtime/direct failures enter unified ErrorErr chain; provider availability/cooldown truth stays provider/server-scoped and must not be rewritten into session-storm truth before client projection."
@@ -405,7 +545,7 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "concise stopless command payload: flowId/repeatCount/maxRepeats/triggerHint plus optional schemaFeedback{reasonCode,missingFields}"
-        semantic_output: "client-visible exec_command using public alias reasoning_stop; no sessionDir/sessionId/requestId flags; natural-language feedback is deferred to req_chatprocess rewrite"
+        semantic_output: "client-visible exec_command using public alias reasoningStop; no sessionDir/sessionId/requestId flags; natural-language feedback is deferred to req_chatprocess rewrite"
         status: anchored
       - step_id: stl-04
         from_node: StoplessCli04ProjectionPlanned
@@ -438,7 +578,7 @@ chains:
         callee_file: sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "restored stopless CLI tool_output plus responses/chat request context"
-        semantic_output: "model-transparent natural-language corrective guidance restored into the next request turn"
+        semantic_output: "model-transparent natural-language corrective guidance restored into the next request turn, with legacy shell-projected `reasoningStop` / `reasoning_stop` history physically removed instead of replayed"
         status: anchored
       - step_id: stl-07
         from_node: StoplessReq08GuidanceRewritten
@@ -640,6 +780,15 @@ shared_multi_reference_functions:
       - runtime.tmux_client_binding.mainline
     note: "Conversation->tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership."
 
+  - function_id: debug.surface_registry
+    binding_status: pending
+    symbol: createDebugToolkit
+    file: src/debug/index.ts
+    owner_feature_id: debug.unified_surface
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "M0 governance anchor only. Runtime migration slices must land before this becomes the actual single-surface consumer entry."
+
   - function_id: error.err_04_router_policy_applied
     symbol: ErrorErr04RouterPolicyApplied
     file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
@@ -684,6 +833,23 @@ split_bindings:
       - symbol: build_hub_req_outbound_05_from_hub_req_chatprocess_03
         file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
     note: "Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -> outbound caller/callee edge."
+
+  - binding_id: debug.unified_surface.governance_shell
+    binding_status: pending
+    from_node: DebugObs01SurfaceRequested
+    to_node: DebugObs07ReplayedOrInspected
+    owner_feature_id: debug.unified_surface
+    runtime_symbols:
+      - symbol: createDebugToolkit
+        file: src/debug/index.ts
+      - symbol: writeDebugErrorDiagArtifact
+        file: src/debug/index.ts
+      - symbol: readDebugErrorDiagArtifact
+        file: src/debug/index.ts
+    typed_symbols:
+      - symbol: buildDebugErrorDiagArtifactRecord
+        file: src/debug/diag/error-artifact.ts
+    note: "M0 governance shell only. Real caller/callee anchors stay pending until M1-M9 migrate the corresponding modules and gates."
 
 maintenance_rules:
   - "Do not invent symbols. Use binding_pending until concrete caller/callee is verified in code."

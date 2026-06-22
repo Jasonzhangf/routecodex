@@ -10,6 +10,10 @@ function ensureDir(dir: string): void {
   }
 }
 
+function pathExists(filePath: string): boolean {
+  return fs.existsSync(filePath);
+}
+
 function parseLines(content: string): NodeSnapshot[] {
   const snapshots: NodeSnapshot[] = [];
   const lines = content.split('\n');
@@ -50,6 +54,73 @@ export class FileSnapshotStore implements SnapshotStore {
     return path.join(this.baseDir, `${sessionId}.jsonl`);
   }
 
+  private findSessionFiles(sessionId: string): string[] {
+    ensureDir(this.baseDir);
+    const visited = new Set<string>();
+    const matches: string[] = [];
+    const stack = [this.baseDir];
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+      const entries = fs.readdirSync(current, { withFileTypes: true });
+      for (const entry of entries) {
+        const next = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(next);
+          continue;
+        }
+        if (entry.isFile() && entry.name === `${sessionId}.jsonl`) {
+          matches.push(next);
+        }
+      }
+    }
+
+    return matches.sort();
+  }
+
+  private readSnapshotsForSession(sessionId: string): NodeSnapshot[] {
+    const files = this.findSessionFiles(sessionId);
+    if (files.length === 0) {
+      return [];
+    }
+    return files.flatMap((file) => {
+      const content = fs.readFileSync(file, 'utf8');
+      return parseLines(content);
+    });
+  }
+
+  private listSessionFiles(): string[] {
+    ensureDir(this.baseDir);
+    const visited = new Set<string>();
+    const sessions = new Set<string>();
+    const stack = [this.baseDir];
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+      const entries = fs.readdirSync(current, { withFileTypes: true });
+      for (const entry of entries) {
+        const next = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(next);
+          continue;
+        }
+        if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+          sessions.add(path.basename(entry.name, '.jsonl'));
+        }
+      }
+    }
+
+    return Array.from(sessions.values()).sort();
+  }
+
   async save(snapshot: NodeSnapshot): Promise<void> {
     const file = this.sessionFile(snapshot.sessionId, snapshot.metadata);
     ensureDir(path.dirname(file));
@@ -58,41 +129,37 @@ export class FileSnapshotStore implements SnapshotStore {
   }
 
   async fetch(sessionId: string, query?: SnapshotQuery): Promise<NodeSnapshot[]> {
-    try {
-      const content = await fsp.readFile(this.sessionFile(sessionId), 'utf8');
-      let snapshots = parseLines(content);
-      if (query?.nodeId) {
-        snapshots = snapshots.filter((snap) => snap.nodeId === query.nodeId);
-      }
-      if (query?.direction) {
-        snapshots = snapshots.filter((snap) => snap.direction === query.direction);
-      }
-      if (typeof query?.limit === 'number') {
-        snapshots = snapshots.slice(-query.limit);
-      }
-      return snapshots;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return [];
-      }
-      throw error;
+    let snapshots = this.readSnapshotsForSession(sessionId);
+    if (query?.nodeId) {
+      snapshots = snapshots.filter((snap) => snap.nodeId === query.nodeId);
     }
+    if (query?.direction) {
+      snapshots = snapshots.filter((snap) => snap.direction === query.direction);
+    }
+    if (typeof query?.limit === 'number') {
+      snapshots = snapshots.slice(-query.limit);
+    }
+    return snapshots;
   }
 
   async clear(sessionId: string): Promise<void> {
-    try {
-      await fsp.rm(this.sessionFile(sessionId));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
+    const files = this.findSessionFiles(sessionId);
+    for (const file of files) {
+      if (!pathExists(file)) {
+        continue;
+      }
+      try {
+        await fsp.rm(file);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
       }
     }
   }
 
   async listSessions(): Promise<string[]> {
-    ensureDir(this.baseDir);
-    const files = await fsp.readdir(this.baseDir);
-    return files.filter((file) => file.endsWith('.jsonl')).map((file) => path.basename(file, '.jsonl'));
+    return this.listSessionFiles();
   }
 }
 

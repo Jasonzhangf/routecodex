@@ -5,7 +5,12 @@ import { createDefaultHarnessRegistry } from './default-harnesses.js';
 import type { DefaultHarnessOptions } from './default-harnesses.js';
 import { DryRunRunner } from './dry-runner.js';
 import { ReplayRunner } from './replay-runner.js';
+import {
+  readDebugErrorDiagArtifactInternal,
+  writeDebugErrorDiagArtifactInternal,
+} from './diag/error-artifact.js';
 import type { SnapshotStore } from './types.js';
+import type { DebugErrorDiagArtifactRecord } from './diag/error-artifact.js';
 
 export interface DebugToolkitOptions extends DefaultHarnessOptions {
   snapshotDirectory?: string;
@@ -28,9 +33,28 @@ export function createDebugToolkit(options: DebugToolkitOptions = {}) {
   };
 }
 
+export function createDebugSurfaceRegistry(options: DebugToolkitOptions = {}) {
+  return createDebugToolkit(options);
+}
+
+export async function writeDebugErrorDiagArtifact(input: {
+  endpoint: string;
+  requestId: string;
+  requestBody: unknown;
+  error: unknown;
+  rootDir?: string;
+}): Promise<string> {
+  return writeDebugErrorDiagArtifactInternal(input);
+}
+
+export async function readDebugErrorDiagArtifact(filePath: string): Promise<DebugErrorDiagArtifactRecord> {
+  return readDebugErrorDiagArtifactInternal(filePath);
+}
+
 export * from './types.js';
 export * from './snapshot-store.js';
 export * from './session-manager.js';
 export * from './dry-runner.js';
 export * from './replay-runner.js';
 export * from './default-harnesses.js';
+export * from './diag/index.js';

@@ -1253,6 +1253,35 @@ verification:
       - "Debug example hooks are observation/demo surface only; changes must not silently widen normal response metadata ownership."
       - "Focused tests should cover response metadata observation plus debug-mode toggle wiring through BidirectionalHookManager."
 
+  - feature_id: debug.unified_surface
+    change_risk: high
+    unit:
+      - src/debug/index.ts
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/mainline-manifests/debug-unified-surface.mainline.yml
+      - docs/architecture/wiki/debug-unified-surface-mainline-source.md
+    contract:
+      - docs/goals/debug-unified-surface-goal.md
+      - docs/audits/2026-06-22-debug-unified-surface-audit.md
+    integration:
+      - tests/debug/unified-surface.owner.spec.ts
+      - tests/debug/diag.error-artifact-red.spec.ts
+      - tests/debug/snapshot-store-port-isolation.red.spec.ts
+      - tests/modules/pipeline/utils/debug-logger.dev-filter.spec.ts
+      - tests/modules/pipeline/utils/debug-logger.release.spec.ts
+      - tests/providers/core/hooks/debug-example-hooks.spec.ts
+    smoke:
+      - npm run verify:debug-unified-surface
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-wiki-sync
+      - npm run verify:architecture-review-surface
+    build:
+      - npm run build:base
+    notes:
+      - "M0 closes only the governance/doc shell. Do not claim src/debug is the sole runtime owner until the per-module migration slices M1-M9 are implemented and verified."
+      - "Verification must prove the diagnostics taxonomy boundary: error diag artifacts move under debug, runtime diagnostics remain under their original runtime owner, and usage inline diag moves only with the logger surface."
+
   - feature_id: responses.direct_tool_shape_contract
     change_risk: high
     unit:
@@ -1637,6 +1666,7 @@ verification:
       - npm run build:base
     notes:
       - "Host converter must stay on stream/body capture plus Rust handoff; TS fallback projection must not reappear."
+      - "Host converter must only consume protocol truth already fixed by entry and VR metadata; payload-shape protocol inference is forbidden."
 
   - feature_id: server.response_inspection_helpers
     change_risk: medium

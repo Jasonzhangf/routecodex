@@ -21,6 +21,10 @@ describe('snapshot store port isolation red tests', () => {
 
     expect(fs.existsSync(path.join(dir, 'ports', '5555', 'rcc-fin.jsonl'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'rcc-fin.jsonl'))).toBe(false);
+
+    const snapshots = await store.fetch('rcc-fin');
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]?.nodeId).toBe('provider-request');
   });
 
   it('keeps provider-request snapshot metadata at root and out of wire payload', async () => {
@@ -75,5 +79,40 @@ describe('snapshot store port isolation red tests', () => {
     expect(fs.existsSync(entryFile)).toBe(true);
     expect(fs.readFileSync(entryFile, 'utf8')).toContain('chat_process.resp.stage8.finalize');
     expect(fs.existsSync(path.join(dir, 'mimo.key1.mimo-v2.5-pro'))).toBe(false);
+
+    const responseSnapshots = await store.fetch('client-req-1', { direction: 'response' });
+    expect(responseSnapshots).toHaveLength(1);
+    expect(responseSnapshots[0]?.nodeId).toBe('provider-response');
+  });
+
+  it('lists and clears sessions across protocol/port subdirectories', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-snapshot-list-'));
+    const store = new FileSnapshotStore(dir);
+
+    await store.save({
+      sessionId: 'root-session',
+      nodeId: 'root-node',
+      direction: 'request',
+      payload: { ok: true },
+      timestamp: 1,
+    });
+    await store.save({
+      sessionId: 'namespaced-session',
+      nodeId: 'namespaced-node',
+      direction: 'request',
+      payload: { ok: true },
+      timestamp: 2,
+      metadata: {
+        entryProtocol: 'openai-responses',
+        matchedPort: 5555,
+      }
+    });
+
+    const listed = await store.listSessions();
+    expect(new Set(listed)).toEqual(new Set(['root-session', 'namespaced-session']));
+
+    await store.clear('namespaced-session');
+    expect(await store.fetch('namespaced-session')).toEqual([]);
+    expect(fs.existsSync(path.join(dir, 'openai-responses', 'ports', '5555', 'namespaced-session.jsonl'))).toBe(false);
   });
 });
