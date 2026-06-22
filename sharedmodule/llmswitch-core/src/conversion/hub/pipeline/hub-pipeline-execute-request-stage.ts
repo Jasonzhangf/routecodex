@@ -164,12 +164,6 @@ function projectRouterInputMetadata(args: {
   const requestTruth = args.requestTruth;
   const runtimeControl = args.runtimeControl;
   const continuationContext = args.continuationContext;
-  if (typeof requestTruth.sessionId === 'string' && requestTruth.sessionId.trim()) {
-    metadata.sessionId = requestTruth.sessionId.trim();
-  }
-  if (typeof requestTruth.conversationId === 'string' && requestTruth.conversationId.trim()) {
-    metadata.conversationId = requestTruth.conversationId.trim();
-  }
   const routeHint = typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
     ? runtimeControl.routeHint.trim()
     : typeof continuationContext.responsesResume === 'object'

@@ -857,8 +857,8 @@ describe('executor metadata session daemon extraction', () => {
       metadata: requestMetadata
     } as any);
 
-    expect(metadata.sessionId).toBe('sess-submit-resume-center-1');
-    expect(metadata.conversationId).toBe('conv-submit-resume-center-1');
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
     expect(metadata.routeHint).toBe('search/gateway-priority-5555-priority-search');
     expect(metadata.retryProviderKey).toBe('minimonth.key1.MiniMax-M2.7');
     expect(metadata.responsesResume).toMatchObject({
@@ -1248,5 +1248,52 @@ describe('executor metadata route hint extraction', () => {
     } as any);
 
     expect(metadata.routeHint).toBe('tools');
+  });
+
+  it('uses servertool web_search CLI result routeHint from submitted tool output', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      method: 'POST',
+      requestId: 'req-route-hint-web-search-cli',
+      headers: {},
+      query: {},
+      body: {
+        tool_outputs: [{
+          call_id: 'call_web_search_1',
+          output: JSON.stringify({
+            toolName: 'web_search',
+            flowId: 'web_search_flow',
+            routeHint: 'web_search'
+          })
+        }]
+      },
+      metadata: {}
+    } as any);
+
+    expect(metadata.routeHint).toBe('web_search');
+  });
+
+  it('uses servertool vision CLI result routeHint from responses input output item', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-route-hint-vision-cli',
+      headers: {},
+      query: {},
+      body: {
+        input: [{
+          type: 'function_call_output',
+          call_id: 'call_vision_1',
+          output: JSON.stringify({
+            toolName: 'vision_auto',
+            flowId: 'vision_flow',
+            routeHint: 'multimodal'
+          })
+        }]
+      },
+      metadata: {}
+    } as any);
+
+    expect(metadata.routeHint).toBe('multimodal');
   });
 });

@@ -1,6 +1,4 @@
-import { createHash } from 'node:crypto';
 import type { ProviderRuntimeMetadata } from '../provider-runtime-metadata.js';
-import { CODEX_IDENTIFIER_MAX_LENGTH } from '../../../../constants/index.js';
 import { HeaderUtils } from './header-utils.js';
 import { ProviderPayloadUtils } from './provider-payload-utils.js';
 
@@ -42,20 +40,10 @@ export class SessionHeaderUtils {
       ?? SessionHeaderUtils.readIdentifier(metadata.conversation_id)
       ?? SessionHeaderUtils.readIdentifier((runtimeMetadata as Record<string, unknown>)?.conversationId);
 
-    const sessionId =
-      existingSessionId
-      ?? existingConversationId
-      ?? SessionHeaderUtils.buildCodexIdentifier('session', runtimeMetadata);
-    const conversationId =
-      existingConversationId
-      ?? existingSessionId
-      ?? SessionHeaderUtils.buildCodexIdentifier('conversation', runtimeMetadata);
-
-    metadata.sessionId = sessionId;
-    metadata.conversationId = conversationId;
-    (runtimeMetadata as Record<string, unknown>).sessionId = sessionId;
-    (runtimeMetadata as Record<string, unknown>).conversationId = conversationId;
-    return { sessionId, conversationId };
+    return {
+      ...(existingSessionId ? { sessionId: existingSessionId } : {}),
+      ...(existingConversationId ? { conversationId: existingConversationId } : {})
+    };
   }
 
   static normalizeCodexClientHeaders(
@@ -98,17 +86,12 @@ export class SessionHeaderUtils {
       ?? SessionHeaderUtils.readIdentifier(runtimeMetadataCarrier?.conversationId)
       ?? SessionHeaderUtils.readIdentifier(runtimeMetadataCarrier?.conversation_id)
       ?? SessionHeaderUtils.readIdentifier(runtimeMetadataRecord?.conversationId);
-    const resolvedSessionId =
-      existingSessionId
-      ?? existingConversationId
-      ?? SessionHeaderUtils.buildCodexIdentifier('session', runtimeMetadata);
-    const resolvedConversationId =
-      existingConversationId
-      ?? existingSessionId
-      ?? SessionHeaderUtils.buildCodexIdentifier('conversation', runtimeMetadata);
-
-    HeaderUtils.setHeaderIfMissing(headers, 'session_id', resolvedSessionId);
-    HeaderUtils.setHeaderIfMissing(headers, 'conversation_id', resolvedConversationId);
+    if (existingSessionId) {
+      HeaderUtils.setHeaderIfMissing(headers, 'session_id', existingSessionId);
+    }
+    if (existingConversationId) {
+      HeaderUtils.setHeaderIfMissing(headers, 'conversation_id', existingConversationId);
+    }
   }
 
   static extractClientHeaders(
@@ -136,33 +119,5 @@ export class SessionHeaderUtils {
       }
     }
     return undefined;
-  }
-
-  private static buildCodexIdentifier(
-    kind: 'session' | 'conversation',
-    runtimeMetadata?: ProviderRuntimeMetadata
-  ): string {
-    const fallbackId = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
-      ? (runtimeMetadata.metadata as Record<string, unknown>).clientRequestId
-      : undefined;
-    const requestId = runtimeMetadata?.requestId ?? fallbackId;
-    const routeName = runtimeMetadata?.routeName;
-    const suffix = (requestId ?? `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-      .toString()
-      .replace(/[^A-Za-z0-9_-]/g, '_');
-    const parts = ['codex_cli', kind, suffix];
-    if (routeName) {
-      parts.push(routeName.replace(/[^A-Za-z0-9_-]/g, '_'));
-    }
-    return SessionHeaderUtils.enforceCodexIdentifierLength(parts.join('_'));
-  }
-
-  private static enforceCodexIdentifierLength(value: string): string {
-    if (value.length <= CODEX_IDENTIFIER_MAX_LENGTH) {
-      return value;
-    }
-    const hash = createHash('sha256').update(value).digest('hex').slice(0, 10);
-    const keep = Math.max(1, CODEX_IDENTIFIER_MAX_LENGTH - hash.length - 1);
-    return `${value.slice(0, keep)}_${hash}`;
   }
 }

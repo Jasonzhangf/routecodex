@@ -715,7 +715,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         },
         'responses relay resumed session truth'
       );
-      metadata.sessionId = responsesResumeSessionId;
     }
     if (responsesResumeConversationId && !currentRequestTruth.conversationId) {
       center.writeRequestTruth(
@@ -728,7 +727,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         },
         'responses relay resumed conversation truth'
       );
-      metadata.conversationId = responsesResumeConversationId;
     }
     const runtimeControl = center.readRuntimeControl();
     const projectedRouteHint =

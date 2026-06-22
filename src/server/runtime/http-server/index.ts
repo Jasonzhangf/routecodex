@@ -174,25 +174,11 @@ function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sess
 }
 
 function readSessionIdForUsageLog(metadata: Record<string, unknown>): string | undefined {
-  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata).sessionId;
-  if (requestTruth) {
-    return requestTruth;
-  }
-  return readTrimmedString(metadata.sessionId)
-    ?? readTrimmedString(metadata.session_id)
-    ?? readTrimmedString(metadata.clientTmuxSessionId)
-    ?? readTrimmedString(metadata.client_tmux_session_id)
-    ?? readTrimmedString(metadata.tmuxSessionId)
-    ?? readTrimmedString(metadata.tmux_session_id);
+  return readRuntimeRequestTruthIdentifiers(metadata).sessionId;
 }
 
 function readConversationIdForUsageLog(metadata: Record<string, unknown>): string | undefined {
-  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata).conversationId;
-  if (requestTruth) {
-    return requestTruth;
-  }
-  return readTrimmedString(metadata.conversationId)
-    ?? readTrimmedString(metadata.conversation_id);
+  return readRuntimeRequestTruthIdentifiers(metadata).conversationId;
 }
 
 import {
@@ -1255,13 +1241,11 @@ export class RouteCodexHttpServer {
     }
 
     // stopMessage 默认启用（true），除非端口显式配置 enabled=false。
-    // direct 路径默认排除 stopMessage，只有端口显式 includeDirect=true 才纳入。
+    // same-protocol direct 永远排除 stopMessage，避免 stopless 污染 direct 历史。
     const effectiveStopMessageEnabled = typeof portConfig?.stopMessage?.enabled === 'boolean'
       ? portConfig.stopMessage.enabled
       : true;
-    const effectiveStopMessageExcludeDirect = portConfig?.stopMessage?.includeDirect === true
-      ? false
-      : true;
+    const effectiveStopMessageExcludeDirect = true;
 
     const metadata: Record<string, unknown> = {
       ...(input.metadata ?? {}),
