@@ -84,12 +84,70 @@ export function hasApiKey(token: RawTokenPayload | null): boolean {
   return typeof cand === 'string' && cand.trim().length > 0;
 }
 
+function hasStableQwenApiKey(token: RawTokenPayload | null): boolean {
+  if (!token) {
+    return false;
+  }
+  const apiKey = token.apiKey ?? token.api_key;
+  if (typeof apiKey !== 'string' || !apiKey.trim()) {
+    return false;
+  }
+  const accessToken = token.access_token ?? token.AccessToken;
+  if (typeof accessToken !== 'string' || !accessToken.trim()) {
+    return true;
+  }
+  return apiKey.trim() !== accessToken.trim();
+}
+
 export function hasRefreshToken(token: RawTokenPayload | null): boolean {
   if (!token) {
     return false;
   }
   const cand = token.refresh_token;
   return typeof cand === 'string' && cand.trim().length > 0;
+}
+
+function parseJwtPayload(jwtToken: unknown): Record<string, unknown> | null {
+  if (typeof jwtToken !== 'string' || !jwtToken.trim()) {
+    return null;
+  }
+  const parts = jwtToken.trim().split('.');
+  if (parts.length !== 3) {
+    return null;
+  }
+  try {
+    const normalized = (parts[1] ?? '').replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const parsed = JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readJwtExpiryMillis(payload: Record<string, unknown> | null): number | null {
+  if (!payload) {
+    return null;
+  }
+  const raw = payload.exp;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return raw > 10_000_000_000 ? Math.floor(raw) : Math.floor(raw * 1000);
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Number(raw.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed > 10_000_000_000 ? Math.floor(parsed) : Math.floor(parsed * 1000);
+    }
+  }
+  return null;
+}
+
+function hasEcoDevJwtRefreshToken(token: RawTokenPayload | null): boolean {
+  const payload = parseJwtPayload(token?.jwt_token);
+  const refreshToken = payload?.refresh_token;
+  return typeof refreshToken === 'string' && refreshToken.trim().length > 0;
 }
 
 export function evaluateTokenState(
@@ -99,16 +157,18 @@ export function evaluateTokenState(
 ): TokenState {
   const access = hasAccessToken(token);
   const apiKey = hasApiKey(token);
-  const refresh = hasRefreshToken(token);
-  const expiresAt = getExpiresAtMillis(token);
+  const refresh = hasRefreshToken(token) || (provider === 'ecodev' && hasEcoDevJwtRefreshToken(token));
+  const expiresAt = getExpiresAtMillis(token) ?? (provider === 'ecodev' ? readJwtExpiryMillis(parseJwtPayload(token?.jwt_token)) : null);
   const msUntilExpiry = expiresAt !== null ? expiresAt - now : null;
   const rawNoRefresh =
     token !== null && (token.norefresh === true || (typeof token.noRefresh === 'boolean' && token.noRefresh));
-  const noRefresh = rawNoRefresh;
+  const noRefresh = provider === 'qwen' ? rawNoRefresh && hasStableQwenApiKey(token) : rawNoRefresh;
 
   let status: TokenState['status'] = 'invalid';
   if (!access) {
     status = 'invalid';
+  } else if (provider === 'qwen' && noRefresh && hasStableQwenApiKey(token)) {
+    status = 'valid';
   } else if (expiresAt === null) {
     status = 'valid';
   } else if (msUntilExpiry !== null && msUntilExpiry <= 0) {
