@@ -233,6 +233,13 @@ jest.unstable_mockModule(
         }
       };
     }),
+    planServertoolExecutionDispatchErrorWithNative: jest.fn((input: any) => ({
+      code: 'SERVERTOOL_HANDLER_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: `[native-dispatch-contract] ${String(input?.kind ?? 'unknown')}`,
+      details: input ?? {}
+    })),
     planServertoolTimeoutWatcherWithNative: jest.fn((timeoutMs?: number) => {
       const normalized = Math.max(0, Math.floor(Number.isFinite(timeoutMs) ? Number(timeoutMs) : 0));
       return {
@@ -474,6 +481,21 @@ jest.unstable_mockModule(
       })),
       skippedToolCalls: [],
       noopToolCalls: []
+    })),
+    buildServertoolHandlerErrorToolOutputPayloadWithNative: jest.fn((input: any) => ({
+      choices: [
+        {
+          message: {
+            tool_calls: [],
+            tool_outputs: [
+              {
+                tool_call_id: String(input?.toolCallId ?? ''),
+                output: String(input?.message ?? '')
+              }
+            ]
+          }
+        }
+      ]
     })),
     buildServertoolOutcomePlanInputWithNative: jest.fn((input: any) => input),
     planServertoolOutcomeWithNative: jest.fn((input: any) => {
@@ -742,7 +764,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js',
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js',
   () => ({
     buildServertoolDispatchPlanInput: jest.fn((input: any) => input),
     runServertoolIoExecutionQueue: jest.fn(async (args: any) => {

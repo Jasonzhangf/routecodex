@@ -104,6 +104,7 @@ const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
 const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch-runtime-shell.ts`;
 const TS_RESPONSE_STAGE_FINALIZE_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`;
 const TS_RESPONSE_STAGE_PREPASS_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-prepass-shell.ts`;
+const TS_EXECUTION_QUEUE_SHELL = `${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`;
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
@@ -2591,6 +2592,7 @@ function checkStopMessageCounterRustOwner() {
 
 function checkServertoolExecutionDispatchRustOwner() {
   const executionShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`);
+  const executionQueueShell = readRequired(TS_EXECUTION_QUEUE_SHELL);
   const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
   const rustExecutionBranch = readRequired(RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT);
   const rustExecutionLoopRuntimeAction = readRequired(RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT);
@@ -2603,9 +2605,27 @@ function checkServertoolExecutionDispatchRustOwner() {
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   assertContains(
     'servertool-execution-dispatch-rust-owner',
-    `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
-    executionShell,
+    TS_EXECUTION_QUEUE_SHELL,
+    executionQueueShell,
     'buildServertoolDispatchPlanInputWithNative'
+  );
+  assertContains(
+    'servertool-execution-queue-shell-owner',
+    TS_EXECUTION_QUEUE_SHELL,
+    executionQueueShell,
+    'runServertoolIoExecutionQueue'
+  );
+  assertContains(
+    'servertool-execution-queue-shell-owner',
+    TS_EXECUTION_QUEUE_SHELL,
+    executionQueueShell,
+    'planServertoolExecutionLoopRuntimeActionWithNative'
+  );
+  assertContains(
+    'servertool-execution-queue-shell-owner',
+    TS_EXECUTION_QUEUE_SHELL,
+    executionQueueShell,
+    'createServertoolProviderProtocolErrorFromPlan'
   );
   assertContains(
     'servertool-execution-handler-outcome-rust-owner',
@@ -2613,15 +2633,23 @@ function checkServertoolExecutionDispatchRustOwner() {
     readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
     'buildServertoolOutcomePlanInputWithNative'
   );
-  for (const marker of [
-    'export const buildServertoolDispatchPlanInput ='
-  ]) {
-    if (!executionShell.includes(marker)) {
-      fail(
-        'servertool-execution-dispatch-rust-owner',
-        `execution-dispatch-outcome-shell.ts must keep direct export marker ${marker}`
-      );
-    }
+  if (executionShell.includes('export const buildServertoolDispatchPlanInput =')) {
+    fail(
+      'servertool-execution-dispatch-rust-owner',
+      'execution-dispatch-outcome-shell.ts must re-export buildServertoolDispatchPlanInput instead of declaring it'
+    );
+  }
+  if (!/export\s*\{\s*buildServertoolDispatchPlanInput\s*\}/.test(executionShell)) {
+    fail(
+      'servertool-execution-dispatch-rust-owner',
+      'execution-dispatch-outcome-shell.ts must re-export buildServertoolDispatchPlanInput from execution-queue-shell.js'
+    );
+  }
+  if (!/export\s*\{\s*runServertoolIoExecutionQueue\s*\}/.test(executionShell)) {
+    fail(
+      'servertool-execution-queue-shell-owner',
+      'execution-dispatch-outcome-shell.ts must re-export runServertoolIoExecutionQueue from execution-queue-shell.js'
+    );
   }
   for (const marker of [
     'export function createServertoolExecutionLoopState(',
@@ -2727,7 +2755,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-loop-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_loop_runtime_action_json'],
     ['servertool-execution-loop-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionLoopRuntimeActionJson'],
     ['servertool-execution-loop-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionLoopRuntimeActionWithNative'],
-    ['servertool-execution-loop-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`, executionShell, 'planServertoolExecutionLoopRuntimeActionWithNative'],
+    ['servertool-execution-loop-runtime-action-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'planServertoolExecutionLoopRuntimeActionWithNative'],
     ['servertool-execution-outcome-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT, rustExecutionOutcomeRuntimeAction, 'feature_id: hub.servertool_execution_outcome_runtime_action_contract'],
     ['servertool-execution-outcome-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT, rustExecutionOutcomeRuntimeAction, 'pub fn plan_servertool_execution_outcome_runtime_action'],
     ['servertool-execution-outcome-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_outcome_runtime_action_contract'],

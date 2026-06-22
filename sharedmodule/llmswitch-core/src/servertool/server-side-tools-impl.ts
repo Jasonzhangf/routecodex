@@ -7,7 +7,7 @@ import type {
 } from './types.js';
 import {
   runServertoolIoExecutionQueue
-} from './execution-dispatch-outcome-shell.js';
+} from './execution-queue-shell.js';
 import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
 import {
   extractTextFromChatLikeWithNative,
