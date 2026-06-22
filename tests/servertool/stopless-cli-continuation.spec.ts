@@ -185,8 +185,19 @@ describe('stopless CLI continuation', () => {
       }
     });
     expect(result.executed).toBe(true);
-    expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
-    expect((result.chat as any).choices?.[0]?.message?.content).toContain('need more evidence');
+    const command = extractExecCommand(result.chat);
+    expect(command).toContain('routecodex hook run reasoningStop');
+    expect((result.chat as any).choices?.[0]?.message?.content).toBe('');
+    expect((result.chat as any).choices?.[0]?.message?.reasoning_text).toContain('need more evidence');
+    expect(command).not.toContain('schemaGuidance');
+    const cliStdout = await runStoplessCliStdout(command);
+    expect(cliStdout.routeHint).toBe('thinking');
+    expect(cliStdout.repeatCount).toBe(2);
+    expect(cliStdout.maxRepeats).toBe(3);
+    expect(cliStdout.sessionId).toBeUndefined();
+    expect(cliStdout.requestId).toBe(adapterContext.requestId);
+    expect(cliStdout.schemaGuidance?.requiredFields).toContain('stopreason');
+    expect(cliStdout.schemaGuidance?.requiredFields).toContain('next_step');
   });
 
   test('missing request truth sessionId keeps stopless terminal', async () => {
@@ -210,6 +221,7 @@ describe('stopless CLI continuation', () => {
 
     expect(result.executed).toBe(true);
     expect(maybeExtractExecCommand(result.chat)).toBeUndefined();
+    expect((result.chat as any).choices?.[0]?.finish_reason).toBe('stop');
     expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
   });
 
@@ -233,7 +245,7 @@ describe('stopless CLI continuation', () => {
       }
     });
     expect(first.executed).toBe(true);
-    expect(maybeExtractExecCommand(first.chat)).toBeUndefined();
+    expect(maybeExtractExecCommand(first.chat)).toContain('routecodex hook run reasoningStop');
 
     const secondAdapterContext = buildAdapterContext({
       requestId: `req-stopless-paired-2-${Date.now()}`,

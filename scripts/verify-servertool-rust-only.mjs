@@ -109,6 +109,8 @@ const TS_EXECUTION_STAGE_SHELL = `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
 const TS_ENGINE_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/engine-preflight-shell.ts`;
+const TS_ENGINE_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`;
+const TS_ENGINE_OBSERVATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
 const TS_REGISTRY_REGISTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-registration-shell.ts`;
@@ -405,13 +407,13 @@ function assertStoplessSessionIdLock() {
     'stopless-session-lock',
     `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
     stoplessSpec,
-    "expect(command).toContain(`--session-id '${adapterContext.sessionId}'`)"
+    "expect(maybeExtractExecCommand(result.chat)).toBeUndefined();"
   );
   assertContains(
     'stopless-session-lock',
     `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
     stoplessSpec,
-    'current tool output instead of persisted file state'
+    "expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop')"
   );
 
   const cliSpec = readRequired(`${ROOT}/tests/cli/servertool-command.spec.ts`);
@@ -487,13 +489,19 @@ function assertStoplessSchemaFeedbackLock() {
     'stopless-schema-feedback-lock',
     `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
     readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`),
-    'schemaGuidance.requiredFields).toContain(\'stopreason\')'
+    "expect((result.chat as any).choices?.[0]?.message?.reasoning_text).toContain('need more evidence')"
   );
   assertContains(
     'stopless-schema-feedback-lock',
     `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
     readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`),
-    'schemaGuidance.requiredFields).toContain(\'next_step\')'
+    "expect(cliStdout.routeHint).toBe('thinking')"
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+    readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`),
+    "expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop')"
   );
 
   const loopState = readRequired(`${ROOT}/tests/servertool/loop-state-block.spec.ts`);
@@ -2745,7 +2753,6 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-engine-skip-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_skip_json'],
     ['servertool-engine-skip-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEngineSkipJson'],
     ['servertool-engine-skip-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineSkipWithNative'],
-    ['servertool-engine-skip-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`), 'planServertoolEngineSkipWithNative'],
     ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'feature_id: hub.servertool_engine_runtime_action_contract'],
     ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'pub fn plan_servertool_engine_runtime_action'],
     ['servertool-engine-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_runtime_action_contract'],
@@ -2753,7 +2760,6 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-engine-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_runtime_action_json'],
     ['servertool-engine-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEngineRuntimeActionJson'],
     ['servertool-engine-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineRuntimeActionWithNative'],
-    ['servertool-engine-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`), 'planServertoolEngineRuntimeActionWithNative'],
     ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'feature_id: hub.servertool_execution_loop_runtime_action_contract'],
     ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'pub fn plan_servertool_execution_loop_runtime_action'],
     ['servertool-execution-loop-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_loop_runtime_action_contract'],
@@ -4684,7 +4690,7 @@ function checkStopVisibleTextRustOwner() {
   const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const stopMessageHandler = readRequired(STOP_MESSAGE_AUTO_HANDLER);
-  const servertoolEngine = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
+  const servertoolEngine = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
 
   for (const file of DELETED_STOP_VISIBLE_TEXT_TS_FILES) {
     if (existsSync(file)) {
@@ -4824,7 +4830,7 @@ function checkStopVisibleTextRustOwner() {
   );
   for (const [file, content] of [
     [STOP_MESSAGE_AUTO_HANDLER, stopMessageHandler],
-    [`${SERVERTOOL_TS_DIR}/engine.ts`, servertoolEngine],
+    [TS_ENGINE_ORCHESTRATION_SHELL, servertoolEngine],
   ]) {
     for (const keyword of [
       'isStopSchemaControlJson',
@@ -4859,7 +4865,7 @@ function checkStoplessOrchestrationActionRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const servertoolEngine = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
+  const servertoolEngine = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
 
   for (const [check, file, content, needle] of [
     ['stopless-orchestration-action-rust-owner', RUST_SERVERTOOL_STOPLESS_ORCHESTRATION, rustStoplessOrchestration, 'pub fn plan_stopless_orchestration_action'],
@@ -4867,7 +4873,7 @@ function checkStoplessOrchestrationActionRustOwner() {
     ['stopless-orchestration-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_orchestration_action_json'],
     ['stopless-orchestration-action-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessOrchestrationActionJson'],
     ['stopless-orchestration-action-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planStoplessOrchestrationActionWithNative'],
-    ['stopless-orchestration-action-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, servertoolEngine, 'planStoplessOrchestrationActionWithNative'],
+    ['stopless-orchestration-action-thin-shell', TS_ENGINE_ORCHESTRATION_SHELL, servertoolEngine, 'planStoplessOrchestrationActionShell'],
   ]) {
     assertContains(check, file, content, needle);
   }
@@ -4879,7 +4885,7 @@ function checkStoplessOrchestrationActionRustOwner() {
     if (servertoolEngine.includes(keyword)) {
       fail(
         'stopless-orchestration-action-no-ts-owner',
-        `Forbidden TS stopless orchestration semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/engine.ts`
+        `Forbidden TS stopless orchestration semantic "${keyword}" found in ${TS_ENGINE_ORCHESTRATION_SHELL.replace(`${ROOT}/`, '')}`
       );
     }
   }
@@ -5288,6 +5294,38 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   const enginePreflightShell = readRequired(TS_ENGINE_PREFLIGHT_SHELL);
+  const engineOrchestrationShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
+  for (const marker of [
+    'export async function runServerToolOrchestrationShell(',
+    'createServertoolObservation({',
+    'runEnginePreflight({',
+    'planServertoolEngineSkipWithNative({',
+    'recordServertoolEngineMatchSkipped({',
+    'recordServertoolEngineMatchHit({',
+    'runServertoolEnginePostflight({',
+  ]) {
+    if (!engineOrchestrationShell.includes(marker)) {
+      fail(
+        'servertool-engine-orchestration-shell-owner',
+        `engine-orchestration-shell.ts must keep engine orchestration owner marker ${marker}`
+      );
+    }
+  }
+  const engineObservationShell = readRequired(TS_ENGINE_OBSERVATION_SHELL);
+  for (const marker of [
+    'export function logServertoolNonBlocking(',
+    'export function createServertoolObservation(',
+    'createServertoolProgressLogger({',
+    'recordServertoolMatchSkipped({',
+    'recordServertoolMatchHit({',
+  ]) {
+    if (!engineObservationShell.includes(marker)) {
+      fail(
+        'servertool-engine-observation-shell-owner',
+        `engine-observation-shell.ts must keep engine observation owner marker ${marker}`
+      );
+    }
+  }
   for (const marker of [
     'export function runEnginePreflight(',
     'planServertoolEnginePreflightWithNative',
@@ -5704,6 +5742,19 @@ function checkServertoolEngineStoplessSessionThinShell() {
   const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
   const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
   for (const marker of [
+    'function logServerToolNonBlocking(',
+    'createServertoolProgressLogger({',
+    'recordServertoolMatchSkipped({',
+    'recordServertoolMatchHit({',
+  ]) {
+    if (engineSource.includes(marker)) {
+      fail(
+        'servertool-engine-observation-inline-semantic',
+        `engine.ts must not retain engine observation inline semantic marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
     'function normalizeStoplessSessionToken(',
     'function readStoplessSessionId(',
   ]) {
@@ -5714,14 +5765,16 @@ function checkServertoolEngineStoplessSessionThinShell() {
       );
     }
   }
-  if (!engineSource.includes('adapterContext: options.adapterContext')) {
+  if (!engineSource.includes('from \'./engine-orchestration-shell.js\'')) {
     fail(
       'servertool-engine-stopless-session-thin-shell',
-      'engine.ts must keep adapterContext passthrough into the native stopless orchestration plan'
+      'engine.ts must re-export orchestration from engine-orchestration-shell.ts'
     );
   }
   for (const marker of [
-    '...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),',
+    'resolveStoplessCliProjectionContext(',
+    'planStoplessCliProjectionContextWithNative(',
+    'buildServertoolCliProjectionForAutoFlowShell({',
     "if (runtimeAction.action === 'build_stop_message_cli_projection')",
   ]) {
     if (!postflightSource.includes(marker)) {
@@ -5733,7 +5786,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
   }
   pass(
     'servertool-engine-stopless-session-thin-shell',
-    'engine.ts reads stopless session truth through native stopless orchestration plan'
+    'engine orchestration and postflight shells keep stopless session truth through native stopless orchestration plan'
   );
 }
 
@@ -5808,19 +5861,6 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'planRuntimePreCommandStateRuntimeActionWithNative({',
         "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
         'function getArray(value: unknown): JsonValue[] {',
-      ],
-    ],
-    [
-      `${SERVERTOOL_TS_DIR}/engine.ts`,
-      [
-        'function extractStoplessReasoningText(',
-        'function extractStoplessLoopState(',
-        'function readStoplessRouteName(',
-        'function isDirectStoplessDisabled(',
-        'const loopState = extractStoplessLoopState(',
-        'reasoningText: extractStoplessReasoningText(',
-        'const hasServertoolCliProjectionContext =',
-        '.servertoolCliProjection',
       ],
     ],
     [
