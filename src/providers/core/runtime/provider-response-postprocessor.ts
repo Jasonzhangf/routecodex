@@ -37,6 +37,15 @@ export function buildPostprocessedProviderResponse(args: {
       : undefined;
     const restoredHeaders = restoreClientSessionHeaders(args.context, headersFromRecord);
     const result: UnknownObject = { sseStream };
+    if (processedRecord.data !== undefined) {
+      result.data = processedRecord.data;
+    }
+    if (processedRecord.status !== undefined) {
+      result.status = processedRecord.status;
+    }
+    if (processedRecord.statusText !== undefined) {
+      result.statusText = processedRecord.statusText;
+    }
     if (restoredHeaders && Object.keys(restoredHeaders).length > 0) {
       result.headers = restoredHeaders;
     }

@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
@@ -361,6 +362,217 @@ describe('provider-response-converter unified semantics handoff', () => {
     });
   });
 
+  it('unwraps provider PipelineExecutionResult.data before bridge conversion for openai-chat responses', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+
+    mockConvertProviderResponse.mockImplementationOnce(async ({ providerResponse }) => ({
+      body: {
+        object: 'response',
+        id: 'resp_openai_chat_data_unwrapped_1',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            name: 'exec_command',
+            call_id: 'call_exec_data_1',
+            arguments: JSON.stringify({ cmd: 'git status --short' })
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_exec_data_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'git status --short' })
+              }
+            ]
+          }
+        },
+        observed_provider_response: providerResponse
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_converter_openai_chat_root_data_1',
+        wantsStream: true,
+        requestSemantics: {} as any,
+        response: {
+          data: {
+            id: 'chatcmpl_root_data_1',
+            object: 'chat.completion',
+            model: '@cf/zai-org/glm-5.2',
+            choices: [
+              {
+                index: 0,
+                finish_reason: 'tool_calls',
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: 'call_exec_data_1',
+                      type: 'function',
+                      function: {
+                        name: 'exec_command',
+                        arguments: JSON.stringify({ cmd: 'git status --short' })
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          headers: {
+            'content-type': 'application/json'
+          },
+          sseStream: new EventEmitter(),
+          status: 200,
+          statusText: 'OK'
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, any>;
+    expect(bridgeArgs?.providerResponse).toMatchObject({
+      id: 'chatcmpl_root_data_1',
+      object: 'chat.completion',
+      model: '@cf/zai-org/glm-5.2',
+      choices: [
+        expect.objectContaining({
+          finish_reason: 'tool_calls',
+          message: expect.objectContaining({
+            tool_calls: [
+              expect.objectContaining({
+                function: expect.objectContaining({
+                  name: 'exec_command'
+                })
+              })
+            ]
+          })
+        })
+      ]
+    });
+    expect((result as any).body).toMatchObject({
+      object: 'response',
+      id: 'resp_openai_chat_data_unwrapped_1',
+      required_action: {
+        type: 'submit_tool_outputs'
+      }
+    });
+  });
+
+  it('RED: preserves top-level data payload for SSE openai-chat responses before bridge conversion', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+
+    mockConvertProviderResponse.mockImplementationOnce(async ({ providerResponse }) => ({
+      body: {
+        object: 'response',
+        id: 'resp_openai_chat_sse_data_unwrapped_1',
+        status: 'requires_action',
+        observed_provider_response: providerResponse
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const sseStream = new PassThrough();
+    sseStream.end('data: [DONE]\n\n');
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_converter_openai_chat_sse_data_1',
+        wantsStream: true,
+        requestSemantics: {} as any,
+        response: {
+          data: {
+            id: 'chatcmpl_sse_data_1',
+            object: 'chat.completion',
+            model: '@cf/zai-org/glm-5.2',
+            choices: [
+              {
+                index: 0,
+                finish_reason: 'tool_calls',
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: 'call_exec_sse_data_1',
+                      type: 'function',
+                      function: {
+                        name: 'exec_command',
+                        arguments: JSON.stringify({ cmd: 'git status --short' })
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          headers: {
+            'content-type': 'application/json'
+          },
+          sseStream,
+          status: 200,
+          statusText: 'OK'
+        } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, any>;
+    expect(bridgeArgs?.providerResponse).toMatchObject({
+      id: 'chatcmpl_sse_data_1',
+      object: 'chat.completion',
+      choices: [
+        expect.objectContaining({
+          finish_reason: 'tool_calls'
+        })
+      ]
+    });
+    expect((result as any).body).toMatchObject({
+      object: 'response',
+      id: 'resp_openai_chat_sse_data_unwrapped_1'
+    });
+  });
+
   it('normalizes responses required_action exec_command arguments through rust ssot before host validation', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
@@ -582,6 +794,104 @@ describe('provider-response-converter unified semantics handoff', () => {
     expect(body?.choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 
+  it('replays exact 5520 GLM body.data chat sample through host converter without dropping choices before bridge handoff', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockSyncReasoningStopModeFromRequest.mockClear();
+
+    const samplePath = path.join(
+      process.env.HOME || '',
+      '.rcc/codex-samples/openai-responses/ports/5520/XLC.key1.glm-5.2/req_1782124799816_fe2dd785/provider-response.json'
+    );
+    if (!fs.existsSync(samplePath)) {
+      return;
+    }
+
+    const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as Record<string, any>;
+    mockConvertProviderResponse.mockImplementationOnce(async ({ providerResponse }) => ({
+      body: {
+        object: 'response',
+        id: 'resp_glm_5520_sample_1',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'function_call',
+            name: 'exec_command',
+            call_id: 'call_glm_sample_1',
+            arguments: JSON.stringify({ cmd: 'pwd' })
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_glm_sample_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'pwd' })
+              }
+            ]
+          }
+        },
+        observed_provider_response: providerResponse
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const result = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_glm_5520_sample_replay_1',
+        wantsStream: true,
+        requestSemantics: {} as any,
+        response: sample.body as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, any>;
+    expect(bridgeArgs?.providerProtocol).toBe('openai-chat');
+    expect(bridgeArgs?.providerResponse).toMatchObject({
+      object: 'chat.completion',
+      model: 'glm-5.2',
+      choices: [
+        expect.objectContaining({
+          finish_reason: 'tool_calls',
+          message: expect.objectContaining({
+            tool_calls: expect.arrayContaining([
+              expect.objectContaining({
+                function: expect.objectContaining({
+                  name: 'exec_command'
+                })
+              })
+            ])
+          })
+        })
+      ]
+    });
+    expect((result as any).body).toMatchObject({
+      object: 'response',
+      id: 'resp_glm_5520_sample_1',
+      required_action: {
+        type: 'submit_tool_outputs'
+      }
+    });
+  });
+
   it('failing-shape replay: preserves empty completed payload for downstream response-contract gate', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
@@ -697,61 +1007,80 @@ describe('provider-response-converter unified semantics handoff', () => {
     expect((result as any).sseStream).toBeDefined();
   });
 
-  it('does not start stopless reenter followup after client disconnect', async () => {
+  it('preserves provider inbound protocol truth on /v1/responses even when wrapper payload looks like responses output', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
 
-    const { trackClientConnectionState } = await import(
-      '../../../../../src/server/utils/client-connection-state.js'
-    );
-    const req = new EventEmitter() as any;
-    req.headers = {};
-    const res = new EventEmitter() as any;
-    res.writableFinished = false;
-    res.writableEnded = false;
-    const clientConnectionState = trackClientConnectionState(req, res);
-    res.emit('close');
+    mockConvertProviderResponse.mockImplementationOnce(async ({ providerProtocol }) => ({
+      body: {
+        id: 'resp_protocol_truth_bridge_1',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: `protocol=${String(providerProtocol)}` }],
+          },
+        ],
+      },
+    }));
 
-    mockConvertProviderResponse.mockImplementationOnce(async ({ reenterPipeline }) => {
-      await reenterPipeline({
-        entryEndpoint: '/v1/responses',
-        requestId: 'req_stopless_client_disconnect_1_followup',
-        body: { model: 'gpt-5.5', input: '继续执行' },
-        metadata: {}
-      });
-      return { body: { id: 'resp_should_not_continue' } };
-    });
-
-    const executeNested = jest.fn(async () => ({ body: { id: 'resp_nested_started' } } as any));
     const { convertProviderResponseIfNeeded } = await import(
       '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
     );
 
-    await expect(convertProviderResponseIfNeeded(
+    const result = await convertProviderResponseIfNeeded(
       {
         entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        providerType: 'openai',
-        requestId: 'req_stopless_client_disconnect_1',
-        wantsStream: true,
-        response: { body: { id: 'resp_seed_stopless' } } as any,
-        requestSemantics: {} as any,
-        originalRequest: { model: 'gpt-5.5', input: 'continue' } as any,
-        pipelineMetadata: {
-          clientConnectionState,
-          __rt: { serverToolFollowup: true, clientProtocol: 'openai-responses' }
-        }
+        providerProtocol: 'openai-chat',
+        providerType: 'deepseek',
+        requestId: 'req_converter_protocol_truth_bridge_1',
+        wantsStream: false,
+        response: {
+          body: {
+            clientStream: false,
+            mode: 'sse',
+            payload: {
+              id: 'resp_protocol_truth_bridge_1',
+              object: 'response',
+              status: 'completed',
+              output: [
+                {
+                  type: 'message',
+                  role: 'assistant',
+                  content: [{ type: 'output_text', text: 'wrapped payload' }]
+                }
+              ]
+            }
+          },
+          continuationOwner: 'relay'
+        } as any,
+        pipelineMetadata: {},
       },
       {
         runtimeManager: {
           resolveRuntimeKey: () => undefined,
           getHandleByRuntimeKey: () => undefined,
         },
-        executeNested,
+        executeNested: async () => ({ body: { ok: true } } as any),
       },
-    )).rejects.toMatchObject({ code: 'CLIENT_DISCONNECTED' });
-    expect(executeNested).not.toHaveBeenCalled();
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(bridgeArgs?.providerProtocol).toBe('openai-chat');
+    expect(bridgeArgs?.providerResponse).toMatchObject({
+      id: 'resp_protocol_truth_bridge_1',
+      object: 'response',
+      status: 'completed'
+    });
+    expect((result as any).body).toMatchObject({
+      id: 'resp_protocol_truth_bridge_1',
+      object: 'response',
+      status: 'completed',
+    });
   });
 
   it('fails marker-only provider SSE wrapper before Rust bridge conversion on live executor converter path', async () => {

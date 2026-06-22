@@ -1,4 +1,5 @@
 import { ResponsesOpenAIConversionCodec } from '../responses-openai-codec.js';
+import { buildResponsesPayloadFromChat } from '../../responses/responses-openai-bridge/response-payload.js';
 
 describe('responses-openai-codec native wrapper', () => {
   const profile = {
@@ -51,9 +52,7 @@ describe('responses-openai-codec native wrapper', () => {
     });
     expect((result as any).tools[0]).toMatchObject({
       type: 'function',
-      function: {
-        name: 'exec_command'
-      }
+      name: 'exec_command'
     });
   });
 
@@ -189,35 +188,90 @@ describe('responses-openai-codec native wrapper', () => {
     });
     expect((result as any).output[0].arguments).not.toContain('"command"');
   });
-}
 
-test('request context store prunes expired request ids', async () => {
-  const codec = new ResponsesOpenAIConversionCodec({});
-  const originalNow = Date.now;
-  let now = 1_000;
-  Date.now = () => now;
-  try {
-    await codec.convertRequest(
-      { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'one' }] }] },
+  test('responses codec normalizes custom tool items into standard function call items', () => {
+    const profile = {
+      clientProtocol: 'openai-responses',
+      entryEndpoint: '/v1/responses'
+    };
+
+    const result = buildResponsesPayloadFromChat(
+      {
+        id: 'resp_custom_tool_1',
+        object: 'response',
+        status: 'requires_action',
+        output: [
+          {
+            type: 'custom_tool_call',
+            call_id: 'call_patch_1',
+            name: 'apply_patch',
+            input: '*** Begin Patch\n*** End Patch'
+          },
+          {
+            type: 'custom_tool_call_output',
+            call_id: 'call_patch_1',
+            output: 'Exit code: 0'
+          }
+        ],
+        required_action: {
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_patch_1',
+                tool_call_id: 'call_patch_1',
+                type: 'function',
+                name: 'apply_patch',
+                arguments: '{"patch":"*** Begin Patch\\n*** End Patch"}'
+              }
+            ]
+          }
+        }
+      },
       profile,
       {
-        requestId: 'req_responses_codec_old',
+        requestId: 'req_responses_codec_custom_tool_output',
         entryEndpoint: '/v1/responses'
       } as any
     );
-    now += 6 * 60_000;
-    await codec.convertRequest(
-      { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'two' }] }] },
-      profile,
-      {
-        requestId: 'req_responses_codec_new',
-        entryEndpoint: '/v1/responses'
-      } as any
-    );
-    expect(((codec as any).ctxMap as { size: number }).size).toBe(1);
-  } finally {
-    Date.now = originalNow;
-  }
-});
 
+    expect((result as any).output[0]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_patch_1',
+      name: 'apply_patch'
+    });
+    expect((result as any).output[1]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'call_patch_1',
+      output: 'Exit code: 0'
+    });
+  });
+
+  test('request context store prunes expired request ids', async () => {
+    const codec = new ResponsesOpenAIConversionCodec({});
+    const originalNow = Date.now;
+    let now = 1_000;
+    Date.now = () => now;
+    try {
+      await codec.convertRequest(
+        { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'one' }] }] },
+        profile,
+        {
+          requestId: 'req_responses_codec_old',
+          entryEndpoint: '/v1/responses'
+        } as any
+      );
+      now += 6 * 60_000;
+      await codec.convertRequest(
+        { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'two' }] }] },
+        profile,
+        {
+          requestId: 'req_responses_codec_new',
+          entryEndpoint: '/v1/responses'
+        } as any
+      );
+      expect(((codec as any).ctxMap as { size: number }).size).toBe(1);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 });

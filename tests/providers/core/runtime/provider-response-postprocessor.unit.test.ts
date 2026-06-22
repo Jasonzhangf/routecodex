@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
+import { PassThrough } from 'node:stream';
 
 import { buildPostprocessedProviderResponse } from '../../../../src/providers/core/runtime/provider-response-postprocessor.js';
 
@@ -60,5 +61,50 @@ describe('provider-response-postprocessor', () => {
     expect(String(text)).toContain('继续');
     expect(String(text)).toContain('Tool update_plan does not exists');
     expect(String(text)).toContain('Tool agent_list does not exists');
+  });
+
+  it('RED: preserves provider data payload when SSE side-channel is present', () => {
+    const stream = new PassThrough();
+    const out = buildPostprocessedProviderResponse({
+      response: {
+        sseStream: stream,
+        data: {
+          id: 'chatcmpl-sse-data',
+          object: 'chat.completion',
+          choices: [
+            {
+              index: 0,
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: 'preserve me'
+              }
+            }
+          ]
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          'content-type': 'application/json'
+        }
+      },
+      context: {
+        requestId: 'req-sse-data-1',
+        startTime: Date.now() - 10
+      } as any,
+      providerType: 'openai'
+    });
+
+    expect((out as any).sseStream).toBe(stream);
+    expect((out as any).data).toMatchObject({
+      id: 'chatcmpl-sse-data',
+      object: 'chat.completion',
+      choices: [
+        expect.objectContaining({
+          finish_reason: 'tool_calls'
+        })
+      ]
+    });
+    expect((out as any).status).toBe(200);
   });
 });

@@ -13,9 +13,6 @@ import {
   readStoplessGoalState,
   resolveRelayResponsesClientSseStreamForHttp,
 } from '../../../../modules/llmswitch/bridge.js';
-import {
-  normalizeProviderResponse
-} from './provider-response-utils.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
@@ -34,11 +31,6 @@ import { logPipelineStage } from '../../../utils/stage-logger.js';
 import {
   buildServerToolAdapterContext
 } from './servertool-adapter-context.js';
-import {
-  executeServerToolClientInjectDispatch,
-  executeServerToolReenterPipeline
-} from './servertool-followup-dispatch.js';
-import { throwIfClientCarrierAborted } from './request-executor-client-abort-block.js';
 import {
   compactFollowupLogReason,
   extractServerToolFollowupErrorLogDetails,
@@ -87,8 +79,16 @@ export function buildBridgeProviderResponseSeed(
   response: PipelineExecutionResult,
   body: unknown
 ): Record<string, unknown> | undefined {
+  const responseRecord = response as unknown as Record<string, unknown>;
   if (body && typeof body === 'object' && !Array.isArray(body)) {
     return body as Record<string, unknown>;
+  }
+  if (
+    responseRecord.data
+    && typeof responseRecord.data === 'object'
+    && !Array.isArray(responseRecord.data)
+  ) {
+    return responseRecord;
   }
   if (response.sseStream === undefined) {
     return undefined;
@@ -103,6 +103,30 @@ export function buildBridgeProviderResponseSeed(
     seed.headers = response.headers;
   }
   return seed;
+}
+
+function buildChoicesArrayBridgeDebugDetails(args: {
+  message: string;
+  bridgeProviderProtocol?: string;
+  bridgeSeed?: Record<string, unknown>;
+  bridgePayload?: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (!args.message.toLowerCase().includes('choices array')) {
+    return {};
+  }
+  const nestedData =
+    args.bridgePayload?.data
+    && typeof args.bridgePayload.data === 'object'
+    && !Array.isArray(args.bridgePayload.data)
+      ? (args.bridgePayload.data as Record<string, unknown>)
+      : undefined;
+  return {
+    bridgeProviderProtocol: args.bridgeProviderProtocol,
+    bridgeSeedKeys: args.bridgeSeed ? Object.keys(args.bridgeSeed) : undefined,
+    bridgePayloadKeys: args.bridgePayload ? Object.keys(args.bridgePayload) : undefined,
+    bridgePayloadHasChoices: Array.isArray(args.bridgePayload?.choices),
+    bridgePayloadHasDataChoices: Array.isArray(nestedData?.choices)
+  };
 }
 
 const GOAL_IRRECOVERABLE_ERROR_STOP_THRESHOLD = 5;
@@ -125,6 +149,25 @@ type NativeRespSemanticsModule = {
 };
 
 let nativeRespSemanticsModulePromise: Promise<NativeRespSemanticsModule> | null = null;
+
+function attachTimingBreakdown(response: PipelineExecutionResult): PipelineExecutionResult {
+  const clientInjectWaitMsRaw = response.usageLogInfo?.clientInjectWaitMs;
+  const clientInjectWaitMs =
+    typeof clientInjectWaitMsRaw === 'number' && Number.isFinite(clientInjectWaitMsRaw)
+      ? Math.max(0, Math.floor(clientInjectWaitMsRaw))
+      : undefined;
+  if (clientInjectWaitMs === undefined) {
+    return response;
+  }
+  return {
+    ...response,
+    timingBreakdown: {
+      ...(response.timingBreakdown ?? {}),
+      clientInjectWaitMs,
+      hubResponseExcludedMs: response.timingBreakdown?.hubResponseExcludedMs ?? clientInjectWaitMs
+    }
+  };
+}
 
 async function loadNativeRespSemanticsModule(): Promise<NativeRespSemanticsModule> {
   if (!nativeRespSemanticsModulePromise) {
@@ -633,6 +676,9 @@ export async function convertProviderResponseIfNeeded(
   deps: ConvertProviderResponseDeps
 ): Promise<PipelineExecutionResult> {
   let body = options.response.body;
+  let bridgeSeedForError: Record<string, unknown> | undefined;
+  let bridgePayloadForError: Record<string, unknown> | undefined;
+  let bridgeProviderProtocolForError: string | undefined;
   if (body && typeof body === 'object') {
     const wrapperError = extractSseWrapperError(body as Record<string, unknown>);
     if (wrapperError) {
@@ -716,30 +762,8 @@ export async function convertProviderResponseIfNeeded(
   if (!bridgeProviderResponseSeed) {
     return options.response;
   }
+  bridgeSeedForError = bridgeProviderResponseSeed;
   body = bridgeProviderResponseSeed;
-  let clientInjectWaitMs = 0;
-  const attachTimingBreakdown = (result: PipelineExecutionResult): PipelineExecutionResult => {
-    if (!(clientInjectWaitMs > 0)) {
-      return result;
-    }
-    const existing = result.timingBreakdown;
-    const nextClientInjectWaitMs = Math.max(
-      0,
-      Math.floor((existing?.clientInjectWaitMs ?? 0) + clientInjectWaitMs)
-    );
-    const nextHubResponseExcludedMs = Math.max(
-      0,
-      Math.floor((existing?.hubResponseExcludedMs ?? 0) + clientInjectWaitMs)
-    );
-    return {
-      ...result,
-      timingBreakdown: {
-        ...existing,
-        clientInjectWaitMs: nextClientInjectWaitMs,
-        hubResponseExcludedMs: nextHubResponseExcludedMs
-      }
-    };
-  };
   const isDirectResponsesPrebuiltSsePassthrough = shouldAllowDirectResponsesPrebuiltSsePassthrough({
     entryEndpoint: options.entryEndpoint || entry,
     providerProtocol: options.providerProtocol,
@@ -752,7 +776,7 @@ export async function convertProviderResponseIfNeeded(
       providerProtocol: options.providerProtocol,
       continuationOwner: options.response.continuationOwner
     });
-    return attachTimingBreakdown(options.response);
+    return options.response;
   }
   let adapterContext: Record<string, unknown> | undefined;
   try {
@@ -797,163 +821,6 @@ export async function convertProviderResponseIfNeeded(
       });
     }
 
-    const providerInvoker = async (invokeOptions: {
-      providerKey: string;
-      providerType?: string;
-      modelId?: string;
-      providerProtocol: string;
-      payload: Record<string, unknown>;
-      entryEndpoint: string;
-      requestId: string;
-      routeHint?: string;
-    }): Promise<{ providerResponse: Record<string, unknown> }> => {
-      const providerInvokeStartMs = Date.now();
-      logPipelineStage('convert.provider_invoke.start', invokeOptions.requestId, {
-        providerKey: invokeOptions.providerKey,
-        providerProtocol: invokeOptions.providerProtocol,
-        routeHint: invokeOptions.routeHint
-      });
-      if (invokeOptions.routeHint) {
-        const carrier = invokeOptions.payload as { metadata?: Record<string, unknown> };
-        const existingMeta =
-          carrier.metadata && typeof carrier.metadata === 'object'
-            ? (carrier.metadata as Record<string, unknown>)
-            : {};
-        carrier.metadata = {
-          ...existingMeta,
-          routeHint: existingMeta.routeHint ?? invokeOptions.routeHint
-        };
-      }
-
-      const runtimeKey = deps.runtimeManager.resolveRuntimeKey(invokeOptions.providerKey);
-      if (!runtimeKey) {
-        throw new Error(`Runtime for provider ${invokeOptions.providerKey} not initialized`);
-      }
-      logPipelineStage('convert.provider_invoke.runtime_resolved', invokeOptions.requestId, {
-        providerKey: invokeOptions.providerKey,
-        runtimeKey
-      });
-      const handle = deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
-      if (!handle) {
-        throw new Error(`Provider runtime ${runtimeKey} not found`);
-      }
-      logPipelineStage('convert.provider_invoke.send.start', invokeOptions.requestId, {
-        providerKey: invokeOptions.providerKey,
-        runtimeKey
-      });
-      const providerSendStartMs = Date.now();
-      const providerResponse = await handle.instance.processIncoming(invokeOptions.payload);
-      logPipelineStage('convert.provider_invoke.send.completed', invokeOptions.requestId, {
-        providerKey: invokeOptions.providerKey,
-        runtimeKey,
-        elapsedMs: Date.now() - providerSendStartMs
-      });
-      const normalizeStartMs = Date.now();
-      const normalized = normalizeProviderResponse(providerResponse);
-      logPipelineStage('convert.provider_invoke.normalize.completed', invokeOptions.requestId, {
-        providerKey: invokeOptions.providerKey,
-        runtimeKey,
-        status: normalized.status,
-        elapsedMs: Date.now() - normalizeStartMs
-      });
-      const normalizedBodyRecord =
-        normalized.body && typeof normalized.body === 'object'
-          ? (normalized.body as Record<string, unknown>)
-          : undefined;
-      const bodyPayload =
-        extractBridgeProviderResponsePayload(normalizedBodyRecord)
-        ?? (normalizedBodyRecord
-          ? normalizedBodyRecord
-          : (normalized as unknown as Record<string, unknown>));
-      logPipelineStage('convert.provider_invoke.completed', invokeOptions.requestId, {
-        providerKey: invokeOptions.providerKey,
-        runtimeKey,
-        elapsedMs: Date.now() - providerInvokeStartMs
-      });
-      return { providerResponse: bodyPayload };
-    };
-
-    const reenterPipeline = async (reenterOpts: {
-      entryEndpoint: string;
-      requestId: string;
-      body?: Record<string, unknown>;
-      metadata?: Record<string, unknown>;
-    }): Promise<{ body?: Record<string, unknown>; sseStream?: unknown; format?: string }> => {
-      throwIfClientCarrierAborted(options.pipelineMetadata);
-      throwIfClientCarrierAborted(reenterOpts.metadata);
-      const reenterStartMs = Date.now();
-      const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
-      logPipelineStage('convert.reenter.start', reenterOpts.requestId, {
-        entryEndpoint: nestedEntry
-      });
-      const nestedResult = await executeServerToolReenterPipeline({
-        entryEndpoint: reenterOpts.entryEndpoint,
-        fallbackEntryEndpoint: options.entryEndpoint || entry,
-        requestId: reenterOpts.requestId,
-        body: reenterOpts.body,
-        metadata: reenterOpts.metadata,
-        baseMetadata: responseMetadataBag,
-        requestSemantics: options.requestSemantics,
-        executeNested: deps.executeNested,
-        onMergeRuntimeMetaError: (error, details) => {
-          logProviderResponseConverterNonBlockingError('reenter.buildNestedMetadata.mergeRuntimeMeta', error, {
-            requestId: details.requestId,
-            entryEndpoint: details.entryEndpoint
-          });
-        }
-      });
-      logPipelineStage('convert.reenter.completed', reenterOpts.requestId, {
-        entryEndpoint: nestedEntry,
-        elapsedMs: Date.now() - reenterStartMs
-      });
-      return nestedResult;
-    };
-
-    const clientInjectDispatch = async (injectOpts: {
-      entryEndpoint: string;
-      requestId: string;
-      body?: Record<string, unknown>;
-      metadata?: Record<string, unknown>;
-    }): Promise<{ ok: boolean; reason?: string }> => {
-      const clientInjectAttemptStartedAt = Date.now();
-      const clientInjectStartMs = Date.now();
-      logPipelineStage('convert.client_inject.start', injectOpts.requestId, {
-        entryEndpoint: injectOpts.entryEndpoint || options.entryEndpoint || entry
-      });
-      const nestedEntry = injectOpts.entryEndpoint || options.entryEndpoint || entry;
-      const injectResult = await executeServerToolClientInjectDispatch({
-        entryEndpoint: injectOpts.entryEndpoint,
-        fallbackEntryEndpoint: options.entryEndpoint || entry,
-        requestId: injectOpts.requestId,
-        body: injectOpts.body,
-        metadata: injectOpts.metadata,
-        baseMetadata: responseMetadataBag,
-        requestSemantics: options.requestSemantics,
-        onMergeRuntimeMetaError: (error, details) => {
-          logProviderResponseConverterNonBlockingError('clientInjectDispatch.mergeRuntimeMeta', error, {
-            requestId: details.requestId,
-            entryEndpoint: details.entryEndpoint
-          });
-        }
-      });
-      clientInjectWaitMs += Math.max(0, Date.now() - clientInjectAttemptStartedAt);
-      if (injectResult.ok) {
-        logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
-          entryEndpoint: nestedEntry,
-          handled: true,
-          elapsedMs: Date.now() - clientInjectStartMs
-        });
-        return { ok: true };
-      }
-      logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
-        entryEndpoint: nestedEntry,
-        handled: false,
-        reason: injectResult.reason || 'client_inject_not_handled',
-        elapsedMs: Date.now() - clientInjectStartMs
-      });
-      return { ok: false, reason: injectResult.reason || 'client_inject_not_handled' };
-    };
-
     logPipelineStage('convert.bridge.start', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol: options.providerProtocol,
@@ -963,6 +830,9 @@ export async function convertProviderResponseIfNeeded(
     const bridgeProviderResponse =
       extractBridgeProviderResponsePayload(bridgeProviderResponseSeed)
       ?? bridgeProviderResponseSeed;
+    bridgePayloadForError = bridgeProviderResponse;
+    const bridgeProviderProtocol = options.providerProtocol;
+    bridgeProviderProtocolForError = bridgeProviderProtocol;
     const effectiveRequestSemantics = (() => {
       const existing = asFlatRecord(options.requestSemantics);
       const existingTools = asFlatRecord(existing?.tools);
@@ -983,16 +853,13 @@ export async function convertProviderResponseIfNeeded(
       };
     })();
     const converted = await bridgeConvertProviderResponse({
-      providerProtocol: options.providerProtocol,
+      providerProtocol: bridgeProviderProtocol,
       providerResponse: bridgeProviderResponse,
       context: adapterContext,
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
       requestSemantics: effectiveRequestSemantics,
-      providerInvoker: serverToolsEnabled ? providerInvoker : undefined,
-      stageRecorder,
-      reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined,
-      clientInjectDispatch: serverToolsEnabled ? clientInjectDispatch : undefined
+      stageRecorder
     });
     syncAdapterContextRuntimeBackToPipelineMetadata({
       pipelineMetadata: options.pipelineMetadata,
@@ -1000,7 +867,7 @@ export async function convertProviderResponseIfNeeded(
     });
     logPipelineStage('convert.bridge.completed', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,
-      providerProtocol: options.providerProtocol,
+      providerProtocol: bridgeProviderProtocol,
       hasSse: Boolean(converted.sseStream),
       hasBody: converted.body !== undefined && converted.body !== null,
       elapsedMs: Date.now() - bridgeStartMs
@@ -1138,7 +1005,13 @@ export async function convertProviderResponseIfNeeded(
         code: errCode,
         upstreamCode: upstreamCode || detailUpstreamCode,
         reason: detailReason,
-        message
+        message,
+        ...buildChoicesArrayBridgeDebugDetails({
+          message,
+          bridgeProviderProtocol: bridgeProviderProtocolForError,
+          bridgeSeed: bridgeSeedForError,
+          bridgePayload: bridgePayloadForError
+        })
       });
       throw error;
     }
@@ -1259,7 +1132,13 @@ export async function convertProviderResponseIfNeeded(
       code: errCode,
       upstreamCode: upstreamCode || detailUpstreamCode,
       reason: detailReason,
-      message
+      message,
+      ...buildChoicesArrayBridgeDebugDetails({
+        message,
+        bridgeProviderProtocol: bridgeProviderProtocolForError,
+        bridgeSeed: bridgeSeedForError,
+        bridgePayload: bridgePayloadForError
+      })
     });
     if (isVerboseErrorLoggingEnabled()) {
       console.error('[RequestExecutor] Failed to convert provider response via llmswitch-core', error);

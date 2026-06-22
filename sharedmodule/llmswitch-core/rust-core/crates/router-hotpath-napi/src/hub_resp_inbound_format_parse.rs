@@ -334,6 +334,13 @@ fn materialize_openai_chat_response_payload(payload: &Value) -> Result<Value, St
         normalize_openai_chat_message_tool_calls_arrays(&mut materialized);
         return Ok(materialized);
     }
+    if let Some(data) = payload.get("data") {
+        if data.get("choices").and_then(Value::as_array).is_some() {
+            let mut materialized = data.clone();
+            normalize_openai_chat_message_tool_calls_arrays(&mut materialized);
+            return Ok(materialized);
+        }
+    }
     if let Some(body_text) = payload
         .get("bodyText")
         .and_then(Value::as_str)
@@ -346,6 +353,13 @@ fn materialize_openai_chat_response_payload(payload: &Value) -> Result<Value, St
             let mut materialized = body.clone();
             normalize_openai_chat_message_tool_calls_arrays(&mut materialized);
             return Ok(materialized);
+        }
+        if let Some(data) = body.get("data") {
+            if data.get("choices").and_then(Value::as_array).is_some() {
+                let mut materialized = data.clone();
+                normalize_openai_chat_message_tool_calls_arrays(&mut materialized);
+                return Ok(materialized);
+            }
         }
         if let Some(body_text) = body
             .get("bodyText")
@@ -1158,6 +1172,77 @@ mod tests {
         assert!(result
             .unwrap_err()
             .contains("OpenAI chat response must contain choices array"));
+    }
+
+    #[test]
+    fn test_parse_openai_chat_provider_wrapper_body_data() {
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "body": {
+                    "status": 200,
+                    "data": {
+                        "id": "chatcmpl_wrapped_1",
+                        "object": "chat.completion",
+                        "model": "deepseek-ai/deepseek-v4-pro",
+                        "choices": [{
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "wrapped hello"},
+                            "finish_reason": "stop"
+                        }]
+                    }
+                }
+            }),
+            protocol: "openai-chat".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        assert_eq!(result.envelope.format, "openai-chat");
+        assert_eq!(
+            result.envelope.metadata.as_ref().unwrap()["model"],
+            "deepseek-ai/deepseek-v4-pro"
+        );
+        assert_eq!(result.envelope.payload["choices"][0]["message"]["content"], "wrapped hello");
+    }
+
+    #[test]
+    fn test_parse_openai_chat_root_data_wrapper() {
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "data": {
+                    "id": "chatcmpl_root_data_1",
+                    "object": "chat.completion",
+                    "model": "@cf/zai-org/glm-5.2",
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": "call_root_data_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "exec_command",
+                                    "arguments": "{\"cmd\":\"pwd\"}"
+                                }
+                            }]
+                        },
+                        "finish_reason": "tool_calls"
+                    }]
+                }
+            }),
+            protocol: "openai-chat".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        assert_eq!(result.envelope.format, "openai-chat");
+        assert_eq!(
+            result.envelope.metadata.as_ref().unwrap()["model"],
+            "@cf/zai-org/glm-5.2"
+        );
+        assert_eq!(
+            result.envelope.payload["choices"][0]["message"]["tool_calls"][0]["id"],
+            "call_root_data_1"
+        );
     }
 
     #[test]

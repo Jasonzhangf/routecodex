@@ -28,6 +28,36 @@ function normalizeResponsesToolCallArgumentsForClient(responsesPayload: Record<s
   Object.assign(responsesPayload, normalized);
 }
 
+function normalizeResponsesClientOutputItems(payload: Record<string, unknown>): void {
+  const output = Array.isArray(payload.output) ? payload.output : undefined;
+  if (!output?.length) {
+    return;
+  }
+  payload.output = output.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return item;
+    }
+    const record = item as Record<string, unknown>;
+    const type = typeof record.type === 'string' ? record.type.trim().toLowerCase() : '';
+    if (type === 'custom_tool_call') {
+      return {
+        ...record,
+        type: 'function_call',
+        ...(typeof record.name === 'string' && record.name.trim().length
+          ? { name: record.name.trim() }
+          : {}),
+      };
+    }
+    if (type === 'custom_tool_call_output') {
+      return {
+        ...record,
+        type: 'function_call_output',
+      };
+    }
+    return item;
+  });
+}
+
 function unwrapData(value: Record<string, unknown>): Record<string, unknown> {
   let current: any = value;
   const seen = new Set<any>();
@@ -89,6 +119,10 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
   if (!response || typeof response !== 'object') return payload;
 
   if ((response as any).object === 'response' && Array.isArray((response as any).output)) {
+    normalizeResponsesClientOutputItems(response);
+    if ((response as any).metadata) {
+      stripInternalToolingMetadata((response as any).metadata);
+    }
     return response;
   }
 
@@ -232,6 +266,7 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
     }
   }
   normalizeResponsesToolCallArgumentsForClient(out, context);
+  normalizeResponsesClientOutputItems(out);
   if ((out as any).metadata) {
     stripInternalToolingMetadata((out as any).metadata);
   }
