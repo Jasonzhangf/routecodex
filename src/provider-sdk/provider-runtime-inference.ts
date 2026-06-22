@@ -339,16 +339,14 @@ function inferMultimodalRouteTargetFromConfig(
   providerNode: UnknownRecord,
   args: { providerId: string }
 ): string | undefined {
+  // Per Jason 2026-06-20, route targets must reference canonical model keys
+  // declared in `provider.models`. `provider.models.<id>.aliases` is
+  // display-only for `/v1/models` and must never flow into VR routed targets
+  // or provider wire `body.model`. Walk only the declared canonical model
+  // keys (not their aliases) and return the first multimodal-capable entry.
   for (const [modelId, modelNode] of Object.entries(normalizeModelsNode(providerNode.models))) {
     if (!modelSupportsMultimodal(modelId, modelNode)) {
       continue;
-    }
-    const aliases = Array.isArray(modelNode.aliases)
-      ? modelNode.aliases.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-      : [];
-    const preferredAlias = aliases.find((alias) => /(^|[-._])(vl|vision|image)([-._]|$)/i.test(alias));
-    if (preferredAlias) {
-      return `${args.providerId}.${preferredAlias}`;
     }
     if (/(^|[-._])(vl|vision|image)([-._]|$)/i.test(modelId)) {
       return `${args.providerId}.${modelId}`;
