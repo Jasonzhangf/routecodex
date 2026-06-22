@@ -13,15 +13,26 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain('function normalizeStoplessSessionToken(');
     expect(source).not.toContain('function readStoplessSessionId(');
     expect(source).toContain('adapterContext: options.adapterContext');
+    expect(source).not.toContain('...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),');
+  });
+
+  test('runServerToolOrchestration delegates stopless session projection into the postflight shell', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
+      'utf8'
+    );
+
     expect(source).toContain('...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),');
+    expect(source).toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
   });
 
   test('runServerToolOrchestration does not locally derive stopless CLI projection context', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
       'utf8'
     );
 
+    expect(source).toContain('resolveStoplessCliProjectionContext(');
     expect(source).toContain('planStoplessCliProjectionContextWithNative');
     expect(source).not.toContain('const triggerHint = [');
     expect(source).not.toContain('const schemaFeedbackCandidate = [');
@@ -47,15 +58,15 @@ describe('engine stopless session thin-shell guard', () => {
 
   test('runServerToolOrchestration routes synthetic/direct preflight through native planning', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
       'utf8'
     );
 
     expect(source).toContain('planServertoolEnginePreflightWithNative');
-    expect(source).not.toContain('if (\n    containsSyntheticRouteCodexControlText(options.chat)\n  )');
-    expect(source).not.toContain('if (stoplessIsDisabledOnDirectRoute(options.adapterContext))');
-    expect(source).not.toContain("from './direct-stopless-route-guard.js'");
-    expect(source).toContain('adapterContext: options.adapterContext as Record<string, unknown>');
+    expect(source).toContain('inspectStopGatewaySignal(');
+    expect(source).toContain('attachStopGatewayContext(');
+    expect(source).toContain('containsSyntheticRouteCodexControlText(');
+    expect(source).toContain('return_original_chat_direct_passthrough');
   });
 
   test('runServerToolOrchestration routes passthrough/no-execution skip through native planning', () => {

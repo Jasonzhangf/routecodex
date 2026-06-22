@@ -1,0 +1,133 @@
+import { beforeEach, describe, expect, jest, test } from '@jest/globals';
+
+const inspectStopGatewaySignalMock = jest.fn();
+const attachStopGatewayContextMock = jest.fn();
+const containsSyntheticRouteCodexControlTextMock = jest.fn(() => false);
+const planServertoolEnginePreflightWithNativeMock = jest.fn();
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/stop-gateway-context.js',
+  () => ({
+    inspectStopGatewaySignal: inspectStopGatewaySignalMock,
+    attachStopGatewayContext: attachStopGatewayContextMock,
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.js',
+  () => ({
+    containsSyntheticRouteCodexControlText: containsSyntheticRouteCodexControlTextMock,
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    planServertoolEnginePreflightWithNative: planServertoolEnginePreflightWithNativeMock,
+  })
+);
+
+const { runEnginePreflight } = await import(
+  '../../sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.js'
+);
+
+describe('engine-preflight-shell', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    inspectStopGatewaySignalMock.mockReturnValue({
+      observed: true,
+      eligible: true,
+      source: 'chat',
+      reason: 'stop_schema_missing',
+      choiceIndex: 0,
+      hasToolCalls: false,
+    });
+    planServertoolEnginePreflightWithNativeMock.mockReturnValue({
+      action: 'continue_to_engine',
+    });
+  });
+
+  test('keeps engine preflight planning and stop-gateway wiring in the owner shell', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile(
+        'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
+        'utf8'
+      )
+    );
+
+    expect(source).toContain('planServertoolEnginePreflightWithNative');
+    expect(source).toContain('inspectStopGatewaySignal(');
+    expect(source).toContain('attachStopGatewayContext(');
+    expect(source).toContain('containsSyntheticRouteCodexControlText(');
+  });
+
+  test('returns original chat when native preflight says so', () => {
+    planServertoolEnginePreflightWithNativeMock.mockReturnValue({
+      action: 'return_original_chat',
+    });
+
+    const result = runEnginePreflight({
+      chat: { id: 'chat-1' } as any,
+      adapterContext: {} as any,
+      logStopEntry: jest.fn(),
+      logStopCompare: jest.fn(),
+    });
+
+    expect(result).toEqual({
+      kind: 'return_original_chat',
+      chat: { id: 'chat-1' },
+    });
+    expect(attachStopGatewayContextMock).not.toHaveBeenCalled();
+  });
+
+  test('returns direct passthrough and logs trigger when native preflight disables stopless', () => {
+    const logStopEntry = jest.fn();
+    const logStopCompare = jest.fn();
+    planServertoolEnginePreflightWithNativeMock.mockReturnValue({
+      action: 'return_original_chat_direct_passthrough',
+    });
+
+    const result = runEnginePreflight({
+      chat: { id: 'chat-2' } as any,
+      adapterContext: {} as any,
+      logStopEntry,
+      logStopCompare,
+    });
+
+    expect(result).toEqual({
+      kind: 'return_original_chat_direct_passthrough',
+      chat: { id: 'chat-2' },
+    });
+    expect(attachStopGatewayContextMock).toHaveBeenCalled();
+    expect(logStopEntry).toHaveBeenCalledWith(
+      'trigger',
+      'skipped_direct_passthrough',
+      expect.objectContaining({ reason: 'stop_schema_missing', source: 'chat', eligible: true })
+    );
+    expect(logStopCompare).toHaveBeenCalledWith('trigger');
+  });
+
+  test('continues with stop signal and logs observed entry', () => {
+    const logStopEntry = jest.fn();
+    const logStopCompare = jest.fn();
+
+    const result = runEnginePreflight({
+      chat: { id: 'chat-3' } as any,
+      adapterContext: {} as any,
+      logStopEntry,
+      logStopCompare,
+    });
+
+    expect(result).toEqual({
+      kind: 'continue',
+      stopSignal: expect.objectContaining({ observed: true, reason: 'stop_schema_missing' }),
+    });
+    expect(attachStopGatewayContextMock).toHaveBeenCalled();
+    expect(logStopEntry).toHaveBeenCalledWith(
+      'entry',
+      'observed',
+      expect.objectContaining({ reason: 'stop_schema_missing', source: 'chat', eligible: true })
+    );
+    expect(logStopCompare).not.toHaveBeenCalled();
+  });
+});

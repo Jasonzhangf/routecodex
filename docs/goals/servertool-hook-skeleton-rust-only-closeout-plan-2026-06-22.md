@@ -61,6 +61,7 @@
 - 新增 hook-governed skeleton gate，禁止 TS：
   - 排序 / 必选 / schema 判定 / terminal 判定 / followup payload 构造 / 工具输出拼装
 - gate 必须先红，再补修复。
+- 已新增 `tests/servertool/engine-mainline-residue.red.spec.ts`，当前为红，锁住 `engine.ts` 仍含本地主链 followup/reenter/terminal/projection 分支。
 
 ### Phase B：收 `execution-dispatch-outcome-shell.ts`
 - 当前状态：已基本完成。

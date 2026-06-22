@@ -106,7 +106,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-shell.js',
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     runServertoolHandler: jest.fn(async (handler: any, context: any) => await handler(context)),
     materializeServertoolPlannedResult: jest.fn(async (planned: any) => {
@@ -245,12 +245,10 @@ describe('servertool auto hook trace', () => {
       priority: 40,
       order: 2,
       handler: async () => ({
-        finalize: async () => ({
-          chatResponse: { ok: true } as JsonObject,
-          execution: {
-            flowId: 'stop_message_flow'
-          }
-        })
+        chatResponse: { ok: true } as JsonObject,
+        execution: {
+          flowId: 'stop_message_flow'
+        }
       })
     });
 
@@ -285,12 +283,10 @@ describe('servertool auto hook trace', () => {
         priority: 40,
         order: 2,
         handler: async () => ({
-          finalize: async () => ({
-            chatResponse: { ok: true } as JsonObject,
-            execution: {
-              flowId: 'stop_message_flow'
-            }
-          })
+          chatResponse: { ok: true } as JsonObject,
+          execution: {
+            flowId: 'stop_message_flow'
+          }
         })
       }
     );
@@ -329,12 +325,10 @@ describe('servertool auto hook trace', () => {
         priority: 40,
         order: 2,
         handler: async () => ({
-          finalize: async () => ({
-            chatResponse: { ok: true } as JsonObject,
-            execution: {
-              flowId: 'stop_message_flow'
-            }
-          })
+          chatResponse: { ok: true } as JsonObject,
+          execution: {
+            flowId: 'stop_message_flow'
+          }
         })
       }
     );

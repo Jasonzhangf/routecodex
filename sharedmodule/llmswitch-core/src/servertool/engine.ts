@@ -3,7 +3,6 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions } from './types.js';
 import { runServerSideToolEngine } from './server-side-tools.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
-import { attachStopGatewayContext, inspectStopGatewaySignal } from './stop-gateway-context.js';
 import { createServertoolProgressLogger } from './progress-log-block.js';
 import { recordServertoolMatchHit, recordServertoolMatchSkipped } from './match-log-block.js';
 import {
@@ -11,25 +10,21 @@ import {
   withTimeout
 } from './timeout-error-block.js';
 import {
-  containsSyntheticRouteCodexControlText,
   resolveServerToolTimeoutMs
 } from './orchestration-policy-block.js';
 import {
   runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
-import { persistPendingServerToolInjection } from './pending-injection-block.js';
-import { buildServertoolCliProjectionForAutoFlow as buildServertoolCliProjectionForAutoFlowShell } from './cli-projection.js';
 import {
-  extractCurrentAssistantStopTextWithNative,
-  planServertoolEnginePreflightWithNative,
+  runServertoolEnginePostflight,
+  resolveStoplessCliProjectionContext
+} from './engine-postflight-shell.js';
+import {
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineSkipWithNative,
-  planStoplessCliProjectionContextWithNative,
   planStoplessOrchestrationActionWithNative as planStoplessOrchestrationActionShell,
-  resolveRuntimeStopMessageStateFromAdapterContextWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { readRuntimeControlFromBoundMetadataCenter } from './stopless-metadata-carrier.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
+import { runEnginePreflight } from './engine-preflight-shell.js';
 
 // native-router-hotpath contract:
 // servertool followup metadata/injection shape is consumed by Rust hub pipeline
@@ -69,54 +64,6 @@ type ServerToolEngineResult = Awaited<ReturnType<typeof runServerSideToolEngine>
 type ServerToolEngineRunner = (
   overrides: Partial<ServerSideToolEngineOptions>
 ) => Promise<ServerToolEngineResult>;
-
-function resolveStoplessCliProjectionContext(
-  execution: ServerToolEngineResult['execution'],
-  adapterContext?: unknown,
-  chatResponse?: JsonObject
-): {
-  reasoningText: string;
-  repeatCount: number;
-  maxRepeats: number;
-  triggerHint?: string;
-  schemaFeedback?: JsonObject;
-} {
-  const context = execution?.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
-    ? execution.context as Record<string, unknown>
-    : {};
-  const adapterRecord =
-    adapterContext && typeof adapterContext === 'object' && !Array.isArray(adapterContext)
-      ? adapterContext as Record<string, unknown>
-      : undefined;
-  const metadata =
-    adapterRecord?.metadata &&
-    typeof adapterRecord.metadata === 'object' &&
-    !Array.isArray(adapterRecord.metadata)
-      ? adapterRecord.metadata as Record<string, unknown>
-      : undefined;
-  const runtimeMetadata = adapterRecord ? readRuntimeMetadata(adapterRecord) : undefined;
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(metadata);
-  const stoplessControl =
-    runtimeControl?.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)
-      ? runtimeControl.stopless as Record<string, unknown>
-      : {};
-  const runtimeSnapshot = resolveRuntimeStopMessageStateFromAdapterContextWithNative({
-    adapterContext: adapterRecord ?? null,
-    ...(runtimeMetadata ? { runtimeMetadata } : {})
-  });
-  return planStoplessCliProjectionContextWithNative({
-    executionContext: context,
-    stoplessControl,
-    runtimeSnapshot: runtimeSnapshot
-      ? {
-          used: runtimeSnapshot.used,
-          maxRepeats: runtimeSnapshot.maxRepeats
-        }
-      : undefined,
-    chatStopText: extractCurrentAssistantStopTextWithNative(chatResponse ?? null),
-    adapterStopText: extractCurrentAssistantStopTextWithNative(adapterRecord ?? null)
-  });
-}
 
 function createServerToolEngineRunner(args: {
   engineOptions: ServerSideToolEngineOptions;
@@ -166,40 +113,19 @@ export async function runServerToolOrchestration(
     logNonBlocking: logServerToolNonBlocking
   });
 
-  const stopSignal = inspectStopGatewaySignal(options.chat);
-  const preflightAction = planServertoolEnginePreflightWithNative({
-    hasSyntheticControlText: containsSyntheticRouteCodexControlText(options.chat),
-    stopSignalObserved: stopSignal.observed,
-    adapterContext: options.adapterContext as Record<string, unknown>
+  const preflight = runEnginePreflight({
+    chat: options.chat,
+    adapterContext: options.adapterContext,
+    logStopEntry,
+    logStopCompare
   });
-  if (preflightAction.action === 'return_original_chat') {
+  if (preflight.kind === 'return_original_chat' || preflight.kind === 'return_original_chat_direct_passthrough') {
     return {
-      chat: options.chat,
+      chat: preflight.chat,
       executed: false
     };
   }
-  attachStopGatewayContext(options.adapterContext, stopSignal);
-  if (stopSignal.observed) {
-    if (preflightAction.action === 'return_original_chat_direct_passthrough') {
-      logStopEntry('trigger', 'skipped_direct_passthrough', {
-        reason: stopSignal.reason,
-        source: stopSignal.source,
-        eligible: stopSignal.eligible
-      });
-      logStopCompare('trigger');
-      return {
-        chat: options.chat,
-        executed: false
-      };
-    }
-    logStopEntry('entry', 'observed', {
-      reason: stopSignal.reason,
-      source: stopSignal.source,
-      eligible: stopSignal.eligible,
-      ...(typeof stopSignal.choiceIndex === 'number' ? { choiceIndex: stopSignal.choiceIndex } : {}),
-      ...(typeof stopSignal.hasToolCalls === 'boolean' ? { hasToolCalls: stopSignal.hasToolCalls } : {})
-    });
-  }
+  const stopSignal = preflight.stopSignal;
 
   const serverToolTimeoutMs = resolveServerToolTimeoutMs();
   const effectiveServerToolTimeoutMs = serverToolTimeoutMs;
@@ -280,146 +206,24 @@ export async function runServerToolOrchestration(
     logStopCompare('trigger', flowId);
   }
   logProgress(1, totalSteps, 'matched', { flowId });
-  if (options.stageRecorder) {
-    try {
-      const finalChat = engineResult.finalChatResponse as Record<string, unknown>;
-      const toolOutputs = Array.isArray(finalChat.tool_outputs) ? finalChat.tool_outputs : [];
-      const firstToolOutput =
-        toolOutputs.length > 0 && toolOutputs[0] && typeof toolOutputs[0] === 'object' && !Array.isArray(toolOutputs[0])
-          ? (toolOutputs[0] as Record<string, unknown>)
-          : null;
-      const summary: Record<string, unknown> = {
-        mode: engineResult.mode,
-        flowId: engineResult.execution?.flowId,
-        hasFollowup: Boolean(engineResult.execution?.followup),
-        pendingInjection: Boolean(engineResult.pendingInjection),
-        toolOutputCount: toolOutputs.length
-      };
-      if (firstToolOutput) {
-        if (typeof firstToolOutput.tool_name === 'string') {
-          summary.toolName = firstToolOutput.tool_name;
-        }
-        if (typeof firstToolOutput.tool_call_id === 'string') {
-          summary.toolCallId = firstToolOutput.tool_call_id;
-        }
-        if (typeof firstToolOutput.content === 'string') {
-          summary.toolOutputContent = firstToolOutput.content;
-        }
-      }
-      if (engineResult.execution?.context && typeof engineResult.execution.context === 'object') {
-        summary.context = engineResult.execution.context;
-      }
-      const followup = engineResult.execution?.followup;
-      if (followup && typeof followup === 'object' && !Array.isArray(followup)) {
-        const followupEntryEndpoint =
-          'entryEndpoint' in followup && typeof followup.entryEndpoint === 'string'
-            ? followup.entryEndpoint
-            : undefined;
-        const followupSummary: Record<string, unknown> = {
-          requestIdSuffix: typeof followup.requestIdSuffix === 'string' ? followup.requestIdSuffix : undefined,
-          entryEndpoint: followupEntryEndpoint
-        };
-        if ('payload' in followup) {
-          followupSummary.mode = 'payload';
-          const payload = followup.payload;
-          if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-            const payloadRecord = payload as Record<string, unknown>;
-            if (Array.isArray(payloadRecord.messages)) {
-              followupSummary.messageCount = payloadRecord.messages.length;
-            }
-            if (Array.isArray(payloadRecord.input)) {
-              followupSummary.inputCount = payloadRecord.input.length;
-            }
-          }
-        } else if ('injection' in followup) {
-          followupSummary.mode = 'injection';
-          const ops = Array.isArray(followup.injection?.ops) ? followup.injection.ops : [];
-          followupSummary.injectionOps = ops
-            .map((item) => (item && typeof item === 'object' && 'op' in item ? (item as { op?: unknown }).op : undefined))
-            .filter((value) => typeof value === 'string');
-        } else {
-          followupSummary.mode = 'metadata_only';
-        }
-        summary.followup = followupSummary;
-      }
-      options.stageRecorder.record('servertool.execution', summary);
-    } catch (error) {
-      logServerToolNonBlocking('record_servertool_execution_snapshot', error, {
-        requestId: options.requestId,
-        flowId: engineResult.execution?.flowId
-      });
-    }
-  }
-
-  // Mixed tools: persist servertool outputs for next request, but return remaining tool_calls to client.
-  if (runtimeAction.action === 'persist_pending_injection_and_return' && engineResult.pendingInjection) {
-    await persistPendingServerToolInjection({
-      pendingInjection: engineResult.pendingInjection,
+  return runServertoolEnginePostflight({
+    options: {
       requestId: options.requestId,
-      flowId,
       adapterContext: options.adapterContext
-    });
-    logProgress(5, totalSteps, 'completed (mixed tools; no reenter)', { flowId });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution.flowId
-    };
-  }
-  if (runtimeAction.action === 'return_servertool_cli_projection_final') {
-    logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution.flowId
-    };
-  }
-  if (runtimeAction.action === 'return_stop_message_terminal_final') {
-    logProgress(5, totalSteps, 'completed (stop_message_auto final terminal result)', {
-      flowId,
-      reason: stoplessPlan.reason
-    });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution.flowId
-    };
-  }
-  if (runtimeAction.action === 'build_stop_message_cli_projection') {
-    const projectionContext = resolveStoplessCliProjectionContext(
-      engineResult.execution,
-      options.adapterContext,
-      engineResult.finalChatResponse
-    );
-    const projection = buildServertoolCliProjectionForAutoFlowShell({
-      options: { requestId: options.requestId, adapterContext: options.adapterContext },
-      flowId,
-      reasoningText: projectionContext.reasoningText,
-      ...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),
-      input: {
-        flowId,
-        repeatCount: projectionContext.repeatCount,
-        maxRepeats: projectionContext.maxRepeats,
-        ...(projectionContext.triggerHint ? { triggerHint: projectionContext.triggerHint } : {}),
-        ...(projectionContext.schemaFeedback ? { schemaFeedback: projectionContext.schemaFeedback } : {})
-      }
-    });
-    logProgress(5, totalSteps, 'completed (stop_message_auto cli projection)', {
-      flowId,
-      reason: stoplessPlan.reason
-    });
-    return {
-      chat: projection.chatResponse,
-      executed: true,
-      flowId: engineResult.execution.flowId
-    };
-  }
-  throw Object.assign(new Error(`[servertool] retired followup/reenter mainline reached for flow ${flowId}`), {
-    code: 'SERVERTOOL_REENTER_RETIRED',
-    details: {
-      requestId: options.requestId,
-      flowId,
-      runtimeAction: runtimeAction.action
-    }
+    },
+    engineResult,
+    runtimeAction,
+    flowId,
+    totalSteps,
+    stoplessPlan,
+    stageRecorder: options.stageRecorder,
+    resolveStoplessCliProjectionContext: () =>
+      resolveStoplessCliProjectionContext(
+        engineResult.execution,
+        options.adapterContext,
+        engineResult.finalChatResponse
+      ),
+    logProgress,
+    logNonBlocking: logServerToolNonBlocking
   });
 }
