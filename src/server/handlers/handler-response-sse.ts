@@ -30,6 +30,7 @@ import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import {
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp,
   assertDirectPassthroughResponsesSseFrameForHttp,
+  sanitizeDirectPassthroughResponsesSseFrameForHttp,
   buildClientSseKeepaliveFrameForHttp,
   buildResponsesMissingSseBridgeErrorPayloadForHttp,
   buildResponsesSseErrorPayloadForHttp,
@@ -439,8 +440,9 @@ function createDirectPassthroughSseGuardStream(stream: Readable, requestId: stri
         boundary = /\r?\n\r?\n/.exec(pending);
         continue;
       }
-      assertDirectPassthroughResponsesSseMetadataIsolationForHttp(frame, requestId);
-      target.push(frame);
+      const sanitized = sanitizeDirectPassthroughResponsesSseFrameForHttp(frame, requestId);
+      assertDirectPassthroughResponsesSseMetadataIsolationForHttp(sanitized, requestId);
+      target.push(sanitized);
       boundary = /\r?\n\r?\n/.exec(pending);
     }
   };
@@ -469,8 +471,9 @@ function createDirectPassthroughSseGuardStream(stream: Readable, requestId: stri
             callback();
             return;
           }
-          assertDirectPassthroughResponsesSseMetadataIsolationForHttp(pending, requestId);
-          this.push(pending);
+          const sanitized = sanitizeDirectPassthroughResponsesSseFrameForHttp(pending, requestId);
+          assertDirectPassthroughResponsesSseMetadataIsolationForHttp(sanitized, requestId);
+          this.push(sanitized);
           pending = '';
         }
         callback();
@@ -548,7 +551,6 @@ function sendStructuredSseError(
 async function normalizeResponsesSseFrameForClient(args: {
   frame: string;
   entryEndpoint?: string;
-  directPassthrough?: boolean;
   requestContext?: DispatchOptions['responsesRequestContext'];
   metadata?: Record<string, unknown>;
   projectionState?: ResponsesSseClientProjectionState;
@@ -557,7 +559,6 @@ async function normalizeResponsesSseFrameForClient(args: {
   return await normalizeResponsesSseFrameForClientForHttp({
     frame: args.frame,
     entryEndpoint: args.entryEndpoint,
-    directPassthrough: args.directPassthrough,
     requestContext: args.requestContext,
     metadata: args.metadata,
     projectionState: args.projectionState,
@@ -591,7 +592,6 @@ function createResponsesClientProjectionStream(args: {
       const normalizedFrame = await normalizeResponsesSseFrameForClient({
         frame,
         entryEndpoint: args.entryEndpoint,
-        directPassthrough: true,
         requestContext: args.requestContext,
         metadata: args.metadata,
         projectionState,
@@ -629,7 +629,6 @@ function createResponsesClientProjectionStream(args: {
         const normalizedFrame = await normalizeResponsesSseFrameForClient({
           frame: pending,
           entryEndpoint: args.entryEndpoint,
-          directPassthrough: true,
           requestContext: args.requestContext,
           metadata: args.metadata,
           projectionState,
@@ -1484,7 +1483,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       normalizeResponsesSseFrameForClient({
         frame,
         entryEndpoint,
-        directPassthrough: isDirectPassthrough,
         requestContext: effectiveResponsesRequestContext,
         metadata: responseProjectionMetadata,
         projectionState: responsesSseProjectionState,

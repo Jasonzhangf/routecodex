@@ -370,7 +370,7 @@ function sanitizeDirectPassthroughResponsesSseJsonPayloadForHttp(payload: string
   return JSON.stringify(rest);
 }
 
-function sanitizeDirectPassthroughResponsesSseFrameForHttp(frame: string, requestId: string): string {
+export function sanitizeDirectPassthroughResponsesSseFrameForHttp(frame: string, requestId: string): string {
   assertDirectPassthroughResponsesSseFrameForHttp(frame, requestId);
   if (isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
     return frame;
@@ -1953,7 +1953,6 @@ async function normalizeNestedResponsesPayloadInSseFrameForHttp(args: {
 export async function normalizeResponsesSseFrameForClientForHttp(args: {
   frame: string;
   entryEndpoint?: string;
-  directPassthrough?: boolean;
   requestContext?: {
     payload: AnyRecord;
     context: AnyRecord;
@@ -1976,14 +1975,11 @@ export async function normalizeResponsesSseFrameForClientForHttp(args: {
   ) {
     return args.frame;
   }
-  const directSanitizedFrame = args.directPassthrough === true
-    ? sanitizeDirectPassthroughResponsesSseFrameForHttp(args.frame, args.requestLabel ?? 'unknown')
-    : args.frame;
-  const lines = directSanitizedFrame.split('\n');
+  const lines = args.frame.split('\n');
   const eventLine = lines.find((line) => line.startsWith('event:'));
   const dataIndex = lines.findIndex((line) => line.startsWith('data:'));
   if (dataIndex < 0 || !eventLine) {
-    return directSanitizedFrame;
+    return args.frame;
   }
   const eventName = eventLine.slice('event:'.length).trim();
   const dataText = lines
@@ -1992,23 +1988,20 @@ export async function normalizeResponsesSseFrameForClientForHttp(args: {
     .map((line) => line.slice(5).trimStart())
     .join('\n');
   if (!dataText || dataText === '[DONE]') {
-    return directSanitizedFrame;
+    return args.frame;
   }
   if (!eventName.startsWith('response.')) {
-    return directSanitizedFrame;
+    return args.frame;
   }
   let data: Record<string, unknown>;
   try {
     const parsed = JSON.parse(dataText);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return directSanitizedFrame;
+      return args.frame;
     }
     data = parsed as Record<string, unknown>;
   } catch {
-    return directSanitizedFrame;
-  }
-  if (args.directPassthrough === true) {
-    return directSanitizedFrame;
+    return args.frame;
   }
   if (shouldSuppressDuplicateApplyPatchSseFrameForHttp({
     eventName,

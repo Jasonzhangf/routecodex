@@ -33,7 +33,6 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 
 const {
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp,
-  normalizeResponsesSseFrameForClientForHttp
 } = await import(
   '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'
 );
@@ -120,38 +119,6 @@ describe('responses-response-bridge direct SSE metadata guard', () => {
 
     expect(() => {
       assertDirectPassthroughResponsesSseMetadataIsolationForHttp(frame, 'req_direct_meta_ok');
-    }).not.toThrow();
-  });
-
-  it('RED: strips top-level metadata from non-response.metadata direct passthrough frames in outbound normalization', async () => {
-    const frame = [
-      'event: response.custom_tool_call_input.delta',
-      `data: ${JSON.stringify({
-        type: 'response.custom_tool_call_input.delta',
-        delta: 'abc',
-        metadata: {
-          source: 'provider',
-          trace_id: 'trace-ok',
-        },
-      })}`,
-      '',
-      '',
-    ].join('\n');
-
-    const sanitized = await normalizeResponsesSseFrameForClientForHttp({
-      frame,
-      entryEndpoint: '/v1/responses',
-      directPassthrough: true,
-      requestLabel: 'req_direct_custom_tool_input_metadata_strip',
-    });
-
-    expect(sanitized).toContain('event: response.custom_tool_call_input.delta');
-    expect(sanitized).not.toContain('"metadata"');
-    expect(() => {
-      assertDirectPassthroughResponsesSseMetadataIsolationForHttp(
-        sanitized,
-        'req_direct_custom_tool_input_metadata_strip'
-      );
     }).not.toThrow();
   });
 
