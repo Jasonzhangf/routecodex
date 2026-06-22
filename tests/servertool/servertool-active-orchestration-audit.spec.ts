@@ -189,6 +189,18 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
+    forbidden: [],
+    required: [
+      'runEnginePreflight',
+      'planServertoolEnginePreflightWithNative',
+      'inspectStopGatewaySignal(',
+      'attachStopGatewayContext(',
+      'containsSyntheticRouteCodexControlText(',
+      'return_original_chat_direct_passthrough',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts',
     forbidden: [],
     required: [
@@ -351,6 +363,13 @@ const TARGETS = [
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-impl.ts',
     forbidden: [
+      'planServertoolRegistryRegistrationActionWithNative',
+      'planServertoolRegistryLookupActionWithNative',
+      'planServertoolRegistryProjectionWithNative',
+      'planServertoolRegistryAutoHookDescriptorsWithNative',
+      'native registry auto handler order missing entry',
+      'native registry auto-hook descriptor missing entry',
+      'native registry record projection mismatch',
       'const toolHandlerRegistryImpl',
       'const autoHandlerRegistryImpl',
       'let autoHookOrderImpl = 0',
@@ -380,6 +399,28 @@ const TARGETS = [
       'export function collectAutoServerToolHooksImpl(',
       'export function isRegisteredToolNameImpl(',
       'export function listRegisteredToolHandlerRecordsImpl(',
+    ],
+  },
+  {
+    file: 'sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts',
+    forbidden: [],
+    required: [
+      'planServertoolRegistryRegistrationActionWithNative',
+      'planServertoolRegistryLookupActionWithNative',
+      'registerServerToolHandlerViaNativePlan',
+      'getServerToolHandlerViaNativePlan',
+    ],
+  },
+  {
+    file: 'sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts',
+    forbidden: [],
+    required: [
+      'planServertoolRegistryProjectionWithNative',
+      'planServertoolRegistryAutoHookDescriptorsWithNative',
+      'projectRegistryHandlerNames',
+      'projectAutoServerToolHandlers',
+      'projectAutoServerToolHookDescriptors',
+      'projectRegisteredServerToolHandlerRecords',
     ],
   },
   {

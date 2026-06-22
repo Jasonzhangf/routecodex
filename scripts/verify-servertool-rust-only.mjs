@@ -108,8 +108,11 @@ const TS_EXECUTION_QUEUE_SHELL = `${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`
 const TS_EXECUTION_STAGE_SHELL = `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`;
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
+const TS_ENGINE_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/engine-preflight-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
+const TS_REGISTRY_REGISTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-registration-shell.ts`;
+const TS_REGISTRY_PROJECTION_SHELL = `${SERVERTOOL_TS_DIR}/registry-projection-shell.ts`;
 const TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL = `${SERVERTOOL_TS_DIR}/run-server-side-tool-engine-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
@@ -2734,7 +2737,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-engine-preflight-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_preflight_json'],
     ['servertool-engine-preflight-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEnginePreflightJson'],
     ['servertool-engine-preflight-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEnginePreflightWithNative'],
-    ['servertool-engine-preflight-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`), 'planServertoolEnginePreflightWithNative'],
+    ['servertool-engine-preflight-ts-thin-shell', TS_ENGINE_PREFLIGHT_SHELL, readRequired(TS_ENGINE_PREFLIGHT_SHELL), 'planServertoolEnginePreflightWithNative'],
     ['servertool-engine-skip-rust-owner', RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT), 'feature_id: hub.servertool_engine_skip_contract'],
     ['servertool-engine-skip-rust-owner', RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT), 'pub fn plan_servertool_engine_skip'],
     ['servertool-engine-skip-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_skip_contract'],
@@ -2774,7 +2777,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-stopless-cli-projection-context-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_cli_projection_context_json'],
     ['servertool-stopless-cli-projection-context-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessCliProjectionContextJson'],
     ['servertool-stopless-cli-projection-context-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planStoplessCliProjectionContextWithNative'],
-    ['servertool-stopless-cli-projection-context-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`), 'planStoplessCliProjectionContextWithNative'],
+    ['servertool-stopless-cli-projection-context-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`), 'planStoplessCliProjectionContextWithNative'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'feature_id: hub.servertool_execution_state_contract'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn create_servertool_execution_loop_state'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn append_executed_tool_record'],
@@ -3375,6 +3378,8 @@ function checkServertoolRegistryRustOwner() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const registryImpl = readRequired(`${SERVERTOOL_TS_DIR}/registry-impl.ts`);
+  const registryRegistrationShell = readRequired(TS_REGISTRY_REGISTRATION_SHELL);
+  const registryProjectionShell = readRequired(TS_REGISTRY_PROJECTION_SHELL);
 
   for (const needle of [
     'feature_id: hub.servertool_registry_contract',
@@ -3419,13 +3424,34 @@ function checkServertoolRegistryRustOwner() {
   for (const needle of [
     'planServertoolRegistryRegistrationActionWithNative',
     'planServertoolRegistryLookupActionWithNative',
-    'planServertoolRegistryAutoHookDescriptorsWithNative',
-    'planServertoolRegistryProjectionWithNative',
   ]) {
     assertContains('servertool-registry-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, needle);
-    assertContains('servertool-registry-ts-thin-shell', `${SERVERTOOL_TS_DIR}/registry-impl.ts`, registryImpl, needle);
+    assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
+  }
+  for (const needle of [
+    'registerServerToolHandlerViaNativePlan',
+    'getServerToolHandlerViaNativePlan',
+  ]) {
+    assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
+  }
+  for (const needle of [
+    'planServertoolRegistryAutoHookDescriptorsWithNative',
+    'planServertoolRegistryProjectionWithNative',
+    'projectRegistryHandlerNames',
+    'projectAutoServerToolHandlers',
+    'projectAutoServerToolHookDescriptors',
+    'projectRegisteredServerToolHandlerRecords',
+  ]) {
+    assertContains('servertool-registry-projection-shell', TS_REGISTRY_PROJECTION_SHELL, registryProjectionShell, needle);
   }
   for (const keyword of [
+    'planServertoolRegistryRegistrationActionWithNative',
+    'planServertoolRegistryLookupActionWithNative',
+    'planServertoolRegistryAutoHookDescriptorsWithNative',
+    'planServertoolRegistryProjectionWithNative',
+    'native registry auto handler order missing entry',
+    'native registry auto-hook descriptor missing entry',
+    'native registry record projection mismatch',
     'if (builtinEntry) {',
     'return getAdHocHandlerEntry(canonicalName);',
     "phase: entry.autoHook?.phase ?? 'default'",
@@ -5261,6 +5287,22 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
+  const enginePreflightShell = readRequired(TS_ENGINE_PREFLIGHT_SHELL);
+  for (const marker of [
+    'export function runEnginePreflight(',
+    'planServertoolEnginePreflightWithNative',
+    'inspectStopGatewaySignal(',
+    'attachStopGatewayContext(',
+    'containsSyntheticRouteCodexControlText(',
+    'return_original_chat_direct_passthrough',
+  ]) {
+    if (!enginePreflightShell.includes(marker)) {
+      fail(
+        'servertool-engine-preflight-shell-owner',
+        `engine-preflight-shell.ts must keep engine preflight owner marker ${marker}`
+      );
+    }
+  }
   const entryPreflightShell = readRequired(TS_ENTRY_PREFLIGHT_SHELL);
   for (const marker of [
     'export function runServertoolEntryPreflight(',
@@ -5660,6 +5702,7 @@ function checkServertoolResponseStageGateThinShell() {
 
 function checkServertoolEngineStoplessSessionThinShell() {
   const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
+  const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
   for (const marker of [
     'function normalizeStoplessSessionToken(',
     'function readStoplessSessionId(',
@@ -5671,14 +5714,20 @@ function checkServertoolEngineStoplessSessionThinShell() {
       );
     }
   }
+  if (!engineSource.includes('adapterContext: options.adapterContext')) {
+    fail(
+      'servertool-engine-stopless-session-thin-shell',
+      'engine.ts must keep adapterContext passthrough into the native stopless orchestration plan'
+    );
+  }
   for (const marker of [
-    'adapterContext: options.adapterContext',
     '...(stoplessPlan.sessionId ? { sessionId: stoplessPlan.sessionId } : {}),',
+    "if (runtimeAction.action === 'build_stop_message_cli_projection')",
   ]) {
-    if (!engineSource.includes(marker)) {
+    if (!postflightSource.includes(marker)) {
       fail(
         'servertool-engine-stopless-session-thin-shell',
-        `engine.ts must keep stopless session thin-shell marker ${marker}`
+        `engine-postflight-shell.ts must keep stopless session thin-shell marker ${marker}`
       );
     }
   }

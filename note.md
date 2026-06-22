@@ -1,3 +1,54 @@
+## 2026-06-22 servertool execution queue shell isolated
+
+- 本轮 slice：把 `runServertoolIoExecutionQueue(...)` 和 `buildServertoolDispatchPlanInput(...)` 从 `execution-dispatch-outcome-shell.ts` 物理搬到独立 `execution-queue-shell.ts`。
+- 当前 owner 变化：
+  - `execution-queue-shell.ts` 持有 execution loop / noop / handler_error queue 语义
+  - `execution-dispatch-outcome-shell.ts` 只剩薄 re-export，不再持有 queue 主逻辑
+  - `server-side-tools-impl.ts` 已改为直接 import `execution-queue-shell.js`
+- 审计 / verify 同步迁移：
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+    - 禁止 `execution-dispatch-outcome-shell.ts` 继续内嵌 `runServertoolIoExecutionQueue` / `buildServertoolDispatchPlanInput` / execution-loop owner markers
+    - 要求 `execution-queue-shell.ts` 持有 queue owner markers
+  - `scripts/verify-servertool-rust-only.mjs`
+    - queue owner 断言迁到 `execution-queue-shell.ts`
+    - `execution-dispatch-outcome-shell.ts` 改成只允许 re-export
+- 新增 focused 白盒：
+  - `tests/servertool/execution-queue-shell.spec.ts`
+- 相关测试基座修正：
+  - `tests/servertool/server-side-tools.failfast.spec.ts` 的 mock 路径同步切到 `execution-queue-shell.js`
+  - 补齐 `buildServertoolHandlerErrorToolOutputPayloadWithNative` / `planServertoolExecutionDispatchErrorWithNative` mock，避免新 import 面导致假失败
+- 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/execution-queue-shell.spec.ts tests/servertool/execution-dispatch-outcome-shell.spec.ts tests/servertool/execution-handler-materialization-shell.spec.ts tests/servertool/execution-branch-runtime-shell.spec.ts tests/servertool/response-stage-prepass-shell.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/server-side-tools.failfast.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/servertool-cli-native-bridge.spec.ts tests/servertool/server-side-tools.dispatch-native.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+- 阶段结论：
+  - 这轮完成的是 execution queue owner 切片，不代表 `server-side-tools-impl.ts` 已 closeout；
+  - 当前 impl 仍持有 pre/post execution branch + outcome materialization + finalize coordination，下一轮仍应继续收这个 orchestrator 尾巴。
+
+## 2026-06-22 servertool response-stage pre-pass shell isolated
+
+- 本轮 slice：把 `server-side-tools-impl.ts` 里的 response-stage pre-pass 提前收成独立壳 `response-stage-prepass-shell.ts`，只保留：
+  - `planServertoolResponseStageGateWithNative(...)`
+  - `runServertoolResponseStageAutoHookPass(...)`
+  - matched hook 的 early return
+- `server-side-tools-impl.ts` 不再直接持有 response-stage gate / auto-hook pre-pass 语义，只消费：
+  - `runServertoolResponseStagePrePass(...)`
+  - `finalizeServertoolResponseStage(...)`
+- 新增 focused 白盒：
+  - `tests/servertool/response-stage-prepass-shell.spec.ts`
+- 审计 / verify 同步迁移：
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts` 现在把 pre-pass owner 锁到新 shell
+  - `scripts/verify-servertool-rust-only.mjs` 现在强制 `response-stage-prepass-shell.ts` 持有 gate + auto-hook owner marker
+- 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/response-stage-prepass-shell.spec.ts tests/servertool/response-stage-finalize-shell.spec.ts tests/servertool/response-stage-auto-hook-shell.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/server-side-tools.failfast.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/servertool-cli-native-bridge.spec.ts tests/servertool/server-side-tools.dispatch-native.spec.ts tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs`
+  - `node scripts/build-core.mjs`
+- 阶段结论：
+  - 这轮只完成 response-stage pre-pass 隔离，不代表 `server-side-tools-impl.ts` 已 Rust-only；
+  - 该文件仍保留 dispatch/execution/finalize 串接主语义，下一轮应继续收 `execution queue / materialization / finalize coordination`。
+
 ## 2026-06-22 servertool execution-loop mismatch moved to Rust action planner
 
 - 本轮 slice：把 `execution-dispatch-outcome-shell.ts` 里的 `assertDispatchExecutionMode(...)` 物理删除，改成 Rust `execution_loop_runtime_action_contract` 直接产出 `throw_dispatch_spec_mismatch`。
@@ -11085,3 +11136,400 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 当前状态：
   - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 已降到 205 行
   - 仍未完成 Rust-only closeout；下一刀候选更集中到 `extractToolCalls(...)` 或 response-stage pre-pass / dispatch tail 的残余编排
+
+## 2026-06-22 stopless live replay truth: second submit still expires continuation
+
+- 本轮重新聚焦 5555 `/v1/responses` stopless live 闭环，目标不是 SSE 协议面，而是完整 `exec_command -> submit_tool_outputs -> 下一轮再 submit` 闭环。
+- 已确认的 live 事实：
+  - `routecodex --version` / `health` 都是 `0.90.3252`
+  - `node scripts/tests/stopless-5555-live-probe.mjs` 结果文件：`/tmp/stopless-5555-live-probe.json`
+  - 首轮仍正确：
+    - 客户端拿到的是标准 `exec_command(routecodex hook run reasoningStop ...)`
+    - 没有 raw `reasoningStop` 泄漏
+    - SSE 也仍是标准协议，不是这个问题
+  - 失败仍在第二次 `submit_tool_outputs` 之后的第三轮：
+    - 第二轮成功返回 `status=200`
+    - 第二轮新 `responseId=resp_1782083842136`
+    - 第三轮立即报 `Responses conversation expired or not found`
+    - diag：`~/.rcc/diag/error-openai-responses-router-request-20260622T071722434-388245-7614.json`
+- 这次有一个关键排障纠偏：
+  - 当前实际运行进程的日志写在 `~/.rcc/logs/server-5520.log`
+  - 不是旧的 `server-5555.log`
+  - `server-5555.log` / `server-5555-start.pid` 已经是旧进程残留，不能再拿来判断这轮 live
+- 当前 live trace（来自 `server-5520.log`）：
+  - 首轮 requestId:
+    - `openai-responses-router-gpt-5.5-20260622T071703127-388243-7612`
+    - provider request 变成 `openai-responses-minimonth.key1-MiniMax-M2.7-20260622T071703127-388243-7612`
+  - 第二轮 submit requestId:
+    - `openai-responses-router-request-20260622T071715049-388244-7613`
+    - provider request 变成 `openai-responses-XLC.key1-glm-5.2-20260622T071715049-388244-7613`
+  - 第二轮完成日志明确显示：
+    - `status=200`
+    - `finish_reason=tool_calls`
+  - 第三轮失败日志：
+    - `openai-responses-router-request-20260622T071722434-388245-7614 failed: Responses conversation expired or not found`
+- 当前高概率根因方向：
+  - 不是 SSE terminal close race 单点问题。
+  - 是 continuation store 的 requestId / responseId 绑定链在第二轮 follow-up 响应侧没有稳定接上。
+  - 现状里 `persistResponsesConversationLifecycleForHttp()` 的 `recordAttemptIds` 顺序是：
+    - 先 `responseId`
+    - 再 `requestLabel`
+    - 再 `timingRequestIds`
+  - 但第二轮 follow-up 的 `responseId=resp_1782083842136` 之前并未作为 request context key 建立；
+  - 同时第二轮 `requestLabel` 已经变成新的 provider/request id（`openai-responses-XLC.key1-glm-5.2-...`），与首轮已 capture 的 request key 不同；
+  - 结果就是第二轮新 responseId 没被稳定 record 到 store，第三轮 submit 当然找不到它。
+- 当前结论：
+  - stopless 完整闭环还没修完，不能宣称完成；
+  - 下一步唯一主线是修 `responses-conversation-store` / `responses-response-bridge` 上第二轮 follow-up 响应的 continuation record 绑定，不再分散到 SSE 协议面。
+
+## 2026-06-22 servertool extract-tool-calls shell 下沉
+
+- 本轮把 `extractToolCalls(...)` 的实际逻辑从 `server-side-tools-impl.ts` 下沉到新文件 `sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.ts`。
+- 新 helper：`extractToolCallsFromResponseStage(chatResponse, requestId)`，负责：
+  - 调 `runServertoolResponseStageWithNative(...)`
+  - 用 `replaceJsonObjectInPlace(...)` 回写 canonical payload
+  - 返回规范化后的 `ToolCall[]`
+- `server-side-tools-impl.ts` 现在只保留兼容导出 `extractToolCalls = extractToolCallsFromResponseStage`，主流程入口已经直接吃新 helper。
+- 同步新增 `tests/servertool/extract-tool-calls-shell.spec.ts`，覆盖：
+  - source owner marker
+  - 正常 tool call 提取 / in-place canonical payload 回写
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts` 新增 `extract-tool-calls-shell.ts` required markers：
+  - `runServertoolResponseStageWithNative`
+  - `replaceJsonObjectInPlace`
+  - `stage.toolCalls.map(`
+- `scripts/verify-servertool-rust-only.mjs` 新增 `TS_EXTRACT_TOOL_CALLS_SHELL`，并锁：
+  - 新 shell 必须保留 `extractToolCallsFromResponseStage`
+  - 新 shell 必须保留 `runServertoolResponseStageWithNative`
+  - 新 shell 必须保留 `replaceJsonObjectInPlace`
+  - `server-side-tools.ts` 需要暴露 `extractToolCallsFromResponseStage`，让 shell 成为显式 owner
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/extract-tool-calls-shell.spec.ts tests/servertool/server-side-tools.extract-tool-calls.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/server-side-tools.failfast.spec.ts --runInBand` => 4 suites / 32 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` => PASS
+  - `node scripts/build-core.mjs` => PASS
+- 当前状态：
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 继续收缩，当前剩余活编排更偏向入口 orchestration / dispatch tail
+
+## 2026-06-22 servertool dispatch-preparation shell 下沉
+
+- 本轮把 `server-side-tools-impl.ts` 中段的 dispatch preparation 编排抽到新文件 `sharedmodule/llmswitch-core/src/servertool/dispatch-preparation-shell.ts`。
+- 新 helper：`prepareServertoolDispatchStage({ options, toolCalls, baseObject, baseForExecution, includeToolCallNames, excludeToolCallNames })`
+  - 读取 `readRuntimeMetadata(...)`
+  - 调 `resolveServertoolRuntimePreCommandState(...)`
+  - 执行 `applyPreCommandHooksToToolCalls(...)`
+  - 最后统一做 `buildServertoolDispatchPlanInput(...) -> planServertoolToolCallDispatchWithNative(...)`
+- `server-side-tools-impl.ts` 不再直接持有：
+  - `readRuntimeMetadata(...)`
+  - `resolveServertoolRuntimePreCommandState(...)`
+  - `applyPreCommandHooksToToolCalls(...)`
+  - `planServertoolToolCallDispatchWithNative(...)`
+- 本轮编译纠偏：
+  - `dispatchPlan` 返回类型最初手写得过宽，`build-core` 报 `ServertoolDispatchPlanPayload` 不兼容；
+  - 已改成 `ReturnType<typeof planServertoolToolCallDispatchWithNative>`，避免 TS 本地再长一份 dispatch plan 结构真源。
+- 同步新增 `tests/servertool/dispatch-preparation-shell.spec.ts`，覆盖：
+  - source owner marker
+  - runtime metadata / pre-command hooks / dispatch-plan 串行调用
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts` 新增 `dispatch-preparation-shell.ts` required markers：
+  - `readRuntimeMetadata`
+  - `resolveServertoolRuntimePreCommandState`
+  - `applyPreCommandHooksToToolCalls`
+  - `planServertoolToolCallDispatchWithNative`
+- `scripts/verify-servertool-rust-only.mjs` 新增 `TS_DISPATCH_PREPARATION_SHELL`，并锁：
+  - 新 shell 必须保留 `prepareServertoolDispatchStage(`
+  - 必须保留 metadata / pre-command / dispatch native planner 四类 owner marker
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/dispatch-preparation-shell.spec.ts tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/server-side-tools.dispatch-native.spec.ts --runInBand` => 4 suites / 34 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` => PASS
+  - `node scripts/build-core.mjs` => PASS
+- 当前状态：
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 已降到 168 行
+  - 剩余活编排进一步集中到 entry preflight / response-stage pre-pass / execution IO tail
+
+## 2026-06-22 stopless goal prompt retarget
+
+- 当前目标已重新收敛为：只验证 `hook + chat-process` owner 的 `reasoningStop / stopless` 闭环，不再把 server / SSE / handler 当作业务改动面。
+- 新实现文档已落盘：`docs/goals/stopless-hook-and-chat-process-closure-goal.md`
+- `/goal` 提示词必须只保留主目标、文档路径、缩略执行规范、验证要求、完成标准，禁止把实现细节重新塞回 prompt。
+
+## 2026-06-22 servertool entry-preflight shell 下沉
+
+- 本轮把 `server-side-tools-impl.ts` 入口的 preflight 编排抽到新文件 `sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts`。
+- 新 helper：`runServertoolEntryPreflight({ options, base })`
+  - 调 `planServertoolEntryPreflightWithNative(...)`
+  - 对 `return_passthrough_non_object_chat` 统一返回 `{ mode: 'passthrough', finalChatResponse: options.chatResponse }`
+  - 对 `throw_client_disconnected` 统一走 `createServerToolClientDisconnectedError(...)`
+  - 其余场景返回 `{ action: 'continue', baseObject }`
+- `server-side-tools-impl.ts` 不再直接持有：
+  - `planServertoolEntryPreflightWithNative(...)`
+  - `return_passthrough_non_object_chat` 分支
+  - `throw_client_disconnected` 分支
+- 同步新增 `tests/servertool/entry-preflight-shell.spec.ts`，覆盖：
+  - source owner marker
+  - non-object passthrough
+  - client disconnected error projection
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts` 新增 `entry-preflight-shell.ts` required markers：
+  - `planServertoolEntryPreflightWithNative`
+  - `createServerToolClientDisconnectedError`
+  - `result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }`
+- `scripts/verify-servertool-rust-only.mjs` 新增 `TS_ENTRY_PREFLIGHT_SHELL`，并把旧 `server-side-tools-impl.ts` 断言迁到新 shell：
+  - 新 shell 必须保留 `runServertoolEntryPreflight(`
+  - 必须保留 `planServertoolEntryPreflightWithNative`
+  - 必须保留 `createServerToolClientDisconnectedError`
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/entry-preflight-shell.spec.ts tests/servertool/server-side-tools.failfast.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` => 3 suites / 31 tests PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` => PASS
+  - `node scripts/build-core.mjs` => PASS
+- 当前状态：
+  - `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts` 已降到 159 行
+  - 剩余活编排更集中在 response-stage pre-pass / execution IO tail
+
+## 2026-06-22 server/SSE stopless patch revert
+
+- 用户明确否定在 server/SSE/handler 这层加 stopless 业务语义：
+  - `dispatchChatJsonAsSse` 仅 `/v1/chat/completions` 入口才生效，本应在 chat process owner 处理
+  - `nativeSseConversationPersistPromise` / `awaitContinuationPersistBeforeEmit` 把 continuation persist 的时序硬编码到 SSE frame emit 之前
+  - `responses-handler.ts` 给 `sendPipelineResponse(...)` 注入 `responsesRequestContext` 属于把 store 真源路由到 handler，不属于 handler 职责
+- 这轮错误改动已物理回退：
+  - `src/server/handlers/handler-response-sse.ts` 回到 HEAD（标准 responses SSE 协议，stopless 不在这层做）
+  - `src/server/handlers/responses-handler.ts` 回到 HEAD（不再向 `sendPipelineResponse` 注入 `responsesRequestContext`，`suppressCompletedLog` 也移除）
+  - `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` 回到 HEAD（清掉整块这轮追加的 `RED:` 测试和过时 `requestIds` 数组 + `clearAllResponsesConversationState` 调用）
+- 下一步修复必须收在：
+  - Rust `servertool-core` hook scheduler / schema gate
+  - Rust `router-hotpath-napi` resp_chatprocess / req_chatprocess
+  - TS 只保留 native wrapper / IO shell
+- 验证命令：
+  - focused Jest
+  - `npm run build:min`
+  - `npm run install:global`
+  - `routecodex restart --port 5555`
+  - `curl /health`
+  - `node scripts/tests/stopless-5555-live-probe.mjs`
+
+## 2026-06-22 stopless goal alignment audit: live gap moved to real /v1/responses submit_tool_outputs restore path
+
+- 本轮先做了 owner 对齐验证，不再碰 server/SSE/handler 业务语义。
+- 已确认的 focused 证据：
+  - Jest PASS:
+    - `tests/servertool/stopless-cli-continuation.spec.ts`
+    - `tests/servertool/stop-message-native-decision.spec.ts`
+    - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+    - `tests/responses/responses-openai-bridge.spec.ts`
+  - Rust PASS:
+    - `cargo test -p servertool-core stopless --lib -- --nocapture`
+  - Rust req-side旧断言已更新：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs`
+    - 原因：4 条测试还锁旧文案 `简洁 summary`，与当前 stop schema 合同真源冲突；只更新断言，不改运行逻辑。
+    - 更新后 PASS：`cargo test -p router-hotpath-napi req_process_stage1_tool_governance_tests --lib -- --nocapture`
+- 直接 CLI 真值也确认：
+  - `routecodex hook run reasoningStop ... repeatCount=2/maxRepeats=3` -> 返回 `repeatCount=3` + `schemaGuidance` + `schemaFeedback(reasonCode=stop_schema_missing)`
+  - `routecodex hook run reasoningStop ... repeatCount=3/maxRepeats=3` -> 返回 `summary=stopless budget exhausted` + `triggerHint=budget_exhausted`
+  - 说明“三次没有 schema 需要停止”在 CLI/stopless owner 内已经成立。
+- 关键 live 证据（5555）：
+  - `curl http://127.0.0.1:5555/health` -> `ready=true version=0.90.3252`
+  - `node scripts/tests/stopless-5555-live-probe.mjs`
+  - 第一轮符合目标：
+    - `hasExecCommand=true`
+    - `hasReasoningStop=false`
+    - 客户端看到的是标准 `exec_command(routecodex hook run reasoningStop ...)`
+    - `schemaFeedback.reasonCode=stop_schema_missing`
+  - 第二轮真实 `/v1/responses submit_tool_outputs` 续轮仍有 owner gap：
+    - server 再次返回 `exec_command(reasoningStop)`，但 `repeatCount` 退回 `1`，没有从第一轮 CLI 输出恢复到 `2`
+    - probe 最终第三轮报：`Responses conversation expired or not found`
+- 结论：
+  - 当前 focused 黑盒没有锁住真实 `/v1/responses submit_tool_outputs` 续轮 restore path。
+  - 真缺口已经收敛到：`responses submit_tool_outputs standardization/restore -> req_chatprocess stopless restore` 之间，而不是 handler/SSE。
+  - 下一步应补更贴近 live 的 red test，覆盖：
+    - 第一轮 `exec_command(reasoningStop)` 输出提交后，第二轮 req-side 必须看到 `repeatCount=2`
+    - 第二轮继续 no_schema 后，第三轮必须 terminal，不得 conversation expired
+    - submit_tool_outputs 真路径必须把 CLI output 改写成 `reasoningStop -> function_call_output` 的模型真相，而不是丢成壳层 resume
+## 2026-06-22 servertool hook skeleton closeout
+- function-map/verification-map 需要真实 owner 源 + 允许路径测试文件双重锚点；不要把包含 canonical builder 字符串的 verify 脚本放进 `allowed_paths`，否则 builder 定义 gate 会误判重定义。
+- `hub.servertool_rust_only_closeout` 已加入 function-map / verification-map，mainline 仍保持 `binding pending`。
+- wiki/render 产物需要单独跑 `render:architecture-wiki-pages` 再 `verify:architecture-wiki-sync`。
+- 新增 `tests/servertool/engine-mainline-residue.red.spec.ts`，当前红在 `engine.ts` 仍含 `persist_pending_injection_and_return` / `return_servertool_cli_projection_final` / `return_stop_message_terminal_final` / `build_stop_message_cli_projection` 等本地主链分支。
+
+## 2026-06-22 servertool hook_skeleton mainline closeout audit (read-only)
+
+- 目标文档：docs/goals/servertool-hook-skeleton-rust-only-closeout-plan-2026-06-22.md
+- 当前状态（仅核对，未做改动）：
+  - function-map.yml 已加 `hub.servertool_rust_only_closeout`（phase plan 里的 closeout gate 描述）
+  - verification-map.yml 已加对应 `hub.servertool_rust_only_closeout`（门禁 + 验证栈）
+  - mainline-call-map.yml `servertool.hook_skeleton.mainline` 仍 `binding pending`：13 条边都是 `binding pending`，需要逐条锚定 owner_feature_id 与 caller/callee。
+  - wiki：docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md 区分了"closeout gate"和"runtime-anchored mainline"两层。
+  - engine.ts 继续被 engine-postflight-shell.ts 抽走 post-engine summary 之后，425 → 更小，但仍是最大 TS 活业务 owner 之一。
+  - registry-impl.ts 仍持有 builtin/ad-hoc binding + auto-hook descriptor materialization + registration/lookup/projection glue。
+  - 已有 `tests/servertool/engine-mainline-residue.red.spec.ts`（绿 = OK），thin-shell spec 改成在 postflight-shell 里查 session-projection marker。
+  - 验证：verify-servertool-rust-only、function-map-compile-gate、architecture-wiki-sync、focused Jest 都已 PASS。
+- 仍待推进（按 plan 顺序，不动其它链路）：
+  - Phase D：继续收 engine.ts，把 stop gateway / timeout / selection / stopless action 下沉到 Rust owner 或更薄 IO shell
+  - Phase E：继续收 registry-impl.ts，让 registry.ts / registry-impl.ts 只剩 native-plan consumer + test-only ad-hoc wiring
+  - Phase F：补 servertool backend-route family 全链黑盒
+  - Phase G：把 mainline 边从 `binding pending` 切到 `anchored`（用 split-binding / focused red gate 走）
+- 风险点（不踩）：
+  - 不批量 checkout
+  - 不在 mainline 还 binding pending 时宣称 Rust-only 闭环
+  - 不把 metadata / debug / snapshot carrier 带入 normal payload
+  - 不新增 TS 排序 / requiredness / schema / terminal 判定
+- 下一步（保持小切片）：先做 engine.ts 下一刀（Phase D）—— 抽出 stop-gateway + timeout-policy 桥到一个独立薄壳，再用既有 red gate 锁残留，验证后再切下一刀。
+## 2026-06-22 debug module consolidation audit (read-only)
+
+- 目标：审计当前 debug 相关实现是否存在“多 owner / 多入口 / 多语义壳”，并给出“整合为唯一模块”的设计方案；本轮只读，不改代码。
+- 已核对的现状真源：
+  - `src/debug/index.ts` 只是 toolkit facade，负责组装 `FileSnapshotStore + DebugSessionManager + HarnessRegistry + DryRunRunner + ReplayRunner`，但**不是** snapshot writer / debug logger / provider debug hooks 的唯一 owner。
+  - `docs/architecture/function-map.yml` 当前只登记了：
+    - `snapshot.stage_contract` -> `owner_module: src/utils`
+    - `snapshot.provider_error_buffer` -> `owner_module: src/providers/core/utils/snapshot-writer-buffer.ts`
+    - `provider.debug_example_hooks_surface` -> `owner_module: src/providers/core/hooks/debug-example-hooks.ts`
+  - 说明 repo 目前并不存在一个统一的 `debug.*` feature owner；debug 语义分裂在 `src/debug` / `src/utils` / `src/providers/core/utils` / `src/modules/pipeline/utils` / `src/providers/core/hooks`。
+- 主要分裂点：
+  - `src/debug/`：session / replay / dry-run / harness facade。
+  - `src/utils/snapshot-writer.ts`：server snapshot writer + local disk fallback + hook writer bridge。
+  - `src/providers/core/utils/snapshot-writer.ts`：provider snapshot writer + queue / retention / local mirror。
+  - `src/modules/pipeline/utils/debug-logger.ts`：pipeline/provider console logger。
+  - `src/providers/core/utils/debug-logger.ts`：仅 re-export 老入口。
+  - `src/utils/debug-utils.ts` + `src/types/debug-types.ts`：另一套通用 debug utils/type surface。
+  - `src/providers/core/hooks/debug-example-hooks.ts` + `src/providers/core/config/provider-debug-hooks.ts`：provider hook debug surface。
+- 审计结论：
+  - 这是“同一 debug 领域，多 owner feature、多导入入口、多目录存放”的结构，不满足“唯一功能块 / 唯一模块”治理要求。
+  - `src/debug` 名字像统一模块，但功能面并未覆盖 snapshot write / logging / provider hook debug；容易误导维护者。
+  - function-map / verification-map 对 debug 只覆盖 snapshot contract 和 provider debug example hooks，没有统一 `debug.mainline` / `debug.owner registry` / `debug wiki manifest`。
+- 设计方向（待正式落盘到 docs）：
+  - 以 `src/debug/` 作为唯一 authoring surface，统一收口 `snapshot/ logging/ harness/ replay/ hook-debug/ policy` 六类能力。
+  - 旧路径只允许短期迁移壳；迁移完成后物理删除 `src/providers/core/utils/debug-logger.ts` 这类纯重导出和散落 owner。
+  - 需要新增 `debug.unified_surface` 一类 function-map / verification-map / wiki manifest / mainline call map，把 debug 从“若干 feature 碎片”提升为一个可查询治理面。
+
+## 2026-06-22 debug unified design correction: diag taxonomy + per-module closure
+
+- 用户要求先收口文档和设计，且统一必须一个模块一个模块收；已更新 `docs/goals/debug-unified-surface-goal.md`，不做代码迁移。
+- diag 分类已明确：
+  - error diag artifact：`~/.rcc/diag/error-*.json`，当前由 `src/server/handlers/responses-handler.ts` catch 内直接写，且有静默 `catch {}`；应先迁到 `src/debug/diag/error-writer.ts` / `error-reader.ts`。
+  - runtime diagnostics contract：`routeResult.diagnostics`、VR forwarder status、Hub native diagnostics，仍归 VR/Hub Rust owner；debug 只能读/投影，不能迁走语义。
+  - inline usage diag：`usage-logger.ts` 输出的 `diag=...`，随 logger 子模块迁移，只处理渲染/gating，不改 timing 真源。
+- 模块顺序调整为：M0 surface docs -> M1 diag error artifact -> M2 snapshot store -> M3 server snapshot writer -> M4 provider snapshot writer -> M5 logger -> M6 harness/replay -> M7 provider hooks -> M8 policy violation -> M9 cleanup。
+
+## 2026-06-22 servertool engine postflight slice 4
+
+- 目标：把 `resolveStoplessCliProjectionContext(...)` 从 `engine.ts` 物理搬到 `engine-postflight-shell.ts`，与 `runServertoolEnginePostflight` 合一。
+- 切片动作：
+  - `engine.ts` 删除 `resolveStoplessCliProjectionContext` 的本地定义，改为从 `./engine-postflight-shell.js` import
+  - `engine-postflight-shell.ts` 新增 export `resolveStoplessCliProjectionContext`，并保留 native 桥接
+  - 同步清理 `engine.ts` 的 dead import `extractCurrentAssistantStopTextWithNative`
+  - `scripts/verify-servertool-rust-only.mjs`：
+    - `stopless-cli-projection-context-ts-thin-shell` 持有者从 `engine.ts` 切到 `engine-postflight-shell.ts`
+  - `tests/servertool/engine-mainline-residue.red.spec.ts`：
+    - 新增 `expect(...).not.toContain('function resolveStoplessCliProjectionContext(')`
+    - 新增 `expect(...).not.toContain('planStoplessCliProjectionContextWithNative')`
+  - `tests/servertool/engine.stopless-session-thin-shell.spec.ts`：
+    - “does not locally derive stopless CLI projection context” 用例改成读 `engine-postflight-shell.ts`
+    - 新增断言 `expect(source).toContain('resolveStoplessCliProjectionContext(')`
+- 文件体量变化（这刀，仅这刀）：
+  - `engine.ts` 302 → 252（-50 行）
+  - `engine-postflight-shell.ts` 191 → 241（+50 行）
+- 验证：
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS
+  - `tests/servertool/engine-mainline-residue.red.spec.ts` + `engine.stopless-session-thin-shell.spec.ts` + `servertool-active-orchestration-audit.spec.ts` --runInBand 31/31 PASS
+  - `node scripts/verify-servertool-rust-only.mjs` PASS（`stopless-cli-projection-context-ts-thin-shell` 现在锁在 `engine-postflight-shell.ts`）
+  - `npm run verify:function-map-compile-gate` PASS
+- 风险/未完成：
+  - `engine.ts` 还剩 252 行：preflight direct-passthrough 分支 + logAutoHookTrace/stop compare + match hit/skipped + totalSteps/进度日志；这些还在 owner 表里，但都已经被 pre-skip/runtime-action/postflight 三个 native plan 治理。
+  - 这一刀不破坏任何 live 行为；post-flight shell 的 `resolveStoplessCliProjectionContext` 与原版完全等价（仅做 owner 漂移）。
+  - 还没改：registry-impl.ts（下一刀）、stopless-session-thin-shell 里的 mock 假信号（属于执行链，不在本刀范围）。
+- 下一步：继续收 engine.ts（stopSignal 判别 + match log 入口）或推进 registry-impl 的 builtin/ad-hoc binding 收薄；都走 red gate 先红后绿 + verify。
+## 2026-06-22 hook skeleton verification pass
+
+- 已验证：
+  - `cargo test -p servertool-core hook_skeleton_contract --lib -- --nocapture` PASS
+  - `tests/servertool/servertool-cli-native-bridge.spec.ts` PASS
+  - `tests/servertool/entry-preflight-shell.spec.ts` PASS
+  - `node scripts/verify-servertool-rust-only.mjs` PASS
+- 已确认当前事实：
+  - `sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts` 仍是 native preflight + timeout-error-block 的 thin shell
+  - `servertool.hook_skeleton.mainline` 仍处于 `binding pending`
+  - `hub.servertool_stopless_cli_continuation` 已锚定，且 stopless CLI / schema guidance / reasoningStop 投影闭环已在 Rust owner 与 thin shell 上持续通过门禁
+- 当前结论：
+  - hook skeleton 的目标文档、mainline call map、function map、verification map 与当前代码一致
+  - 这轮没有再发现新的 stale test / stale gate 需要立即物理删除
+
+## 2026-06-22 hook skeleton goal audit
+
+- 已核对目标文件：`/Users/fanzhang/.codex/attachments/4ae3db80-8514-46cd-a9fb-0231eba7e7ea/pasted-text-1.txt`
+- 已核对文档：
+  - `docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md`
+  - `docs/architecture/wiki/stopless-session-mainline-source.md`
+  - `docs/architecture/mainline-call-map.yml`
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/verification-map.yml`
+  - `.agents/skills/rcc-dev-skills/references/22-servertool-hook-skeleton-workflow.md`
+  - `.agents/skills/rcc-dev-skills/references/23-servertool-hook-dev-debug-flow.md`
+- 当前结论：
+  - wiki 语义已对齐到 hook + chat-process owner 路径；
+  - `servertool.hook_skeleton.mainline` 仍是 `binding pending`，没有 runtime anchored 证据；
+  - `hub.servertool_stopless_cli_continuation` 的 stopless mainline 仍是已注册 owner；
+  - 下一步不能宣称闭环完成，必须继续找唯一 owner 代码与红测缺口。
+
+
+## 2026-06-22 servertool preflight slice attempt reverted
+
+- 试验结果：不能把 `engine.ts` 的 stop-gateway/preflight early-return 直接迁入 `sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts`。
+- 原因：`entry-preflight-shell.ts` 在仓库里已有既定 contract（`runServertoolEntryPreflight({ options, base })`），且 `run-server-side-tool-engine-shell.ts` 已消费它；该文件不是 engine 专属 shell。
+- 已回退：
+  - 维持 `engine.ts` 既有 preflight 调用
+  - 恢复 `entry-preflight-shell.ts` 原有 contract
+  - 仅保留之前已验证通过的 `engine-postflight-shell.ts` / stopless session thin-shell 迁移
+- 复盘结论：下一个 slice 不能再复用现有 entry-preflight contract 名称；若继续下沉 preflight，必须先新建独立 shell 或先在 goal 文档里明确 owner 分层。
+
+## 2026-06-22 servertool engine preflight shell isolated
+
+- 本轮 slice：把 `engine.ts` 里的 stop-gateway + engine preflight early-return 从主文件收成独立壳 `engine-preflight-shell.ts`。
+- 现在 owner 分层：
+  - `engine-preflight-shell.ts` 持有 `inspectStopGatewaySignal` / `attachStopGatewayContext` / `containsSyntheticRouteCodexControlText` / `planServertoolEnginePreflightWithNative` / direct-passthrough early return
+  - `engine.ts` 只消费 `runEnginePreflight(...)`，再继续 skip/runtime-action/stopless/postflight 编排
+- 同步门禁：
+  - `tests/servertool/engine-mainline-residue.red.spec.ts` 新增禁止 `engine.ts` 持有 `planServertoolEnginePreflightWithNative`
+  - `tests/servertool/engine.stopless-session-thin-shell.spec.ts` 的 preflight owner 检查切到 `engine-preflight-shell.ts`
+  - 新增 `tests/servertool/engine-preflight-shell.spec.ts`
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts` 和 `scripts/verify-servertool-rust-only.mjs` 都新增/切到 `engine-preflight-shell.ts` owner marker
+- 验证：
+  - `tests/servertool/engine-preflight-shell.spec.ts tests/servertool/engine-mainline-residue.red.spec.ts tests/servertool/engine.stopless-session-thin-shell.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` 36/36 PASS
+  - `node scripts/verify-servertool-rust-only.mjs` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+- 当前残留：
+  - `engine.ts` 仍保留 progress logger / match log / timeout runner / skip handling / runtimeAction fan-in
+  - `registry-impl.ts` 仍保留 builtin/ad-hoc projection glue
+- 下一步建议：
+  - 继续收 `engine.ts` 的 match/progress 入口，或转切 `registry-impl.ts` 的 projection glue。
+
+## 2026-06-22 servertool registry projection shell isolated
+
+- 本轮 slice：把 `registry-impl.ts` 中的 registry projection/mapping glue 收到新壳 `registry-projection-shell.ts`。
+- 当前 owner 分层：
+  - `registry-impl.ts` 保留 register/get 基础 wiring、builtin/ad-hoc catalog 读取、调用 registration/lookup native plan
+  - `registry-projection-shell.ts` 持有 handler names、auto handler order、auto-hook descriptor、registered records 的 native projection + sourceIndex/entry 回填校验
+- 同步门禁：
+  - `tests/servertool/registry-projection-shell.spec.ts` 新增白盒，覆盖 names/auto handlers/descriptors/records/mismatch
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts` 禁止 `registry-impl.ts` 再直接持有 `planServertoolRegistryProjectionWithNative` / `planServertoolRegistryAutoHookDescriptorsWithNative` / projection mismatch strings；新增 `registry-projection-shell.ts` required marker
+  - `scripts/verify-servertool-rust-only.mjs` 新增 `TS_REGISTRY_PROJECTION_SHELL` 并把 projection/native descriptor owner marker 切到新 shell
+- 验证：
+  - `tests/servertool/registry-projection-shell.spec.ts tests/servertool/server-side-tools.auto-hook-config.spec.ts tests/servertool/servertool-cli-native-bridge.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` PASS（58/58）
+  - `node scripts/verify-servertool-rust-only.mjs` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+- 当前残留：
+  - `registry-impl.ts` 仍保留 registration/lookup glue 与 builtin/ad-hoc catalog read；下一步可考虑 `registry-registration-shell.ts` 或继续收 `engine.ts` match/progress/timeout runner。
+
+## 2026-06-22 servertool registry registration shell isolated
+
+- 本轮 slice：继续收 `registry-impl.ts`，把 registration/lookup native plan 消费与 builtin/ad-hoc lookup glue 移到新壳 `registry-registration-shell.ts`。
+- 当前 owner 分层：
+  - `registry-registration-shell.ts` 持有 `planServertoolRegistryRegistrationActionWithNative` / `planServertoolRegistryLookupActionWithNative` 的 TS native-plan consumer。
+  - `registry-projection-shell.ts` 继续持有 registry projection / auto-hook descriptor / registered record projection。
+  - `registry-impl.ts` 只保留 registry API surface、catalog raw record gathering、投影 shell 调用。
+- 同步门禁：
+  - `tests/servertool/registry-registration-shell.spec.ts` 新增白盒，覆盖 registration allow/reject、lookup builtin/ad-hoc/none、registered-name config check。
+  - `tests/servertool/servertool-active-orchestration-audit.spec.ts` 禁止 `registry-impl.ts` 再直接持有 registration/lookup/projection native plan，要求 `registry-registration-shell.ts` owner markers。
+  - `scripts/verify-servertool-rust-only.mjs` 新增 `TS_REGISTRY_REGISTRATION_SHELL`，把 registration/lookup owner marker 从 `registry-impl.ts` 切到新 shell。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/registry-registration-shell.spec.ts tests/servertool/registry-projection-shell.spec.ts tests/servertool/server-side-tools.auto-hook-config.spec.ts tests/servertool/servertool-cli-native-bridge.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` PASS（5 suites / 63 tests）。
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` PASS。
+  - `npm run verify:function-map-compile-gate` PASS。
+- 当前残留：
+  - `registry-impl.ts` 仍保留 builtin/ad-hoc catalog read 和 raw record gathering；这是 IO/catalog glue，不是 registration/lookup native-plan owner。
+  - `servertool.hook_skeleton.mainline` 仍是 `binding pending`，不能宣称 Rust-only 闭环完成。

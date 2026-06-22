@@ -1,10 +1,7 @@
 import type { ServerToolHandler } from './types.js';
 import {
-  type ServertoolAutoHookPhase,
   type ServerToolHandlerRegistrationSpec,
-  type ServerToolRegisteredHandlerRecord,
-  getServertoolToolSpec,
-  isServertoolEnabledByConfig
+  type ServerToolRegisteredHandlerRecord
 } from './skeleton-config.js';
 import {
   getBuiltinHandlerEntry,
@@ -12,19 +9,22 @@ import {
   listBuiltinHandlerNames
 } from './builtin-handler-catalog.js';
 import {
-  getAdHocHandlerEntry,
   listAdHocAutoHandlerEntries,
   listAdHocHandlerNames,
   listAdHocHandlerRecords,
-  listAdHocToolCallHandlerSpecs,
-  registerAdHocHandlerForTests
+  listAdHocToolCallHandlerSpecs
 } from './adhoc-handler-test-support.js';
 import {
-  planServertoolRegistryAutoHookDescriptorsWithNative,
-  planServertoolRegistryLookupActionWithNative,
-  planServertoolRegistryProjectionWithNative,
-  planServertoolRegistryRegistrationActionWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+  getServerToolHandlerViaNativePlan,
+  isRegisteredServerToolNameViaNativeConfig,
+  registerServerToolHandlerViaNativePlan
+} from './registry-registration-shell.js';
+import {
+  projectAutoServerToolHandlers,
+  projectAutoServerToolHookDescriptors,
+  projectRegisteredServerToolHandlerRecords,
+  projectRegistryHandlerNames
+} from './registry-projection-shell.js';
 
 type TriggerMode = 'tool_call' | 'auto';
 type AutoHookPhase = 'pre' | 'default' | 'post';
@@ -66,50 +66,17 @@ export const registerServerToolHandler = (
     };
   }
 ): void => {
-  const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
-  const builtinNameMatched = listBuiltinHandlerNames().includes(canonicalName);
-  const builtinEntry = builtinNameMatched
-    ? getBuiltinHandlerEntry(canonicalName)
-    : undefined;
-  const actionPlan = planServertoolRegistryRegistrationActionWithNative({
-    name: typeof name === 'string' ? name : '',
-    hasHandler: typeof handler === 'function',
-    builtinNameMatched,
-    builtinEntryPresent: Boolean(builtinEntry),
-    registrationAllowedByConfig: canonicalName ? isServertoolEnabledByConfig(canonicalName) : true
-  });
-  if (actionPlan.action !== 'register_adhoc') {
-    return;
-  }
-  registerAdHocHandlerForTests(name, handler, options);
+  registerServerToolHandlerViaNativePlan(name, handler, options);
 };
 
-export const getServerToolHandler = (name: string): ServerToolHandlerEntry | undefined => {
-  const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
-  const builtinEntry = listBuiltinHandlerNames().includes(canonicalName)
-    ? getBuiltinHandlerEntry(canonicalName)
-    : undefined;
-  const adHocEntry = canonicalName ? getAdHocHandlerEntry(canonicalName) : undefined;
-  const actionPlan = planServertoolRegistryLookupActionWithNative({
-    name: typeof name === 'string' ? name : '',
-    builtinEntryPresent: Boolean(builtinEntry),
-    adHocEntryPresent: Boolean(adHocEntry)
-  });
-  if (actionPlan.action === 'return_builtin') {
-    return builtinEntry;
-  }
-  if (actionPlan.action === 'return_adhoc') {
-    return adHocEntry;
-  }
-  return undefined;
-};
+export const getServerToolHandler = (
+  name: string
+): ServerToolHandlerEntry | undefined => getServerToolHandlerViaNativePlan(name);
 
 export function listRegisteredServerToolHandlerNames(): string[] {
-  return planServertoolRegistryProjectionWithNative({
-    registeredNames: [...listBuiltinHandlerNames(), ...listAdHocHandlerNames()],
-    registeredRecords: [],
-    autoHandlerNames: []
-  }).registeredNames;
+  return projectRegistryHandlerNames({
+    names: [...listBuiltinHandlerNames(), ...listAdHocHandlerNames()]
+  });
 }
 
 export function listAdHocRegisteredToolCallHandlerSpecs(): Array<{
@@ -122,55 +89,19 @@ export function listAdHocRegisteredToolCallHandlerSpecs(): Array<{
 }
 
 export const listAutoServerToolHandlers = (): ServerToolHandlerEntry[] => {
-  const entries = [...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()];
-  const entryByName = new Map(
-    entries.map((entry) => [entry.name.trim().toLowerCase(), entry] as const)
-  );
-  return planServertoolRegistryProjectionWithNative({
-    registeredNames: [],
-    registeredRecords: [],
-    autoHandlerNames: entries.map((entry) => entry.name)
-  }).autoHandlerNames.map((name) => {
-    const entry = entryByName.get(name.trim().toLowerCase());
-    if (!entry) {
-      throw new Error(`[servertool] native registry auto handler order missing entry for name: ${name}`);
-    }
-    return entry;
+  return projectAutoServerToolHandlers({
+    entries: [...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()]
   });
 };
 
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
-  const entries = listAutoServerToolHandlers();
-  const entryById = new Map(
-    entries.map((entry) => [entry.name.trim().toLowerCase(), entry] as const)
-  );
-  return planServertoolRegistryAutoHookDescriptorsWithNative({
-    hooks: entries.map((entry) => ({
-      id: entry.name,
-      phase: entry.autoHook?.phase,
-      priority: entry.autoHook?.priority,
-      order: entry.autoHook?.order
-    }))
-  }).map((descriptor) => {
-    const entry = entryById.get(descriptor.id.trim().toLowerCase());
-    if (!entry) {
-      throw new Error(
-        `[servertool] native registry auto-hook descriptor missing entry for id: ${descriptor.id}`
-      );
-    }
-    return {
-      id: descriptor.id,
-      phase: descriptor.phase,
-      priority: descriptor.priority,
-      order: descriptor.order,
-      registration: entry.registration,
-      handler: entry.handler
-    };
+  return projectAutoServerToolHookDescriptors({
+    entries: listAutoServerToolHandlers()
   });
 };
 
 export function isRegisteredServerToolName(name: string): boolean {
-  return getServertoolToolSpec(name)?.enabled === true;
+  return isRegisteredServerToolNameViaNativeConfig(name);
 }
 
 export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHandlerRecord[] {
@@ -191,29 +122,7 @@ export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHa
       handler: entry.handler
     }))
   ];
-  const projection = planServertoolRegistryProjectionWithNative({
-    registeredNames: [],
-    registeredRecords: rawRecords.map((entry, sourceIndex) => ({
-      name: entry.name,
-      trigger: entry.trigger,
-      sourceIndex
-    })),
-    autoHandlerNames: []
-  });
-  return projection.registeredRecords.map((recordPlan) => {
-    const entry = rawRecords[recordPlan.sourceIndex];
-    if (
-      !entry ||
-      entry.name.trim().toLowerCase() !== recordPlan.name.trim().toLowerCase() ||
-      entry.trigger !== recordPlan.trigger
-    ) {
-      throw new Error(
-        `[servertool] native registry record projection mismatch at sourceIndex=${recordPlan.sourceIndex} for ${recordPlan.trigger}:${recordPlan.name}`
-      );
-    }
-    return {
-      registration: entry.registration,
-      handler: entry.handler
-    };
+  return projectRegisteredServerToolHandlerRecords({
+    rawRecords
   });
 }
