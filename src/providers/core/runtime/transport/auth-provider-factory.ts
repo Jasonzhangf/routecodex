@@ -23,6 +23,7 @@ type OAuthAuthExtended = OAuthAuth & {
 };
 
 type ApiKeyAuthWithEntries = ApiKeyAuth & {
+  selectionMode?: 'round-robin' | 'priority';
   entries?: Array<{
     alias?: string;
     apiKey?: string;
@@ -86,7 +87,10 @@ export class AuthProviderFactory {
     // 检查是否有多 key entries，有则使用轮询模式
     const authWithEntries = auth as ApiKeyAuthWithEntries;
     if (authWithEntries.entries && authWithEntries.entries.length > 0) {
-      const rotator = new ApiKeyRotator(authWithEntries.entries);
+      const rotator = new ApiKeyRotator(
+        authWithEntries.entries,
+        authWithEntries.selectionMode ?? 'round-robin'
+      );
       return new ApiKeyAuthProvider(auth as ApiKeyAuth, rotator);
     }
 
@@ -105,6 +109,7 @@ export class AuthProviderFactory {
 
     const profileTokenFileMode = familyProfile?.resolveOAuthTokenFileMode?.({
       oauthProviderId: resolvedOAuthProviderId,
+      tokenFile: auth.tokenFile,
       auth: {
         clientId: auth.clientId,
         tokenUrl: auth.tokenUrl,
@@ -115,15 +120,20 @@ export class AuthProviderFactory {
 
     // For providers like Gemini CLI where public OAuth client may not be available,
     // allow reading tokens produced by external login tools (CLIProxyAPI) via token file.
-    const useTokenFile =
-      (typeof profileTokenFileMode === 'boolean'
-        ? profileTokenFileMode
-        : (
-            resolvedOAuthProviderId === 'gemini'
-          )) &&
-      !auth.clientId &&
-      !auth.tokenUrl &&
-      !auth.deviceCodeUrl;
+    // ProviderFamilyProfile is the source of truth for "use external token file vs OAuth client flow":
+    // - `true` => always use TokenFileAuthProvider (no client/URL/deviceCode required).
+    // - `false` => always require OAuth client credentials.
+    // - `undefined` => fall back to legacy heuristic (gemini without client/URL/deviceCode).
+    let useTokenFile: boolean;
+    if (typeof profileTokenFileMode === 'boolean') {
+      useTokenFile = profileTokenFileMode;
+    } else {
+      useTokenFile =
+        resolvedOAuthProviderId === 'gemini' &&
+        !auth.clientId &&
+        !auth.tokenUrl &&
+        !auth.deviceCodeUrl;
+    }
 
     if (useTokenFile) {
       // Keep TokenFileAuthProvider pure: do not infer providerId from type/rawType.

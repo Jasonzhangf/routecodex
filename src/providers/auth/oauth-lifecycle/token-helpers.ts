@@ -117,10 +117,57 @@ export function hasNoRefreshFlag(token: StoredOAuthToken | null): boolean {
   return false;
 }
 
+function parseJwtPayload(jwtToken: unknown): Record<string, unknown> | null {
+  if (typeof jwtToken !== 'string' || !jwtToken.trim()) {
+    return null;
+  }
+  const parts = jwtToken.trim().split('.');
+  if (parts.length !== 3) {
+    return null;
+  }
+  try {
+    const normalized = (parts[1] ?? '').replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const parsed = JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getEcoDevJwtExpiresAt(token: StoredOAuthToken | null, providerType: string): number | null {
+  if (providerType.trim().toLowerCase() !== 'ecodev') {
+    return null;
+  }
+  const payload = parseJwtPayload((token as UnknownObject | null)?.jwt_token);
+  const raw = payload?.exp;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return raw > 10_000_000_000 ? Math.floor(raw) : Math.floor(raw * 1000);
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Number(raw.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed > 10_000_000_000 ? Math.floor(parsed) : Math.floor(parsed * 1000);
+    }
+  }
+  return null;
+}
+
+function hasEcoDevJwtRefreshToken(token: StoredOAuthToken | null, providerType: string): boolean {
+  if (providerType.trim().toLowerCase() !== 'ecodev') {
+    return false;
+  }
+  const payload = parseJwtPayload((token as UnknownObject | null)?.jwt_token);
+  const refreshToken = payload?.refresh_token;
+  return typeof refreshToken === 'string' && refreshToken.trim().length > 0;
+}
+
 export function evaluateTokenState(token: StoredOAuthToken | null, providerType: string) {
   const hasApiKey = hasApiKeyField(token);
   const hasAccess = hasAccessToken(token);
-  const expiresAt = getExpiresAt(token);
+  const expiresAt = getExpiresAt(token) ?? getEcoDevJwtExpiresAt(token, providerType);
   const isExpired = expiresAt !== null && Date.now() >= expiresAt - 60_000;
   const isNearExpiry = expiresAt !== null && Date.now() >= expiresAt - 300_000;
 
@@ -134,6 +181,7 @@ export function evaluateTokenState(token: StoredOAuthToken | null, providerType:
     isExpired,
     isNearExpiry,
     validAccess,
-    isExpiredOrNear
+    isExpiredOrNear,
+    hasRefreshToken: hasNonEmptyString(token?.refresh_token) || hasEcoDevJwtRefreshToken(token, providerType)
   };
 }

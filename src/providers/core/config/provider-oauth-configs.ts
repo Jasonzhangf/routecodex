@@ -8,6 +8,7 @@ import type { ProviderProfile } from '../../profile/provider-profile.js';
 import { OAuthDeviceFlowStrategyFactory } from '../strategies/oauth-device-flow.js';
 import { OAuthAuthCodeFlowStrategyFactory } from '../strategies/oauth-auth-code-flow.js';
 import { OAuthHybridFlowStrategyFactory } from '../strategies/oauth-hybrid-flow.js';
+import { EcoDevOAuthFlowStrategy } from '../strategies/ecodev-oauth-flow.js';
 
 let oauthConfigsInitialized = false;
 
@@ -18,6 +19,24 @@ function registerOAuthFlowFactories(): void {
 }
 
 function registerProviderOAuthConfigs(): void {
+  OAuthFlowConfigManager.registerDefaultConfig('ecodev', {
+    flowType: OAuthFlowType.AUTHORIZATION_CODE,
+    activationType: OAuthActivationType.AUTO_BROWSER,
+    endpoints: {
+      authorizationUrl: 'https://cn.devecostudio.huawei.com/console/DevEcoIDE/apply',
+      deviceCodeUrl: 'ecodev-local-callback',
+      tokenUrl: 'https://cn.devecostudio.huawei.com/authrouter/auth/api/temptoken/check',
+      userInfoUrl: 'https://cn.devecostudio.huawei.com/authrouter/auth/api/jwToken/check'
+    },
+    client: {
+      clientId: '1008',
+      scopes: []
+    },
+    retry: {
+      maxAttempts: 1,
+      backoffMs: 0
+    }
+  });
 }
 
 export function initializeOAuthConfigs(): void {
@@ -39,6 +58,9 @@ export function getProviderOAuthConfig(
 
 export function createProviderOAuthStrategy(providerId: string, overrides: Record<string, unknown> = {}, tokenFile?: string) {
   const config = getProviderOAuthConfig(providerId, overrides);
+  if (providerId.trim().toLowerCase() === 'ecodev') {
+    return new EcoDevOAuthFlowStrategy(config, undefined, tokenFile);
+  }
   return OAuthFlowConfigManager.createStrategy(config, undefined, tokenFile);
 }
 

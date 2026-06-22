@@ -177,6 +177,42 @@ function shouldHonorNoRefresh(providerType: string, token: StoredOAuthToken | nu
   return true;
 }
 
+function extractEcoDevJwtPayload(token: StoredOAuthToken | null): Record<string, unknown> | null {
+  const jwtToken = token && typeof (token as UnknownObject).jwt_token === 'string'
+    ? String((token as UnknownObject).jwt_token).trim()
+    : '';
+  if (!jwtToken) {
+    return null;
+  }
+  const parts = jwtToken.split('.');
+  if (parts.length !== 3) {
+    return null;
+  }
+  try {
+    const normalized = (parts[1] ?? '').replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const parsed = JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveRefreshTokenForProvider(providerType: string, token: StoredOAuthToken | null): string {
+  const direct = typeof token?.refresh_token === 'string' ? token.refresh_token.trim() : '';
+  if (direct) {
+    return direct;
+  }
+  if (providerType.trim().toLowerCase() !== 'ecodev') {
+    return '';
+  }
+  const payload = extractEcoDevJwtPayload(token);
+  const fromJwt = payload && typeof payload.refresh_token === 'string' ? payload.refresh_token.trim() : '';
+  return fromJwt;
+}
+
 function applyRefreshFailureBackoff(_cacheKey: string, _providerType: string, _message: string): void {
 }
 
@@ -517,6 +553,7 @@ export async function ensureValidOAuthToken(
     logTokenSnapshot(providerType, token, endpoints);
     const tokenState = evaluateTokenState(token, providerType);
     const noRefresh = shouldHonorNoRefresh(providerType, token);
+    const refreshToken = resolveRefreshTokenForProvider(providerType, token);
 
     if (noRefresh && !forceReauth && !openBrowserRequested && !forceRefreshRequested) {
       logOAuthDebug(
@@ -537,7 +574,7 @@ export async function ensureValidOAuthToken(
     if (
       !forceReauth &&
       (forceRefreshRequested || tokenState.isExpiredOrNear) &&
-      token?.refresh_token &&
+      refreshToken &&
       typeof strategy.refreshToken === 'function'
     ) {
       try {
@@ -546,7 +583,7 @@ export async function ensureValidOAuthToken(
             ? '[OAuth] refreshing token (forced by upstream invalid-token repair)...'
             : '[OAuth] refreshing token...'
         );
-        const refreshed = await strategy.refreshToken(token.refresh_token);
+        const refreshed = await strategy.refreshToken(refreshToken);
         await finalizeTokenWrite(providerType, strategy, tokenFilePath, refreshed, 'refreshed and saved');
         updateThrottle(cacheKey);
         return;

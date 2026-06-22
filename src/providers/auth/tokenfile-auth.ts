@@ -111,19 +111,24 @@ export class TokenFileAuthProvider implements IAuthProvider {
     const file = this.resolveTokenFile();
     if (!file) {
       this.token = null;
-      this.isInitialized = true;
+      this.isInitialized = false;
       this.updateStatus(false, false, 'token_file_missing');
-      return;
+      throw new Error('missing required authentication credential: token file missing');
     }
     this.token = this.readJson(file);
     if (!this.token) {
-      this.isInitialized = true;
+      this.isInitialized = false;
       this.updateStatus(false, false, 'token_file_unreadable');
-      return;
+      throw new Error(`missing required authentication credential: token file unreadable (${file})`);
     }
     const ok = this.hasAccessToken(this.token) || this.hasApiKey(this.token);
+    if (!ok) {
+      this.isInitialized = false;
+      this.updateStatus(false, false, 'missing_access_token_or_api_key');
+      throw new Error(`missing required authentication credential: token file missing access token (${file})`);
+    }
     this.isInitialized = true;
-    this.updateStatus(ok, ok, ok ? undefined : 'missing_access_token_or_api_key');
+    this.updateStatus(true, true);
   }
 
   buildHeaders(): Record<string, string> {
