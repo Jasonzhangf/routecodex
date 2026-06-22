@@ -16,7 +16,29 @@ function isolateSessionDir(label: string): void {
 }
 
 function bindStoplessMetadataCenter<T extends Record<string, unknown>>(adapterContext: T): T {
-  MetadataCenter.attach(adapterContext);
+  const center = MetadataCenter.attach(adapterContext);
+  if (typeof adapterContext.requestId === 'string' && adapterContext.requestId.trim()) {
+    center.writeRequestTruth(
+      'requestId',
+      adapterContext.requestId.trim(),
+      {
+        module: 'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
+        symbol: 'bindStoplessMetadataCenter',
+        stage: 'test'
+      }
+    );
+  }
+  if (typeof adapterContext.sessionId === 'string' && adapterContext.sessionId.trim()) {
+    center.writeRequestTruth(
+      'sessionId',
+      adapterContext.sessionId.trim(),
+      {
+        module: 'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
+        symbol: 'bindStoplessMetadataCenter',
+        stage: 'test'
+      }
+    );
+  }
   return adapterContext;
 }
 
@@ -221,7 +243,7 @@ describe('servertool CLI projection blackbox', () => {
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     const command = JSON.parse(toolCall.function.arguments).cmd;
     expect(toolCall.function.name).toBe('exec_command');
-    expect(command).toContain('routecodex hook run reasoning_stop');
+    expect(command).toContain('routecodex hook run reasoningStop');
     expect(command).not.toContain('stop_message_auto');
     expect(extractCommandInput(command).repeatCount).toBe(2);
   });
@@ -325,7 +347,7 @@ describe('servertool CLI projection blackbox', () => {
 
     expect(result.executed).toBe(true);
     const payload = result.chat as any;
-    expect(JSON.stringify(payload)).not.toContain('routecodex hook run reasoning_stop');
+    expect(JSON.stringify(payload)).not.toContain('routecodex hook run reasoningStop');
     expect(payload.required_action).toBeUndefined();
     expect(payload.choices?.[0]?.message?.tool_calls).toBeUndefined();
   });
@@ -343,7 +365,9 @@ describe('servertool CLI projection blackbox', () => {
               role: 'assistant',
               content: [
                 '已完成在线验证。',
-                '{"stopreason":0,"reason":"已完成 allow-stop live 验证","has_evidence":1,"evidence":"5555 live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round allow stop","done_steps":"allow-stop response","next_step":"","next_suggested_path":"","learned":"summary must be markdown"}'
+                '<rcc_stop_schema>',
+                '{"stopreason":0,"reason":"已完成 allow-stop live 验证","has_evidence":1,"evidence":"5555 live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round allow stop","done_steps":"allow-stop response","next_step":"","next_suggested_path":"","learned":"summary must be markdown"}',
+                '</rcc_stop_schema>'
               ].join('\n')
             },
             finish_reason: 'stop'
@@ -464,7 +488,8 @@ describe('servertool CLI projection blackbox', () => {
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     expect(toolCall.function.name).toBe('exec_command');
     const command = JSON.parse(toolCall.function.arguments).cmd;
-    expect(command).toContain('routecodex hook run reasoning_stop');
+    expect(command).toContain('routecodex hook run reasoningStop');
     expect(command).not.toContain('stop_message_auto');
   });
+
 });
