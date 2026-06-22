@@ -30,7 +30,7 @@
 - 目标骨架：`docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md`
 - 机器主线：`docs/architecture/mainline-call-map.yml` 的 `servertool.hook_skeleton.mainline`
 - 迁移计划：`docs/goals/servertool-rustification-implementation-plan.md`
-- closeout 计划：`docs/goals/servertool-skeleton-rust-only-closeout-plan-2026-06-20.md`
+- closeout 计划：`docs/goals/servertool-hook-skeleton-rust-only-closeout-plan-2026-06-22.md`
 - Rust owner 方向：`sharedmodule/llmswitch-core/rust-core/crates/servertool-core/`
 - Hub runtime owner：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/`
 - TS 壳层：`sharedmodule/llmswitch-core/src/servertool/`
@@ -131,6 +131,10 @@
 5. 最后固化 red test
 - 真实样本先落 fixture 或 focused case。
 - 修复必须让 red -> green，再 replay 旧样本。
+
+6. closeout feature-map 的 allowed_paths 选文件要避开 verify 脚本中的 builder 字符串
+- 如果 `allowed_paths` 里放了包含 canonical builder 名称的 gate 脚本，`function-map` 的 builder 定义门禁会把字符串命中误判成 allowed-path 重定义。
+- 只把真正的 owner 源文件和纯测试文件放进 `allowed_paths`；验证脚本留在 `required_gates`。
 
 6. Native build 和黑盒顺序不能反
 - 只要黑盒依赖新 NAPI 导出，必须先完成 `build-native-hotpath`，再跑 Jest / CLI 黑盒。

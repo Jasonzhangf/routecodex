@@ -1,0 +1,122 @@
+lifecycle_id: servertool.hook_skeleton.mainline
+summary: "Servertool standard hook skeleton: CLI remains the business execution
+  lifecycle, while request/result injection, response interception, schema
+  validation, hook response injection, followup/reenter effect planning, and
+  finalization are governed by Rust-owned required/optional hooks."
+owner_feature_id: binding pending
+entrypoint:
+  node_id: HubRespChatProcess03Governed
+  wiki_page: null
+  call_map_chain_id: servertool.hook_skeleton.mainline
+node_ids:
+  - HubReqChatProcess03Governed
+  - HubReqInbound02Standardized
+  - HubRespChatProcess03Governed
+  - HubRespOutbound04ClientSemantic
+  - ServertoolCli04ClientExecuted
+  - ServertoolReqHook01ResultParsed
+  - ServertoolReqHook02TextRewritten
+  - ServertoolReqHook03ToolInjected
+  - ServertoolReqHook04RequestFinalized
+  - ServertoolRespHook01Intercepted
+  - ServertoolRespHook02SchemaValidated
+  - ServertoolRespHook03HookResponseInjected
+  - ServertoolRespHook04FollowupPlanned
+  - ServertoolRespHook05ReenterDispatched
+  - ServertoolRespHook06ProjectionFinalized
+edges:
+  - step_id: sth-resp-01
+    from_node: HubRespChatProcess03Governed
+    to_node: ServertoolRespHook01Intercepted
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-resp-02
+    from_node: ServertoolRespHook01Intercepted
+    to_node: ServertoolRespHook02SchemaValidated
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-resp-03
+    from_node: ServertoolRespHook02SchemaValidated
+    to_node: ServertoolRespHook03HookResponseInjected
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-resp-04
+    from_node: ServertoolRespHook03HookResponseInjected
+    to_node: ServertoolRespHook04FollowupPlanned
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-resp-05
+    from_node: ServertoolRespHook04FollowupPlanned
+    to_node: ServertoolRespHook05ReenterDispatched
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-resp-06
+    from_node: ServertoolRespHook05ReenterDispatched
+    to_node: ServertoolRespHook06ProjectionFinalized
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-resp-07
+    from_node: ServertoolRespHook06ProjectionFinalized
+    to_node: HubRespOutbound04ClientSemantic
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-cli-01
+    from_node: ServertoolRespHook03HookResponseInjected
+    to_node: ServertoolCli04ClientExecuted
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-req-01
+    from_node: HubReqInbound02Standardized
+    to_node: ServertoolReqHook01ResultParsed
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-req-02
+    from_node: ServertoolReqHook01ResultParsed
+    to_node: ServertoolReqHook02TextRewritten
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-req-03
+    from_node: ServertoolReqHook02TextRewritten
+    to_node: ServertoolReqHook03ToolInjected
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-req-04
+    from_node: ServertoolReqHook03ToolInjected
+    to_node: ServertoolReqHook04RequestFinalized
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+  - step_id: sth-req-05
+    from_node: ServertoolReqHook04RequestFinalized
+    to_node: HubReqChatProcess03Governed
+    status: binding pending
+    owner_feature_id: binding pending
+    binding_pending: true
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

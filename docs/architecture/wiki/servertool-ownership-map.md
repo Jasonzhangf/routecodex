@@ -37,6 +37,7 @@ Feature scope: `hub.servertool_*`
 | `hub.servertool_stopless_cli_projection_context` | stopless CLI projection context planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_flow_presentation` | servertool progress log tool-name and highlight presentation policy | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_loop_warning` | stop-message loop warning text/count injection and seed payload bridge | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/followup-core/src` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
+| `hub.servertool_rust_only_closeout` | servertool hook skeleton closeout gate; proves remaining TS orchestration has been reduced to thin shells before physical deletion and anchors the Rust hook skeleton contract | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map` |
 | `hub.servertool_orchestration_policy` | servertool timeout, client-inject, followup error, and adapter provider-key policy | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_backend_route_runtime` | servertool backend-route followup endpoint, payload, injection, metadata, error envelope, and bootstrap replay planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 
@@ -568,7 +569,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts`
+- `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Forbidden paths:
@@ -610,7 +611,8 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts`
 - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
 
 Forbidden paths:
@@ -692,7 +694,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
 - `tests/servertool/execution-shell.backend-failfast.spec.ts`
 
 Forbidden paths:
@@ -730,7 +732,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
 - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
 
 Forbidden paths:
@@ -768,7 +770,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts`
 - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
 
 Forbidden paths:
@@ -810,7 +812,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts`
 - `tests/servertool/execution-shell.backend-failfast.spec.ts`
 
 Forbidden paths:
@@ -893,7 +895,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts`
+- `sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
 
 Forbidden paths:
@@ -932,7 +934,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts`
+- `sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
 
 Forbidden paths:
@@ -1031,7 +1033,7 @@ Required gates:
 
 Notes:
 - Rust skeleton config owns flow id normalization, progress tool-name resolution, and gold highlight decisions.
-- `progress-log-block.ts` may only call native flow presentation wrappers.
+- progress-log-block.ts may only call native flow presentation wrappers.
 - TS skeleton-config must not expose progress presentation projection helpers.
 - Do not restore local `normalizeFlowId`, `buildServertoolProgressConfig`, `toolNameByFlowId`, `goldHighlightFlowIds`, or Set-based highlight policy in TS.
 
@@ -1077,6 +1079,72 @@ Notes:
 - Loop warning text and repeat-count policy stay Rust-owned in followup-core.
 - TS may only build the native seed payload and pass the native warning injector as callback glue.
 - `appendStopMessageLoopWarning` must not return as a TS semantic owner/export.
+
+## hub.servertool_rust_only_closeout
+
+Summary: servertool hook skeleton closeout gate; proves remaining TS orchestration has been reduced to thin shells before physical deletion and anchors the Rust hook skeleton contract
+
+Owner kind: `rust_ssot`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs`
+Owner scope: servertool rust-only closeout gate and Rust hook skeleton contract anchors (validate, scheduler, phase contract)
+
+Canonical types:
+- `ServertoolHookSpec`
+- `ServertoolHookSchedulerInput`
+- `ServertoolHookEvent`
+- `ServertoolHookProjection`
+- `ServertoolHookEffectPlan`
+- `ServertoolHookSkeletonError`
+
+Canonical builders:
+- `validate_servertool_hook_spec`
+- `plan_servertool_hook_schedule`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/response-stage-prepass-shell.spec.ts`
+- `tests/servertool/execution-queue-shell.spec.ts`
+- `tests/servertool/execution-stage-shell.spec.ts`
+- `tests/servertool/entry-context-shell.spec.ts`
+- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
+- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
+- `tests/servertool/server-side-tools.dispatch-native.spec.ts`
+- `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
+- `tests/servertool/servertool-auto-hook-trace.spec.ts`
+- `tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts`
+
+Forbidden paths:
+- `src/providers`
+- `src/server/runtime/http-server/executor`
+- `sharedmodule/llmswitch-core/src/servertool/handlers`
+
+Required tests:
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/response-stage-prepass-shell.spec.ts`
+- `tests/servertool/execution-queue-shell.spec.ts`
+- `tests/servertool/execution-stage-shell.spec.ts`
+- `tests/servertool/entry-context-shell.spec.ts`
+- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
+- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
+- `tests/servertool/servertool-auto-hook-trace.spec.ts`
+- `tests/servertool/server-side-tools.dispatch-native.spec.ts`
+- `tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts`
+
+Required gates:
+- `npm run verify:servertool-rust-only`
+- `npm run verify:function-map-compile-gate`
+- `npm run verify:architecture-mainline-call-map`
+
+Notes:
+- This feature registers the closeout gate only; it does not declare `servertool.hook_skeleton.mainline` anchored.
+- `docs/architecture/mainline-call-map.yml` `chain_id: servertool.hook_skeleton.mainline` must remain `binding pending` until Rust owner symbols and blackbox gates exist for runtime owners.
+- Re-introducing TS business semantics in any of the listed allowed shell files is fail-fast.
 
 ## hub.servertool_orchestration_policy
 

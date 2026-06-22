@@ -452,7 +452,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -487,7 +487,8 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts
       - tests/servertool/execution-dispatch-outcome-shell.spec.ts
     forbidden_paths:
       - src/providers
@@ -555,7 +556,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
       - tests/servertool/execution-shell.backend-failfast.spec.ts
     forbidden_paths:
       - src/providers
@@ -586,7 +587,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
       - tests/servertool/execution-dispatch-outcome-shell.spec.ts
     forbidden_paths:
       - src/providers
@@ -617,7 +618,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts
       - tests/servertool/execution-dispatch-outcome-shell.spec.ts
     forbidden_paths:
       - src/providers
@@ -652,7 +653,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts
       - tests/servertool/execution-shell.backend-failfast.spec.ts
     forbidden_paths:
       - src/providers
@@ -721,7 +722,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
+      - sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts
       - tests/servertool/server-side-tools.failfast.spec.ts
     forbidden_paths:
       - src/providers
@@ -753,7 +754,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
+      - sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts
       - tests/servertool/server-side-tools.failfast.spec.ts
     forbidden_paths:
       - src/providers
@@ -874,6 +875,65 @@ owners:
       - "Loop warning text and repeat-count policy stay Rust-owned in followup-core."
       - "TS may only build the native seed payload and pass the native warning injector as callback glue."
       - "`appendStopMessageLoopWarning` must not return as a TS semantic owner/export."
+
+  - feature_id: hub.servertool_rust_only_closeout
+    status: active
+    summary: "servertool hook skeleton closeout gate; proves remaining TS orchestration has been reduced to thin shells before physical deletion and anchors the Rust hook skeleton contract"
+    owner_kind: rust_ssot
+    owner_scope: "servertool rust-only closeout gate and Rust hook skeleton contract anchors (validate, scheduler, phase contract)"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs
+    canonical_types:
+      - ServertoolHookSpec
+      - ServertoolHookSchedulerInput
+      - ServertoolHookEvent
+      - ServertoolHookProjection
+      - ServertoolHookEffectPlan
+      - ServertoolHookSkeletonError
+    canonical_builders:
+      - validate_servertool_hook_spec
+      - plan_servertool_hook_schedule
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/response-stage-prepass-shell.spec.ts
+      - tests/servertool/execution-queue-shell.spec.ts
+      - tests/servertool/execution-stage-shell.spec.ts
+      - tests/servertool/entry-context-shell.spec.ts
+      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+      - tests/servertool/server-side-tools.dispatch-native.spec.ts
+      - tests/servertool/server-side-tools.auto-hook-config.spec.ts
+      - tests/servertool/servertool-auto-hook-trace.spec.ts
+      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+    required_tests:
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/response-stage-prepass-shell.spec.ts
+      - tests/servertool/execution-queue-shell.spec.ts
+      - tests/servertool/execution-stage-shell.spec.ts
+      - tests/servertool/entry-context-shell.spec.ts
+      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/server-side-tools.auto-hook-config.spec.ts
+      - tests/servertool/servertool-auto-hook-trace.spec.ts
+      - tests/servertool/server-side-tools.dispatch-native.spec.ts
+      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "This feature registers the closeout gate only; it does not declare `servertool.hook_skeleton.mainline` anchored."
+      - "`docs/architecture/mainline-call-map.yml` `chain_id: servertool.hook_skeleton.mainline` must remain `binding pending` until Rust owner symbols and blackbox gates exist for runtime owners."
+      - "Re-introducing TS business semantics in any of the listed allowed shell files is fail-fast."
 
   - feature_id: hub.servertool_orchestration_policy
     status: active
@@ -3390,6 +3450,7 @@ owners:
       - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
       - "SSE terminal/probe/incomplete-repair is a locked business module: terminal-state parse, finish_reason/probe synthesis, stream-end repair, incomplete projection, and required_action closeout all belong to `responses-sse-bridge.ts` and must not regrow as handler-local semantics."
       - "Server handler must not keep local `response.*` event allowlists, keepalive/drop helpers, required_action frame parsing, terminal-state parsing, client-close cleanup gating, probe finish_reason resolution, or stream-end repair decisions; those stay behind the dedicated SSE bridge surface."
+      - "Client-visible Responses SSE must stay on the standard protocol surface: transport keepalive may only be SSE comments, never synthetic business events like `event: ping`."
       - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, finish_reason derivation, protocol-hint parsing, or `__sse_responses` dispatch-entry detection; those stay behind the dedicated SSE bridge surface."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
