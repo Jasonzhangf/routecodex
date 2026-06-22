@@ -81,6 +81,34 @@ describe('stop_message_auto continuation routing state key', () => {
     });
   });
 
+  test('prefers current request stopless tool output over stale runtime stopMessageState', () => {
+    const state = resolveRuntimeStopMessageStateFromAdapterContext({
+      __raw_request_body: {
+        input: [{
+          type: 'function_call_output',
+          call_id: 'call_servertool_cli',
+          output: '{"toolName":"stop_message_auto","flowId":"stop_message_flow","continuationPrompt":"continue from current tool output","repeatCount":3,"maxRepeats":4}'
+        }]
+      },
+      __rt: {
+        stopMessageState: {
+          stopMessageText: 'stale runtime text',
+          stopMessageMaxRepeats: 4,
+          stopMessageUsed: 0,
+          stopMessageStageMode: 'on'
+        }
+      }
+    } as any);
+
+    expect(state).toEqual({
+      text: 'continue from current tool output',
+      maxRepeats: 4,
+      used: 2,
+      source: 'client_exec_result',
+      stageMode: 'on'
+    });
+  });
+
   test('uses Rust-owned bd working directory resolver', () => {
     const workdir = resolveBdWorkingDirectoryForRecord(
       {

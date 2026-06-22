@@ -181,17 +181,13 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   };
   const center = MetadataCenter.attach(metadata);
   const resumeSessionId =
-    typeof args.resumeMeta?.sessionId === 'string' && args.resumeMeta.sessionId.trim()
-      ? args.resumeMeta.sessionId.trim()
-      : typeof args.requestContext.sessionId === 'string' && args.requestContext.sessionId.trim()
-        ? args.requestContext.sessionId.trim()
-        : undefined;
+    typeof args.requestContext.sessionId === 'string' && args.requestContext.sessionId.trim()
+      ? args.requestContext.sessionId.trim()
+      : undefined;
   const resumeConversationId =
-    typeof args.resumeMeta?.conversationId === 'string' && args.resumeMeta.conversationId.trim()
-      ? args.resumeMeta.conversationId.trim()
-      : typeof args.requestContext.conversationId === 'string' && args.requestContext.conversationId.trim()
-        ? args.requestContext.conversationId.trim()
-        : undefined;
+    typeof args.requestContext.conversationId === 'string' && args.requestContext.conversationId.trim()
+      ? args.requestContext.conversationId.trim()
+      : undefined;
   if (resumeSessionId) {
     center.writeRequestTruth(
       'sessionId',

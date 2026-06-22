@@ -809,7 +809,7 @@ describe('executor metadata session daemon extraction', () => {
     });
   });
 
-  it('projects resumed responsesResume session truth and route pin into flat metadata when request truth is only carried by MetadataCenter', () => {
+  it('keeps responsesResume session scope out of request truth while preserving route pin projection', () => {
     const requestMetadata: Record<string, unknown> = {};
     const requestCenter = MetadataCenter.attach(requestMetadata);
     requestCenter.writeContinuationContext(
@@ -867,10 +867,7 @@ describe('executor metadata session daemon extraction', () => {
       sessionId: 'sess-submit-resume-center-1',
       conversationId: 'conv-submit-resume-center-1'
     });
-    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
-      sessionId: 'sess-submit-resume-center-1',
-      conversationId: 'conv-submit-resume-center-1'
-    });
+    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toEqual({});
   });
 
   it('preserves request truth in metadata center even if legacy top-level session field is later overwritten', () => {

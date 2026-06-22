@@ -17,6 +17,7 @@ import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-s
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { preserveLiveClientAbortCarriers } from './executor/request-executor-client-abort-block.js';
 import { hasStoplessDirectiveInRequestPayload } from './executor/provider-response-shared-pure-blocks.js';
+import { extractServertoolCliResultRouteHintFromRequestNative } from '../../../modules/llmswitch/bridge/native-exports.js';
 
 const ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER = {
   module: 'src/server/runtime/http-server/executor-metadata.ts',
@@ -696,38 +697,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       'responses resume request truth'
     );
     metadata.responsesResume = responsesResumeSource;
-    const responsesResumeSessionId =
-      typeof responsesResumeSource.sessionId === 'string' && responsesResumeSource.sessionId.trim()
-        ? responsesResumeSource.sessionId.trim()
-        : undefined;
-    const responsesResumeConversationId =
-      typeof responsesResumeSource.conversationId === 'string' && responsesResumeSource.conversationId.trim()
-        ? responsesResumeSource.conversationId.trim()
-        : undefined;
-    if (responsesResumeSessionId && !currentRequestTruth.sessionId) {
-      center.writeRequestTruth(
-        'sessionId',
-        responsesResumeSessionId,
-        {
-          module: 'src/server/runtime/http-server/executor-metadata.ts',
-          symbol: 'buildRequestMetadata',
-          stage: 'HubReqInbound02Standardized'
-        },
-        'responses relay resumed session truth'
-      );
-    }
-    if (responsesResumeConversationId && !currentRequestTruth.conversationId) {
-      center.writeRequestTruth(
-        'conversationId',
-        responsesResumeConversationId,
-        {
-          module: 'src/server/runtime/http-server/executor-metadata.ts',
-          symbol: 'buildRequestMetadata',
-          stage: 'HubReqInbound02Standardized'
-        },
-        'responses relay resumed conversation truth'
-      );
-    }
     const runtimeControl = center.readRuntimeControl();
     const projectedRouteHint =
       typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
@@ -884,6 +853,10 @@ function extractRouteHint(input: PipelineExecutionInput): string | undefined {
     || isRecord(bodyMetadata?.responsesResumeContext)
     || typeof bodyMetadata?.previous_response_id === 'string'
     || typeof bodyMetadata?.response_id === 'string';
+  const servertoolCliRouteHint = extractServertoolCliResultRouteHint(input);
+  if (servertoolCliRouteHint) {
+    return servertoolCliRouteHint;
+  }
   if (bodyHasResponsesResume) {
     return undefined;
   }
@@ -892,6 +865,32 @@ function extractRouteHint(input: PipelineExecutionInput): string | undefined {
     return bodyRouteHint;
   }
   return undefined;
+}
+
+function extractServertoolCliResultRouteHint(input: PipelineExecutionInput): string | undefined {
+  if (!requestMayContainToolOutput(input.body)) {
+    return undefined;
+  }
+  return extractServertoolCliResultRouteHintFromRequestNative({
+    adapterContext: {
+      __raw_request_body: input.body
+    },
+    runtimeMetadata: input.metadata
+  });
+}
+
+function requestMayContainToolOutput(value: unknown): boolean {
+  try {
+    const text = JSON.stringify(value);
+    return typeof text === 'string' && (
+      text.includes('"tool_outputs"')
+      || text.includes('"function_call_output"')
+      || text.includes('"tool_result"')
+      || text.includes('"tool_message"')
+    );
+  } catch {
+    return false;
+  }
 }
 
 function cloneMetadata(source: Record<string, unknown>): Record<string, unknown> {

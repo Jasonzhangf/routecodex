@@ -130,6 +130,18 @@ async function runStoplessCliStdout(command: string) {
   return JSON.parse(output[0] ?? '{}') as Record<string, any>;
 }
 
+function buildResponsesToolOutputRequest(output: Record<string, unknown>) {
+  return {
+    input: [
+      {
+        type: 'function_call_output',
+        call_id: 'call_servertool_cli',
+        output: JSON.stringify(output)
+      }
+    ]
+  };
+}
+
 describe('stopless CLI continuation', () => {
   test('direct runtime routeName disables stopless CLI projection', async () => {
     const adapterContext = buildAdapterContext({
@@ -187,6 +199,7 @@ describe('stopless CLI continuation', () => {
     expect(result.executed).toBe(true);
     const command = extractExecCommand(result.chat);
     expect(command).toContain('routecodex hook run reasoningStop');
+    expect(command).toContain(`--session-id '${adapterContext.sessionId}'`);
     expect((result.chat as any).choices?.[0]?.message?.content).toBe('');
     expect((result.chat as any).choices?.[0]?.message?.reasoning_text).toContain('need more evidence');
     expect(command).not.toContain('schemaGuidance');
@@ -194,7 +207,7 @@ describe('stopless CLI continuation', () => {
     expect(cliStdout.routeHint).toBe('thinking');
     expect(cliStdout.repeatCount).toBe(2);
     expect(cliStdout.maxRepeats).toBe(3);
-    expect(cliStdout.sessionId).toBeUndefined();
+    expect(cliStdout.sessionId).toBe(adapterContext.sessionId);
     expect(cliStdout.requestId).toBe(adapterContext.requestId);
     expect(cliStdout.schemaGuidance?.requiredFields).toContain('stopreason');
     expect(cliStdout.schemaGuidance?.requiredFields).toContain('next_step');
@@ -332,14 +345,21 @@ describe('stopless CLI continuation', () => {
 
   test('stopless sessionId drives repeatCount end-to-end and does not cross sessions', async () => {
     const sessionA = `session-stopless-e2e-a-${Date.now()}`;
+    const requestA1 = `req-stopless-e2e-a-1-${Date.now()}`;
     const firstA = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
-      adapterContext: buildAdapterContext({
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        sessionId: sessionA
-      }),
-      requestId: `req-stopless-e2e-a-1-${Date.now()}`,
+      adapterContext: (() => {
+        const context = bindMetadataCenter({
+        ...buildAdapterContext({
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          sessionId: sessionA
+        })
+        } as any);
+        bindRequestTruth(context, requestA1, sessionA);
+        return context;
+      })(),
+      requestId: requestA1,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
       reenterPipeline: async () => {
@@ -347,26 +367,35 @@ describe('stopless CLI continuation', () => {
       }
     });
     expect(firstA.executed).toBe(true);
-    expect(maybeExtractExecCommand(firstA.chat)).toBeUndefined();
+    const commandA1 = maybeExtractExecCommand(firstA.chat);
+    expect(commandA1).toContain('routecodex hook run reasoningStop');
+    const stdoutA1 = await runStoplessCliStdout(commandA1!);
+    expect(stdoutA1.sessionId).toBe(sessionA);
+    expect(stdoutA1.repeatCount).toBe(2);
 
+    const requestA2 = `req-stopless-e2e-a-2-${Date.now()}`;
+    const adapterA2 = bindMetadataCenter({
+      ...buildAdapterContext({
+        requestId: requestA2,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        sessionId: sessionA
+      }),
+      __raw_request_body: buildResponsesToolOutputRequest(stdoutA1),
+      __rt: {
+        stopMessageState: {
+          stopMessageText: 'stale runtime text',
+          stopMessageMaxRepeats: 3,
+          stopMessageUsed: 0,
+          stopMessageStageMode: 'on'
+        }
+      }
+    } as any);
+    bindRequestTruth(adapterA2, requestA2, sessionA);
     const secondA = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
-      adapterContext: bindMetadataCenter({
-        ...buildAdapterContext({
-          requestId: `req-stopless-e2e-a-2-${Date.now()}`,
-          entryEndpoint: '/v1/responses',
-          providerProtocol: 'openai-responses',
-          sessionId: sessionA
-        }),
-        __raw_request_body: {
-          input: [{
-            type: 'function_call_output',
-            call_id: 'call_servertool_cli',
-            output: JSON.stringify({ repeatCount: 1, maxRepeats: 3, sessionId: sessionA })
-          }]
-        }
-      } as any),
-      requestId: `req-stopless-e2e-a-2-${Date.now()}`,
+      adapterContext: adapterA2,
+      requestId: requestA2,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
       reenterPipeline: async () => {
@@ -374,17 +403,61 @@ describe('stopless CLI continuation', () => {
       }
     });
     expect(secondA.executed).toBe(true);
-    expect(maybeExtractExecCommand(secondA.chat)).toBeUndefined();
+    const commandA2 = maybeExtractExecCommand(secondA.chat);
+    expect(commandA2).toContain('routecodex hook run reasoningStop');
+    const stdoutA2 = await runStoplessCliStdout(commandA2!);
+    expect(stdoutA2.sessionId).toBe(sessionA);
+    expect(stdoutA2.repeatCount).toBe(3);
 
-    const sessionB = `session-stopless-e2e-b-${Date.now()}`;
-    const firstB = await runServerToolOrchestration({
-      chat: buildStopChatResponse('need more evidence'),
-      adapterContext: buildAdapterContext({
+    const requestA3 = `req-stopless-e2e-a-3-${Date.now()}`;
+    const adapterA3 = bindMetadataCenter({
+      ...buildAdapterContext({
+        requestId: requestA3,
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses',
-        sessionId: sessionB
+        sessionId: sessionA
       }),
-      requestId: `req-stopless-e2e-b-1-${Date.now()}`,
+      __raw_request_body: buildResponsesToolOutputRequest(stdoutA2),
+      __rt: {
+        stopMessageState: {
+          stopMessageText: 'stale runtime text',
+          stopMessageMaxRepeats: 3,
+          stopMessageUsed: 0,
+          stopMessageStageMode: 'on'
+        }
+      }
+    } as any);
+    bindRequestTruth(adapterA3, requestA3, sessionA);
+    const thirdA = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: adapterA3,
+      requestId: requestA3,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless session e2e must not reenter');
+      }
+    });
+    expect(thirdA.executed).toBe(true);
+    expect(maybeExtractExecCommand(thirdA.chat)).toBeUndefined();
+    expect((thirdA.chat as any).choices?.[0]?.finish_reason).toBe('stop');
+
+    const sessionB = `session-stopless-e2e-b-${Date.now()}`;
+    const requestB1 = `req-stopless-e2e-b-1-${Date.now()}`;
+    const firstB = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: (() => {
+        const context = bindMetadataCenter({
+        ...buildAdapterContext({
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          sessionId: sessionB
+        })
+        } as any);
+        bindRequestTruth(context, requestB1, sessionB);
+        return context;
+      })(),
+      requestId: requestB1,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
       reenterPipeline: async () => {
@@ -392,7 +465,11 @@ describe('stopless CLI continuation', () => {
       }
     });
     expect(firstB.executed).toBe(true);
-    expect(maybeExtractExecCommand(firstB.chat)).toBeUndefined();
+    const commandB1 = maybeExtractExecCommand(firstB.chat);
+    expect(commandB1).toContain('routecodex hook run reasoningStop');
+    const stdoutB1 = await runStoplessCliStdout(commandB1!);
+    expect(stdoutB1.sessionId).toBe(sessionB);
+    expect(stdoutB1.repeatCount).toBe(2);
   });
 
   test('missing session makes stopless terminal instead of projecting CLI', async () => {

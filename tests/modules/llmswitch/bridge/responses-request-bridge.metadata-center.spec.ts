@@ -161,4 +161,42 @@ describe('responses-request-bridge metadata center projection', () => {
       conversationId: 'conv-stopless-live-1'
     });
   });
+
+  it('does not upgrade resumeMeta-only session scope into request truth', () => {
+    const requestContext = {
+      payload: { model: 'gpt-5.5', input: [] },
+      context: { input: [] },
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    };
+    const resumeMeta = {
+      responseId: 'resp_resume_only_1',
+      continuationOwner: 'relay',
+      routeHint: 'thinking',
+      sessionId: 'sess-resume-only-1',
+      conversationId: 'conv-resume-only-1'
+    };
+
+    const metadata = buildResponsesPipelineMetadataForHttp({
+      streamPlan: {
+        originalStream: true,
+        outboundStream: true,
+        inboundStream: true,
+        acceptsSse: true,
+        requestStartMeta: {}
+      },
+      clientRequestId: 'client-resume-only-1',
+      requestContext,
+      resumeMeta
+    });
+
+    const center = MetadataCenter.read(metadata);
+    expect(center?.readContinuationContext()).toMatchObject({
+      responsesResume: resumeMeta
+    });
+    expect(center?.readRequestTruth()).toEqual({});
+    expect(readRuntimeControlProjection(metadata)).toMatchObject({
+      routeHint: 'thinking'
+    });
+  });
 });

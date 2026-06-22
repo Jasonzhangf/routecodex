@@ -1,4 +1,162 @@
+# 2026-06-22 stopless sessionId / no-schema loop closeout slice
+
+- 实锤问题 1：`src/server/runtime/http-server/executor-metadata.ts` 会把 `responsesResume.sessionId/conversationId` 写进 `MetadataCenter.requestTruth`；`src/modules/llmswitch/bridge/responses-request-bridge.ts` 也会优先拿 `resumeMeta.sessionId/conversationId` 写 request truth。这个违反“只有请求入口真相能写 request truth”，会让 continuation context 冒充 session truth。
+- 实锤问题 2：`servertool-core/src/persisted_lookup.rs::resolve_runtime_stop_message_state_from_adapter_context` 先吃 stale `runtime_metadata.stopMessageState`，再看当前 request 的 stopless CLI `tool_output`，导致 `repeatCount` 恢复顺序颠倒；live-like focused 现象就是第二/三轮还在 `used=0 left=3`。
+- 本轮修复：
+  - 删除 `responsesResume -> requestTruth.sessionId/conversationId` 写入。
+  - `responses-request-bridge` 只允许 `requestContext.sessionId/conversationId` 写 request truth，不再吃 `resumeMeta`。
+  - stopless runtime snapshot 恢复顺序改成：当前 request `tool_output` -> runtime `responsesRequestContext` 中的 tool output -> stale runtime stopMessageState。
+  - 补强 session E2E：同一 session 明确锁 `repeatCount 2 -> 3 -> terminal`，且在第二/三轮显式注入 stale runtime state，证明当前 request tool output 优先。
+- 验证：
+  - `cargo test -p servertool-core current_request_stopless_cli_result_wins_over_stale_runtime_snapshot -- --nocapture` PASS
+  - `cargo test -p servertool-core adapter_context_restores_stopless_cli_result_from_request_record -- --nocapture` PASS
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS
+  - focused Jest PASS：
+    - `tests/servertool/stop-message-runtime-utils.continuation.spec.ts`
+    - `tests/servertool/stopless-cli-continuation.spec.ts`
+    - `tests/servertool/stopless-vr-route-hint.spec.ts`
+    - `tests/server/http-server/executor-metadata.spec.ts`
+    - `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts`
+  - `node scripts/verify-servertool-rust-only.mjs` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+
+# 2026-06-22 snapshot 统一写盘工具 M3/M4 收口
+
+- 新增 `src/debug/snapshot/writer.ts`：唯一 snapshot 写盘入口 `writeUnifiedSnapshot`
+  - 内含 hook bridge 调用 + 本地 disk 写入 + runtime marker + prune
+  - 支持 `rawPayload`（provider 预构建 payload 直写，不二次包装）
+  - 支持 `headers` / `url` / `extraMeta` / `entryPort` / `providerKey` 统一参数
+- `src/utils/snapshot-writer.ts`（M3 server writer）→ 薄壳：只调 `writeUnifiedSnapshot`，360 行 → ~30 行
+- `src/providers/core/utils/snapshot-writer.ts`（M4 provider writer）→ `persistProviderSnapshot` + `writeClientSnapshot` 改调 `writeUnifiedSnapshot`，保留 429/error/stream/queue 逻辑
+- 验证：
+  - `tsc --noEmit` PASS
+  - 9 focused suites / 20 tests PASS（含 provider snapshot-writer.* 全套 + debug snapshot + diag + handler）
+  - `verify:debug-unified-surface` PASS
+  - `verify:function-map-compile-gate` PASS（全 13 步）
+- 设计文档：`docs/goals/snapshot-unified-write-tool-plan.md`
+
+# 2026-06-22 snapshot 统一写盘工具方案设计
+
+- Jason 新约束：snapshot 需要全局唯一工具写盘 + 统一命令参数控制。
+- 现状审计：
+  - 写盘点 3 处分散：`src/utils/snapshot-writer.ts`（server）、`src/providers/core/utils/snapshot-writer.ts`（provider）、`src/debug/snapshot-store.ts`（debug jsonl store）。
+  - 参数面散在 CLI `--snap`/`--snap-stages`/`--snap-off`、`globalThis.rccSnapshotsEnabled`、`runtimeFlags.snapshotsEnabled`、多个 `ROUTECODEX_SNAPSHOT_*` env。
+  - hook bridge `writeSnapshotViaHooks(...)` 被两个 writer 各自��用，无唯一入口。
+- 设计方案落盘：`docs/goals/snapshot-unified-write-tool-plan.md`
+  - 唯一写盘点：`src/debug/snapshot/writer.ts`，canonical builder: `createSnapshotWriter`
+  - 统一 CLI：`routecodex snapshot` 子命令
+  - 统一参数合约：`SnapshotWriteInput`，scope/stage/requestId/entryEndpoint/entryPort/data/verbosity/flush
+  - 环境变量收敛：`ROUTECODEX_SNAPSHOT_ENABLE` / `STAGES` / `SCOPE` / `ROOT`
+  - 迁移顺序：M2（已完成 store）→ M3 server writer shell → M4 provider writer shell → M9 删旧文件
+- 下一步：按 M3→M4 顺序逐模块迁 writer，不跨模块并行。
+
+# 2026-06-22 debug.unified_surface M1 收口（diag_error_artifact）
+
+# 2026-06-22 /v1/responses relay openai-chat SSE payload cropped before host bridge
+
+- 21:14 replaypool/key1/glm-5.2 live sample已锁定真实根因，不是上游缺 `choices`：
+  - sample: `~/.rcc/codex-samples/openai-responses/ports/5520/replaypool.key1.glm-5.2/req_1782134010681_5176696d/provider-response.json`
+  - provider response 同时包含：
+    - `body.sseStream`
+    - `body.data.object = "chat.completion"`
+    - `body.data.choices[0].finish_reason = "tool_calls"`
+- 但 `src/providers/core/runtime/provider-response-postprocessor.ts::buildPostprocessedProviderResponse(...)` 在 SSE 分支只返回 `{ sseStream, headers }`，把 `data/status/statusText` 裁掉。
+- 结果：
+  - host converter 日志只看到 `bridgeSeedKeys=["sseStream","headers"]`
+  - `/v1/responses` relay openai-chat 路径失去原始 chat payload，只能依赖流 materialize；这批 live 样本随后在 Rust `parse_openai_chat_response` 处炸出 `OpenAI chat response must contain choices array`
+- 红测：
+  - `tests/providers/core/runtime/provider-response-postprocessor.unit.test.ts`
+    - `RED: preserves provider data payload when SSE side-channel is present`
+  - 当前已先红，说明唯一 owner 已锁到 postprocessor 的 SSE 裁剪行为
+
+- Jason 目标：把 `~/.rcc/diag/error-*.json` 写面、replay reader、responses-handler 失败落盘全部收口到 `debug.unified_surface` 唯一 owner；明确 diag 三分：error artifact 迁 debug，runtime diagnostics 留原 VR/Hub owner，inline `diag=` 跟 logger 收口。
+- 本轮只动 M1，不跨到 M2~M9。
+- 改动范围（最小切片）：
+  - `src/debug/index.ts`
+    - 暴露 `createDebugToolkit` / `createDebugSurfaceRegistry` / `writeDebugErrorDiagArtifact` / `readDebugErrorDiagArtifact` 四个 canonical builders。
+    - diag 写面委托 `src/debug/diag/error-artifact.ts` 内部实现，外部只走 owner facade。
+  - `src/debug/diag/error-artifact.ts`
+    - 内部实现改名为 `writeDebugErrorDiagArtifactInternal` / `readDebugErrorDiagArtifactInternal`。
+    - `requestId` 不安全字符统一替成 `_`；`requestBody` 与 `error.details` 走 `redactSensitiveData` 遮罩。
+  - `src/debug/diag/index.ts`
+    - 只导出 `buildDebugErrorDiagArtifactRecord` + 内部函数别名；`read/write` canonical builder 真源落在 `src/debug/index.ts`。
+  - `src/server/handlers/responses-handler.ts`
+    - handler 失败不再直接 `fs.writeFileSync` 到 `~/.rcc/diag`，统一调 `writeDebugErrorDiagArtifact(...)`；写失败改为非阻塞错误日志，不再 `catch {}` 静默吞。
+  - `scripts/debug/replay-live-minimax-2013.mjs`
+    - 不再硬编码 `/Users/fanzhang/.rcc/diag/...`，改成 `readDebugErrorDiagArtifact(...)` + 显式 `process.argv[2]` 路径。
+  - `scripts/verify-debug-unified-surface.mjs`
+    - 静态门禁：handler 内不允许出现 ad hoc 写面；replay 脚本必须走 reader + CLI arg。
+  - `tests/debug/diag.error-artifact-red.spec.ts`
+    - 验证 `redact` 真的把 `authorization` / `api_key` 替成 `[REDACTED]`；`requestId` 不安全字符替成 `_`；record shape 稳定。
+  - `tests/server/handlers/responses-handler.debug-diag.spec.ts`
+    - 把原来自造的最小 bridge mock 换成 `createBridgeHttpServerMock(...)`，补上 `deriveFinishReasonNative` 等 mock 表面，断言失败一定走 `writeDebugErrorDiagArtifact(...)`。
+  - `tests/debug/unified-surface.owner.spec.ts`（新增）
+    - M0/M1 owner gate：锁住 `package.json` 的 `verify:debug-unified-surface` script、`src/debug` 的 re-export 链、diag 内部 alias 命名。
+  - `docs/architecture/function-map.yml`
+    - `debug.unified_surface.owner_module: src/debug/index.ts` -> `src/debug`（目录真源），符合现有 `verify-function-map-canonical-builder-definitions` 期望。
+  - `package.json`
+    - 新增 `verify:debug-unified-surface: node scripts/verify-debug-unified-surface.mjs`。
+- diag 三分边界（已落入 M0 notes 与 function-map notes）：
+  - error diag artifact：迁 `src/debug/diag/*`，本轮 M1 收口。
+  - runtime diagnostics（VR `routeResult.diagnostics` / `/_routecodex/diagnostics/virtual-router` / Hub native diagnostics）：不动，原 owner 继续。
+  - usage inline `diag=` 渲染：本轮不动，归 M5 logger 收口。
+- 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/debug/diag.error-artifact-red.spec.ts tests/debug/unified-surface.owner.spec.ts tests/server/handlers/responses-handler.debug-diag.spec.ts --runInBand --forceExit` -> 3 suites / 5 tests PASS。
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:debug-unified-surface` -> `[verify-debug-unified-surface] PASS`。
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` -> 全 13 步 PASS（含 `verify:function-map-canonical-builder-definitions`）。
+- 剩余缺口（M2 之前需要保持警惕）：
+  - `src/server/handlers/responses-handler.ts` 现仍保留 `~/fs writeFileSync` 的兜底注释路径（M1 收口只走 canonical builder；以后禁止再把这条 fallback 留回去）。
+  - `tests/debug/unified-surface.owner.spec.ts` 仍是 M0/M1 最小断言；M2 起要扩出 `forbidden_paths` 物理删除、payload-leak、snapshot/logger/harness/hooks/policy 子模块 gate。
+  - live replay：旧 `replay-live-minimax-2013.mjs` 的真实路径本轮未跑（按需由 Jason 决定何时重放），不是完成标准阻断项。
+- 经验精华（写入 skills/note，不灌回 goal）：
+  - `owner_module` 用文件（如 `src/debug/index.ts`）时，`verify-function-map-canonical-builder-definitions` 会把 owner 自身的 canonical builder 误判为 `allowed_paths` 内重复定义。`debug.unified_surface` 这种“目录级唯一 surface”必须用目录真源，对齐现有 Rust/HTTP server 的 owner 写法。
+  - 任何 canonical builder 暴露给 `allowed_paths` 之外的逻辑，verifier 都会直接报 `redefined outside owner_module but inside allowed_paths`，不允许绕。
+
+# 2026-06-22 protocol truth hard-lock: entry + VR only
+
+- Jason 纠偏后已确认：
+  - 入口协议不是 fallback，也不是推断；`entryEndpoint` 就是唯一入口协议真相。
+  - provider/response 协议真相只允许在 VR 命中后写入 MetadataCenter。
+  - 其他阶段只能读，不能根据 payload shape / wrapper / endpoint fallback 再猜 `providerProtocol` 或 `clientProtocol`。
+- 本轮已落代码与红锁：
+  - `src/server/runtime/http-server/executor-pipeline.ts`
+    - 新增 `resolveEntryProtocolFromEndpoint(...)`
+    - unknown entry endpoint 直接 fail-fast
+    - stage recorder 不再读取/回退 `metadata.providerProtocol`
+  - `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+    - 删除 `entryEndpoint.includes('/v1/responses') ? 'openai-responses'` 的 `clientProtocol` 推断
+  - 新/改 focused tests：
+    - `tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts`
+    - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+- 验证：
+  - `executor-pipeline.stage-recorder.spec.ts` PASS
+  - `servertool-adapter-context.spec.ts` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+- 继续收口：
+  - `src/server/runtime/http-server/http-server-runtime-providers.ts::createProviderHandle(...)`
+  - 已删除 `runtime.outboundProfile ?? mapProviderProtocol(type/family)` fallback
+  - 现在 provider runtime 若缺 `outboundProfile`，直接 fail-fast：`Provider runtime <key> is missing required outboundProfile protocol truth`
+  - focused 回归：`tests/server/runtime/http-server/http-server-runtime-providers.create-provider-handle.spec.ts` PASS
+
 # 2026-06-22 continuation save/restore ordering aligned to current-turn truth
+
+# 2026-06-22 /v1/responses relay path protocol mismatch cause
+
+- 已确认这不是 direct/relay 主线混淆，也不是“outbound 没决定协议”。
+- 真实错位发生在 host owner `src/server/runtime/http-server/executor/provider-response-converter.ts`：
+  - `buildBridgeProviderResponseSeed(...)` / `extractBridgeProviderResponsePayload(...)` 已经把 provider raw wrapper 解到 `body.payload`；
+  - 但 `bridgeConvertProviderResponse(...)` 仍盲传 route-selected `options.providerProtocol`。
+- 因此当 upstream target 是 `openai-chat`，但实际 host 手上拿到的已是 `body.payload.object="response"` 的 Responses 语义 payload 时，resp-01 入口会用错误 parser 进入 Rust，触发 `OpenAI chat response must contain choices array`。
+- 结论：outbound 决定的是 upstream wire protocol，不等于 host 当前待 materialize payload protocol；`/v1/responses` relay 样本需要在 host handoff 前按 payload 真 shape 纠正为 `openai-responses`，不能继续盲信 route-selected `providerProtocol`。
+
+# 2026-06-22 Jason 纠偏：响应流水线协议不得按 payload shape 猜测
+
+- 唯一真源：请求一进主线就由 `entry protocol + Virtual Router target + MetadataCenter` 锁定整条响应流水线。
+- provider 命中后，“响应进来走哪里、走哪条协议链、重试后仍走哪条链” 都已经在 metadata/runtime truth 里定死；不允许在中途根据 wrapper/body/payload shape 再拆、再猜、再改协议。
+- 因此这类故障的排查方向只能是：
+  - 某个 host/bridge 壳层绕开了 MetadataCenter/VR 已注册的阶段真相；
+  - 或者同一响应被错误地重新送回了前段入口。
+- 后续红测与修复必须锁“metadata/VR truth 不可被 payload shape 覆盖”，不能再做 shape-driven 协议判断。
 
 - 用户纠偏后的明确约束已回写 wiki：
   - `docs/architecture/wiki/continuation-standard-contract.md`
@@ -169,6 +327,26 @@
   - `scripts/verify-servertool-rust-only.mjs` 里有过时 `read(...)` 引用，当前已收敛到 `readRequired(...)`
   - `docs/architecture/wiki/servertool-ownership-map.md` 和对应 HTML review 面必须和生成器同步，否则 `install:global` 会卡在 wiki sync/html sync
 
+# 2026-06-22 provider-error snapshot default spill fixed
+
+- 已确认 `request-executor-provider-send-failure.ts` 虽然会写 `phase: 'provider-error'`，但默认 `src/utils/snapshot-stage-policy.ts` 不包含 `provider-error`，所以失败请求经常只有 `provider-request` / `provider-response`，没有错误样本。
+- 已修复：默认 stage selector 加入 `provider-error`。
+- focused 验证：
+  - `tests/utils/snapshot-stage-policy.spec.ts`
+  - `tests/providers/core/utils/snapshot-writer.error-spill.spec.ts`
+  - `npx tsc --noEmit`
+
+# 2026-06-22 5520 startup forwarder-config failure root cause
+
+- 用户贴出的启动失败 `fwd.minimax.minimax-m3 target 'minimax' does not declare model 'minimax-m3'` 已核对为真实配置不一致，不是代码回归猜测：
+  - `~/.rcc/config.toml` 存在 openai forwarder `fwd.minimax.minimax-m3`
+  - `~/.rcc/provider/replaypool/config.v2.toml` 已声明 `provider.models."minimax-m3"`
+  - `~/.rcc/provider/minimax/config.v2.toml` 只声明 `provider.models."MiniMax-M3"`，缺少 lowercase `minimax-m3`
+- 采用最小配置修复：给 `~/.rcc/provider/minimax/config.v2.toml` 补同语义的 `provider.models."minimax-m3"` 声明。
+- live 验证：
+  - `routecodex start --port 5520` 不再报 forwarder-config 错误
+  - `curl http://127.0.0.1:5520/health` -> `ready:true`
+
 ## 2026-06-22 servertool execution-dispatch error wrapper collapse
 
 - 本轮 slice：`sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts` 不再本地构造 `ProviderProtocolError`，统一改用 `timeout-error-block.ts::createServertoolProviderProtocolErrorFromPlan(...)`。
@@ -181,6 +359,29 @@
 - 当前仍未完成项：
   - `execution-dispatch-outcome-shell.ts` 还保留 `runServertoolIoExecutionQueue(...)`、`materializeNativeToolCallExecutionOutcome(...)`、`hydrateExecutionLoopState(...)` / `dehydrateExecutionLoopState(...)` 这些桥接/编排面；
   - `servertool.hook_skeleton.mainline` 仍是 `binding pending`，不能宣称 Rust-only 主线闭环。
+
+# 2026-06-22 legacy provider.responses.process field de-judged
+
+- 已把 provider bootstrap 里对 `process` 的语义判断物理收紧为恒定 `chat`：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs`
+  - 不再因 provider 配置里的 `process` 抛错，也不再把它当作路由/直连判定真源
+- 已清掉仍在生成旧字段的模板/样本：
+  - `src/cli/config/bootstrap-provider-templates.ts`
+  - `src/cli/config/init-provider-catalog.ts`
+  - `tests/server/http-server/router-direct-passthrough.blackbox.spec.ts`
+  - `tests/server/handlers/responses-provider-owned-continuation-reroute.blackbox.spec.ts`
+- 已补回归：
+  - `tests/sharedmodule/provider-streaming-capability.spec.ts`
+  - `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts`
+  - 目标是确认 legacy `responsesConfig.process` 不再改变 same-protocol direct 结果
+- 已验证：
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/sharedmodule/provider-streaming-capability.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts -t "legacy responses process field" --runInBand`
+- 当前验证缺口：
+  - `tests/server/http-server/router-direct-passthrough.blackbox.spec.ts`
+  - `tests/server/handlers/responses-provider-owned-continuation-reroute.blackbox.spec.ts`
+  - 这两条在当前环境命中既有 Jest ESM loader 问题：`Must use import to load ES Module ...`，失败点不在本次改动逻辑本身，需按 blackbox ESM 运行基座另行处理
 
 ## 2026-06-22 reasoningStop live closeout probe
 
@@ -11691,3 +11892,161 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 关键反模式：把 request truth 再复制成 stopless 自己的 sessionId / MetadataCenter 回退拼装 / NAPI plan 返参。
 - 触发信号：缺 requestTruth.sessionId 时 stopless 必须终止；出现本地 metadata.sessionId / runtime.sessionId 回退即违规。
 - 验证：cargo test -p servertool-core stopless_orchestration --lib -- --nocapture；Jest focused stopless tests 4/4 PASS。
+
+# 2026-06-22 relay JSON metadata leak fix
+
+- 5520/relay 当前硬错误不是 stopless 直接污染 direct，而是 relay JSON client projection 仍可能带 `metadata` 容器，触发 `assertClientResponseHasNoInternalCarriers(...)` fail-fast。
+- 唯一修复点已收在 `src/modules/llmswitch/bridge/responses-response-bridge.ts::projectResponsesClientPayloadForClientForHttp(...)`：对 JSON client projection 结果递归物理删除所有 `metadata` key；不碰 direct SSE `response.metadata` passthrough 规则。
+- 新 focused 回归：`tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts` 新增 native payload 带 metadata 时 client JSON 仍必须无 metadata。
+- focused 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts --runInBand`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/handler-metadata-boundary.spec.ts --runInBand`
+- 当前未闭环项：5520 same-protocol request 为什么实际回 relay 还没拿到 `router-direct.skipped` 细因日志，只确认 stopless route_hint=thinking 已进 VR，不足以证明 direct gating 真因。
+
+# 2026-06-22 5520 longcontext forwarder truth tightened
+
+- 旧样本 `/Volumes/extension/.rcc/diag/error-openai-responses-router-gpt-5.4-20260622T121805317-391251-155.json` 已证实不是 VR 第一层错判；VR 当时命中的是 `longcontext`，最终 400 是 `context_length_exceeded`。
+- 真问题在第二层候选真源：5520 的 `longcontext` 路由此前共用 `fwd.paid.gpt-5.4`，该 forwarder 含 `1token` / `XL`，而这两个候选在这类大上下文请求上并不可靠。
+- 已把 live `~/.rcc/config.toml` 收紧为：
+  - 新增 `fwd.paid.gpt-5.4-longcontext`
+  - 该 forwarder 仅保留 `providerId = "asxs"`；bootstrap 后展开为 `asxs.crsa.gpt-5.4` / `asxs.crsb.gpt-5.4`
+  - `gateway_priority_5520.routing.longcontext` 改为 `["fwd.paid.gpt-5.4-longcontext", "fwd.glm.glm-5.2"]`
+- 同步 drift test：
+  - `tests/config/virtual-router-builder.forwarder-10000.spec.ts`
+- focused 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/config/virtual-router-builder.forwarder-10000.spec.ts --runInBand`
+- 当前结论：
+  - 这轮修掉的是 VR 候选池真源，不是 provider send 层补偿；
+  - 若后续还要继续防止“配置自报大窗口但实际上游不认”的问题，需要再给 provider/model context truth 增加更硬的审计/gate，而不是只信 `maxContext` / `longcontext` capability。
+# 2026-06-22 5520/5555 live sample audit: longcontext fallback path + response parse owners
+
+- 已修复一层 Rust response unwrap 缺口：
+  - 文件：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs`
+  - 变更：`materialize_openai_chat_response_payload()` 新增 `payload.body.data.choices` 解包
+  - 新白盒：`test_parse_openai_chat_provider_wrapper_body_data`
+  - 目的：修复 5555 `/v1/responses` 命中 `XLC.key2.deepseek-v4-pro` 时，上游返回 `provider-response.body.data.choices` 但 Rust 误把 provider wrapper 当最终 openai-chat payload，导致 `OpenAI chat response must contain choices array`
+  - 本地验证：
+    - `cargo test -p router-hotpath-napi test_parse_openai_chat_provider_wrapper_body_data --lib -- --nocapture`
+    - `cargo test -p router-hotpath-napi test_parse_openai_chat_response --lib -- --nocapture`
+    - `cargo test -p router-hotpath-napi test_openai_chat_missing_choices_fails_fast --lib -- --nocapture`
+    - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+  - 仍未完成：
+    - 未做 live replay，因为本轮不动运行中端口
+    - `custom_tool_call` 的 TS SSE parser 残留仍是独立问题，未在这次修复面里解决
+
+- 样本 `req_1782103943592_a87cc65e` / `openai-responses-XLC.key2-deepseek-v4-pro-20260622T125223592-391502-406` 已核对：
+  - `~/.rcc/codex-samples/openai-responses/ports/5555/XLC.key2.deepseek-v4-pro/req_1782103943592_a87cc65e/provider-response.json`
+  - 上游真实返回是 `application/json` chat payload，且 `body.data.choices` 完整存在，不是 provider 缺 `choices`
+  - 当前报错 `OpenAI chat response must contain choices array` 的真 owner 在 Rust
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs`
+    - `parse_openai_chat_response()` / `materialize_openai_chat_response_payload()`
+  - 现状缺口：`materialize_openai_chat_response_payload()` 只解 `payload.choices` / `payload.body.choices` / `bodyText`，没有解 `payload.body.data.choices`，因此把 provider wrapper 误当最终 chat payload 去 parse。
+
+- 样本 `req_1782103968267_5a6ea141` / `openai-responses-XL.key1-gpt-5.4-mini-20260622T125248267-391505-409` 已核对：
+  - 5520 日志链：
+    - `XLC.key2.glm-5.2` -> 503
+    - `asxs.crsb.gpt-5.4` -> `SSE_TO_JSON_ERROR`
+    - `asxs.crsa.gpt-5.4` -> `SSE_TO_JSON_ERROR`
+    - 然后进入 `gateway_priority_5520.default`
+    - `asxs.crsa/asxs.crsb/XL.key1.gpt-5.4-mini` 连续命中并最终报 `Unknown output item type: custom_tool_call`
+  - 5520 routing 真源：
+    - `~/.rcc/config.toml`
+    - `gateway_priority_5520.longcontext` = `["asxs.crsa.gpt-5.4", "asxs.crsb.gpt-5.4", "fwd.glm.glm-5.2"]`
+    - `gateway_priority_5520.default` = `["fwd.paid.gpt-5.4-mini", "fwd.minimax.MiniMax-M3"]`
+  - 结论：mini 不是首轮 VR 误选；是 longcontext 候选连续失败后，根据当前 error-policy/default-pool 设计落入 default 池。
+  - 当前 `custom_tool_call` 报错 owner 仍在 TS SSE parser：
+    - `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts`
+    - `sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts`
+  - 两处都仍把 `custom_tool_call` 走到 default throw，和 Rust / bridge 已支持该 item type 的真相不一致。
+
+- 样本 `req_1782103941274_4d68bd41` / `openai-responses-router-gpt-5.4-20260622T125221274-391501-405` 已核对：
+  - 5520 命中 `longcontext -> asxs[crsa].gpt-5.4`，10 秒后成功返回 `finish_reason=tool_calls`
+  - 这条不是失败样本；只是说明当前 `tools:last-tool-other` 会把请求留在 longcontext 路线上。
+
+- 2026-06-22 `custom_tool_call` SSE rustify 修复切面已锁：
+  - 目标文件：`sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts`
+  - Rust 真源已具备：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs::parse_resp_format_envelope_json`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs` 已锁 `custom_tool_call`
+  - 当前改法：
+    - TS 保留 SSE stream read / timeout / abort / event 回调 / stats
+    - 最终 payload materialize 改走 Rust `parseRespFormatEnvelopeJson`
+    - 不再让 TS `response-builder.ts` 决定 `custom_tool_call` output item 语义
+  - focused 回归准备锁：
+    - SSE `response.output_item.added/done` with `item.type=custom_tool_call`
+    - 断言不再抛 `Unknown output item type: custom_tool_call`
+    - 断言 materialized `response.output[*].type === "custom_tool_call"`
+# 2026-06-22 5520 GLM openai-chat root-data wrapper host mainline fix
+
+- 用户纠偏后回到 function map / response mainline source 核对：
+  - `docs/architecture/wiki/response-mainline-call-graph.md`
+  - `feature_id: hub.response_provider_sse_materialization`
+  - `feature_id: server.provider_response_conversion_host`
+- 关键结论：
+  - live 报错 `Rust HubPipeline response path failed: hub_pipeline_error: OpenAI chat response must contain choices array`
+  - 不是之前修过的 `parseRespFormatEnvelopeJson` 薄桥再次失效；
+  - 真正出错点在 host mainline：`convertProviderResponseIfNeeded(...)` 传给 bridge 前丢了 `PipelineExecutionResult.data`
+  - 622 live 样本 `provider-response.json` 真实形状是 `response.data.choices`，而 host 旧逻辑只优先看 `response.body`，当 `response.body` 缺失时只保留 `{ sseStream, status, headers }`，导致 Rust HubPipeline 收到无 `choices` payload。
+- 红样本 / 红复现：
+  - node 直接重放 `~/.rcc/codex-samples/openai-responses/port-5520/req_1782110251637_cb2323ec/provider-response.json`
+  - `dist/server/runtime/http-server/executor/provider-response-converter.js::convertProviderResponseIfNeeded(...)` 在补丁前稳定抛同一错误
+- 修复：
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts::buildBridgeProviderResponseSeed(...)`
+  - 当 `response.data` 是 object 时，直接把整份 `PipelineExecutionResult` 作为 seed 交给 `extractBridgeProviderResponsePayload(...)`，让 root `data` 正常解包进 bridge
+- 新 focused 红锁：
+  - `tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts`
+  - case: `unwraps provider PipelineExecutionResult.data before bridge conversion for openai-chat responses`
+- 验证：
+  - focused Jest PASS：
+    - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts -t "unwraps provider PipelineExecutionResult.data before bridge conversion for openai-chat responses" --runInBand`
+  - workspace `dist` host repro PASS：
+    - 同一份 622 live 样本通过 `convertProviderResponseIfNeeded(...)` 不再抛错
+  - 运行中全局包热修同步：
+    - 将新的 `dist/server/runtime/http-server/executor/provider-response-converter.js` 复制到 `/opt/homebrew/lib/node_modules/routecodex/dist/server/runtime/http-server/executor/provider-response-converter.js`
+  - 5520 已重启，新 pid=`8691`
+  - live probe PASS：
+    - `POST /v1/responses {"model":"XLC.glm-5.2","input":"Reply with exactly OK","stream":false}` -> `200 OK`
+    - `POST /v1/responses` + `noop` function tool -> `200 OK`，返回 `required_action.submit_tool_outputs.tool_calls[]`
+- 当前缺口：
+  - `npm run install:global` / `npm run build:base` 在现有 repo 全量流水线上仍以非零退出结束，但从已见输出看主要是长链路尾段问题，不影响本轮 host mainline 修复本身；本轮已用 workspace dist + 全局 runtime 文件同步绕过，server live 已验证。
+
+## 2026-06-22 5520 replay correction + GLM body.data audit
+- 旧 /tmp/replay-5520-old-sample.mjs 误把 sample.body 直接传给 convertProviderResponseIfNeeded；该函数要求 PipelineExecutionResult(response.body=wrapper)，所以“hasBody:false”是假重放证据，作废。
+- 已重新确认：bridge 级别对 5520 custom_tool_call 老样本，providerProtocol=openai-responses 时可 materialize 出 body.object=response、outputLen=4；openai-chat 仍按预期报 choices array。
+- 现阶段真实剩余问题转到 5520 GLM 样本：日志显示 Rust chat parser 仍未把 body.data 提升成 chat payload，需做红测锁 body.data -> choices path。
+
+## 2026-06-22 5520 closeout verification
+- focused contract PASS: `forces responses protocol truth...` + `unwraps provider PipelineExecutionResult.data...`.
+- real sample replay PASS:
+  - old custom_tool_call sample `req_1782114260479_5b59cec4` -> `body.object=response`, `outputLen=4`, `hasSse=true`.
+  - GLM body.data sample `req_1782113698055_d42dbbbd` -> `body.object=response`, `outputLen=5`, `hasSse=true`.
+- build break was TS type-only: `PipelineExecutionResult` lacks declared `data`; fixed by reading through `responseRecord`. No semantic change.
+- `npm run build:base` PASS.
+- `npm run install:global` PASS. installed version `0.90.3263`.
+- `routecodex restart --port 5520` PASS. `/health` => `{ready:true, version:0.90.3263}`.
+- live probe on 5520 `/v1/responses` PASS: HTTP 200, `body.object=response`, `required_action` present, `outputTypes=[function_call]`.
+- gap: did not force exact live provider `XLC.key1.glm-5.2` after restart; exact old failure shapes are covered by offline real-sample replay instead.
+
+## 2026-06-22 stopless sessionId truth chain closeout (in progress)
+- confirmed second gap: Rust `stopless_cli_projection_context_contract.rs` originally had no `sessionId/requestId` fields, so TS shell pass-through alone could not reach stopless exec command projection.
+- fixed Rust contract + native TS bridge type surface to carry `sessionId/requestId` through `planStoplessCliProjectionContextWithNative(...)`.
+- fixed `engine-postflight-shell.ts` to read `sessionId/requestId` directly from MetadataCenter request truth when building stopless CLI projection context, instead of relying on `engineResult.execution.context` to still contain injected requestTruth.
+- added Rust bridge assertion in `router-hotpath-napi/src/servertool_core_blocks.rs` for `sessionId/requestId` round-trip.
+- next verification: rebuild native hotpath -> focused Jest `tests/servertool/stopless-cli-continuation.spec.ts` -> live probes `scripts/tests/stopless-5555-final-probe.mjs` and `scripts/tests/stopless-5555-live-probe.mjs`.
+# 2026-06-22 5520 openai provider failure observability gap
+
+- Jason 要求：先把失败原因打出来，再定点修；不能猜，必须先看 sample / mainline source / function map。
+- 当前样本：
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/XLC.key1.glm-5.2/req_1782128011238_9b4f0f4e/__runtime.json`
+  - `~/.rcc/codex-samples/openai-responses/port-5520/req_1782128011238_9b4f0f4e/provider-request_1.json`
+  - 缺口：失败的 `XLC.key1.glm-5.2` 没有对应 `provider-response.json`，只有最终成功 provider 的聚合 response。
+- 代码证据：
+  - `src/server/runtime/http-server/request-executor.ts` 已把 `writeProviderSnapshot` 传给响应成功链，但 `processProviderSendFailure(...)` 还没写 `provider-error` snapshot。
+  - `src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts` 会把 `provider_response_processing` 映射成 `stage=provider.send`，所以日志里的 `provider.send status=500` 不能证明是上游真实 HTTP 500。
+  - `src/server/utils/stage-logger.ts` 会抑制 `provider.send.error` 控制台输出，因此当前 live log 对这类失败不可观测。
+- 当前唯一修改点候选：
+  - 先补 `request-executor-provider-send-failure.ts` 的 `provider-error` snapshot 落盘，让每次失败都有 request-scoped artifact。
+  - 再用新 artifact 复查当前 openai provider 本地炸点，避免继续盲改 response/parser。
+- 预期红锁：
+  - focused spec 断言 `provider_response_processing` / `provider_send` 失败都会调用 `writeProviderSnapshot({ phase: 'provider-error', ... })`
+  - 落盘数据至少带 `message/status/code/upstreamCode/requestExecutorProviderErrorStage/providerKey/requestId`
