@@ -7,7 +7,7 @@ import { Transform, type Readable } from 'node:stream';
  */
 
 // feature_id: server.responses_response_handler_bridge_surface
-// canonical_builders: shouldDispatchResponsesSseToClientForHttp, resolveResponsesRequestContextForHttp, assertDirectPassthroughResponsesSseMetadataIsolationForHttp, updateResponsesContractProbeFromSseChunkForHttp, inspectResponsesTerminalStateFromSseChunkForHttp, summarizeResponsesSseFrameForLogForHttp, resolveResponsesProviderProtocolHintFromSseFrameForHttp, buildResponsesTerminalSseFramesFromProbeForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, planResponsesStreamEndRepairForHttp, buildResponsesSseErrorPayloadForHttp, buildResponsesStructuredSseErrorPayloadForHttp, buildResponsesMissingSseBridgeErrorPayloadForHttp, buildResponsesStreamIncompleteErrorPayloadForHttp, prepareResponsesJsonBodyForSseBridgeForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, createResponsesJsonToSseConverterForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp, projectResponsesSseFrameForClientForHttp
+// canonical_builders: resolveResponsesRequestContextForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, shouldRepairResponsesContinuationTerminalForHttp, rebindResponsesConversationRequestIdForHttp, clearResponsesConversationByRequestIdForHttpProjection, recordResponsesResponseForHttpProjection, finalizeResponsesConversationRequestRetentionForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp
 
 import type { AnyRecord } from './module-loader.js';
 import {
@@ -248,189 +248,6 @@ export function shouldDispatchResponsesSseToClientForHttp(args: {
 export function buildClientSseKeepaliveFrameForHttp(entryEndpoint?: string): string {
   const commentFrame = ': keepalive\n\n';
   return commentFrame;
-}
-
-export function isDirectPassthroughTransportKeepaliveFrameForHttp(frame: string): boolean {
-  const trimmed = frame.trim();
-  if (!trimmed) {
-    return false;
-  }
-  const lines = trimmed.split(/\r?\n/);
-  const eventNames = lines
-    .filter((line) => line.startsWith('event:'))
-    .map((line) => line.slice('event:'.length).trim())
-    .filter(Boolean);
-  if (eventNames.length !== 1 || eventNames[0] !== 'keepalive') {
-    return false;
-  }
-  return lines.every((line) => !line || line.startsWith('event:') || line.startsWith('data:') || line.startsWith(':'));
-}
-
-function isResponsesRequiredActionFrame(frame: string): boolean {
-  return frame.split(/\r?\n/).some((line) => {
-    if (!line.startsWith('data:')) {
-      return false;
-    }
-    const data = line.slice('data:'.length).trim();
-    if (!data || data === '[DONE]') {
-      return false;
-    }
-    try {
-      const parsed = JSON.parse(data) as Record<string, unknown>;
-      return parsed.type === 'response.required_action';
-    } catch {
-      return false;
-    }
-  });
-}
-
-function readDirectPassthroughSseEventNames(frame: string): string[] {
-  return frame
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith('event:'))
-    .map((line) => line.slice('event:'.length).trim())
-    .filter(Boolean);
-}
-
-function hasNonResponsesDirectPassthroughEvent(frame: string): boolean {
-  const eventNames = readDirectPassthroughSseEventNames(frame);
-  if (eventNames.length === 0) {
-    return false;
-  }
-  return eventNames.some((eventName) => !eventName.startsWith('response.'));
-}
-
-export function assertDirectPassthroughResponsesSseFrameForHttp(frame: string, requestId: string): void {
-  if (isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
-    return;
-  }
-  if (hasNonResponsesDirectPassthroughEvent(frame)) {
-    throw Object.assign(
-      new Error(`[server.response_projection] direct passthrough SSE must contain only Responses standard events (requestId=${requestId})`),
-      { code: 'RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION' }
-    );
-  }
-  if (isResponsesRequiredActionFrame(frame)) {
-    throw Object.assign(
-      new Error(`[server.response_projection] direct passthrough SSE must not rewrite response.required_action into output_item/function_call frames (requestId=${requestId})`),
-      { code: 'RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION' }
-    );
-  }
-}
-
-function isInternalMetadataCarrierForHttp(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return Object.keys(record).some(
-    (key) => key.startsWith('__routecodex') || key.startsWith('__rt') || key === 'providerKey'
-  );
-}
-
-function sanitizeDirectPassthroughResponsesSseJsonPayloadForHttp(payload: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(payload);
-  } catch {
-    return payload;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return payload;
-  }
-  const record = parsed as Record<string, unknown>;
-  const eventType = typeof record.type === 'string' ? record.type.trim() : '';
-  if (eventType === 'response.metadata' || !Object.prototype.hasOwnProperty.call(record, 'metadata')) {
-    return payload;
-  }
-  const { metadata: _metadata, ...rest } = record;
-  return JSON.stringify(rest);
-}
-
-export function sanitizeDirectPassthroughResponsesSseFrameForHttp(frame: string, requestId: string): string {
-  assertDirectPassthroughResponsesSseFrameForHttp(frame, requestId);
-  if (isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
-    return frame;
-  }
-  const lineBreak = frame.includes('\r\n') ? '\r\n' : '\n';
-  const lines = frame.split(/\r?\n/);
-  let mutated = false;
-  const sanitizedLines = lines.map((line) => {
-    if (!line.startsWith('data:')) {
-      return line;
-    }
-    const prefix = line.startsWith('data: ') ? 'data: ' : 'data:';
-    const payload = line.slice(prefix.length);
-    const sanitizedPayload = sanitizeDirectPassthroughResponsesSseJsonPayloadForHttp(payload);
-    if (sanitizedPayload !== payload) {
-      mutated = true;
-      return `${prefix}${sanitizedPayload}`;
-    }
-    return line;
-  });
-  if (!mutated) {
-    return frame;
-  }
-  return sanitizedLines.join(lineBreak);
-}
-
-export function assertDirectPassthroughResponsesSseMetadataIsolationForHttp(frame: string, requestId: string): void {
-  assertDirectPassthroughResponsesSseFrameForHttp(frame, requestId);
-  for (const line of frame.split(/\r?\n/)) {
-    if (!line.startsWith('data:')) {
-      continue;
-    }
-    const dataText = line.slice(5).trim();
-    if (!dataText || dataText === '[DONE]') {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(dataText);
-    } catch {
-      continue;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      continue;
-    }
-    const stack: unknown[] = [parsed];
-    const seen = new WeakSet<object>();
-    while (stack.length > 0) {
-      const current = stack.pop();
-      if (!current || typeof current !== 'object' || Array.isArray(current)) {
-        continue;
-      }
-      if (seen.has(current as object)) {
-        continue;
-      }
-      seen.add(current as object);
-      const record = current as Record<string, unknown>;
-      const metadata = record.metadata;
-      if (metadata !== undefined) {
-        if (isInternalMetadataCarrierForHttp(metadata)) {
-          throw new Error(
-            `[server.response_projection] direct passthrough SSE metadata contains internal control fields (requestId=${requestId})`
-          );
-        }
-        if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
-          stack.push(metadata);
-        }
-      }
-      for (const [key, value] of Object.entries(record)) {
-        if (key === 'metadata') {
-          continue;
-        }
-        if (key === 'metaCarrier' || key === 'runtimeMetadata' || key === 'errorCarrier' || key === '__rt') {
-          throw new Error(
-            `[server.response_projection] client response contains internal carrier field "${key}" (requestId=${requestId})`
-          );
-        }
-        if (value && typeof value === 'object') {
-          stack.push(value);
-        }
-      }
-    }
-  }
 }
 
 export function shouldRequireResponsesTerminalEventForHttp(args: {
@@ -711,6 +528,39 @@ function resolveResponsesConversationRecordRequestIdsForHttp(args: {
   return responseIds.length > 0 ? responseIds : requestIds;
 }
 
+function resolveResponsesConversationStaleRequestIdsForHttp(args: {
+  requestLabel: string;
+  timingRequestIds?: string[];
+  canonicalRequestIds?: string[];
+}): string[] {
+  const staleRequestIds: string[] = [];
+  const canonical = new Set(
+    Array.isArray(args.canonicalRequestIds)
+      ? args.canonicalRequestIds
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : []
+  );
+  const add = (value: unknown): void => {
+    if (typeof value !== 'string') {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || canonical.has(trimmed) || staleRequestIds.includes(trimmed)) {
+      return;
+    }
+    staleRequestIds.push(trimmed);
+  };
+  add(args.requestLabel);
+  if (Array.isArray(args.timingRequestIds)) {
+    for (const requestId of args.timingRequestIds) {
+      add(requestId);
+    }
+  }
+  return staleRequestIds;
+}
+
 function readResponsesToolDefinitionNameForHttp(tool: unknown): string | undefined {
   if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
     return undefined;
@@ -931,6 +781,7 @@ export function attachResponsesConversationLifecycleStreamForHttp(args: {
   }
   let pending = '';
   let finalResponse: Record<string, unknown> | undefined;
+
   const inspectFrames = (text: string): void => {
     pending += text;
     let boundary = /\r?\n\r?\n/.exec(pending);
@@ -1175,6 +1026,22 @@ export async function persistResponsesConversationLifecycleForHttp(
       args.onNonBlockingError?.(`responses-conversation-finalize:${recordedRequestId}`, error);
     });
 
+    const staleRequestIds = resolveResponsesConversationStaleRequestIdsForHttp({
+      requestLabel: args.requestLabel,
+      timingRequestIds: persisted.timingRequestIds,
+      canonicalRequestIds: [recordedRequestId],
+    });
+    for (const staleRequestId of staleRequestIds) {
+      await clearResponsesConversationByRequestIdForHttpProjection(staleRequestId).catch((error) => {
+        args.onTrace?.('record.clear_stale_error', {
+          staleRequestId,
+          responseId,
+          message: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        });
+        args.onNonBlockingError?.(`responses-conversation-clear-stale:${staleRequestId}`, error);
+      });
+    }
+
     args.onTrace?.('record.done', { responseId, retainedRequestIds: [recordedRequestId] });
     return { recorded: true, responseId };
   }
@@ -1193,6 +1060,16 @@ export async function persistResponsesConversationLifecycleForHttp(
       keepForSubmitToolOutputs: false,
     }).catch((error) => {
       args.onNonBlockingError?.(`responses-conversation-finalize:${retainRequestId}`, error);
+    });
+  }
+  const staleRequestIds = resolveResponsesConversationStaleRequestIdsForHttp({
+    requestLabel: args.requestLabel,
+    timingRequestIds: persisted.timingRequestIds,
+    canonicalRequestIds: retainRequestIds,
+  });
+  for (const staleRequestId of staleRequestIds) {
+    await clearResponsesConversationByRequestIdForHttpProjection(staleRequestId).catch((error) => {
+      args.onNonBlockingError?.(`responses-conversation-clear-stale:${staleRequestId}`, error);
     });
   }
   return { recorded: false, reason: 'not_continuation' };
@@ -1609,7 +1486,6 @@ export async function prepareResponsesJsonSseDispatchPlanForHttp(args: {
 }): Promise<{
   normalizedPayload: Record<string, unknown>;
   sanitizedPayload: Record<string, unknown>;
-  finishReason?: string;
 }> {
   const normalizedPayload = ensureResponsesJsonToSseRequiredFieldsForHttp({
     payload: args.responsesPayload,
@@ -1619,7 +1495,6 @@ export async function prepareResponsesJsonSseDispatchPlanForHttp(args: {
   return {
     normalizedPayload,
     sanitizedPayload,
-    finishReason: resolveResponsesClientPayloadFinishReasonForHttp(normalizedPayload),
   };
 }
 

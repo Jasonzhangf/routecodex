@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { shouldCaptureSnapshotStage } from '../../utils/snapshot-stage-policy.js';
 import { releaseMetadataCenterForHttpResponse } from '../runtime/http-server/metadata-center/metadata-center.js';
+import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 
 export { releaseMetadataCenterForHttpResponse };
 
@@ -58,6 +59,7 @@ export type ResponsesRequestContext = {
 export interface DispatchOptions {
   forceSSE?: boolean;
   entryEndpoint?: string;
+  entryPort?: number;
   sseTotalTimeoutMs?: number;
   responsesRequestContext?: ResponsesRequestContext;
 }
@@ -66,6 +68,48 @@ export type ClientSseSnapshotRecorder = {
   record: (chunk: unknown) => void;
   flush: (error?: unknown) => void;
 };
+
+export function resolveSnapshotGroupRequestId(args: {
+  explicitGroupRequestId?: string;
+  metadata?: Record<string, unknown>;
+}): string | undefined {
+  const candidates = [
+    args.explicitGroupRequestId,
+    args.metadata?.clientRequestId,
+    args.metadata?.groupRequestId,
+  ];
+  for (const value of candidates) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+export function resolveSnapshotEntryPort(args: {
+  explicitEntryPort?: number;
+  metadata?: Record<string, unknown>;
+  usageEntryPort?: number;
+}): number | undefined {
+  const candidates = [
+    args.explicitEntryPort,
+    args.usageEntryPort,
+    args.metadata?.entryPort,
+    args.metadata?.matchedPort,
+    args.metadata?.routecodexLocalPort
+  ];
+  for (const value of candidates) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
+}
 
 type PipeCapable = { pipe?: unknown };
 type WebReadable = { getReader?: () => unknown };
@@ -150,6 +194,36 @@ export function logResponseNonBlockingError(operation: string, error: unknown): 
   console.warn(`[handler-response] ${operation} failed (non-blocking): ${reason}`);
 }
 
+export function recordSseTransportStreamStart(requestId: string): void {
+  getSessionExecutionStateTracker().recordSseStreamStart(requestId);
+}
+
+export function recordSseTransportStreamEnd(
+  requestId: string,
+  options?: { finishReason?: string; terminal?: boolean }
+): void {
+  getSessionExecutionStateTracker().recordSseStreamEnd(requestId, options);
+}
+
+export function recordSseTransportClientClose(
+  requestId: string,
+  options?: { finishReason?: string; terminal?: boolean; closeBeforeStreamEnd?: boolean }
+): void {
+  getSessionExecutionStateTracker().recordSseClientClose(requestId, options);
+}
+
+export function finalizeSseTransportCloseout(args: {
+  metadata?: Record<string, unknown>;
+  releaseReason?: string;
+  logResponseCompleted?: (details?: Record<string, unknown>) => void;
+  completedDetails?: Record<string, unknown>;
+}): void {
+  if (args.releaseReason) {
+    releaseMetadataCenterForHttpResponse(args.metadata, args.releaseReason);
+  }
+  args.logResponseCompleted?.(args.completedDetails);
+}
+
 export function applyHeaders(
   res: Response,
   headers: Record<string, string> | undefined,
@@ -219,9 +293,13 @@ export function createClientSseSnapshotRecorder(
   res: Response,
   options: {
     requestId: string;
+    groupRequestId?: string;
     entryEndpoint?: string;
+    entryPort?: number;
     status: number;
     headers?: Record<string, string>;
+    metadata?: Record<string, unknown>;
+    usageEntryPort?: number;
   }
 ): ClientSseSnapshotRecorder {
   let flushed = false;
@@ -275,7 +353,13 @@ export function createClientSseSnapshotRecorder(
     void writeServerSnapshot({
       phase: 'client-response',
       requestId: options.requestId,
+      groupRequestId: options.groupRequestId,
       entryEndpoint: options.entryEndpoint,
+      entryPort: resolveSnapshotEntryPort({
+        explicitEntryPort: options.entryPort,
+        metadata: options.metadata,
+        usageEntryPort: options.usageEntryPort
+      }),
       data: payload
     }).catch((snapshotError) => {
       logResponseNonBlockingError(`writeServerSnapshot:sse_payload:${options.requestId}`, snapshotError);

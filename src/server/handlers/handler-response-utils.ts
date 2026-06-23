@@ -6,6 +6,7 @@ import {
   logResponseNonBlockingError,
   releaseMetadataCenterForHttpResponse,
   resolveSnapshotEntryPort,
+  resolveSnapshotGroupRequestId,
   shouldCaptureClientResponseSnapshotStage,
   toNodeReadable,
   type DispatchOptions,
@@ -13,26 +14,28 @@ import {
 import { sendSsePipelineResponse } from './handler-response-sse.js';
 import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
 import { logUsageSummary } from '../runtime/http-server/executor/usage-logger.js';
+import { deriveFinishReason } from '../utils/finish-reason.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { registerRequestLogContext } from '../utils/request-log-color.js';
+import { attachResponsesStreamSemanticsForHttp } from '../../modules/llmswitch/bridge/responses-stream-semantics.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
+  attachResponsesConversationLifecycleStreamForHttp,
   buildResponsesRequestLogContextForHttp,
+  clearResponsesConversationRequestIdsForHttp,
   importResponsesHandlerCoreDist,
   normalizeChatUsagePayloadForHttp,
+  prepareResponsesJsonBodyForSseBridgeForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
-  resolveResponsesRequestContextForHttp,
-  resolveResponsesClientPayloadFinishReasonForHttp,
-  shouldDispatchResponsesSseToClientForHttp,
-} from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
-import {
-  attachResponsesConversationLifecycleStreamForHttp,
-  clearResponsesConversationRequestIdsForHttp,
+  prepareResponsesJsonSseDispatchPlanForHttp,
   persistResponsesConversationLifecycleForHttp,
+  resolveResponsesClientPayloadFinishReasonForHttp,
   resolveResponsesConversationClearReasonForHttp,
+  resolveResponsesRequestContextForHttp,
+  shouldDispatchResponsesSseToClientForHttp,
   shouldClearResponsesConversationOnFailureForHttp,
 } from '../../modules/llmswitch/bridge/responses-response-bridge.js';
 
@@ -71,11 +74,14 @@ export async function sendPipelineResponse(
     metadata: resultMetadata,
     usageEntryPort: result.usageLogInfo?.entryPort
   });
+  const snapshotGroupRequestId = resolveSnapshotGroupRequestId({
+    metadata: resultMetadata
+  });
   const requestLogContext = buildResponsesRequestLogContextForHttp({
     metadata: result.metadata,
     usageLogInfo: (result.usageLogInfo ?? null) as Record<string, unknown> | null
   });
-  const effectiveResponsesRequestContext = resolveResponsesRequestContextForHttp({
+  const effectiveResponsesRequestContext = options?.responsesRequestContext ?? resolveResponsesRequestContextForHttp({
     metadata: resultMetadata,
   });
   registerRequestLogContext(requestLabel, requestLogContext);
@@ -215,10 +221,16 @@ export async function sendPipelineResponse(
         if (!stream) {
           return result;
         }
+        const semanticsStream = attachResponsesStreamSemanticsForHttp({
+          stream,
+          entryEndpoint,
+          requestLabel,
+          onNonBlockingError: logResponseNonBlockingError,
+        });
         return {
           ...result,
           sseStream: attachResponsesConversationLifecycleStreamForHttp({
-            stream,
+            stream: semanticsStream,
             entryEndpoint,
             requestLabel,
             usageLogInfo: result.usageLogInfo,
@@ -241,6 +253,35 @@ export async function sendPipelineResponse(
       })()
       : result;
 
+  const preparedResponsesJsonSseDispatch =
+    forceSSE
+    && result.sseStream === undefined
+    && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
+    && body
+    && typeof body === 'object'
+    && !Array.isArray(body)
+      ? await (async () => {
+        const responsesPayload = await prepareResponsesJsonBodyForSseBridgeForHttp({
+          body,
+          entryEndpoint,
+          requestLabel,
+        });
+        if (!responsesPayload) {
+          return undefined;
+        }
+        const bridgePlan = await prepareResponsesJsonSseDispatchPlanForHttp({
+          responsesPayload,
+          entryEndpoint,
+          requestLabel,
+          metadata: resultMetadata,
+          requestContext: effectiveResponsesRequestContext,
+        });
+        return {
+          responsesPayload: bridgePlan.normalizedPayload,
+        };
+      })()
+      : undefined;
+
   // G6: sendSsePipelineResponse now returns boolean | Error.
   // Propagate Error upward so executor catch-chain can reroute provider.
   const sseResult = await sendSsePipelineResponse({
@@ -253,8 +294,10 @@ export async function sendPipelineResponse(
     expectsStream,
     entryEndpoint,
     entryPort: options?.entryPort,
+    snapshotGroupRequestId,
+    snapshotEntryPort,
     sseTotalTimeoutMs: options?.sseTotalTimeoutMs,
-    requestLogContext,
+    preparedResponsesJsonSseDispatch,
     responsesRequestContext: effectiveResponsesRequestContext,
     logResponseCompleted,
   });
@@ -284,6 +327,7 @@ export async function sendPipelineResponse(
       void writeServerSnapshot({
         phase: 'client-response',
         requestId: requestLabel,
+        groupRequestId: snapshotGroupRequestId,
         entryEndpoint,
         entryPort: snapshotEntryPort,
         data: { status, headers: result.headers, body: null }
@@ -362,6 +406,7 @@ export async function sendPipelineResponse(
     void writeServerSnapshot({
       phase: 'client-response',
       requestId: requestLabel,
+      groupRequestId: snapshotGroupRequestId,
       entryEndpoint,
       entryPort: snapshotEntryPort,
       data: { status, headers: result.headers, body: sanitized }

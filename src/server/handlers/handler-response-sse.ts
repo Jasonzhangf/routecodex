@@ -6,24 +6,22 @@ import {
   applyHeaders,
   assertClientResponseHasNoInternalCarriers,
   createClientSseSnapshotRecorder,
+  finalizeSseTransportCloseout,
   logResponseNonBlockingError,
   maybeAttachClientSseSnapshotStream,
-  releaseMetadataCenterForHttpResponse,
+  recordSseTransportClientClose,
+  recordSseTransportStreamEnd,
+  recordSseTransportStreamStart,
   shouldCaptureClientResponseSnapshotStage,
   toNodeReadable,
   type ClientSseSnapshotRecorder,
   type DispatchOptions,
   type ResponsesRequestContext,
 } from './handler-response-common.js';
-import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
+import { logPipelineStage } from '../utils/stage-logger.js';
 import { extractUsageFromResult } from '../runtime/http-server/executor/usage-aggregator.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
-import { deriveFinishReason } from '../utils/finish-reason.js';
-import {
-  colorizeRequestLog,
-} from '../utils/request-log-color.js';
-import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
@@ -34,31 +32,21 @@ import {
   buildResponsesMissingSseBridgeErrorPayloadForHttp,
   buildResponsesSseErrorPayloadForHttp,
   buildResponsesStructuredSseErrorPayloadForHttp,
-  createChatJsonToSseConverterForHttp,
   createResponsesJsonToSseConverterForHttp,
   isDirectPassthroughTransportKeepaliveFrameForHttp,
-  normalizeResponsesSseFrameForClientForHttp,
-  prepareResponsesJsonBodyForSseBridgeForHttp,
-  prepareResponsesJsonSseDispatchPlanForHttp,
-  resolveResponsesRequestContextForHttp,
-  resolveResponsesProviderProtocolHintFromSseFrameForHttp,
   shouldDropClientSseFrameForHttp,
-  summarizeResponsesSseFrameForLogForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
+import {
+  normalizeClientVisibleResponsesSseFrameForHttp,
+  type ResponsesSseClientProjectionStateForHttp,
+} from '../../modules/llmswitch/bridge/responses-client-projection.js';
+import {
+  createChatJsonToSseConverterForHttp,
+} from '../../modules/llmswitch/bridge/responses-response-bridge.js';
 
 type FlushableResponse = Response & {
   flushHeaders?: () => void;
   flush?: () => void;
-};
-
-type StreamCompletionLogState = {
-  logged: boolean;
-};
-
-type ResponsesSseClientProjectionState = {
-  pendingApplyPatchArgumentDeltas: Record<string, string>;
-  applyPatchCallIds: string[];
-  emittedApplyPatchDoneCallIds: string[];
 };
 
 type SendSsePipelineResponseArgs = {
@@ -71,8 +59,12 @@ type SendSsePipelineResponseArgs = {
   expectsStream: boolean;
   entryEndpoint?: string;
   entryPort?: number;
+  snapshotGroupRequestId?: string;
+  snapshotEntryPort?: number;
   sseTotalTimeoutMs?: number;
-  requestLogContext: Record<string, unknown>;
+  preparedResponsesJsonSseDispatch?: {
+    responsesPayload: Record<string, unknown>;
+  };
   responsesRequestContext?: ResponsesRequestContext;
   logResponseCompleted: (details?: Record<string, unknown>) => void;
 };
@@ -83,6 +75,9 @@ type ResponsesJsonSseDispatchArgs = {
   result: PipelineExecutionResult;
   status: number;
   entryEndpoint?: string;
+  preparedResponsesJsonSseDispatch?: {
+    responsesPayload: Record<string, unknown>;
+  };
   responsesRequestContext?: DispatchOptions['responsesRequestContext'];
   logResponseCompleted: (details?: Record<string, unknown>) => void;
 };
@@ -170,16 +165,17 @@ function logResponsesSseTransportTrace(
 }
 
 function logSseFrameProjection(requestLabel: string, stage: string, frame: string): void {
-  const summary = summarizeResponsesSseFrameForLogForHttp(frame);
-  if (!summary) {
+  if (!frame) {
     return;
   }
-  logPipelineStage(stage, requestLabel, summary);
+  logPipelineStage(stage, requestLabel, { emit: true });
 }
 
 function writeSseDiagnosticSnapshot(
   requestLabel: string,
   entryEndpoint: string | undefined,
+  entryPort: number | undefined,
+  groupRequestId: string | undefined,
   reason: string,
   data: Record<string, unknown>
 ): void {
@@ -189,7 +185,9 @@ function writeSseDiagnosticSnapshot(
   void writeServerSnapshot({
     phase: 'client-response.error',
     requestId: requestLabel,
+    groupRequestId,
     entryEndpoint,
+    entryPort,
     data: {
       mode: 'sse',
       reason,
@@ -208,46 +206,6 @@ function createSseClientResponseClosedError(): Error & { code: string; name: str
   });
 }
 
-function formatTimestamp(): string {
-  const now = new Date();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  return `${hours}:${minutes}:${seconds}`;
-}
-
-function logStreamRequestComplete(
-  endpoint: string | undefined,
-  requestLabel: string,
-  status: number,
-  finishReason?: string,
-  context?: Record<string, unknown>
-): void {
-  if (!SHOULD_LOG_HTTP_EVENTS) {
-    return;
-  }
-  const targetEndpoint = endpoint && endpoint.trim() ? endpoint.trim() : '/unknown';
-  const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
-  const timingSuffix = formatRequestTimingSummary(requestLabel);
-  const line = `✅ [${targetEndpoint}] ${formatTimestamp()} request ${requestLabel} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
-  console.warn(colorizeRequestLog(line, requestLabel, context));
-}
-
-function logStreamRequestCompleteOnce(
-  state: StreamCompletionLogState,
-  endpoint: string | undefined,
-  requestLabel: string,
-  status: number,
-  finishReason?: string,
-  context?: Record<string, unknown>
-): void {
-  if (state.logged) {
-    return;
-  }
-  state.logged = true;
-  logStreamRequestComplete(endpoint, requestLabel, status, finishReason, context);
-}
-
 function maybeUpdateUsageLogInfoFromSseFrame(
   result: PipelineExecutionResult,
   frame: string
@@ -261,7 +219,7 @@ function maybeUpdateUsageLogInfoFromSseFrame(
       bodyText: frame
     }
   }, {
-    providerProtocol: resolveResponsesProviderProtocolHintFromSseFrameForHttp(frame)
+    providerProtocol: undefined
   });
   if (!usage) {
     return;
@@ -414,7 +372,10 @@ function sendSseBridgeError(
   } catch (error) {
     logResponseNonBlockingError(`sendSseBridgeError:end:${requestLabel}`, error);
   }
-  releaseMetadataCenterForHttpResponse(metadata, releaseReason);
+  finalizeSseTransportCloseout({
+    metadata,
+    releaseReason,
+  });
 }
 
 function extractStructuredSseErrorPayload(
@@ -450,7 +411,10 @@ function sendStructuredSseError(
   } catch (error) {
     logResponseNonBlockingError(`sendStructuredSseError:end:${requestLabel}`, error);
   }
-  releaseMetadataCenterForHttpResponse(metadata, releaseReason);
+  finalizeSseTransportCloseout({
+    metadata,
+    releaseReason,
+  });
 }
 
 async function normalizeResponsesSseFrameForClient(args: {
@@ -458,10 +422,10 @@ async function normalizeResponsesSseFrameForClient(args: {
   entryEndpoint?: string;
   requestContext?: DispatchOptions['responsesRequestContext'];
   metadata?: Record<string, unknown>;
-  projectionState?: ResponsesSseClientProjectionState;
+  projectionState?: ResponsesSseClientProjectionStateForHttp;
   requestLabel?: string;
 }): Promise<string> {
-  return await normalizeResponsesSseFrameForClientForHttp({
+  return await normalizeClientVisibleResponsesSseFrameForHttp({
     frame: args.frame,
     entryEndpoint: args.entryEndpoint,
     requestContext: args.requestContext,
@@ -479,7 +443,7 @@ function createResponsesClientProjectionStream(args: {
   requestLabel: string;
 }): Readable {
   let pending = '';
-  const projectionState: ResponsesSseClientProjectionState = {
+  const projectionState: ResponsesSseClientProjectionStateForHttp = {
     pendingApplyPatchArgumentDeltas: {},
     applyPatchCallIds: [],
     emittedApplyPatchDoneCallIds: [],
@@ -565,20 +529,7 @@ async function streamResponsesJsonAsSse(
   }
   try {
     const converter = await createResponsesJsonToSseConverterForHttp();
-    const responsesRequestContext = resolveResponsesRequestContextForHttp({
-      metadata: args.result.metadata,
-    });
-    const bridgePlan = await prepareResponsesJsonSseDispatchPlanForHttp({
-      responsesPayload: args.responsesPayload,
-      entryEndpoint: args.entryEndpoint,
-      requestLabel: args.requestLabel,
-      metadata:
-        args.result.metadata && typeof args.result.metadata === 'object' && !Array.isArray(args.result.metadata)
-          ? args.result.metadata as Record<string, unknown>
-          : undefined,
-      requestContext: responsesRequestContext,
-    });
-    const sse = await converter.convertResponseToJsonToSse(bridgePlan.normalizedPayload, {
+    const sse = await converter.convertResponseToJsonToSse(args.responsesPayload, {
       requestId: args.requestLabel
     });
     const rawStream = toNodeReadable(sse);
@@ -586,7 +537,7 @@ async function streamResponsesJsonAsSse(
       ? createResponsesClientProjectionStream({
         stream: rawStream,
         entryEndpoint: args.entryEndpoint,
-        requestContext: responsesRequestContext,
+        requestContext: args.responsesRequestContext,
         metadata:
           args.result.metadata && typeof args.result.metadata === 'object' && !Array.isArray(args.result.metadata)
             ? args.result.metadata as Record<string, unknown>
@@ -608,11 +559,14 @@ async function streamResponsesJsonAsSse(
       if (!args.res.writableEnded && !args.res.destroyed) {
         args.res.end();
       }
-      releaseMetadataCenterForHttpResponse(args.result.metadata, 'json_to_sse_closeout');
-      args.logResponseCompleted({
-        status: args.status,
-        mode: 'sse',
-        finishReason: bridgePlan.finishReason
+      finalizeSseTransportCloseout({
+        metadata: args.result.metadata as Record<string, unknown> | undefined,
+        releaseReason: 'json_to_sse_closeout',
+        logResponseCompleted: args.logResponseCompleted,
+        completedDetails: {
+          status: args.status,
+          mode: 'sse',
+        },
       });
     });
     stream.on('error', (error: Error) => {
@@ -688,11 +642,14 @@ async function streamChatCompletionsJsonAsSse(
       if (!args.res.writableEnded && !args.res.destroyed) {
         args.res.end();
       }
-      releaseMetadataCenterForHttpResponse(args.result.metadata, 'json_to_sse_closeout');
-      args.logResponseCompleted({
-        status: args.status,
-        mode: 'sse',
-        finishReason: deriveFinishReason(args.result.body)
+      finalizeSseTransportCloseout({
+        metadata: args.result.metadata as Record<string, unknown> | undefined,
+        releaseReason: 'json_to_sse_closeout',
+        logResponseCompleted: args.logResponseCompleted,
+        completedDetails: {
+          status: args.status,
+          mode: 'sse',
+        },
       });
     });
     stream.on('error', (error: Error) => {
@@ -725,11 +682,7 @@ async function streamChatCompletionsJsonAsSse(
 }
 
 async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): Promise<boolean> {
-  const responsesPayload = await prepareResponsesJsonBodyForSseBridgeForHttp({
-    body: args.result.body,
-    entryEndpoint: args.entryEndpoint,
-    requestLabel: args.requestLabel,
-  });
+  const responsesPayload = args.preparedResponsesJsonSseDispatch?.responsesPayload;
   if (!responsesPayload) {
     return false;
   }
@@ -740,7 +693,7 @@ async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): P
 }
 
 export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs): Promise<boolean | Error> {
-  const { res, result, requestLabel, status, body, forceSSE, expectsStream, entryEndpoint, requestLogContext } = args;
+  const { res, result, requestLabel, status, body, forceSSE, expectsStream, entryEndpoint } = args;
   if (forceSSE && result.sseStream === undefined) {
     if (await streamChatCompletionsJsonAsSse({
       res,
@@ -760,6 +713,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       result,
       status,
       entryEndpoint,
+      preparedResponsesJsonSseDispatch: args.preparedResponsesJsonSseDispatch,
       responsesRequestContext: args.responsesRequestContext,
       logResponseCompleted: args.logResponseCompleted
     })) {
@@ -767,17 +721,23 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
     logPipelineStage('response.sse.missing', requestLabel, { status });
     const structuredErrorPayload = extractStructuredSseErrorPayload(body, requestLabel, status);
-    args.logResponseCompleted({
-      status: 200,
-      mode: 'sse',
-      reason: structuredErrorPayload ? 'structured_error_passthrough' : 'missing_stream',
-      bridgeStatus: structuredErrorPayload ? status : 502
+    finalizeSseTransportCloseout({
+      releaseReason: 'force_sse_missing_stream_observed',
+      logResponseCompleted: args.logResponseCompleted,
+      completedDetails: {
+        status: 200,
+        mode: 'sse',
+        reason: structuredErrorPayload ? 'structured_error_passthrough' : 'missing_stream',
+        bridgeStatus: structuredErrorPayload ? status : 502
+      },
     });
     if (shouldCaptureClientResponseSnapshotStage('client-response.error')) {
       void writeServerSnapshot({
         phase: 'client-response.error',
         requestId: requestLabel,
+        groupRequestId: args.snapshotGroupRequestId,
         entryEndpoint,
+        entryPort: args.snapshotEntryPort,
         data: {
           mode: 'sse',
           status: 200,
@@ -832,12 +792,19 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   if (!stream) {
     const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
     logPipelineStage('response.sse.missing', requestLabel, {});
-    args.logResponseCompleted({ status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 });
+    finalizeSseTransportCloseout({
+      metadata: resultMetadata,
+      releaseReason: 'missing_stream_observed',
+      logResponseCompleted: args.logResponseCompleted,
+      completedDetails: { status: 200, mode: 'sse', reason: 'missing_stream', bridgeStatus: 502 },
+    });
     if (shouldCaptureClientResponseSnapshotStage('client-response.error')) {
       void writeServerSnapshot({
         phase: 'client-response.error',
         requestId: requestLabel,
+        groupRequestId: args.snapshotGroupRequestId,
         entryEndpoint,
+        entryPort: args.snapshotEntryPort,
         data: {
           mode: 'sse',
           status: 200,
@@ -862,10 +829,12 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   const clientSseSnapshotRecorder = shouldCaptureClientResponseSnapshotStage('client-response')
     ? createClientSseSnapshotRecorder(restoredStream, res, {
       requestId: requestLabel,
+      groupRequestId: args.snapshotGroupRequestId,
       entryEndpoint,
       entryPort: args.entryPort,
       status,
       headers: result.headers,
+      metadata: resultMetadata,
       usageEntryPort: result.usageLogInfo?.entryPort
     })
     : undefined;
@@ -902,14 +871,20 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       closeBeforeStreamEnd: true,
       detectedBeforeStreamStart: true
     };
-    getSessionExecutionStateTracker().recordSseClientClose(requestLabel, {
+    recordSseTransportClientClose(requestLabel, {
       finishReason: details.finishReason,
       terminal: false,
       closeBeforeStreamEnd: true
     });
     logSseClientCloseDiagnosis(requestLabel, details);
     logPipelineStage('response.sse.client_close', requestLabel, details);
-    writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, 'prestart_client_close', {
+    writeSseDiagnosticSnapshot(
+      requestLabel,
+      entryEndpoint,
+      args.snapshotEntryPort,
+      args.snapshotGroupRequestId,
+      'prestart_client_close',
+      {
       ...details,
       hasStreamSource: streamSource !== undefined,
       streamSourceType:
@@ -920,7 +895,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
             : typeof streamSource,
       directPassthrough: isDirectPassthrough,
       clientConnectionDisconnected: clientConnectionState?.disconnected === true,
-    });
+      }
+    );
     try {
       const abortError = createSseClientResponseClosedError();
       if (typeof (stream as Readable).once === 'function') {
@@ -943,7 +919,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     } catch (error) {
       logResponseNonBlockingError(`response.sse.client_close.prestart.destroy:${requestLabel}`, error);
     }
-    releaseMetadataCenterForHttpResponse(resultMetadata, 'sse_prestart_client_close');
+    finalizeSseTransportCloseout({
+      metadata: resultMetadata,
+      releaseReason: 'sse_prestart_client_close',
+    });
     return true;
   }
 
@@ -959,7 +938,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     flushable.flush();
   }
   logPipelineStage('response.sse.stream.start', requestLabel, { status });
-  getSessionExecutionStateTracker().recordSseStreamStart(requestLabel);
+  recordSseTransportStreamStart(requestLabel);
 
   const writeClientSseFrame = (
     frame: string,
@@ -984,7 +963,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   };
 
   let ended = false;
-  const completionLogState: StreamCompletionLogState = { logged: false };
   let cleanupLogged = false;
   let streamEnded = false;
   let totalTimer: NodeJS.Timeout | null = null;
@@ -1042,15 +1020,19 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
   };
   const destroySourceStream = (error?: Error) => {
+    const destroyTarget =
+      streamSource && typeof (streamSource as { destroy?: unknown }).destroy === 'function'
+        ? streamSource as Readable
+        : stream;
     try {
       if (error && isClientDisconnectAbortError(error)) {
-        stream.once('error', (streamError) => {
+        destroyTarget.once('error', (streamError) => {
           if (!isClientDisconnectAbortError(streamError)) {
             logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, streamError);
           }
         });
       }
-      stream.destroy?.(error);
+      destroyTarget.destroy?.(error);
     } catch (destroyError) {
       logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, destroyError);
     }
@@ -1062,9 +1044,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
     clientCloseAbortScheduled = true;
     const abortError = createSseClientResponseClosedError();
-    setImmediate(() => {
-      destroySourceStream(abortError);
-    });
+    destroySourceStream(abortError);
   };
   const runClientCloseBeforeTerminalCleanup = (closeBeforeStreamEnd: boolean) => {
     abortSourceStreamForClientClose();
@@ -1085,9 +1065,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
   };
 
-  let lastProjectedClientFrameSummary: Record<string, unknown> | null = null;
-  let lastRawClientFrameSummary: Record<string, unknown> | null = null;
-
   const endWithSseError = (code: string, message: string, statusCode = 504, logLabel = 'response.sse.stream.timeout') => {
     if (ended) {
       return;
@@ -1096,11 +1073,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     clearTimers();
     detachOutboundStream();
     logPipelineStage(logLabel, requestLabel, { code, message });
-    writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, code, {
+    writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, args.snapshotEntryPort, args.snapshotGroupRequestId, code, {
       status: statusCode,
       message,
-      lastRawFrame: lastRawClientFrameSummary ?? undefined,
-      lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
       streamEnded,
     });
     const payload = buildResponsesSseErrorPayloadForHttp({
@@ -1156,10 +1131,11 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       status,
       trigger,
       streamEnded,
-      lastRawFrame: lastRawClientFrameSummary ?? undefined,
-      lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined
     };
-    releaseMetadataCenterForHttpResponse(resultMetadata, `sse_${trigger}_closeout`);
+    finalizeSseTransportCloseout({
+      metadata: resultMetadata,
+      releaseReason: `sse_${trigger}_closeout`,
+    });
     if (closeBeforeStreamEnd) {
       logSseClientCloseDiagnosis(requestLabel, {
         ...details,
@@ -1169,23 +1145,33 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         ...details,
         closeBeforeStreamEnd
       });
-      writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, 'client_close_before_terminal', {
+      writeSseDiagnosticSnapshot(
+        requestLabel,
+        entryEndpoint,
+        args.snapshotEntryPort,
+        args.snapshotGroupRequestId,
+        'client_close_before_terminal',
+        {
         ...details,
         closeBeforeStreamEnd
-      });
+        }
+      );
       runClientCloseBeforeTerminalCleanup(closeBeforeStreamEnd);
       return;
     }
     logPipelineStage('response.sse.stream.end', requestLabel, details);
-    args.logResponseCompleted({
-      status,
-      mode: 'sse',
+    finalizeSseTransportCloseout({
+      logResponseCompleted: args.logResponseCompleted,
+      completedDetails: {
+        status,
+        mode: 'sse',
+      },
     });
   };
 
   let ssePending = '';
   let clientWriteQueue = Promise.resolve();
-  const responsesSseProjectionState: ResponsesSseClientProjectionState = {
+  const responsesSseProjectionState: ResponsesSseClientProjectionStateForHttp = {
     pendingApplyPatchArgumentDeltas: {},
     applyPatchCallIds: [],
     emittedApplyPatchDoneCallIds: [],
@@ -1211,17 +1197,12 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       .then((normalizedFrame) => {
         if (!normalizedFrame) {
           logPipelineStage('response.sse.project_frame', requestLabel, {
-            emit: false,
-            raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined
+            emit: false
           });
           return;
         }
-        lastRawClientFrameSummary = summarizeResponsesSseFrameForLogForHttp(frame);
-        lastProjectedClientFrameSummary = summarizeResponsesSseFrameForLogForHttp(normalizedFrame);
         logPipelineStage('response.sse.project_frame', requestLabel, {
-          emit: true,
-          raw: lastRawClientFrameSummary ?? undefined,
-          projected: lastProjectedClientFrameSummary ?? undefined
+          emit: true
         });
         writeClientSseFrame(normalizedFrame, errorLabel, { recordSnapshot: false });
       })
@@ -1232,7 +1213,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
           logPipelineStage('response.sse.projection.cancelled_after_client_close', requestLabel, {
             reason,
             sourceCode,
-            raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
           });
           return;
         }
@@ -1247,7 +1227,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
           message: projectionError.message,
           reason,
           sourceCode,
-          raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
         });
         endWithSseError(
           readErrorCode(projectionError) ?? 'SSE_CLIENT_PROJECTION_FAILED',
@@ -1287,24 +1266,34 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ended = true;
     clearTimers();
     detachOutboundStream();
-    getSessionExecutionStateTracker().recordSseClientClose(requestLabel, {
+    recordSseTransportClientClose(requestLabel, {
       finishReason: undefined,
       terminal: false,
       closeBeforeStreamEnd: !streamEnded
     });
     logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
-    writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, 'stream_error', {
+    writeSseDiagnosticSnapshot(
+      requestLabel,
+      entryEndpoint,
+      args.snapshotEntryPort,
+      args.snapshotGroupRequestId,
+      'stream_error',
+      {
       status: 500,
       message: error.message,
       code: readErrorCode(error),
-      lastRawFrame: lastRawClientFrameSummary ?? undefined,
-      lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
       streamEnded,
-    });
-    args.logResponseCompleted({
-      status: 500,
-      mode: 'sse',
-      reason: 'stream_error',
+      }
+    );
+    finalizeSseTransportCloseout({
+      metadata: resultMetadata,
+      releaseReason: 'sse_stream_error_closeout',
+      logResponseCompleted: args.logResponseCompleted,
+      completedDetails: {
+        status: 500,
+        mode: 'sse',
+        reason: 'stream_error',
+      },
     });
     try {
       const clientVisibleMessage = error.message.startsWith('[server.response_projection]')
@@ -1333,19 +1322,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ended = true;
     streamEnded = true;
     clearTimers();
-    const resolvedStreamFinishReason =
-      typeof result.usageLogInfo?.finishReason === 'string' && result.usageLogInfo.finishReason.trim()
-        ? result.usageLogInfo.finishReason.trim()
-        : undefined;
-    if (!resolvedStreamFinishReason) {
-      logPipelineStage('response.sse.finish_reason.missing', requestLabel, {
-        status,
-        mode: 'sse',
-        reason: 'missing_bridge_finish_reason'
-      });
-    }
-    getSessionExecutionStateTracker().recordSseStreamEnd(requestLabel, {
-      finishReason: resolvedStreamFinishReason,
+    recordSseTransportStreamEnd(requestLabel, {
+      finishReason: undefined,
       terminal: false
     });
     if (ssePending.trim()) {
@@ -1359,14 +1337,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     } catch (error) {
       logResponseNonBlockingError(`response.sse.stream.end.flush_queue:${requestLabel}`, error);
     }
-    logStreamRequestCompleteOnce(
-      completionLogState,
-      entryEndpoint,
-      requestLabel,
-      status,
-      resolvedStreamFinishReason,
-      requestLogContext
-    );
     if (!res.writableEnded && !res.destroyed) {
       try {
         res.end();
@@ -1378,8 +1348,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   });
 
   res.on('close', () => {
+    abortSourceStreamForClientClose();
     if (!streamEnded) {
-      getSessionExecutionStateTracker().recordSseClientClose(requestLabel, {
+      recordSseTransportClientClose(requestLabel, {
         finishReason: undefined,
         terminal: false,
         closeBeforeStreamEnd: true
