@@ -67,6 +67,7 @@ fn extract_tagged_sequence_calls(text: &str, matches: &mut Vec<ToolCallMatch>) {
                         ToolCallMatch {
                             start,
                             end,
+                            id: None,
                             name,
                             args,
                         },

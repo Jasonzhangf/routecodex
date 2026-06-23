@@ -17,6 +17,7 @@ fn extract_custom_tag_calls(text: &str, matches: &mut Vec<ToolCallMatch>) {
             ToolCallMatch {
                 start: full.start(),
                 end: full.end(),
+                id: None,
                 name,
                 args,
             },
@@ -43,6 +44,7 @@ fn extract_generic_calls(text: &str, matches: &mut Vec<ToolCallMatch>) {
             ToolCallMatch {
                 start: full.start(),
                 end: full.end(),
+                id: None,
                 name,
                 args,
             },
@@ -77,6 +79,7 @@ fn extract_generic_calls(text: &str, matches: &mut Vec<ToolCallMatch>) {
                 ToolCallMatch {
                     start: full.start(),
                     end: full.end(),
+                    id: None,
                     name,
                     args,
                 },
@@ -107,8 +110,69 @@ fn extract_generic_calls(text: &str, matches: &mut Vec<ToolCallMatch>) {
             ToolCallMatch {
                 start: marker.start(),
                 end: body_end,
+                id: None,
                 name,
                 args,
+            },
+        );
+    }
+}
+
+fn infer_marker_tool_name(args: &str) -> Option<String> {
+    let args = parse_tool_args_object(args)?;
+    if read_non_empty_string_arg(&args, "cmd").is_some() {
+        return Some("exec_command".to_string());
+    }
+    None
+}
+
+fn extract_glm_marker_calls(text: &str, matches: &mut Vec<ToolCallMatch>) {
+    if !text.contains("<|tool_calls_section_begin|>")
+        || !text.contains("<|tool_call_argument_begin|>")
+    {
+        return;
+    }
+    let Some(call_re) = Regex::new(
+        r"(?is)<\|tool_call_begin\|>\s*([A-Za-z0-9_.:-]+)\s*<\|tool_call_argument_begin\|>\s*",
+    )
+    .ok()
+    else {
+        return;
+    };
+    for captures in call_re.captures_iter(text) {
+        let Some(full_start) = captures.get(0) else {
+            continue;
+        };
+        let Some(id_match) = captures.get(1) else {
+            continue;
+        };
+        let args_start = full_start.end();
+        if args_start >= text.len() || text.as_bytes()[args_start] != b'{' {
+            continue;
+        }
+        let Some(args_end) = find_balanced_json_end(text, args_start) else {
+            continue;
+        };
+        let args = &text[args_start..args_end];
+        let Some(name) = infer_marker_tool_name(args) else {
+            continue;
+        };
+        if !tool_call_args_are_harvestable(name.as_str(), args) {
+            continue;
+        }
+        let tail = &text[args_end..];
+        let end = tail
+            .find("<|tool_call_end|>")
+            .map(|offset| args_end + offset + "<|tool_call_end|>".len())
+            .unwrap_or(args_end);
+        push_match(
+            matches,
+            ToolCallMatch {
+                start: full_start.start(),
+                end,
+                id: Some(id_match.as_str().trim().to_string()),
+                name,
+                args: args.to_string(),
             },
         );
     }

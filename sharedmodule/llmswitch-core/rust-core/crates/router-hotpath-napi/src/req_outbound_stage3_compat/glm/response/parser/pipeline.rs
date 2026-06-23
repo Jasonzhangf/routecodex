@@ -7,6 +7,7 @@ pub(super) fn extract_tool_calls_from_text(
 
     extract_custom_tag_calls(text, &mut matches);
     extract_generic_calls(text, &mut matches);
+    extract_glm_marker_calls(text, &mut matches);
     extract_tagged_sequence_calls(text, &mut matches);
 
     if matches.is_empty() && text.contains("<arg_key>") {
@@ -23,6 +24,7 @@ pub(super) fn extract_tool_calls_from_text(
                             ToolCallMatch {
                                 start: 0,
                                 end: text.len(),
+                                id: None,
                                 name,
                                 args,
                             },
@@ -42,8 +44,12 @@ pub(super) fn extract_tool_calls_from_text(
         .iter()
         .enumerate()
         .map(|(idx, entry)| {
+            let id = entry
+                .id
+                .clone()
+                .unwrap_or_else(|| format!("glm_tool_{}_{}", choice_idx, idx + 1));
             json!({
-                "id": format!("glm_tool_{}_{}", choice_idx, idx + 1),
+                "id": id,
                 "type": "function",
                 "function": {
                     "name": entry.name,
@@ -60,6 +66,9 @@ pub(super) fn extract_tool_calls_from_text(
             cleaned.replace_range(entry.start..entry.end, "");
         }
     }
+    cleaned = cleaned
+        .replace("<|tool_calls_section_begin|>", "")
+        .replace("<|tool_calls_section_end|>", "");
     let reasoning = cleaned.trim().to_string();
     let reasoning = if reasoning.is_empty() {
         None

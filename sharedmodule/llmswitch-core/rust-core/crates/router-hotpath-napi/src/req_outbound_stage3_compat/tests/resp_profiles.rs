@@ -3530,3 +3530,66 @@ fn test_resp_profile_chat_glm_extracts_tool_calls_from_inline_marker() {
         .unwrap_or("");
     assert!(args.contains("echo ok"));
 }
+
+#[test]
+fn test_resp_profile_chat_glm_extracts_tool_calls_from_xlc_glm_marker_sample() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "id": "chatcmpl-bba48e973d9964d5",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "<|tool_calls_section_begin|> <|tool_call_begin|> call_1jDJHGWJY6IznXALCUX97FwV <|tool_call_argument_begin|> {\"cmd\": \"git status --short -- sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/lmstudio/request.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/state.rs\", \"login\": true, \"max_output_tokens\": 4000, \"tty\": false, \"workdir\": \"/Users/fanzhang/Documents/github/routecodex\"} <|tool_call_end|> <|tool_call_begin|> call_3JdTDcvj4Xtiom5gyXI2Boxl <|tool_call_argument_begin|> {\"cmd\": \"git status --short -- sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/mod.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_actions.rs\", \"login\": true, \"max_output_tokens\": 4000, \"tty\": false, \"workdir\": \"/Users/fanzhang/Documents/github/routecodex\"} <|tool_call_end|> <|tool_calls_section_end|>",
+                    "tool_calls": []
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:glm".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_1782198181237_a0f0169a".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("glm-5.2".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("XLC".to_string()),
+            provider_key: Some("XLC.key1.glm-5.2".to_string()),
+            runtime_key: Some("XLC.key1".to_string()),
+            client_request_id: Some("req_1782198181237_a0f0169a".to_string()),
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:glm".to_string()));
+    let message = &result.payload["choices"][0]["message"];
+    assert!(message["content"].is_null());
+    assert!(message.get("reasoning_content").is_none());
+    assert_eq!(message["tool_calls"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        message["tool_calls"][0]["id"],
+        "call_1jDJHGWJY6IznXALCUX97FwV"
+    );
+    assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
+    assert_eq!(
+        message["tool_calls"][1]["id"],
+        "call_3JdTDcvj4Xtiom5gyXI2Boxl"
+    );
+    assert_eq!(message["tool_calls"][1]["function"]["name"], "exec_command");
+    let args = message["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .unwrap_or("");
+    assert!(args.contains("hub_resp_outbound_sse_stream.rs"));
+}

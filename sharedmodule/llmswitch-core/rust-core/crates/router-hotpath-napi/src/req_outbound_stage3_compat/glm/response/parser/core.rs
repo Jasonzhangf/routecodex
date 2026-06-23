@@ -2,6 +2,7 @@
 struct ToolCallMatch {
     start: usize,
     end: usize,
+    id: Option<String>,
     name: String,
     args: String,
 }
@@ -10,6 +11,7 @@ fn push_match(matches: &mut Vec<ToolCallMatch>, candidate: ToolCallMatch) {
     let exists = matches.iter().any(|entry| {
         entry.start == candidate.start
             && entry.end == candidate.end
+            && entry.id == candidate.id
             && entry.name == candidate.name
             && entry.args == candidate.args
     });

@@ -129,6 +129,8 @@ struct ProviderRuntimeProfileJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     model_capabilities: Option<BTreeMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    model_compatibility_profiles: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_context_tokens: Option<i64>,
@@ -193,6 +195,8 @@ struct ModelIndexEntry {
     models: Vec<String>,
     #[serde(default)]
     alias_to_model: BTreeMap<String, String>,
+    #[serde(default)]
+    compatibility_profiles: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -237,6 +241,7 @@ struct NormalizedProvider {
     extensions: Option<Value>,
     server_tools_disabled: bool,
     model_capabilities: Option<BTreeMap<String, Vec<String>>>,
+    model_compatibility_profiles: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -341,9 +346,9 @@ pub(crate) fn bootstrap_virtual_router_provider_profiles_json(
 
     let expanded_target_keys = expand_target_keys(&routed_target_keys, &alias_index, &model_index);
     let (profiles, target_runtime) =
-        build_provider_profiles(&expanded_target_keys, &model_index, &runtime_entries).map_err(|error| {
-            napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error))
-        })?;
+        build_provider_profiles(&expanded_target_keys, &model_index, &runtime_entries).map_err(
+            |error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)),
+        )?;
     let output = ProviderProfilesBootstrapOutput {
         profiles,
         target_runtime,
@@ -447,6 +452,9 @@ fn build_provider_runtime_entries(
                         None
                     },
                     model_capabilities: normalized_provider.model_capabilities.clone(),
+                    model_compatibility_profiles: normalized_provider
+                        .model_compatibility_profiles
+                        .clone(),
                     model_id: None,
                     max_context_tokens: None,
                     anthropic_thinking_config: None,
@@ -517,6 +525,8 @@ fn build_provider_profiles(
         let anthropic_thinking = resolve_anthropic_thinking(runtime, &canonical_model_id);
         let anthropic_thinking_budgets =
             resolve_anthropic_thinking_budgets(runtime, &canonical_model_id).cloned();
+        let compatibility_profile =
+            resolve_model_compatibility_profile(runtime, model_info, &canonical_model_id);
 
         profiles.insert(
             target_key.clone(),
@@ -527,7 +537,7 @@ fn build_provider_profiles(
                 auth: runtime.auth.clone(),
                 enabled: runtime.enabled,
                 outbound_profile: runtime.outbound_profile.clone(),
-                compatibility_profile: runtime.compatibility_profile.clone(),
+                compatibility_profile: compatibility_profile.clone(),
                 runtime_key: Some(runtime_key.clone()),
                 model_id: Some(canonical_model_id.clone()),
                 process_mode: runtime
@@ -555,10 +565,12 @@ fn build_provider_profiles(
 
         let mut resolved_runtime = runtime.clone();
         resolved_runtime.model_id = Some(canonical_model_id.clone());
+        resolved_runtime.compatibility_profile = compatibility_profile;
         resolved_runtime.streaming = streaming_pref;
         resolved_runtime.max_context_tokens = Some(context_tokens);
         resolved_runtime.anthropic_thinking_config = anthropic_thinking_config;
-        resolved_runtime.anthropic_thinking = resolve_anthropic_thinking(runtime, &canonical_model_id);
+        resolved_runtime.anthropic_thinking =
+            resolve_anthropic_thinking(runtime, &canonical_model_id);
         resolved_runtime.anthropic_thinking_budgets = anthropic_thinking_budgets;
         target_runtime.insert(target_key.clone(), resolved_runtime);
     }
@@ -603,7 +615,11 @@ fn resolve_canonical_model_id(model_id: &str, model_index: &ModelIndexEntry) -> 
     if trimmed.is_empty() {
         return None;
     }
-    if model_index.models.iter().any(|candidate| candidate == trimmed) {
+    if model_index
+        .models
+        .iter()
+        .any(|candidate| candidate == trimmed)
+    {
         return Some(trimmed.to_string());
     }
     model_index.alias_to_model.get(trimmed).cloned()
@@ -667,6 +683,7 @@ fn normalize_provider(
             .and_then(Value::as_bool)
             == Some(false);
     let model_capabilities = normalize_provider_model_capabilities(provider);
+    let model_compatibility_profiles = normalize_model_compatibility_profiles(provider);
 
     Ok(NormalizedProvider {
         provider_type: provider_type.clone(),
@@ -694,6 +711,7 @@ fn normalize_provider(
         extensions: normalize_provider_extensions(provider),
         server_tools_disabled,
         model_capabilities,
+        model_compatibility_profiles,
     })
 }
 
@@ -701,6 +719,7 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
     let models_declared = provider.contains_key("models");
     let mut collected: Vec<String> = Vec::new();
     let mut alias_to_model: BTreeMap<String, String> = BTreeMap::new();
+    let mut compatibility_profiles: BTreeMap<String, String> = BTreeMap::new();
     let mut seen = HashSet::new();
 
     if let Some(models_value) = provider.get("models") {
@@ -711,6 +730,11 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                         continue;
                     };
                     if let Some(model_id) = read_optional_string(model_obj.get("id")) {
+                        if let Some(profile) =
+                            read_optional_string(model_obj.get("compatibilityProfile"))
+                        {
+                            compatibility_profiles.insert(model_id.trim().to_string(), profile);
+                        }
                         push_unique_string(&mut collected, &mut seen, model_id);
                     }
                     if let Some(model_id) = read_optional_string(model_obj.get("id")) {
@@ -740,6 +764,11 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                     let canonical_model_id = model_name.trim().to_string();
                     push_unique_string(&mut collected, &mut seen, canonical_model_id.clone());
                     if let Some(model_obj) = model_raw.as_object() {
+                        if let Some(profile) =
+                            read_optional_string(model_obj.get("compatibilityProfile"))
+                        {
+                            compatibility_profiles.insert(canonical_model_id.clone(), profile);
+                        }
                         if let Some(aliases) = model_obj.get("aliases").and_then(Value::as_array) {
                             for alias in aliases {
                                 if let Some(value) = alias.as_str() {
@@ -762,6 +791,7 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
         declared: models_declared,
         models: collected,
         alias_to_model,
+        compatibility_profiles,
     })
 }
 
@@ -1549,7 +1579,9 @@ fn interpret_auth_type(value: Option<&str>) -> AuthTypeInfo {
 
 #[cfg(test)]
 mod alias_tests {
-    use super::{bootstrap_virtual_router_provider_profiles_json, bootstrap_virtual_router_providers_json};
+    use super::{
+        bootstrap_virtual_router_provider_profiles_json, bootstrap_virtual_router_providers_json,
+    };
     use serde_json::{json, Value};
 
     #[test]
@@ -1631,7 +1663,8 @@ mod alias_tests {
             }
         });
 
-        let providers_bootstrap = bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
+        let providers_bootstrap =
+            bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
         let providers_bootstrap_json: Value = serde_json::from_str(&providers_bootstrap).unwrap();
         let alias_index = providers_bootstrap_json["aliasIndex"].clone();
         let model_index = providers_bootstrap_json["modelIndex"].clone();
@@ -1647,8 +1680,75 @@ mod alias_tests {
         .unwrap();
         let output: Value = serde_json::from_str(&profiles).unwrap();
 
-        assert_eq!(output["profiles"]["DF.key1.deepseek-v4-pro"]["modelId"], json!("DeepSeek-V4-Pro"));
-        assert_eq!(output["targetRuntime"]["DF.key1.deepseek-v4-pro"]["modelId"], json!("DeepSeek-V4-Pro"));
+        assert_eq!(
+            output["profiles"]["DF.key1.deepseek-v4-pro"]["modelId"],
+            json!("DeepSeek-V4-Pro")
+        );
+        assert_eq!(
+            output["targetRuntime"]["DF.key1.deepseek-v4-pro"]["modelId"],
+            json!("DeepSeek-V4-Pro")
+        );
+    }
+
+    #[test]
+    fn provider_bootstrap_applies_model_level_compatibility_profile_only_to_target_model() {
+        let providers = json!({
+            "XLC": {
+                "id": "XLC",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://xlapis.com/v1",
+                "auth": {
+                    "type": "apikey",
+                    "entries": [{ "alias": "key1", "apiKey": "test" }]
+                },
+                "models": {
+                    "glm-5.2": {
+                        "compatibilityProfile": "chat:glm",
+                        "supportsStreaming": true,
+                        "maxContext": 1048576
+                    },
+                    "deepseek-v4-pro": {
+                        "supportsStreaming": true,
+                        "maxContext": 1048576
+                    }
+                }
+            }
+        });
+
+        let providers_bootstrap =
+            bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
+        let providers_bootstrap_json: Value = serde_json::from_str(&providers_bootstrap).unwrap();
+        let alias_index = providers_bootstrap_json["aliasIndex"].clone();
+        let model_index = providers_bootstrap_json["modelIndex"].clone();
+        let runtime_entries = providers_bootstrap_json["runtimeEntries"].clone();
+
+        let routed_target_keys = json!(["XLC.key1.glm-5.2", "XLC.key1.deepseek-v4-pro"]);
+        let profiles = bootstrap_virtual_router_provider_profiles_json(
+            routed_target_keys.to_string(),
+            alias_index.to_string(),
+            model_index.to_string(),
+            runtime_entries.to_string(),
+        )
+        .unwrap();
+        let output: Value = serde_json::from_str(&profiles).unwrap();
+
+        assert_eq!(
+            output["profiles"]["XLC.key1.glm-5.2"]["compatibilityProfile"],
+            json!("chat:glm")
+        );
+        assert_eq!(
+            output["targetRuntime"]["XLC.key1.glm-5.2"]["compatibilityProfile"],
+            json!("chat:glm")
+        );
+        assert_eq!(
+            output["profiles"]["XLC.key1.deepseek-v4-pro"]["compatibilityProfile"],
+            json!("compat:passthrough")
+        );
+        assert_eq!(
+            output["targetRuntime"]["XLC.key1.deepseek-v4-pro"]["compatibilityProfile"],
+            json!("compat:passthrough")
+        );
     }
 }
 
@@ -2328,6 +2428,22 @@ fn normalize_provider_model_capabilities(
     }
 }
 
+fn normalize_model_compatibility_profiles(
+    provider: &Map<String, Value>,
+) -> Option<BTreeMap<String, String>> {
+    let mut result = BTreeMap::new();
+    for_each_model(provider, |model_id, model| {
+        if let Some(profile) = read_optional_string(model.get("compatibilityProfile")) {
+            result.insert(model_id, profile);
+        }
+    });
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
 fn resolve_model_by_id<'a>(
     provider: &'a Map<String, Value>,
     target_id: &str,
@@ -2454,8 +2570,16 @@ fn normalize_anthropic_thinking_effort(value: &Value) -> Option<String> {
             let normalized = raw.trim().to_lowercase();
             if normalized == "minimal" {
                 Some("low".to_string())
-            } else if ["low", "medium", "high", "max", "xhigh", "extra_high", "extra-high"]
-                .contains(&normalized.as_str())
+            } else if [
+                "low",
+                "medium",
+                "high",
+                "max",
+                "xhigh",
+                "extra_high",
+                "extra-high",
+            ]
+            .contains(&normalized.as_str())
             {
                 if ["max", "xhigh", "extra_high", "extra-high"].contains(&normalized.as_str()) {
                     Some("high".to_string())
@@ -2665,6 +2789,24 @@ fn resolve_output_tokens(runtime: &ProviderRuntimeProfileJson, model_id: &str) -
         .copied()
         .filter(|value| *value > 0)
         .or(runtime.default_output_tokens.filter(|value| *value > 0))
+}
+
+fn resolve_model_compatibility_profile(
+    runtime: &ProviderRuntimeProfileJson,
+    model_info: &ModelIndexEntry,
+    model_id: &str,
+) -> Option<String> {
+    model_info
+        .compatibility_profiles
+        .get(model_id)
+        .cloned()
+        .or_else(|| {
+            runtime
+                .model_compatibility_profiles
+                .as_ref()
+                .and_then(|map| map.get(model_id).cloned())
+        })
+        .or_else(|| runtime.compatibility_profile.clone())
 }
 
 fn resolve_anthropic_thinking_config<'a>(
