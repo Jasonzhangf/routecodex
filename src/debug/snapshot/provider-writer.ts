@@ -2,7 +2,7 @@
 // Strategy split: provider-queue, provider-429, provider-sse, provider-errorsample
 import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { shouldCaptureSnapshotStage } from '../../utils/snapshot-stage-policy.js';
-import { coerceSnapshotPayloadForWrite } from '../../utils/snapshot-payload-guard.js';
+import { coerceSnapshotPayloadForWrite, planSnapshotPayloadWrite } from '../../utils/snapshot-payload-guard.js';
 import { writeUnifiedSnapshot } from './writer.js';
 import {
   resetProviderSnapshotErrorBufferForTests,
@@ -45,6 +45,19 @@ export type Phase =
   | 'provider-preprocess-debug'
   | 'provider-body-debug';
 export type ClientPhase = 'client-request';
+
+type ClientOversizeSnapshot = {
+  meta: Record<string, unknown>;
+  url?: string;
+  headers?: Record<string, unknown>;
+  oversize: {
+    kind: 'snapshot_payload_oversize';
+    droppedBecause: 'payload_max_bytes_exceeded';
+    estimatedBytes: number;
+    maxBytes: number;
+    summary: Record<string, unknown>;
+  };
+};
 
 export type ProviderSnapshotWriteOptions = {
   phase: Phase;
@@ -122,6 +135,40 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
   }));
 
   return { endpoint, folder, stage, requestId, groupRequestId, providerToken, payload, entryPort };
+}
+
+function buildClientOversizeSnapshotArtifact(args: {
+  stage: ClientPhase;
+  endpoint: string;
+  entryPort?: number;
+  headers?: Record<string, unknown>;
+  payloadSummary: Record<string, unknown>;
+  estimatedBytes: number;
+  maxBytes: number;
+}): ClientOversizeSnapshot {
+  const artifact = buildSnapshotPayload({
+    scope: 'client',
+    stage: args.stage,
+    data: undefined,
+    headers: args.headers,
+    url: args.endpoint,
+    entryPort: args.entryPort,
+    extraMeta: {
+      entryEndpoint: args.endpoint,
+      ...(typeof args.entryPort === 'number' ? { entryPort: args.entryPort, matchedPort: args.entryPort } : {})
+    }
+  }) as Record<string, unknown>;
+
+  return {
+    ...(artifact as Omit<ClientOversizeSnapshot, 'oversize'>),
+    oversize: {
+      kind: 'snapshot_payload_oversize',
+      droppedBecause: 'payload_max_bytes_exceeded',
+      estimatedBytes: args.estimatedBytes,
+      maxBytes: args.maxBytes,
+      summary: args.payloadSummary
+    }
+  };
 }
 
 async function persistProviderSnapshot(input: ProviderSnapshotPersistInput, forceLocalDiskWriteWhenDisabled = false): Promise<void> {
@@ -224,18 +271,32 @@ export async function writeClientSnapshot(options: {
             body: options.body,
             metadata: metadataSnapshot || {}
           };
-    const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
+    const builtPayload = buildSnapshotPayload({
+      scope: 'client',
       stage,
       data: snapshotPayload,
       headers: options.headers,
       url: endpoint,
+      entryPort,
       extraMeta: {
         entryEndpoint: endpoint,
         ...(typeof entryPort === 'number' ? { entryPort, matchedPort: entryPort } : {}),
         stream: options.metadata?.stream,
         userAgent: options.metadata?.userAgent
       }
-    }));
+    });
+    const payloadDecision = planSnapshotPayloadWrite(stage, builtPayload);
+    const payload = payloadDecision.kind === 'full'
+      ? payloadDecision.payload
+      : buildClientOversizeSnapshotArtifact({
+          stage,
+          endpoint,
+          entryPort,
+          headers: options.headers,
+          payloadSummary: payloadDecision.summary,
+          estimatedBytes: payloadDecision.estimatedBytes,
+          maxBytes: payloadDecision.maxBytes
+        });
     await writeUnifiedSnapshot({
       scope: 'client',
       stage,

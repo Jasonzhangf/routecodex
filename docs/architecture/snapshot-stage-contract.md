@@ -69,6 +69,7 @@
 - 边界快照和模块级快照统一落到 `~/.rcc/codex-samples/`。
 - 目录桶必须优先按 entry endpoint / port / requestId 归档，不得按 provider 反推主桶。
 - snapshot metadata 只能留在 snapshot root / meta，禁止写回 provider wire payload 或 client response payload。
+- `client-request` 若因 payload 超过 debug 限额而不能保留完整正文，必须由 debug owner 写显式 oversize artifact；禁止写出仅含 `meta` 的假成功快照。
 
 ## 5. 测试覆盖要求
 

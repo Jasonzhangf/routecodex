@@ -23,6 +23,7 @@ export async function writeServerSnapshot(options: {
   requestId: string;
   data: unknown;
   entryEndpoint?: string;
+  entryPort?: number;
   providerKey?: string;
   groupRequestId?: string;
 }): Promise<void> {
@@ -33,6 +34,7 @@ export async function writeServerSnapshot(options: {
     groupRequestId: options.groupRequestId,
     providerKey: options.providerKey,
     entryEndpoint: options.entryEndpoint,
+    entryPort: options.entryPort,
     data: options.data,
     verbosity: 'verbose',
   });

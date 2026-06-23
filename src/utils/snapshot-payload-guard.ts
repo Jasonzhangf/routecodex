@@ -1,5 +1,19 @@
 const DEFAULT_SNAPSHOT_PAYLOAD_MAX_BYTES = 256 * 1024;
 
+export type SnapshotPayloadWriteDecision =
+  | {
+      kind: 'full';
+      payload: unknown;
+      estimatedBytes: number;
+      maxBytes: number;
+    }
+  | {
+      kind: 'oversize';
+      estimatedBytes: number;
+      maxBytes: number;
+      summary: Record<string, unknown>;
+    };
+
 function resolveBoolFromEnv(names: string[], defaultValue: boolean): boolean {
   for (const name of names) {
     const raw = String(process.env[name] ?? '').trim().toLowerCase();
@@ -90,8 +104,13 @@ function summarizeProviderRequestSnapshot(value: unknown): Record<string, unknow
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return null;
   }
-  const request = body as Record<string, unknown>;
+  const bodyRecord = body as Record<string, unknown>;
+  const request =
+    bodyRecord.body && typeof bodyRecord.body === 'object' && !Array.isArray(bodyRecord.body)
+      ? bodyRecord.body as Record<string, unknown>
+      : bodyRecord;
   const input = Array.isArray(request.input) ? request.input : [];
+  const messages = Array.isArray(request.messages) ? request.messages : [];
   const instructions = typeof request.instructions === 'string' ? request.instructions : '';
   const requestShape: Record<string, unknown> = {
     model: typeof request.model === 'string' ? request.model : null,
@@ -99,7 +118,8 @@ function summarizeProviderRequestSnapshot(value: unknown): Record<string, unknow
       typeof request.previous_response_id === 'string' && request.previous_response_id.trim()
         ? request.previous_response_id.trim()
         : null,
-    input: summarizeResponsesInputItems(input),
+    ...(input.length > 0 ? { input: summarizeResponsesInputItems(input) } : {}),
+    ...(messages.length > 0 ? { messages: summarizeResponsesInputItems(messages) } : {}),
     instructions: instructions
       ? {
           chars: instructions.length,
@@ -250,14 +270,34 @@ function summarizeSnapshotPayload(value: unknown): Record<string, unknown> {
   };
 }
 
-export function coerceSnapshotPayloadForWrite(stage: string, payload: unknown): unknown {
+export function planSnapshotPayloadWrite(stage: string, payload: unknown): SnapshotPayloadWriteDecision {
   if (shouldPreserveFullSnapshotPayload(stage)) {
-    return payload;
+    return {
+      kind: 'full',
+      payload,
+      estimatedBytes: estimateSnapshotPayloadBytes(payload),
+      maxBytes: resolveSnapshotPayloadMaxBytes()
+    };
   }
   const maxBytes = resolveSnapshotPayloadMaxBytes();
   const estimatedBytes = estimateSnapshotPayloadBytes(payload, { maxBytes: maxBytes + 1 });
   if (estimatedBytes <= maxBytes) {
-    return payload;
+    return {
+      kind: 'full',
+      payload,
+      estimatedBytes,
+      maxBytes
+    };
   }
-  return undefined;
+  return {
+    kind: 'oversize',
+    estimatedBytes,
+    maxBytes,
+    summary: summarizeSnapshotPayload(payload)
+  };
+}
+
+export function coerceSnapshotPayloadForWrite(stage: string, payload: unknown): unknown {
+  const decision = planSnapshotPayloadWrite(stage, payload);
+  return decision.kind === 'full' ? decision.payload : undefined;
 }

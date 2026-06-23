@@ -88,6 +88,86 @@ describe('snapshot default raw + port contract', () => {
     expect(raw).not.toContain('parsed-body-should-not-be-primary-raw');
   });
 
+  it('does not collapse oversized client-request payloads into meta-only snapshots', async () => {
+    const previousMaxBytes = process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES;
+    process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES = '1024';
+    try {
+      const requestId = 'req_client_request_oversize_explicit';
+      allowSnapshotLocalDiskWrite(requestId);
+
+      await writeClientSnapshot({
+        entryEndpoint: '/v1/responses',
+        requestId,
+        headers: { accept: 'application/json' },
+        body: {
+          model: 'gpt-5.4',
+          input: Array.from({ length: 48 }, (_, idx) => ({
+            role: 'user',
+            content: [{ type: 'input_text', text: `chunk-${idx}-${'x'.repeat(256)}` }]
+          })),
+          tools: Array.from({ length: 12 }, (_, idx) => ({
+            type: 'function',
+            name: `tool_${idx}`,
+            description: 'd'.repeat(256)
+          }))
+        },
+        metadata: {
+          matchedPort: 5555,
+          stream: true
+        }
+      });
+
+      const filePath = path.join(
+        tempDir,
+        'openai-responses',
+        'ports',
+        '5555',
+        requestId,
+        'client-request.json'
+      );
+      const raw = await fs.readFile(filePath, 'utf8');
+      const parsed = JSON.parse(raw) as {
+        body?: unknown;
+        bodyText?: string;
+        oversize?: {
+          kind?: string;
+          droppedBecause?: string;
+          estimatedBytes?: number;
+          maxBytes?: number;
+          summary?: Record<string, unknown>;
+        };
+        headers?: Record<string, unknown>;
+        url?: string;
+      };
+
+      expect(parsed.body).toBeUndefined();
+      expect(parsed.bodyText).toBeUndefined();
+      expect(parsed.url).toBe('/v1/responses');
+      expect(parsed.headers).toMatchObject({ accept: 'application/json' });
+      expect(parsed.oversize).toMatchObject({
+        kind: 'snapshot_payload_oversize',
+        droppedBecause: 'payload_max_bytes_exceeded',
+        maxBytes: 1024
+      });
+      expect(parsed.oversize?.estimatedBytes).toBeGreaterThan(1024);
+      expect(parsed.oversize?.summary).toMatchObject({
+        type: 'provider-request',
+        requestShape: {
+          model: 'gpt-5.4',
+          toolsCount: 12
+        }
+      });
+      expect(raw).not.toContain('"body":');
+      expect(raw).not.toContain('"bodyText":');
+    } finally {
+      if (previousMaxBytes === undefined) {
+        delete process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES;
+      } else {
+        process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES = previousMaxBytes;
+      }
+    }
+  });
+
   it('stores client-response snapshots under ports/<port>/<requestId> without provider-key path segment', async () => {
     const requestId = 'req_client_response_port_bucket';
     allowSnapshotLocalDiskWrite(requestId);

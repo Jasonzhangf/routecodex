@@ -51,6 +51,18 @@ export interface SnapshotWriteInput {
   forceLocalDiskWriteWhenDisabled?: boolean;
 }
 
+function isExplicitOversizeSnapshotArtifact(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+  const record = payload as Record<string, unknown>;
+  const oversize = record.oversize;
+  if (!oversize || typeof oversize !== 'object' || Array.isArray(oversize)) {
+    return false;
+  }
+  return (oversize as Record<string, unknown>).kind === 'snapshot_payload_oversize';
+}
+
 // --- internal helpers ---
 
 const DEFAULT_KEEP_RECENT_REQUEST_DIRS = 64;
@@ -223,8 +235,13 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
   const folder = mapEndpointToFolder(input.entryEndpoint);
   const stageSafe = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
   const entryPort = resolveRequiredEntryPort(input.stage, input.entryPort);
+  if (input.rawPayload === undefined && input.data === undefined) {
+    throw new Error(`[snapshot-writer] payload required for stage=${input.stage}`);
+  }
   const builtPayload = input.rawPayload ?? buildSnapshotPayload(input);
-  const payload = coerceSnapshotPayloadForWrite(input.stage, builtPayload);
+  const payload = isExplicitOversizeSnapshotArtifact(builtPayload)
+    ? builtPayload
+    : coerceSnapshotPayloadForWrite(input.stage, builtPayload);
   if (payload === undefined) return;
 
   if (snapshotsEnabled) {
