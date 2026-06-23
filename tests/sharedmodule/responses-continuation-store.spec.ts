@@ -10,12 +10,14 @@ import {
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
   releaseResponsesConversationRequestPayload,
+  rebindResponsesConversationRequestId,
   resetResponsesConversationStateForRestartSimulation,
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
   responsesConversationStore
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
 import { buildChatRequestFromResponses } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import { buildResponsesRequestContextForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.ts';
 
 function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {
   if (!Array.isArray(messages)) return null;
@@ -325,6 +327,218 @@ describe('responses conversation store plain continuation restore', () => {
       type: 'function',
       name: 'exec_command'
     });
+  });
+
+  it('rebinds the same continuation request context across provider switch and resumes from final success only', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-provider-switch-router-1'),
+      sessionId: 'sess-provider-switch',
+      conversationId: 'conv-provider-switch',
+      providerKey: 'crs.key1.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        tools: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: { type: 'object', properties: {} }
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'provider switch then continue' }]
+          }
+        ],
+        toolsRaw: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: { type: 'object', properties: {} }
+          }
+        ]
+      }
+    });
+
+    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
+
+    const providerAttempt1 = track('req-provider-switch-attempt-1');
+    const providerAttempt2 = track('req-provider-switch-attempt-2');
+
+    rebindResponsesConversationRequestId('req-provider-switch-router-1', providerAttempt1);
+    rebindResponsesConversationRequestId(providerAttempt1, providerAttempt2);
+
+    expect(() =>
+      resumeLatestResponsesContinuationByScope({
+        requestId: track('req-provider-switch-probe'),
+        sessionId: 'sess-provider-switch',
+        conversationId: 'conv-provider-switch',
+        entryKind: 'responses',
+        continuationOwner: 'relay',
+        payload: {
+          model: 'gpt-5.4',
+          input: [
+            {
+              type: 'message',
+              role: 'user',
+              content: [{ type: 'input_text', text: 'next turn after reroute' }]
+            }
+          ]
+        }
+      })
+    ).not.toThrow();
+
+    recordResponsesResponse({
+      requestId: providerAttempt2,
+      providerKey: 'crs.key2.gpt-5.4',
+      response: {
+        id: 'resp-provider-switch-success-1',
+        status: 'requires_action',
+        output: [
+          {
+            id: 'fc_call_provider_switch',
+            type: 'function_call',
+            status: 'completed',
+            call_id: 'call_provider_switch',
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_provider_switch',
+                type: 'function_call',
+                name: 'exec_command',
+                arguments: '{"cmd":"pwd"}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed = resumeResponsesConversation('resp-provider-switch-success-1', {
+      response_id: 'resp-provider-switch-success-1',
+      tool_outputs: [{ tool_call_id: 'call_provider_switch', output: 'ok' }]
+    });
+
+    expect(resumed.payload.previous_response_id).toBe('resp-provider-switch-success-1');
+    expect(resumed.meta).toMatchObject({
+      restoredFromResponseId: 'resp-provider-switch-success-1',
+      previousRequestId: providerAttempt2,
+      providerKey: 'crs.key2.gpt-5.4'
+    });
+  });
+
+  it('RED: relay materialized submit_tool_outputs resume keeps tools through request bridge restore', async () => {
+    captureResponsesRequestContext({
+      requestId: track('req-relay-materialized-tools-1'),
+      sessionId: 'sess-relay-materialized-tools',
+      conversationId: 'conv-relay-materialized-tools',
+      payload: {
+        model: 'gpt-5.5',
+        store: true,
+        tools: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] }
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续 stopless relay materialized tools 验证' }]
+          }
+        ],
+        toolsRaw: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] }
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-relay-materialized-tools-1'),
+      continuationOwner: 'relay',
+      response: {
+        id: 'resp-relay-materialized-tools-1',
+        status: 'requires_action',
+        output: [
+          {
+            id: 'fc_call_relay_materialized_tools_1',
+            type: 'function_call',
+            status: 'completed',
+            call_id: 'call_relay_materialized_tools_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"maxRepeats\\\\\\":3,\\\\\\"repeatCount\\\\\\":1,\\\\\\"triggerHint\\\\\\":\\\\\\"no_schema\\\\\\"}\\""}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_relay_materialized_tools_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"maxRepeats\\\\\\":3,\\\\\\"repeatCount\\\\\\":1,\\\\\\"triggerHint\\\\\\":\\\\\\"no_schema\\\\\\"}\\""}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    const resumed = resumeResponsesConversation('resp-relay-materialized-tools-1', {
+      response_id: 'resp-relay-materialized-tools-1',
+      tool_outputs: [
+        {
+          call_id: 'call_relay_materialized_tools_1',
+          output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3,"routeHint":"thinking"}'
+        }
+      ]
+    }, {
+      requestId: track('req-relay-materialized-tools-2'),
+      continuationOwner: 'relay'
+    });
+
+    const context = await buildResponsesRequestContextForHttp({
+      payload: resumed.payload,
+      requestId: track('req-relay-materialized-tools-2'),
+      resumeMeta: resumed.meta,
+      metadata: {
+        session_id: 'sess-relay-materialized-tools',
+        conversation_id: 'conv-relay-materialized-tools'
+      }
+    });
+
+    expect(Array.isArray((resumed.meta as any)?.restoredTools)).toBe(true);
+    expect(context.payload.tools).toEqual([
+      expect.objectContaining({
+        type: 'function',
+        name: 'exec_command'
+      })
+    ]);
+    expect(context.context.toolsRaw).toEqual([
+      expect.objectContaining({
+        type: 'function',
+        name: 'exec_command'
+      })
+    ]);
   });
 
   it('records response message output_text as legal request history input_text instead of replaying response-only content types', () => {
@@ -2878,7 +3092,7 @@ describe('responses conversation store plain continuation restore', () => {
             id: 'fc_third_round_1',
             call_id: 'call_third_round_1',
             name: 'exec_command',
-            arguments: '{"cmd":"routecodex hook run reasoning_stop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}',
+            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}',
             status: 'in_progress'
           }
         ],
@@ -2890,7 +3104,7 @@ describe('responses conversation store plain continuation restore', () => {
                 id: 'call_third_round_1',
                 type: 'function',
                 name: 'exec_command',
-                arguments: '{"cmd":"routecodex hook run reasoning_stop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}'
+                arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}'
               }
             ]
           }
@@ -2934,7 +3148,7 @@ describe('responses conversation store plain continuation restore', () => {
             id: 'fc_third_round_2',
             call_id: 'call_third_round_2',
             name: 'exec_command',
-            arguments: '{"cmd":"routecodex hook run reasoning_stop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}',
+            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}',
             status: 'in_progress'
           }
         ],
@@ -2946,7 +3160,7 @@ describe('responses conversation store plain continuation restore', () => {
                 id: 'call_third_round_2',
                 type: 'function',
                 name: 'exec_command',
-                arguments: '{"cmd":"routecodex hook run reasoning_stop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}'
+                arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}'
               }
             ]
           }

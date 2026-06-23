@@ -134,6 +134,9 @@
 - `ServertoolReqHook01ResultParsed` 的“restore”只表示把 shell `exec_command` 的普通 tool result 还原成当前轮模型可见的 hook result，不表示重放历史 continuation。
 - 对称配对要同时检查两侧：如果响应侧 `ServertoolRespHook03HookResponseInjected` 已经投影成 shell，那请求侧就必须在 `ServertoolReqHook01ResultParsed -> 02 -> 03 -> 04` 里把同一轮结果还原成 built-in tool 形状；如果响应侧还没投影，说明不该提前做请求侧恢复。两边错位就是上下文对不上。
 - continuation 与 stopless 顺序锁：必须先 restore/materialize request truth（Responses continuation owner），再做 stopless 3-round no-schema 判定；响应侧必须先做完 stopless interception / schema / projection，再由 continuation owner 写回 canonical context。如果先存后拦，下一轮恢复出来的是旧 shape，注入的 schemaGuidance / repeatCount / feedback 会全丢；如果先拦后恢，3-round no-schema 判定拿不到真实当前轮上下文。判别证据：1）response 端是否产出标准 `exec_command`；2）第二轮 submit 时是否仍能从请求里取到上一轮 stopless 注入的 `schemaFeedback/repeatCount`；3）continuation store 里是否只保存了最终 project 后的 response，而不是原始 provider payload。
+- 对 `/v1/responses`，response-side continuation save 不能只回写旧 request 壳；必须保存“上一版 request context + 当前 response delta”，其中 delta 至少覆盖最终 client-visible tool surface（如 stopless 投影后的 `exec_command` / required_action tool calls）。否则下一轮 restore 会丢 `payload.tools/context.toolsRaw`，stopless contract 与 tool visibility 一起断。
+- SSE 是 transport-only。排查 stopless/continuation 时不得把 `handler-response-sse.ts`、SSE frame projector、stream closeout 当 schema judgment、tool restore、continuation save/restore 或 tool list injection owner；SSE 只能验证 framing/metadata isolation/JSON-SSE equivalence for finalized semantic body。如果修复需要改 SSE 才能让 stopless 过，先判为 wrong owner，回到 response governance、continuation owner 或 request hook owner。
+- Responses continuation save 的过渡 TS 锚点只能在 response dispatch / lifecycle bridge 的 outbound 起点，不能在 `handler-response-sse.ts`。`forceSSE` JSON-to-SSE 和 relay SSE stream 都必须先经 lifecycle bridge 保存 finalized response truth，再交给 SSE 传输层写帧；SSE handler 不得 import `responses-response-bridge.js`。
 
 5. 最后固化 red test
 - 真实样本先落 fixture 或 focused case。
@@ -258,6 +261,7 @@
 - `binding pending` 还在时就把 mainline/function-map 写成已实现。
 - TS 文件还承载 engine/registry/followup decision，却宣称“0 TS 业务语义”。
 - 把 skill 流程写在聊天里但不回写 repo；下次继续做时又要重新口述。
+- 在 SSE writer / SSE bridge / stream closeout 里修 stopless schema、continuation restore/save、tool list preservation 或 hook projection；这属于传输层承载逻辑语义，必须退回唯一 owner 修。
 
 ## 验证
 - `cargo test -p servertool-core`

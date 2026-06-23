@@ -45,6 +45,7 @@ const mockBridgeModule = async () => ({
     },
   })),
   buildResponsesStructuredSseErrorPayloadForHttp: jest.fn(() => null),
+  attachResponsesConversationLifecycleStreamForHttp: jest.fn(({ stream }: { stream: unknown }) => stream),
   buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn((probe: Record<string, unknown> | undefined) => {
     if (!probe?.required_action) return [];
     const response = { ...probe, status: 'requires_action' };

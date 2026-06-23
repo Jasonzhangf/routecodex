@@ -6,6 +6,7 @@
  */
 
 // feature_id: server.responses_request_handler_bridge_surface
+// feature_id: hub.chat_process_responses_continuation
 // canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, captureResponsesPipelineRequestContextForHttp, finalizeResponsesPipelineResultForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
 
 import type { AnyRecord } from './module-loader.js';
@@ -171,45 +172,43 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   resumeMeta?: Record<string, unknown>;
   requestContext: ResponsesRequestContextForHttp;
 }): Record<string, unknown> {
+  const responsesResume = args.resumeMeta
+    ? sanitizeResponsesResumeForContinuationContextForHttp(args.resumeMeta)
+    : undefined;
   const metadata: Record<string, unknown> = {
     clientRequestId: args.clientRequestId,
     clientStream: args.streamPlan.acceptsSse || undefined,
     providerProtocol: 'openai-responses',
     clientHeaders: args.clientHeaders,
     clientConnectionState: args.clientConnectionState,
-    ...(args.resumeMeta ? { responsesResume: args.resumeMeta } : {}),
+    ...(responsesResume ? { responsesResume } : {}),
   };
   const center = MetadataCenter.attach(metadata);
-  const resumeSessionId =
-    typeof args.requestContext.sessionId === 'string' && args.requestContext.sessionId.trim()
-      ? args.requestContext.sessionId.trim()
-      : undefined;
-  const resumeConversationId =
-    typeof args.requestContext.conversationId === 'string' && args.requestContext.conversationId.trim()
-      ? args.requestContext.conversationId.trim()
-      : undefined;
-  if (resumeSessionId) {
+  if (typeof args.requestContext.sessionId === 'string' && args.requestContext.sessionId.trim()) {
     center.writeRequestTruth(
       'sessionId',
-      resumeSessionId,
+      args.requestContext.sessionId.trim(),
       {
         module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
         symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'MetaReq02RequestTruthBound'
+        stage: 'MetaReq02TruthMaterialized'
       },
-      'responses relay resumed session scope'
+      'responses handler request-context session truth'
     );
   }
-  if (resumeConversationId) {
+  if (
+    typeof args.requestContext.conversationId === 'string'
+    && args.requestContext.conversationId.trim()
+  ) {
     center.writeRequestTruth(
       'conversationId',
-      resumeConversationId,
+      args.requestContext.conversationId.trim(),
       {
         module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
         symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'MetaReq02RequestTruthBound'
+        stage: 'MetaReq02TruthMaterialized'
       },
-      'responses relay resumed conversation scope'
+      'responses handler request-context conversation truth'
     );
   }
   center.writeContinuationContext(
@@ -274,17 +273,30 @@ export function buildResponsesPipelineMetadataForHttp(args: {
         'responses relay resumed provider pin'
       );
     }
-    center.writeContinuationContext(
-      'responsesResume',
-      args.resumeMeta,
-      {
-        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-        symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'MetaReq03ContinuationAttached'
-      }
-    );
+    if (responsesResume) {
+      center.writeContinuationContext(
+        'responsesResume',
+        responsesResume,
+        {
+          module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+          symbol: 'buildResponsesPipelineMetadataForHttp',
+          stage: 'MetaReq03ContinuationAttached'
+        }
+      );
+    }
   }
   return metadata;
+}
+
+function sanitizeResponsesResumeForContinuationContextForHttp(
+  resumeMeta: Record<string, unknown>
+): Record<string, unknown> {
+  const sanitized = { ...resumeMeta };
+  delete sanitized.sessionId;
+  delete sanitized.session_id;
+  delete sanitized.conversationId;
+  delete sanitized.conversation_id;
+  return sanitized;
 }
 
 export function buildResponsesConversationPortScopeForHttp(
@@ -557,6 +569,27 @@ function isProviderOwnedSubmitToolOutputsResumePayload(payload: AnyRecord): bool
   return Boolean(responseId && toolOutputs.length > 0 && !hasChatHistory);
 }
 
+function isRelayMaterializedSubmitToolOutputsResumePayload(
+  payload: AnyRecord,
+  resumeMeta?: Record<string, unknown>
+): boolean {
+  if (
+    !resumeMeta
+    || typeof resumeMeta !== 'object'
+    || Array.isArray(resumeMeta)
+    || resumeMeta.continuationOwner !== 'relay'
+  ) {
+    return false;
+  }
+  const previousResponseId =
+    typeof payload.previous_response_id === 'string' && payload.previous_response_id.trim()
+      ? payload.previous_response_id.trim()
+      : undefined;
+  const fullInput = Array.isArray(resumeMeta.fullInput) ? resumeMeta.fullInput : undefined;
+  const hasInputHistory = Array.isArray(payload.input) && payload.input.length > 0;
+  return Boolean(previousResponseId && hasInputHistory && fullInput && fullInput.length > 0);
+}
+
 export async function buildResponsesRequestContextForHttp(args: {
   payload: AnyRecord;
   requestId?: string;
@@ -582,11 +615,38 @@ export async function buildResponsesRequestContextForHttp(args: {
     && isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)
     && Array.isArray(relayResumeFullInput)
     && relayResumeFullInput.length > 0;
+  const relayOwnedMaterializedSubmitToolOutputsResume =
+    isRelayMaterializedSubmitToolOutputsResumePayload(payloadForPersistence, args.resumeMeta);
   if (relayOwnedSubmitToolOutputsResume) {
+    const payloadWithRestoredTools = relayResumeTools?.length
+      ? {
+        ...payloadForPersistence,
+        tools: relayResumeTools,
+      }
+      : payloadForPersistence;
     return {
-      payload: payloadForPersistence,
+      payload: payloadWithRestoredTools,
       context: {
         input: relayResumeFullInput,
+        ...(relayResumeTools?.length ? { toolsRaw: relayResumeTools } : {}),
+      },
+      sessionId: readResponsesSessionIdFromHttp(args.metadata),
+      conversationId: readResponsesConversationIdFromHttp(args.metadata),
+      ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
+      ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
+    };
+  }
+  if (relayOwnedMaterializedSubmitToolOutputsResume) {
+    const payloadWithRestoredTools = relayResumeTools?.length
+      ? {
+        ...payloadForPersistence,
+        tools: relayResumeTools,
+      }
+      : payloadForPersistence;
+    return {
+      payload: payloadWithRestoredTools,
+      context: {
+        input: relayResumeFullInput ?? [],
         ...(relayResumeTools?.length ? { toolsRaw: relayResumeTools } : {}),
       },
       sessionId: readResponsesSessionIdFromHttp(args.metadata),
@@ -818,17 +878,18 @@ export async function prepareResponsesHandlerRuntimeForHttp(
       isSubmitToolOutputs: preparedEntry.isSubmitToolOutputs,
       outboundStream: streamPlan.outboundStream,
     });
+    const requestContext = await buildResponsesRequestContextForHttp({
+      payload,
+      requestId: args.requestId,
+      metadata: effectiveRequestMetadata,
+      resumeMeta: preparedEntry.resumeMeta,
+      matchedPort: args.portScope?.matchedPort,
+      routingPolicyGroup: args.portScope?.routingPolicyGroup,
+    });
     return {
       kind: 'ok',
-      payload,
-      requestContext: await buildResponsesRequestContextForHttp({
-        payload,
-        requestId: args.requestId,
-        metadata: effectiveRequestMetadata,
-        resumeMeta: preparedEntry.resumeMeta,
-        matchedPort: args.portScope?.matchedPort,
-        routingPolicyGroup: args.portScope?.routingPolicyGroup,
-      }),
+      payload: requestContext.payload,
+      requestContext,
       pipelineEntryEndpoint: preparedEntry.pipelineEntryEndpoint,
       isSubmitToolOutputs: preparedEntry.isSubmitToolOutputs,
       resumeMeta: preparedEntry.resumeMeta,

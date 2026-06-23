@@ -250,89 +250,90 @@ chains:
         semantic_input: "client semantic body/probe"
         semantic_output: "http json/sse frame"
         status: anchored
+        note: "Transport-only boundary: SSE/JSON frame writers must not perform stopless schema judgment, continuation save/restore, tool list injection, hook restore, or semantic repair. Any such fix belongs to Hub response governance, continuation owner, or request hook owner before this edge."
 
   - chain_id: responses.continuation.mainline
-    summary: "Responses continuation mainline: explicit request evidence resolves direct vs relay ownership, canonical request truth is restored before request-side hook rewrite, and finalized response truth is saved only after response governance/projection completes."
+    summary: "Responses continuation mainline is a Chat Process boundary block: request-side Responses restore runs after HubReqInbound02Standardized and before HubReqChatProcess03Governed; response-side save runs after HubRespChatProcess03Governed and before HubRespOutbound04ClientSemantic; SSE remains transport-only after semantic finalization."
     entry_contract:
-      node: CntReq01EntryEvidence
+      node: ChatProcReqContinuation01EntryEvidence
       owner_doc: docs/architecture/wiki/responses-continuation-mainline-source.md
     edges:
       - step_id: rct-01
-        from_node: CntReq01EntryEvidence
-        to_node: CntReq02OwnerResolved
+        from_node: ChatProcReqContinuation01EntryEvidence
+        to_node: ChatProcReqContinuation02OwnerResolved
         caller_symbol: prepareResponsesHandlerEntryForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
         callee_symbol: planResponsesHandlerEntry
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
-        owner_feature_id: server.responses_request_handler_bridge_surface
+        owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "raw current request payload plus explicit continuation evidence such as submit_tool_outputs, previous_response_id, response_id, or internal reentry marker"
         semantic_output: "entry evidence classified into ordinary create vs legal continuation candidate"
         status: partial
-        note: "Request-visible evidence is the only legal starting point. Session/scope-only hits are forbidden."
+        note: "Request-visible evidence is the only legal starting point. Session/scope-only hits are forbidden. Handler/bridge code is a temporary shell; semantic owner is the Chat Process continuation block."
       - step_id: rct-02
-        from_node: CntReq02OwnerResolved
-        to_node: CntReq03CanonicalRestored
+        from_node: ChatProcReqContinuation02OwnerResolved
+        to_node: ChatProcReqContinuation03CanonicalRestored
         caller_symbol: buildResponsesRequestContextForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
         callee_symbol: captureReqInboundResponsesContextSnapshotJson
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
-        owner_feature_id: server.responses_request_handler_bridge_surface
+        owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "legal continuation candidate plus request metadata scope"
         semantic_output: "canonical direct ownership metadata or relay materialized request truth"
         status: partial
-        note: "This edge is partial because request-side owner truth is still split between native resume/materialize and TS bridge surfaces."
+        note: "This edge is partial because request-side owner truth is still split between native resume/materialize and TS bridge surfaces; target owner is Chat Process request entry boundary."
       - step_id: rct-03
-        from_node: CntReq03CanonicalRestored
-        to_node: CntReq04HookRestored
-        owner_feature_id: binding pending
-        semantic_input: "canonical restored current-turn request truth"
-        semantic_output: "request truth after current-turn tool result or hook shell has been restored back to model-visible built-in shape"
+        from_node: ChatProcReqContinuation03CanonicalRestored
+        to_node: ChatProcReqContinuation04HookRestored
+        owner_feature_id: hub.chat_process_responses_continuation
+        semantic_input: "canonical restored current-turn request truth including payload/input/tools and request-scoped continuation metadata"
+        semantic_output: "request truth after current-turn client exec_command result has been restored back to model-visible reasoningStop semantics/guidance"
         status: binding pending
         binding_pending: true
-        note: "This edge belongs to the future request-side hook skeleton. Save/restore ordering is invalid until this boundary is explicitly anchored."
+        note: "This edge is the required request-side stopless restore boundary. Current code only has partial continuation restore/tool retention surfaces; do not fake caller/callee symbols until the Chat Process hook-restore builder is real. Tests must not stop at payload.tools; they must prove exec_command CLI output is restored into model-visible reasoningStop semantics after continuation restore."
       - step_id: rct-04
-        from_node: CntReq04HookRestored
-        to_node: CntReq05Governed
+        from_node: ChatProcReqContinuation04HookRestored
+        to_node: ChatProcReqContinuation05Governed
         caller_symbol: captureReqInboundResponsesContextSnapshot
         caller_file: src/modules/llmswitch/bridge/native-exports.ts
         callee_symbol: captureReqInboundResponsesContextSnapshotWithNative
         callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts
-        owner_feature_id: server.responses_request_handler_bridge_surface
+        owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "restored current-turn request semantic"
         semantic_output: "normal governed Hub request path resumes"
         status: partial
       - step_id: rct-05
-        from_node: CntReq05Governed
-        to_node: CntResp06ResponseGoverned
+        from_node: ChatProcReqContinuation05Governed
+        to_node: ChatProcRespContinuation06ResponseGoverned
         caller_symbol: prepareResponsesJsonClientDispatchPlanForHttp
         caller_file: src/modules/llmswitch/bridge/responses-response-bridge.ts
         callee_symbol: projectResponsesClientPayloadForClientNative
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
-        owner_feature_id: server.responses_response_handler_bridge_surface
-        semantic_input: "governed request yields response-side truth plus tool/stopless projection decisions"
-        semantic_output: "finalized response-side governed truth before persistence"
+        owner_feature_id: hub.chat_process_responses_continuation
+        semantic_input: "governed request yields response-side truth plus finish_reason stop schema or reasoningStop tool-call schema"
+        semantic_output: "finalized response-side governed truth after schema judgment and client-visible stopless projection, before persistence"
         status: partial
-        note: "Response-side hook/stopless projection must complete before canonical save."
+        note: "Response-side hook/stopless projection must complete before canonical save. Tests must assert schema source, schema judgment, and client-visible exec_command projection fields, not SSE frame shape. SSE remains transport-only and cannot be a repair point for this edge."
       - step_id: rct-06
-        from_node: CntResp06ResponseGoverned
-        to_node: CntResp07CanonicalSaved
+        from_node: ChatProcRespContinuation06ResponseGoverned
+        to_node: ChatProcRespContinuation07CanonicalSaved
         caller_symbol: persistResponsesConversationLifecycleForHttp
         caller_file: src/server/handlers/handler-response-utils.ts
         callee_symbol: recordResponsesResponseForHttp
         callee_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
-        owner_feature_id: server.responses_response_handler_bridge_surface
-        semantic_input: "finalized client-visible response truth after response governance/projection"
+        owner_feature_id: hub.chat_process_responses_continuation
+        semantic_input: "finalized client-visible response truth after response governance/projection, including response.id, required_action, projected tool calls, and merged tool definitions"
         semantic_output: "canonical continuation truth saved for the next legal restore/materialize"
         status: partial
-        note: "Saving pre-hook/pre-projection shell truth here is invalid."
+        note: "Saving pre-hook/pre-projection shell truth here is invalid. A valid gate must prove saved truth is the same semantic body the client can continue from. Save is a Chat Process response-end boundary action, not SSE closeout."
       - step_id: rct-07
-        from_node: CntResp07CanonicalSaved
-        to_node: CntResp08Released
+        from_node: ChatProcRespContinuation07CanonicalSaved
+        to_node: ChatProcRespContinuation08Released
         caller_symbol: releaseMetadataCenterForHttpResponse
         caller_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
         callee_symbol: releaseMetadataCenterForHttpResponse
         callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
-        owner_feature_id: server.responses_response_handler_bridge_surface
+        owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "saved canonical continuation truth plus request-scoped metadata families"
         semantic_output: "closeout release of legal minimum retained state"
         status: anchored

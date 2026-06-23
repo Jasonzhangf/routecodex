@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const finalizeRetentionMock = jest.fn(async (_requestId: string, _options?: unknown) => undefined);
@@ -154,9 +154,23 @@ const mockBridgeModule = async () => ({
       },
     };
   }),
+  attachResponsesConversationLifecycleStreamForHttp: jest.fn((args: {
+    stream: Readable;
+    requestLabel: string;
+  }) => args.stream.pipe(new Transform({
+    transform(chunk, _encoding, callback) {
+      callback(null, chunk);
+    },
+    flush(callback) {
+      void finalizeRetentionMock(args.requestLabel, { keepForSubmitToolOutputs: true })
+        .then(() => callback())
+        .catch((error) => callback(error as Error));
+    },
+  }))),
   captureResponsesRequestContextForHttpProjection: jest.fn(async () => undefined),
   clearResponsesConversationByRequestIdForHttpProjection: jest.fn(async () => undefined),
   clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
+  sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async (payload: Record<string, unknown>) => {
       const responseId = typeof payload.id === 'string' ? payload.id : '';

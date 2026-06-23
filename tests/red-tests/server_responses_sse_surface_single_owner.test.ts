@@ -5,7 +5,7 @@ import { join } from 'node:path';
 const root = process.cwd();
 
 describe('server responses SSE surface single owner', () => {
-  it('keeps handler-response-sse split between SSE facade and lifecycle facade', () => {
+  it('keeps handler-response-sse transport-only without lifecycle facade imports', () => {
     const source = readFileSync(join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
     const importStatements = source
       .split('\n')
@@ -13,9 +13,11 @@ describe('server responses SSE surface single owner', () => {
     const joinedImports = importStatements.join('\n');
 
     expect(source).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
-    expect(source).toContain("from '../../modules/llmswitch/bridge/responses-response-bridge.js'");
+    expect(source).not.toContain("from '../../modules/llmswitch/bridge/responses-response-bridge.js'");
     expect(joinedImports).not.toMatch(/buildResponsesSseErrorPayloadForHttp[\s\S]*responses-response-bridge\.js/);
     expect(joinedImports).not.toMatch(/shouldDispatchResponsesSseToClientForHttp[\s\S]*responses-response-bridge\.js/);
+    expect(source).not.toContain('persistResponsesConversationLifecycleForHttp');
+    expect(source).not.toContain('planResponsesContinuationCloseActionForHttp');
   });
 
   it('keeps handler-response-utils split between SSE facade and lifecycle facade', () => {
@@ -32,5 +34,19 @@ describe('server responses SSE surface single owner', () => {
     expect(source).toContain("from './responses-sse-bridge.js'");
     expect(lifecycleSection).not.toContain('buildResponsesSseErrorPayloadForHttp');
     expect(lifecycleSection).not.toContain('shouldDispatchResponsesSseToClientForHttp');
+  });
+
+  it('does not let responses-response-bridge own SSE semantic helpers', () => {
+    const source = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'), 'utf8');
+
+    for (const forbiddenExport of [
+      'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
+      'export function planResponsesStreamEndRepairForHttp(',
+      'export async function createResponsesJsonToSseConverterForHttp(',
+      'export async function projectResponsesSseFrameForClientForHttp(',
+      'export async function normalizeResponsesSseFrameForClientForHttp(',
+    ]) {
+      expect(source).not.toContain(forbiddenExport);
+    }
   });
 });

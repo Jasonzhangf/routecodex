@@ -25,7 +25,6 @@ import {
 } from '../utils/request-log-color.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
-import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp,
@@ -34,64 +33,26 @@ import {
   buildClientSseKeepaliveFrameForHttp,
   buildResponsesMissingSseBridgeErrorPayloadForHttp,
   buildResponsesSseErrorPayloadForHttp,
-  buildResponsesStreamIncompleteErrorPayloadForHttp,
   buildResponsesStructuredSseErrorPayloadForHttp,
   createChatJsonToSseConverterForHttp,
-  buildResponsesTerminalSseFramesFromProbeForHttp,
   createResponsesJsonToSseConverterForHttp,
   isDirectPassthroughTransportKeepaliveFrameForHttp,
-  inspectResponsesTerminalStateFromSseChunkForHttp,
   normalizeResponsesSseFrameForClientForHttp,
-  planResponsesContinuationCloseActionForHttp,
-  planResponsesStreamEndRepairForHttp,
   prepareResponsesJsonBodyForSseBridgeForHttp,
   prepareResponsesJsonSseDispatchPlanForHttp,
   resolveResponsesRequestContextForHttp,
   resolveResponsesProviderProtocolHintFromSseFrameForHttp,
-  resolveResponsesTerminalProbeFinishReasonForHttp,
   shouldDropClientSseFrameForHttp,
-  shouldPersistResponsesContinuationOnProbeUpdateForHttp,
-  shouldPersistResponsesConversationStateForHttp,
-  shouldRequireResponsesTerminalEventForHttp,
   summarizeResponsesSseFrameForLogForHttp,
-  updateResponsesContractProbeFromSseChunkForHttp
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
-import {
-  clearResponsesConversationRequestIdsForHttp,
-  finalizeResponsesConversationRequestRetentionForHttp,
-  persistResponsesConversationLifecycleForHttp,
-  resolveResponsesConversationClearReasonForHttp,
-  shouldClearResponsesConversationOnClientCloseForHttp,
-  shouldClearResponsesConversationOnFailureForHttp,
-} from '../../modules/llmswitch/bridge/responses-response-bridge.js';
 
 type FlushableResponse = Response & {
   flushHeaders?: () => void;
   flush?: () => void;
 };
 
-type SseFinishReasonTracker = {
-  finishReason?: string;
-  seenTerminalEvent: boolean;
-};
-
-type SseTerminalWatch = {
-  sawTerminalChunk: boolean;
-  sawResponsesCompletedChunk?: boolean;
-  sawResponsesDoneEvent?: boolean;
-  sawAssistantMessageDoneTerminal?: boolean;
-  requiresResponsesTerminalEvent?: boolean;
-  terminalSource?: string;
-  pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.error' | 'response.cancelled' | 'response.failed';
-};
-
 type StreamCompletionLogState = {
   logged: boolean;
-};
-
-type StreamContractProbeEnvelope = {
-  probe?: Record<string, unknown>;
-  emitted?: boolean;
 };
 
 type ResponsesSseClientProjectionState = {
@@ -99,55 +60,6 @@ type ResponsesSseClientProjectionState = {
   applyPatchCallIds: string[];
   emittedApplyPatchDoneCallIds: string[];
 };
-
-function summarizeResponsesProbeForLog(
-  probe: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!probe) {
-    return undefined;
-  }
-  const output = Array.isArray(probe.output) ? probe.output : [];
-  const outputTypes = output
-    .map((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        return undefined;
-      }
-      const row = item as Record<string, unknown>;
-      return typeof row.type === 'string' && row.type.trim() ? row.type.trim() : undefined;
-    })
-    .filter((value): value is string => Boolean(value));
-  const statuses = output
-    .map((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        return undefined;
-      }
-      const row = item as Record<string, unknown>;
-      return typeof row.status === 'string' && row.status.trim() ? row.status.trim() : undefined;
-    })
-    .filter((value): value is string => Boolean(value));
-  const requiredAction =
-    probe.required_action && typeof probe.required_action === 'object' && !Array.isArray(probe.required_action)
-      ? probe.required_action as Record<string, unknown>
-      : undefined;
-  const submitToolOutputs =
-    requiredAction?.submit_tool_outputs && typeof requiredAction.submit_tool_outputs === 'object' && !Array.isArray(requiredAction.submit_tool_outputs)
-      ? requiredAction.submit_tool_outputs as Record<string, unknown>
-      : undefined;
-  const requiredToolCalls = Array.isArray(submitToolOutputs?.tool_calls) ? submitToolOutputs.tool_calls.length : 0;
-  return {
-    id: typeof probe.id === 'string' ? probe.id : undefined,
-    status: typeof probe.status === 'string' ? probe.status : undefined,
-    outputCount: output.length,
-    outputTypes: outputTypes.length > 0 ? outputTypes : undefined,
-    outputStatuses: statuses.length > 0 ? statuses : undefined,
-    hasRequiredAction: Boolean(requiredAction),
-    requiredActionType: typeof requiredAction?.type === 'string' ? requiredAction.type : undefined,
-    requiredToolCallCount: requiredToolCalls > 0 ? requiredToolCalls : undefined,
-    sawResponseCompleted: probe.__seen_response_completed === true,
-    sawResponseDone: probe.__seen_response_done === true,
-    sawResponseRequiredAction: probe.__seen_response_required_action === true,
-  };
-}
 
 type SendSsePipelineResponseArgs = {
   res: Response;
@@ -158,6 +70,7 @@ type SendSsePipelineResponseArgs = {
   forceSSE: boolean;
   expectsStream: boolean;
   entryEndpoint?: string;
+  entryPort?: number;
   sseTotalTimeoutMs?: number;
   requestLogContext: Record<string, unknown>;
   responsesRequestContext?: ResponsesRequestContext;
@@ -178,14 +91,6 @@ const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
   && process.env.RCC_HTTP_LOG_DISABLE !== '1';
 const DEFAULT_SSE_TOTAL_TIMEOUT_MS = 300_000;
 const DEFAULT_SSE_PROJECTION_TIMEOUT_MS = 5_000;
-const DEFAULT_SSE_TERMINAL_CLOSE_TIMEOUT_MS = 1_500;
-
-function updateContractProbeFromSseChunk(
-  chunk: unknown,
-  contractProbe: StreamContractProbeEnvelope
-): void {
-  contractProbe.probe = updateResponsesContractProbeFromSseChunkForHttp(chunk, contractProbe.probe);
-}
 
 function assertClientSseFrameHasNoInternalCarriers(frame: string, requestId: string): void {
   for (const line of frame.split(/\r?\n/)) {
@@ -248,7 +153,7 @@ function logSseClientCloseDiagnosis(requestLabel: string, details: Record<string
   }
 }
 
-function logResponsesContinuationTrace(
+function logResponsesSseTransportTrace(
   stage: string,
   requestLabel: string,
   details?: Record<string, unknown>
@@ -258,9 +163,9 @@ function logResponsesContinuationTrace(
   }
   try {
     const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
-    console.warn(`[responses-continuation] ${stage} request=${requestLabel}${suffix}`);
+    console.warn(`[responses-sse-transport] ${stage} request=${requestLabel}${suffix}`);
   } catch {
-    console.warn(`[responses-continuation] ${stage} request=${requestLabel}`);
+    console.warn(`[responses-sse-transport] ${stage} request=${requestLabel}`);
   }
 }
 
@@ -662,7 +567,6 @@ async function streamResponsesJsonAsSse(
     const converter = await createResponsesJsonToSseConverterForHttp();
     const responsesRequestContext = resolveResponsesRequestContextForHttp({
       metadata: args.result.metadata,
-      fallback: args.responsesRequestContext,
     });
     const bridgePlan = await prepareResponsesJsonSseDispatchPlanForHttp({
       responsesPayload: args.responsesPayload,
@@ -673,19 +577,6 @@ async function streamResponsesJsonAsSse(
           ? args.result.metadata as Record<string, unknown>
           : undefined,
       requestContext: responsesRequestContext,
-    });
-    await persistResponsesConversationLifecycleForHttp({
-      entryEndpoint: args.entryEndpoint,
-      requestLabel: args.requestLabel,
-      usageLogInfo: args.result.usageLogInfo,
-      metadata:
-        args.result.metadata && typeof args.result.metadata === 'object' && !Array.isArray(args.result.metadata)
-          ? args.result.metadata as Record<string, unknown>
-          : undefined,
-      requestContext: responsesRequestContext,
-      body: bridgePlan.sanitizedPayload,
-      onTrace: (stage, details) => logResponsesContinuationTrace(`json-to-sse.persist.${stage}`, args.requestLabel, details),
-      onNonBlockingError: logResponseNonBlockingError,
     });
     const sse = await converter.convertResponseToJsonToSse(bridgePlan.normalizedPayload, {
       requestId: args.requestLabel
@@ -972,8 +863,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ? createClientSseSnapshotRecorder(restoredStream, res, {
       requestId: requestLabel,
       entryEndpoint,
+      entryPort: args.entryPort,
       status,
-      headers: result.headers
+      headers: result.headers,
+      usageEntryPort: result.usageLogInfo?.entryPort
     })
     : undefined;
   const outboundStream = shouldCaptureClientResponseSnapshotStage('client-response')
@@ -1028,17 +921,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       directPassthrough: isDirectPassthrough,
       clientConnectionDisconnected: clientConnectionState?.disconnected === true,
     });
-    if (shouldClearResponsesConversationOnClientCloseForHttp({
-      entryEndpoint,
-      closeBeforeStreamEnd: true,
-    })) {
-      void clearResponsesConversationRequestIdsForHttp({
-        requestLabel,
-        timingRequestIds: result.usageLogInfo?.timingRequestIds,
-        reason: 'client-close',
-        onNonBlockingError: logResponseNonBlockingError,
-      });
-    }
     try {
       const abortError = createSseClientResponseClosedError();
       if (typeof (stream as Readable).once === 'function') {
@@ -1093,9 +975,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     if (options?.recordSnapshot !== false) {
       clientSseSnapshotRecorder?.record(frame);
     }
-    if (!isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
-      clientSemanticFrameWritten = true;
-    }
     logSseFrameProjection(requestLabel, 'response.sse.write_frame', frame);
     try {
       res.write(frame);
@@ -1108,109 +987,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   const completionLogState: StreamCompletionLogState = { logged: false };
   let cleanupLogged = false;
   let streamEnded = false;
-  let clientSemanticFrameWritten = false;
-  const finishTracker: SseFinishReasonTracker = {
-    finishReason: undefined,
-    seenTerminalEvent: false,
-  };
   let totalTimer: NodeJS.Timeout | null = null;
   let keepaliveTimer: NodeJS.Timeout | null = null;
-  let terminalFlushTimer: NodeJS.Timeout | null = null;
-  let terminalAutoCloseTimer: NodeJS.Timeout | null = null;
-  const terminalWatch: SseTerminalWatch = {
-    sawTerminalChunk: false,
-    sawResponsesCompletedChunk: false,
-    requiresResponsesTerminalEvent: false
-  };
-  const contractProbe: StreamContractProbeEnvelope = {
-    probe: undefined,
-    emitted: false
-  };
-  terminalWatch.requiresResponsesTerminalEvent = shouldRequireResponsesTerminalEventForHttp({
-    entryEndpoint,
-    probe: contractProbe.probe,
-  });
-  const effectiveResponsesRequestContext = resolveResponsesRequestContextForHttp({
-    metadata: result.metadata,
-    fallback: args.responsesRequestContext,
-  });
-  let nativeSseConversationPersisted = false;
-
-  const persistNativeSseConversationState = async (): Promise<void> => {
-    if (isDirectPassthrough) {
-      logResponsesContinuationTrace('sse.persist.skip.direct_passthrough', requestLabel);
-      return;
-    }
-    if (nativeSseConversationPersisted) {
-      logResponsesContinuationTrace('sse.persist.skip.already_persisted', requestLabel);
-      return;
-    }
-    if (!shouldPersistResponsesConversationStateForHttp({
-      entryEndpoint,
-      probe: contractProbe.probe,
-    })) {
-      logResponsesContinuationTrace('sse.persist.skip.not_eligible', requestLabel, {
-        entryEndpoint: entryEndpoint ?? 'unknown',
-        hasProbe: Boolean(contractProbe.probe)
-      });
-      return;
-    }
-    nativeSseConversationPersisted = true;
-    const sanitizedProbeBody = stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>);
-    logResponsesContinuationTrace('sse.persist.start', requestLabel, {
-      responseId: undefined,
-      finishReason: deriveFinishReason(sanitizedProbeBody) ?? finishTracker.finishReason ?? undefined,
-      continuationOwner,
-      providerKey: result.usageLogInfo?.providerKey,
-      hasRequestContext: Boolean(effectiveResponsesRequestContext)
-    });
-    await persistResponsesConversationLifecycleForHttp({
-      entryEndpoint,
-      requestLabel,
-      usageLogInfo: result.usageLogInfo,
-      metadata:
-        result.metadata && typeof result.metadata === 'object' && !Array.isArray(result.metadata)
-          ? result.metadata as Record<string, unknown>
-          : undefined,
-      requestContext: effectiveResponsesRequestContext,
-      continuationOwner,
-      body: sanitizedProbeBody,
-      onTrace: (stage, details) => logResponsesContinuationTrace(`sse.persist.${stage}`, requestLabel, details),
-      onNonBlockingError: logResponseNonBlockingError,
-    });
-    logResponsesContinuationTrace('sse.persist.done', requestLabel, {
-      responseId: undefined,
-      finishReason: deriveFinishReason(sanitizedProbeBody) ?? finishTracker.finishReason ?? undefined
-    });
-  };
-
-  const finalizeSyntheticTerminalClose = (): void => {
-    const resolvedFinishReason = resolveResponsesTerminalProbeFinishReasonForHttp({
-      finishReason: finishTracker.finishReason,
-      probe:
-        contractProbe.probe && typeof contractProbe.probe === 'object' && !Array.isArray(contractProbe.probe)
-          ? stripInternalKeysDeep(contractProbe.probe as Record<string, unknown>)
-          : contractProbe.probe,
-    });
-    if (resolvedFinishReason) {
-      finishTracker.finishReason = resolvedFinishReason;
-    }
-    finishTracker.seenTerminalEvent = true;
-    terminalWatch.sawTerminalChunk = true;
-    streamEnded = true;
-    getSessionExecutionStateTracker().recordSseStreamEnd(requestLabel, {
-      finishReason: finishTracker.finishReason,
-      terminal: true
-    });
-    logStreamRequestCompleteOnce(
-      completionLogState,
-      entryEndpoint,
-      requestLabel,
-      status,
-      finishTracker.finishReason,
-      requestLogContext
-    );
-  };
 
   const readTimeoutMs = (names: string[], fallback: number): number => {
     for (const name of names) {
@@ -1256,11 +1034,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ['ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS', 'RCC_HTTP_SSE_PROJECTION_TIMEOUT_MS'],
     DEFAULT_SSE_PROJECTION_TIMEOUT_MS
   );
-  const terminalCloseTimeoutMs = readTimeoutMs(
-    ['ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS', 'RCC_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS'],
-    DEFAULT_SSE_TERMINAL_CLOSE_TIMEOUT_MS
-  );
-
   const detachOutboundStream = () => {
     try {
       outboundStream.unpipe(res);
@@ -1295,55 +1068,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   };
   const runClientCloseBeforeTerminalCleanup = (closeBeforeStreamEnd: boolean) => {
     abortSourceStreamForClientClose();
-    void (async () => {
-      const closeAction = planResponsesContinuationCloseActionForHttp({
-        entryEndpoint,
-        requestContextPresent: Boolean(effectiveResponsesRequestContext),
-        probe: contractProbe.probe,
-      });
-      if (closeAction.action === 'persist_continuation') {
-        logResponsesContinuationTrace('client_close.persist_continuation', requestLabel, {
-          closeBeforeStreamEnd,
-          detectedBeforeStreamStart: !streamEnded
-        });
-        await persistNativeSseConversationState();
-        await finalizeResponsesConversationRequestRetentionForHttp(requestLabel, {
-          keepForSubmitToolOutputs: closeAction.keepForSubmitToolOutputs
-        });
-        return;
-      }
-      logResponsesContinuationTrace('client_close.clear_abandoned', requestLabel, {
-        closeBeforeStreamEnd,
-        detectedBeforeStreamStart: !streamEnded
-      });
-      if (shouldClearResponsesConversationOnClientCloseForHttp({ entryEndpoint, closeBeforeStreamEnd })) {
-        void clearResponsesConversationRequestIdsForHttp({
-          requestLabel,
-          timingRequestIds: result.usageLogInfo?.timingRequestIds,
-          reason: 'client-close',
-          onNonBlockingError: logResponseNonBlockingError,
-        });
-      }
-    })().catch((error) => {
-      logResponseNonBlockingError(`response.sse.client_close.cleanup:${requestLabel}`, error);
-    });
-  };
-
-  const finalizeStreamEndContinuationRetention = async (): Promise<void> => {
-    const closeAction = planResponsesContinuationCloseActionForHttp({
-      entryEndpoint,
-      requestContextPresent: Boolean(effectiveResponsesRequestContext),
-      probe: contractProbe.probe,
-    });
-    if (closeAction.action !== 'persist_continuation') {
-      return;
-    }
-    logResponsesContinuationTrace('stream_end.persist_continuation', requestLabel, {
-      closeBeforeStreamEnd: false,
-      streamEnded: true,
-    });
-    await finalizeResponsesConversationRequestRetentionForHttp(requestLabel, {
-      keepForSubmitToolOutputs: closeAction.keepForSubmitToolOutputs,
+    logResponsesSseTransportTrace('client_close.transport_only', requestLabel, {
+      closeBeforeStreamEnd,
+      detectedBeforeStreamStart: !streamEnded
     });
   };
 
@@ -1355,14 +1082,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     if (keepaliveTimer) {
       clearInterval(keepaliveTimer);
       keepaliveTimer = null;
-    }
-    if (terminalFlushTimer) {
-      clearTimeout(terminalFlushTimer);
-      terminalFlushTimer = null;
-    }
-    if (terminalAutoCloseTimer) {
-      clearTimeout(terminalAutoCloseTimer);
-      terminalAutoCloseTimer = null;
     }
   };
 
@@ -1382,10 +1101,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       message,
       lastRawFrame: lastRawClientFrameSummary ?? undefined,
       lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
-      probe: contractProbe.probe ?? undefined,
       streamEnded,
-      sawTerminalEvent: finishTracker.seenTerminalEvent,
-      finishReason: finishTracker.finishReason,
     });
     const payload = buildResponsesSseErrorPayloadForHttp({
       requestLabel,
@@ -1435,16 +1151,13 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     cleanupLogged = true;
     clearTimers();
     detachOutboundStream();
-    const closeBeforeStreamEnd = trigger === 'close' && !streamEnded && !finishTracker.seenTerminalEvent;
+    const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
     const details = {
       status,
       trigger,
       streamEnded,
-      sawTerminalEvent: finishTracker.seenTerminalEvent,
-      finishReason: finishTracker.finishReason,
       lastRawFrame: lastRawClientFrameSummary ?? undefined,
-      lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
-      probe: contractProbe.probe ?? undefined
+      lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined
     };
     releaseMetadataCenterForHttpResponse(resultMetadata, `sse_${trigger}_closeout`);
     if (closeBeforeStreamEnd) {
@@ -1467,7 +1180,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     args.logResponseCompleted({
       status,
       mode: 'sse',
-      ...(finishTracker.finishReason ? { finishReason: finishTracker.finishReason } : {})
     });
   };
 
@@ -1483,7 +1195,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       normalizeResponsesSseFrameForClient({
         frame,
         entryEndpoint,
-        requestContext: effectiveResponsesRequestContext,
+        requestContext: args.responsesRequestContext,
         metadata: responseProjectionMetadata,
         projectionState: responsesSseProjectionState,
         requestLabel,
@@ -1511,7 +1223,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
           raw: lastRawClientFrameSummary ?? undefined,
           projected: lastProjectedClientFrameSummary ?? undefined
         });
-        updateContractProbeFromSseChunk(normalizedFrame, contractProbe);
         writeClientSseFrame(normalizedFrame, errorLabel, { recordSnapshot: false });
       })
       .catch((error) => {
@@ -1547,99 +1258,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       });
   };
 
-  const writeTerminalProbeFramesAndClose = async (stage: string): Promise<void> => {
-    if (ended || streamEnded || res.writableEnded || res.destroyed) {
-      return;
-    }
-    try {
-      await clientWriteQueue;
-    } catch (error) {
-      logResponseNonBlockingError(`response.sse.terminal.close.flush_queue:${requestLabel}`, error);
-    }
-    if (ended || streamEnded || res.writableEnded || res.destroyed) {
-      return;
-    }
-    void persistNativeSseConversationState().catch((error) => {
-      logResponseNonBlockingError(`responses-conversation-native-sse-terminal:${requestLabel}`, error);
-    });
-    const framesToWrite = buildResponsesTerminalSseFramesFromProbeForHttp(contractProbe.probe, requestLabel);
-    if (framesToWrite.length === 0) {
-      if (terminalWatch.sawAssistantMessageDoneTerminal || finishTracker.seenTerminalEvent) {
-        finalizeSyntheticTerminalClose();
-        if (!res.writableEnded && !res.destroyed) {
-          ended = true;
-          clearTimers();
-          detachOutboundStream();
-          try {
-            res.end();
-          } catch (endError) {
-            logResponseNonBlockingError(`${stage}.end:${requestLabel}`, endError);
-          }
-          clientSseSnapshotRecorder?.flush();
-          destroySourceStream();
-        }
-        return;
-      }
-      endWithSseError(
-        'SSE_TERMINAL_PROBE_EMPTY',
-        'SSE terminal state reached but Responses terminal frames were unavailable',
-        500,
-        'response.sse.terminal.close.error'
-      );
-      return;
-    }
-    try {
-      for (const frame of framesToWrite) {
-        const normalizedFrame = await projectClientSseFrame(frame, `${stage}.write_terminal`);
-        if (normalizedFrame) {
-          logPipelineStage('response.sse.terminal.write_frame', requestLabel, {
-            stage,
-            raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
-            projected: summarizeResponsesSseFrameForLogForHttp(normalizedFrame) ?? undefined
-          });
-          writeClientSseFrame(normalizedFrame, `${stage}.write_terminal`);
-        }
-      }
-      finishTracker.seenTerminalEvent = true;
-      terminalWatch.sawTerminalChunk = true;
-      terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || framesToWrite.some((frame) => frame.includes('event: response.completed'));
-      terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || framesToWrite.some((frame) => frame.includes('event: response.done'));
-      terminalWatch.terminalSource = terminalWatch.terminalSource ?? stage;
-      contractProbe.emitted = true;
-    } catch (repairWriteError) {
-      const code = readErrorCode(repairWriteError) ?? 'SSE_CLIENT_PROJECTION_FAILED';
-      const message = repairWriteError instanceof Error ? repairWriteError.message : String(repairWriteError ?? 'SSE client projection failed');
-      endWithSseError(code, message, 500, 'response.sse.projection.error');
-      return;
-    }
-    if (!res.writableEnded && !res.destroyed) {
-      finalizeSyntheticTerminalClose();
-      ended = true;
-      clearTimers();
-      detachOutboundStream();
-      try {
-        res.end();
-      } catch (endError) {
-        logResponseNonBlockingError(`${stage}.end:${requestLabel}`, endError);
-      }
-      clientSseSnapshotRecorder?.flush();
-      destroySourceStream();
-    }
-  };
-
-  const scheduleTerminalProbeClose = (stage: string, delayMs: number): void => {
-    if (terminalAutoCloseTimer || ended || streamEnded || res.writableEnded || res.destroyed) {
-      return;
-    }
-    terminalAutoCloseTimer = setTimeout(() => {
-      terminalAutoCloseTimer = null;
-      void writeTerminalProbeFramesAndClose(stage).catch((error) => {
-        logResponseNonBlockingError(`${stage}:${requestLabel}`, error);
-      });
-    }, delayMs);
-    terminalAutoCloseTimer.unref?.();
-  };
-
   outboundStream.on('data', (chunk: unknown) => {
     const text = typeof chunk === 'string' ? chunk
       : Buffer.isBuffer(chunk) ? chunk.toString('utf8')
@@ -1653,52 +1271,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       if (!part.trim()) continue;
       const frame = `${part}\n\n`;
       maybeUpdateUsageLogInfoFromSseFrame(result, frame);
-      const nextTerminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
-        chunk: part,
-        finishReason: finishTracker.finishReason,
-        seenTerminalEvent: finishTracker.seenTerminalEvent,
-        sawTerminalChunk: terminalWatch.sawTerminalChunk,
-        sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk,
-        sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent,
-        sawAssistantMessageDoneTerminal: terminalWatch.sawAssistantMessageDoneTerminal,
-        requiresResponsesTerminalEvent: terminalWatch.requiresResponsesTerminalEvent,
-        terminalSource: terminalWatch.terminalSource,
-        pendingTerminalEvent: terminalWatch.pendingTerminalEvent,
-      });
-      finishTracker.finishReason = nextTerminalState.finishReason;
-      finishTracker.seenTerminalEvent = nextTerminalState.seenTerminalEvent;
-      terminalWatch.sawTerminalChunk = nextTerminalState.sawTerminalChunk;
-      terminalWatch.sawResponsesCompletedChunk = nextTerminalState.sawResponsesCompletedChunk;
-      terminalWatch.sawResponsesDoneEvent = nextTerminalState.sawResponsesDoneEvent;
-      terminalWatch.sawAssistantMessageDoneTerminal = nextTerminalState.sawAssistantMessageDoneTerminal;
-      terminalWatch.requiresResponsesTerminalEvent = nextTerminalState.requiresResponsesTerminalEvent;
-      terminalWatch.terminalSource = nextTerminalState.terminalSource;
-      terminalWatch.pendingTerminalEvent = nextTerminalState.pendingTerminalEvent;
-      updateContractProbeFromSseChunk(part, contractProbe);
-      if (shouldPersistResponsesContinuationOnProbeUpdateForHttp({
-        entryEndpoint,
-        probe: contractProbe.probe,
-      })) {
-        void persistNativeSseConversationState().catch((error) => {
-          logResponseNonBlockingError(`responses-conversation-native-sse-required-action:${requestLabel}`, error);
-        });
-      }
       enqueueClientSseFrame(frame, 'response.sse.stream.write_frame');
     }
-    if (isDirectPassthrough || !terminalWatch.terminalSource || ended || streamEnded || terminalFlushTimer) {
-      return;
-    }
-    terminalFlushTimer = setTimeout(() => {
-      terminalFlushTimer = null;
-      if (ended || streamEnded || res.writableEnded || res.destroyed) {
-        return;
-      }
-      void persistNativeSseConversationState().catch((error) => {
-        logResponseNonBlockingError(`responses-conversation-native-sse-terminal:${requestLabel}`, error);
-      });
-      scheduleTerminalProbeClose('response.sse.terminal.auto_close', 120);
-    }, 25);
-    terminalFlushTimer.unref?.();
   });
 
   outboundStream.on('error', (error: Error) => {
@@ -1714,8 +1288,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     clearTimers();
     detachOutboundStream();
     getSessionExecutionStateTracker().recordSseClientClose(requestLabel, {
-      finishReason: finishTracker.finishReason,
-      terminal: finishTracker.seenTerminalEvent,
+      finishReason: undefined,
+      terminal: false,
       closeBeforeStreamEnd: !streamEnded
     });
     logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
@@ -1725,28 +1299,12 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       code: readErrorCode(error),
       lastRawFrame: lastRawClientFrameSummary ?? undefined,
       lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
-      probe: contractProbe.probe ?? undefined,
       streamEnded,
-      sawTerminalEvent: finishTracker.seenTerminalEvent,
-      finishReason: finishTracker.finishReason,
     });
-    if (shouldClearResponsesConversationOnFailureForHttp({
-      entryEndpoint,
-      status: 500,
-      phase: 'sse_stream_error',
-    })) {
-      void clearResponsesConversationRequestIdsForHttp({
-        requestLabel,
-        timingRequestIds: result.usageLogInfo?.timingRequestIds,
-        reason: resolveResponsesConversationClearReasonForHttp('sse_stream_error'),
-        onNonBlockingError: logResponseNonBlockingError,
-      });
-    }
     args.logResponseCompleted({
       status: 500,
       mode: 'sse',
       reason: 'stream_error',
-      ...(finishTracker.finishReason ? { finishReason: finishTracker.finishReason } : {})
     });
     try {
       const clientVisibleMessage = error.message.startsWith('[server.response_projection]')
@@ -1776,12 +1334,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     streamEnded = true;
     clearTimers();
     const resolvedStreamFinishReason =
-      finishTracker.finishReason
-      || (typeof result.usageLogInfo?.finishReason === 'string' && result.usageLogInfo.finishReason.trim()
+      typeof result.usageLogInfo?.finishReason === 'string' && result.usageLogInfo.finishReason.trim()
         ? result.usageLogInfo.finishReason.trim()
-        : undefined);
-    finishTracker.finishReason = resolvedStreamFinishReason;
-    finishTracker.seenTerminalEvent = terminalWatch.sawTerminalChunk;
+        : undefined;
     if (!resolvedStreamFinishReason) {
       logPipelineStage('response.sse.finish_reason.missing', requestLabel, {
         status,
@@ -1791,33 +1346,11 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
     getSessionExecutionStateTracker().recordSseStreamEnd(requestLabel, {
       finishReason: resolvedStreamFinishReason,
-      terminal: finishTracker.seenTerminalEvent
+      terminal: false
     });
     if (ssePending.trim()) {
       const pendingFrame = `${ssePending}\n\n`;
       maybeUpdateUsageLogInfoFromSseFrame(result, pendingFrame);
-      const nextTerminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
-        chunk: ssePending,
-        finishReason: finishTracker.finishReason,
-        seenTerminalEvent: finishTracker.seenTerminalEvent,
-        sawTerminalChunk: terminalWatch.sawTerminalChunk,
-        sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk,
-        sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent,
-        sawAssistantMessageDoneTerminal: terminalWatch.sawAssistantMessageDoneTerminal,
-        requiresResponsesTerminalEvent: terminalWatch.requiresResponsesTerminalEvent,
-        terminalSource: terminalWatch.terminalSource,
-        pendingTerminalEvent: terminalWatch.pendingTerminalEvent,
-      });
-      finishTracker.finishReason = nextTerminalState.finishReason;
-      finishTracker.seenTerminalEvent = nextTerminalState.seenTerminalEvent;
-      terminalWatch.sawTerminalChunk = nextTerminalState.sawTerminalChunk;
-      terminalWatch.sawResponsesCompletedChunk = nextTerminalState.sawResponsesCompletedChunk;
-      terminalWatch.sawResponsesDoneEvent = nextTerminalState.sawResponsesDoneEvent;
-      terminalWatch.sawAssistantMessageDoneTerminal = nextTerminalState.sawAssistantMessageDoneTerminal;
-      terminalWatch.requiresResponsesTerminalEvent = nextTerminalState.requiresResponsesTerminalEvent;
-      terminalWatch.terminalSource = nextTerminalState.terminalSource;
-      terminalWatch.pendingTerminalEvent = nextTerminalState.pendingTerminalEvent;
-      updateContractProbeFromSseChunk(ssePending, contractProbe);
       enqueueClientSseFrame(pendingFrame, 'response.sse.stream.write_pending_frame');
       ssePending = '';
     }
@@ -1826,228 +1359,29 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     } catch (error) {
       logResponseNonBlockingError(`response.sse.stream.end.flush_queue:${requestLabel}`, error);
     }
-    const streamEndRepairPlan = planResponsesStreamEndRepairForHttp({
+    logStreamRequestCompleteOnce(
+      completionLogState,
       entryEndpoint,
-      probe: contractProbe.probe,
-      sawResponsesCompletedChunk: isDirectPassthrough ? true : terminalWatch.sawResponsesCompletedChunk === true,
-      sawResponsesDoneEvent: isDirectPassthrough ? true : terminalWatch.sawResponsesDoneEvent === true,
-      sawTerminalEvent: finishTracker.seenTerminalEvent === true,
-    });
-    const repairedTerminalFrames = streamEndRepairPlan.shouldRepairTerminalFrames
-      ? buildResponsesTerminalSseFramesFromProbeForHttp(contractProbe.probe, requestLabel)
-      : [];
-    if (repairedTerminalFrames.length > 0 && !res.writableEnded && !res.destroyed) {
+      requestLabel,
+      status,
+      resolvedStreamFinishReason,
+      requestLogContext
+    );
+    if (!res.writableEnded && !res.destroyed) {
       try {
-        for (const frame of repairedTerminalFrames) {
-          const normalizedFrame = await projectClientSseFrame(frame, 'response.sse.stream.end.write_terminal_probe');
-          if (normalizedFrame) {
-            logPipelineStage('response.sse.terminal.write_frame', requestLabel, {
-              stage: 'response.sse.stream.end.write_terminal_probe',
-              raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
-              projected: summarizeResponsesSseFrameForLogForHttp(normalizedFrame) ?? undefined
-            });
-            writeClientSseFrame(normalizedFrame, 'response.sse.stream.end.write_terminal_probe');
-          }
-        }
-        finishTracker.seenTerminalEvent = true;
-        terminalWatch.sawTerminalChunk = true;
-        terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || repairedTerminalFrames.some((frame: string) => frame.includes('event: response.completed'));
-        terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || repairedTerminalFrames.some((frame: string) => frame.includes('event: response.done'));
-        contractProbe.emitted = true;
-      } catch (repairWriteError) {
-        const code = readErrorCode(repairWriteError) ?? 'SSE_CLIENT_PROJECTION_FAILED';
-        const message = repairWriteError instanceof Error ? repairWriteError.message : String(repairWriteError ?? 'SSE client projection failed');
-        endWithSseError(code, message, 500, 'response.sse.projection.error');
+        res.end();
+      } catch (endError) {
+        logResponseNonBlockingError(`response.sse.stream.end:${requestLabel}`, endError);
       }
+      clientSseSnapshotRecorder?.flush();
     }
-    void persistNativeSseConversationState()
-      .catch((error) => {
-        logResponseNonBlockingError(`responses-conversation-native-sse:${requestLabel}`, error);
-      })
-      .finally(async () => {
-        await finalizeStreamEndContinuationRetention().catch((error) => {
-          logResponseNonBlockingError(`responses-conversation-native-sse-finalize:${requestLabel}`, error);
-        });
-        const closedBeforeTerminalEvent = !finishTracker.seenTerminalEvent;
-        const closedBeforeTerminalRepairPlan = planResponsesStreamEndRepairForHttp({
-          entryEndpoint,
-          probe: contractProbe.probe,
-          sawResponsesCompletedChunk: isDirectPassthrough ? true : terminalWatch.sawResponsesCompletedChunk === true,
-          sawResponsesDoneEvent: isDirectPassthrough ? true : terminalWatch.sawResponsesDoneEvent === true,
-          sawTerminalEvent: finishTracker.seenTerminalEvent === true,
-        });
-        if (closedBeforeTerminalEvent && closedBeforeTerminalRepairPlan.shouldRepairContinuationTerminal) {
-          const repairedToolContinuationFrames = buildResponsesTerminalSseFramesFromProbeForHttp(
-            contractProbe.probe,
-            requestLabel
-          );
-          if (repairedToolContinuationFrames.length > 0 && !res.writableEnded && !res.destroyed) {
-            try {
-              await clientWriteQueue;
-              for (const frame of repairedToolContinuationFrames) {
-                const normalizedFrame = await projectClientSseFrame(
-                  frame,
-                  'response.sse.stream.end.write_tool_continuation_terminal_probe'
-                );
-                if (normalizedFrame) {
-                  logPipelineStage('response.sse.terminal.write_frame', requestLabel, {
-                    stage: 'response.sse.stream.end.write_tool_continuation_terminal_probe',
-                    raw: summarizeResponsesSseFrameForLogForHttp(frame) ?? undefined,
-                    projected: summarizeResponsesSseFrameForLogForHttp(normalizedFrame) ?? undefined
-                  });
-                  writeClientSseFrame(
-                    normalizedFrame,
-                    'response.sse.stream.end.write_tool_continuation_terminal_probe'
-                  );
-                }
-              }
-              finishTracker.seenTerminalEvent = true;
-              terminalWatch.sawTerminalChunk = true;
-              terminalWatch.sawResponsesCompletedChunk = terminalWatch.sawResponsesCompletedChunk || repairedToolContinuationFrames.some((frame: string) => frame.includes('event: response.completed'));
-              terminalWatch.sawResponsesDoneEvent = terminalWatch.sawResponsesDoneEvent || repairedToolContinuationFrames.some((frame: string) => frame.includes('event: response.done'));
-              contractProbe.emitted = true;
-            } catch (repairWriteError) {
-              logResponseNonBlockingError(
-                `response.sse.stream.end.write_tool_continuation_terminal_probe:${requestLabel}`,
-                repairWriteError
-              );
-            }
-          }
-        }
-        const repairedClosedBeforeTerminalEvent = !finishTracker.seenTerminalEvent;
-        const finalStreamEndRepairPlan = planResponsesStreamEndRepairForHttp({
-          entryEndpoint,
-          probe: contractProbe.probe,
-          sawResponsesCompletedChunk: isDirectPassthrough ? true : terminalWatch.sawResponsesCompletedChunk === true,
-          sawResponsesDoneEvent: isDirectPassthrough ? true : terminalWatch.sawResponsesDoneEvent === true,
-          sawTerminalEvent: finishTracker.seenTerminalEvent === true,
-        });
-        if (repairedClosedBeforeTerminalEvent && finalStreamEndRepairPlan.shouldProjectIncompleteError) {
-          const incompletePayload = buildResponsesStreamIncompleteErrorPayloadForHttp(requestLabel);
-          const incompleteError =
-            incompletePayload.error && typeof incompletePayload.error === 'object' && !Array.isArray(incompletePayload.error)
-              ? incompletePayload.error as Record<string, unknown>
-              : {};
-          const incompleteMessage =
-            typeof incompleteError.message === 'string' ? incompleteError.message : 'Upstream provider error';
-          const incompleteCode =
-            typeof incompleteError.code === 'string' ? incompleteError.code : 'HTTP_HANDLER_ERROR';
-          logPipelineStage('response.sse.stream.error', requestLabel, {
-            message: incompleteMessage,
-            code: incompleteCode,
-            lastRawFrame: lastRawClientFrameSummary ?? undefined,
-            lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
-            probe: summarizeResponsesProbeForLog(contractProbe.probe),
-            pendingTerminalEvent: terminalWatch.pendingTerminalEvent,
-            terminalSource: terminalWatch.terminalSource,
-            sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
-            sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
-            finishReason: resolvedStreamFinishReason,
-          });
-          writeSseDiagnosticSnapshot(requestLabel, entryEndpoint, incompleteCode, {
-            status: 502,
-            message: incompleteMessage,
-            code: incompleteCode,
-            lastRawFrame: lastRawClientFrameSummary ?? undefined,
-            lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
-            probe: contractProbe.probe ?? undefined,
-            sawTerminalEvent: finishTracker.seenTerminalEvent,
-            sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
-            sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
-            finishReason: resolvedStreamFinishReason,
-          });
-          if (shouldClearResponsesConversationOnFailureForHttp({
-            entryEndpoint,
-            status: 502,
-            phase: 'sse_incomplete',
-          })) {
-            void clearResponsesConversationRequestIdsForHttp({
-              requestLabel,
-              timingRequestIds: result.usageLogInfo?.timingRequestIds,
-              reason: resolveResponsesConversationClearReasonForHttp('sse_incomplete'),
-              onNonBlockingError: logResponseNonBlockingError,
-            });
-          }
-          // G6: upstream_stream_incomplete without emitted semantic frames must
-          // surface as Error so executor catch-chain enters decideDirectRouterRetry
-          // -> provider-switch. Already-emitted frames = fail-fast, no reroute.
-          const hasEmittedSemanticFrames = clientSemanticFrameWritten === true
-            || terminalWatch.sawResponsesCompletedChunk === true
-            || terminalWatch.sawResponsesDoneEvent === true
-            || contractProbe.emitted === true;
-          if (!hasEmittedSemanticFrames) {
-            const upstreamError = new Error(`upstream stream incomplete: ${incompleteMessage}`);
-            (upstreamError as Error & Record<string, unknown>).code = 'UPSTREAM_STREAM_INCOMPLETE';
-            (upstreamError as Error & Record<string, unknown>).statusCode = 502;
-            (upstreamError as Error & Record<string, unknown>).providerKey = result.usageLogInfo?.providerKey;
-            (upstreamError as Error & Record<string, unknown>).requestId = requestLabel;
-            throw upstreamError;
-          }
-          // G4: started-stream with partial semantic frames must still surface
-          // the upstream_stream_incomplete error to the client via an explicit
-          // `event: error` frame, then close the stream. We re-use the same
-          // payload builder used for the non-emitted path so the client-visible
-          // code and message stay identical to the throw path.
-          if (!res.writableEnded && !res.destroyed) {
-            try {
-              const errorFramePayload = buildResponsesStreamIncompleteErrorPayloadForHttp(requestLabel);
-              writeClientSseFrame(
-                `event: error\ndata: ${JSON.stringify(errorFramePayload)}\n\n`,
-                'response.sse.stream_incomplete.write_error_event'
-              );
-            } catch (writeError) {
-              logResponseNonBlockingError(
-                `response.sse.stream_incomplete.write_error_event:${requestLabel}`,
-                writeError
-              );
-            }
-          }
-          args.logResponseCompleted({
-            status: 502,
-            mode: 'sse',
-            reason: 'upstream_stream_incomplete',
-            bridgeStatus: 502,
-            finishReason: 'incomplete',
-          });
-          logPipelineStage('response.sse.stream.incomplete_internal_error', requestLabel, {
-            message: incompleteMessage,
-            code: incompleteCode,
-            clientErrorSuppressed: true,
-            lastRawFrame: lastRawClientFrameSummary ?? undefined,
-            lastProjectedFrame: lastProjectedClientFrameSummary ?? undefined,
-            probe: summarizeResponsesProbeForLog(contractProbe.probe),
-            pendingTerminalEvent: terminalWatch.pendingTerminalEvent,
-            terminalSource: terminalWatch.terminalSource,
-            sawResponsesCompletedChunk: terminalWatch.sawResponsesCompletedChunk === true,
-            sawResponsesDoneEvent: terminalWatch.sawResponsesDoneEvent === true,
-            finishReason: resolvedStreamFinishReason,
-          });
-        } else {
-          logStreamRequestCompleteOnce(
-            completionLogState,
-            entryEndpoint,
-            requestLabel,
-            status,
-            resolvedStreamFinishReason,
-            requestLogContext
-          );
-        }
-        if (!res.writableEnded && !res.destroyed) {
-          try {
-            res.end();
-          } catch (endError) {
-            logResponseNonBlockingError(`response.sse.stream.end:${requestLabel}`, endError);
-          }
-          clientSseSnapshotRecorder?.flush();
-        }
-      });
   });
 
   res.on('close', () => {
     if (!streamEnded) {
       getSessionExecutionStateTracker().recordSseClientClose(requestLabel, {
-        finishReason: finishTracker.finishReason,
-        terminal: finishTracker.seenTerminalEvent,
+        finishReason: undefined,
+        terminal: false,
         closeBeforeStreamEnd: true
       });
     }

@@ -5,7 +5,9 @@ import {
   assertClientResponseHasNoInternalCarriers,
   logResponseNonBlockingError,
   releaseMetadataCenterForHttpResponse,
+  resolveSnapshotEntryPort,
   shouldCaptureClientResponseSnapshotStage,
+  toNodeReadable,
   type DispatchOptions,
 } from './handler-response-common.js';
 import { sendSsePipelineResponse } from './handler-response-sse.js';
@@ -27,6 +29,7 @@ import {
   shouldDispatchResponsesSseToClientForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
 import {
+  attachResponsesConversationLifecycleStreamForHttp,
   clearResponsesConversationRequestIdsForHttp,
   persistResponsesConversationLifecycleForHttp,
   resolveResponsesConversationClearReasonForHttp,
@@ -63,13 +66,17 @@ export async function sendPipelineResponse(
   const entryEndpoint = typeof options?.entryEndpoint === 'string' && options.entryEndpoint.trim()
     ? options.entryEndpoint.trim()
     : undefined;
+  const snapshotEntryPort = resolveSnapshotEntryPort({
+    explicitEntryPort: options?.entryPort,
+    metadata: resultMetadata,
+    usageEntryPort: result.usageLogInfo?.entryPort
+  });
   const requestLogContext = buildResponsesRequestLogContextForHttp({
     metadata: result.metadata,
     usageLogInfo: (result.usageLogInfo ?? null) as Record<string, unknown> | null
   });
   const effectiveResponsesRequestContext = resolveResponsesRequestContextForHttp({
     metadata: resultMetadata,
-    fallback: options?.responsesRequestContext,
   });
   registerRequestLogContext(requestLabel, requestLogContext);
   const responseStartedAtMs = Date.now();
@@ -108,8 +115,10 @@ export async function sendPipelineResponse(
       logUsageSummary(requestLabel, {
         providerKey: usageLogInfo.providerKey,
         model: usageLogInfo.model,
+        requestModel: usageLogInfo.requestModel,
         routeName: usageLogInfo.routeName,
         poolId: usageLogInfo.poolId,
+        entryPort: usageLogInfo.entryPort,
         finishReason: resolvedFinishReason,
         usage: usageLogInfo.usage as any,
         externalLatencyMs,
@@ -159,17 +168,91 @@ export async function sendPipelineResponse(
     continuationOwner: result.continuationOwner,
   });
 
+  if (
+    forceSSE
+    && result.sseStream === undefined
+    && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
+    && body
+    && typeof body === 'object'
+    && !Array.isArray(body)
+  ) {
+    const forceSseJsonDispatchPlan = await prepareResponsesJsonClientDispatchPlanForHttp({
+      body,
+      entryEndpoint,
+      requestLabel,
+      requestContext: effectiveResponsesRequestContext,
+      metadata: resultMetadata,
+      resolveBridge: importResponsesHandlerCoreDist,
+    });
+    await persistResponsesConversationLifecycleForHttp({
+      entryEndpoint,
+      requestLabel,
+      usageLogInfo: result.usageLogInfo,
+      metadata: resultMetadata,
+      requestContext: effectiveResponsesRequestContext,
+      body: forceSseJsonDispatchPlan.sanitizedBody,
+      onTrace: (stage, details) => {
+        if ((process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() !== '1') {
+          return;
+        }
+        try {
+          const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
+          console.warn(`[responses-continuation] json.force_sse.persist.${stage} request=${requestLabel}${suffix}`);
+        } catch {
+          console.warn(`[responses-continuation] json.force_sse.persist.${stage} request=${requestLabel}`);
+        }
+      },
+      onNonBlockingError: logResponseNonBlockingError,
+    });
+  }
+
+  const responseForDispatch =
+    result.sseStream !== undefined
+    && result.continuationOwner !== 'direct'
+    && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
+      ? (() => {
+        const stream = toNodeReadable(result.sseStream);
+        if (!stream) {
+          return result;
+        }
+        return {
+          ...result,
+          sseStream: attachResponsesConversationLifecycleStreamForHttp({
+            stream,
+            entryEndpoint,
+            requestLabel,
+            usageLogInfo: result.usageLogInfo,
+            metadata: resultMetadata,
+            requestContext: effectiveResponsesRequestContext,
+            onTrace: (stage, details) => {
+              if ((process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() !== '1') {
+                return;
+              }
+              try {
+                const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
+                console.warn(`[responses-continuation] outbound_stream.${stage} request=${requestLabel}${suffix}`);
+              } catch {
+                console.warn(`[responses-continuation] outbound_stream.${stage} request=${requestLabel}`);
+              }
+            },
+            onNonBlockingError: logResponseNonBlockingError,
+          }),
+        };
+      })()
+      : result;
+
   // G6: sendSsePipelineResponse now returns boolean | Error.
   // Propagate Error upward so executor catch-chain can reroute provider.
   const sseResult = await sendSsePipelineResponse({
     res,
-    result,
+    result: responseForDispatch,
     requestLabel,
     status,
     body,
     forceSSE,
     expectsStream,
     entryEndpoint,
+    entryPort: options?.entryPort,
     sseTotalTimeoutMs: options?.sseTotalTimeoutMs,
     requestLogContext,
     responsesRequestContext: effectiveResponsesRequestContext,
@@ -202,6 +285,7 @@ export async function sendPipelineResponse(
         phase: 'client-response',
         requestId: requestLabel,
         entryEndpoint,
+        entryPort: snapshotEntryPort,
         data: { status, headers: result.headers, body: null }
       }).catch((error) => {
         logResponseNonBlockingError(`writeServerSnapshot:json_empty:${requestLabel}`, error);
@@ -279,6 +363,7 @@ export async function sendPipelineResponse(
       phase: 'client-response',
       requestId: requestLabel,
       entryEndpoint,
+      entryPort: snapshotEntryPort,
       data: { status, headers: result.headers, body: sanitized }
     }).catch((error) => {
       logResponseNonBlockingError(`writeServerSnapshot:json_payload:${requestLabel}`, error);

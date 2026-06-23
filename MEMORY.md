@@ -3406,3 +3406,10 @@ Tags: startupExcludedProviderKeys, virtual-router-config, direct_model, ecodev, 
   - `cargo test -p router-hotpath-napi request_codec_does_not_drop_live_stopless_tool_continuation_when_chat_messages_shortcut_exists --lib -- --nocapture`
   - `cargo test -p router-hotpath-napi test_req_process_responses_input_still_materializes_stopless_contract --lib -- --nocapture`
   - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+
+# 2026-06-23 Responses SSE is transport-only; continuation save belongs before outbound
+
+- Verified boundary: `src/server/handlers/handler-response-sse.ts` must not import `responses-response-bridge.js` and must not call `persistResponsesConversationLifecycleForHttp` / continuation save/restore helpers. SSE handler owns frame writing, keepalive, metadata isolation, projection timeout, transport close/error only.
+- For `/v1/responses` `forceSSE` JSON-to-SSE and relay SSE stream, continuation persistence must happen before entering SSE transport: `sendPipelineResponse` dispatches through `responses-response-bridge.ts` lifecycle helpers, then hands finalized stream/body to `handler-response-sse.ts`.
+- `responses-sse-bridge.ts` must not re-export response payload projection helpers such as `normalizeResponsesClientPayloadForHttp`; payload projection belongs to lifecycle/response bridge.
+- Verified by forbidden-symbol scan over SSE handler/bridge/semantics, focused TS scan, SSE red tests and handler blackbox (`server_responses_sse_business_module_contract`, `server_responses_sse_surface_single_owner`, `handler-response-utils.force-sse-json-responses`, `handler-response-utils.required-action-split-frame`), `cargo test -p router-hotpath-napi responses_conversation`, native build, and architecture gates.

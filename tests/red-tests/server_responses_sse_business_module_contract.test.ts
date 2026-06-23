@@ -5,9 +5,13 @@ import { join } from 'node:path';
 const root = process.cwd();
 
 describe('server responses SSE business module contract', () => {
-  it('keeps handler-response-sse transport-only while responses-sse-bridge owns terminal semantics', () => {
+  it('keeps handler-response-sse transport-only and forbids SSE semantics in lifecycle bridge owners', () => {
     const handler = readFileSync(join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
     const bridge = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
+    const responseLifecycleBridge = readFileSync(
+      join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'),
+      'utf8'
+    );
 
     expect(handler).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
     expect(bridge).toContain('// feature_id: server.responses_sse_bridge_surface');
@@ -23,6 +27,16 @@ describe('server responses SSE business module contract', () => {
       'function buildResponsesStreamIncompleteErrorPayload(',
     ]) {
       expect(handler).not.toContain(forbiddenLocalDefinition);
+    }
+
+    for (const forbiddenLifecycleBridgeExport of [
+      'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
+      'export function planResponsesStreamEndRepairForHttp(',
+      'export async function createResponsesJsonToSseConverterForHttp(',
+      'export async function projectResponsesSseFrameForClientForHttp(',
+      'export async function normalizeResponsesSseFrameForClientForHttp(',
+    ]) {
+      expect(responseLifecycleBridge).not.toContain(forbiddenLifecycleBridgeExport);
     }
   });
 
