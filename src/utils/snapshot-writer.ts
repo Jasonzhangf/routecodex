@@ -1,41 +1,6 @@
 /**
- * M3 thin shell: server snapshot writer delegates to the unified debug snapshot writer.
- * This file must not contain direct fs.writeFile or independent path/queue logic.
- * Owner: debug.unified_surface -> src/debug/snapshot/writer.ts
- * Migration target: physical deletion in M9.
+ * M3 thin shell: server snapshot APIs delegate to the unified debug snapshot surface.
+ * This file must not contain direct fs writes, hook bridge calls, or path logic.
+ * Owner: debug.unified_surface -> src/debug/snapshot/server-writer.ts
  */
-import { writeUnifiedSnapshot, isSnapshotsEnabled } from '../debug/snapshot/writer.js';
-
-export type ServerSnapshotPhase =
-  | 'http-request'
-  | 'routing-selected'
-  | 'llm-switch-request'
-  | 'compatibility-request'
-  | 'compatibility-response'
-  | 'llm-switch-response'
-  | 'final-response'
-  | 'http-response'
-  | 'http-response.error'
-  | string;
-
-export async function writeServerSnapshot(options: {
-  phase: ServerSnapshotPhase;
-  requestId: string;
-  data: unknown;
-  entryEndpoint?: string;
-  providerKey?: string;
-  groupRequestId?: string;
-}): Promise<void> {
-  return writeUnifiedSnapshot({
-    scope: 'server',
-    stage: String(options.phase),
-    requestId: options.requestId,
-    groupRequestId: options.groupRequestId,
-    providerKey: options.providerKey,
-    entryEndpoint: options.entryEndpoint,
-    data: options.data,
-    verbosity: 'verbose',
-  });
-}
-
-export { isSnapshotsEnabled };
+export * from '../debug/snapshot/server-writer.js';

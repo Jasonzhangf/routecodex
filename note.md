@@ -1,3 +1,110 @@
+# 2026-06-23 stopless live hook/hang truth
+
+- Jason 提示截图里 stopless 像“挂死”。
+- 在线重放证据：
+  - 直接执行：
+    - `routecodex hook run reasoningStop --input-json '{"flowId":"stop_message_flow","maxRepeats":3,"repeatCount":1,"triggerHint":"no_schema"}' --session-id '019eecd0-3655-7663-986d-757ba76400f2' --request-id 'probe-hang-check-1'`
+  - 结果：命令立即退出，返回 `{"ok":true,...,"repeatCount":2,...}`，说明 `reasoningStop` CLI 本体不挂。
+  - 再跑：
+    - `node scripts/tests/stopless-5555-live-probe.mjs`
+  - 结果：5555 在线闭环成功，`finalStatus="reasoning_stop_budget_terminal_ok"`。
+- 新真相：
+  - “挂死”不是 `reasoningStop` hook 子进程卡住。
+  - 当前 5555 live 证据显示：首轮 `requires_action + exec_command`，submit_tool_outputs 续轮后会自然收口到 terminal。
+  - 首轮 stopless 提示文本当前仍作为 `response.output[type=reasoning].summary` 发给 client；terminal 文本才作为 `message/output_text` 发出。
+  - 若要改善排版，可以考虑把“stopless 生成的可见提示文本”单独投影成 `message/output_text`，但这应只限 stopless 生成文本，不能把通用 reasoning 语义整体改成正文。
+
+# 2026-06-23 stopless closeout audit after rebuild/install/restart
+
+- 新验证：
+  - `cargo test -p servertool-core stopless --lib -- --nocapture` PASS
+  - `cargo test -p servertool-core persisted_lookup --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi stopless --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi test_req_process_responses_input_still_materializes_stopless_contract --lib -- --nocapture` PASS
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS
+  - `tests/servertool/stopless-cli-continuation.spec.ts` PASS
+  - `tests/servertool/stopless-vr-route-hint.spec.ts` PASS
+  - `tests/servertool/servertool-cli-projection.spec.ts` PASS
+  - `tests/scripts/stopless-5555-live-probe.spec.ts` PASS
+  - `npm run verify:servertool-rust-only` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-mainline-call-map` PASS
+  - `npm run verify:architecture-mainline-manifest-sync` PASS
+  - `npm run build:min` PASS
+- 编译补点：
+  - `cargo test -p router-hotpath-napi stopless --lib` 曾被 `hashline` 顶层缺失 `OpKind` / `compute_line_hash` re-export 卡住。
+  - 已修：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hashline/mod.rs` 补回顶层 re-export；属于编译面修复，不改 stopless 语义。
+- 全局安装 / 重启：
+  - `npm pack` 产物：`routecodex-0.90.3196.tgz`
+  - 全局安装后 `routecodex --version` => `0.90.3196`
+  - `routecodex restart --port 5555` 后 `curl /health` => version `0.90.3196`
+- 当前最关键在线事实：
+  - 新版 `0.90.3196` 上重新跑 `node scripts/tests/stopless-5555-live-probe.mjs`
+  - 首轮仍正确：
+    - `hasExecCommand=true`
+    - `hasReasoningStop=false`
+    - `leakedStopSchema=false`
+    - command 为 `routecodex hook run reasoningStop ... --session-id ... --request-id ...`
+  - 但 round 1 `submit_tool_outputs` 再次失败：
+    - `status=502`
+    - raw SSE error: `event: error` + `{"type":"error","status":502,"error":{"message":"Upstream provider error","code":"upstream_error"}}`
+    - `finalStatus="requires_action"`
+  - 结论：
+    - stopless 首轮 CLI projection / CLI stdout / repeatCount 进 2 仍正常；
+    - 当前版本的 5555 live **还不能宣称闭环完成**，因为 submit_tool_outputs 续轮仍会被 upstream 502 打断。
+
+# 2026-06-23 continuation provider-switch persistence truth
+
+- 新 focused 证据：
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts` PASS
+  - `tests/sharedmodule/responses-continuation-store.spec.ts` PASS（新增 provider-switch rebind case）
+- 已确认真相 1：relay `/v1/responses.submit_tool_outputs` restore 之前只把 `restoredTools` 放进 `context.toolsRaw` 不够；`payload.tools` 也必须同步保留，否则下一轮 stopless/tool visibility 会断。
+  - 已修：`src/modules/llmswitch/bridge/responses-request-bridge.ts::buildResponsesRequestContextForHttp` 在 relay restore 路径回填 `payload.tools = restoredTools`
+- 已确认真相 2：provider switch 期间 continuation request context 通过 requestId rebind 迁移，不应提前 clear。
+  - 证据：`tests/sharedmodule/responses-continuation-store.spec.ts::rebinds the same continuation request context across provider switch and resumes from final success only`
+- 新打到的真实红点：
+  - `tests/server/handlers/responses-response-bridge.provider-switch-retention.spec.ts`
+  - 当前 `persistResponsesConversationLifecycleForHttp(...)` 在 tool continuation response 上会先尝试 `responseId`，若 `recordResponsesResponseForRequest(responseId)` 失败，会继续 fallback 试 `requestLabel`
+  - 实测调用序列：
+    - `resp-provider-switch-retention-1`
+    - `req-router-final`
+- 这意味着当前 bridge 允许“canonical responseId 记录失败后，回写 router requestId”。
+  - 这不是 mock 假红，而是当前真实行为；需要决定是否收紧为“tool continuation response 只能记录到 canonical responseId，不允许回退到 router requestId”，或至少补明确测试证明 failed provider attempt ids 不会被写入。
+
+# 2026-06-23 debug unified surface closeout继续推进
+
+- provider snapshot 策略层已从单体 `src/debug/snapshot/provider-writer.ts` 拆为：
+  - `provider-queue.ts`
+  - `provider-429.ts`
+  - `provider-sse.ts`
+  - `provider-errorsample.ts`
+  - `provider-utils.ts`
+  - `provider-writer.ts` 保留编排层
+- 修复的真实回归点：
+  - `writeProviderSnapshot(...)` 的 429 分支必须先 `purge429ProviderSnapshotArtifacts(...)` 再 `schedule429ProviderSnapshotPurge(...)`；之前误改成只调 schedule，导致 `tests/providers/core/utils/snapshot-writer.429-suppression.spec.ts` 红。
+  - `__resetProviderSnapshotQueueForTests()` 不能改成 async；测试按同步 helper 调用，误改后会造成 queue 状态未清，影响 queue focused。
+- focused 验证已回绿：
+  - `tests/providers/core/utils/snapshot-writer.queue.spec.ts`
+  - `tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts`
+  - `tests/providers/core/utils/snapshot-writer.release-gating.spec.ts`
+  - `tests/providers/core/utils/snapshot-writer.429-suppression.spec.ts`
+  - `tests/providers/core/utils/snapshot-writer.error-spill.spec.ts`
+  - 合计 5 suites / 11 tests PASS
+- `node scripts/verify-debug-unified-surface.mjs` PASS
+- `npm run verify:function-map-compile-gate` PASS
+- policy surface 继续收口：
+  - `scripts/policy-violations-report.mjs` 已删除死 helper：`walk` / `readJson` / `classifyRecord`
+  - `package.json` 的 `policy:report` 已从 `node ...` 改为 `tsx ...`，因为脚本读取 `src/debug/policy/violations.ts`，用 `node` 直接跑会 `ERR_MODULE_NOT_FOUND`
+- diag replay 真回放证据：
+  - `node --experimental-vm-modules --import tsx scripts/debug/replay-live-minimax-2013.mjs ~/.rcc/diag/error-openai-responses-router-gpt-5.4-20260622T211152240-392265-1169.json`
+  - 各阶段 `violation=none`
+  - 落盘 `tmp/live-minimax-2013-replay.json`
+  - artifact check: `hasRequestCodec=true hasAnthropicCodec=true hasCompat=true hasPipeline=true`
+- architecture review surface closeout：
+  - `docs/architecture/mainline-call-map.yml` 中 `debug.unified_surface.mainline` 已从 pending 改为 anchored
+  - `verify:architecture-mainline-binding-pending-gate` 现显示 `debug.unified_surface.mainline: anchored=1 partial=0 pending=0 total=1`
+  - `npm run verify:architecture-review-surface` PASS
+
 # 2026-06-22 stopless sessionId / no-schema loop closeout slice
 
 - 实锤问题 1：`src/server/runtime/http-server/executor-metadata.ts` 会把 `responsesResume.sessionId/conversationId` 写进 `MetadataCenter.requestTruth`；`src/modules/llmswitch/bridge/responses-request-bridge.ts` 也会优先拿 `resumeMeta.sessionId/conversationId` 写 request truth。这个违反“只有请求入口真相能写 request truth”，会让 continuation context 冒充 session truth。
@@ -19,6 +126,35 @@
     - `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts`
   - `node scripts/verify-servertool-rust-only.mjs` PASS
   - `npm run verify:function-map-compile-gate` PASS
+
+# 2026-06-22 M1-M9 全模块收口完成
+
+- 所有 debug 子模块已迁入 `src/debug/*` 唯一 authoring surface
+- 验证结果：
+  - `tsc --noEmit` PASS
+  - 12 focused suites / 31 tests PASS
+  - `verify:debug-unified-surface` PASS
+  - `verify:function-map-compile-gate` PASS（全 13 步）
+- 旧 owner 路径（snapshot-writer.ts / debug-logger.ts / hooks / harness）改为 re-export shell，M9 最后删除了 debug 目录下的旧 facade
+- 跨模块 re-export shells 保留用于兼容，在后续 gate 收紧时可逐步物理删除
+
+# 2026-06-22 debug unified surface / snapshot/logger/hook/policy M3-M8 收口
+
+- 已完成：
+  - M3 `src/utils/snapshot-writer.ts` → `src/debug/snapshot/writer.ts` shell
+  - M4 `src/providers/core/utils/snapshot-writer.ts` → unified writer shell
+  - M5 `src/modules/pipeline/utils/debug-logger.ts` / `colored-logger.ts` → `src/debug/logger/*`
+  - M6 `src/debug/harness/*` 重排
+  - M7 `src/providers/core/hooks/debug-example-hooks.ts` / `src/providers/core/config/provider-debug-hooks.ts` → `src/debug/hooks/*`
+  - M8 `src/debug/policy/violations.ts` 新增，policy read logic 收口
+- 证据：
+  - `tsc --noEmit` PASS
+  - debug-focused tests PASS
+  - provider snapshot-writer.* tests PASS
+  - debug-logger.dev-filter/release PASS
+  - `verify:debug-unified-surface` PASS
+  - `verify:function-map-compile-gate` PASS
+- 剩余：M9 cleanup 只做旧 facade 物理删除/最终导出整理，不动语义。
 
 # 2026-06-22 snapshot 统一写盘工具 M3/M4 收口
 
@@ -68,6 +204,24 @@
   - `tests/providers/core/runtime/provider-response-postprocessor.unit.test.ts`
     - `RED: preserves provider data payload when SSE side-channel is present`
   - 当前已先红，说明唯一 owner 已锁到 postprocessor 的 SSE 裁剪行为
+
+# 2026-06-22 /v1/responses direct SSE metadata leak on non-response.metadata events
+
+- 23:09 live sample报错：
+  - `[server.response_projection] client response contains internal carrier field "metadata"`
+  - 样本指向 direct passthrough `/v1/responses` SSE，不是 relay chat bridge。
+- 已锁唯一根因：
+  - `src/server/handlers/handler-response-sse.ts::createDirectPassthroughSseGuardStream(...)`
+  - 之前 transport guard 对 frame 做校验后直接透传；对 `response.custom_tool_call_input.delta` 这类非 `response.metadata` 事件，provider top-level `metadata` 会继续流到 client frame，随后被 client carrier guard 视为内部字段并 fail-fast。
+- 修复策略：
+  - 规则：仅对 non-`response.metadata` 事件剥离 top-level `metadata`；`response.metadata` 事件保留，但继续严拦内部 control fields（`providerKey` / `__rt` / `__routecodex*`）。
+  - Jason 纠偏后责任收口：
+    - sanitize owner 落到 `src/modules/llmswitch/bridge/responses-response-bridge.ts::normalizeResponsesSseFrameForClientForHttp(...)`
+    - `handler-response-sse.ts` 只保留 transport guard + outbound normalize 调用，不再持有 sanitize 语义
+  - 验证：
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts` PASS
+    - `tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts` PASS
+    - `npx tsc --noEmit --pretty false` 仅剩仓库原有 `src/token-daemon/token-utils.ts` 的 2 个 `qwen` 比较错误；本次改动无新增 TS 错
 
 - Jason 目标：把 `~/.rcc/diag/error-*.json` 写面、replay reader、responses-handler 失败落盘全部收口到 `debug.unified_surface` 唯一 owner；明确 diag 三分：error artifact 迁 debug，runtime diagnostics 留原 VR/Hub owner，inline `diag=` 跟 logger 收口。
 - 本轮只动 M1，不跨到 M2~M9。
@@ -211,6 +365,48 @@
     - SSE persist 也在 client projection plan/terminal probe 之后，不是 provider raw payload 直接落 continuation。
 - 当前文档需要更明确写死顺序：
   - request side：Responses continuation owner 先 restore/materialize 当前请求，再让 stopless 读取当前轮 tool_output/runtime metadata 判定 3 次 no-schema guard。
+
+# 2026-06-23 debug unified surface snapshot provider/server writer migration closeout
+
+- provider snapshot writer (`writeProviderSnapshot` / `writeClientSnapshot` / `writeProviderRetrySnapshot` / `writeRepairFeedbackSnapshot` / `attachProviderSseSnapshotStream`) physically moved from `src/providers/core/utils/snapshot-writer.ts` to `src/debug/snapshot/provider-writer.ts`.
+- provider snapshot error buffer physically moved from `src/providers/core/utils/snapshot-writer-buffer.ts` to `src/debug/snapshot/buffer.ts`.
+- old `src/providers/core/utils/snapshot-writer.ts` is now one-line re-export shell: `export * from '../../../debug/snapshot/provider-writer.js'`.
+- `src/providers/core/utils/snapshot-writer-buffer.ts` physically deleted.
+- server snapshot writer (`writeServerSnapshot` / `isSnapshotsEnabled`) physically moved from `src/utils/snapshot-writer.ts` to `src/debug/snapshot/server-writer.ts`.
+- old `src/utils/snapshot-writer.ts` is now one-line re-export shell: `export * from '../debug/snapshot/server-writer.js'`.
+- provider writer no longer calls `writeSnapshotViaHooks` directly; all disk writes go through `writeUnifiedSnapshot` in `src/debug/snapshot/writer.ts`.
+- `writeUnifiedSnapshot` gains `forceLocalDiskWriteWhenDisabled` field to support provider contract-failure local mirror.
+- `createSnapshotWriter` canonical builder added to `src/debug/snapshot/writer.ts`.
+- `verify:debug-unified-surface` gate rewritten: now enforces all 6 old owner paths are one-line re-export shells, provider writer has no direct file writes, old buffer file stays deleted, removed debug flat files stay deleted, and only approved debug owners (`writer.ts`, `error-artifact.ts`, `violations.ts`, `snapshot-store.ts`) contain `fsp.writeFile` / `fs.writeFile` / `fsp.mkdir`.
+- function-map `snapshot.stage_contract` allowed_paths now includes `src/debug/snapshot`; `snapshot.provider_error_buffer` owner_module changed to `src/debug/snapshot/buffer.ts`.
+- verification-map `snapshot.provider_error_buffer` unit paths updated to new debug snapshot locations.
+- verification evidence:
+  - `tsc --noEmit` PASS
+  - `verify:debug-unified-surface` PASS
+  - `verify:function-map-compile-gate` PASS (all 13 sub-gates)
+  - focused Jest: 3 + 5 + 4 = 12 suites / 31 tests all PASS
+    - tests/debug/* (3 suites, 8 tests)
+    - tests/providers/core/utils/snapshot-writer.* (5 suites, 11 tests)
+    - tests/providers/core/hooks + tests/modules/pipeline/utils/debug-logger.* + tests/server/handlers/responses-handler.debug-diag (4 suites, 12 tests)
+- remaining gap: `scripts/policy-violations-report.mjs` not yet wired to `src/debug/policy/violations.ts`; M8 policy integration incomplete.
+- remaining gap: architecture wiki/manifest/mainline-call-map for `debug.unified_surface` may need refresh to reflect new `src/debug/snapshot/*` structure.
+
+# 2026-06-23 continuation 架构审计先锁官方契约，不从当前行为反推
+
+- Jason 新要求已转成文档执行顺序：先 direct 样本 + 官方 `/v1/responses` 文档真源，后 mainline source / manifest / gate，最后才准动 continuation runtime。
+- 已确认 direct 样本 `~/.rcc/codex-samples/openai-responses/port-52525/req_1782141103548_1973d9d4/provider-request.json` 的关键事实：
+  - 请求 `input` 显式包含 `function_call` + `function_call_output` 增量链，不是靠 response 隐式记忆下轮上下文。
+  - `tools` 为 `exec_command`，说明工具链作为 request-visible items 明确进入上游请求。
+- 已把官方真源和导出约束落盘：
+  - `docs/architecture/wiki/openai-responses-continuation-official-contract.md`
+  - `docs/architecture/wiki/responses-continuation-mainline-source.md`
+  - `docs/architecture/manifests/responses.continuation.mainline.yml`
+  - `docs/architecture/mainline-call-map.yml` 新增 `responses.continuation.mainline`
+- 当前锁定的新架构结论：
+  - continuation owner 必须在 request side 基于显式证据判定，不能由 response side 猜 request truth。
+  - request 顺序必须是：owner restore/materialize -> request-side hook restore -> normal governance。
+  - response 顺序必须是：response governance/projection 完成 -> canonical save。
+  - stopless 只消费 restored current-turn truth，不拥有 continuation owner 权。
   - response side：stopless interception/schema/projection 先完成，再由 continuation owner persist canonical response truth。
 - 已补真源：
   - `docs/architecture/wiki/continuation-standard-contract.md`
@@ -12050,3 +12246,94 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 预期红锁：
   - focused spec 断言 `provider_response_processing` / `provider_send` 失败都会调用 `writeProviderSnapshot({ phase: 'provider-error', ... })`
   - 落盘数据至少带 `message/status/code/upstreamCode/requestExecutorProviderErrorStage/providerKey/requestId`
+
+# 2026-06-22 build:min blocker
+
+- 实锤：全局 routecodex 未升级不是 install shim 问题，根因是 `npm run build:min` 被 `src/token-daemon/token-utils.ts` 的死分支挡住。
+- 证据：TS2367，`OAuthProviderId` 只剩 `deepseek-account | ecodev`，但 token-utils 仍比较 `provider === \"qwen\"`。
+- 处理：按物理删除原则移除 token-utils 中已失真的 qwen token-state 分支，避免构建链阻断 stopless live 验证。
+- 继续解构建阻断：`src/debug/index.ts` 仍引用旧平铺 harness 路径，已改回 `src/debug/harness/*` 当前目录真相；同时删掉不存在的 `providerDependencies` 显式重组写法，改为直接透传 options。
+- zterm live 样本继续锁到 hook binary 解析 bug：全局 CLI 在 ESM 下 `__dirname` 失效，退化到 `process.cwd()`，导致异地 cwd 误找 `/Volumes/.../sharedmodule/.../routecodex-servertool`。已改为 `import.meta.url` 模块根 + install root 真源解析，并补 focused 黑盒。
+- zterm 实机重放已转绿：`routecodex hook run reasoningStop --input-json ...` 不再报 SERVERTOOL_BINARY_NOT_FOUND，返回正常 CLI JSON（routeHint=thinking, repeatCount=2）。说明 hook binary 解析 bug 已经从真实样本侧消失。
+- final probe 红点已锁 owner：1) stopless exec_command 缺 `ROUTECODEX_SESSION_DIR=...` 前缀；2) CLI stdout `input` 仍回显 schemaFeedback。现已在 Rust cli_contract 真源收紧。
+- 2026-06-23 stopless repair: removed non-entry sessionId/conversationId request-truth write in responses-request-bridge; removed responses toolsRaw filtering in hub_req_inbound_context_capture so tools persist/restore raw across continuation. Focused green: responses-request-bridge.request-context-normalization, responses-continuation-store preserves restored tools, native build ready. Next: build:min -> restart 5555 -> live probe for second-turn tools + 3x no-schema stop.
+# 2026-06-23 stopless continuation tools restore chain audit
+
+- 用户最新硬约束再确认：
+  - 不允许 response 反推 tools
+  - continuation 上下文要在 request 时确定、request 时保存
+  - `sessionId` 只能请求入口写入，stopless 只消费 request truth
+- 当前锁到的 request-side 主链：
+  - `responses-handler.ts -> prepareResponsesHandlerRuntimeForHttp -> buildResponsesRequestContextForHttp`
+  - 首轮普通 `/v1/responses` 请求走 `captureReqInboundResponsesContextSnapshot(...)`
+  - resume 轮 `relayOwnedSubmitToolOutputsResume` 只读取 `resumeMeta.restoredTools`
+  - `restoredTools` 只来自 persist 时 `entry.tools`
+- live 红样本仍说明第二轮 `restoredTools = null`，所以问题不是 response projection，而是首轮 requestContext/tools 在保存前就丢了或被覆盖。
+- 已确认 Rust continuation store 真相仍正确：
+  - `prepare_responses_conversation_entry(...)` 只从 `payload.tools` 或 `context.toolsRaw` 取 tools
+  - 没有 response inference 路径
+- Jason 新纠偏已确认：
+  - 不是“响应时再猜请求上下文”
+  - 正确设计应为：request 阶段先保存对称请求上下文；response 阶段只在既有 request entry 上补 response/continuation 真相
+  - 当前可疑错误不是缺 request-side capture，而是 response 侧可能用 stale/incomplete `responsesRequestContext` 把请求阶段已保存的真相白覆盖
+- 2026-06-23 新实锤：
+  - `src/modules/llmswitch/bridge/responses-response-bridge.ts::resolveResponsesRequestContextForHttp(...)` 原先带 response-side fallback 语义
+  - 这会让 response 阶段读取 handler fallback，而不是只认 MetadataCenter 当前轮 continuation truth
+  - 已物理删除该 fallback；focused spec `tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts` PASS
+
+# 2026-06-23 temp crsa route config
+
+- /Volumes/extension/.rcc/config.toml 新增 fwd.temp.gpt-5.5-thinking-xhigh，providerId=crsa，model=gpt-5.5。
+- /Volumes/extension/.rcc/provider/crsa/config.v2.toml 新增 provider，baseURL=https://temp.asxs.top/v1，auth 使用 ${TEMP_ASXS_KEY}，不落明文 key。
+- gateway_priority_5520 / gateway_priority_5555 各 8 个 routing entry 的 targets 首位均为 fwd.temp.gpt-5.5-thinking-xhigh，thinking=xhigh。
+- 验证：routecodex config validate -c /Volumes/extension/.rcc/config.toml PASS；parser 检查 5520/5555 count=8 bad=[]；grep 确认未落 sk-agQ3 明文。
+- 重启验证：routecodex restart -c /Volumes/extension/.rcc/config.toml -p 5520 / -p 5555 PASS；5520/5555 /health ready=true。
+- live probe：5520 与 5555 `/v1/responses` stream=false 均 HTTP 200，runtime/provider sample 均显示 providerKey=crsa.temp.gpt-5.5，provider url=https://temp.asxs.top/v1/responses。
+- direct 边界观察：same-protocol direct 不会用 route thinking 改写 client request body；真实 Codex sample 若 client body 带 reasoning.effort=medium，则 provider-request 仍是 medium。配置已将 route entry thinking=xhigh，但强制覆盖 direct body 需要另行改 response/request owner，不能作为 config-only 行为宣称。
+
+# 2026-06-23 response-side continuation save must merge stopless delta before record
+
+- 新实锤：response-side `persistResponsesConversationLifecycleForHttp(...)` 之前只拿 request-side `responsesRequestContext` 壳去 `captureRequestContext`，不会把本轮 stopless/工具投影后的 delta tools 合并进 continuation store。
+- 直接后果：submit_tool_outputs 第二轮虽然 request restore 已支持 `restoredTools -> payload.tools + context.toolsRaw`，但首轮 response save 若没把 tools 一起存下去，下一轮 `restoredTools` 仍会为空，stopless/tool visibility 断链。
+- 已修：`src/modules/llmswitch/bridge/responses-response-bridge.ts`
+  - response persist 前先构造 `persistRequestContext = previous requestContext + response delta tools`
+  - delta tools 来源只认最终 canonical response truth：`output.function_call` + `required_action.submit_tool_outputs.tool_calls`
+  - 若 requestContext 已有 `payload.tools/context.toolsRaw/clientToolsRaw` 则保留并去重；若没有则从当前最终 response 最小合成 client-visible tool defs（如 `exec_command`）
+  - capture 仍只走 canonical `responseId`，不回退到 router/provider request ids
+- focused 证据：
+  - `tests/server/handlers/handler-response-utils.responses-conversation.spec.ts` PASS
+  - `tests/server/handlers/responses-response-bridge.provider-switch-retention.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts` PASS
+  - `tests/sharedmodule/responses-continuation-store.spec.ts` PASS
+- 新锁定真相：
+  - request-side 保存的是“上一版对称上下文”
+  - response-side 保存的是“上一版上下文 + 当前 response delta + canonical response truth”
+  - 这个保存点必须在 stopless/tool projection 之后、client 返回之前，否则下轮 restore 会丢 stopless 可见改动
+# 2026-06-23 stopless live continuation pair restore truth
+
+- 新确认的真实丢失点不在 response-side persistence，而在 Rust request capture：
+  - `hub_req_inbound_tool_call_normalization.rs::build_reasoning_stop_restored_function_call`
+  - `hub_req_inbound_context_capture.rs::normalize_responses_input_items`
+- 真实故障链：
+  - live stopless projection 形状可能只有 `exec_command(cmd="routecodex hook run reasoningStop")`，没有 `--input-json`
+  - 旧逻辑要求从 shell cmd 中抽出 `--input-json` 才肯恢复 `reasoningStop`，导致 function_call 被吞
+  - 随后的 `function_call_output` 失去配对 call，成为 orphan，再被 `normalize_responses_input_items/filter_orphan_responses_tool_outputs` 过滤
+  - 即使前一步恢复出了 `reasoningStop`，如果 `tools` 里只声明 `exec_command`，旧 `normalize_responses_input_items` 仍会把 `reasoningStop` 当“未声明工具”继续丢掉
+- 本轮修复：
+  - stopless shell restore 对 `routecodex hook run reasoningStop` 无 `--input-json` 的 live 形状回落为 `reasoningStop(arguments="{}")`
+  - responses request context capture 对 stopless restored pair 免于“必须在 tools 中显式声明 reasoningStop”的过滤
+  - 相关旧测试口径改为对齐当前 contract：model-visible stop tool 是 `reasoningStop`，不是 `exec_command`
+- 验证：
+  - `cargo test -p router-hotpath-napi stopless --lib -- --nocapture` PASS（29 passed）
+  - `cargo test -p router-hotpath-napi request_codec_does_not_drop_live_stopless_tool_continuation_when_chat_messages_shortcut_exists --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi test_req_process_responses_input_still_materializes_stopless_contract --lib -- --nocapture` PASS
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS
+
+# 2026-06-23 Codex view_image -> multimodal route miss root cause
+
+- 实样本：`~/.rcc/codex-samples/openai-responses/port-5555/openai-responses-router-gpt-5.4-20260623T131421437-395334-744/provider-request.json` 确认当前 turn user message 内已有 `<image ...>` + `input_image(data:image...)`，但 runtime 最终仍落 `asxs.crsa.gpt-5.4-mini`。
+- 代码真因锁定在 `virtual_router_engine/features.rs::build_routing_features`：
+  - 旧逻辑只在 `latest_message_role == "user"` 时才跑 `analyze_media_attachments(...)`；
+  - 对 Responses current turn，如果 user 图像后面跟了 `function_call` / `function_call_output`，`latest_role` 会变成 `assistant/tool`，导致 `has_image_attachment=false`，从而错过 `multimodal` route。
+- 正确语义：不要求图片一定挂在最新 entry 上，但必须只看 current turn 的 user carrier，不能吃历史 turn。
+- 已补 focused Rust test：current turn user image + trailing tool entries 仍需 `has_image_attachment=true` 且 classifier 命中 `multimodal`。

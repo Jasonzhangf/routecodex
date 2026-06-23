@@ -143,7 +143,7 @@ verification:
       - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while current-request restoration advances repeatCount 1 -> 2 -> 3."
       - "Validation must prove req_chatprocess rewrites the paired stopless tool result into model-transparent natural language + missing/error feedback, and VR still routes that turn to thinking."
       - "Validation must prove `/v1/responses` stopless turns do not lose the schema contract between req_chatprocess and the responses->chat bridge: req owner must preserve the contract in `instructions`, and bridge owner must materialize it into the outbound system message."
-      - "Validation must prove omitted caller `sessionId/requestId/sessionDir` no longer blocks stopless CLI projection or CLI execution, and that no persisted writeback path is required."
+      - "Validation must prove stopless CLI projection/CLI execution uses active request-truth `sessionId/requestId` for same-session counting, while `sessionDir` and any persisted writeback path remain absent."
       - "Validation must prove `responsesRequestContext.sessionId/conversationId` stays continuation-only and cannot materialize request session truth, stopless activation, stop-message scope, or state keys."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
@@ -648,6 +648,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
     contract:
       - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
     integration:
@@ -661,6 +662,7 @@ verification:
       - npm run build:base
     notes:
       - "If route instruction parsing changes, include routing instruction regression set."
+      - "Current-turn media routing must prove a user image in the active turn still routes multimodal even when trailing tool entries make latest_role non-user."
 
   - feature_id: hub.route_metadata_surface
     change_risk: medium
@@ -1219,7 +1221,8 @@ verification:
   - feature_id: snapshot.provider_error_buffer
     change_risk: medium
     unit:
-      - src/providers/core/utils/snapshot-writer-buffer.ts
+      - src/debug/snapshot/buffer.ts
+      - src/debug/snapshot/provider-writer.ts
       - src/providers/core/utils/snapshot-writer.ts
     contract:
       - tests/providers/core/utils/snapshot-writer.queue.spec.ts

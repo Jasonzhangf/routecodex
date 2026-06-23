@@ -1,9 +1,11 @@
 import { jest } from '@jest/globals';
 
-const writeSnapshotViaHooksMock = jest.fn(async () => undefined);
+const writeUnifiedSnapshotMock = jest.fn(async () => undefined);
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  writeSnapshotViaHooks: writeSnapshotViaHooksMock
+jest.unstable_mockModule('../../../../src/debug/snapshot/writer.js', () => ({
+  writeUnifiedSnapshot: writeUnifiedSnapshotMock,
+  createSnapshotWriter: () => ({ write: writeUnifiedSnapshotMock }),
+  isSnapshotsEnabled: () => true,
 }));
 
 describe('provider snapshot writer queue', () => {
@@ -15,7 +17,7 @@ describe('provider snapshot writer queue', () => {
     jest.resetModules();
     process.env.ROUTECODEX_PROVIDER_SNAPSHOT_QUEUE_MAX_ITEMS = '2';
     process.env.ROUTECODEX_PROVIDER_SNAPSHOT_QUEUE_MEMORY_BUDGET_BYTES = '1048576';
-    writeSnapshotViaHooksMock.mockReset();
+    writeUnifiedSnapshotMock.mockReset();
   });
 
   afterEach(async () => {
@@ -84,8 +86,8 @@ describe('provider snapshot writer queue', () => {
 
     await __flushProviderSnapshotQueueForTests();
 
-    expect(writeSnapshotViaHooksMock).toHaveBeenCalledTimes(2);
-    expect(writeSnapshotViaHooksMock.mock.calls.map((call) => call[0]?.requestId)).toEqual([
+    expect(writeUnifiedSnapshotMock).toHaveBeenCalledTimes(2);
+    expect(writeUnifiedSnapshotMock.mock.calls.map((call) => call[0]?.requestId)).toEqual([
       'req_queue_3',
       'req_queue_4'
     ]);
@@ -135,7 +137,7 @@ describe('provider snapshot writer queue', () => {
 
     await __flushProviderSnapshotQueueForTests();
 
-    const payload = writeSnapshotViaHooksMock.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    const payload = writeUnifiedSnapshotMock.mock.calls[0]?.[0]?.data as Record<string, unknown>;
     expect(payload?.__snapshot_truncated).toBeUndefined();
     expect(payload).toMatchObject({
       meta: {
@@ -197,7 +199,7 @@ describe('provider snapshot writer queue', () => {
 
     await __flushProviderSnapshotQueueForTests();
 
-    const payload = writeSnapshotViaHooksMock.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    const payload = writeUnifiedSnapshotMock.mock.calls[0]?.[0]?.data as Record<string, unknown>;
     expect(payload?.__snapshot_truncated).toBeUndefined();
     expect(payload).toMatchObject({
       meta: {

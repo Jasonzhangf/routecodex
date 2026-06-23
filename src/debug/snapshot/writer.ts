@@ -1,3 +1,4 @@
+// feature_id: snapshot.stage_contract — calls shouldCaptureSnapshotStage for stage gating
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { resolveRccSnapshotsDirFromEnv } from '../../config/user-data-paths.js';
@@ -47,6 +48,7 @@ export interface SnapshotWriteInput {
   url?: string;
   extraMeta?: Record<string, unknown>;
   rawPayload?: unknown;
+  forceLocalDiskWriteWhenDisabled?: boolean;
 }
 
 // --- internal helpers ---
@@ -205,7 +207,8 @@ function resolveSnapshotDir(folder: string, groupRequestId: string, providerToke
 // --- write ---
 
 export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<void> {
-  if (!isSnapshotsEnabled()) return;
+  const snapshotsEnabled = isSnapshotsEnabled();
+  if (!snapshotsEnabled && !input.forceLocalDiskWriteWhenDisabled) return;
   if (!shouldCaptureSnapshotStage(input.stage)) return;
 
   const groupRequestId = normalizeRequestId(input.groupRequestId || input.requestId);
@@ -216,23 +219,24 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
   const payload = coerceSnapshotPayloadForWrite(input.stage, builtPayload);
   if (payload === undefined) return;
 
-  // 1) Call hook bridge first (for llmswitch-core debug consumption)
-  try {
-    const hookWriter = await loadSnapshotHookWriter();
-    if (hookWriter) {
-      await hookWriter({
-        endpoint: input.entryEndpoint || '/v1/chat/completions',
-        stage: input.stage,
-        requestId: input.requestId,
-        groupRequestId,
-        providerKey: input.providerKey,
-        entryPort: input.entryPort,
-        data: payload,
-        verbosity: input.verbosity || 'verbose',
-      });
+  if (snapshotsEnabled) {
+    try {
+      const hookWriter = await loadSnapshotHookWriter();
+      if (hookWriter) {
+        await hookWriter({
+          endpoint: input.entryEndpoint || '/v1/chat/completions',
+          stage: input.stage,
+          requestId: input.requestId,
+          groupRequestId,
+          providerKey: input.providerKey,
+          entryPort: input.entryPort,
+          data: payload,
+          verbosity: input.verbosity || 'verbose',
+        });
+      }
+    } catch (error) {
+      logHookNonBlockingError(`hook:${input.stage}`, error);
     }
-  } catch (error) {
-    logHookNonBlockingError(`hook:${input.stage}`, error);
   }
 
   if (!canWriteSnapshotToLocalDisk(input.requestId, groupRequestId)) return;
@@ -253,6 +257,13 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
   } catch (error) {
     logHookNonBlockingError(`write:${input.stage}`, error);
   }
+}
+
+export function createSnapshotWriter() {
+  return {
+    write: writeUnifiedSnapshot,
+    isEnabled: isSnapshotsEnabled,
+  };
 }
 
 export { isSnapshotsEnabled };

@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 /**
- * Report Unified Hub policy violations/enforcement rewrites captured under:
- *   ~/.routecodex/codex-samples/__policy_violations__/
- *
- * This is intended for day-to-day monitoring when policy is enabled by default.
+ * Report Unified Hub policy violations/enforcement rewrites.
+ * Delegates read logic to src/debug/policy/violations.ts (debug.unified_surface).
  */
 
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { resolvePolicyViolationsRoot, collectPolicyViolations } from '../src/debug/policy/violations.js';
 
 function usage() {
   console.log(`Usage:
@@ -25,7 +23,7 @@ Options:
 
 function parseArgs(argv) {
   const out = {
-    root: path.join(os.homedir(), '.routecodex', 'errorsamples', 'policy'),
+    root: undefined,
     sinceHours: undefined,
     limit: 30,
     fail: false
@@ -54,49 +52,12 @@ async function fileExists(p) {
   }
 }
 
-async function walk(dir) {
-  const out = [];
-  const stack = [dir];
-  while (stack.length) {
-    const current = stack.pop();
-    let entries = [];
-    try {
-      entries = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const ent of entries) {
-      const p = path.join(current, ent.name);
-      if (ent.isDirectory()) stack.push(p);
-      else if (ent.isFile() && ent.name.endsWith('.json')) out.push(p);
-    }
-  }
-  return out;
-}
-
 function inc(map, key, by = 1) {
   map.set(key, (map.get(key) || 0) + by);
 }
 
 function topN(map, n) {
   return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
-}
-
-async function readJson(p) {
-  try {
-    const raw = await fs.readFile(p, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function classifyRecord(obj) {
-  if (!obj || typeof obj !== 'object') return { kind: 'unknown' };
-  const o = obj;
-  if (Array.isArray(o.violations) || (o.summary && typeof o.summary === 'object')) return { kind: 'observe' };
-  if (Array.isArray(o.removedTopLevelKeys) || Array.isArray(o.flattenedWrappers)) return { kind: 'enforce' };
-  return { kind: 'unknown' };
 }
 
 function safeString(value) {
@@ -124,15 +85,11 @@ async function main() {
     usage();
     process.exit(0);
   }
-  let root = path.resolve(args.root);
-  if (!(await fileExists(root))) {
-    const fallback = path.join(os.homedir(), '.routecodex', 'codex-samples', '__policy_violations__');
-    if (await fileExists(fallback)) {
-      root = fallback;
-    } else {
-      console.log(`[policy-report] no folder: ${root}`);
-      process.exit(0);
-    }
+  const root = resolvePolicyViolationsRoot(args.root);
+  const rootExists = await fileExists(root);
+  if (!rootExists) {
+    console.log(`[policy-report] no folder: ${root}`);
+    process.exit(0);
   }
 
   const sinceMs =
@@ -140,35 +97,23 @@ async function main() {
       ? Date.now() - args.sinceHours * 60 * 60 * 1000
       : null;
 
-  const files = await walk(root);
-  const rows = [];
-  for (const file of files) {
-    let st;
-    try {
-      st = await fs.stat(file);
-    } catch {
-      continue;
-    }
-    if (sinceMs !== null && st.mtimeMs < sinceMs) continue;
-    const obj = await readJson(file);
-    if (!obj) continue;
+  const records = await collectPolicyViolations({ rootDir: root, sinceHours: args.sinceHours, limit: args.limit ? args.limit * 2 : undefined });
+  const rows = records.map((rec) => {
+    const file = rec.file;
     const rel = path.relative(root, file);
     const parts = rel.split(path.sep);
-    const endpointFolder = parts[0] || '';
-    const providerKey = parts[1] || '';
-    const requestId = parts[2] || '';
-    rows.push({
+    return {
       file,
       rel,
-      endpointFolder,
-      providerKey,
-      requestId,
-      stage: safeString(obj?.stage) || safeString(obj?.meta?.stage) || inferStageFromFilename(file),
-      protocol: safeString(obj?.providerProtocol) || safeString(obj?.protocol),
-      kind: classifyRecord(obj).kind,
-      obj
-    });
-  }
+      endpointFolder: parts[0] || '',
+      providerKey: parts[1] || '',
+      requestId: parts[2] || '',
+      stage: inferStageFromFilename(file),
+      protocol: '',
+      kind: rec.violations.length > 0 ? 'observe' : rec.removedTopLevelKeys.length > 0 ? 'enforce' : 'unknown',
+      obj: rec,
+    };
+  });
 
   console.log(`[policy-report] root=${root}`);
   if (sinceMs !== null) {

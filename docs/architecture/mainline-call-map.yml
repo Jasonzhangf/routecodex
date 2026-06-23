@@ -251,6 +251,92 @@ chains:
         semantic_output: "http json/sse frame"
         status: anchored
 
+  - chain_id: responses.continuation.mainline
+    summary: "Responses continuation mainline: explicit request evidence resolves direct vs relay ownership, canonical request truth is restored before request-side hook rewrite, and finalized response truth is saved only after response governance/projection completes."
+    entry_contract:
+      node: CntReq01EntryEvidence
+      owner_doc: docs/architecture/wiki/responses-continuation-mainline-source.md
+    edges:
+      - step_id: rct-01
+        from_node: CntReq01EntryEvidence
+        to_node: CntReq02OwnerResolved
+        caller_symbol: prepareResponsesHandlerEntryForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        callee_symbol: planResponsesHandlerEntry
+        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        owner_feature_id: server.responses_request_handler_bridge_surface
+        semantic_input: "raw current request payload plus explicit continuation evidence such as submit_tool_outputs, previous_response_id, response_id, or internal reentry marker"
+        semantic_output: "entry evidence classified into ordinary create vs legal continuation candidate"
+        status: partial
+        note: "Request-visible evidence is the only legal starting point. Session/scope-only hits are forbidden."
+      - step_id: rct-02
+        from_node: CntReq02OwnerResolved
+        to_node: CntReq03CanonicalRestored
+        caller_symbol: buildResponsesRequestContextForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        callee_symbol: captureReqInboundResponsesContextSnapshotJson
+        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        owner_feature_id: server.responses_request_handler_bridge_surface
+        semantic_input: "legal continuation candidate plus request metadata scope"
+        semantic_output: "canonical direct ownership metadata or relay materialized request truth"
+        status: partial
+        note: "This edge is partial because request-side owner truth is still split between native resume/materialize and TS bridge surfaces."
+      - step_id: rct-03
+        from_node: CntReq03CanonicalRestored
+        to_node: CntReq04HookRestored
+        owner_feature_id: binding pending
+        semantic_input: "canonical restored current-turn request truth"
+        semantic_output: "request truth after current-turn tool result or hook shell has been restored back to model-visible built-in shape"
+        status: binding pending
+        binding_pending: true
+        note: "This edge belongs to the future request-side hook skeleton. Save/restore ordering is invalid until this boundary is explicitly anchored."
+      - step_id: rct-04
+        from_node: CntReq04HookRestored
+        to_node: CntReq05Governed
+        caller_symbol: captureReqInboundResponsesContextSnapshot
+        caller_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_symbol: captureReqInboundResponsesContextSnapshotWithNative
+        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts
+        owner_feature_id: server.responses_request_handler_bridge_surface
+        semantic_input: "restored current-turn request semantic"
+        semantic_output: "normal governed Hub request path resumes"
+        status: partial
+      - step_id: rct-05
+        from_node: CntReq05Governed
+        to_node: CntResp06ResponseGoverned
+        caller_symbol: prepareResponsesJsonClientDispatchPlanForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-response-bridge.ts
+        callee_symbol: projectResponsesClientPayloadForClientNative
+        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        owner_feature_id: server.responses_response_handler_bridge_surface
+        semantic_input: "governed request yields response-side truth plus tool/stopless projection decisions"
+        semantic_output: "finalized response-side governed truth before persistence"
+        status: partial
+        note: "Response-side hook/stopless projection must complete before canonical save."
+      - step_id: rct-06
+        from_node: CntResp06ResponseGoverned
+        to_node: CntResp07CanonicalSaved
+        caller_symbol: persistResponsesConversationLifecycleForHttp
+        caller_file: src/server/handlers/handler-response-utils.ts
+        callee_symbol: recordResponsesResponseForHttp
+        callee_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        owner_feature_id: server.responses_response_handler_bridge_surface
+        semantic_input: "finalized client-visible response truth after response governance/projection"
+        semantic_output: "canonical continuation truth saved for the next legal restore/materialize"
+        status: partial
+        note: "Saving pre-hook/pre-projection shell truth here is invalid."
+      - step_id: rct-07
+        from_node: CntResp07CanonicalSaved
+        to_node: CntResp08Released
+        caller_symbol: releaseMetadataCenterForHttpResponse
+        caller_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
+        callee_symbol: releaseMetadataCenterForHttpResponse
+        callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
+        owner_feature_id: server.responses_response_handler_bridge_surface
+        semantic_input: "saved canonical continuation truth plus request-scoped metadata families"
+        semantic_output: "closeout release of legal minimum retained state"
+        status: anchored
+
   - chain_id: debug.unified_surface.mainline
     summary: "Debug unified surface governance shell for diag artifacts, snapshots, logger rendering, harness/replay, and policy observation."
     entry_contract:
@@ -260,12 +346,15 @@ chains:
       - step_id: dbg-01
         from_node: DebugObs01SurfaceRequested
         to_node: DebugObs07ReplayedOrInspected
-        binding_pending: true
-        split_binding_id: debug.unified_surface.governance_shell
-        owner_feature_id: binding pending
+        caller_symbol: createDebugToolkit
+        caller_file: src/debug/index.ts
+        callee_symbol: createDebugToolkit
+        callee_file: src/debug/index.ts
+        owner_feature_id: debug.unified_surface
         semantic_input: "debug surface request entering the unified debug owner shell"
-        semantic_output: "debug surface request handed to the M0/M1 governance shell pending deeper module split anchoring"
-        note: "M0/M1 governance shell only. Keep the edge pending until the intermediate debug nodes are anchored to concrete runtime and typed symbols."
+        semantic_output: "debug toolkit with diag/snapshot/logger/harness replay surfaces unified under src/debug"
+        status: anchored
+        note: "The unified debug entry builds the canonical toolkit facade and routes all migrated debug sub-surfaces through the single debug owner module."
 
   - chain_id: error.mainline
     summary: "Provider/runtime/direct failures enter unified ErrorErr chain; provider availability/cooldown truth stays provider/server-scoped and must not be rewritten into session-storm truth before client projection."
@@ -781,13 +870,13 @@ shared_multi_reference_functions:
     note: "Conversation->tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership."
 
   - function_id: debug.surface_registry
-    binding_status: pending
+    binding_status: confirmed
     symbol: createDebugToolkit
     file: src/debug/index.ts
     owner_feature_id: debug.unified_surface
     reused_by_chains:
       - debug.unified_surface.mainline
-    note: "M0 governance anchor only. Runtime migration slices must land before this becomes the actual single-surface consumer entry."
+    note: "Canonical debug owner entrypoint. createDebugToolkit is the unified facade constructor for debug diag/snapshot/logger/harness replay surfaces."
 
   - function_id: error.err_04_router_policy_applied
     symbol: ErrorErr04RouterPolicyApplied
@@ -833,23 +922,6 @@ split_bindings:
       - symbol: build_hub_req_outbound_05_from_hub_req_chatprocess_03
         file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
     note: "Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -> outbound caller/callee edge."
-
-  - binding_id: debug.unified_surface.governance_shell
-    binding_status: pending
-    from_node: DebugObs01SurfaceRequested
-    to_node: DebugObs07ReplayedOrInspected
-    owner_feature_id: debug.unified_surface
-    runtime_symbols:
-      - symbol: createDebugToolkit
-        file: src/debug/index.ts
-      - symbol: writeDebugErrorDiagArtifact
-        file: src/debug/index.ts
-      - symbol: readDebugErrorDiagArtifact
-        file: src/debug/index.ts
-    typed_symbols:
-      - symbol: buildDebugErrorDiagArtifactRecord
-        file: src/debug/diag/error-artifact.ts
-    note: "M0 governance shell only. Real caller/callee anchors stay pending until M1-M9 migrate the corresponding modules and gates."
 
 maintenance_rules:
   - "Do not invent symbols. Use binding_pending until concrete caller/callee is verified in code."

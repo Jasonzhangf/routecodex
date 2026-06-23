@@ -1,3 +1,4 @@
+// feature_id: snapshot.provider_error_buffer
 export type ProviderSnapshotPersistInput = {
   endpoint: string;
   folder: string;
