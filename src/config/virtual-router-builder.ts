@@ -202,6 +202,27 @@ function extractRoutingFromUserConfig(
   return routing;
 }
 
+function extractPolicyGroupOptionFromUserConfig(
+  userConfig: UnknownRecord,
+  key: string,
+  options?: BuildVirtualRouterInputV2Options,
+): UnknownRecord | undefined {
+  const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
+  const groupsNode = isRecord(vrNode.routingPolicyGroups) ? (vrNode.routingPolicyGroups as UnknownRecord) : undefined;
+  if (!groupsNode) {
+    return undefined;
+  }
+  const requestedGroup = typeof options?.routingPolicyGroup === 'string' ? options.routingPolicyGroup.trim() : '';
+  if (!requestedGroup) {
+    return isRecord(vrNode[key]) ? (vrNode[key] as UnknownRecord) : undefined;
+  }
+  const group = isRecord(groupsNode[requestedGroup]) ? (groupsNode[requestedGroup] as UnknownRecord) : undefined;
+  if (isRecord(group?.[key])) {
+    return group![key] as UnknownRecord;
+  }
+  return isRecord(vrNode[key]) ? (vrNode[key] as UnknownRecord) : undefined;
+}
+
 /**
  * Build a VirtualRouterInput in "v2" mode by combining:
  * - Provider v2 configs loaded from ~/.rcc/provider (or a custom root)
@@ -216,6 +237,7 @@ export async function buildVirtualRouterInputV2(
   options?: BuildVirtualRouterInputV2Options,
 ): Promise<VirtualRouterInput> {
   const routing = extractRoutingFromUserConfig(userConfig, options);
+  const hitLog = extractPolicyGroupOptionFromUserConfig(userConfig, 'hitLog', options);
   const referencedProviderIds = resolveReferencedProviderIdsFromRouting(routing);
   for (const providerId of resolveProviderIdsFromProviderPorts(userConfig)) {
     referencedProviderIds.add(providerId);
@@ -266,7 +288,8 @@ export async function buildVirtualRouterInputV2(
     ...(forwardersSource && Object.keys(forwardersSource).length
       ? { forwarders: normalizeForwardersForNative(forwardersSource, providerConfigs) }
       : {}),
-    ...(applyPatch ? { applyPatch } : {})
+    ...(applyPatch ? { applyPatch } : {}),
+    ...(hitLog ? { hitLog } : {})
   };
   return input;
 }
@@ -276,14 +299,33 @@ function normalizeForwardersForNative(
   providerConfigs: ProviderConfigMap,
 ): Record<string, UnknownRecord> {
   const out: Record<string, UnknownRecord> = {};
+  const seenProtocolModels = new Map<string, string>();
   for (const [id, raw] of Object.entries(source)) {
     const entry: UnknownRecord = { ...raw };
     entry.forwarderId = pickString(entry.forwarderId) ?? id;
-    const modelId = pickString(entry.modelId) ?? pickString(entry.model);
-    if (modelId) {
-      entry.modelId = modelId;
-      delete entry.model;
+    const protocol = pickString(entry.protocol);
+    if (!protocol) {
+      throw new Error(`[forwarder-config] ${id} missing protocol`);
     }
+    const normalizedModelId = pickString(entry.modelId);
+    const authoringModel = pickString(entry.model);
+    if (normalizedModelId && authoringModel && normalizedModelId !== authoringModel) {
+      throw new Error(`[forwarder-config] ${id} has conflicting model/modelId`);
+    }
+    const modelId = authoringModel ?? normalizedModelId;
+    if (!modelId) {
+      throw new Error(`[forwarder-config] ${id} missing top-level model`);
+    }
+    const seenKey = `${protocol}::${modelId}`;
+    const existingForwarderId = seenProtocolModels.get(seenKey);
+    if (existingForwarderId && existingForwarderId !== id) {
+      throw new Error(
+        `[forwarder-config] duplicate forwarder for (protocol='${protocol}', model='${modelId}'): existing='${existingForwarderId}', new='${id}'`,
+      );
+    }
+    seenProtocolModels.set(seenKey, id);
+    entry.modelId = modelId;
+    delete entry.model;
     const resolutionMode = pickString(entry.resolutionMode);
     if (!resolutionMode) {
       entry.resolutionMode = 'model-first';
@@ -307,8 +349,10 @@ function normalizeForwardersForNative(
             providerConfigs,
           });
           return providerKeys.map((providerKey) => ({
-            ...target,
             providerKey,
+            providerId: pickString(target.providerId),
+            weight: pickNumber(target.weight),
+            priority: pickNumber(target.priority),
             disabled: target.disabled === true
           }));
         });
@@ -324,12 +368,19 @@ function resolveForwarderTargetProviderKeys(options: {
   target: UnknownRecord;
   providerConfigs: ProviderConfigMap;
 }): string[] {
-  const explicitProviderKey = pickString(options.target.providerKey);
-  if (explicitProviderKey) {
-    return [explicitProviderKey];
+  const providerKey = pickString(options.target.providerKey);
+  if (providerKey) {
+    return [providerKey];
   }
 
-  const providerId = pickString(options.target.providerId) ?? pickString(options.target.provider);
+  if (pickString(options.target.modelId) || pickString(options.target.model)) {
+    throw new Error(`[forwarder-config] ${options.forwarderId} target must not declare modelId/model; use forwarder.model and split different models into separate forwarders`);
+  }
+  if (pickString(options.target.provider)) {
+    throw new Error(`[forwarder-config] ${options.forwarderId} target must declare providerId`);
+  }
+
+  const providerId = pickString(options.target.providerId);
   if (!providerId) {
     throw new Error(`[forwarder-config] ${options.forwarderId} target requires providerId`);
   }
@@ -337,11 +388,9 @@ function resolveForwarderTargetProviderKeys(options: {
   if (!providerConfig) {
     throw new Error(`[forwarder-config] ${options.forwarderId} target providerId '${providerId}' is not configured`);
   }
-  const modelId = pickString(options.target.modelId)
-    ?? pickString(options.target.model)
-    ?? options.forwarderModelId;
+  const modelId = options.forwarderModelId;
   if (!modelId) {
-    throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' requires modelId or forwarder model`);
+    throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' requires forwarder.model`);
   }
   if (!providerDeclaresModel(providerConfig.provider, modelId)) {
     throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' does not declare model '${modelId}'`);
@@ -398,32 +447,28 @@ function providerAuthAliases(provider: UnknownRecord): string[] {
 }
 
 function providerDeclaresModel(provider: UnknownRecord, modelId: string): boolean {
+  // Per Jason 2026-06-20, `provider.models.<id>.aliases` is display-only for
+  // `/v1/models`. Forwarder / VR / provider wire must only accept canonical
+  // model keys declared under `provider.models` (or, for legacy array form,
+  // each entry's `id`). Aliases must never define a routable / wire model.
+  const normalizedModelId = typeof modelId === 'string' ? modelId.trim() : '';
+  if (!normalizedModelId) {
+    return false;
+  }
   const models = provider.models;
   if (Array.isArray(models)) {
     return models.some((model) => {
       if (!isRecord(model)) {
         return false;
       }
-      if (pickString(model.id) === modelId) {
-        return true;
-      }
-      const aliases = Array.isArray(model.aliases) ? model.aliases : [];
-      return aliases.some((alias) => typeof alias === 'string' && alias.trim() === modelId);
+      return pickString(model.id)?.trim() === normalizedModelId;
     });
   }
   if (isRecord(models)) {
-    if (Object.prototype.hasOwnProperty.call(models, modelId)) {
-      return true;
-    }
-    return Object.values(models).some((model) => {
-      if (!isRecord(model) || !Array.isArray(model.aliases)) {
-        return false;
-      }
-      return model.aliases.some((alias) => typeof alias === 'string' && alias.trim() === modelId);
-    });
+    return Object.prototype.hasOwnProperty.call(models, normalizedModelId);
   }
   const defaultModel = pickString(provider.defaultModel) ?? pickString(provider.modelId) ?? pickString(provider.model);
-  return defaultModel === modelId;
+  return defaultModel?.trim() === normalizedModelId;
 }
 
 function parseProviderIdFromProviderKeyForLegacyConfig(providerKey?: string): string | undefined {
@@ -437,6 +482,17 @@ function pickString(value: unknown): string | undefined {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     return trimmed || undefined;
+  }
+  return undefined;
+}
+
+function pickNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
 }

@@ -1,7 +1,7 @@
 import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
-describe('deepseek search model aliases in virtual router bootstrap', () => {
+describe('deepseek model aliases stay display-only in virtual router bootstrap', () => {
   const input: any = {
     virtualrouter: {
       providers: {
@@ -21,23 +21,24 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
         }
       },
       routing: {
-        default: ['deepseek-web.deepseek-chat-search']
+        default: ['deepseek-web.deepseek-chat']
       }
     }
   };
 
-  it('accepts deepseek-chat-search in routing/default without explicit model declaration', () => {
+  it('does not register model aliases as routable provider keys', () => {
     const result = bootstrapVirtualRouterConfig(input);
     const providerKeys = Object.keys(result.providers);
-    expect(providerKeys.some((key) => key.endsWith('.deepseek-chat-search'))).toBe(true);
+    expect(providerKeys.some((key) => key.endsWith('.deepseek-chat'))).toBe(true);
+    expect(providerKeys.some((key) => key.endsWith('.deepseek-chat-search'))).toBe(false);
   });
 
-  it('routes direct provider.model request to canonical deepseek-chat model', async () => {
+  it('rejects direct provider.model alias input instead of resolving it to canonical', async () => {
     const result = bootstrapVirtualRouterConfig(input);
     const engine = new VirtualRouterEngine();
     engine.initialize(result.config);
 
-    const routed = await engine.route(
+    expect(() => engine.route(
       {
         model: 'deepseek-web.deepseek-chat-search',
         messages: [{ role: 'user', content: 'Search latest updates' }]
@@ -50,13 +51,10 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
         direction: 'request',
         providerProtocol: 'openai-chat'
       }
-    );
-
-    expect(routed.target?.providerKey).toMatch(/deepseek-web/);
-    expect(routed.target?.modelId).toBe('deepseek-chat');
+    )).toThrow(/Unknown model deepseek-chat-search for provider deepseek-web/);
   });
 
-  it('routes alias model input to configured canonical DeepSeek-V4-Pro model', async () => {
+  it('requires canonical model ids in routed targets and inbound direct model input', async () => {
     const v4Input: any = {
       virtualrouter: {
         providers: {
@@ -80,21 +78,22 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
           }
         },
         routing: {
-          web_search: ['deepseek-web.deepseek-v4-flash-search']
+          web_search: ['deepseek-web.DeepSeek-V4-Flash']
         }
       }
     };
 
     const result = bootstrapVirtualRouterConfig(v4Input);
     const providerKeys = Object.keys(result.providers);
-    expect(providerKeys.some((key) => key.endsWith('.deepseek-v4-flash-search'))).toBe(true);
+    expect(providerKeys.some((key) => key.endsWith('.DeepSeek-V4-Flash'))).toBe(true);
+    expect(providerKeys.some((key) => key.endsWith('.deepseek-v4-flash-search'))).toBe(false);
 
     const engine = new VirtualRouterEngine();
     engine.initialize(result.config);
 
     const routed = await engine.route(
       {
-        model: 'deepseek-web.deepseek-v4-pro',
+        model: 'deepseek-web.DeepSeek-V4-Pro',
         messages: [{ role: 'user', content: 'Search latest updates' }]
       },
       {
@@ -109,5 +108,20 @@ describe('deepseek search model aliases in virtual router bootstrap', () => {
 
     expect(routed.target?.providerKey).toMatch(/deepseek-web/);
     expect(routed.target?.modelId).toBe('DeepSeek-V4-Pro');
+
+    expect(() => engine.route(
+      {
+        model: 'deepseek-web.deepseek-v4-pro',
+        messages: [{ role: 'user', content: 'Search latest updates' }]
+      },
+      {
+        requestId: 'req-deepseek-v4-pro-alias',
+        entryEndpoint: '/v1/chat/completions',
+        processMode: 'chat',
+        stream: false,
+        direction: 'request',
+        providerProtocol: 'openai-chat'
+      }
+    )).toThrow(/Unknown model deepseek-v4-pro for provider deepseek-web/);
   });
 });

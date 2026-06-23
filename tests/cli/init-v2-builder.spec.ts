@@ -8,7 +8,7 @@ describe('init-v2-builder', () => {
       defaultTarget: 'openai.gpt-5.2',
       thinkingTarget: 'tab.gpt-5.2',
       webSearchTargets: ['ali-coding-plan.qwen3.6-plus', 'qwen.qwen3.5-plus'],
-      multimodalTargets: ['deepseek-web.deepseek-v4-vision']
+      multimodalTargets: ['deepseek-web.deepseek-chat']
     }) as Record<string, any>;
 
     expect(routing.default[0]).toEqual({
@@ -24,7 +24,7 @@ describe('init-v2-builder', () => {
       'qwen.qwen3.5-plus': 1
     });
     expect(routing.multimodal[0].loadBalancing.weights).toEqual({
-      'deepseek-web.deepseek-v4-vision': 1
+      'deepseek-web.deepseek-chat': 1
     });
     expect(routing.web_search[0].mode).toBeUndefined();
   });

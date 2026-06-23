@@ -66,9 +66,10 @@ export function buildWeightedRoutePool(id: string, targets: string[]): Record<st
 
 export function resolveDefaultToolsTarget(defaultTarget: string): string {
   const normalizedDefaultTarget = defaultTarget.trim();
-  if (normalizedDefaultTarget.startsWith('deepseek-web.')) {
-    return 'deepseek-web.deepseek-v4-flash-nothinking';
-  }
+  // Per Jason 2026-06-20, model aliases are display-only and must not become
+  // VR route targets. Historically deepseek-web substituted
+  // `deepseek-v4-flash-nothinking` here, but that is an alias, not a canonical
+  // provider model key. Keep the canonical default target unchanged.
   return normalizedDefaultTarget;
 }
 

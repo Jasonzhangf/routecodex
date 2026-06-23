@@ -15,8 +15,7 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
   let liveConfig: Record<string, unknown> | null = null;
   try {
     liveConfig = parseTomlRecord(readFileSync(LIVE_CONFIG, 'utf8'));
-  } catch (e) {
-    // leave null; the it() blocks below will skip via the liveConfig guard
+  } catch {
     liveConfig = null;
   }
   const skipUnless = liveConfig ? it : it.skip;
@@ -30,113 +29,205 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     }
   });
 
-  skipUnless('bootstrap forwarders section contains GPT round-robin + MiniMax forwarders', async () => {
+  skipUnless('bootstrap forwarders section contains current live forwarders', async () => {
     const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_coding_10000',
     });
     const fwds = (input as unknown as { forwarders?: Record<string, unknown> }).forwarders ?? {};
-    const fwdIds = Object.keys(fwds).sort();
-    expect(fwdIds).toEqual([
-      'fwd.gpt.gpt-5.4-mini',
-      'fwd.gpt.gpt-5.5',
+    expect(Object.keys(fwds).sort()).toEqual([
+      'fwd.deepseek.deepseek-v4-flash',
+      'fwd.deepseek.deepseek-v4-pro',
+      'fwd.glm.glm-5.2',
       'fwd.minimax.MiniMax-M2.7',
       'fwd.minimax.MiniMax-M3',
+      'fwd.minimax.minimax-m3',
+      'fwd.paid.gpt-5.4',
+      'fwd.paid.gpt-5.4-mini',
+      'fwd.temp.gpt-5.5-thinking-xhigh',
     ]);
 
-    const gpt55 = fwds['fwd.gpt.gpt-5.5'] as {
+    const paid54 = fwds['fwd.paid.gpt-5.4'] as {
       strategy?: string;
       stickyKey?: string;
-      targets: Array<{ providerId?: string; providerKey?: string; modelId?: string; priority?: number }>;
+      targets: Array<{ providerId?: string; providerKey?: string; priority?: number }>;
     };
-    expect(gpt55.strategy).toBe('round-robin');
-    expect(gpt55.stickyKey).toBe('none');
-    expect(gpt55.targets.map((t) => [t.providerId, t.providerKey, t.modelId, t.priority])).toEqual([
-      ['1token', '1token.key1.gpt-5.5', undefined, undefined],
-      ['sdfv', 'sdfv.key1.gpt-5.5', undefined, undefined],
-    ]);
+    expect(paid54.strategy).toBe('priority');
+    expect(paid54.stickyKey).toBe('none');
+    expect(new Set(paid54.targets.map((t) => t.providerId))).toEqual(new Set(['asxs', '1token', 'XL']));
+    expect(paid54.targets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerId: 'asxs', providerKey: 'asxs.crsa.gpt-5.4', priority: 1 }),
+      expect.objectContaining({ providerId: 'XL', providerKey: 'XL.key1.gpt-5.4', priority: 2 }),
+      expect.objectContaining({ providerId: '1token', providerKey: '1token.key1.gpt-5.4', priority: 3 }),
+    ]));
+    for (const target of paid54.targets) {
+      expect(target.providerKey).toContain('.gpt-5.4');
+      const expectedPriority = target.providerId === 'asxs'
+        ? 1
+        : target.providerId === 'XL'
+          ? 2
+          : target.providerId === '1token'
+            ? 3
+            : 4;
+      expect(target.priority).toBe(expectedPriority);
+    }
+
+    const paid54Mini = fwds['fwd.paid.gpt-5.4-mini'] as {
+      strategy?: string;
+      stickyKey?: string;
+      targets: Array<{ providerId?: string; providerKey?: string; priority?: number }>;
+    };
+    expect(paid54Mini.strategy).toBe('priority');
+    expect(paid54Mini.stickyKey).toBe('none');
+    expect(new Set(paid54Mini.targets.map((t) => t.providerId))).toEqual(new Set(['asxs', 'XL']));
+    for (const target of paid54Mini.targets) {
+      expect(target.providerKey).toContain('.gpt-5.4-mini');
+      const expectedPriority = target.providerId === 'asxs'
+        ? 1
+        : target.providerId === 'XL'
+          ? 2
+          : 3;
+      expect(target.priority).toBe(expectedPriority);
+    }
 
     const m27 = fwds['fwd.minimax.MiniMax-M2.7'] as {
-      targets: Array<{ provider?: string; providerId?: string; providerKey?: string; model?: string; weight?: number }>;
+      targets: Array<{ providerId?: string; providerKey?: string; weight?: number }>;
     };
-    expect(m27.targets.map((t) => [t.providerId ?? t.provider, t.providerKey, t.weight]).sort()).toEqual([
-      ['mini27', 'mini27.key1.MiniMax-M2.7', 3],
-      ['minimax', 'minimax.key1.MiniMax-M2.7', 5],
-      ['minimonth', 'minimonth.key1.MiniMax-M2.7', 2],
+    expect(m27.targets.map((t) => [t.providerId, t.providerKey, t.weight]).sort()).toEqual([
+      ['minimax', 'minimax.key1.MiniMax-M2.7', 1],
+      ['minimonth', 'minimonth.key1.MiniMax-M2.7', 5],
     ]);
 
     const m3 = fwds['fwd.minimax.MiniMax-M3'] as {
-      targets: Array<{ provider?: string; providerId?: string; providerKey?: string; model?: string }>;
+      targets: Array<{ providerId?: string; providerKey?: string; priority?: number }>;
     };
-    expect(m3.targets[0]?.providerId).toBe('minimax');
-    expect(m3.targets[0]?.providerKey).toBe('minimax.key1.MiniMax-M3');
-    expect((m3 as any).modelId ?? m3.targets[0]?.model).toBe('MiniMax-M3');
+    expect(m3.targets).toEqual([
+      expect.objectContaining({
+        providerId: 'minimax',
+        providerKey: 'minimax.key1.MiniMax-M3',
+        priority: 1,
+      }),
+    ]);
+
+    const glm52 = fwds['fwd.glm.glm-5.2'] as {
+      strategy?: string;
+      stickyKey?: string;
+      targets: Array<{ providerId?: string; providerKey?: string; weight?: number }>;
+    };
+    expect(glm52.strategy).toBe('weighted');
+    expect(glm52.stickyKey).toBe('none');
+    expect(glm52.targets).toEqual([
+      expect.objectContaining({
+        providerId: 'XLC',
+        providerKey: 'XLC.key1.glm-5.2',
+        weight: 1,
+      }),
+      expect.objectContaining({
+        providerId: 'XLC',
+        providerKey: 'XLC.key2.glm-5.2',
+        weight: 1,
+      }),
+      expect.objectContaining({
+        providerId: 'replaypool',
+        providerKey: 'replaypool.key1.glm-5.2',
+        weight: 1,
+      }),
+    ]);
   });
 
-  skipUnless('5520 GPT routes use free GPT forwarders before paid providers', async () => {
+  skipUnless('5520 routes use current live priority forwarders', async () => {
     const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_priority_5520',
     });
-    for (const routeName of ['coding', 'tools', 'search', 'web_search', 'multimodal']) {
-      expect(routeTargets(input.routing, routeName)).toEqual([
-        'fwd.gpt.gpt-5.4-mini',
-        'asxs.gpt-5.4-mini',
-        'cc.gpt-5.4-mini',
-      ]);
-    }
-    for (const routeName of ['thinking', 'longcontext', 'default']) {
-      expect(routeTargets(input.routing, routeName)).toEqual([
-        'fwd.gpt.gpt-5.5',
-        'asxs.gpt-5.5',
-        'cc.gpt-5.5',
-      ]);
-    }
-  });
-
-  skipUnless('live config keeps forwarder targets providerId/modelId only', () => {
-    const raw = readFileSync(LIVE_CONFIG, 'utf8');
-    expect(raw).not.toMatch(/providerKey\s*=/);
-    expect(raw).not.toMatch(/\.key1\./);
-  });
-
-  skipUnless('5555 GPT routes use GPT forwarder target', async () => {
-    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
-      routingPolicyGroup: 'gateway_priority_5555',
-    });
-    for (const routeName of ['coding', 'thinking', 'longcontext', 'default']) {
-      expect(routeTargets(input.routing, routeName)).toEqual([
-        'fwd.gpt.gpt-5.5',
-        'fwd.minimax.MiniMax-M3',
-        'mimo.mimo-v2.5',
-      ]);
-    }
-  });
-
-  skipUnless('5555 weighted tool/search routes keep direct MiniMax/Mimo targets', async () => {
-    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
-      routingPolicyGroup: 'gateway_priority_5555',
-    });
+    expect(routeTargets(input.routing, 'coding')).toEqual(['fwd.temp.gpt-5.5-thinking-xhigh', 'fwd.paid.gpt-5.4-mini']);
     for (const routeName of ['tools', 'search', 'web_search', 'multimodal']) {
       expect(routeTargets(input.routing, routeName)).toEqual([
-        'minimax.MiniMax-M3',
-        'opencode-zen-free.minimax-m3-free',
-        'mini27.MiniMax-M2.7',
-        'minimonth.MiniMax-M2.7',
-        'mimo.mimo-v2.5',
+        'fwd.temp.gpt-5.5-thinking-xhigh',
+        'fwd.paid.gpt-5.4-mini',
       ]);
     }
+    expect(routeTargets(input.routing, 'thinking')).toEqual([
+      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.paid.gpt-5.4',
+    ]);
+    expect(routeTargets(input.routing, 'longcontext')).toEqual([
+      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.paid.gpt-5.4-mini',
+      'fwd.glm.glm-5.2',
+    ]);
+    expect(routeTargets(input.routing, 'default')).toEqual([
+      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.paid.gpt-5.4-mini',
+      'fwd.glm.glm-5.2',
+      'fwd.minimax.MiniMax-M3',
+    ]);
+  });
+
+  skipUnless('5520 thinking uses the current xhigh priority pool', async () => {
+    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+      routingPolicyGroup: 'gateway_priority_5520',
+    });
+    const thinkingRoute = input.routing.thinking;
+    expect(Array.isArray(thinkingRoute)).toBe(true);
+    const [pool] = thinkingRoute as Array<Record<string, unknown>>;
+    expect(pool.mode).toBe('priority');
+    expect(pool.targets).toEqual(['fwd.temp.gpt-5.5-thinking-xhigh', 'fwd.paid.gpt-5.4']);
+    expect(pool.thinking).toBe('xhigh');
+  });
+
+  skipUnless('5555 route targets match current config truth', async () => {
+    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+      routingPolicyGroup: 'gateway_priority_5555',
+    });
+    expect(routeTargets(input.routing, 'coding')).toEqual([
+      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.glm.glm-5.2',
+      'fwd.deepseek.deepseek-v4-pro',
+      'fwd.paid.gpt-5.4-mini',
+    ]);
+    expect(routeTargets(input.routing, 'thinking')).toEqual([
+      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.glm.glm-5.2',
+      'fwd.deepseek.deepseek-v4-pro',
+      'fwd.paid.gpt-5.4-mini',
+    ]);
+    expect(routeTargets(input.routing, 'longcontext')).toEqual([
+      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.glm.glm-5.2',
+      'fwd.deepseek.deepseek-v4-pro',
+      'fwd.paid.gpt-5.4-mini',
+    ]);
+    for (const routeName of ['tools', 'search', 'web_search']) {
+      expect(routeTargets(input.routing, routeName)).toEqual([
+        'fwd.temp.gpt-5.5-thinking-xhigh',
+        'fwd.deepseek.deepseek-v4-flash',
+        'fwd.minimax.MiniMax-M3',
+        'fwd.minimax.MiniMax-M2.7',
+      ]);
+    }
+    expect(routeTargets(input.routing, 'multimodal')).toEqual(['fwd.temp.gpt-5.5-thinking-xhigh', 'fwd.minimax.MiniMax-M3']);
+    expect(routeTargets(input.routing, 'default')).toEqual([
+      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.paid.gpt-5.4-mini',
+      'fwd.minimax.MiniMax-M3',
+    ]);
+  });
+
+  skipUnless('live config keeps forwarder targets providerId only', () => {
+    const raw = readFileSync(LIVE_CONFIG, 'utf8');
+    expect(raw).not.toMatch(/providerKey\s*=/);
+    expect(raw).not.toMatch(/modelId\s*=/);
   });
 
   skipUnless('5555 allowedProviders expands forwarders to real provider ids', () => {
     const allowed = extractProviderKeysForRoutingGroup(liveConfig as Record<string, unknown>, 'gateway_priority_5555');
-
     expect(allowed).toEqual(expect.arrayContaining([
-      '1token',
-      'sdfv',
+      'asxs',
       'minimax',
-      'opencode-zen-free',
-      'mini27',
       'minimonth',
-      'mimo',
+      'XL',
+      'XLC',
+      'replaypool',
+      'crsa',
     ]));
     expect(allowed).not.toContain('fwd');
   });
@@ -154,15 +245,20 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     ]);
   });
 
-  skipUnless('live config.toml contains fwd. exactly the expected times (drift guard)', () => {
+  skipUnless('live config.toml contains the expected forwarder ids (drift guard)', () => {
     const raw = readFileSync(LIVE_CONFIG, 'utf8');
     const fwdMatches = raw.match(/"fwd\.[^"]+"/g) ?? [];
     const fwdIds = Array.from(new Set(fwdMatches.map((m) => m.slice(1, -1))));
     expect(fwdIds.sort()).toEqual([
-      'fwd.gpt.gpt-5.4-mini',
-      'fwd.gpt.gpt-5.5',
+      'fwd.deepseek.deepseek-v4-flash',
+      'fwd.deepseek.deepseek-v4-pro',
+      'fwd.glm.glm-5.2',
       'fwd.minimax.MiniMax-M2.7',
       'fwd.minimax.MiniMax-M3',
+      'fwd.minimax.minimax-m3',
+      'fwd.paid.gpt-5.4',
+      'fwd.paid.gpt-5.4-mini',
+      'fwd.temp.gpt-5.5-thinking-xhigh',
     ]);
   });
 });

@@ -107,8 +107,50 @@ describe('virtual-router-builder: routing policy group tagging', () => {
     expect(result.routing.search).toEqual([
       expect.objectContaining({
         id: 'gateway-priority-5555-search',
-        routeParams: expect.objectContaining({ routePolicyGroup: 'gateway_priority_5555' }),
+      routeParams: expect.objectContaining({ routePolicyGroup: 'gateway_priority_5555' }),
       }),
     ]);
+  });
+
+  it('carries group-level hitLog omit config into the selected virtual router input', async () => {
+    const userConfig = {
+      virtualrouterMode: 'v2',
+      httpserver: { ports: [] },
+      virtualrouter: {
+        routingPolicyGroups: {
+          gateway_priority_5555: {
+            hitLog: {
+              omit: ['requestId', 'sessionId', 'reason', 'model']
+            },
+            routing: {
+              longcontext: [
+                {
+                  id: 'gateway-priority-5555-longcontext',
+                  targets: ['XLC.deepseek-v4-pro'],
+                },
+              ],
+            },
+          },
+          gateway_priority_5520: {
+            hitLog: {
+              omit: ['stopMessage']
+            },
+            routing: {
+              longcontext: [
+                { id: 'gateway-priority-5520-longcontext', targets: ['mini27.MiniMax-M2.7'] },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    const result = await buildVirtualRouterInputV2(userConfig as any, undefined, {
+      routingPolicyGroup: 'gateway_priority_5555',
+    });
+
+    expect(result.hitLog).toEqual({
+      omit: ['requestId', 'sessionId', 'reason', 'model']
+    });
   });
 });
