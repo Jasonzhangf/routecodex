@@ -628,26 +628,6 @@ fn merge_reasoning_text(existing: Option<&Value>, segments: &[String]) -> Option
     }
 }
 
-fn to_reasoning_segments_from_value(value: Option<&Value>) -> Vec<String> {
-    match value {
-        Some(Value::Array(entries)) => entries
-            .iter()
-            .filter_map(Value::as_str)
-            .map(|text| text.trim().to_string())
-            .filter(|text| !text.is_empty())
-            .collect(),
-        Some(Value::String(text)) => {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                Vec::new()
-            } else {
-                vec![trimmed.to_string()]
-            }
-        }
-        _ => Vec::new(),
-    }
-}
-
 fn strip_reasoning_from_text_value(text: &str, segments: &mut Vec<String>) -> String {
     let cleaned = extract_reasoning_segments(text, Some(segments));
     let sanitized = sanitize_reasoning_tagged_text(text);
