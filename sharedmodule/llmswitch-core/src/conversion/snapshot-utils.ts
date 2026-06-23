@@ -14,6 +14,7 @@ export interface SnapshotHookOptions {
   groupRequestId?: string;
   entryProtocol?: string;
   entryPort?: number;
+  runtimeMetadata?: Record<string, unknown>;
 }
 
 interface SnapshotPayload {
@@ -26,6 +27,7 @@ interface SnapshotPayload {
   groupRequestId?: string;
   entryProtocol?: string;
   entryPort?: number;
+  runtimeMetadata?: Record<string, unknown>;
 }
 
 const DEFAULT_SNAPSHOT_ALLOWED_STAGES = Object.freeze([
@@ -152,7 +154,8 @@ export async function writeSnapshotViaHooks(options: SnapshotHookOptions): Promi
     providerKey: options.providerKey,
     groupRequestId: options.groupRequestId,
     entryProtocol: options.entryProtocol,
-    entryPort: options.entryPort
+    entryPort: options.entryPort,
+    runtimeMetadata: options.runtimeMetadata
   });
 }
 
@@ -169,6 +172,7 @@ export async function recordSnapshot(options: SnapshotPayload): Promise<void> {
     groupRequestId: options.groupRequestId,
     entryProtocol: options.entryProtocol,
     entryPort: options.entryPort,
+    runtimeMetadata: options.runtimeMetadata,
     data: prepared.data,
     verbosity: 'verbose'
   }).catch(() => {
@@ -430,6 +434,7 @@ export function createSnapshotWriter(opts: {
   groupRequestId?: string;
   entryProtocol?: string;
   entryPort?: number;
+  runtimeMetadata?: Record<string, unknown>;
 }): SnapshotWriter | undefined {
   if (!shouldRecordSnapshots()) {
     return undefined;
@@ -453,6 +458,7 @@ export function createSnapshotWriter(opts: {
         groupRequestId: opts.groupRequestId,
         entryProtocol: opts.entryProtocol,
         entryPort: opts.entryPort,
+        runtimeMetadata: opts.runtimeMetadata,
         data: prepared.data
       });
     }, prepared.sizeBytes);

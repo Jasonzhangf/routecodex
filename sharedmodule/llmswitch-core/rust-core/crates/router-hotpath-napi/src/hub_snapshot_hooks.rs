@@ -35,6 +35,7 @@ struct SnapshotHookOptions {
     group_request_id: Option<String>,
     entry_protocol: Option<String>,
     entry_port: Option<i64>,
+    runtime_metadata: Option<Value>,
 }
 
 static SNAPSHOT_WRITER_RUNTIME: OnceLock<Option<SnapshotWriterRuntime>> = OnceLock::new();
@@ -682,7 +683,7 @@ fn build_runtime_metadata_payload(
     group_request_token: &str,
 ) -> Value {
     let provider_key = normalize_provider_key(&options.provider_key);
-    serde_json::json!({
+    let mut payload = serde_json::json!({
       "timestamp": chrono::Utc::now().to_rfc3339(),
       "versions": {
         "routecodex": env::var("ROUTECODEX_VERSION").ok(),
@@ -696,7 +697,76 @@ fn build_runtime_metadata_payload(
       "providerKey": provider_key,
       "entryProtocol": options.entry_protocol.clone(),
       "entryPort": options.entry_port
-    })
+    });
+    if let Some(request_truth) = build_runtime_request_truth_summary(options.runtime_metadata.as_ref())
+    {
+        if let Some(payload_obj) = payload.as_object_mut() {
+            payload_obj.insert("requestTruth".to_string(), request_truth);
+        }
+    }
+    payload
+}
+
+fn clone_trimmed_string_field(source: &Map<String, Value>, key: &str, out: &mut Map<String, Value>) {
+    if let Some(value) = read_trimmed_string(source.get(key)) {
+        out.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn clone_object_field_if_present(
+    source: &Map<String, Value>,
+    key: &str,
+    out: &mut Map<String, Value>,
+) {
+    if let Some(value) = source.get(key).and_then(Value::as_object) {
+        out.insert(key.to_string(), Value::Object(value.clone()));
+    }
+}
+
+fn build_runtime_request_truth_summary(runtime_metadata: Option<&Value>) -> Option<Value> {
+    let metadata = runtime_metadata?.as_object()?;
+    let mut summary = Map::<String, Value>::new();
+
+    for key in [
+        "sessionId",
+        "conversationId",
+        "continuationOwner",
+        "responseId",
+        "previousResponseId",
+        "routeHint",
+    ] {
+        clone_trimmed_string_field(metadata, key, &mut summary);
+    }
+
+    for key in ["responsesResume", "continuation", "responsesRequestContext"] {
+        clone_object_field_if_present(metadata, key, &mut summary);
+    }
+
+    if let Some(runtime_control) = metadata.get("runtime_control").and_then(Value::as_object) {
+        let mut runtime_summary = Map::<String, Value>::new();
+        for key in [
+            "serverToolFollowup",
+            "serverToolFollowupSource",
+            "stopless",
+            "stoplessGoalStatus",
+        ] {
+            if let Some(value) = runtime_control.get(key) {
+                runtime_summary.insert(key.to_string(), value.clone());
+            }
+        }
+        if !runtime_summary.is_empty() {
+            summary.insert(
+                "runtimeControl".to_string(),
+                Value::Object(runtime_summary),
+            );
+        }
+    }
+
+    if summary.is_empty() {
+        None
+    } else {
+        Some(Value::Object(summary))
+    }
 }
 
 fn file_mtime_ms(path: &Path) -> i128 {
@@ -1062,6 +1132,7 @@ pub(crate) fn enqueue_payload_contract_errorsample(
         group_request_id: None,
         entry_protocol: None,
         entry_port: None,
+        runtime_metadata: None,
     });
 }
 
@@ -1293,6 +1364,7 @@ mod tests {
             group_request_id: Some("grp_1".to_string()),
             entry_protocol: Some("openai-responses".to_string()),
             entry_port: Some(5555),
+            runtime_metadata: None,
         };
 
         write_snapshot_file(&options, Some(root.as_path())).expect("snapshot write should succeed");
@@ -1315,6 +1387,99 @@ mod tests {
                 .join("mimo.key1.mimo-v2.5")
                 .exists(),
             "provider directory must not be created for entry snapshots"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn runtime_metadata_payload_captures_request_truth_summary() {
+        let root = env::temp_dir().join(format!(
+            "rcc-snapshot-runtime-truth-{}",
+            Uuid::new_v4().simple()
+        ));
+        let options = SnapshotHookOptions {
+            endpoint: "/v1/responses".to_string(),
+            stage: "provider-request".to_string(),
+            request_id: "req_runtime_truth_1".to_string(),
+            data: serde_json::json!({
+                "body": { "ok": true }
+            }),
+            verbosity: Some("minimal".to_string()),
+            channel: None,
+            provider_key: Some("minimax.key1.MiniMax-M3".to_string()),
+            group_request_id: Some("grp_runtime_truth".to_string()),
+            entry_protocol: Some("openai-responses".to_string()),
+            entry_port: Some(5555),
+            runtime_metadata: Some(serde_json::json!({
+                "sessionId": "sess-123",
+                "conversationId": "conv-456",
+                "continuationOwner": "relay",
+                "responseId": "resp_789",
+                "previousResponseId": "resp_prev_111",
+                "routeHint": "thinking",
+                "responsesResume": { "previousRequestId": "req_prev_1" },
+                "continuation": { "chainId": "req_chain_1", "continuationScope": "request_chain" },
+                "responsesRequestContext": { "sessionId": "sess-123", "conversationId": "conv-456" },
+                "runtime_control": {
+                    "stopless": true,
+                    "stoplessGoalStatus": "continue_needed",
+                    "serverToolFollowup": true
+                }
+            })),
+        };
+
+        write_snapshot_file(&options, Some(root.as_path())).expect("snapshot write should succeed");
+
+        let runtime_path = root
+            .join("openai-responses")
+            .join("port-5555")
+            .join("grp_runtime_truth")
+            .join("__runtime.json");
+        let parsed: Value =
+            serde_json::from_str(fs::read_to_string(runtime_path).unwrap().as_str()).unwrap();
+
+        let truth = parsed
+            .get("requestTruth")
+            .and_then(Value::as_object)
+            .expect("requestTruth object");
+        assert_eq!(truth.get("sessionId").and_then(Value::as_str), Some("sess-123"));
+        assert_eq!(
+            truth.get("conversationId").and_then(Value::as_str),
+            Some("conv-456")
+        );
+        assert_eq!(
+            truth.get("continuationOwner").and_then(Value::as_str),
+            Some("relay")
+        );
+        assert_eq!(truth.get("responseId").and_then(Value::as_str), Some("resp_789"));
+        assert_eq!(
+            truth.get("previousResponseId").and_then(Value::as_str),
+            Some("resp_prev_111")
+        );
+        assert_eq!(truth.get("routeHint").and_then(Value::as_str), Some("thinking"));
+        assert_eq!(
+            truth
+                .get("continuation")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("chainId"))
+                .and_then(Value::as_str),
+            Some("req_chain_1")
+        );
+        assert_eq!(
+            truth
+                .get("responsesResume")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("previousRequestId"))
+                .and_then(Value::as_str),
+            Some("req_prev_1")
+        );
+        assert_eq!(
+            truth
+                .get("runtimeControl")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("stopless"))
+                .and_then(Value::as_bool),
+            Some(true)
         );
         let _ = fs::remove_dir_all(root);
     }

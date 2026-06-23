@@ -21,6 +21,7 @@ class SnapshotStageRecorder implements StageRecorder {
       providerKey: typeof options.context.providerId === 'string' ? options.context.providerId : undefined,
       entryProtocol: resolveEntryProtocol(options.endpoint),
       entryPort: resolveEntryPort(options.context),
+      runtimeMetadata: readSnapshotRuntimeMetadata(options.context),
       groupRequestId:
         typeof contextAny.clientRequestId === 'string'
           ? (contextAny.clientRequestId as string)
@@ -73,6 +74,14 @@ function resolveEntryPort(context: AdapterContext): number | undefined {
     }
   }
   return undefined;
+}
+
+function readSnapshotRuntimeMetadata(context: AdapterContext): Record<string, unknown> | undefined {
+  const metadata = context.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return undefined;
+  }
+  return metadata as Record<string, unknown>;
 }
 
 export function createSnapshotRecorder(context: AdapterContext, endpoint: string): StageRecorder {
