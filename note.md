@@ -1,5 +1,7 @@
 # 2026-06-23 OpenAI-compatible SSE 5xx regression audit
 
+- Jason 当轮纠偏已采纳：受管端口 live 验证禁止 repo-local `node dist/cli.js start ...` / `routecodex start ...`；本项目交付口径统一为全局安装版本 `routecodex restart --port <port>` + `/health` + 新 marker 样本。
+
 - 症状：Jason 报告最近修改后 OpenAI 通路变 500；样本中 5555/5520 出现 provider 403/504/520/5xx 类错误，需先区分上游错误与本地 wire 回归。
 - 样本结论：
   - 最新 5555 真实 provider-error 主要是 upstream 403/504（如 `asxs.top | 504`、quota 403），不是所有样本都是本地 500。
@@ -139,6 +141,28 @@
   - 缺黑盒断言“第二轮 submit 在 restore 后，把 `exec_command` CLI output 还原为内置 `reasoningStop` tool result，再下发 provider request”，当前黑盒只断到 `executePipeline` 入参 tools 不丢。
   - 缺字段级契约矩阵：每阶段必须检查 `entryEndpoint`、`responseId/previous_response_id`、`continuationOwner`、`payload.input`、`payload.tools/context.toolsRaw`、stop guidance、`reasoningStop` tool_use/tool_result、client `required_action.exec_command`、store saved body。
 
+# 2026-06-23 stopless multi-round delivery closure
+
+- 本轮目标：修复 stopless relay `/v1/responses.submit_tool_outputs` 多轮续接中第二轮状态恢复与第三轮 terminal 投影；SSE 只作为传输层验证，不在 SSE 加 stopless 语义。
+- 根因 1：`servertool-core::resolve_runtime_stop_message_state_from_adapter_context` 没读取当前 relay submit 的 `responsesResume.toolOutputsDetailed[].outputText`，导致第二轮仍按 `used=0` 判定，`repeatCount` 卡在 1。
+- 修复 1：`persisted_lookup.rs` 增加 `responsesResume.toolOutputsDetailed` 当前轮 CLI stdout 解析，复用 stopless CLI result snapshot parser；新增 Rust 单测 `adapter_context_responses_resume_tool_outputs_restore_current_stopless_cli_result`。
+- 根因 2：第三轮 `schemaGate.action=followup` 时本轮计数后 `nextUsed>=nextMaxRepeats`，native handler 不再投 exec tool，但 chat process final body 仍保留 provider 文本。
+- 修复 2：`stop-message-auto.ts` 在 response chat process handler 中用 Rust persist plan 的 `nextUsed/nextMaxRepeats` 判定“本轮后预算耗尽”，命中后直接 final projection 为 `stopless budget exhausted`，不触碰 SSE。
+- 测试修正：`scripts/tests/stopless-followup-blackbox.mjs` 的 SSE materializer 从 finalized `response.output[].content[].text` 派生 `output_text`，避免 raw SSE 已包含 terminal 文本但测试对象缺 `output_text` 的伪红。
+- 验证：
+  - `cargo test -p servertool-core stopless --lib -- --nocapture` PASS（54 passed）。
+  - `cargo test -p servertool-core persisted_lookup --lib -- --nocapture` PASS（44 passed）。
+  - `cargo test -p router-hotpath-napi stopless --lib -- --nocapture` PASS（29 passed）。
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS。
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/stop-message-native-decision.spec.ts --runInBand --detectOpenHandles --forceExit` PASS（26 passed；Jest reports native CustomGC open handle）。
+  - `node scripts/tests/stopless-followup-blackbox.mjs` PASS after native rebuild：providers `crs1 -> crs2 -> crs1`，`repeatCount2=2`，third round `reason=stop_schema_budget_exhausted left=0`，terminal body `stopless budget exhausted`。
+  - `npm run verify:servertool-rust-only` PASS。
+  - `npm run verify:function-map-compile-gate` PASS。
+- 当前阻塞/缺口：
+  - `npm run build:min` blocked by existing `responses.continuation.mainline` wiki/mainline node-id mismatch in `verify-architecture-mainline-node-id-consistency`.
+  - `npx tsc` blocked by existing `responses-sse-bridge` export/type drift (`assertDirectPassthroughResponsesSseFrameForHttp*` imports and `pendingTerminalEvent` literal type).
+  - 因以上无关阻塞，本轮只能声明 stopless focused + blackbox closure，不声明全量 build closure。
+
 # 2026-06-23 stopless closeout audit after rebuild/install/restart
 
 - 新验证：
@@ -234,6 +258,36 @@
 
 - 实锤问题 1：`src/server/runtime/http-server/executor-metadata.ts` 会把 `responsesResume.sessionId/conversationId` 写进 `MetadataCenter.requestTruth`；`src/modules/llmswitch/bridge/responses-request-bridge.ts` 也会优先拿 `resumeMeta.sessionId/conversationId` 写 request truth。这个违反“只有请求入口真相能写 request truth”，会让 continuation context 冒充 session truth。
 - 实锤问题 2：`servertool-core/src/persisted_lookup.rs::resolve_runtime_stop_message_state_from_adapter_context` 先吃 stale `runtime_metadata.stopMessageState`，再看当前 request 的 stopless CLI `tool_output`，导致 `repeatCount` 恢复顺序颠倒；live-like focused 现象就是第二/三轮还在 `used=0 left=3`。
+
+# 2026-06-23 SSE transport-only boundary audit refresh
+
+- Jason 本轮再次锁定原则：SSE 必须是独立模块，且只做 transport；不得承载 continuation、terminal、required_action、summary、hint、stopless、apply_patch 语义。跨协议通用逻辑归 `chat process`；Responses 私有逻辑归 `resp_outbound`；SSE 只负责 `json -> sse` / frame transport。
+- 当前已验证绿灯：
+  - `npm run verify:responses-sse-business-module` PASS
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+  - 这证明当前 `responses-sse-bridge.ts` / `handler-response-sse.ts` 边界 gate 已接受“transport/projection facade only”，terminal/probe/repair 不再允许长回 SSE owner。
+- 代码面真相：
+  - `src/modules/llmswitch/bridge/responses-sse-bridge.ts` 现在是独立 facade；`normalizeClientVisibleResponsesSseFrameForHttp(...)` 只做 frame parse + tools/context 读取 + 调 Rust `projectResponsesSseFrameForClientNative(...)`。
+  - `src/modules/llmswitch/bridge/responses-client-projection.ts` 已被物理清空为无逻辑 stub，generic bridge 不再持有 SSE projection owner。
+  - `src/modules/llmswitch/bridge/responses-response-bridge.ts` 仍是 response lifecycle / JSON->SSE dispatch plan owner，但已不再持有 `projectResponsesSseFrameForClientForHttp` / `normalizeResponsesSseFrameForClientForHttp` 这类旧 SSE projector helper。
+  - `src/modules/llmswitch/bridge/responses-stream-semantics.ts` 仍保留 terminal/probe/repair 的 TS thin wrapper，但它们只是 native 转发，不应再被 SSE owner 文档表述成业务真源。
+- 当前仍红的 focused blackbox：
+  - `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` FAIL
+    - force-SSE JSON->SSE case 仍报 `event:error` / `sse_bridge_error` / `SSE stream missing from pipeline result`
+    - nested `response.required_action` case 仍泄漏 `response.required_action` 和 `{\"patch\":...}` 包装
+    - direct passthrough case 仍先发 `response.output_item.added` 且 `arguments:\"\"`
+  - `tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts` FAIL
+    - upstream 缺 `response.done` 时当前只收到 `response.completed`，没补 `response.done`
+    - upstream 仅给 `required_action` 时没有补出 `response.completed` / `response.done`
+- 当前最关键 gap 判定：
+  1. force-SSE JSON->SSE 缺的不是 SSE 业务逻辑，而是 `prepareResponsesJsonSseDispatchPlanForHttp(...)` 只补 `model`，没有保证 JSON->SSE converter 所需的完整 canonical Responses shape（至少 `id/model/object/output`）在 dispatch plan 里是可用真相。
+  2. Rust `project_responses_sse_frame_for_client(...)` 对 `response.required_action` 只识别 top-level `required_action`；对 `response.required_action` nested 在 `response` 里的样本没有完成标准 tool SSE normalize。
+  3. terminal repair 黑盒仍红，说明 terminal/completed/done 的补齐 owner 还没完全前移到非-SSE 语义 owner；不能回头把 repair 写回 handler/SSE bridge。
+- 下一阶段顺序保持不变：
+  1. 锁边界
+  2. 黑盒对比
+  3. Rust owner 收口
+  4. TS 接线
 - 本轮修复：
   - 删除 `responsesResume -> requestTruth.sessionId/conversationId` 写入。
   - `responses-request-bridge` 只允许 `requestContext.sessionId/conversationId` 写 request truth，不再吃 `resumeMeta`。
@@ -12586,6 +12640,31 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `submit_tool_outputs` 续轮 => HTTP 200，返回 `status=completed`, `output_text=Stopped.`，样本 `~/.rcc/codex-samples/openai-responses/port-5555/req_1782201883614_7b107d42/`，无 `provider-error.json`；provider-request 保留 assistant `tool_calls` + tool message + tools。
 - 当前证据结论：dev 重装重启后的 5555 OpenAI 基础请求、首轮 tool call、submit_tool_outputs 续轮均未复现 500；当前不能宣称“provider 把工具调用发成文本且我们未收割”是本轮 500 根因。旧 XLC/glm marker 样本与当前 5555 live 成功样本必须分开处理。
 
+# 2026-06-23 orangeai glm-5.2 provider runtime config
+
+- 新增运行时 provider：`/Volumes/extension/.rcc/provider/orangeai/config.v2.toml`
+  - providerId=`orangeai`
+  - baseURL=`https://api2.orangeai.cc/v1`
+  - model=`glm-5.2`
+  - compatibilityProfile=`chat:glm`
+- 上游直连验证：
+  - `GET /v1/models` HTTP 200，包含 `glm-5.2`
+  - `POST /v1/chat/completions` model=`glm-5.2` HTTP 200，返回 `orange-ok`
+- `/Volumes/extension/.rcc/config.toml` 最终 routing 约束：
+  - `fwd.glm.glm-5.2` 为 weighted，targets=`XLC + replaypool + orangeai`，权重均为 1。
+  - `replaypool` 只保留在 `fwd.glm.glm-5.2`，已从其它 forwarder 移除。
+  - 5520 priority：GPT target 在 `fwd.glm.glm-5.2` 前。
+  - 5555 priority：`fwd.glm.glm-5.2` 在 GPT target 前。
+- 验证：
+  - `routecodex config validate -c /Volumes/extension/.rcc/config.toml` PASS。
+  - `routecodex restart -c /Volumes/extension/.rcc/config.toml -p 5520` PASS，`/health` ready=true。
+  - `routecodex restart -c /Volumes/extension/.rcc/config.toml -p 5555` PASS，`/health` ready=true。
+  - 5520 live `/v1/responses` 样本 `req_1782209199255_1f0089c2` 命中 `asxs.crsa.gpt-5.4-mini`，证明 GPT 优先。
+  - 5555 live `/v1/responses` 样本 `req_1782209211785_8c091bac` 命中 `replaypool.key1.glm-5.2`，证明 glm 优先。
+  - weighted 多轮样本命中 `orangeai.key1.glm-5.2`、`replaypool.key1.glm-5.2`、`XLC.key1/key2.glm-5.2`。
+- 风险：
+  - orangeai 有成功样本，也有 `req_1782209238428_d6118a35` 上游业务错误样本：HTTP 200 body 内 `error.code=400`, message=`Provider returned error`，RouteCodex 投影为 `MALFORMED_RESPONSE`。provider request body 仅含 `model/messages/stream/max_tokens`，未见内部 metadata 污染。
+
 # 2026-06-23 `--snap` raw boundary + debug owner audit
 
 - CLI 与 contract 真相：
@@ -12625,3 +12704,369 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 剩余风险：
   - `responses-response-bridge.ts` 仍有历史 direct SSE guard/probe 辅助的过渡残留；本轮没有扩大迁移，否则会牵动 direct-sse metadata guard 测试和公共 import 面。后续应单独把 direct SSE guard owner 迁到 `responses-sse-semantics.ts` 并同步测试命名。
   - 本轮未做 live replay；证据是 focused blackbox/Jest、Rust、native build 和 architecture gates。
+
+# 2026-06-23 SSE 独立模块 + 纯传输 closeout audit（当前真实状态）
+
+- Jason 新边界再确认：
+  - SSE 必须是独立模块。
+  - SSE 只能承载 transport，不能挂 continuation / required_action / terminal / repair / tool projection 等协议语义。
+- 当前验证结果：
+  - `npm run verify:responses-sse-business-module` PASS。
+  - `npm run verify:responses-handler-single-bridge-surface` FAIL。
+    - 真实残留点在 `src/modules/llmswitch/bridge/responses-response-bridge.ts`：
+      - `isResponsesRequiredActionFrame`（L269）
+      - `readDirectPassthroughSseEventNames`（L287）
+      - `hasNonResponsesDirectPassthroughEvent`（L295）
+  - `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts` FAIL。
+    - 新 TS native wrapper 已存在，但当前 native artifact 里没有：
+      - `inspectResponsesTerminalStateFromSseChunkJson`
+      - `planResponsesStreamEndRepairJson`
+  - `cargo test -p router-hotpath-napi responses_response_utils --lib -- --nocapture` FAIL。
+    - Rust 编译卡在 `shared_responses_response_utils.rs:1031`
+    - 直接原因：`has_responses_tool_call` 不可见，当前 `plan_responses_stream_end_repair_value(...)` 仍引用不可访问符号。
+- 当前代码真相：
+  - `src/server/handlers/handler-response-sse.ts` 已明显收口到 transport façade，不再直接持有 continuation persist helper。
+  - `src/modules/llmswitch/bridge/responses-sse-semantics.ts` 已成为独立 SSE 模块壳层，并已把以下能力切到 native wrapper：
+    - `updateResponsesContractProbeFromSseChunkForHttp`
+    - `inspectResponsesTerminalStateFromSseChunkForHttp`
+    - `planResponsesStreamEndRepairForHttp`
+    - `projectResponsesSseFrameForClientForHttp`
+  - 但 `responses-sse-bridge.ts` 仍从 `responses-response-bridge.ts` 回拉 direct passthrough SSE guard / request-context / JSON dispatch helpers，说明“独立模块”已起壳，但还没做到纯 transport-only。
+  - `responses-sse-semantics.ts` 里仍留有 TS 语义函数：
+    - `summarizeResponsesSseFrameForLogForHttp`
+    - `resolveResponsesProviderProtocolHintFromSseFrameForHttp`
+    - apply_patch 重复抑制状态机
+    - nested response / call_id 相关投影辅助
+- 当前结论：
+  - SSE 独立模块：半完成。已有独立 owner 文件，但 bridge 仍跨回 lifecycle owner 取语义 helper。
+  - SSE 纯传输：未完成。至少 direct passthrough SSE guard 语义还在 lifecycle bridge；SSE semantics 模块本身也还持有日志/协议判别/投影辅助。
+  - Rust 唯一真源：未完成。Rust 源码与 TS wrapper 已起步，但 native 编译未过、artifact 未重建、Jest contract 未转绿。
+- 下一步最小闭环顺序：
+  1. 先把 `responses-response-bridge.ts` 里剩余 direct SSE guard helper 迁出，重新打绿 `verify:responses-handler-single-bridge-surface`。
+  2. 修 Rust `has_responses_tool_call` 可见性/本地 helper 问题，让 `responses_response_utils` 编译通过。
+  3. 重建 native hotpath，打绿 native SSE contract Jest。
+  4. 再扩黑盒 old-vs-new fixture，继续压缩 `responses-sse-semantics.ts` 剩余 TS 语义。
+
+# 2026-06-23 SSE 独立模块边界修复 + native terminal/repair 闭环
+
+- 已完成的代码收口：
+  - direct passthrough SSE guard / metadata isolation / sanitize / keepalive 判断已从 `src/modules/llmswitch/bridge/responses-response-bridge.ts` 迁到 `src/modules/llmswitch/bridge/responses-sse-semantics.ts`。
+  - `src/modules/llmswitch/bridge/responses-sse-bridge.ts` 已改为从独立 SSE 模块 re-export 上述能力，不再从 lifecycle bridge 回拉这组 SSE 语义。
+  - Rust `shared_responses_response_utils.rs` 新增本地 `has_responses_tool_call_local(...)`，不再依赖 `chat_node_result_semantics.rs` 的私有 helper。
+- 当前已验证绿灯：
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+  - `npm run verify:responses-sse-business-module` PASS
+  - `cargo test -p router-hotpath-napi responses_response_utils --lib -- --nocapture` PASS（13 passed）
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS
+  - `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts` PASS
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts` PASS（当前实际 owner 已切到 `responses-sse-bridge`）
+  - `tests/red-tests/server_responses_sse_business_module_contract.test.ts` PASS
+  - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-mainline-call-map` PASS
+- 当前剩余 gap：
+  - SSE 仍未达到“纯 transport only”终态；`responses-sse-semantics.ts` 还保留日志摘要、协议 hint、apply_patch 去重状态机、nested response normalize 等 TS 语义。
+  - 还没有把旧 TS SSE codec 主实现（`sharedmodule/llmswitch-core/src/sse/**`）通过黑盒对比迁到 Rust 唯一 owner。
+  - 本轮未做 live replay；当前证据仍是 focused gate / focused Jest / Rust test / native build。
+
+# 2026-06-23 SSE 黑盒对比基线追加审计（四类样本现状）
+
+- 已跑并转绿：
+  - `tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` PASS
+  - 说明 `required_action` split-frame 这类黑盒目前仍被锁住。
+- 新打出的真实红点：
+  - `tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts` FAIL（2 passed / 2 failed）
+  - `tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts` FAIL（1 passed / 4 failed）
+  - `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` FAIL（4 passed / 3 failed）
+- 失败形态摘要：
+  - terminal / incomplete repair 线：
+    - 预期有 `response.completed` / `response.done` / `event:error(upstream_stream_incomplete)` 的场景，实际输出只停在 `response.output_item.done` 或 `response.completed`。
+    - `auto-closes a hung stream...` 用例直接超时，说明 stream end 后没有统一 repair/close 逻辑补尾。
+  - apply_patch 线：
+    - forceSSE JSON-to-SSE 情况出现 `event:error` + `SSE stream missing from pipeline result`
+    - live/direct passthrough 情况仍泄漏 `{\"patch\":...}` 包裹或空 `\"arguments\":\"\"`，说明当前 `normalizeResponsesSseFrameForClientForHttp(...)` 里的 TS 投影/去重语义与黑盒预期不一致。
+- 当前唯一修改点候选：
+  - `src/server/handlers/handler-response-sse.ts`
+    - 当前 `outboundStream.on('end', ...)` 逻辑只 flush queue + `res.end()`；这证明现在 SSE 面没有承接 repair owner。
+    - Jason 最新纠偏已确认：这不是“该把 repair 接回 SSE”的证据，而是“terminal/incomplete 事件还没在进入 SSE 之前被非 SSE owner 产出”的证据。
+  - `src/modules/llmswitch/bridge/responses-sse-semantics.ts`
+    - 当前仍持有 apply_patch SSE 归一、重复抑制、nested response normalize 等 TS 语义；apply_patch 黑盒红点直接落在这里的剩余逻辑上。
+
+# 2026-06-23 Jason 边界纠偏后续落实：SSE 面不得承接 terminal/probe/repair
+
+- 用户最新硬约束再确认：
+  - `handler-response-sse.ts` / `responses-sse-bridge.ts` / `responses-sse-semantics.ts` 都不能再承接 continuation / terminal / incomplete repair 逻辑。
+  - SSE 是标准传输承载体，只做 transport / IO / keepalive / abort / backpressure / metadata guard / opaque handoff。
+- 已执行的纠偏动作：
+  - 撤销“把 terminal/incomplete helper 补回 SSE 面”的方向。
+  - 新增非 SSE owner 文件：`src/modules/llmswitch/bridge/responses-stream-semantics.ts`
+  - 将以下函数从 `responses-sse-semantics.ts` 物理迁出到新非 SSE owner：
+    - `updateResponsesContractProbeFromSseChunkForHttp`
+    - `inspectResponsesTerminalStateFromSseChunkForHttp`
+    - `planResponsesStreamEndRepairForHttp`
+  - `src/modules/llmswitch/bridge.ts` 与 `src/modules/llmswitch/bridge/index.ts` 已改为从 `responses-stream-semantics.ts` 导出上述能力，而不是从 SSE owner 导出。
+- 新增/更新门禁：
+  - `tests/red-tests/server_responses_sse_business_module_contract.test.ts`
+    - 新增断言：`responses-sse-semantics.ts` 不得再导出 terminal/probe/repair 三个 helper。
+  - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts`
+    - 新增断言：`responses-sse-semantics.ts` 不得再拥有 terminal/probe/repair 三个 export。
+  - `scripts/architecture/verify-responses-sse-business-module.mjs`
+    - 新增扫描：SSE owner 文件不得再导出 terminal/probe/repair。
+- 当前已验证：
+  - `tests/red-tests/server_responses_sse_business_module_contract.test.ts` PASS
+  - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts` PASS
+  - `npm run verify:responses-sse-business-module` PASS
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+- 当前结论：
+  - SSE 纯传输边界又收紧了一步：terminal/probe/repair 已不再属于 SSE owner。
+  - 但 terminal/incomplete 黑盒红点仍在，说明真正事件生成 owner 还需要继续前移到 Rust response projection / chat-process owner，而不是把逻辑重新塞回 SSE 面。
+
+# 2026-06-23 SSE transport-only 审计结论（供后续 /goal 与 closeout 使用）
+
+- Jason 最终边界再确认：
+  - SSE 是标准传输承载体，不做 continuation，不做 terminal repair，不做 required_action/tool/apply_patch 语义，不做 payload normalize。
+  - 允许职责仅限 transport/IO：frame write、abort/backpressure、keepalive、metadata guard、opaque native handoff。
+- 当前代码状态：
+  - 好的一面：
+    - `responses-stream-semantics.ts` 已把 terminal/probe/repair wrapper 从 `responses-sse-semantics.ts` 物理迁出。
+    - `handler-response-sse.ts` 当前没有重新接回 terminal/probe/repair helper。
+    - `verify:responses-sse-business-module` / `verify:responses-handler-single-bridge-surface` 已能阻止这 3 个 helper 回流到 SSE owner。
+  - 还没收干净的面：
+    - `responses-sse-semantics.ts` 仍保留 `projectResponsesSseFrameForClientForHttp` / `normalizeResponsesSseFrameForClientForHttp`。
+    - 同文件仍保留 apply_patch 去重状态机、nested response normalize、protocol hint、SSE log summary；这些都不是纯 transport。
+    - `responses-sse-bridge.ts` 仍是跨 `responses-response-bridge.ts` 与 `responses-sse-semantics.ts` 的 re-export facade，独立 owner 还不够薄。
+- 当前真实 gap：
+  1. 文档 gap：`docs/goals/sse-rust-transport-closeout-plan.md` 原先仍把 terminal/repair/tool projection 写进 SSE 范围，已在本轮修正口径。
+  2. 黑盒 gap：`responses-handler.sse-terminal-event.blackbox`、`stream-closed-before-completed.regression`、`apply-patch-freeform-sse` 失败，说明非 SSE owner 仍未在进入 SSE 前产出完整语义结果。
+  3. owner gap：prod path 里“谁负责 close-before-terminal / incomplete error / apply_patch 最终投影”还没有完全前移到 Rust/non-SSE owner。
+- 执行顺序锁定：
+  1. 先锁 transport-only 边界与黑盒基线。
+  2. 再把黑盒失败对应语义 owner 前移到 non-SSE / Rust。
+  3. 最后才接线 SSE transport。
+- 禁止回退方向：
+  - 不得把 terminal/probe/repair 重新接回 `handler-response-sse.ts`。
+  - 不得把 apply_patch / required_action / nested normalize 作为“临时修复”长期留在 `responses-sse-semantics.ts`。
+
+# 2026-06-23 Jason 新纠偏：SSE 只承载 json->sse，逻辑必须先落 JSON 阶段
+
+- 新阶段规则：
+  - 所有逻辑功能都应该先在 JSON 阶段完成。
+  - 若该逻辑对所有协议都生效，owner 应在 `chat process`。
+  - 若该逻辑是 Responses 私有字段/私有功能，owner 应在响应 `resp_outbound`。
+  - SSE 只承载 `json -> sse`，不再承载任何逻辑判定。
+- 对当前 closeout 的直接影响：
+  - `hint` 这类语义不能只按“文件 owner”拆分，要先判定它是跨协议通用还是 Responses 私有。
+  - `protocol hint`、`required_action`、apply_patch/custom_tool projection、payload normalize、terminal/incomplete repair 都必须继续前移到 JSON owner，不能停在 SSE facade/file split。
+  - 后续审计口径必须改成“这个语义应在 `chat process` 还是 `resp_outbound`”，而不是只问“它在不在 SSE 文件里”。
+
+# 2026-06-23 Jason 再纠偏：summary / hint 属于应用 owner，不属于 generic bridge
+
+- Jason 新规则：
+  - `summary`、`hint` 这类如果是 stopless/应用强相关功能，就应该回到对应应用 owner。
+  - stopless 的下一轮路由 hint / stop list 处理属于 `chat process` 的 stop list / stopless owner，不属于 SSE。
+  - 不能把这类东西随便塞进 generic bridge、generic projection 文件，或者 SSE facade。
+- 对当前收口的影响：
+  - 我刚才做的“先把 summary/hint 从 SSE 文件迁到 generic non-SSE 文件”只能算临时物理拆分，不是最终 owner。
+  - 后续必须继续把 stopless hint / summary 追到具体应用 owner，再从 bridge 层彻底删除。
+
+# 2026-06-23 --snap raw+port default closeout完成
+
+- 新根因 1：`client-response` SSE 路径仍缺 `snapshotGroupRequestId` / `snapshotEntryPort` 透传，导致 `client-response(.error)` 还可能回退到 router label 目录。
+- 修复 1：
+  - `src/server/handlers/handler-response-sse.ts`
+  - `src/server/handlers/handler-response-utils.ts`
+  - 已把 `snapshotGroupRequestId` / `snapshotEntryPort` 贯穿到 `client-response` 与 `client-response.error`。
+- 新根因 2：JSON `/v1/responses` 的 `client-request` 缺口不是 rawBody capture 本身，而是 direct lane：
+  - `request-executor` 路径里本地 snapshot gate 原本在 `provider.send.start` 才放开；
+  - 更关键的是 JSON non-stream 样本命中 direct 分流时，根本不会走 `initializeRequestExecutorRequestState -> writeInboundClientSnapshot`。
+- 修复 2：
+  - `src/server/runtime/http-server/executor/request-executor-request-state.ts`
+    - `allowSnapshotLocalDiskWrite(...)` 前移到 `request.snapshot.start` 之前。
+  - `src/server/runtime/http-server/index.ts`
+    - 在 `router-direct` / `provider-direct` 真入口新增 `captureDirectLaneClientRequestSnapshot(...)`， direct 命中前先写 `client-request`。
+  - `src/server/handlers/chat-handler.ts`
+  - `src/server/handlers/messages-handler.ts`
+  - `src/server/handlers/responses-handler.ts`
+    - request-side metadata 显式补 `entryPort/matchedPort/localPort`。
+- 新 focused 验证：
+  - `tests/debug/snapshot-default-raw-port-contract.spec.ts` PASS
+  - `tests/server/runtime/http-server/executor/request-executor-request-state.spec.ts` PASS
+  - `tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts` PASS
+  - `tests/providers/core/utils/snapshot-writer.release-gating.spec.ts` PASS
+  - `tests/providers/core/utils/snapshot-writer.429-suppression.spec.ts` PASS
+  - `npm run verify:architecture-snapshot-stage-contract` PASS
+  - `npm run verify:architecture-snapshot-stage-owners` PASS
+  - `npx tsc -p tsconfig.json --pretty false` PASS
+- live 证据：
+  - repo-local `node dist/cli.js start --snap --port 5555`
+  - `/health` => `0.90.3205`
+  - JSON probe:
+    - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782211982805_0bcb51d6/`
+    - 同目录已有 `client-request.json` / `provider-request.json` / `provider-response.json` / `client-response.json`
+    - `client-request.json` 保存真实 raw bodyText：`{"model":"gpt-5.4","stream":false,"input":"snap-json-probe-20260623T1853c say ok only"}`
+  - SSE probe:
+    - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782210645586_18bdcfb5/client-request.json`
+    - 证明 stream 路径入口 raw 也正常落盘。
+- 当前结论：
+  - `--snap` 默认四件套已经能按 `ports/<port>/<entryRequestId>/` 落盘，并覆盖 JSON + SSE 两条 live 入口。
+  - 旧的 providerKey / router label 目录在 `ports/5555/` 下仍有历史遗留样本，但这轮新样本未再使用它们作为默认四件套目录。
+
+# 2026-06-23 Jason 当前主策略确认：先删 SSE/bridge 脏语义，再接受红，再补应用 owner
+
+- Jason 最新要求：
+  - 最优先目标不是先补应用功能，而是先把 SSE 里不属于它的东西删干净。
+  - 删掉以后如果红，先接受红；红出来的就是应用层 owner 缺失，再去补应用 owner。
+- 本轮已执行：
+  - 已把 `summary` / `hint` 从 SSE/bridge 通路删除，不再允许它们挂在 `responses-sse-bridge.ts` / `handler-response-sse.ts` / generic projection 文件上继续伪装成 bridge 语义。
+- 当前红证据：
+  - `tests/red-tests/server_responses_sse_business_module_contract.test.ts` FAIL
+  - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts` FAIL
+  - 失败原因不是“SSE 还拥有这些函数”，而是旧 red test 仍假设 `summary` / `hint` 会在 bridge projection owner 存在；现在它们被删掉后，暴露出真正的应用 owner 还没补。
+- 当前剩余 gap：
+  - `verify:responses-sse-business-module` 还没收紧到覆盖 `summary` / `hint` 这类应用语义泄漏；后续要把 gate 改成：
+    - SSE/bridge 不得拥有这些语义；
+    - stopless/应用 owner 缺失时应在应用层 red，而不是在 SSE 层兜住。
+
+# 2026-06-23 SSE/bridge summary+hint 删除与 gate 收紧证据
+
+- 已删掉的 bridge/SSE 语义残留：
+  - `summarizeResponsesSseFrameForLogForHttp`
+  - `resolveResponsesProviderProtocolHintFromSseFrameForHttp`
+  - `handler-response-sse.ts` 中基于上述 helper 的 frame summary / protocol sniff / lastRawFrame / lastProjectedFrame 残留
+- 当前 focused 验证：
+  - `rg -n "lastRawClientFrameSummary|lastProjectedClientFrameSummary|summarizeResponsesSseFrameForLogForHttp|resolveResponsesProviderProtocolHintFromSseFrameForHttp" src/server/handlers/handler-response-sse.ts src/modules/llmswitch/bridge/responses-sse-bridge.ts src/modules/llmswitch/bridge/responses-client-projection.ts src/modules/llmswitch/bridge/responses-sse-semantics.ts`
+    - 0 matches
+  - `tests/red-tests/server_responses_sse_business_module_contract.test.ts` PASS
+  - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts` PASS
+  - `npm run verify:responses-sse-business-module` PASS
+- 当前结论：
+  - SSE / SSE bridge / generic client-projection 已不再保留 summary/hint 这类应用语义占位。
+  - 后续若 stopless/应用功能缺失，应在应用 owner（chat process / stopless owner / resp_outbound）侧继续显式暴露，不得回流到 SSE。
+
+# 2026-06-23 SSE closeout 下一层红点：generic bridge 仍持有 project/normalize
+
+- 本轮进一步收紧的 gate 目标：
+  - 不仅 `summary` / `hint` 不得留在 SSE / generic bridge，
+  - `projectResponsesSseFrameForClientForHttp`
+  - `normalizeResponsesSseFrameForClientForHttp`
+    也不允许长期停在 `responses-sse-bridge.ts` / `responses-client-projection.ts` 这种 generic bridge owner。
+- 当前 focused 红证据：
+  - `tests/red-tests/server_responses_sse_business_module_contract.test.ts` FAIL
+  - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts` FAIL
+  - `npm run verify:responses-sse-business-module` FAIL
+- 红点真相：
+  - `responses-sse-bridge.ts` 仍 re-export `projectResponsesSseFrameForClientForHttp` / `normalizeResponsesSseFrameForClientForHttp`
+  - `responses-client-projection.ts` 仍直接实现/承载这两个函数
+  - 这说明 SSE 面虽然更干净了，但 generic bridge 仍在承载 JSON/application 语义，离“纯 transport”终态还有一层要剥。
+- 下一步方向：
+  - 不在 bridge 层修绿。
+  - 继续把这两个能力往正确 JSON/application owner 或 Rust transport owner 重新拆，直到 bridge red 消失而应用 owner 真正接住。
+
+# 2026-06-23 project/normalize 真 owner 锚点确认
+
+- 新证据：
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/mainline-call-map.yml`
+  - `docs/architecture/wiki/response-mainline-call-graph.md`
+  都已把 `projectResponsesClientPayloadForClientNative` 锚到：
+  - `feature_id: hub.response_responses_client_projection`
+  - `HubRespOutbound04ClientSemantic`
+- 结论：
+  - `responses-client-projection.ts` 里的 `projectResponsesSseFrameForClientForHttp` / `normalizeResponsesSseFrameForClientForHttp` 不是“暂时缺少 owner”，而是已经有 `resp_outbound` 真 owner，却还在 generic bridge 晚执行。
+  - 后续应该把这层残留收回 `hub.response_responses_client_projection` / Rust `resp_outbound`，不是在 handler/bridge 继续找合理性。
+
+# 2026-06-23 SSE transport closeout 审计补充：当前真实红点与黑盒缺口
+
+- 当前 owner/gate 证据：
+  - `src/modules/llmswitch/bridge/responses-sse-semantics.ts` 现在只剩 transport/keepalive/direct-passthrough guard/`json -> sse` converter 创建，说明第一层 SSE surface 已基本清干净。
+  - 但 `src/modules/llmswitch/bridge/responses-client-projection.ts` 仍拥有：
+    - `projectResponsesSseFrameForClientForHttp`
+    - `normalizeResponsesSseFrameForClientForHttp`
+    - `shouldSuppressDuplicateApplyPatchSseFrameForHttp`
+    - `normalizeNestedResponsesPayloadInSseFrameForHttp`
+    - `readResponsesClientToolsRawForHttp`
+  - 这证明 apply_patch 去重、required_action/tool projection、nested response normalize 仍停在 generic bridge，不是 transport。
+- 当前门禁结果：
+  - `npm run verify:responses-sse-business-module` FAIL
+    - 直接命中 `responses-client-projection.ts must not own ... projectResponsesSseFrameForClientForHttp`
+    - 直接命中 `responses-client-projection.ts must not own ... normalizeResponsesSseFrameForClientForHttp`
+  - `npm run verify:responses-handler-single-bridge-surface` FAIL
+    - 除上述两个 export 外，还命中 apply_patch/nested normalize/readToolsRaw 等本地 helper 残留
+- 当前黑盒结果：
+  - `tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts` FAIL
+    - “upstream closes without response.done” 当前只看到 `response.completed`，没补出 `response.done`
+    - “upstream required_action without response.completed” 当前没补出 `response.completed` / `response.done`
+  - `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` FAIL
+    - JSON -> SSE bridge case 现在直接落 `event: error` / `code: sse_bridge_error` / `message: SSE stream missing from pipeline result`
+    - live required_action/output projection 仍残留 `{\"patch\":...}` 包装和 `function_call` 形态，没完全投成 freeform `custom_tool_call`
+    - direct passthrough 仍先漏出空 `\"arguments\":\"\"` function_call 再补 custom tool frame
+- 架构锚点复核：
+  - `docs/architecture/function-map.yml` 已把 `hub.response_responses_client_projection` 标成 Rust owner，且 summary 明确包含 “JSON body and SSE frames, including apply_patch freeform custom tool output”
+  - `docs/architecture/mainline-call-map.yml` 已把 `HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic` 锚到 `projectResponsesClientPayloadForClientNative`
+  - 因此当前 bridge 红点不是“owner 缺失”，而是“已有 Rust/resp_outbound owner，但 TS generic bridge 还在晚执行”
+- 当前阶段结论：
+  - Jason 的方向是对的：现在不该把 terminal/apply_patch/required_action 语义补回 SSE。
+  - 正确顺序仍然是：
+    1. 继续锁 boundary，让 `responses-client-projection.ts` 这层残留显式变红
+    2. 用现有黑盒锁住对外行为
+    3. 把这些语义回收到 Rust `resp_outbound` / 正确应用 owner
+    4. 最后再接回 transport shell
+
+# 2026-06-23 SSE boundary lock 继续推进：generic bridge owner 已物理掏空
+
+- 本轮代码收口：
+  - `src/modules/llmswitch/bridge/responses-sse-bridge.ts`
+    - 新增薄壳 `normalizeClientVisibleResponsesSseFrameForHttp(...)`
+    - 只做 frame event/data 解析、requestContext 工具读取、再直接调用 Rust `projectResponsesSseFrameForClientNative(...)`
+    - 不再从 `responses-client-projection.ts` import generic bridge projection helper
+  - `src/server/handlers/handler-response-sse.ts`
+    - 已改成只调用新的 SSE facade `normalizeClientVisibleResponsesSseFrameForHttp(...)`
+  - `src/modules/llmswitch/bridge/responses-client-projection.ts`
+    - 旧 `projectResponsesSseFrameForClientForHttp` / `normalizeResponsesSseFrameForClientForHttp` / apply_patch duplicate suppression / nested normalize helpers 已物理删除
+    - 文件只保留 `import './native-exports.js'; export {};` 占位，避免 generic bridge 语义复活
+- 新验证：
+  - `npm run verify:responses-sse-business-module` PASS
+  - `npm run verify:responses-handler-single-bridge-surface` PASS
+  - `tests/red-tests/server_responses_sse_business_module_contract.test.ts` PASS
+  - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts` PASS
+  - `tests/server/runtime/http-server/executor/provider-response-relay-sse.spec.ts` PASS
+  - `tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts` PASS
+  - `tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` PASS
+- 这一步之后的真实剩余红点：
+  - `tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts` 仍 FAIL
+    - upstream close without `response.done` 时，当前仍没补出 `response.done`
+    - upstream bare `response.required_action` 时，当前仍没补出 `response.completed` / `response.done`
+  - `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` 仍 FAIL
+    - JSON -> SSE force bridge 仍会落 `sse_bridge_error`
+    - `response.required_action` 内嵌 `response.output/required_action` 里仍残留 `function_call` + `{\"patch\":...}` 包装
+    - direct passthrough 仍会先漏出空 `arguments:\"\"` 的 `response.output_item.added`
+- 当前结论：
+  - boundary 锁定这一层已经完成：generic bridge owner 不再持有旧 SSE projection/normalize 语义。
+  - 剩下的红已经更纯，集中暴露为：
+    - terminal repair owner 没有在正确 JSON/non-SSE owner 接住
+    - apply_patch/required_action 深层投影还没完全被 Rust `resp_outbound` 接住
+
+# 2026-06-23 --snap old-sample purge + port-bucket/debug closeout
+
+- 已物理清掉 `~/.rcc/codex-samples/openai-responses` / `openai-chat` 的旧布局目录，并清空目标 `ports/5555`；最终 live 复验后 `openai-responses` 顶层只剩 `ports`。
+- 首轮 repo-local `0.90.3207` live 抓到真实缺口：`providerSnapshotQueueDrain` 报 `[snapshot-writer] entryPort required for stage=provider-error`。这说明不是目录 helper 问题，而是 provider snapshot entry-port reader 没识别 `metadata.routecodexLocalPort`。
+- 已修：
+  - `src/debug/snapshot/provider-writer.ts`：`resolveProviderSnapshotEntryPort(...)` 新增 `routecodexLocalPort` 候选。
+  - `src/debug/snapshot/writer.ts`：所有 `client-*` / `provider-*` stage 一律要求 `ports/<port>/`，禁止根目录 fallback。
+  - `tests/debug/snapshot-default-raw-port-contract.spec.ts`：新增 `provider-error` focused，锁 `routecodexLocalPort -> ports/<port>/<requestId>/provider-error.json`，且禁止根目录 fallback。
+- skills / repo 规则沉淀：
+  - `AGENTS.md`：新增 live debug 入口锁，先看 `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`，再看 `~/.rcc/logs/server-<port>.log`；`port-unknown` / 根目录 `req_*` / 裸 provider 目录都不是允许长期增长的主路径。
+  - `.agents/skills/rcc-dev-skills/references/50-rcc-config-ssot.md`：补 canonical sample/log 查看顺序与 `--snap` 四件套检查口径。
+  - `.agents/skills/rcc-dev-skills/references/92-lessons-2026-06.md`：新增 L92-63，要求 live closeout 前先清旧样本，只认 `ports/<port>/<requestId>`。
+- focused/gate 验证：
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/debug/snapshot-default-raw-port-contract.spec.ts --runInBand` PASS。
+  - `npm run verify:architecture-snapshot-stage-contract` PASS。
+  - `npm run verify:architecture-snapshot-stage-owners` PASS。
+  - `npx tsc -p tsconfig.json --pretty false` PASS。
+- 最终 live 复验（repo-local `node dist/cli.js start --port 5555 --snap --log-level info`）：
+  - health: `{"version":"0.90.3207","status":"ok"}`
+  - probe marker: `snap-json-live2-20260623T191010z say ok only`
+  - 样本目录：`~/.rcc/codex-samples/openai-responses/ports/5555/req_1782213014738_26f110ff/`
+  - 同桶存在：`client-request.json` / `provider-request.json` / `provider-response.json` / `client-response.json`
+  - `client-request.json.bodyText` 为真实 raw：`{"model":"gpt-5.4","stream":false,"input":"snap-json-live2-20260623T191010z say ok only"}`
+  - 顶层验证：`find ~/.rcc/codex-samples/openai-responses -maxdepth 1 -mindepth 1 -type d` 只返回 `ports`

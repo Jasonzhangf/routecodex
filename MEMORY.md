@@ -1,5 +1,7 @@
 # RouteCodex Memory
 
+- 2026-06-23: `--snap` live closeout 的交付口径必须用全局安装版本 `routecodex restart --port <port>` + `/health`，不能再用 repo-local `node dist/cli.js start ...` / `routecodex start ...` 代替。清掉 `~/.rcc/codex-samples/openai-responses` 旧布局后，5555 新 probe 已验证两条样本都落在 `~/.rcc/codex-samples/openai-responses/ports/5555/<requestId>/`，四件套 base 文件齐全；`client-request.bodyText` 与 provider/client response raw 都保留了真实载荷，`routecodex --version` / `/health.version` / sample `__runtime.json.versions.routecodex` 统一为 `0.90.3207`。
+
 - 2026-06-23: debug.unified_surface 已从分散的 diag/snapshot/logger/harness/hooks/policy 收口到 `src/debug/*`；`diag` error artifact 写读统一走 `src/debug/diag/error-artifact.ts`，provider snapshot 写盘统一走 `src/debug/snapshot/writer.ts`，provider snapshot 策略层拆成 `provider-queue/provider-429/provider-sse/provider-errorsample/provider-utils/provider-writer`，旧 provider snapshot queue / 429 / local-mirror / error-spill focused tests 已回绿。`scripts/policy-violations-report.mjs` 已去死 helper 并改由 `tsx` 入口运行。验证通过 `verify:debug-unified-surface`、`verify:function-map-compile-gate`、`verify:architecture-review-surface`、`tests/debug/*`、`tests/providers/core/utils/snapshot-writer.*`、`tests/server/handlers/responses-handler.debug-diag.spec.ts`、`tests/modules/pipeline/utils/debug-logger.*`、`tests/providers/core/hooks/debug-example-hooks.spec.ts`，以及 `scripts/debug/replay-live-minimax-2013.mjs` 对旧 diag 样本的真回放（`violation=none`）。
 
 - 2026-06-22: servertool hook skeleton 的 `ServertoolReqHook01ResultParsed` / `request-side hooks must restore the model-visible pair` 这里的 "restore" 只表示把当前轮 shell `exec_command` 的普通 tool result 还原成模型可见的 hook result，不表示 Responses continuation store/restore。Responses continuation 的 owner 仍然是 `responses_resume.rs` + `responses-conversation-store.ts`；servertool hooks 不能读取 continuation store 来决定恢复，也不能把 `submit_tool_outputs` / `previous_response_id` 当作 hook 自己的职责。
@@ -3413,3 +3415,20 @@ Tags: startupExcludedProviderKeys, virtual-router-config, direct_model, ecodev, 
 - For `/v1/responses` `forceSSE` JSON-to-SSE and relay SSE stream, continuation persistence must happen before entering SSE transport: `sendPipelineResponse` dispatches through `responses-response-bridge.ts` lifecycle helpers, then hands finalized stream/body to `handler-response-sse.ts`.
 - `responses-sse-bridge.ts` must not re-export response payload projection helpers such as `normalizeResponsesClientPayloadForHttp`; payload projection belongs to lifecycle/response bridge.
 - Verified by forbidden-symbol scan over SSE handler/bridge/semantics, focused TS scan, SSE red tests and handler blackbox (`server_responses_sse_business_module_contract`, `server_responses_sse_surface_single_owner`, `handler-response-utils.force-sse-json-responses`, `handler-response-utils.required-action-split-frame`), `cargo test -p router-hotpath-napi responses_conversation`, native build, and architecture gates.
+
+# 2026-06-23 --snap default raw+port truth
+
+- Default `--snap` four-piece path truth is `~/.rcc/codex-samples/<endpoint>/ports/<entryPort>/<clientRequestId>/`; new live samples must not use providerKey/router-label directories as the default four-piece bucket.
+- `client-request` has two required owners:
+  - request-executor path must open local snapshot gate before `writeInboundClientSnapshot` (`src/server/runtime/http-server/executor/request-executor-request-state.ts`);
+  - direct lanes must explicitly capture inbound client snapshot before entering `router-direct` / `provider-direct` execution (`src/server/runtime/http-server/index.ts`).
+- Request-side metadata must carry `entryPort/matchedPort/localPort` from handler entry (`chat-handler.ts`, `messages-handler.ts`, `responses-handler.ts`) so `client-request` can satisfy the mandatory `ports/<port>/...` contract.
+- Verified live on `5555` with repo-local `node dist/cli.js start --snap --port 5555`:
+  - JSON sample `req_1782211982805_0bcb51d6` contains `client-request.json`, `provider-request.json`, `provider-response.json`, `client-response.json` in the same request dir.
+  - `client-request.json` stores raw `bodyText` for the original JSON request.
+
+# 2026-06-23 --snap port enforcement follow-up
+
+- `provider-error` snapshot writes also belong under `ports/<entryPort>/<clientRequestId>/`; root-level `req_*` fallback is no longer acceptable for any `client-*` / `provider-*` stage.
+- `src/debug/snapshot/provider-writer.ts` must recognize `metadata.routecodexLocalPort` when resolving port-scoped provider snapshot writes; provider error call sites may only carry that port hint through metadata.
+- Live closeout rule: after cleaning old samples, the only allowed top-level sample dir under `openai-responses` / `openai-chat` is `ports`.

@@ -103,9 +103,23 @@ function normalizeRequestId(raw?: string): string {
   return trimmed.replace(/[^A-Za-z0-9_.-]/g, '_') || `req_${Date.now()}`;
 }
 
-function normalizeProviderToken(raw?: string): string {
-  if (!raw || typeof raw !== 'string') return '';
-  return raw.trim().replace(/[^A-Za-z0-9_.-]/g, '_');
+function requiresPortScopedSnapshotDir(stage: string): boolean {
+  const normalized = String(stage || '').trim().toLowerCase();
+  return normalized.startsWith('client-')
+    || normalized.startsWith('provider-');
+}
+
+function resolveRequiredEntryPort(stage: string, entryPort?: number): number | undefined {
+  const numeric = typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0
+    ? Math.floor(entryPort)
+    : undefined;
+  if (numeric !== undefined) {
+    return numeric;
+  }
+  if (requiresPortScopedSnapshotDir(stage)) {
+    throw new Error(`[snapshot-writer] entryPort required for stage=${stage}`);
+  }
+  return undefined;
 }
 
 function toErrorCode(err: unknown): string | undefined {
@@ -188,17 +202,11 @@ function buildSnapshotPayload(input: SnapshotWriteInput): unknown {
   return result;
 }
 
-function resolveSnapshotDir(folder: string, groupRequestId: string, providerToken?: string, entryPort?: number): string {
+function resolveSnapshotDir(folder: string, groupRequestId: string, entryPort?: number): string {
   const base = resolveSnapshotRoot();
-  const portSegment =
-    typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0
-      ? path.join('ports', String(Math.floor(entryPort)))
-      : '';
-  if (providerToken) {
-    return portSegment
-      ? path.join(base, folder, portSegment, providerToken, groupRequestId)
-      : path.join(base, folder, providerToken, groupRequestId);
-  }
+  const portSegment = entryPort !== undefined
+    ? path.join('ports', String(entryPort))
+    : '';
   return portSegment
     ? path.join(base, folder, portSegment, groupRequestId)
     : path.join(base, folder, groupRequestId);
@@ -212,9 +220,9 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
   if (!shouldCaptureSnapshotStage(input.stage)) return;
 
   const groupRequestId = normalizeRequestId(input.groupRequestId || input.requestId);
-  const providerToken = normalizeProviderToken(input.providerKey);
   const folder = mapEndpointToFolder(input.entryEndpoint);
   const stageSafe = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
+  const entryPort = resolveRequiredEntryPort(input.stage, input.entryPort);
   const builtPayload = input.rawPayload ?? buildSnapshotPayload(input);
   const payload = coerceSnapshotPayloadForWrite(input.stage, builtPayload);
   if (payload === undefined) return;
@@ -229,7 +237,7 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
           requestId: input.requestId,
           groupRequestId,
           providerKey: input.providerKey,
-          entryPort: input.entryPort,
+          entryPort,
           data: payload,
           verbosity: input.verbosity || 'verbose',
         });
@@ -241,14 +249,14 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
 
   if (!canWriteSnapshotToLocalDisk(input.requestId, groupRequestId)) return;
 
-  const dir = resolveSnapshotDir(folder, groupRequestId, providerToken || undefined, input.entryPort);
+  const dir = resolveSnapshotDir(folder, groupRequestId, entryPort);
   await ensureDir(dir);
   await ensureSnapshotRuntimeMarker(dir, {
     endpoint: input.entryEndpoint || '/v1/chat/completions',
     requestId: input.requestId,
     groupRequestId,
     providerKey: input.providerKey,
-    ...(typeof input.entryPort === 'number' ? { entryPort: input.entryPort, matchedPort: input.entryPort } : {}),
+    ...(typeof entryPort === 'number' ? { entryPort, matchedPort: entryPort } : {}),
   });
 
   try {

@@ -11,7 +11,8 @@
 8. **llmswitch-core 禁止新增 TS 功能代码**：如有必要，一律转为 Rust 实现，TS 仅允许保留最小调用壳层。
 9. **Hub Pipeline / Chat Process 必须 Rust-only**：凡属 Hub Pipeline / chat process / req_chatprocess / resp_chatprocess / servertool followup orchestration 的语义、判定、修复、兼容、sanitize、tool list 注入与裁剪，唯一真源必须在 Rust，TS 收缩为薄壳转发。
 10. **只写必要代码，且必须最小合规**：新增/修改代码前，先证明它是完成当前需求所必需的；禁止加入用户未要求、问题未证明需要、或不影响验收的代码。实现必须保持最小合规面，能删则删，能不加就不加。
-11. **已移除 provider 禁止复活**：已物理删除的 provider 不得恢复其 runtime、contract、probe、harness、compat profile、fixture、script、test、doc 或 config 入口，除非 Jason 明确授权新 provider 设计。
+ 11. **已移除 provider 禁止复活**：已物理删除的 provider 不得恢复其 runtime、contract、probe、harness、compat profile、fixture、script、test、doc 或 config 入口，除非 Jason 明确授权新 provider 设计。
+ 12. **错误处理硬骨架（2026-06-20 纠偏）**：所有 provider 错误一律可切（含 401/403/INVALID_API_KEY/INSUFFICIENT_QUOTA/ACCOUNT_DISABLED 等）。唯一停止条件：相关可选池 + default 池**同时**为空。`default 池永远不可空` 是配置/VR 真源硬约束（每个 routing group 必须有显式 default fallback tier）。禁止 `router-direct` / `provider-direct` / `RequestExecutor` / provider runtime / `http-error-mapper` 在 `candidateExhausted=false` 或 `defaultPoolAvailable=true` 时 rethrow 或投影 provider error。`client_disconnect` 仍是 health-neutral（不切、不投影 4xx），不属于本骨架覆盖。真源见 `docs/error-handling-v2.md` 与新 `docs/goals/provider-error-reroutable-until-pool-and-default-empty.md`。
 12. **Hub Pipeline / Virtual Router 禁止 provider 特例**：Hub Pipeline 与 Virtual Router 永远只承载协议、路由、工具治理的通用语义；禁止写入任何 provider-specific 分支、shape 修补、上下文补偿或已移除 provider 特例。provider 差异只能在对应 Provider runtime 内解决。
 13. **direct passthrough 禁止换壳转换**：router-direct/provider-direct 的唯一职责是 provider passthrough + hooks；禁止进入 HubPipeline response conversion/chat-process/servertool response orchestration，禁止新增 direct response 专用壳、SSE materialize/remap/canonicalize、fallback/patch/shape 修补；禁止 direct 5xx/转换错误通过 `routecodexSameProtocolDirectDisabled` 重入 executor/reroute。
 14. **Hub Pipeline 流水线锁定原则**：靠“类型不可接 + 运行时必拦 + 导出不可见 + 红测必红”锁住 `req_inbound -> req_chatprocess -> req_outbound -> resp_inbound -> resp_chatprocess -> resp_outbound`，禁止靠约定维护阶段边界；`req_inbound` 是唯一标准化入口，`req_chatprocess` 禁止协议转换，`req_outbound` 是唯一 provider wire build。
@@ -20,6 +21,8 @@
 17. **错误链唯一入口锁**：provider/runtime/direct/executor 错误必须单向进入 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`；`router-direct` / `RequestExecutor` / provider runtime 只能作为 source/caller，不得本地实现 retry/reroute/cooldown/health policy，不得手拼 provider error event。
 18. **红测→绿化→旧样本在线复测锁**：每次开发新功能或修复缺陷，必须先固化最小 failing sample / red test 并确认当前为红，再修改唯一真源让其转绿；绿化后必须在线重放旧错误样本或同入口真实样本，证明不是只对单测修好的虚假修复。没有“先红”证据或没有旧样本在线复测证据，不得宣称闭环完成。
 19. **Responses continuation 三重隔离锁**：Responses continuation / submit_tool_outputs / scope materialize 必须同时按 `entry protocol(or endpoint)`、`continuationOwner(direct|relay)`、`session/conversation(+port/group)` 建立恢复隔离键。禁止普通 chat/messages 入口命中 responses continuation scope；禁止 direct continuation 续到 relay；禁止 relay continuation 伪装成 direct remote continuation；禁止仅凭 session/scope 命中历史自动续接。
+20. **live debug 样本/日志入口锁**：运行时排障先看 `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`，再看 `~/.rcc/logs/server-<port>.log`；`port-unknown`、根目录 `req_*`、裸 provider 目录都不是允许长期增长的主路径，验证 canonical `ports/<port>/` 后必须物理清理旧样本。
+21. **live 重启/验证命令锁**：受管端口 live 验证只允许使用全局安装版本 `routecodex restart --port <port>` + `/health`；禁止把 repo-local `node dist/cli.js start ...`、`routecodex start ...` 或其他 start/node-dist 口径当作交付验证真相。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
@@ -168,6 +171,7 @@ client-visible error
 6. Provider 模型名双轨契约（2026-06-12）：`provider.models.<modelId>` 的 key 即唯一 upstream/provider wire model 名；`aliases` 仅供客户端可见模型名和客户端入口匹配使用。`/v1/models` 可以展示 alias（无 alias 时展示 `modelId`），但 provider 出站请求里的 `body.model` 必须始终回写为 `modelId`，禁止把 alias 直接发给上游。
 7. Responses continuation 契约（2026-06-12）：remote/upstream-owned `responseId/previous_response_id` 必须记 `continuationOwner=direct` 并沿 same-protocol direct 续接；本地 relay/materialize 生成的 continuation id 必须记 `continuationOwner=relay` 并只走 relay。`store:false` 不得阻止同一 response 的 tool continuation 持久化；response 侧若仍有 pending tool call，必须以 response 真相将 `allowContinuation=true`。`providerKey` 只能存在于 runtime/meta carrier 做 direct pin，禁止写回 resumed/materialized provider payload。
 8. Responses continuation 隔离补充（2026-06-13）：continuation 恢复键必须同时锁 `entry protocol/endpoint + continuationOwner + session/conversation(+port/group)`；不能只靠 session scope materialize。普通 `/v1/chat/completions` / `/v1/messages` 入口命中到 Responses continuation 时必须显式拒绝，而不是桥接补偿；`buildChatRequestFromResponses` 只消费已确认属于 Responses owner 的 `fullInput`。
+9. Codex 模型能力真源补充（2026-06-21）：`/v1/models` 不是可选展示面，而是 Codex 的模型目录与模型级能力真源。对 `/v1/responses` 路径，Codex 会从 `/v1/models` 的 `ModelInfo` 读取 `supports_reasoning_summaries`、`support_verbosity`、`supports_parallel_tool_calls`、`context_window/max_context_window`、`supports_search_tool`、`use_responses_lite`、`tool_mode`、`input_modalities` 等字段来构造 runtime 请求；`modelProvider/capabilities/read` 只返回 provider 级布尔值（`namespace_tools/image_generation/web_search`），不能替代 `/v1/models`。因此若要让 Codex 对某模型（如 `gpt-5.5`）获得完整能力，`/v1/models` 必须稳定列出该模型并返回完整 `ModelInfo`；否则只会落到 fallback metadata，不能视为“完整能力可用”。
 
 ## 2026-06-05 硬编码 + Fallback 架构收口引用
 

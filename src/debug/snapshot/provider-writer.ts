@@ -87,6 +87,7 @@ function resolveProviderSnapshotEntryPort(metadata?: Record<string, unknown>): n
     metadata.entryPort,
     metadata.matchedPort,
     metadata.localPort,
+    metadata.routecodexLocalPort,
     portContext?.matchedPort,
     portContext?.localPort
   ];
@@ -146,8 +147,7 @@ export async function writeProviderSnapshot(options: ProviderSnapshotWriteOption
       entryEndpoint: options.entryEndpoint,
       requestId: options.requestId,
       clientRequestId: options.clientRequestId,
-      providerKey: options.providerKey,
-      providerId: options.providerId
+      entryPort: resolveProviderSnapshotEntryPort(options.metadata)
     };
     await purge429ProviderSnapshotArtifacts(purgeInput);
     schedule429ProviderSnapshotPurge(purgeInput);
@@ -192,6 +192,7 @@ export async function writeClientSnapshot(options: {
   requestId: string;
   headers?: Record<string, unknown>;
   body: unknown;
+  rawBodyText?: string;
   metadata?: Record<string, unknown>;
   providerKey?: string;
 }): Promise<void> {
@@ -215,10 +216,14 @@ export async function writeClientSnapshot(options: {
       options.metadata && typeof options.metadata === 'object'
         ? options.metadata
         : undefined;
-    const snapshotPayload = {
-      body: options.body,
-      metadata: metadataSnapshot || {}
-    };
+    const entryPort = resolveProviderSnapshotEntryPort(metadataSnapshot);
+    const snapshotPayload =
+      typeof options.rawBodyText === 'string'
+        ? options.rawBodyText
+        : {
+            body: options.body,
+            metadata: metadataSnapshot || {}
+          };
     const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
       stage,
       data: snapshotPayload,
@@ -226,6 +231,7 @@ export async function writeClientSnapshot(options: {
       url: endpoint,
       extraMeta: {
         entryEndpoint: endpoint,
+        ...(typeof entryPort === 'number' ? { entryPort, matchedPort: entryPort } : {}),
         stream: options.metadata?.stream,
         userAgent: options.metadata?.userAgent
       }
@@ -237,6 +243,7 @@ export async function writeClientSnapshot(options: {
       groupRequestId,
       providerKey: providerToken || undefined,
       entryEndpoint: options.entryEndpoint,
+      entryPort,
       data: payload,
       rawPayload: payload,
       verbosity: 'verbose',
