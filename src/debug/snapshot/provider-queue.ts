@@ -86,6 +86,7 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput, forc
     entryPort: input.entryPort,
     data: input.payload,
     rawPayload: input.payload,
+    runtimeMetadata: input.runtimeMetadata,
     verbosity: 'verbose',
     forceLocalDiskWriteWhenDisabled,
   });

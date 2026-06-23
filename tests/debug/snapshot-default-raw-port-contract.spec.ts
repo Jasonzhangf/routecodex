@@ -5,6 +5,7 @@ import { jest } from '@jest/globals';
 
 import { runtimeFlags, setRuntimeFlag } from '../../src/runtime/runtime-flags.js';
 import { writeServerSnapshot } from '../../src/utils/snapshot-writer.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import {
   __flushProviderSnapshotQueueForTests,
   __resetProviderSnapshotQueueForTests,
@@ -86,6 +87,15 @@ describe('snapshot default raw + port contract', () => {
 
     expect(parsed.bodyText).toContain('"input":"true-raw-body"');
     expect(raw).not.toContain('parsed-body-should-not-be-primary-raw');
+    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
+      requestId,
+      groupRequestId: requestId,
+      entryPort: 5555,
+      runtimeMetadata: expect.objectContaining({
+        matchedPort: 5555,
+        stream: false
+      })
+    }));
   });
 
   it('does not collapse oversized client-request payloads into meta-only snapshots', async () => {
@@ -227,5 +237,84 @@ describe('snapshot default raw + port contract', () => {
     await expect(
       fs.stat(path.join(tempDir, 'openai-responses', requestId, 'provider-error.json'))
     ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
+      requestId,
+      groupRequestId: requestId,
+      providerKey: 'mock.provider',
+      entryPort: 5555,
+      runtimeMetadata: expect.objectContaining({
+        routecodexLocalPort: 5555
+      })
+    }));
+  });
+
+  it('projects metadata-center request truth and continuation state into snapshot runtime metadata', async () => {
+    const requestId = 'req_client_request_truth_projection';
+    allowSnapshotLocalDiskWrite(requestId);
+    const metadata: Record<string, unknown> = {
+      matchedPort: 5555,
+      stream: false
+    };
+    const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth('sessionId', 'sess-proj-1', {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol: 'metadata_center_projection_test',
+      stage: 'test'
+    });
+    center.writeRequestTruth('conversationId', 'conv-proj-1', {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol: 'metadata_center_projection_test',
+      stage: 'test'
+    });
+    center.writeContinuationContext('continuationOwner', 'relay', {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol: 'metadata_center_projection_test',
+      stage: 'test'
+    });
+    center.writeContinuationContext('previousResponseId', 'resp-prev-1', {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol: 'metadata_center_projection_test',
+      stage: 'test'
+    });
+    center.writeContinuationContext('responsesResume', { previousRequestId: 'req-prev-1' }, {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol: 'metadata_center_projection_test',
+      stage: 'test'
+    });
+    center.writeRuntimeControl('stopless', { active: true, repeatCount: 2 }, {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol: 'metadata_center_projection_test',
+      stage: 'test'
+    });
+    center.writeRuntimeControl('stoplessGoalStatus', 'continue_needed', {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol: 'metadata_center_projection_test',
+      stage: 'test'
+    });
+
+    await writeClientSnapshot({
+      entryEndpoint: '/v1/responses',
+      requestId,
+      headers: { 'content-type': 'application/json' },
+      body: { input: 'metadata center projection probe' },
+      metadata
+    });
+
+    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
+      requestId,
+      groupRequestId: requestId,
+      entryPort: 5555,
+      runtimeMetadata: expect.objectContaining({
+        sessionId: 'sess-proj-1',
+        conversationId: 'conv-proj-1',
+        continuationOwner: 'relay',
+        previousResponseId: 'resp-prev-1',
+        responsesResume: expect.objectContaining({ previousRequestId: 'req-prev-1' }),
+        runtime_control: expect.objectContaining({
+          stopless: expect.objectContaining({ active: true, repeatCount: 2 }),
+          stoplessGoalStatus: 'continue_needed'
+        })
+      })
+    }));
   });
 });

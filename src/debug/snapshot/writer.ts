@@ -12,6 +12,11 @@ import {
   resolveSnapshotKeepRecentRequestDirs,
 } from '../../utils/snapshot-request-retention.js';
 import { redactSensitiveData } from '../../utils/sensitive-redaction.js';
+import { MetadataCenter } from '../../server/runtime/http-server/metadata-center/metadata-center.js';
+import {
+  readRuntimeControlProjection,
+  readRuntimeRequestTruthIdentifiers
+} from '../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 type SnapshotHookWriter = (payload: Record<string, unknown>) => Promise<void>;
 let snapshotHookWriterPromise: Promise<SnapshotHookWriter | null> | null = null;
 
@@ -48,6 +53,7 @@ export interface SnapshotWriteInput {
   url?: string;
   extraMeta?: Record<string, unknown>;
   rawPayload?: unknown;
+  runtimeMetadata?: Record<string, unknown>;
   forceLocalDiskWriteWhenDisabled?: boolean;
 }
 
@@ -214,6 +220,60 @@ function buildSnapshotPayload(input: SnapshotWriteInput): unknown {
   return result;
 }
 
+function buildSnapshotRuntimeMetadata(
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+  const projected: Record<string, unknown> = { ...metadata };
+  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
+  const continuation = MetadataCenter.read(metadata)?.readContinuationContext();
+  const runtimeControl = readRuntimeControlProjection(metadata);
+
+  if (requestTruth.sessionId) {
+    projected.sessionId = requestTruth.sessionId;
+  }
+  if (requestTruth.conversationId) {
+    projected.conversationId = requestTruth.conversationId;
+  }
+  if (typeof continuation?.continuationOwner === 'string' && continuation.continuationOwner.trim()) {
+    projected.continuationOwner = continuation.continuationOwner.trim();
+  }
+  if (typeof continuation?.responseId === 'string' && continuation.responseId.trim()) {
+    projected.responseId = continuation.responseId.trim();
+  }
+  if (typeof continuation?.previousResponseId === 'string' && continuation.previousResponseId.trim()) {
+    projected.previousResponseId = continuation.previousResponseId.trim();
+  }
+  if (continuation?.responsesResume && typeof continuation.responsesResume === 'object') {
+    projected.responsesResume = continuation.responsesResume;
+  }
+  if (continuation?.responsesRequestContext && typeof continuation.responsesRequestContext === 'object') {
+    projected.responsesRequestContext = continuation.responsesRequestContext;
+  }
+  if (runtimeControl.routeHint) {
+    projected.routeHint = runtimeControl.routeHint;
+  }
+
+  const runtimeControlSummary: Record<string, unknown> = {};
+  for (const key of [
+    'serverToolFollowup',
+    'serverToolFollowupSource',
+    'stopless',
+    'stoplessGoalStatus'
+  ] as const) {
+    if (runtimeControl[key] !== undefined) {
+      runtimeControlSummary[key] = runtimeControl[key];
+    }
+  }
+  if (Object.keys(runtimeControlSummary).length > 0) {
+    projected.runtime_control = runtimeControlSummary;
+  }
+
+  return projected;
+}
+
 function resolveSnapshotDir(folder: string, groupRequestId: string, entryPort?: number): string {
   const base = resolveSnapshotRoot();
   const portSegment = entryPort !== undefined
@@ -243,6 +303,7 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
     ? builtPayload
     : coerceSnapshotPayloadForWrite(input.stage, builtPayload);
   if (payload === undefined) return;
+  const runtimeMetadata = buildSnapshotRuntimeMetadata(input.runtimeMetadata);
 
   if (snapshotsEnabled) {
     try {
@@ -256,6 +317,7 @@ export async function writeUnifiedSnapshot(input: SnapshotWriteInput): Promise<v
           providerKey: input.providerKey,
           entryPort,
           data: payload,
+          runtimeMetadata,
           verbosity: input.verbosity || 'verbose',
         });
       }

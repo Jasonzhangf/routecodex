@@ -134,7 +134,17 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
     }
   }));
 
-  return { endpoint, folder, stage, requestId, groupRequestId, providerToken, payload, entryPort };
+  return {
+    endpoint,
+    folder,
+    stage,
+    requestId,
+    groupRequestId,
+    providerToken,
+    payload,
+    entryPort,
+    runtimeMetadata: options.metadata
+  };
 }
 
 function buildClientOversizeSnapshotArtifact(args: {
@@ -182,6 +192,7 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput, forc
     entryPort: input.entryPort,
     data: input.payload,
     rawPayload: input.payload,
+    runtimeMetadata: input.runtimeMetadata,
     verbosity: 'verbose',
     forceLocalDiskWriteWhenDisabled,
   });
@@ -307,6 +318,7 @@ export async function writeClientSnapshot(options: {
       entryPort,
       data: payload,
       rawPayload: payload,
+      runtimeMetadata: metadataSnapshot,
       verbosity: 'verbose',
     });
   } catch (error) {
