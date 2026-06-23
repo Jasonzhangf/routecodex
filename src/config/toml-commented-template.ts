@@ -110,6 +110,8 @@ holdMaxMs = 60000
 # 网页搜索引擎配置
 # injectPolicy: selective 按需注入, always 总是注入
 # 引擎配置决定哪个 provider 处理 web_search 请求
+# executionMode = "servertool": 注入 canonical web_search function tool，由 RouteCodex 执行搜索。
+# executionMode = "direct": 仅用于已验证 provider 原生搜索且 capabilities 含 web_search_direct 的引擎。
 #------------------------------------------------------------------------------
 [virtualrouter.routingPolicyGroups."default".webSearch]
 injectPolicy = "selective"
@@ -120,8 +122,7 @@ id = "example:web_search_engine"
 providerKey = "search_provider.provider_search"
 description = "示例搜索引擎 (请替换为实际 provider)"
 default = true
-executionMode = "direct"
-directActivation = "route"
+capabilities = ["web_search"]
+executionMode = "servertool"
 modelId = "default-model"
-serverToolsDisabled = true
 `;

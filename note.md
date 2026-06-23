@@ -1,3 +1,116 @@
+# 2026-06-23 OpenAI-compatible SSE 5xx regression audit
+
+- 症状：Jason 报告最近修改后 OpenAI 通路变 500；样本中 5555/5520 出现 provider 403/504/520/5xx 类错误，需先区分上游错误与本地 wire 回归。
+- 样本结论：
+  - 最新 5555 真实 provider-error 主要是 upstream 403/504（如 `asxs.top | 504`、quota 403），不是所有样本都是本地 500。
+  - 旧 direct 520 样本是测试桩 `upstream exploded`，不作为生产根因。
+  - 真实可疑修改点在 `src/providers/core/runtime/provider-request-shaping-utils.ts::buildProviderHttpRequestBody`：最近未提交 hunk 让 `familyProfile.buildRequestBody` 分支绕过 `ensureGenericStreamField`，会造成 OpenAI-compatible SSE 请求只带 `Accept: text/event-stream`，provider body 丢 `stream:true`。
+- 修复：
+  - 已把 profile body 分支恢复为同 legacy/default 分支一样调用 `ensureGenericStreamField`；当前该实现与 HEAD 正确形态一致。
+  - 新增红测 `tests/providers/core/runtime/provider-request-shaping-utils.metadata-boundary.spec.ts::preserves positive SSE intent when a family profile builds the provider payload`，先红后绿，锁 profile body 不再丢 `stream:true`。
+- 验证：
+  - 红测先红：新增 focused test 在修复前收到 `{ model, messages }`，缺 `stream:true`。
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/provider-request-shaping-utils.metadata-boundary.spec.ts` PASS（5/5）。
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/protocol-http-providers.unit.test.ts` PASS（18/18）。
+  - `git diff --check` PASS。
+  - `npm run build:min` BLOCKED by unrelated dirty Rust compile errors in `virtual_router_engine/provider_bootstrap.rs` around `model_compatibility_profiles` struct fields; cannot do install/restart/live closeout until that compile surface is fixed.
+
+# 2026-06-23 5555 XLC/glm tool marker display pollution audit
+
+- Jason correction: do not call this a qwen provider issue. 5555 sample owner must be proven from samples first.
+- Sample truth:
+  - First marker appearance in 5555 samples is `req_1782197544523_1e7b5fd9`.
+  - `provider-request.json` for `XLC.key1.glm-5.2` is clean: no `<|tool_calls_section_begin|>`, model `glm-5.2`, tools include `exec_command`, messages count 666.
+  - Same request `provider-response.json` first contains marker text in upstream `choices[0].message.content`; `tool_calls=[]`, `finish_reason=stop`, provider `XLC`, model `glm-5.2`, URL `https://xlapis.com/v1/chat/completions`.
+  - Later `req_1782197728965_6f1d2f99` and following requests carry that marker in `provider-request.messages.*.content`; diag shows the same marker in `requestBody.input.*.content.0.text`, `capturedEntryRequest`, `contextSnapshot`, and `responsesContext`.
+  - In chat wire for `req_1782197728965_6f1d2f99`, leaked marker appears as `messages.451.role=user`, proving displayed transcript/history was polluted and replayed to providers.
+- Config truth:
+  - Runtime provider is `~/.rcc/provider/XLC/config.v2.toml`, provider type `openai`, no provider-level `compatibilityProfile`.
+  - XLC is a multi-model aggregation provider: `glm-5.2`, deepseek, minimax, kimi. Setting provider-level `chat:glm` would be wrong because it would affect non-GLM models.
+  - Rust provider bootstrap currently resolves missing provider-level compatibility profile to `compat:passthrough`; target profiles inherit only runtime/provider-level profile. Model-level compat is not represented in target profile.
+- Current root-cause candidates to red-test:
+  1. target/profile generation cannot express model-level `compatibilityProfile` for XLC `glm-5.2`, so GLM response compat is not invoked.
+  2. Even if `chat:glm` is invoked, GLM response parser currently has tests for DSML/fenced/bracketed formats but not this exact `<|tool_calls_section_begin|>` marker format, so it may still fail to harvest/strip.
+
+# 2026-06-23 web_search direct/non-direct capability gate
+
+- 本轮修复目标：区分 `web_search_provider` / canonical `web_search` / `web_search_direct`，并防止 MiniMax 这种 non-direct search provider 被 direct/builtin web search 路由命中。
+- 已落地的 Rust 真源：
+  - `web_search_mode.rs`：`executionMode=direct` 只有在 engine capabilities 显式包含 `web_search_direct` 时才生效；只有 `web_search` 时解析为 `Servertool`。
+  - `hub_pipeline_blocks/web_search.rs` / `chat_servertool_orchestration.rs` / bridge tests：direct builtin rewrite 和 skip servertool 都依赖同一个 resolver；MiniMax-like `executionMode=direct + capabilities=["web_search"]` 仍保留 canonical function tool `web_search`，不改成 `web_search_20250305`。
+  - `virtual_router_engine/routing/config.rs`：`web_search` 与 `web_search_direct` capability filtering 精确匹配，不再互相代偿。
+  - `virtual_router_engine/config_bootstrap.rs`：webSearch engine capabilities 会被 normalize/preserve 到 runtime metadata。
+- 配置/声明层：
+  - `/Users/fanzhang/.rcc/provider/minimax/config.v2.toml` 只声明 `web_search`，没有 `web_search_direct`。
+  - `/Users/fanzhang/.rcc/config.toml` 当前没有 `virtualrouter.*.webSearch.engines` / `executionMode` / `directActivation` / `web_search_direct`，MiniMax 不会被配置层强行 direct。
+  - 仅发现旧 `/Users/fanzhang/.rcc/provider/glm/config.v1.json` 有 `webSearch.engines`，不属于当前 MiniMax active config。
+- function/verification map：
+  - 新增 `hub.web_search_tool_governance`，owner 绑定到 Rust `web_search_mode.rs`，allowed paths 覆盖 adjacent Rust tool injection / VR filtering / config bootstrap / TS 壳层声明。
+  - 新增 `npm run build:native-hotpath` script 作为 function-map 允许引用的 package gate。
+- 验证结果：
+  - `cargo test -p router-hotpath-napi web_search --lib -- --nocapture` PASS：46 passed。
+  - `cargo test -p router-hotpath-napi test_plan_chat_web_search_operations --lib -- --nocapture` PASS：4 passed。
+  - `cargo test -p router-hotpath-napi resolves_responses_bridge_tools --lib -- --nocapture` PASS：9 passed。
+  - `cargo test -p router-hotpath-napi capability_filter --lib -- --nocapture` PASS：3 passed。
+  - `cargo test -p router-hotpath-napi normalize_web_search_resolves_provider_key_from_route_targets --lib -- --nocapture` PASS：1 passed。
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/provider-sdk/provider-inspect.spec.ts tests/sharedmodule/virtual-router-websearch-provider-resolution.spec.ts` PASS：8 tests。
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/cli/config-command.spec.ts -t "webSearch"` PASS：7 tests。
+  - `npm run build:native-hotpath` PASS（Rust warnings remain existing noisy baseline）。
+  - `git diff --check` PASS。
+  - `npm run verify:function-map-compile-gate` PASS。
+  - `npm run verify:architecture-mainline-call-map` PASS。
+  - `npm run verify:architecture-mainline-manifest-sync` PASS。
+- Live/runtime status:
+  - `curl http://127.0.0.1:5555/health` 返回 `version=0.90.3198`。
+  - 最新 0.90.3198 MiniMax sample `openai-responses-minimax.key1-MiniMax-M3-20260623T151722951-396224-1634` 只证明普通 `exec_command` 返回，client body 未出现 `web_search_20250305`；但该样本不是 search 请求，且没有 provider-request artifact，不能作为完整 web_search live 证据。
+  - 当前 active config 缺 `webSearch.engines` 后端，所以还不能证明 “canonical `web_search` tool_use -> RouteCodex 执行搜索 -> tool_output 回灌 -> 最终搜索答案” 的 live 闭环。
+- 剩余风险：
+  - 没有先红日志，不能声称本轮保留了完整 red-before-green 证据；只能声称当前 tests/gates 锁住目标行为。
+  - 需要后续明确配置一个 `web_search_provider` backend（MiniMax Token Plan CLI/MCP 或等价 servertool search backend）后，再跑 5555 MiniMax-M3 search+ordinary-tool live probe，并抓 provider request / tool output / final answer。
+
+# 2026-06-23 stopless relay materialized submit_tool_outputs tool-loss root cause
+
+- 继续拆黑盒以避免大集成 spec OOM：
+  - 新增独立小 spec：`tests/server/handlers/stopless-submit-tool-outputs.tools-blackbox.spec.ts`
+  - 从 `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` 物理删除重复的 stopless submit handler 黑盒，只保留小 spec 作为唯一 owner。
+  - 当前小 spec 已经排除两类伪红：
+    - 缺失 `MetadataCenter` continuation context 导致首轮 response 无法持久化 request context。
+    - 手动先调 `resumeResponsesConversation(...)` 把 continuation entry 自己消费掉。
+  - 当前真实红点已经锁定在 handler 续轮入参：
+    - `handleResponses(...) -> executePipeline(...)` 的 `pipelineInput.body.previous_response_id === responseId`
+    - 但 `pipelineInput.body.tools === undefined`
+    - 这说明“submit_tool_outputs 续轮 provider 请求缺 tools”现在已经有独立小黑盒，不再依赖巨型 integration spec。
+  - 已确认根因与修复：
+    - `prepareResponsesHandlerRuntimeForHttp(...)` 同时返回 `payload` 和 `requestContext`，其中 `requestContext.payload` 已含 relay restore 后的 `tools`，但下游 `executePipeline` 仍吃旧 `payload`，导致第二轮 provider request 缺 `tools`。
+    - 已修 `src/modules/llmswitch/bridge/responses-request-bridge.ts`：request bridge 返回的 canonical `payload` 改为 `requestContext.payload`，不再把恢复好的 tools 只留在 side context。
+  - 回归验证：
+    - `npm run jest:run -- --runInBand --runTestsByPath tests/server/handlers/stopless-submit-tool-outputs.tools-blackbox.spec.ts --detectOpenHandles --forceExit` PASS
+    - 该黑盒现已证明：`handleResponses(...) -> executePipeline(...)` 的 submit_tool_outputs 第二轮入参同时保留 `previous_response_id` 与 `body.tools=[{type:\"function\",name:\"exec_command\"}]`。
+
+- Jason 要求不要再靠线上样本猜，先用黑盒红测把请求端和 provider 入口锁住。
+- 新确认根因：
+  - `resumeResponsesConversation(...)` 对 relay `submit_tool_outputs` 已经正确产出 `meta.restoredTools`。
+  - 但 `buildResponsesRequestContextForHttp(...)` 只在“原始 provider-owned submit payload”分支回填 `restoredTools`；当 payload 已经被 materialize 成 `previous_response_id + input` 形态时，会掉回 native capture 分支，导致 `payload.tools/context.toolsRaw` 丢失。
+  - 这解释了 Jason 看到的 stopless 续轮/provider 入口 `tools` 为空：不是 store 没存住，而是 request-bridge 恢复时把 store 已恢复出的 tools 白白丢掉了。
+- 修复：
+  - `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+  - 新增 relay materialized submit_tool_outputs 判定：只要是 relay continuation，且 payload 已有 `previous_response_id + input`，同时 `resumeMeta.fullInput` 存在，就必须继续回填 `resumeMeta.restoredTools` 到 `payload.tools/context.toolsRaw`，不能再走丢工具的 native capture 分支。
+- 新黑盒/红测证据：
+  - `tests/sharedmodule/responses-continuation-store.spec.ts`
+    - `RED: relay materialized submit_tool_outputs resume keeps tools through request bridge restore`
+    - 用真实 `capture -> recordResponse -> resumeResponsesConversation -> buildResponsesRequestContextForHttp` 链锁住 request 端恢复后 tools 仍在。
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts`
+    - `RED: relay materialized submit_tool_outputs payload must still retain restored tools`
+    - 锁住 bridge 恢复分支不再把 materialized relay payload 误判成普通请求。
+  - `tests/providers/core/runtime/protocol-http-providers.unit.test.ts`
+    - `HTTP TRANSPORT RED: openai responses provider-request snapshot preserves tool continuation wire shape`
+    - 额外补断言 `providerBody.tools === inbound.tools`，锁住 provider 入口不会再把恢复好的 tools 丢掉。
+- 当前验证：
+  - `tests/sharedmodule/responses-continuation-store.spec.ts -t "relay materialized submit_tool_outputs resume keeps tools through request bridge restore"` PASS
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts` PASS
+  - `tests/providers/core/runtime/protocol-http-providers.unit.test.ts -t "openai responses provider-request snapshot preserves tool continuation wire shape"` PASS
+- 当前还没重新做 5555 live probe；这轮先把 Jason 要求的离线黑盒锁住，再决定是否回线上复测。
+
 # 2026-06-23 stopless live hook/hang truth
 
 - Jason 提示截图里 stopless 像“挂死”。
@@ -13,6 +126,18 @@
   - 当前 5555 live 证据显示：首轮 `requires_action + exec_command`，submit_tool_outputs 续轮后会自然收口到 terminal。
   - 首轮 stopless 提示文本当前仍作为 `response.output[type=reasoning].summary` 发给 client；terminal 文本才作为 `message/output_text` 发出。
   - 若要改善排版，可以考虑把“stopless 生成的可见提示文本”单独投影成 `message/output_text`，但这应只限 stopless 生成文本，不能把通用 reasoning 语义整体改成正文。
+
+# 2026-06-23 stopless continuation test audit
+
+- Jason 纠偏：不要把注意力放在 SSE 出口；核心是返回前状态、操作顺序、continuation save/restore 与 stopless hook 的语义顺序是否正确。
+- 现有测试覆盖：
+  - `tests/server/handlers/stopless-submit-tool-outputs.tools-blackbox.spec.ts` 证明首轮 response 可保存 continuation，第二轮 handler 入 `executePipeline` 时 `entryEndpoint=/v1/responses`、`previous_response_id` 保留、`body.tools` 含 `exec_command`。
+  - `tests/server/handlers/responses-response-bridge.provider-switch-retention.spec.ts` 证明 requires_action response 只用 canonical `responseId` 记录/保留，不回退写 router request id / provider attempt id。
+  - Rust `hub_pipeline_lib` 测试证明 `/v1/responses` stopless 请求会注入 stop schema guidance，并且 stopless CLI result 会在 provider payload 里重写成模型可见 `reasoningStop` tool_use/tool_result。
+- 当前测试缺口：
+  - 缺完整黑盒断言“首轮 provider request 已带 stop guidance + reasoningStop tool，首轮 response hook 把 stop/tool_call schema 判定后投影成客户端 `exec_command`，且保存的是投影后的 canonical continuation truth”。
+  - 缺黑盒断言“第二轮 submit 在 restore 后，把 `exec_command` CLI output 还原为内置 `reasoningStop` tool result，再下发 provider request”，当前黑盒只断到 `executePipeline` 入参 tools 不丢。
+  - 缺字段级契约矩阵：每阶段必须检查 `entryEndpoint`、`responseId/previous_response_id`、`continuationOwner`、`payload.input`、`payload.tools/context.toolsRaw`、stop guidance、`reasoningStop` tool_use/tool_result、client `required_action.exec_command`、store saved body。
 
 # 2026-06-23 stopless closeout audit after rebuild/install/restart
 
@@ -12337,3 +12462,33 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - 对 Responses current turn，如果 user 图像后面跟了 `function_call` / `function_call_output`，`latest_role` 会变成 `assistant/tool`，导致 `has_image_attachment=false`，从而错过 `multimodal` route。
 - 正确语义：不要求图片一定挂在最新 entry 上，但必须只看 current turn 的 user carrier，不能吃历史 turn。
 - 已补 focused Rust test：current turn user image + trailing tool entries 仍需 `has_image_attachment=true` 且 classifier 命中 `multimodal`。
+
+# 2026-06-23 dev build/install/restart and OpenAI 5555 live truth
+
+- Jason 纠偏：本轮必须跑 `dev`，不能跑 release。
+- `npm run build:dev` PASS；脚本链路执行 `build:base -> fix:cli-permission -> install:global`，并显示 `RouteCodex server restarted: localhost:5555`。
+- 独立验证：
+  - `routecodex --version` => `0.90.3201`
+  - `curl http://127.0.0.1:5555/health` => `ready=true`, `pipelineReady=true`, `version=0.90.3201`
+- 5555 OpenAI `/v1/responses` live probes:
+  - 非工具请求 `gpt-5.5` / `Reply with exactly: pong` => HTTP 200，返回 `pong`。
+  - 首轮 function tool 请求 `exec_command(cmd=echo routecodex-tool-ok)` => HTTP 200，client response 为 `requires_action`，样本 `~/.rcc/codex-samples/openai-responses/port-5555/req_1782201780144_b8ba6afd/`，provider `asxs.crsa.gpt-5.4-mini`，`provider-response.json` 为 200 且标准 `function_call`，不是文本工具 marker。
+  - `submit_tool_outputs` 续轮 => HTTP 200，返回 `status=completed`, `output_text=Stopped.`，样本 `~/.rcc/codex-samples/openai-responses/port-5555/req_1782201883614_7b107d42/`，无 `provider-error.json`；provider-request 保留 assistant `tool_calls` + tool message + tools。
+- 当前证据结论：dev 重装重启后的 5555 OpenAI 基础请求、首轮 tool call、submit_tool_outputs 续轮均未复现 500；当前不能宣称“provider 把工具调用发成文本且我们未收割”是本轮 500 根因。旧 XLC/glm marker 样本与当前 5555 live 成功样本必须分开处理。
+
+# 2026-06-23 `--snap` raw boundary + debug owner audit
+
+- CLI 与 contract 真相：
+  - `routecodex start --snap` 会设置 `ROUTECODEX_SNAPSHOT=1`，默认 selector 走 `getDefaultSnapshotStageSelector()`；同时强制 `ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS=1`。
+  - `docs/architecture/snapshot-stage-contract.md` 明确默认 `--snap` 四件套：`client-request` / `provider-request` / `provider-response` / `client-response`。
+- 请求入口 raw 真相：
+  - 当前 `client-request` 快照来自 `writeInboundClientSnapshot -> writeClientSnapshot`，保存的是 `PipelineExecutionInput.body` 与 metadata，不是字节级 HTTP raw body。
+  - server middleware 入口使用 `express.json(...)`；因此入口 body 在进入 snapshot 前已被 JSON parse。
+- provider 输出 raw 真相：
+  - 非 SSE / 可 probe 成 JSON 的 provider 输出会直接以 `phase='provider-response'` 保存完整 response 对象。
+  - SSE provider 输出分两段：
+    - 先写一个 `provider-response` 元信息快照（`mode: sse`, `captureSse`, `transport`）。
+    - `attachProviderSseSnapshotStream(...)` 再聚合最多 256 KiB upstream SSE 文本，额外落一个同 phase 的 `provider-response` 快照（通常文件名带 `_1`），其中 `bodyText` 才是 raw stream 文本。
+- debug owner 真相：
+  - `src/debug/index.ts` 只是 facade/registry；现状不是“snapshot 唯一使用 debug 模块”。
+  - 项目自带审计 `docs/audits/2026-06-22-debug-unified-surface-audit.md` 已明确：当前不存在 single debug owner，snapshot/provider hook 等 ownership 仍是 split。
