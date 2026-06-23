@@ -2,8 +2,6 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::hub_pipeline_blocks::protocol::resolve_provider_protocol;
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SseStreamInput {

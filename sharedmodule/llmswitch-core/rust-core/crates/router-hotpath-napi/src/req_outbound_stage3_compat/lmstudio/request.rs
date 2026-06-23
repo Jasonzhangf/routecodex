@@ -1,7 +1,5 @@
-use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use sha2::Sha256;
-use uuid::Uuid;
 
 use super::super::AdapterContext;
 
