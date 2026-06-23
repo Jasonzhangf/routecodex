@@ -328,7 +328,18 @@ pub fn resolve_runtime_stop_message_state(
 pub fn resolve_runtime_stop_message_state_from_adapter_context(
     input: &RuntimeStopMessageStateFromAdapterContextInput,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
-    if let Some(snapshot) = resolve_stopless_cli_result_snapshot_from_request(&input.adapter_context)
+    if let Some(snapshot) =
+        resolve_stopless_cli_result_snapshot_from_request(&input.adapter_context)
+    {
+        return Some(snapshot);
+    }
+    if let Some(snapshot) =
+        resolve_stopless_cli_result_snapshot_from_responses_resume(&input.adapter_context)
+    {
+        return Some(snapshot);
+    }
+    if let Some(snapshot) =
+        resolve_stopless_cli_result_snapshot_from_responses_resume(input.runtime_metadata.as_ref()?)
     {
         return Some(snapshot);
     }
@@ -345,6 +356,14 @@ pub fn resolve_runtime_stop_message_state_from_adapter_context(
     None
 }
 
+fn resolve_stopless_cli_result_snapshot_from_responses_resume(
+    carrier: &Value,
+) -> Option<RuntimeStopMessageStateSnapshot> {
+    let record = carrier.as_object()?;
+    let resume = record.get("responsesResume").and_then(Value::as_object)?;
+    read_stopless_cli_result_snapshot_from_tool_output_details(resume.get("toolOutputsDetailed")?)
+}
+
 fn resolve_stopless_cli_result_snapshot_from_runtime_metadata(
     runtime_metadata: Option<&Value>,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
@@ -356,9 +375,7 @@ fn resolve_stopless_cli_result_snapshot_from_runtime_metadata(
         responses_context.get("payload"),
         responses_context.get("context"),
     ] {
-        if let Some(snapshot) =
-            candidate.and_then(read_stopless_cli_result_snapshot_from_request)
-        {
+        if let Some(snapshot) = candidate.and_then(read_stopless_cli_result_snapshot_from_request) {
             return Some(snapshot);
         }
     }
@@ -376,6 +393,21 @@ fn resolve_stopless_cli_result_snapshot_from_request(
     }
     if let Some(captured_request) = get_captured_request(adapter_context) {
         if let Some(snapshot) = read_stopless_cli_result_snapshot_from_request(&captured_request) {
+            return Some(snapshot);
+        }
+    }
+    None
+}
+
+fn read_stopless_cli_result_snapshot_from_tool_output_details(
+    details: &Value,
+) -> Option<RuntimeStopMessageStateSnapshot> {
+    let rows = details.as_array()?;
+    for row_value in rows {
+        let row = row_value.as_object()?;
+        let raw_output = read_trimmed_string(row.get("outputText"))
+            .or_else(|| read_trimmed_string(row.get("output")))?;
+        if let Some(snapshot) = read_stopless_cli_result_snapshot_from_output_text(&raw_output) {
             return Some(snapshot);
         }
     }
@@ -409,34 +441,42 @@ fn read_stopless_cli_result_snapshot_from_request(
     for output in candidate_outputs {
         let output_record = output.as_object()?;
         let raw_output = read_trimmed_string(output_record.get("output"))?;
-        let parsed: Value = serde_json::from_str(&raw_output).ok()?;
-        let row = parsed.as_object()?;
-        if read_trimmed_string(row.get("toolName")).as_deref() != Some("stop_message_auto") {
-            continue;
+        if let Some(snapshot) = read_stopless_cli_result_snapshot_from_output_text(&raw_output) {
+            return Some(snapshot);
         }
-        if read_trimmed_string(row.get("flowId")).as_deref() != Some(STOP_MESSAGE_FOLLOWUP_FLOW_ID) {
-            continue;
-        }
-        let repeat_count = read_js_nonnegative_integer(row.get("repeatCount"))?;
-        let max_repeats = read_js_nonnegative_integer(row.get("maxRepeats"))?;
-        if max_repeats <= 0 {
-            continue;
-        }
-        let text = read_trimmed_string(row.get("continuationPrompt"))
-            .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
-        return Some(RuntimeStopMessageStateSnapshot {
-            text,
-            provider_key: None,
-            max_repeats,
-            used: repeat_count.saturating_sub(1),
-            source: Some("client_exec_result".to_string()),
-            updated_at: None,
-            last_used_at: None,
-            stage_mode: Some("on".to_string()),
-            ai_mode: None,
-        });
     }
     None
+}
+
+fn read_stopless_cli_result_snapshot_from_output_text(
+    raw_output: &str,
+) -> Option<RuntimeStopMessageStateSnapshot> {
+    let parsed: Value = serde_json::from_str(raw_output).ok()?;
+    let row = parsed.as_object()?;
+    if read_trimmed_string(row.get("toolName")).as_deref() != Some("stop_message_auto") {
+        return None;
+    }
+    if read_trimmed_string(row.get("flowId")).as_deref() != Some(STOP_MESSAGE_FOLLOWUP_FLOW_ID) {
+        return None;
+    }
+    let repeat_count = read_js_nonnegative_integer(row.get("repeatCount"))?;
+    let max_repeats = read_js_nonnegative_integer(row.get("maxRepeats"))?;
+    if max_repeats <= 0 {
+        return None;
+    }
+    let text = read_trimmed_string(row.get("continuationPrompt"))
+        .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
+    Some(RuntimeStopMessageStateSnapshot {
+        text,
+        provider_key: None,
+        max_repeats,
+        used: repeat_count.saturating_sub(1),
+        source: Some("client_exec_result".to_string()),
+        updated_at: None,
+        last_used_at: None,
+        stage_mode: Some("on".to_string()),
+        ai_mode: None,
+    })
 }
 
 pub fn read_runtime_stop_message_stage_mode(runtime_metadata: &Value) -> Option<String> {
@@ -2154,6 +2194,45 @@ mod tests {
     }
 
     #[test]
+    fn adapter_context_responses_resume_tool_outputs_restore_current_stopless_cli_result() {
+        let input = RuntimeStopMessageStateFromAdapterContextInput {
+            runtime_metadata: Some(json!({
+                "stopMessageState": {
+                    "stopMessageText": " stale runtime text ",
+                    "stopMessageStageMode": "on",
+                    "stopMessageMaxRepeats": 3,
+                    "stopMessageUsed": 0
+                }
+            })),
+            adapter_context: json!({
+                "responsesResume": {
+                    "continuationOwner": "relay",
+                    "toolOutputsDetailed": [{
+                        "callId": "call_servertool_cli",
+                        "originalId": "call_servertool_cli",
+                        "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from relay submit output\",\"repeatCount\":2,\"maxRepeats\":3}"
+                    }],
+                    "fullInput": [{
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "上一轮执行结果：repeatCount=2/3。"
+                        }]
+                    }]
+                }
+            }),
+        };
+
+        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
+            .expect("responses resume tool output snapshot");
+        assert_eq!(snapshot.text, "continue from relay submit output");
+        assert_eq!(snapshot.max_repeats, 3);
+        assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
+    }
+
+    #[test]
     fn adapter_context_prefers_raw_request_tool_output_over_captured_chat_request() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: None,
@@ -2468,5 +2547,4 @@ mod tests {
         };
         assert!(resolve_implicit_gemini_stop_message_snapshot(&tool_like).is_none());
     }
-
 }

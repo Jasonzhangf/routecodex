@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import { spawnSync } from 'node:child_process';
 import express from 'express';
 
 function setEnv(name, value) {
@@ -99,10 +100,135 @@ function upstreamResponse(text, finish = 'stop') {
   };
 }
 
+function findExecCommandTool(body) {
+  const toolCalls = body?.required_action?.submit_tool_outputs?.tool_calls;
+  if (!Array.isArray(toolCalls)) {
+    return null;
+  }
+  for (const call of toolCalls) {
+    if (call?.name !== 'exec_command' && call?.function?.name !== 'exec_command') {
+      continue;
+    }
+    const raw = call?.function?.arguments ?? call?.arguments ?? '';
+    if (typeof raw !== 'string' || !raw.trim()) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.cmd === 'string') {
+        return {
+          callId: call.tool_call_id || call.id || call.call_id,
+          command: parsed.cmd
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function parseSseResponseEnvelope(text) {
+  const response = {};
+  let lastPayload = null;
+  const blocks = String(text || '').split(/\r?\n\r?\n/u);
+  for (const block of blocks) {
+    const lines = block.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) {
+      continue;
+    }
+    let event = '';
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        event = line.slice('event:'.length).trim();
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice('data:'.length).trim());
+      }
+    }
+    const data = dataLines.join('\n').trim();
+    if (!data || data === '[DONE]') {
+      continue;
+    }
+    let payload;
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      continue;
+    }
+    lastPayload = payload;
+    if (payload && typeof payload === 'object') {
+      const candidate = payload.response && typeof payload.response === 'object'
+        ? payload.response
+        : payload;
+      if (
+        event === 'response.completed'
+        || event === 'response.done'
+        || event === 'response.required_action'
+        || candidate?.object === 'response'
+        || candidate?.required_action
+      ) {
+        Object.assign(response, candidate);
+      }
+    }
+  }
+  if (Object.keys(response).length > 0) {
+    materializeResponsesOutputText(response);
+    return response;
+  }
+  if (lastPayload && typeof lastPayload === 'object') {
+    const fallback = lastPayload.response && typeof lastPayload.response === 'object'
+      ? lastPayload.response
+      : lastPayload;
+    materializeResponsesOutputText(fallback);
+    return fallback;
+  }
+  throw new Error(`Unable to materialize SSE response envelope: ${text.slice(0, 500)}`);
+}
+
+function materializeResponsesOutputText(response) {
+  if (!response || typeof response !== 'object' || typeof response.output_text === 'string') {
+    return;
+  }
+  const output = Array.isArray(response.output) ? response.output : [];
+  const parts = [];
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const part of content) {
+      if (typeof part?.text === 'string') {
+        parts.push(part.text);
+      }
+    }
+  }
+  if (parts.length > 0) {
+    response.output_text = parts.join('');
+  }
+}
+
+function parseJsonOrSseResponse(text) {
+  const trimmed = String(text || '').trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return JSON.parse(trimmed);
+  }
+  return parseSseResponseEnvelope(trimmed);
+}
+
+function runCliCommand(command) {
+  const result = spawnSync('sh', ['-c', command], {
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024
+  });
+  if (result.status !== 0) {
+    throw new Error(`CLI failed: ${result.stderr || `exit ${result.status}`}`);
+  }
+  return JSON.parse(result.stdout);
+}
+
 async function main() {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-stopless-blackbox-'));
   const home = path.join(tmp, 'home');
   const sessionDir = path.join(tmp, 'sessions');
+  const sessionId = `stopless-relay-${Date.now()}`;
   await fs.mkdir(home, { recursive: true });
   await fs.mkdir(sessionDir, { recursive: true });
 
@@ -171,14 +297,26 @@ async function main() {
       executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input),
       errorHandling: routeCodex.errorHandling
     }));
+    app.post('/v1/responses/:id/submit_tool_outputs', (req, res) => handleResponses(req, res, {
+      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input),
+      errorHandling: routeCodex.errorHandling
+    }, {
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      responseIdFromPath: req.params?.id
+    }));
     harnessServer = await listen(http.createServer(app));
 
     const resp = await fetch(`${harnessServer.baseUrl}/v1/responses`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-session-id': sessionId,
+        'x-conversation-id': sessionId
+      },
       body: JSON.stringify({
         model: 'gpt-5.3-codex',
         stream: false,
+        metadata: { sessionId, conversationId: sessionId },
         input: [{
           role: 'user',
           content: [{ type: 'input_text', text: '请直接回复一句“阶段完成”，然后结束。<**stopless:on**>' }]
@@ -189,32 +327,86 @@ async function main() {
     const text = await resp.text();
     assert.equal(resp.status, 200, `expected 200, got ${resp.status}, body=${text}`);
     const body = JSON.parse(text);
-    const toolCalls = body?.required_action?.submit_tool_outputs?.tool_calls;
-    assert.ok(Array.isArray(toolCalls) && toolCalls.length > 0, `expected required_action tool call projection, body=${text}`);
-    const execTool = toolCalls.find((item) => item?.name === 'exec_command' || item?.function?.name === 'exec_command');
+    const execTool = findExecCommandTool(body);
     assert.ok(execTool, `expected exec_command projection, body=${text}`);
-    const rawArgs = execTool?.function?.arguments ?? execTool?.arguments ?? '';
-    const args = JSON.parse(rawArgs);
+    const command = execTool.command;
+    const args = JSON.parse(command.match(/--input-json '([^']+)'(?=\s--|$)/)?.[1] || '{}');
     assert.ok(
-      typeof args?.cmd === 'string'
-        && (
-          args.cmd.includes('routecodex hook run stop_message_auto')
-          || args.cmd.includes('routecodex servertool run stop_message_auto')
-        ),
-      `expected stop_message_auto CLI projection, args=${rawArgs}`
+      command.includes('routecodex hook run reasoningStop'),
+      `expected reasoningStop CLI projection, args=${command}`
     );
+    assert.match(command, /--session-id '[^']+'/u, `expected request-truth session id in command, args=${command}`);
+    assert.match(command, /--request-id '[^']+'/u, `expected request-truth request id in command, args=${command}`);
     assert.ok(
-      !String(args.cmd).includes('continuationPrompt') && !String(args.cmd).includes('stopreason'),
-      `expected status-only CLI input without leaked guidance, args=${rawArgs}`
+      !String(command).includes('continuationPrompt') && !String(command).includes('stopreason'),
+      `expected status-only CLI input without leaked guidance, args=${command}`
     );
     assert.equal(upstreamHits.length, 1, `expected exactly one upstream hit before client-side CLI execution, got ${upstreamHits.length}`);
     assert.equal(upstreamHits[0]?.isFollowup, false, `unexpected server-side followup upstream hit: ${JSON.stringify(upstreamHits)}`);
     assert.equal(upstreamHits[0]?.providerFromAuth, 'crs1', `initial request should use first round-robin provider, hits=${JSON.stringify(upstreamHits)}`);
 
+    const cliOutput1 = runCliCommand(command);
+    assert.equal(cliOutput1.sessionId, sessionId, `expected CLI sessionId to round-trip, stdout=${JSON.stringify(cliOutput1)}`);
+    assert.equal(cliOutput1.requestId, body.request_id || body.id || execTool.callId, `expected CLI requestId to round-trip, stdout=${JSON.stringify(cliOutput1)}`);
+
+    const submit1 = await fetch(`${harnessServer.baseUrl}/v1/responses/${encodeURIComponent(body.id)}/submit_tool_outputs`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-session-id': sessionId,
+        'x-conversation-id': sessionId
+      },
+      body: JSON.stringify({
+        tool_outputs: [
+          {
+            tool_call_id: execTool.callId,
+            output: JSON.stringify(cliOutput1)
+          }
+        ]
+      })
+    });
+    const submitText1 = await submit1.text();
+    assert.equal(submit1.status, 200, `expected first submit_tool_outputs to succeed, body=${submitText1}`);
+    const submitBody1 = parseJsonOrSseResponse(submitText1);
+    const execTool2 = findExecCommandTool(submitBody1);
+    assert.ok(execTool2, `expected second-round exec_command projection, body=${submitText1}`);
+    const submitInput2 = JSON.parse(execTool2.command.match(/--input-json '([^']+)'(?=\s--|$)/)?.[1] || '{}');
+    assert.equal(submitInput2.repeatCount, 2, `expected repeatCount=2 after first submit, body=${submitText1}`);
+
+    const cliOutput2 = runCliCommand(execTool2.command);
+    const submit2 = await fetch(`${harnessServer.baseUrl}/v1/responses/${encodeURIComponent(submitBody1.id)}/submit_tool_outputs`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-session-id': sessionId,
+        'x-conversation-id': sessionId
+      },
+      body: JSON.stringify({
+        tool_outputs: [
+          {
+            tool_call_id: execTool2.callId,
+            output: JSON.stringify(cliOutput2)
+          }
+        ]
+      })
+    });
+    const submitText2 = await submit2.text();
+    assert.equal(submit2.status, 200, `expected second submit_tool_outputs to succeed, body=${submitText2}`);
+    const submitBody2 = parseJsonOrSseResponse(submitText2);
+    const execTool3 = findExecCommandTool(submitBody2);
+    assert.ok(!execTool3, `expected terminal stopless result after third round, body=${submitText2}`);
+    assert.ok(
+      typeof submitBody2?.output_text === 'string'
+        && submitBody2.output_text.includes('stopless budget exhausted'),
+      `expected terminal stopless body to report budget exhaustion, body=${submitText2}`
+    );
+
     console.log('✅ stopless blackbox passed', JSON.stringify({
       upstreamHits: upstreamHits.length,
       providers: upstreamHits.map((hit) => hit.providerFromAuth),
-      execCommand: args.cmd,
+      sessionId,
+      execCommand: command,
+      repeatCount2: submitInput2.repeatCount,
       status: resp.status
     }));
   } finally {

@@ -160,6 +160,29 @@ function buildStopSchemaFeedback(args: {
   };
 }
 
+function resolveFailFastStopSummaryPrefix(schemaGate: {
+  reason_code?: string;
+  summary_prefix?: string | null;
+}): string {
+  if (schemaGate.reason_code === 'stop_schema_budget_exhausted') {
+    return 'stopless budget exhausted';
+  }
+  return typeof schemaGate.summary_prefix === 'string' ? schemaGate.summary_prefix : '';
+}
+
+function isStopSchemaBudgetTerminalAfterCurrentTurn(args: {
+  schemaGate: { action?: string; count_budget?: boolean; countBudget?: boolean };
+  persistPlan: { nextUsed: number; nextMaxRepeats: number };
+}): boolean {
+  const countBudget = args.schemaGate.count_budget ?? args.schemaGate.countBudget;
+  return args.schemaGate.action === 'followup'
+    && countBudget !== false
+    && Number.isFinite(args.persistPlan.nextMaxRepeats)
+    && args.persistPlan.nextMaxRepeats > 0
+    && Number.isFinite(args.persistPlan.nextUsed)
+    && args.persistPlan.nextUsed >= args.persistPlan.nextMaxRepeats;
+}
+
 function writeStoplessLearnedNoteFromRustPlan(args: {
   adapterContext: Record<string, unknown>;
   requestId: string;
@@ -489,7 +512,7 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (
     compare.observationHash = typeof schemaGate.observation_hash === 'string' ? schemaGate.observation_hash : '';
     compare.observationStableCount = typeof schemaGate.no_change_count === 'number' ? schemaGate.no_change_count : 0;
     if (schemaGate.action === 'fail_fast') {
-      const prefixed = applyStopSummaryPrefix(ctx.base, '');
+      const prefixed = replaceStopSummaryContent(ctx.base, resolveFailFastStopSummaryPrefix(schemaGate));
       return buildStopSchemaFinalPlan(prefixed);
     }
 
@@ -533,6 +556,12 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (
     });
     compare.maxRepeats = persistPlan.compareMaxRepeats;
     compare.remaining = persistPlan.compareRemaining;
+    if (isStopSchemaBudgetTerminalAfterCurrentTurn({ schemaGate, persistPlan })) {
+      compare.reason = 'stop_schema_budget_exhausted';
+      compare.remaining = 0;
+      const terminal = replaceStopSummaryContent(ctx.base, 'stopless budget exhausted');
+      return buildStopSchemaFinalPlan(terminal);
+    }
     const snapInput = {
       text: persistPlan.snapshot.text,
       ...(persistPlan.snapshot.providerKey ? { providerKey: persistPlan.snapshot.providerKey } : {}),
