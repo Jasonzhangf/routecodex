@@ -25,7 +25,6 @@ mod gemini_openai_codec;
 mod hashline;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
-mod hub_chat_envelope_validator;
 mod hub_pipeline;
 mod hub_pipeline_blocks;
 mod hub_pipeline_contracts;
@@ -268,11 +267,9 @@ pub fn resolve_virtual_router_routing_state_key_json(metadata_json: String) -> N
 }
 
 #[napi]
-pub fn evaluate_singleton_route_pool_exhaustion_json(
-    input_json: String,
-) -> NapiResult<String> {
-    let input: SingletonRoutePoolExhaustionInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+pub fn evaluate_singleton_route_pool_exhaustion_json(input_json: String) -> NapiResult<String> {
+    let input: SingletonRoutePoolExhaustionInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output: SingletonRoutePoolExhaustionDecision =
         evaluate_singleton_route_pool_exhaustion(&input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -1813,9 +1810,7 @@ pub fn plan_stopless_orchestration_action_json(input_json: String) -> NapiResult
 }
 
 #[napi(js_name = "normalizeStoplessTriggerHintForMetadataJson")]
-pub fn normalize_stopless_trigger_hint_for_metadata_json(
-    input_json: String,
-) -> NapiResult<String> {
+pub fn normalize_stopless_trigger_hint_for_metadata_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::normalize_stopless_trigger_hint_for_metadata_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
