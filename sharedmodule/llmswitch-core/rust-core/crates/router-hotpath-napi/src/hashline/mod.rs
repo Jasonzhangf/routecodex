@@ -6,14 +6,11 @@ mod hashline_types;
 
 use serde::{Deserialize, Serialize};
 
-pub use hashline_apply::{apply_hashline_ops, materialize_changeset};
-pub use hashline_hash::{compute_line_hash, compute_line_hashes, verify_anchor};
+pub use hashline_apply::apply_hashline_ops;
+pub use hashline_hash::compute_line_hash;
 pub use hashline_parser::parse_hashline_ops;
 pub use hashline_to_apply_patch::emit_apply_patch;
-pub use hashline_types::{
-    ApplyResult, HashlineChangeset, HashlineConflict, HashlineError, HashlineErrorCode, HashlineOp,
-    OpKind,
-};
+pub use hashline_types::{HashlineChangeset, HashlineError, OpKind};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

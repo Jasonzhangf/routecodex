@@ -3,6 +3,7 @@ use crate::hub_pipeline_blocks::adapter_context::resolve_adapter_context_client_
 use crate::hub_pipeline_blocks::metadata::resolve_stop_message_router_metadata;
 use crate::hub_pipeline_blocks::process_mode::resolve_active_process_mode;
 use crate::hub_pipeline_blocks::protocol::{normalize_endpoint, resolve_provider_protocol};
+use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use chrono;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -56,7 +57,7 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
     if !input.payload.is_object() && !input.payload.is_array() {
         return Err("Payload must be a JSON object or array".to_string());
     }
-    let payload = input.payload.clone();
+    let mut payload = input.payload.clone();
 
     let mut output_metadata = input.metadata.as_object().cloned().unwrap_or_default();
     output_metadata.insert("endpoint".to_string(), Value::String(endpoint));
@@ -105,7 +106,7 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
     } else {
         "request".to_string()
     };
-    output_metadata.insert("direction".to_string(), Value::String(direction));
+    output_metadata.insert("direction".to_string(), Value::String(direction.clone()));
 
     let stage = if input.stage.eq_ignore_ascii_case("outbound") {
         "outbound".to_string()
@@ -113,6 +114,11 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
         "inbound".to_string()
     };
     output_metadata.insert("stage".to_string(), Value::String(stage));
+
+    if direction == "request" {
+        normalize_shell_like_tool_calls_before_governance(&mut payload)
+            .map_err(|error| error.to_string())?;
+    }
 
     let route_hint = output_metadata
         .get("routeHint")
@@ -147,11 +153,7 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
     })
 }
 
-pub use crate::hub_pipeline_blocks::napi_bindings::{
-    build_router_metadata_input_json, coerce_standardized_request_from_payload_json,
-    extract_model_hint_from_metadata_json, normalize_hub_endpoint_json, resolve_sse_protocol_json,
-    resolve_stop_message_router_metadata_json, run_hub_pipeline_json,
-};
+pub use crate::hub_pipeline_blocks::napi_bindings::run_hub_pipeline_json;
 
 #[cfg(test)]
 #[path = "hub_pipeline_tests.rs"]

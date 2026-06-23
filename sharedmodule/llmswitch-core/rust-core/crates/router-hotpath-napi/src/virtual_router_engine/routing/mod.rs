@@ -5,8 +5,6 @@ mod key_utils;
 mod metadata;
 mod primary_exhausted_to_default_pool;
 mod selection;
-mod source_normalizer;
-mod target_expander;
 mod utils;
 
 #[allow(unused_imports)]
@@ -33,12 +31,9 @@ pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,
     resolve_instruction_target, InstructionTargetMatchMode,
 };
-pub(crate) use source_normalizer::normalize_routing;
-pub(crate) use target_expander::expand_routing_table;
 
 #[allow(unused_imports)]
 pub(crate) use primary_exhausted_to_default_pool::{
-    plan_primary_exhausted_to_default_pool,
-    PrimaryExhaustedPlanInput, PrimaryExhaustedToDefaultPoolPlan, PrimaryExhaustedPlanStatus,
-    RoutePoolTierInput,
+    plan_primary_exhausted_to_default_pool, PrimaryExhaustedPlanInput, PrimaryExhaustedPlanStatus,
+    PrimaryExhaustedToDefaultPoolPlan, RoutePoolTierInput,
 };

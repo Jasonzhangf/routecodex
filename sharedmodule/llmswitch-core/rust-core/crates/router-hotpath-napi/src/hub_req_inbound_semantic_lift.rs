@@ -1,7 +1,5 @@
 use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};
 use crate::shared_tool_mapping::build_anthropic_tool_alias_map_from_slice;
-use napi::bindgen_prelude::Result as NapiResult;
-use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -94,6 +92,13 @@ fn map_resume_tool_outputs_detailed(responses_resume: &Value) -> Vec<ResumeToolO
     mapped
 }
 
+fn sanitize_responses_resume_for_semantics(value: &Value) -> Option<Value> {
+    let mut row = value.as_object()?.clone();
+    row.remove("sessionId");
+    row.remove("conversationId");
+    Some(Value::Object(row))
+}
+
 fn build_responses_continuation(
     payload: Option<&Value>,
     responses_resume: Option<&Value>,
@@ -107,6 +112,8 @@ fn build_responses_continuation(
         resume_obj.and_then(|row| read_object_trimmed_string(row, "restoredFromResponseId"));
     let previous_response_id =
         payload_obj.and_then(|row| read_object_trimmed_string(row, "previous_response_id"));
+    let route_hint = resume_obj.and_then(|row| read_object_trimmed_string(row, "routeHint"));
+    let provider_key = resume_obj.and_then(|row| read_object_trimmed_string(row, "providerKey"));
 
     let chain_id = previous_request_id
         .clone()
@@ -137,6 +144,12 @@ fn build_responses_continuation(
     }
     if !resume_from.is_empty() {
         continuation.insert("resumeFrom".to_string(), Value::Object(resume_from));
+    }
+    if let Some(route_hint) = route_hint {
+        continuation.insert("routeHint".to_string(), Value::String(route_hint));
+    }
+    if let Some(provider_key) = provider_key {
+        continuation.insert("providerKey".to_string(), Value::String(provider_key));
     }
 
     let mapped_outputs = responses_resume
@@ -180,6 +193,10 @@ fn build_responses_continuation(
     continuation.insert(
         "stateOrigin".to_string(),
         Value::String("openai-responses".to_string()),
+    );
+    continuation.insert(
+        "continuationOwner".to_string(),
+        Value::String("relay".to_string()),
     );
     continuation.insert("restored".to_string(), Value::Bool(true));
 
@@ -302,15 +319,20 @@ fn ensure_object(value: &mut Value) -> &mut Map<String, Value> {
 
 pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) -> Value {
     let mut chat_envelope = input.chat_envelope;
-    let has_direct_tool_outputs = ensure_object(&mut chat_envelope)
+    let envelope = ensure_object(&mut chat_envelope);
+    let payload_value = envelope
+        .entry("payload".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let payload = ensure_object(payload_value);
+
+    let has_direct_tool_outputs = payload
         .get("toolOutputs")
         .and_then(|v| v.as_array())
         .map(|v| !v.is_empty())
         .unwrap_or(false);
 
     let (has_client_tools_raw, has_tool_alias_map, has_responses_resume) = {
-        let envelope = ensure_object(&mut chat_envelope);
-        let semantics_value = envelope
+        let semantics_value = payload
             .entry("semantics".to_string())
             .or_insert_with(|| Value::Object(Map::new()));
         let semantics = ensure_object(semantics_value);
@@ -341,13 +363,10 @@ pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) 
         )
     };
 
-    let normalized_responses_resume = input.responses_resume.as_ref().and_then(|value| {
-        if value.is_object() {
-            Some(value.clone())
-        } else {
-            None
-        }
-    });
+    let normalized_responses_resume = input
+        .responses_resume
+        .as_ref()
+        .and_then(sanitize_responses_resume_for_semantics);
     let continuation = if matches!(
         input.protocol.as_deref().map(|value| value.trim().to_ascii_lowercase()),
         Some(protocol) if protocol == "openai-responses"
@@ -381,7 +400,11 @@ pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) 
 
     {
         let envelope = ensure_object(&mut chat_envelope);
-        let semantics_value = envelope
+        let payload_value = envelope
+            .entry("payload".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        let payload = ensure_object(payload_value);
+        let semantics_value = payload
             .entry("semantics".to_string())
             .or_insert_with(|| Value::Object(Map::new()));
         let semantics = ensure_object(semantics_value);
@@ -429,7 +452,7 @@ pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) 
                 if !mapped_outputs.is_empty() {
                     let mapped_value = serde_json::to_value(mapped_outputs)
                         .unwrap_or_else(|_| Value::Array(Vec::new()));
-                    envelope.insert("toolOutputs".to_string(), mapped_value);
+                    payload.insert("toolOutputs".to_string(), mapped_value);
                 }
             }
         }

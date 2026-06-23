@@ -8,9 +8,11 @@ use crate::stopless_prompt::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use stop_message_core::{evaluate_stop_schema_gate, StopSchemaGateAction};
+use stop_message_core::{
+    evaluate_stop_schema_gate_with_reasoning_stop_arguments, StopSchemaGateAction,
+};
 const STOP_MESSAGE_AUTO_TOOL_NAME: &str = "stop_message_auto";
-const REASONING_STOP_PUBLIC_TOOL_NAME: &str = "reasoning_stop";
+const REASONING_STOP_PUBLIC_TOOL_NAME: &str = "reasoningStop";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +39,8 @@ pub struct ServertoolCliRunOutput {
     pub model_guidance: String,
     pub tool_name: String,
     pub flow_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_hint: Option<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub continuation_prompt: String,
     pub repeat_count: u32,
@@ -104,6 +108,14 @@ pub struct ServertoolClientVisibleProjectionShellInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ServertoolCliProjectionExecutionContextInput {
+    pub request_id: String,
+    pub client_call_id: String,
+    pub tool_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientExecCliProjectionInput {
     #[serde(default)]
     pub tool_name: Option<String>,
@@ -163,8 +175,10 @@ impl std::error::Error for ServertoolCliError {}
 pub fn build_servertool_cli_binary_run_command_from_client_exec_result(
     input: ServertoolCliRunInput,
 ) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
-    let invoked_public_reasoning_stop =
-        input.tool_name.trim().eq_ignore_ascii_case(REASONING_STOP_PUBLIC_TOOL_NAME);
+    let invoked_public_reasoning_stop = input
+        .tool_name
+        .trim()
+        .eq_ignore_ascii_case(REASONING_STOP_PUBLIC_TOOL_NAME);
     let input = normalize_cli_run_input_aliases(input)?;
     validate_cli_run_input(&input)?;
     match input.tool_name.as_str() {
@@ -172,6 +186,7 @@ pub fn build_servertool_cli_binary_run_command_from_client_exec_result(
             build_stop_message_auto_run_output(input, invoked_public_reasoning_stop)
         }
         "servertool_fixture" => build_servertool_fixture_run_output(input),
+        "web_search" | "vision_auto" => build_generic_client_exec_cli_run_output(input),
         other => Err(ServertoolCliError::UnsupportedTool(other.to_string())),
     }
 }
@@ -185,14 +200,8 @@ fn is_safe_stopless_identity(value: &str) -> bool {
 fn normalize_stopless_session_identity(
     input: &ServertoolCliRunInput,
 ) -> Result<(Option<String>, Option<String>), ServertoolCliError> {
-    let session_id = input
-        .session_id
-        .as_deref()
-        .and_then(read_optional_trimmed);
-    let request_id = input
-        .request_id
-        .as_deref()
-        .and_then(read_optional_trimmed);
+    let session_id = input.session_id.as_deref().and_then(read_optional_trimmed);
+    let request_id = input.request_id.as_deref().and_then(read_optional_trimmed);
     if let Some(value) = session_id.as_deref() {
         if !is_safe_stopless_identity(value) {
             return Err(ServertoolCliError::InvalidField("sessionId"));
@@ -256,6 +265,7 @@ fn build_terminal_stopless_output(
         model_guidance: continuation_prompt.clone(),
         tool_name: "stop_message_auto".to_string(),
         flow_id: "stop_message_flow".to_string(),
+        route_hint: None,
         continuation_prompt,
         repeat_count: max_repeats,
         max_repeats,
@@ -321,27 +331,34 @@ fn derive_stopless_feedback_from_raw_reasoning_stop_input(
     input: &Value,
     current_repeat_count: u32,
     current_max_repeats: u32,
-) -> Result<Option<(StoplessContinuationTrigger, Option<StoplessSchemaFeedback>)>, ServertoolCliError> {
+) -> Result<Option<(StoplessContinuationTrigger, Option<StoplessSchemaFeedback>)>, ServertoolCliError>
+{
     if !input_looks_like_raw_reasoning_stop_schema(input) {
         return Ok(None);
     }
-    let assistant_text =
+    let raw_arguments =
         serde_json::to_string(input).map_err(|_| ServertoolCliError::InvalidField("inputJson"))?;
     let used = current_repeat_count.saturating_sub(1);
     let no_change_count = current_repeat_count.saturating_sub(1);
-    let decision =
-        evaluate_stop_schema_gate(&assistant_text, used, current_max_repeats, "", no_change_count);
+    let decision = evaluate_stop_schema_gate_with_reasoning_stop_arguments(
+        "",
+        Some(&raw_arguments),
+        used,
+        current_max_repeats,
+        "",
+        no_change_count,
+    );
     let trigger = read_stopless_trigger_hint(&serde_json::json!({
         "triggerHint": decision.reason_code
     }));
     let feedback = match decision.action {
         StopSchemaGateAction::AllowStop => None,
-        StopSchemaGateAction::Followup | StopSchemaGateAction::FailFast => Some(
-            StoplessSchemaFeedback {
+        StopSchemaGateAction::Followup | StopSchemaGateAction::FailFast => {
+            Some(StoplessSchemaFeedback {
                 reason_code: decision.reason_code,
                 missing_fields: decision.missing_fields,
-            },
-        ),
+            })
+        }
     };
     Ok(Some((trigger, feedback)))
 }
@@ -377,14 +394,13 @@ fn build_stop_message_auto_run_output(
     {
         // 打满后优雅停止，不报错；但若当前这次已经提交了合法终态 schema，
         // 必须允许 schema_pass 正常收尾，而不是被 budget_exhausted 吞掉。
-        let continuation_prompt = resolve_stopless_continuation_prompt(
-            StoplessContinuationPromptInput {
+        let continuation_prompt =
+            resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
                 used: current_max_repeats.saturating_sub(1),
                 max_repeats: current_max_repeats,
                 trigger: StoplessContinuationTrigger::BudgetExhausted,
-            },
-        )
-        .expect("prompt");
+            })
+            .expect("prompt");
         return Ok(build_terminal_stopless_output(
             session_id,
             request_id,
@@ -414,28 +430,14 @@ fn build_stop_message_auto_run_output(
     let next_repeat_count = current_repeat_count
         .saturating_add(1)
         .min(current_max_repeats);
-    let mut canonical_input = serde_json::json!({
+    let canonical_input = serde_json::json!({
         "flowId": flow_id,
         "repeatCount": next_repeat_count,
         "maxRepeats": current_max_repeats,
         "triggerHint": stopless_trigger_hint(trigger)
     });
-    if let Some(feedback) = schema_feedback.as_ref() {
-        if let Some(object) = canonical_input.as_object_mut() {
-            object.insert(
-                "schemaFeedback".to_string(),
-                serde_json::json!({
-                    "reasonCode": feedback.reason_code,
-                    "missingFields": feedback.missing_fields
-                }),
-            );
-        }
-    }
-    let continuation_prompt = resolve_stopless_cli_continuation_prompt(
-        trigger,
-        used_for_prompt,
-        current_max_repeats,
-    )?;
+    let continuation_prompt =
+        resolve_stopless_cli_continuation_prompt(trigger, used_for_prompt, current_max_repeats)?;
     let model_guidance = build_stopless_cli_model_guidance(
         &continuation_prompt,
         schema_feedback.as_ref(),
@@ -449,6 +451,7 @@ fn build_stop_message_auto_run_output(
         model_guidance,
         tool_name: input.tool_name,
         flow_id,
+        route_hint: Some("thinking".to_string()),
         continuation_prompt,
         repeat_count: next_repeat_count,
         max_repeats: current_max_repeats,
@@ -485,9 +488,7 @@ fn build_stopless_cli_model_guidance(
     current_repeat_count: u32,
 ) -> String {
     let mut parts = Vec::<String>::new();
-    parts.push(
-        "这是什么：stop schema 是模型在准备结束、暂停或继续时返回的收尾报告。".to_string(),
-    );
+    parts.push("这是什么：stop schema 是模型在准备结束、暂停或继续时返回的收尾报告。".to_string());
     parts.push(
         "为什么要填：它把结论、证据、根因、排查顺序和下一步固定下来，让系统知道现在是 finished、blocked 还是 continue_needed。".to_string(),
     );
@@ -497,12 +498,8 @@ fn build_stopless_cli_model_guidance(
     parts.push(
         "字段怎么写：stopreason=0/1/2；reason 写当前状态；has_evidence 用 0/1；evidence 写证据；issue_cause 写卡点；next_step 写下一步具体动作。".to_string(),
     );
-    parts.push(
-        "怎么填：每个字段都要写具体内容；不要只写空话或只写字段名。".to_string(),
-    );
-    parts.push(
-        "stopreason 取值：0=finished，1=blocked，2=continue_needed。".to_string(),
-    );
+    parts.push("怎么填：每个字段都要写具体内容；不要只写空话或只写字段名。".to_string());
+    parts.push("stopreason 取值：0=finished，1=blocked，2=continue_needed。".to_string());
     parts.push(
         "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进，先继续执行\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"先看入口，再看链路，再看验证\",\"done_steps\":\"已完成现有排查\",\"next_step\":\"继续完成剩余验证并补最后一轮证据\",\"next_suggested_path\":\"按当前链路继续\",\"needs_user_input\":false,\"learned\":\"把真实结论写进 stop schema\"}".to_string(),
     );
@@ -580,6 +577,7 @@ fn build_servertool_fixture_run_output(
         model_guidance: String::new(),
         tool_name: input.tool_name,
         flow_id,
+        route_hint: None,
         continuation_prompt: String::new(),
         repeat_count: input
             .repeat_count
@@ -610,6 +608,66 @@ fn build_servertool_fixture_run_output(
         injected_prompt_preview: None,
         input: input.input,
     })
+}
+
+fn build_generic_client_exec_cli_run_output(
+    input: ServertoolCliRunInput,
+) -> Result<ServertoolCliRunOutput, ServertoolCliError> {
+    let flow_id = input
+        .flow_id
+        .as_deref()
+        .map(|value| non_empty(Some(value), "flowId"))
+        .transpose()?
+        .or_else(|| read_non_empty_string(&input.input, "flowId").ok())
+        .unwrap_or_else(|| "servertool_cli_projection".to_string());
+    let route_hint = route_hint_for_client_exec_tool(&input.tool_name).map(str::to_string);
+    Ok(ServertoolCliRunOutput {
+        ok: true,
+        kind: input.tool_name.clone(),
+        tool: input.tool_name.clone(),
+        summary: format!("{} cli result", input.tool_name),
+        model_guidance: String::new(),
+        tool_name: input.tool_name,
+        flow_id,
+        route_hint,
+        continuation_prompt: String::new(),
+        repeat_count: input
+            .repeat_count
+            .or_else(|| read_u32(&input.input, "repeatCount"))
+            .unwrap_or(0),
+        max_repeats: input
+            .max_repeats
+            .or_else(|| read_u32(&input.input, "maxRepeats"))
+            .unwrap_or(0),
+        session_id: input.session_id.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }),
+        request_id: input.request_id.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }),
+        schema_guidance: None,
+        schema_feedback: None,
+        injected_prompt_preview: None,
+        input: input.input,
+    })
+}
+
+fn route_hint_for_client_exec_tool(tool_name: &str) -> Option<&'static str> {
+    match tool_name {
+        "web_search" => Some("web_search"),
+        "vision_auto" => Some("multimodal"),
+        _ => None,
+    }
 }
 
 pub fn stopless_schema_guidance_with_trigger(
@@ -720,6 +778,34 @@ fn stopless_trigger_hint(trigger: StoplessContinuationTrigger) -> &'static str {
     }
 }
 
+pub fn normalize_stopless_trigger_hint_for_metadata(reason_code: Option<&str>) -> &'static str {
+    let token = reason_code
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("no_schema");
+    match token {
+        "stop_schema_missing" => "no_schema",
+        "stop_schema_reason_missing" => "invalid_schema",
+        "stop_schema_terminal_missing_fields" => "invalid_schema",
+        "stop_schema_stopreason_missing_or_non_numeric" => "invalid_schema",
+        "stop_schema_needs_user_input_missing_next_step" => "invalid_schema",
+        "stop_schema_next_step_missing" => "invalid_schema",
+        "stop_schema_forcestop_reason_missing" => "invalid_schema",
+        "stop_schema_continue_without_next_step" => "non_terminal_schema",
+        "stop_schema_continue_next_step" => "non_terminal_schema",
+        "stop_schema_budget_exhausted" => "budget_exhausted",
+        "stop_schema_finished" => "schema_pass",
+        "stop_schema_blocked" => "schema_pass",
+        "stop_schema_needs_user_input" => "schema_pass",
+        "stop_schema_forcestop" => "schema_pass",
+        "invalid_schema" => "invalid_schema",
+        "non_terminal_schema" => "non_terminal_schema",
+        "budget_exhausted" => "budget_exhausted",
+        "schema_pass" => "schema_pass",
+        _ => "no_schema",
+    }
+}
+
 fn read_stopless_trigger_hint(input: &Value) -> StoplessContinuationTrigger {
     let token = input
         .as_object()
@@ -740,9 +826,7 @@ fn read_stopless_trigger_hint(input: &Value) -> StoplessContinuationTrigger {
         }
         "stop_schema_next_step_missing" => StoplessContinuationTrigger::InvalidSchema,
         "stop_schema_forcestop_reason_missing" => StoplessContinuationTrigger::InvalidSchema,
-        "stop_schema_continue_without_next_step" => {
-            StoplessContinuationTrigger::NonTerminalSchema
-        }
+        "stop_schema_continue_without_next_step" => StoplessContinuationTrigger::NonTerminalSchema,
         "stop_schema_continue_next_step" => StoplessContinuationTrigger::NonTerminalSchema,
         "stop_schema_budget_exhausted" => StoplessContinuationTrigger::BudgetExhausted,
         "stop_schema_finished" => StoplessContinuationTrigger::SchemaPass,
@@ -758,9 +842,10 @@ fn read_stopless_trigger_hint(input: &Value) -> StoplessContinuationTrigger {
 }
 
 fn read_stopless_schema_feedback(input: &Value) -> Option<StoplessSchemaFeedback> {
-    let feedback = input
-        .as_object()
-        .and_then(|row| row.get("schemaFeedback").or_else(|| row.get("schema_feedback")))?;
+    let feedback = input.as_object().and_then(|row| {
+        row.get("schemaFeedback")
+            .or_else(|| row.get("schema_feedback"))
+    })?;
     let row = feedback.as_object()?;
     let reason_code = row
         .get("reasonCode")
@@ -926,23 +1011,9 @@ fn build_client_exec_cli_projection_output_with_identity(
                 Value::String(trigger_hint.to_string()),
             );
         }
-        if let Some(schema_feedback) = read_stopless_schema_feedback(&input) {
-            input_payload.insert(
-                "schemaFeedback".to_string(),
-                serde_json::json!({
-                    "reasonCode": schema_feedback.reason_code,
-                    "missingFields": schema_feedback.missing_fields
-                }),
-            );
-        }
         let input_json = serde_json::to_string(&Value::Object(input_payload))
             .map_err(|_| ServertoolCliError::InvalidField("json"))?;
-        let cmd = build_client_exec_command(
-            tool_name,
-            &input_json,
-            session_id,
-            request_id,
-        );
+        let cmd = build_client_exec_command(tool_name, &input_json, session_id, request_id);
         validate_no_denied_cli_marker(&cmd)?;
         let mut output = serde_json::json!({
             "toolName": tool_name,
@@ -951,6 +1022,9 @@ fn build_client_exec_cli_projection_output_with_identity(
             "maxRepeats": max_repeats,
             "execCommand": cmd
         });
+        if let Some(route_hint) = route_hint_for_client_exec_tool(tool_name) {
+            output["routeHint"] = Value::String(route_hint.to_string());
+        }
         if let Some(session_id) = session_id.and_then(read_optional_trimmed) {
             output["sessionId"] = Value::String(session_id);
         }
@@ -971,6 +1045,9 @@ fn build_client_exec_cli_projection_output_with_identity(
         "maxRepeats": max_repeats,
         "execCommand": cmd
     });
+    if let Some(route_hint) = route_hint_for_client_exec_tool(tool_name) {
+        output["routeHint"] = Value::String(route_hint.to_string());
+    }
     if let Some(session_id) = session_id.and_then(read_optional_trimmed) {
         output["sessionId"] = Value::String(session_id);
     }
@@ -1234,6 +1311,40 @@ pub fn build_client_visible_projection_shell(
     }))
 }
 
+pub fn build_servertool_cli_projection_execution_context(
+    input: ServertoolCliProjectionExecutionContextInput,
+) -> Result<Value, ServertoolCliError> {
+    let request_id = input.request_id.trim();
+    if request_id.is_empty() {
+        return Err(ServertoolCliError::MissingField("requestId"));
+    }
+    let client_call_id = input.client_call_id.trim();
+    if !is_safe_call_id(client_call_id) {
+        return Err(ServertoolCliError::InvalidField("clientCallId"));
+    }
+    let tool_name = input.tool_name.trim();
+    if !is_safe_tool_name(tool_name) {
+        return Err(ServertoolCliError::InvalidField("toolName"));
+    }
+    if is_denied_cli_projection(tool_name) {
+        return Err(ServertoolCliError::DeniedTool(tool_name.to_string()));
+    }
+    if !is_client_exec_cli_projection(tool_name) {
+        return Err(ServertoolCliError::UnsupportedTool(tool_name.to_string()));
+    }
+
+    Ok(serde_json::json!({
+        "flowId": "servertool_cli_projection",
+        "context": {
+            "servertoolCliProjection": {
+                "clientCallId": client_call_id,
+                "toolName": tool_name,
+                "requestId": request_id
+            }
+        }
+    }))
+}
+
 pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, ServertoolCliError> {
     validate_no_denied_cli_marker(raw_output)?;
     let value: Value = serde_json::from_str(raw_output)
@@ -1262,44 +1373,6 @@ pub fn validate_client_exec_command_result(raw_output: &str) -> Result<Value, Se
         return Err(ServertoolCliError::InvalidField("flowId"));
     }
     Ok(value)
-}
-
-fn collect_text_from_content_parts(value: &Value, out: &mut Vec<String>) {
-    if let Some(text) = value
-        .as_str()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        out.push(text.to_string());
-        return;
-    }
-    let Some(parts) = value.as_array() else {
-        return;
-    };
-    for part in parts {
-        if let Some(text) = part.as_str().map(str::trim).filter(|text| !text.is_empty()) {
-            out.push(text.to_string());
-            continue;
-        }
-        let Some(record) = part.as_object() else {
-            continue;
-        };
-        let text = read_optional_string_from_object(record, "text")
-            .or_else(|| read_optional_string_from_object(record, "output_text"))
-            .or_else(|| read_optional_string_from_object(record, "content"));
-        if let Some(text) = text {
-            out.push(text);
-        }
-    }
-}
-
-fn read_optional_string_from_object(object: &Map<String, Value>, field: &str) -> Option<String> {
-    object
-        .get(field)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
 }
 
 const DENIED_INTERNAL_CARRIER_KEYS: &[&str] = &[
@@ -1419,8 +1492,12 @@ mod tests {
         let schema_guidance = output
             .schema_guidance
             .expect("NoSchema stopless CLI output must carry schema guidance");
-        assert!(schema_guidance.required_fields.contains(&"stopreason".to_string()));
-        assert!(schema_guidance.required_fields.contains(&"next_step".to_string()));
+        assert!(schema_guidance
+            .required_fields
+            .contains(&"stopreason".to_string()));
+        assert!(schema_guidance
+            .required_fields
+            .contains(&"next_step".to_string()));
         assert_eq!(schema_guidance.stopreason_values.finished, 0);
         assert_eq!(schema_guidance.stopreason_values.blocked, 1);
         assert_eq!(schema_guidance.stopreason_values.continue_needed, 2);
@@ -1434,8 +1511,10 @@ mod tests {
                 "triggerHint": "no_schema"
             })
         );
-        assert_eq!(schema_guidance.trigger_hint, "no_schema",
-            "NoSchema default must produce no_schema trigger_hint");
+        assert_eq!(
+            schema_guidance.trigger_hint, "no_schema",
+            "NoSchema default must produce no_schema trigger_hint"
+        );
         assert_eq!(output.ok, true);
         assert_eq!(output.kind, "stop_message_auto");
     }
@@ -1488,8 +1567,12 @@ mod tests {
         let schema_guidance = output
             .schema_guidance
             .expect("status-only stopless CLI output must carry schema guidance");
-        assert!(schema_guidance.required_fields.contains(&"reason".to_string()));
-        assert!(schema_guidance.required_fields.contains(&"learned".to_string()));
+        assert!(schema_guidance
+            .required_fields
+            .contains(&"reason".to_string()));
+        assert!(schema_guidance
+            .required_fields
+            .contains(&"learned".to_string()));
         assert!(output.injected_prompt_preview.is_none());
         assert_eq!(
             output.input,
@@ -1500,28 +1583,52 @@ mod tests {
                 "triggerHint": "no_schema"
             })
         );
-        assert_eq!(schema_guidance.trigger_hint, "no_schema",
-            "NoSchema default must produce no_schema trigger_hint");
+        assert_eq!(
+            schema_guidance.trigger_hint, "no_schema",
+            "NoSchema default must produce no_schema trigger_hint"
+        );
     }
 
     #[test]
-    fn web_search_is_not_client_exec_cli_projection() {
-        let err = build_servertool_cli_binary_run_command_from_client_exec_result(
+    fn web_search_cli_projection_output_is_executable() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
                 tool_name: "web_search".to_string(),
-                input: json!({}),
-                flow_id: Some("stop_message_flow".to_string()),
+                input: json!({"query":"rust hooks"}),
+                flow_id: Some("web_search_flow".to_string()),
                 repeat_count: Some(1),
                 max_repeats: Some(3),
                 session_id: Some("session-test".to_string()),
                 request_id: Some("req-test".to_string()),
             },
         )
-        .expect_err("web_search must not be CLI projection");
-        assert_eq!(
-            err,
-            ServertoolCliError::UnsupportedTool("web_search".to_string())
-        );
+        .expect("web_search must be CLI projection");
+        assert_eq!(output.tool_name, "web_search");
+        assert_eq!(output.flow_id, "web_search_flow");
+        assert_eq!(output.route_hint.as_deref(), Some("web_search"));
+        assert_eq!(output.input["query"], "rust hooks");
+        assert_eq!(output.session_id.as_deref(), Some("session-test"));
+        assert_eq!(output.request_id.as_deref(), Some("req-test"));
+    }
+
+    #[test]
+    fn vision_auto_cli_projection_output_is_executable() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "vision_auto".to_string(),
+                input: json!({"image":"img_1"}),
+                flow_id: Some("vision_flow".to_string()),
+                repeat_count: None,
+                max_repeats: None,
+                session_id: None,
+                request_id: None,
+            },
+        )
+        .expect("vision_auto must be CLI projection");
+        assert_eq!(output.tool_name, "vision_auto");
+        assert_eq!(output.flow_id, "vision_flow");
+        assert_eq!(output.route_hint.as_deref(), Some("multimodal"));
+        assert_eq!(output.input["image"], "img_1");
     }
 
     #[test]
@@ -1570,6 +1677,7 @@ mod tests {
 
     #[test]
     fn stop_message_projection_command_carries_identity_flags() {
+        std::env::set_var("ROUTECODEX_SESSION_DIR", "/tmp/should-not-leak-stopless");
         let output = plan_client_exec_cli_projection_output(ClientExecCliProjectionInput {
             tool_name: Some("stop_message_auto".to_string()),
             flow_id: Some("stop_message_flow".to_string()),
@@ -1592,6 +1700,8 @@ mod tests {
             .expect("execCommand");
         assert!(command.contains("--session-id 'sess-stop-proj'"));
         assert!(command.contains("--request-id 'req-stop-proj'"));
+        assert!(!command.contains("ROUTECODEX_SESSION_DIR="));
+        std::env::remove_var("ROUTECODEX_SESSION_DIR");
     }
 
     #[test]
@@ -1820,7 +1930,7 @@ mod tests {
         })
         .expect("projection output");
         let command = out["execCommand"].as_str().expect("exec command");
-        let prefix = "routecodex hook run reasoning_stop --input-json '";
+        let prefix = "routecodex hook run reasoningStop --input-json '";
         assert!(command.starts_with(prefix));
         let input_start = prefix.len();
         let input_json = if let Some(input_end) = command[input_start..]
@@ -1992,18 +2102,28 @@ mod tests {
     }
 
     #[test]
-    fn projection_rejects_fake_exec_and_web_search() {
+    fn projection_builds_web_search_and_rejects_fake_exec() {
         assert_eq!(
             build_client_exec_cli_projection_output(
                 "web_search",
-                "stop_message_flow",
-                json!({}),
+                "web_search_flow",
+                json!({"query":"x"}),
                 1,
                 3
-            ),
-            Err(ServertoolCliError::UnsupportedTool(
-                "web_search".to_string()
-            ))
+            )
+            .expect("web_search projection")["toolName"],
+            json!("web_search")
+        );
+        assert_eq!(
+            build_client_exec_cli_projection_output(
+                "vision_auto",
+                "vision_flow",
+                json!({"image":"img_1"}),
+                0,
+                0
+            )
+            .expect("vision projection")["routeHint"],
+            json!("multimodal")
         );
         assert_eq!(
             build_client_exec_cli_projection_output(
@@ -2115,6 +2235,45 @@ mod tests {
     }
 
     #[test]
+    fn cli_projection_execution_context_is_rust_owned() {
+        let out = build_servertool_cli_projection_execution_context(
+            ServertoolCliProjectionExecutionContextInput {
+                request_id: "req_cli_projection".to_string(),
+                client_call_id: "call_cli_projection_1".to_string(),
+                tool_name: "servertool_fixture".to_string(),
+            },
+        )
+        .expect("cli projection execution context");
+        assert_eq!(out["flowId"], "servertool_cli_projection");
+        assert_eq!(
+            out["context"]["servertoolCliProjection"]["clientCallId"],
+            "call_cli_projection_1"
+        );
+        assert_eq!(
+            out["context"]["servertoolCliProjection"]["toolName"],
+            "servertool_fixture"
+        );
+        assert_eq!(
+            out["context"]["servertoolCliProjection"]["requestId"],
+            "req_cli_projection"
+        );
+    }
+
+    #[test]
+    fn cli_projection_execution_context_rejects_non_cli_tool() {
+        assert_eq!(
+            build_servertool_cli_projection_execution_context(
+                ServertoolCliProjectionExecutionContextInput {
+                    request_id: "req_bad_cli_projection".to_string(),
+                    client_call_id: "call_bad_cli_projection_1".to_string(),
+                    tool_name: "fake_exec".to_string(),
+                },
+            ),
+            Err(ServertoolCliError::DeniedTool("fake_exec".to_string()))
+        );
+    }
+
+    #[test]
     fn projection_plan_error_codes_are_documented_in_tests() {
         let repeat_over_budget = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
@@ -2199,12 +2358,10 @@ mod tests {
 
     #[test]
     fn exec_result_validation_rejects_wrong_tool_name() {
-        let raw = json!({"toolName": "web_search", "flowId": "stop_message_flow"});
+        let raw = json!({"toolName": "fake_exec", "flowId": "stop_message_flow"});
         assert_eq!(
             validate_client_exec_command_result(&raw.to_string()),
-            Err(ServertoolCliError::UnsupportedTool(
-                "web_search".to_string()
-            ))
+            Err(ServertoolCliError::DeniedTool("fake_exec".to_string()))
         );
     }
 
@@ -2264,10 +2421,52 @@ mod tests {
         assert_eq!(parsed["toolName"], "servertool_fixture");
     }
 
+    #[test]
+    fn exec_result_validation_accepts_web_search_route_hint() {
+        let raw = json!({
+            "toolName": "web_search",
+            "flowId": "web_search_flow",
+            "routeHint": "web_search"
+        });
+        let parsed = validate_client_exec_command_result(&raw.to_string()).expect("valid result");
+        assert_eq!(parsed["routeHint"], "web_search");
+    }
+
+    #[test]
+    fn normalize_stopless_trigger_hint_for_metadata_maps_reason_codes() {
+        assert_eq!(
+            normalize_stopless_trigger_hint_for_metadata(Some("stop_schema_missing")),
+            "no_schema"
+        );
+        assert_eq!(
+            normalize_stopless_trigger_hint_for_metadata(Some(
+                "stop_schema_terminal_missing_fields"
+            )),
+            "invalid_schema"
+        );
+        assert_eq!(
+            normalize_stopless_trigger_hint_for_metadata(Some("stop_schema_continue_next_step")),
+            "non_terminal_schema"
+        );
+        assert_eq!(
+            normalize_stopless_trigger_hint_for_metadata(Some("stop_schema_budget_exhausted")),
+            "budget_exhausted"
+        );
+        assert_eq!(
+            normalize_stopless_trigger_hint_for_metadata(Some("stop_schema_finished")),
+            "schema_pass"
+        );
+        assert_eq!(
+            normalize_stopless_trigger_hint_for_metadata(Some("")),
+            "no_schema"
+        );
+    }
+
     // ── trigger hint branch tests ──────────────────────────────────────────
 
     #[test]
-    fn stopless_cli_output_with_explicit_invalid_schema_trigger_hints_produces_invalid_schema_hint() {
+    fn stopless_cli_output_with_explicit_invalid_schema_trigger_hints_produces_invalid_schema_hint()
+    {
         let output = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
                 tool_name: "stop_message_auto".to_string(),
@@ -2322,14 +2521,12 @@ mod tests {
         assert_eq!(schema_guidance.trigger_hint, "invalid_schema");
         let inp = output.input;
         assert_eq!(inp["triggerHint"], "invalid_schema");
-        assert_eq!(
-            inp["schemaFeedback"]["reasonCode"],
-            "stop_schema_stopreason_missing_or_non_numeric"
-        );
+        assert!(inp.get("schemaFeedback").is_none());
     }
 
     #[test]
-    fn stopless_cli_output_with_explicit_non_terminal_schema_trigger_hints_produces_non_terminal_schema_hint() {
+    fn stopless_cli_output_with_explicit_non_terminal_schema_trigger_hints_produces_non_terminal_schema_hint(
+    ) {
         let output = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
                 tool_name: "stop_message_auto".to_string(),
@@ -2357,7 +2554,8 @@ mod tests {
     }
 
     #[test]
-    fn stopless_cli_output_with_explicit_budget_exhausted_trigger_hints_produces_budget_exhausted_hint() {
+    fn stopless_cli_output_with_explicit_budget_exhausted_trigger_hints_produces_budget_exhausted_hint(
+    ) {
         let output = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
                 tool_name: "stop_message_auto".to_string(),
@@ -2416,7 +2614,7 @@ mod tests {
     fn public_reasoning_stop_partial_schema_derives_missing_schema_feedback() {
         let output = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
-                tool_name: "reasoning_stop".to_string(),
+                tool_name: "reasoningStop".to_string(),
                 input: json!({
                     "stopreason": 2,
                     "reason": "第一轮故意缺 schema"
@@ -2428,7 +2626,7 @@ mod tests {
                 request_id: Some("req-derive-schema".to_string()),
             },
         )
-        .expect("reasoning_stop output");
+        .expect("reasoningStop output");
         assert_eq!(output.flow_id, "stop_message_flow");
         assert_eq!(output.input["flowId"], "stop_message_flow");
         let reason_code = output
@@ -2437,7 +2635,10 @@ mod tests {
             .map(|item| item.reason_code.as_str())
             .expect("schema feedback reason");
         assert!(!reason_code.is_empty());
-        assert_ne!(output.input["triggerHint"], Value::String("budget_exhausted".to_string()));
+        assert_ne!(
+            output.input["triggerHint"],
+            Value::String("budget_exhausted".to_string())
+        );
         assert!(output
             .schema_feedback
             .as_ref()
@@ -2445,7 +2646,52 @@ mod tests {
             .missing_fields
             .iter()
             .any(|field| field == "next_step"));
-        assert_eq!(output.input["schemaFeedback"]["reasonCode"], reason_code);
+        assert!(output.input.get("schemaFeedback").is_none());
+        assert_eq!(
+            output
+                .schema_feedback
+                .as_ref()
+                .expect("schema feedback")
+                .reason_code,
+            reason_code
+        );
+    }
+
+    #[test]
+    fn public_reasoning_stop_full_schema_derives_schema_pass_without_feedback() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "reasoningStop".to_string(),
+                input: json!({
+                    "stopreason": 0,
+                    "reason": "done",
+                    "has_evidence": 1,
+                    "evidence": "ok",
+                    "issue_cause": "fixed",
+                    "excluded_factors": "none",
+                    "diagnostic_order": "1",
+                    "done_steps": "done",
+                    "next_step": "",
+                    "next_suggested_path": "",
+                    "needs_user_input": false,
+                    "learned": "x"
+                }),
+                flow_id: None,
+                repeat_count: Some(1),
+                max_repeats: Some(3),
+                session_id: Some("session-derive-schema-pass".to_string()),
+                request_id: Some("req-derive-schema-pass".to_string()),
+            },
+        )
+        .expect("reasoningStop output");
+        assert_eq!(output.flow_id, "stop_message_flow");
+        assert_eq!(output.input["flowId"], "stop_message_flow");
+        assert_eq!(
+            output.input["triggerHint"],
+            Value::String("schema_pass".to_string())
+        );
+        assert!(output.schema_feedback.is_none());
+        assert_eq!(output.summary, "stopless continuation ready");
     }
 
     // projection_output_quotes_json_apostrophes already covers triggerHint in command JSON
@@ -2465,8 +2711,10 @@ mod tests {
         .expect("projection output");
         let command = out["execCommand"].as_str().expect("exec command");
         // triggerHint must appear in the JSON embedded in the shell command
-        assert!(command.contains("triggerHint"), "projection command must include triggerHint: {}", command);
+        assert!(
+            command.contains("triggerHint"),
+            "projection command must include triggerHint: {}",
+            command
+        );
     }
-
-
 }
