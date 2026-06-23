@@ -153,8 +153,9 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
     })
 }
 
-pub use crate::hub_pipeline_blocks::napi_bindings::run_hub_pipeline_json;
-
 #[cfg(test)]
 #[path = "hub_pipeline_tests.rs"]
 mod hub_pipeline_tests;
+
+#[cfg(test)]
+use crate::hub_pipeline_blocks::napi_bindings::run_hub_pipeline_json;

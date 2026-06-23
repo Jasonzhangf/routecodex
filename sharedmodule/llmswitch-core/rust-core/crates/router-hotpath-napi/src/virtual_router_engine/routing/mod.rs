@@ -20,7 +20,7 @@ pub(crate) use config::{
 pub(crate) use direct_model::{
     direct_model_media_requirement_error, parse_direct_provider_model, select_direct_provider_model,
 };
-pub(crate) use key_utils::{extract_key_alias, extract_key_index, extract_provider_id};
+pub(crate) use key_utils::{extract_key_alias, extract_provider_id};
 #[allow(unused_imports)]
 pub(crate) use metadata::{
     build_scoped_session_key, extract_excluded_provider_keys, extract_runtime_now_ms,

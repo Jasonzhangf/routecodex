@@ -1,4 +1,4 @@
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 use std::cell::RefCell;
 use std::env;
 use std::fs;
@@ -1069,6 +1069,7 @@ fn deserialize_chat_process_usage_state(
 #[cfg(test)]
 mod isolation_tests {
     use super::*;
+    use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

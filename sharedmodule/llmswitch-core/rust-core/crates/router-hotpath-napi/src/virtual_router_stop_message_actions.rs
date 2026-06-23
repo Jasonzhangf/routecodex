@@ -1,9 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Number, Value};
 
-use crate::shared_json_utils::{
-    normalize_on_off_auto_mode, normalize_on_off_mode, read_trimmed_string,
-};
+use crate::shared_json_utils::{normalize_on_off_auto_mode, read_trimmed_string};
 
 const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
 
