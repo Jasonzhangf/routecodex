@@ -279,48 +279,48 @@ fn resolve_entry_protocol(options: &SnapshotHookOptions, data: &Value) -> String
     resolve_snapshot_folder(entry.as_str())
 }
 
-fn extract_nested_entry_port(value: &Value) -> Option<i64> {
-    fn read_port_field(obj: &Map<String, Value>, key: &str) -> Option<i64> {
-        obj.get(key)
-            .and_then(|value| {
-                value
-                    .as_i64()
-                    .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
-            })
-            .filter(|port| *port > 0)
-    }
-    if let Value::Object(obj) = value {
-        if let Some(port) = read_port_field(obj, "entryPort")
-            .or_else(|| read_port_field(obj, "matchedPort"))
-            .or_else(|| read_port_field(obj, "localPort"))
-        {
-            return Some(port);
-        }
-        for key in ["portContext", "meta", "metadata", "runtime"] {
-            if let Some(Value::Object(nested)) = obj.get(key) {
-                if let Some(port) = read_port_field(nested, "entryPort")
-                    .or_else(|| read_port_field(nested, "matchedPort"))
-                    .or_else(|| read_port_field(nested, "localPort"))
-                {
-                    return Some(port);
-                }
-            }
-        }
-    }
-    None
+fn read_port_value(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
+        .filter(|port| *port > 0)
 }
 
-fn resolve_entry_port(options: &SnapshotHookOptions, data: &Value) -> String {
-    let port = options
+fn extract_nested_entry_port(value: &Value) -> Option<i64> {
+    fn search(value: &Value, depth: usize) -> Option<i64> {
+        if depth > 8 {
+            return None;
+        }
+        match value {
+            Value::Object(obj) => {
+                for key in ["entryPort", "matchedPort", "localPort"] {
+                    if let Some(port) = obj.get(key).and_then(read_port_value) {
+                        return Some(port);
+                    }
+                }
+                for nested in obj.values() {
+                    if let Some(port) = search(nested, depth + 1) {
+                        return Some(port);
+                    }
+                }
+                None
+            }
+            Value::Array(items) => items.iter().find_map(|nested| search(nested, depth + 1)),
+            _ => None,
+        }
+    }
+    search(value, 0)
+}
+
+fn resolve_entry_port(options: &SnapshotHookOptions, data: &Value) -> Option<i64> {
+    options
         .entry_port
         .filter(|value| *value > 0)
         .or_else(|| extract_nested_entry_port(data))
-        .unwrap_or(0);
-    if port > 0 {
-        format!("port-{}", port)
-    } else {
-        "port-unknown".to_string()
-    }
+}
+
+fn requires_port_scoped_snapshot_dir(stage: &str) -> bool {
+    stage.starts_with("client-") || stage.starts_with("provider-")
 }
 
 fn sanitize_token(value: &str, fallback: &str) -> String {
@@ -678,9 +678,103 @@ fn write_json_file_if_missing_atomic(target: &Path, contents: &str) -> Result<()
     ))
 }
 
+fn merge_json_objects_missing_and_non_null(existing: &mut Map<String, Value>, incoming: &Map<String, Value>) {
+    for (key, incoming_value) in incoming {
+        match existing.get_mut(key) {
+            Some(existing_value) => match (existing_value, incoming_value) {
+                (Value::Object(existing_obj), Value::Object(incoming_obj)) => {
+                    merge_json_objects_missing_and_non_null(existing_obj, incoming_obj);
+                }
+                (Value::Null, value) if !value.is_null() => {
+                    *existing.get_mut(key).expect("existing key present") = value.clone();
+                }
+                _ => {}
+            },
+            None => {
+                if !incoming_value.is_null() {
+                    existing.insert(key.clone(), incoming_value.clone());
+                }
+            }
+        }
+    }
+}
+
+fn write_json_file_atomic_replace(target: &Path, contents: &str) -> Result<(), std::io::Error> {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("__runtime.json");
+    for _ in 0..16 {
+        let tmp_name = format!(
+            ".{}.tmp-{}-{}",
+            file_name,
+            chrono::Utc::now().timestamp_millis(),
+            Uuid::new_v4()
+                .simple()
+                .to_string()
+                .get(0..6)
+                .unwrap_or("rand")
+        );
+        let tmp_path = parent.join(tmp_name);
+        let mut tmp_file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+
+        let write_result = (|| -> Result<(), std::io::Error> {
+            tmp_file.write_all(contents.as_bytes())?;
+            tmp_file.sync_all()?;
+            drop(tmp_file);
+            fs::rename(&tmp_path, target)?;
+            Ok(())
+        })();
+
+        if write_result.is_ok() {
+            return Ok(());
+        }
+        let _ = fs::remove_file(&tmp_path);
+        return write_result;
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "unable to allocate temporary runtime metadata replace file",
+    ))
+}
+
+fn upsert_runtime_metadata_file(target: &Path, payload: &Value) -> Result<(), std::io::Error> {
+    let payload_str = serde_json::to_string_pretty(payload)?;
+    if !target.exists() {
+        return write_json_file_if_missing_atomic(target, payload_str.as_str());
+    }
+    let existing_raw = fs::read_to_string(target)?;
+    let existing_parsed: Value = serde_json::from_str(existing_raw.as_str()).map_err(|error| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+    })?;
+
+    match (existing_parsed, payload.clone()) {
+        (Value::Object(mut existing_obj), Value::Object(incoming_obj)) => {
+            merge_json_objects_missing_and_non_null(&mut existing_obj, &incoming_obj);
+            let merged = Value::Object(existing_obj);
+            let merged_str = serde_json::to_string_pretty(&merged)?;
+            if merged_str != existing_raw {
+                write_json_file_atomic_replace(target, merged_str.as_str())?;
+            }
+            Ok(())
+        }
+        _ => write_json_file_atomic_replace(target, payload_str.as_str()),
+    }
+}
+
 fn build_runtime_metadata_payload(
     options: &SnapshotHookOptions,
     group_request_token: &str,
+    resolved_entry_port: Option<i64>,
 ) -> Value {
     let provider_key = normalize_provider_key(&options.provider_key);
     let mut payload = serde_json::json!({
@@ -696,8 +790,13 @@ fn build_runtime_metadata_payload(
       "groupRequestId": group_request_token,
       "providerKey": provider_key,
       "entryProtocol": options.entry_protocol.clone(),
-      "entryPort": options.entry_port
+      "entryPort": resolved_entry_port
     });
+    if let Some(payload_obj) = payload.as_object_mut() {
+        if let Some(port) = resolved_entry_port {
+            payload_obj.insert("matchedPort".to_string(), Value::from(port));
+        }
+    }
     if let Some(request_truth) = build_runtime_request_truth_summary(options.runtime_metadata.as_ref())
     {
         if let Some(payload_obj) = payload.as_object_mut() {
@@ -921,7 +1020,16 @@ fn write_snapshot_file(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(resolve_snapshot_root);
     let folder = resolve_entry_protocol(options, &options.data);
-    let entry_port_token = resolve_entry_port(options, &options.data);
+    let entry_port = resolve_entry_port(options, &options.data);
+    if entry_port.is_none() && requires_port_scoped_snapshot_dir(options.stage.as_str()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "[hub_snapshot_hooks] entryPort required for stage={}",
+                options.stage
+            ),
+        ));
+    }
     let stage_token = sanitize_token(options.stage.as_str(), "snapshot");
     let group_request_token = sanitize_token(
         options
@@ -934,7 +1042,12 @@ fn write_snapshot_file(
     );
     let dir = root
         .join(folder)
-        .join(entry_port_token)
+        .join("ports")
+        .join(
+            entry_port
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+        )
         .join(&group_request_token);
     if let Err(e) = fs::create_dir_all(&dir) {
         eprintln!(
@@ -943,14 +1056,13 @@ fn write_snapshot_file(
         );
     }
     let meta_path = dir.join("__runtime.json");
-    let meta_payload = build_runtime_metadata_payload(&options, group_request_token.as_str());
-    if let Ok(payload_str) = serde_json::to_string_pretty(&meta_payload) {
-        if let Err(e) = write_json_file_if_missing_atomic(&meta_path, payload_str.as_str()) {
-            eprintln!(
-                "[hub_snapshot_hooks] Failed to write runtime metadata {:?}: {}",
-                meta_path, e
-            );
-        }
+    let meta_payload =
+        build_runtime_metadata_payload(&options, group_request_token.as_str(), entry_port);
+    if let Err(e) = upsert_runtime_metadata_file(&meta_path, &meta_payload) {
+        eprintln!(
+            "[hub_snapshot_hooks] Failed to write runtime metadata {:?}: {}",
+            meta_path, e
+        );
     }
 
     let spacing = options.verbosity.as_deref() == Some("minimal");
@@ -1371,7 +1483,8 @@ mod tests {
 
         let entry_dir = root
             .join("openai-responses")
-            .join("port-5555")
+            .join("ports")
+            .join("5555")
             .join("grp_1");
         assert!(
             entry_dir.exists(),
@@ -1432,7 +1545,8 @@ mod tests {
 
         let runtime_path = root
             .join("openai-responses")
-            .join("port-5555")
+            .join("ports")
+            .join("5555")
             .join("grp_runtime_truth")
             .join("__runtime.json");
         let parsed: Value =
@@ -1480,6 +1594,154 @@ mod tests {
                 .and_then(|row| row.get("stopless"))
                 .and_then(Value::as_bool),
             Some(true)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn snapshot_file_resolves_nested_body_metadata_entry_port() {
+        let root = env::temp_dir().join(format!(
+            "rcc-snapshot-nested-port-{}",
+            Uuid::new_v4().simple()
+        ));
+        let options = SnapshotHookOptions {
+            endpoint: "/v1/responses".to_string(),
+            stage: "provider-request".to_string(),
+            request_id: "req_nested_port_1".to_string(),
+            data: serde_json::json!({
+                "body": {
+                    "metadata": {
+                        "entryPort": 5555,
+                        "matchedPort": 5555
+                    }
+                }
+            }),
+            verbosity: Some("minimal".to_string()),
+            channel: None,
+            provider_key: Some("xlc.key1.glm-5.2".to_string()),
+            group_request_id: Some("grp_nested_port".to_string()),
+            entry_protocol: Some("openai-responses".to_string()),
+            entry_port: None,
+            runtime_metadata: None,
+        };
+
+        write_snapshot_file(&options, Some(root.as_path())).expect("nested entryPort should resolve");
+
+        let entry_dir = root
+            .join("openai-responses")
+            .join("ports")
+            .join("5555")
+            .join("grp_nested_port");
+        assert!(entry_dir.join("provider-request.json").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn snapshot_file_missing_entry_port_fails_fast_for_boundary_stage() {
+        let root = env::temp_dir().join(format!(
+            "rcc-snapshot-missing-port-{}",
+            Uuid::new_v4().simple()
+        ));
+        let options = SnapshotHookOptions {
+            endpoint: "/v1/responses".to_string(),
+            stage: "provider-request".to_string(),
+            request_id: "req_missing_port_1".to_string(),
+            data: serde_json::json!({
+                "body": { "ok": true }
+            }),
+            verbosity: Some("minimal".to_string()),
+            channel: None,
+            provider_key: Some("xlc.key1.glm-5.2".to_string()),
+            group_request_id: Some("grp_missing_port".to_string()),
+            entry_protocol: Some("openai-responses".to_string()),
+            entry_port: None,
+            runtime_metadata: None,
+        };
+
+        let error = write_snapshot_file(&options, Some(root.as_path()))
+            .expect_err("missing entryPort must fail-fast");
+        assert!(error.to_string().contains("entryPort required"));
+        assert!(
+            !root.join("openai-responses").exists(),
+            "missing entryPort must not create fallback directories"
+        );
+    }
+
+    #[test]
+    fn runtime_metadata_file_is_enriched_by_later_provider_snapshot() {
+        let root = env::temp_dir().join(format!(
+            "rcc-snapshot-runtime-enrich-{}",
+            Uuid::new_v4().simple()
+        ));
+        let group_request_id = "grp_runtime_enrich";
+
+        let client_options = SnapshotHookOptions {
+            endpoint: "/v1/responses".to_string(),
+            stage: "client-request".to_string(),
+            request_id: "req_runtime_enrich_client".to_string(),
+            data: serde_json::json!({
+                "body": {
+                    "metadata": {
+                        "entryPort": 5555,
+                        "matchedPort": 5555
+                    }
+                }
+            }),
+            verbosity: Some("minimal".to_string()),
+            channel: None,
+            provider_key: None,
+            group_request_id: Some(group_request_id.to_string()),
+            entry_protocol: Some("openai-responses".to_string()),
+            entry_port: Some(5555),
+            runtime_metadata: None,
+        };
+        write_snapshot_file(&client_options, Some(root.as_path()))
+            .expect("client snapshot should seed runtime metadata");
+
+        let provider_options = SnapshotHookOptions {
+            endpoint: "/v1/responses".to_string(),
+            stage: "provider-request".to_string(),
+            request_id: "req_runtime_enrich_provider".to_string(),
+            data: serde_json::json!({
+                "body": {
+                    "ok": true
+                }
+            }),
+            verbosity: Some("minimal".to_string()),
+            channel: None,
+            provider_key: Some("xlc.key1.glm-5.2".to_string()),
+            group_request_id: Some(group_request_id.to_string()),
+            entry_protocol: Some("openai-responses".to_string()),
+            entry_port: Some(5555),
+            runtime_metadata: Some(serde_json::json!({
+                "sessionId": "sess-enrich-1",
+                "conversationId": "conv-enrich-1",
+                "continuationOwner": "relay"
+            })),
+        };
+        write_snapshot_file(&provider_options, Some(root.as_path()))
+            .expect("provider snapshot should enrich runtime metadata");
+
+        let runtime_path = root
+            .join("openai-responses")
+            .join("ports")
+            .join("5555")
+            .join(group_request_id)
+            .join("__runtime.json");
+        let parsed: Value =
+            serde_json::from_str(fs::read_to_string(runtime_path).unwrap().as_str()).unwrap();
+        assert_eq!(
+            parsed.get("providerKey").and_then(Value::as_str),
+            Some("xlc.key1.glm-5.2")
+        );
+        let truth = parsed
+            .get("requestTruth")
+            .and_then(Value::as_object)
+            .expect("requestTruth object");
+        assert_eq!(truth.get("sessionId").and_then(Value::as_str), Some("sess-enrich-1"));
+        assert_eq!(
+            truth.get("conversationId").and_then(Value::as_str),
+            Some("conv-enrich-1")
         );
         let _ = fs::remove_dir_all(root);
     }
