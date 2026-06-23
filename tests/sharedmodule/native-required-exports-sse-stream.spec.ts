@@ -255,4 +255,69 @@ describe('native required exports for sse stream helpers', () => {
     expect(parsed.error?.status).toBe(400);
     expect(parsed.error?.message).toContain('call_function_snr978zyv21w_1');
   });
+
+  test('responses submit normalization keeps empty function_call_output paired as empty string', () => {
+    const binding = nodeRequire(
+      path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+    ) as Record<string, unknown>;
+    const plan = binding.planResponsesHandlerEntryJson as (
+      payloadJson: string,
+      entryEndpoint?: string,
+      responseIdFromPath?: string
+    ) => string;
+    const resume = binding.resumeResponsesConversationPayloadJson as (...args: string[]) => string;
+
+    const planned = JSON.parse(
+      plan(
+        JSON.stringify({
+          previous_response_id: 'resp_empty_output_1',
+          input: [{ type: 'function_call_output', call_id: 'call_empty_output_1' }],
+          model: 'gpt-5.5',
+        }),
+        '/v1/responses',
+        undefined
+      )
+    ) as {
+      payload: {
+        tool_outputs?: Array<{ output?: string; tool_call_id?: string }>;
+      };
+    };
+    expect(planned.payload.tool_outputs).toEqual([
+      { tool_call_id: 'call_empty_output_1', output: '' },
+    ]);
+
+    const resumed = JSON.parse(
+      resume(
+        JSON.stringify({
+          requestId: 'req_empty_output_1',
+          basePayload: { model: 'gpt-5.5' },
+          input: [
+            {
+              type: 'function_call',
+              id: 'fc_empty_output_1',
+              call_id: 'call_empty_output_1',
+              name: 'exec_command',
+              arguments: '{"cmd":"pwd"}',
+            },
+          ],
+        }),
+        'resp_empty_output_1',
+        JSON.stringify({
+          tool_outputs: [{ call_id: 'call_empty_output_1' }],
+        }),
+        'req_empty_output_2'
+      )
+    ) as {
+      payload: { input?: Array<{ output?: string; type?: string; call_id?: string }> };
+      meta?: { toolOutputsDetailed?: Array<{ outputText?: string; callId?: string }> };
+    };
+    expect(resumed.payload.input?.[1]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'call_empty_output_1',
+      output: '',
+    });
+    expect(resumed.meta?.toolOutputsDetailed).toEqual([
+      { callId: 'call_empty_output_1', originalId: 'call_empty_output_1', outputText: '' },
+    ]);
+  });
 });

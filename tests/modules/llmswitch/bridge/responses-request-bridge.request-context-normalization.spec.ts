@@ -249,6 +249,88 @@ describe('responses-request-bridge relay request-context normalization', () => {
     });
   });
 
+  it('preserves stopless tool-call history from relay fullInput instead of collapsing it into guidance text', async () => {
+    const context = await buildResponsesRequestContextForHttp({
+      payload: {
+        model: 'gpt-5.4',
+        previous_response_id: 'resp_stopless_resume_1',
+        input: [
+          {
+            type: 'function_call',
+            call_id: 'call_stopless_resume_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}',
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_stopless_resume_2',
+          },
+        ],
+      },
+      requestId: 'req_stopless_resume_context_1',
+      metadata: {
+        session_id: 'sess_stopless_resume_1',
+        conversation_id: 'conv_stopless_resume_1',
+      },
+      resumeMeta: {
+        continuationOwner: 'relay',
+        fullInput: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '继续执行 stopless 测试' }],
+          },
+          {
+            type: 'function_call',
+            id: 'fc_stopless_resume_1',
+            call_id: 'call_stopless_resume_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}',
+          },
+          {
+            type: 'function_call_output',
+            id: 'fc_stopless_resume_1',
+            call_id: 'call_stopless_resume_1',
+            output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
+          },
+          {
+            type: 'function_call',
+            id: 'fc_stopless_resume_2',
+            call_id: 'call_stopless_resume_2',
+            name: 'exec_command',
+            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}',
+          },
+          {
+            type: 'function_call_output',
+            id: 'fc_stopless_resume_2',
+            call_id: 'call_stopless_resume_2',
+            output: '',
+          },
+        ],
+        restoredTools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }],
+      },
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555',
+    });
+
+    expect(mockCaptureReqInboundResponsesContextSnapshot).not.toHaveBeenCalled();
+    expect(context.context.input).toHaveLength(5);
+    expect(context.context.input[1]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_stopless_resume_1',
+    });
+    expect(context.context.input[2]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'call_stopless_resume_1',
+      output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
+    });
+    expect(context.context.input[4]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'call_stopless_resume_2',
+      output: '',
+    });
+  });
+
   it('materializes request context session truth from factual Codex client headers', async () => {
     mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
       input: [],

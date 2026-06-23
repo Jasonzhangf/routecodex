@@ -47,12 +47,37 @@
     - 请求头显式带：
       - `x-session-id: sess-live-proj-1`
       - `x-conversation-id: conv-live-proj-1`
-    - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782236025632_90cc52eb/__runtime.json`
+  - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782236025632_90cc52eb/__runtime.json`
       - 已在线出现：
         - `requestTruth.sessionId = "sess-live-proj-1"`
         - `requestTruth.conversationId = "conv-live-proj-1"`
         - `requestTruth.responsesRequestContext...`
     - 说明 snapshot 审计面对 request truth 的在线缺失问题已闭环。
+
+# 2026-06-24 responses continuation empty tool-result normalization audit
+
+- 新白盒异常：
+  - 问题不在 SSE。
+  - 真异常在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`。
+- 直接复现：
+  - `planResponsesHandlerEntryJson(...)` 对 `/v1/responses + previous_response_id + input:[{type:function_call_output, call_id, no output}]`
+    - 当前会产出 `tool_outputs[0].output = "\"\""`，不是实际空串。
+  - `resumeResponsesConversationPayloadJson(...)` 对 `tool_outputs:[{call_id, no output}]`
+    - 当前会把恢复后的 `function_call_output.output` 写成 `"null"` 字符串。
+- 当前判断：
+  - `function_call_output` 缺 `output` 时，pairing 不能丢；但现在实现把“缺失/空”的语义错误投影成了 quoted-empty / string-null。
+  - 这属于 responses continuation native normalization bug，不属于 transport/SSE。
+- 下一步：
+  - 先补红测锁 `planResponsesHandlerEntryJson` 与 `resumeResponsesConversationPayloadJson` 的 empty-output contract。
+  - 再改 Rust 唯一修改点，把缺失/Null 统一收敛为真实空串 `""`，禁止 `"\"\""` / `"null"`。
+- 已完成验证：
+  - 红测：`tests/sharedmodule/native-required-exports-sse-stream.spec.ts -t "responses submit normalization keeps empty function_call_output paired as empty string"` 先红，红点是收到 `tool_outputs[0].output = "\"\""`.
+  - 绿化后同一 focused jest 通过。
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` 通过。
+  - `cargo test -p router-hotpath-napi shared_responses_conversation_utils --lib -- --nocapture` 通过（34 passed）。
+  - 直接 NAPI 复测：
+    - `planResponsesHandlerEntryJson(...)` 现在产出 `tool_outputs[0].output = ""`
+    - `resumeResponsesConversationPayloadJson(...)` 现在产出 `function_call_output.output = ""`
 
 # 2026-06-24 5555 live snapshot bucket split root cause
 

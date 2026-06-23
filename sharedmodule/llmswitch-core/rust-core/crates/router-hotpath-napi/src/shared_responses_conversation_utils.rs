@@ -132,6 +132,13 @@ fn pick_responses_persisted_fields(payload: &Value) -> Value {
     Value::Object(next)
 }
 
+fn clone_responses_context_body(payload: &Value) -> Map<String, Value> {
+    let mut cloned = clone_object(Some(payload));
+    cloned.remove("response_id");
+    cloned.remove("tool_outputs");
+    cloned
+}
+
 fn normalize_responses_tool_definition(tool: &Value) -> Option<Value> {
     let row = tool.as_object()?;
     let tool_type = row
@@ -180,6 +187,18 @@ fn normalize_responses_tool_definitions(value: Option<&Value>) -> Vec<Value> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
+}
+
+fn read_entry_tools_value(entry_obj: &Map<String, Value>) -> Value {
+    if let Some(tools) = entry_obj.get("tools") {
+        return tools.clone();
+    }
+    entry_obj
+        .get("basePayload")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("tools"))
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn normalize_responses_history_item(value: Value) -> Value {
@@ -982,7 +1001,7 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
 fn stringify_responses_tool_output(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) => text.clone(),
-        Some(Value::Null) | None => "\"\"".to_string(),
+        Some(Value::Null) | None => String::new(),
         Some(other) => {
             serde_json::to_string(other).unwrap_or_else(|_| "[object Object]".to_string())
         }
@@ -1195,11 +1214,7 @@ fn normalize_submitted_tool_outputs(
             ));
         };
 
-        let output_text = match row.get("output") {
-            Some(Value::String(text)) => text.clone(),
-            Some(other) => serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
-            None => "null".to_string(),
-        };
+        let output_text = stringify_responses_tool_output(row.get("output"));
 
         let mut item = Map::new();
         item.insert(
@@ -1224,10 +1239,7 @@ fn normalize_submitted_tool_outputs(
 }
 
 fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Value {
-    let mut base_payload = pick_responses_persisted_fields(payload)
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
+    let mut base_payload = clone_responses_context_body(payload);
 
     if let Some(model) = read_trimmed_string(payload.as_object().and_then(|row| row.get("model"))) {
         base_payload.insert("model".to_string(), Value::String(model));
@@ -1263,7 +1275,12 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
     entry.insert("basePayload".to_string(), Value::Object(base_payload));
     entry.insert("input".to_string(), Value::Array(input));
     entry.insert("providerKey".to_string(), provider_key_value);
-    if !tools.is_empty() {
+    if !tools.is_empty()
+        && !entry
+            .get("basePayload")
+            .and_then(Value::as_object)
+            .is_some_and(|row| row.contains_key("tools"))
+    {
         entry.insert("tools".to_string(), Value::Array(tools));
     }
 
@@ -1316,7 +1333,6 @@ fn resume_responses_conversation_payload(
     let (normalized_items, submitted_details) =
         normalize_submitted_tool_outputs(&tool_outputs, &merged_input)?;
     merged_input.extend(normalized_items);
-    let merged_input = collapse_auto_stop_hook_pairs_in_history(merged_input);
     let full_input = normalize_responses_history_items(merged_input.clone());
     payload.insert("input".to_string(), Value::Array(merged_input));
 
@@ -1369,7 +1385,7 @@ fn resume_responses_conversation_payload(
             "toolOutputsDetailed": submitted_details,
             "fullInputItems": full_input.len(),
             "fullInput": full_input,
-            "restoredTools": entry_obj.get("tools").cloned().unwrap_or(Value::Null),
+            "restoredTools": read_entry_tools_value(&entry_obj),
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
         }
     }))
@@ -1641,11 +1657,7 @@ fn collect_submitted_tool_output_details(input_items: &[Value]) -> Vec<Value> {
         let call_id = read_trimmed_string(row.get("call_id"))
             .or_else(|| read_trimmed_string(row.get("id")))
             .unwrap_or_else(|| format!("resume_tool_{}", index + 1));
-        let output_text = match row.get("output") {
-            Some(Value::String(text)) => text.clone(),
-            Some(other) => serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
-            None => "null".to_string(),
-        };
+        let output_text = stringify_responses_tool_output(row.get("output"));
         submitted.push(serde_json::json!({
             "callId": call_id.clone(),
             "originalId": call_id,
@@ -1920,7 +1932,6 @@ fn restore_responses_continuation_payload(
         }
     }
 
-    let delta_input = collapse_auto_stop_hook_pairs_in_history(delta_input);
     payload.insert(
         "input".to_string(),
         Value::Array(normalize_responses_history_items(delta_input.clone())),
@@ -1939,8 +1950,8 @@ fn restore_responses_continuation_payload(
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
             "deltaInputItems": delta_input.len(),
-            "fullInput": normalize_responses_history_items(collapse_auto_stop_hook_pairs_in_history(input_items.clone())),
-            "restoredTools": entry_obj.get("tools").cloned().unwrap_or(Value::Null),
+            "fullInput": normalize_responses_history_items(input_items.clone()),
+            "restoredTools": read_entry_tools_value(&entry_obj),
             "toolOutputsDetailed": submitted_details,
             "restored": true,
         }
@@ -1989,7 +2000,6 @@ fn materialize_responses_continuation_payload(
             strip_leading_pending_function_call_replay(&suffix_delta, &pending_call_ids);
         let suffix_delta =
             collapse_duplicate_pending_tool_batch_replay(&suffix_delta, &pending_call_ids);
-        let suffix_delta = collapse_auto_stop_hook_pairs_in_history(suffix_delta);
         if suffix_delta.is_empty() {
             return Value::Null;
         }
@@ -1998,8 +2008,7 @@ fn materialize_responses_continuation_payload(
         let submitted_details = collect_submitted_tool_output_details(&suffix_delta);
         let mut full_input = prefix.clone();
         full_input.extend(suffix_delta.clone());
-        let full_input =
-            normalize_responses_history_items(collapse_auto_stop_hook_pairs_in_history(full_input));
+        let full_input = normalize_responses_history_items(full_input);
 
         let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
             .as_object()
@@ -2035,7 +2044,7 @@ fn materialize_responses_continuation_payload(
                 "continuationDeltaItems": suffix_delta.len(),
                 "fullInputItems": full_input.len(),
                 "fullInput": full_input,
-                "restoredTools": entry_obj.get("tools").cloned().unwrap_or(Value::Null),
+                "restoredTools": read_entry_tools_value(&entry_obj),
                 "toolOutputsDetailed": submitted_details,
             }
         });
@@ -2065,14 +2074,12 @@ fn materialize_responses_continuation_payload(
         strip_leading_pending_function_call_replay(&continuation_delta, &pending_call_ids);
     let continuation_delta =
         collapse_duplicate_pending_tool_batch_replay(&continuation_delta, &pending_call_ids);
-    let continuation_delta = collapse_auto_stop_hook_pairs_in_history(continuation_delta);
 
     let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
     let submitted_details = collect_submitted_tool_output_details(&continuation_delta);
     let mut full_input = prefix.clone();
     full_input.extend(continuation_delta.clone());
-    let full_input =
-        normalize_responses_history_items(collapse_auto_stop_hook_pairs_in_history(full_input));
+    let full_input = normalize_responses_history_items(full_input);
 
     let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
         .as_object()
@@ -2108,7 +2115,7 @@ fn materialize_responses_continuation_payload(
             "continuationDeltaItems": continuation_delta.len(),
             "fullInputItems": full_input.len(),
             "fullInput": full_input,
-            "restoredTools": entry_obj.get("tools").cloned().unwrap_or(Value::Null),
+            "restoredTools": read_entry_tools_value(&entry_obj),
             "toolOutputsDetailed": submitted_details,
         }
     })
@@ -2426,7 +2433,7 @@ mod tests {
     }
 
     #[test]
-    fn resume_collapses_latest_stopless_tool_pair_to_guidance_in_continuation_history() {
+    fn resume_preserves_stopless_tool_pairs_in_canonical_continuation_history() {
         let resumed = resume_responses_conversation_payload(
             &json!({
                 "requestId": "req-stopless-1",
@@ -2473,22 +2480,25 @@ mod tests {
 
         let payload = resumed.get("payload").and_then(Value::as_object).unwrap();
         let input = payload.get("input").and_then(Value::as_array).unwrap();
-        assert_eq!(input.len(), 2);
+        assert_eq!(input.len(), 5);
         assert_eq!(input[0]["type"], json!("message"));
-        assert_eq!(input[1]["type"], json!("message"));
-        let guidance = input[1]["content"][0]["text"].as_str().unwrap_or("");
-        assert!(guidance.contains("上一轮执行结果：repeatCount=3/3"));
-        assert!(guidance.contains("继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。"));
-        assert!(guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+        assert_eq!(input[1]["type"], json!("function_call"));
+        assert_eq!(input[2]["type"], json!("function_call_output"));
+        assert_eq!(input[3]["type"], json!("function_call"));
+        assert_eq!(input[4]["type"], json!("function_call_output"));
         let serialized = serde_json::to_string(input).unwrap();
-        assert!(!serialized.contains("call_third_round_1"));
-        assert!(!serialized.contains("call_third_round_2"));
-        assert!(!serialized.contains("\"function_call_output\""));
+        assert!(serialized.contains("call_third_round_1"));
+        assert!(serialized.contains("call_third_round_2"));
+        assert!(serialized.contains("\"function_call_output\""));
 
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
-        assert_eq!(full_input.len(), 2);
-        assert_eq!(full_input[1]["type"], json!("message"));
+        assert_eq!(full_input.len(), 5);
+        assert_eq!(full_input[1]["type"], json!("function_call"));
+        assert_eq!(full_input[2]["type"], json!("function_call_output"));
+        assert_eq!(full_input[3]["type"], json!("function_call"));
+        assert_eq!(full_input[4]["type"], json!("function_call_output"));
+        assert_eq!(full_input[4]["call_id"], json!("call_third_round_2"));
     }
 
     #[test]
@@ -2552,9 +2562,12 @@ mod tests {
             }),
         );
 
-        assert_eq!(entry["tools"][0]["type"], json!("function"));
-        assert_eq!(entry["tools"][0]["name"], json!("exec_command"));
-        assert!(entry["tools"][0].get("function").is_none());
+        assert_eq!(entry["basePayload"]["tools"][0]["type"], json!("function"));
+        assert_eq!(
+            entry["basePayload"]["tools"][0]["function"]["name"],
+            json!("exec_command")
+        );
+        assert!(entry.get("tools").is_none());
         assert_eq!(entry["input"][0]["type"], json!("function_call"));
         assert_eq!(entry["input"][0]["name"], json!("exec_command"));
         assert!(entry["input"][0].get("function").is_none());
@@ -2771,6 +2784,69 @@ mod tests {
         assert!(serialized.contains("data:image/png;base64,HISTORY"));
         assert!(!serialized.contains("[Image omitted]"));
         assert!(serialized.contains("data:image/png;base64,CURRENT"));
+    }
+
+    #[test]
+    fn resume_reads_restored_tools_from_full_base_payload_when_entry_tools_are_absent() {
+        let entry = prepare_responses_conversation_entry(
+            &json!({
+                "model": "gpt-5.4",
+                "store": false,
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                }]
+            }),
+            &json!({
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "继续执行" }]
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_restore_tools_1",
+                        "call_id": "call_restore_tools_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }
+                ]
+            }),
+        );
+
+        assert!(entry.get("tools").is_none());
+        assert_eq!(
+            entry["basePayload"]["tools"][0]["function"]["name"],
+            json!("exec_command")
+        );
+
+        let resumed = resume_responses_conversation_payload(
+            &json!({
+                "requestId": "req_restore_tools_1",
+                "basePayload": entry.get("basePayload").cloned().unwrap_or(Value::Null),
+                "input": entry.get("input").cloned().unwrap_or(Value::Null)
+            }),
+            "resp_restore_tools_1",
+            &json!({
+                "tool_outputs": [{
+                    "call_id": "call_restore_tools_1",
+                    "output": "{\"ok\":true}"
+                }]
+            }),
+            Some("req_restore_tools_2"),
+        )
+        .unwrap();
+
+        let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
+        assert_eq!(meta["restoredTools"][0]["type"], json!("function"));
+        assert_eq!(
+            meta["restoredTools"][0]["function"]["name"],
+            json!("exec_command")
+        );
     }
 
     #[test]
