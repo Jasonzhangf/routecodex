@@ -125,7 +125,7 @@ struct ServertoolResponseStageGatePlannerInput {
     adapter_context: Option<Value>,
     runtime_control: Option<Value>,
     allow_followup: bool,
-    has_servertool_support: bool,
+    has_servertool_support: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1590,7 +1590,7 @@ pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResul
             should_bypass: true,
             skip_reason: Some("followup_bypass".to_string()),
         }
-    } else if !input.has_servertool_support {
+    } else if input.has_servertool_support == Some(false) {
         ServertoolResponseStageGateOutput {
             should_bypass: true,
             skip_reason: Some("no_servertool_support".to_string()),
@@ -3672,6 +3672,39 @@ mod tests {
                 },
                 "allowFollowup": false,
                 "hasServertoolSupport": true
+            })
+            .to_string(),
+        )
+        .expect("gate");
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["shouldBypass"], Value::Bool(false));
+        assert_eq!(value.get("skipReason"), None);
+    }
+
+    #[test]
+    fn plan_servertool_response_stage_gate_does_not_bypass_when_support_flag_omitted() {
+        let raw = plan_servertool_response_stage_gate_json(
+            json!({
+                "payload": {
+                    "choices": [{
+                        "index": 0,
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": "call_reasoning_stop_omitted_support",
+                                "type": "function",
+                                "function": {
+                                    "name": "reasoningStop",
+                                    "arguments": "{\"reason\":\"still running\",\"stopreason\":2}"
+                                }
+                            }]
+                        }
+                    }]
+                },
+                "adapterContext": {},
+                "runtimeControl": {},
+                "allowFollowup": false
             })
             .to_string(),
         )

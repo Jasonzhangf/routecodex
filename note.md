@@ -76,8 +76,94 @@
   - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` 通过。
   - `cargo test -p router-hotpath-napi shared_responses_conversation_utils --lib -- --nocapture` 通过（34 passed）。
   - 直接 NAPI 复测：
-    - `planResponsesHandlerEntryJson(...)` 现在产出 `tool_outputs[0].output = ""`
-    - `resumeResponsesConversationPayloadJson(...)` 现在产出 `function_call_output.output = ""`
+  - `planResponsesHandlerEntryJson(...)` 现在产出 `tool_outputs[0].output = ""`
+  - `resumeResponsesConversationPayloadJson(...)` 现在产出 `function_call_output.output = ""`
+
+# 2026-06-24 5555 session history / dead-loop audit
+
+- Jason 要求：
+  - 先提交当前 continuation 修复；
+  - 再审 5555 live session，确认是否丢历史、是否历史正常增长、为何看起来像死循环。
+- 已提交：
+  - `c75d6ceb4 fix: preserve responses continuation history`
+- live 进程真相：
+  - `curl http://127.0.0.1:5555/health` -> `version=0.90.3216`
+  - `netstat -anv -p tcp | grep '\\.5555 '` -> `node:39823 LISTEN`
+  - `ps -p 39823 -o pid=,ppid=,command=` -> 全局安装 `routecodex/dist/index.js ...`
+- 样本审计结论：
+  - `ports/5555` 目录按时间看见的 `841 -> 740 -> 847 -> 743 -> 1049 ...` 不是单链历史回退，而是多条独立链混在一起看。
+  - 可疑链内部仍是严格前缀追加：
+    - `req_1782227984278_8ecc4c26 -> req_1782228060706_c8f44938`：`prefix=841/841`，新增 8 条
+    - `req_1782228041349_173e6fb8 -> req_1782228078571_d2d459cd`：`prefix=740/740`，新增 6 条
+    - `req_1782227937195_5200a1a1 -> req_1782228091363_e3c09209`：`prefix=1037/1037`，新增 12 条
+    - `req_1782228130153_290cd438 -> req_1782228159938_d041a01a`：`prefix=930/930`，新增 2 条
+  - 说明“历史没长/历史丢了”不是当前样本真相；历史是在长。
+- 真异常：
+  - 同一 stopless session `019ec8e6-9975-7d63-bc73-db8708b21596` 的 stopless 状态没有推进。
+  - `req_1782228159938_d041a01a/provider-request.json` 里已经累计带有 92 个不同 `requestId` 的 `stop_message_auto` tool_result，且统计结果是：
+    - `uniqueRequestCount = 92`
+    - `repeatHistogram = { "2": 92 }`
+  - 即：历史在持续增长，但同一 session 的 `repeatCount` 在 92 个不同 requestId 上始终卡死为 `2/3`。
+- 与 root cause 的对应关系：
+  - 这与本轮已修的 continuation store root cause 一致：
+    - `shared_responses_conversation_utils.rs` 旧逻辑会把最新 stopless `function_call + function_call_output` 折叠改写成 guidance `message`
+    - 改写后的结果被写进 `payload.input` / `meta.fullInput`
+    - continuation canonical truth 被污染后，后续 restore/materialize 无法保留真实 stopless tool history，应用层就会出现“历史还在长，但 stopless 状态不推进/像死循环”的现象
+- 当前口径：
+  - 已确认 root cause 与 live 样本症状一致。
+  - 但 5555 当前仍是全局安装运行实例，尚未带上 `c75d6ceb4` 这次修复，因此还不能宣称 live 已闭环。
+
+- 2026-06-24 晚些 live closeout 进展：
+  - 已确认当前 5555 新 PID 重启后，`~/.rcc/install/current/node_modules/rcc-llmswitch-core` 与全局 `routecodex/node_modules/rcc-llmswitch-core` 都已重新链接到本地仓库 `sharedmodule/llmswitch-core`。
+  - 已完成：
+    - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+    - `routecodex restart --port 5555`
+  - 但在线 stopless probe 当前被上游 provider 状态挡住，尚未拿到新的 stopless continuation 成功样本：
+    1. `scripts/tests/stopless-5555-live-probe.mjs`
+       - 3 次都命中 5555 VR：
+         - `search -> minimax.key1.MiniMax-M3`
+         - `search -> minimonth.key1.MiniMax-M2.7`
+       - 但都在 provider 阶段失败：`Upstream provider error`
+       - requestIds:
+         - `openai-responses-minimax.key1-MiniMax-M3-20260624T020824334-397471-2881`
+         - `openai-responses-minimonth.key1-MiniMax-M2.7-20260624T020828912-397472-2882`
+         - `openai-responses-minimax.key1-MiniMax-M3-20260624T020839724-397473-2883`
+    2. `scripts/tests/stopless-5555-final-probe.mjs`
+       - 命中 `thinking -> XLC.key1.glm-5.2`
+       - 首轮未拿到 `exec_command`，对应请求随后也 upstream fail：
+         - `openai-responses-XLC.key1-glm-5.2-20260624T020926915-397474-2884`
+    3. 用历史成功 stopless 样本 `req_1782227555587_b91755b2/provider-request_2.json` 的请求体回放到当前 5555
+       - 命中 `router-glm-5.2`
+       - 同样 upstream fail：
+         - `openai-responses-router-glm-5.2-20260624T021205266-397475-2885`
+  - 结论：
+    - continuation root-cause fix 已编译并接入当前 5555 runtime 路径。
+    - 但本轮在线验证被 provider/upstream 失败挡住，没有新的 live stopless success sample，因此还不能宣称在线闭环完成。
+
+# 2026-06-24 5555 provider-200 reasoningStop live projection audit
+
+- 新确认的根因一：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
+  - `plan_servertool_response_stage_gate_json` 把 `hasServertoolSupport` 设计成必填 `bool`，缺失即反序列化为 `false`。
+  - 但 TS live caller `sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts` 实际不会传这个字段；现有 Jest 也显式锁了“不传 legacy capability details”。
+  - 结果：response-stage native gate 在 live 主线上会把 provider 200 返回的 `reasoningStop` 误判为 `skipReason=no_servertool_support`，stopless CLI 投影根本不执行。
+- 已修：
+  - Rust gate 输入改成 `Option<bool>`；
+  - 只有显式 `Some(false)` 才 bypass；
+  - 新增白盒：`plan_servertool_response_stage_gate_does_not_bypass_when_support_flag_omitted`。
+- 已验证：
+  - `cargo test -p router-hotpath-napi plan_servertool_response_stage_gate_ --lib -- --nocapture` -> `3 passed`
+  - `tests/servertool/server-side-tools.failfast.spec.ts -t "does not pass legacy servertool support capability details into the native response-stage gate"` -> PASS
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+- live 新证据：
+  - 新样本：`req_1782239686630_e9b808cf`
+  - provider 命中：`XLC.key1.glm-5.2`
+  - `provider-response.json` 明确是 `status=200` 且 `finish_reason=tool_calls`，`tool_calls[0].function.name = reasoningStop`
+  - 但 RouteCodex 仍对外报 `HTTP_HANDLER_ERROR`，日志：`failed: Upstream provider error (status=286)`
+- 当前判断：
+  - `no_servertool_support` 误旁路已确认并修复。
+  - live 还叠着第二个错误投影点；它发生在 provider 200 之后、client 响应之前，不是 SSE，也不是 upstream 真失败。
+  - 下一步应继续追 `provider-response -> servertool runtime action -> client projection/error projection` 之间为何被投成 `status=286`。
 
 # 2026-06-24 5555 live snapshot bucket split root cause
 
