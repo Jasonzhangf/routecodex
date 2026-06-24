@@ -536,6 +536,44 @@ function isRelayMaterializedSubmitToolOutputsResumePayload(
   return Boolean(previousResponseId && hasInputHistory && fullInput && fullInput.length > 0);
 }
 
+async function buildCapturedRelayResumeRequestContextForHttp(args: {
+  payload: AnyRecord;
+  requestId?: string;
+  metadata?: Record<string, unknown>;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}): Promise<ResponsesRequestContextForHttp> {
+  const payloadMetadata =
+    args.payload.metadata && typeof args.payload.metadata === 'object' && !Array.isArray(args.payload.metadata)
+      ? (args.payload.metadata as Record<string, unknown>)
+      : undefined;
+  const captured = await captureReqInboundResponsesContextSnapshot({
+    rawRequest: args.payload,
+    requestId: args.requestId,
+    toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
+  });
+  const capturedInput = Array.isArray(captured.input) ? captured.input : [];
+  const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : undefined;
+  const normalizedPayload: AnyRecord = {
+    ...args.payload,
+    input: capturedInput,
+  };
+  if (capturedToolsRaw?.length) {
+    normalizedPayload.tools = capturedToolsRaw;
+  }
+  return {
+    payload: normalizedPayload,
+    context: {
+      input: capturedInput,
+      ...(capturedToolsRaw?.length ? { toolsRaw: capturedToolsRaw } : {}),
+    },
+    sessionId: readResponsesSessionIdFromHttp(args.metadata),
+    conversationId: readResponsesConversationIdFromHttp(args.metadata),
+    ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
+    ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
+  };
+}
+
 export async function buildResponsesRequestContextForHttp(args: {
   payload: AnyRecord;
   requestId?: string;
@@ -564,42 +602,36 @@ export async function buildResponsesRequestContextForHttp(args: {
   const relayOwnedMaterializedSubmitToolOutputsResume =
     isRelayMaterializedSubmitToolOutputsResumePayload(payloadForPersistence, args.resumeMeta);
   if (relayOwnedSubmitToolOutputsResume) {
-    const payloadWithRestoredTools = relayResumeTools?.length
-      ? {
-        ...payloadForPersistence,
-        tools: relayResumeTools,
-      }
-      : payloadForPersistence;
-    return {
-      payload: payloadWithRestoredTools,
-      context: {
-        input: relayResumeFullInput,
-        ...(relayResumeTools?.length ? { toolsRaw: relayResumeTools } : {}),
-      },
-      sessionId: readResponsesSessionIdFromHttp(args.metadata),
-      conversationId: readResponsesConversationIdFromHttp(args.metadata),
-      ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
-      ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
+    const relayResumePayload: AnyRecord = {
+      ...payloadForPersistence,
+      ...(typeof args.resumeMeta?.responseId === 'string' && args.resumeMeta.responseId.trim()
+        ? { previous_response_id: args.resumeMeta.responseId.trim() }
+        : {}),
+      input: relayResumeFullInput,
+      ...(relayResumeTools?.length ? { tools: relayResumeTools } : {}),
     };
+    delete relayResumePayload.response_id;
+    delete relayResumePayload.tool_outputs;
+    return buildCapturedRelayResumeRequestContextForHttp({
+      payload: relayResumePayload,
+      requestId: args.requestId,
+      metadata: args.metadata,
+      matchedPort: args.matchedPort,
+      routingPolicyGroup: args.routingPolicyGroup,
+    });
   }
   if (relayOwnedMaterializedSubmitToolOutputsResume) {
-    const payloadWithRestoredTools = relayResumeTools?.length
-      ? {
+    return buildCapturedRelayResumeRequestContextForHttp({
+      payload: {
         ...payloadForPersistence,
-        tools: relayResumeTools,
-      }
-      : payloadForPersistence;
-    return {
-      payload: payloadWithRestoredTools,
-      context: {
         input: relayResumeFullInput ?? [],
-        ...(relayResumeTools?.length ? { toolsRaw: relayResumeTools } : {}),
+        ...(relayResumeTools?.length ? { tools: relayResumeTools } : {}),
       },
-      sessionId: readResponsesSessionIdFromHttp(args.metadata),
-      conversationId: readResponsesConversationIdFromHttp(args.metadata),
-      ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
-      ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
-    };
+      requestId: args.requestId,
+      metadata: args.metadata,
+      matchedPort: args.matchedPort,
+      routingPolicyGroup: args.routingPolicyGroup,
+    });
   }
   if (isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)) {
     return {

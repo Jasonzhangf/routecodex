@@ -249,7 +249,34 @@ describe('responses-request-bridge relay request-context normalization', () => {
     });
   });
 
-  it('preserves stopless tool-call history from relay fullInput instead of collapsing it into guidance text', async () => {
+  it('normalizes relay fullInput stopless history into provider-facing reasoningStop pair', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续执行 stopless 测试' }],
+        },
+        {
+          type: 'function_call',
+          id: 'fc_stopless_resume_1',
+          call_id: 'call_stopless_resume_1',
+          name: 'reasoningStop',
+          arguments: '{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}',
+        },
+        {
+          type: 'function_call_output',
+          id: 'fc_stopless_resume_1',
+          call_id: 'call_stopless_resume_1',
+          output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
+        },
+      ],
+      toolsRaw: [
+        { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } },
+        { type: 'function', name: 'reasoningStop', parameters: { type: 'object', properties: {} } }
+      ],
+    });
+
     const context = await buildResponsesRequestContextForHttp({
       payload: {
         model: 'gpt-5.4',
@@ -313,22 +340,40 @@ describe('responses-request-bridge relay request-context normalization', () => {
       routingPolicyGroup: 'gateway_priority_5555',
     });
 
-    expect(mockCaptureReqInboundResponsesContextSnapshot).not.toHaveBeenCalled();
-    expect(context.context.input).toHaveLength(5);
+    expect(mockCaptureReqInboundResponsesContextSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'req_stopless_resume_context_1',
+        rawRequest: expect.objectContaining({
+          previous_response_id: 'resp_stopless_resume_1',
+          tools: [
+            { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }
+          ],
+          input: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'function_call',
+              call_id: 'call_stopless_resume_1',
+              name: 'exec_command',
+            }),
+          ]),
+        }),
+      }),
+    );
+    expect(context.context.input).toHaveLength(3);
     expect(context.context.input[1]).toMatchObject({
       type: 'function_call',
       call_id: 'call_stopless_resume_1',
+      name: 'reasoningStop',
     });
     expect(context.context.input[2]).toMatchObject({
       type: 'function_call_output',
       call_id: 'call_stopless_resume_1',
       output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
     });
-    expect(context.context.input[4]).toMatchObject({
-      type: 'function_call_output',
-      call_id: 'call_stopless_resume_2',
-      output: '',
-    });
+    expect(context.payload.input).toEqual(context.context.input);
+    expect(context.payload.tools).toEqual([
+      { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } },
+      { type: 'function', name: 'reasoningStop', parameters: { type: 'object', properties: {} } }
+    ]);
   });
 
   it('materializes request context session truth from factual Codex client headers', async () => {
@@ -383,7 +428,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
     expect(JSON.stringify(context.payload)).not.toContain('persisted-context-must-not-leak');
   });
 
-  it('materializes stopless metadata-center runtime control into responses instructions from side-channel metadata', () => {
+  it('does not materialize stopless runtime control into instructions at request bridge stage', () => {
     const payload: Record<string, unknown> = {
       model: 'gpt-5.4',
       input: [
@@ -420,12 +465,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
     );
 
     const prepared = prepareResponsesRequestBodyForHttp(payload, runtimeMetadata);
-    expect(typeof prepared.pipelineBody.instructions).toBe('string');
-    expect(String(prepared.pipelineBody.instructions)).toContain('repeatCount=2/3');
-    expect(String(prepared.pipelineBody.instructions)).toContain('reasonCode=stop_schema_missing');
-    expect(String(prepared.pipelineBody.instructions)).toContain('missingFields=stopreason, reason');
-    expect(String(prepared.pipelineBody.instructions)).toContain('如果任务已经完成');
-    expect(String(prepared.pipelineBody.instructions)).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
+    expect(prepared.pipelineBody.instructions).toBeUndefined();
   });
 
   it('does not read stopless runtime control from request payload metadata', () => {
