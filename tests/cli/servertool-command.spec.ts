@@ -264,6 +264,9 @@ describe('servertool CLI command', () => {
     createServertoolCommand(program, {
       log: (line) => output.push(line),
       error: (line) => errors.push(line),
+      exit: (code) => {
+        throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
+      }
     });
 
     await program.parseAsync([
@@ -271,7 +274,7 @@ describe('servertool CLI command', () => {
       'routecodex',
       'servertool',
       'run',
-      'reasoning_stop',
+      'stop_message_auto',
       '--input-json',
       JSON.stringify({
         flowId: 'stop_message_flow',
@@ -288,9 +291,103 @@ describe('servertool CLI command', () => {
     const payload = JSON.parse(output[0] ?? '{}');
     expect(payload.modelGuidance).toContain('如果任务已经完成，补齐 stop schema');
     expect(payload.modelGuidance).toContain('如果任务还没完成，不要停，继续执行当前任务');
+    expect(payload.modelGuidance).toContain('stopreason：必填数字；0=finished，1=blocked，2=continue_needed');
+    expect(payload.modelGuidance).toContain('next_step：如果 stopreason=2，必须写下一步要执行的具体动作');
+    expect(payload.modelGuidance).toContain('reason：用一句具体的话写清当前状态');
   });
 
-  it.each(['web_search', 'vision_auto', 'memory_cache_auto'])(
+  it('expands terminal missing fields into per-field repair guidance', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
+      }
+    });
+
+    await program.parseAsync([
+      'node',
+      'routecodex',
+      'servertool',
+      'run',
+      'stop_message_auto',
+      '--input-json',
+      JSON.stringify({
+        flowId: 'stop_message_flow',
+        repeatCount: 1,
+        maxRepeats: 3,
+        schemaFeedback: {
+          reasonCode: 'stop_schema_terminal_missing_fields',
+          missingFields: [
+            'has_evidence',
+            'evidence',
+            'issue_cause',
+            'excluded_factors',
+            'diagnostic_order',
+            'done_steps'
+          ]
+        }
+      })
+    ]);
+
+    expect(errors).toEqual([]);
+    const payload = JSON.parse(output[0] ?? '{}');
+    expect(payload.schemaFeedback.reasonCode).toBe('stop_schema_terminal_missing_fields');
+    expect(payload.schemaFeedback.missingFields).toEqual(expect.arrayContaining([
+      'has_evidence',
+      'evidence',
+      'issue_cause',
+      'excluded_factors',
+      'diagnostic_order',
+      'done_steps'
+    ]));
+    expect(payload.modelGuidance).toContain('终态 stop schema 要求更严格');
+    expect(payload.modelGuidance).toContain('has_evidence：只能填 0 或 1');
+    expect(payload.modelGuidance).toContain('evidence：写真正支撑结论的证据');
+    expect(payload.modelGuidance).toContain('issue_cause：写根因或当前卡点');
+    expect(payload.modelGuidance).toContain('excluded_factors：写已经排除掉的错误方向');
+    expect(payload.modelGuidance).toContain('diagnostic_order：按顺序写本轮排查路径');
+    expect(payload.modelGuidance).toContain('done_steps：列出已经实际完成的动作');
+  });
+
+  it.each([
+    ['web_search', 'web_search', 'web_search_flow', { query: 'x' }],
+    ['vision_auto', 'multimodal', 'vision_flow', { image: 'img_vision' }]
+  ])(
+    'supports client-exec servertool %s',
+    async (toolName, expectedRouteHint, expectedFlowId, input) => {
+      const output: string[] = [];
+      const errors: string[] = [];
+      const program = new Command();
+      program.exitOverride();
+      createServertoolCommand(program, {
+        log: (line) => output.push(line),
+        error: (line) => errors.push(line),
+        exit: (code) => {
+          throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
+        }
+      });
+
+      await program.parseAsync([
+        'node', 'routecodex', 'servertool', 'run', toolName,
+        '--flow', expectedFlowId,
+        '--input-json', JSON.stringify(input)
+      ]);
+
+      expect(errors).toEqual([]);
+      const payload = JSON.parse(output[0] ?? '{}');
+      expect(payload.toolName).toBe(toolName);
+      expect(payload.flowId).toBe(expectedFlowId);
+      expect(payload.routeHint).toBe(expectedRouteHint);
+      expect(payload.input).toEqual(input);
+    }
+  );
+
+  it.each(['memory_cache_auto'])(
     'fails fast for non client-exec servertool %s',
     async (toolName) => {
       const output: string[] = [];

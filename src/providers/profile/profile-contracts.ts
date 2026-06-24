@@ -54,6 +54,7 @@ export interface PrepareStreamBodyInput {
 
 export interface ResolveOAuthTokenFileInput {
   oauthProviderId: string;
+  tokenFile?: string;
   auth: {
     clientId?: string;
     tokenUrl?: string;

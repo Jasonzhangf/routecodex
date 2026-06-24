@@ -1249,7 +1249,9 @@ describe('server-side-tools tool-error closed loop', () => {
     expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(1, {
       responseStageGatePlan: {
         shouldBypass: false,
-        nextAction: 'run_auto_hooks'
+        nextAction: 'continue_to_execution',
+        responseHookMatched: false,
+        responseHookRequired: false
       },
       autoHookEvaluated: false,
       hasAutoHookResult: false,
@@ -1258,7 +1260,9 @@ describe('server-side-tools tool-error closed loop', () => {
     expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(2, {
       responseStageGatePlan: {
         shouldBypass: false,
-        nextAction: 'run_auto_hooks'
+        nextAction: 'continue_to_execution',
+        responseHookMatched: false,
+        responseHookRequired: false
       },
       autoHookEvaluated: true,
       hasAutoHookResult: false,

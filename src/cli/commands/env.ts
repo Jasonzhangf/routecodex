@@ -93,7 +93,7 @@ export function createEnvCommand(program: Command, ctx: EnvCommandContext): void
           throw new Error('Missing port. Set via --port, env or config file');
         }
 
-        const resolvedHost = normalizeConnectHost(host, LOCAL_HOSTS.IPV4);
+const resolvedHost = normalizeConnectHost(host);
         const lines = computeEnvOutput({ host: resolvedHost, port, json: Boolean(options.json) });
         for (const line of lines) {
           ctx.log(line);

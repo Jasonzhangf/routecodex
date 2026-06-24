@@ -312,7 +312,7 @@ async function probeRouteCodexServer(
 }
 
 function normalizeHostForHttp(host: string): string {
-  return resolvePreferredLocalConnectHost(host, LOCAL_HOSTS.IPV4);
+  return resolvePreferredLocalConnectHost(host);
 }
 
 async function requestProcessRestartViaHttp(
@@ -469,12 +469,14 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
         hostUsed = h;
         break;
       }
-      logRestartNonBlocking(ctx, 'resolve_targets.health_probe', describeHealthProbeFailure(probe), {
-        host: h,
-        port,
-        kind: probe.kind,
-        status: probe.status
-      });
+      if (probe.kind !== 'starting') {
+        logRestartNonBlocking(ctx, 'resolve_targets.health_probe', describeHealthProbeFailure(probe), {
+          host: h,
+          port,
+          kind: probe.kind,
+          status: probe.status
+        });
+      }
     }
     if (!ok) {
       continue;
@@ -529,12 +531,14 @@ async function waitForRestart(ctx: RestartCommandContext, host: string, port: nu
     if (!probe || !probe.ok) {
       sawEndpointUnavailable = true;
       samePidHealthyStreak = 0;
-      logRestartNonBlocking(ctx, 'wait_for_restart.health_probe', describeHealthProbeFailure(probe || { ok: false, kind: 'network_error' }), {
-        host: probeHosts[0] || host,
-        port,
-        kind: probe?.kind,
-        status: probe?.status
-      });
+      if (probe?.kind !== 'starting') {
+        logRestartNonBlocking(ctx, 'wait_for_restart.health_probe', describeHealthProbeFailure(probe || { ok: false, kind: 'network_error' }), {
+          host: probeHosts[0] || host,
+          port,
+          kind: probe?.kind,
+          status: probe?.status
+        });
+      }
       await ctx.sleep(sawNewPid ? 250 : 150);
       continue;
     }

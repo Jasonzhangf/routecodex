@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs/promises';
-import { execSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const baseUrl = process.env.STOPLESS_BASE_URL || 'http://127.0.0.1:5555';
@@ -249,17 +249,35 @@ function looksLikeStopSchema(text) {
 
 function isStopMessageAutoCommand(command) {
   return typeof command === 'string' && (
-    command.includes('routecodex hook run reasoning_stop')
+    command.includes('routecodex hook run reasoningStop')
+    || command.includes('routecodex hook run reasoning_stop')
     || command.includes('routecodex servertool run stop_message_auto')
   );
 }
 
 async function runResumeRound(responseId, toolCallId, command) {
-  const cliOutput = execSync(command, {
+  const cliRun = spawnSync('sh', ['-c', command], {
     encoding: 'utf8',
-    maxBuffer: 1024 * 1024,
-    timeout: 20_000
-  }).trim();
+    maxBuffer: 4 * 1024 * 1024,
+    timeout: 60_000
+  });
+  if (cliRun.error) {
+    const detail = [
+      cliRun.error.message,
+      cliRun.stdout ? `stdout=${cliRun.stdout.slice(0, 800)}` : '',
+      cliRun.stderr ? `stderr=${cliRun.stderr.slice(0, 800)}` : ''
+    ].filter(Boolean).join('\n');
+    throw new Error(detail);
+  }
+  if ((cliRun.status ?? 0) !== 0) {
+    const detail = [
+      `cli exited with status=${cliRun.status ?? 'unknown'}`,
+      cliRun.stdout ? `stdout=${cliRun.stdout.slice(0, 800)}` : '',
+      cliRun.stderr ? `stderr=${cliRun.stderr.slice(0, 800)}` : ''
+    ].filter(Boolean).join('\n');
+    throw new Error(detail);
+  }
+  const cliOutput = (cliRun.stdout ?? '').trim();
   const response = await requestJson(
     `${baseUrl}/v1/responses/${encodeURIComponent(responseId)}/submit_tool_outputs`,
     {

@@ -78,19 +78,23 @@ export function maskHeaders(headers: Record<string, unknown> | undefined | null)
 }
 
 export function buildSnapshotPayload(options: {
+  scope?: string;
   stage: string;
   data: unknown;
   headers?: Record<string, unknown>;
   url?: string;
+  entryPort?: number;
   extraMeta?: Record<string, unknown>;
 }) {
   const redactedData = redactSensitiveData(options.data);
   const redactedHeaders = redactSensitiveData(maskHeaders(options.headers || {})) as Record<string, unknown>;
   return {
     meta: {
+      ...(typeof options.scope === 'string' && options.scope.trim() ? { scope: options.scope.trim() } : {}),
       stage: options.stage,
       version: String(process.env.ROUTECODEX_VERSION || 'dev'),
       buildTime: String(process.env.ROUTECODEX_BUILD_TIME || new Date().toISOString()),
+      ...(typeof options.entryPort === 'number' ? { entryPort: options.entryPort } : {}),
       ...(options.extraMeta || {})
     },
     url: options.url,

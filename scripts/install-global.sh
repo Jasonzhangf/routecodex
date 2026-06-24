@@ -137,62 +137,27 @@ prepare_isolated_build_root() {
 
 # 构建项目
 build_project() {
-    echo "🔨 构建项目..."
-    prepare_isolated_build_root
-    pushd "$INSTALL_BUILD_ROOT" >/dev/null
-
-    rm -rf .install-build-dist-check
-
-    # 检查是否已有依赖
-    if [ ! -d "node_modules" ]; then
-        echo "📦 安装项目依赖..."
-
-        # 避免重量级下载/编译：忽略 postinstall、跳过可选依赖
-        export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-        export PUPPETEER_SKIP_DOWNLOAD=1
-
-        if [ -f package-lock.json ]; then
-            echo "   使用 npm ci (带忽略脚本)"
-            if ! timeout 600 npm ci --no-audit --no-fund --omit=optional --ignore-scripts --loglevel=warn; then
-                echo "❌ npm ci 失败或超时"
-                echo "💡 尝试清理缓存后重装：rm -rf node_modules package-lock.json && npm cache clean --force"
-                exit 1
-            fi
-        else
-            echo "   使用 npm install (带忽略脚本)"
-            if ! timeout 600 npm install --no-audit --no-fund --omit=optional --ignore-scripts --prefer-offline --progress=false --loglevel=warn; then
-                echo "❌ npm install 失败或超时"
-                echo "💡 尝试清理缓存后重装：rm -rf node_modules && npm cache clean --force"
-                exit 1
-            fi
+    if [ "${ROUTECODEX_INSTALL_SKIP_BUILD:-0}" = "1" ]; then
+        echo "🔨 使用 build:dev 已通过审计的产物，跳过 install:global 内部构建"
+        INSTALL_BUILD_ROOT="$SOURCE_ROOT"
+        if [ ! -f "$INSTALL_BUILD_ROOT/dist/cli.js" ]; then
+            echo "❌ 缺少 build:dev 产物：dist/cli.js"
+            echo "💡 先执行: npm run build:dev"
+            exit 1
         fi
-    else
-        echo "✅ 依赖已存在，跳过安装"
+        if [ ! -f "$INSTALL_BUILD_ROOT/dist/error-handling/route-error-hub.js" ]; then
+            echo "❌ 缺少 build:dev 产物：dist/error-handling/route-error-hub.js"
+            echo "💡 先执行: npm run build:dev"
+            exit 1
+        fi
+        return
     fi
 
-    # 构建项目
-    echo "🔨 编译TypeScript..."
-    # 本地全局安装使用最小构建链路，绕开 prebuild 审计脚本，避免与 repo-level 审计耦合。
-    BUILD_MODE=dev ROUTECODEX_SKIP_AUTO_BUMP=1 timeout 300 npm run build:min || {
-       echo "❌ 构建超时或失败"
-       echo "💡 尝试手动构建：BUILD_MODE=dev npm run build:min"
-       exit 1
-   }
-    # 确保CLI可执行（本地 + 全局目标自愈）
-    node scripts/ensure-cli-executable.mjs || true
-    ROUTECODEX_SHIM_DIR="$HOME/.local/bin" node scripts/ensure-cli-command-shim.mjs || true
-
-    # 检查构建结果
-    if [ ! -f "dist/cli.js" ]; then
-        echo "❌ 构建失败：找不到 dist/cli.js"
-        exit 1
-    fi
-    if [ ! -f "dist/error-handling/route-error-hub.js" ]; then
-        echo "❌ 构建失败：找不到 dist/error-handling/route-error-hub.js"
-        exit 1
-    fi
-    echo "✅ 构建完成"
-    popd >/dev/null
+    echo "🔁 install:global 默认入口切到 build:dev（直面审计 gate）"
+    BUILD_MODE=dev \
+    ROUTECODEX_BUILD_RESTART_ONLY="${ROUTECODEX_BUILD_RESTART_ONLY:-1}" \
+    ROUTECODEX_INSTALL_VERIFY_PORT="${ROUTECODEX_INSTALL_VERIFY_PORT:-5555}" \
+    npm run build:dev
 }
 
 # 全局安装

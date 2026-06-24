@@ -1,4 +1,3 @@
-import { LOCAL_HOSTS } from '../../constants/index.js';
 import { resolvePreferredLocalConnectHost } from '../../utils/local-connect-host.js';
 
 export function normalizePort(value: unknown): number {
@@ -14,7 +13,7 @@ export function normalizePort(value: unknown): number {
   return NaN;
 }
 
-export function normalizeConnectHost(host: unknown, fallback: string = LOCAL_HOSTS.IPV4): string {
+export function normalizeConnectHost(host: unknown): string {
   const raw = typeof host === 'string' ? host : String(host ?? '');
-  return resolvePreferredLocalConnectHost(raw.trim(), fallback);
+  return resolvePreferredLocalConnectHost(raw.trim());
 }

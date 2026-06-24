@@ -68,10 +68,13 @@ export function buildLocalProbeHostCandidates(host: unknown): string[] {
   return out;
 }
 
-export function resolvePreferredLocalConnectHost(
-  host: unknown,
-  fallback: string = LOCAL_HOSTS.IPV4
-): string {
+export function resolvePreferredLocalConnectHost(host: unknown): string {
   const candidates = buildLocalProbeHostCandidates(host);
-  return candidates[0] || fallback;
+  const first = candidates[0];
+  if (typeof first !== 'string' || first.length === 0) {
+    throw new Error(
+      `resolvePreferredLocalConnectHost: no usable host candidate resolved for input=${String(host)} (no-fallback policy)`
+    );
+  }
+  return first;
 }

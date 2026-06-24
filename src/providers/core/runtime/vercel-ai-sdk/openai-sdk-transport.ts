@@ -413,6 +413,43 @@ function convertResponseFormat(
   };
 }
 
+export function preserveOpenAiSdkChatWireSemantics(
+  originalBody: UnknownRecord,
+  sdkArgs: UnknownRecord
+): UnknownRecord {
+  let changed = false;
+  const nextBody: UnknownRecord = { ...sdkArgs };
+  if (typeof originalBody.stream === 'boolean' && typeof nextBody.stream !== 'boolean') {
+    nextBody.stream = originalBody.stream;
+    changed = true;
+  }
+  if (Array.isArray(originalBody.messages) && Array.isArray(nextBody.messages)) {
+    const originalMessagesJson = JSON.stringify(originalBody.messages);
+    const nextMessagesJson = JSON.stringify(nextBody.messages);
+    if (originalMessagesJson !== nextMessagesJson) {
+      nextBody.messages = originalBody.messages;
+      changed = true;
+    }
+  }
+  if (Array.isArray(originalBody.tools) && Array.isArray(nextBody.tools)) {
+    const originalToolsJson = JSON.stringify(originalBody.tools);
+    const nextToolsJson = JSON.stringify(nextBody.tools);
+    if (originalToolsJson !== nextToolsJson) {
+      nextBody.tools = originalBody.tools;
+      changed = true;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(originalBody, 'tool_choice')) {
+    const originalToolChoiceJson = JSON.stringify(originalBody.tool_choice);
+    const nextToolChoiceJson = JSON.stringify(nextBody.tool_choice);
+    if (originalToolChoiceJson !== nextToolChoiceJson) {
+      nextBody.tool_choice = originalBody.tool_choice;
+      changed = true;
+    }
+  }
+  return changed ? nextBody : sdkArgs;
+}
+
 export function buildOpenAiSdkChatCallOptions(
   body: UnknownRecord,
   requestHeaders: Record<string, string>
@@ -591,7 +628,10 @@ export class VercelAiSdkOpenAiTransport {
 
     const callOptions = buildOpenAiSdkChatCallOptions(providerBody, requestInfo.headers);
     const argsResult = await model.getArgs(callOptions);
-    const body = asRecord(argsResult.args);
+    const body = preserveOpenAiSdkChatWireSemantics(
+      providerBody,
+      asRecord(argsResult.args)
+    );
 
     const response = await fetch(requestInfo.targetUrl, {
       method: 'POST',

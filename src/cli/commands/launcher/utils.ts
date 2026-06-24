@@ -219,7 +219,7 @@ import { resolvePreferredLocalConnectHost } from '../../../utils/local-connect-h
  * address (typically 127.0.0.1 for local usage).
  */
 export function normalizeConnectHost(host: string): string {
-  return resolvePreferredLocalConnectHost(host, '127.0.0.1');
+  return resolvePreferredLocalConnectHost(host);
 }
 
 /**

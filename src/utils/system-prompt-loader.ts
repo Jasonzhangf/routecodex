@@ -149,6 +149,21 @@ export function replaceSystemInOpenAIMessages(messages: unknown[], systemText: s
   return out;
 }
 
+function mergeResponsesInstructions(
+  existing: string | undefined,
+  override: string
+): string {
+  const normalizedOverride = override.trim();
+  const normalizedExisting = typeof existing === 'string' ? existing.trim() : '';
+  if (!normalizedExisting) {
+    return normalizedOverride;
+  }
+  if (normalizedExisting.includes(normalizedOverride)) {
+    return normalizedExisting;
+  }
+  return `${normalizedOverride}\n\n${normalizedExisting}`;
+}
+
 export function applySystemPromptOverride(entryEndpoint: string, payload: PromptAwarePayload | null | undefined): void {
   const override = getSystemPromptOverride();
   if (!override || !payload || typeof payload !== 'object') {
@@ -166,7 +181,7 @@ export function applySystemPromptOverride(entryEndpoint: string, payload: Prompt
       ];
       break;
     case '/v1/responses':
-      payload.instructions = override.prompt;
+      payload.instructions = mergeResponsesInstructions(payload.instructions, override.prompt);
       break;
     default:
       break;

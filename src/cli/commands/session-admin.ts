@@ -117,7 +117,7 @@ async function resolveBaseUrl(ctx: SessionAdminCommandContext, options: SessionA
   }
 
   const configPick = readPortHostFromConfig(loaded);
-  const host = normalizeConnectHost(options.host || configPick.host || LOCAL_HOSTS.LOCALHOST, LOCAL_HOSTS.IPV4);
+  const host = normalizeConnectHost(options.host || configPick.host || LOCAL_HOSTS.LOCALHOST);
 
   let port = normalizePort(options.port);
   if (!Number.isFinite(port) || port <= 0) {

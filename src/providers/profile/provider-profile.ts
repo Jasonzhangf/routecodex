@@ -52,6 +52,7 @@ export interface ApiKeyAuthConfig {
   accountFile?: string;
   accountAlias?: string;
   tokenFile?: string;
+  selectionMode?: 'round-robin' | 'priority';
 }
 
 /**

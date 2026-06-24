@@ -1,6 +1,7 @@
 import {
   applyOpenCodeZenThinkingDefaults,
   buildOpenAiSdkChatCallOptions,
+  preserveOpenAiSdkChatWireSemantics,
   VercelAiSdkOpenAiTransport
 } from '../../../../src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.js';
 
@@ -257,6 +258,89 @@ describe('buildOpenAiSdkChatCallOptions', () => {
         ]
       }
     ]);
+  });
+});
+
+describe('preserveOpenAiSdkChatWireSemantics', () => {
+  it('restores stream and raw wire messages/tools when AI SDK rewrites tool history semantics', () => {
+    const original = {
+      model: 'glm-5.2',
+      stream: true,
+      messages: [
+        { role: 'system', content: 'sys' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_patch_1',
+              type: 'function',
+              function: {
+                name: 'apply_patch',
+                arguments: '*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch'
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          id: 'call_result_1',
+          name: 'exec_command',
+          tool_call_id: 'call_patch_1',
+          content: 'ok'
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'apply_patch',
+            description: 'patch',
+            parameters: { type: 'string' }
+          }
+        }
+      ],
+      tool_choice: 'required'
+    } as any;
+
+    const sdkArgs = {
+      model: 'glm-5.2',
+      messages: [
+        { role: 'system', content: 'sys' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'call_patch_1',
+              type: 'function',
+              function: {
+                name: 'apply_patch',
+                arguments: '\"*** Begin Patch\\n*** Add File: a.txt\\n+hi\\n*** End Patch\"'
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_patch_1',
+          content: 'ok'
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'apply_patch',
+            description: 'patch',
+            parameters: { type: 'string' }
+          }
+        }
+      ],
+      tool_choice: { type: 'required' }
+    } as any;
+
+    expect(preserveOpenAiSdkChatWireSemantics(original, sdkArgs)).toEqual(original);
   });
 });
 

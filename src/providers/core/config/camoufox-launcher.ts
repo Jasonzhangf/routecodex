@@ -1351,11 +1351,13 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
         }
       }
       if (!gotoOk) {
-        const fallbackOauthUrl = resolvePortalOauthUrl(launchUrl);
-        if (fallbackOauthUrl && headless) {
-          logOAuthDebug(`[OAuth] camo-cli portal goto failed; fallback to direct oauthUrl=${fallbackOauthUrl}`);
-          effectiveLaunchUrl = fallbackOauthUrl;
-          gotoOk = gotoCamoUrl(actionContext, effectiveLaunchUrl);
+        // No-fallback contract: camo-cli portal goto failure surfaces as a launch failure.
+        // Do not silently retry via the direct OAuth URL; the outer branch already fails fast.
+        const directOauthUrl = resolvePortalOauthUrl(launchUrl);
+        if (directOauthUrl && headless) {
+          logOAuthDebug(
+            `[OAuth] camo-cli portal goto failed; refusing direct oauthUrl retry (no-fallback policy): ${directOauthUrl}`
+          );
         }
       }
     }

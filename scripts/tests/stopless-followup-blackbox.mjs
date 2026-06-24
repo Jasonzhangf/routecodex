@@ -7,6 +7,10 @@ import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import express from 'express';
 
+const REAL_CODEX_REQUEST_FIXTURE = path.resolve(
+  'tests/fixtures/errorsamples/responses-request-standardization/2026-06-13-duplicate-replay-wrapper-noise/request-body.json'
+);
+
 function setEnv(name, value) {
   const old = process.env[name];
   if (value === undefined) delete process.env[name]; else process.env[name] = value;
@@ -101,18 +105,20 @@ function upstreamResponse(text, finish = 'stop') {
 }
 
 function findExecCommandTool(body) {
-  const toolCalls = body?.required_action?.submit_tool_outputs?.tool_calls;
-  if (!Array.isArray(toolCalls)) {
-    return null;
+  const candidates = [];
+  const requiredActionCalls = body?.required_action?.submit_tool_outputs?.tool_calls;
+  if (Array.isArray(requiredActionCalls)) {
+    candidates.push(...requiredActionCalls);
   }
-  for (const call of toolCalls) {
-    if (call?.name !== 'exec_command' && call?.function?.name !== 'exec_command') {
-      continue;
-    }
+  const outputItems = Array.isArray(body?.output) ? body.output : [];
+  if (outputItems.length > 0) {
+    candidates.push(...outputItems);
+  }
+  for (const call of candidates) {
+    const name = call?.name ?? call?.function?.name ?? null;
+    if (name !== 'exec_command') continue;
     const raw = call?.function?.arguments ?? call?.arguments ?? '';
-    if (typeof raw !== 'string' || !raw.trim()) {
-      continue;
-    }
+    if (typeof raw !== 'string' || !raw.trim()) continue;
     try {
       const parsed = JSON.parse(raw);
       if (typeof parsed?.cmd === 'string') {
@@ -126,6 +132,18 @@ function findExecCommandTool(body) {
     }
   }
   return null;
+}
+
+function isExplicitServerFollowup(body) {
+  if (!body || typeof body !== 'object') {
+    return false;
+  }
+  if (String(body?.metadata?.__rt?.serverToolFollowup || '') === 'true') {
+    return true;
+  }
+  const requestId = String(body?.request_id || '');
+  const previousResponseId = String(body?.previous_response_id || '');
+  return requestId.includes(':stop_followup') || previousResponseId.includes(':stop_followup');
 }
 
 function parseSseResponseEnvelope(text) {
@@ -224,6 +242,20 @@ function runCliCommand(command) {
   return JSON.parse(result.stdout);
 }
 
+async function buildRealCodexResponsesRequest(sessionId) {
+  const raw = await fs.readFile(REAL_CODEX_REQUEST_FIXTURE, 'utf8');
+  const payload = JSON.parse(raw);
+  const next = JSON.parse(JSON.stringify(payload));
+  next.model = 'gpt-5.3-codex';
+  next.stream = false;
+  next.metadata = {
+    ...(next.metadata && typeof next.metadata === 'object' ? next.metadata : {}),
+    sessionId,
+    conversationId: sessionId
+  };
+  return next;
+}
+
 async function main() {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-stopless-blackbox-'));
   const home = path.join(tmp, 'home');
@@ -251,9 +283,7 @@ async function main() {
     upstreamApp.use(express.json({ limit: '2mb' }));
     upstreamApp.post('/responses', (req, res) => {
       upstreamHits.push(req.body);
-      const isFollowup = String(req.body?.metadata?.__rt?.serverToolFollowup || '') === 'true'
-        || String(req.body?.request_id || '').includes(':stop_followup')
-        || (Array.isArray(req.body?.input) && JSON.stringify(req.body.input).includes('继续执行'));
+      const isFollowup = isExplicitServerFollowup(req.body);
       const authHeader = req.get('authorization') || '';
       const providerFromAuth = authHeader.includes('crs1-') ? 'crs1' : authHeader.includes('crs2-') ? 'crs2' : 'unknown';
       upstreamHits[upstreamHits.length - 1].providerFromAuth = providerFromAuth;
@@ -306,6 +336,7 @@ async function main() {
     }));
     harnessServer = await listen(http.createServer(app));
 
+    const firstPayload = await buildRealCodexResponsesRequest(sessionId);
     const resp = await fetch(`${harnessServer.baseUrl}/v1/responses`, {
       method: 'POST',
       headers: {
@@ -313,15 +344,7 @@ async function main() {
         'x-session-id': sessionId,
         'x-conversation-id': sessionId
       },
-      body: JSON.stringify({
-        model: 'gpt-5.3-codex',
-        stream: false,
-        metadata: { sessionId, conversationId: sessionId },
-        input: [{
-          role: 'user',
-          content: [{ type: 'input_text', text: '请直接回复一句“阶段完成”，然后结束。<**stopless:on**>' }]
-        }]
-      })
+      body: JSON.stringify(firstPayload)
     });
 
     const text = await resp.text();
