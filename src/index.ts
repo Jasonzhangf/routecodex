@@ -379,6 +379,91 @@ function logNonBlockingError(stage: string, error: unknown): void {
   console.warn(`[routecodex][non-blocking] stage=${stage} error=${message}`);
 }
 
+type ErrorTopFrame = {
+  frame: string;
+  file?: string;
+  line?: number;
+  column?: number;
+};
+
+function extractErrorTopFrame(error: unknown): ErrorTopFrame | undefined {
+  const stack = error instanceof Error ? error.stack : undefined;
+  if (typeof stack !== 'string' || !stack.trim()) {
+    return undefined;
+  }
+  const lines = stack
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines.slice(1)) {
+    const withParen = line.match(/\((.+):(\d+):(\d+)\)$/);
+    if (withParen) {
+      return {
+        frame: line,
+        file: withParen[1],
+        line: Number.parseInt(withParen[2], 10),
+        column: Number.parseInt(withParen[3], 10),
+      };
+    }
+    const bare = line.match(/^at (.+):(\d+):(\d+)$/);
+    if (bare) {
+      return {
+        frame: line,
+        file: bare[1],
+        line: Number.parseInt(bare[2], 10),
+        column: Number.parseInt(bare[3], 10),
+      };
+    }
+  }
+  return undefined;
+}
+
+function buildUncaughtExceptionDetails(error: unknown): Record<string, unknown> {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const topFrame = extractErrorTopFrame(error);
+  return {
+    message,
+    error,
+    ...(topFrame?.frame ? { topFrame: topFrame.frame } : {}),
+    ...(topFrame?.file ? { file: topFrame.file } : {}),
+    ...(typeof topFrame?.line === 'number' ? { line: topFrame.line } : {}),
+    ...(typeof topFrame?.column === 'number' ? { column: topFrame.column } : {}),
+    action: 'continue_without_shutdown'
+  };
+}
+
+function handleRuntimeUncaughtException(
+  error: unknown,
+  deps: {
+    logLifecycle: typeof logProcessLifecycle;
+    report: typeof reportCliError;
+    consoleError: (...args: unknown[]) => void;
+  } = {
+    logLifecycle: logProcessLifecycle,
+    report: reportCliError,
+    consoleError: (...args: unknown[]) => console.error(...args)
+  }
+): void {
+  const details = buildUncaughtExceptionDetails(error);
+  deps.logLifecycle({
+    event: 'uncaught_exception',
+    source: 'index.main',
+    details
+  });
+  void deps.report('UNCAUGHT_EXCEPTION', 'Uncaught Exception', error, 'critical', {
+    action: 'continue_without_shutdown',
+    ...(typeof details.file === 'string' ? { file: details.file } : {}),
+    ...(typeof details.line === 'number' ? { line: details.line } : {}),
+    ...(typeof details.column === 'number' ? { column: details.column } : {}),
+    ...(typeof details.topFrame === 'string' ? { topFrame: details.topFrame } : {}),
+  });
+  const locationLabel =
+    typeof details.file === 'string' && typeof details.line === 'number'
+      ? ` @ ${details.file}:${details.line}${typeof details.column === 'number' ? `:${details.column}` : ''}`
+      : '';
+  deps.consoleError(`❌ Uncaught Exception${locationLabel}:`, error);
+}
+
 type ShutdownReason =
   | { kind: 'signal'; signal: string }
   | { kind: 'uncaughtException'; message: string }
@@ -2010,24 +2095,7 @@ async function main(): Promise<void> {
 
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    logProcessLifecycle({
-      event: 'uncaught_exception',
-      source: 'index.main',
-      details: { message, error }
-    });
-    recordShutdownReason({ kind: 'uncaughtException', message });
-    void reportCliError('UNCAUGHT_EXCEPTION', 'Uncaught Exception', error, 'critical');
-    console.error('❌ Uncaught Exception:', error);
-    gracefulShutdown(app).catch((shutdownError) => {
-      const reason = shutdownError instanceof Error ? shutdownError.message : String(shutdownError);
-      logProcessLifecycle({
-        event: 'graceful_shutdown_failed',
-        source: 'index.main',
-        details: { reason }
-      });
-      process.exit(1);
-    });
+    handleRuntimeUncaughtException(error);
   });
 
   // Handle unhandled promise rejections (log only; do not shutdown)
@@ -2057,4 +2125,4 @@ if (isDirectExecution(import.meta.url, process.argv[1])) {
   });
 }
 
-export { RouteCodexApp, main };
+export { RouteCodexApp, main, handleRuntimeUncaughtException, extractErrorTopFrame, buildUncaughtExceptionDetails };

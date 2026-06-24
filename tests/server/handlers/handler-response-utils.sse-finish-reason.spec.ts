@@ -662,6 +662,77 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(clearResponsesConversationByRequestId).not.toHaveBeenCalledWith('resp_direct_required_action_close');
   });
 
+  it('does not raise uncaughtException when SSE timeout closes upstream with an error', async () => {
+    const previousTimeout = process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
+    process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = '30';
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const upstream = new PassThrough();
+    const chunks: string[] = [];
+    let uncaught: Error | undefined;
+    const onUncaught = (error: Error) => {
+      uncaught = error;
+    };
+    process.prependOnceListener('uncaughtException', onUncaught);
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    try {
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          sseStream: upstream
+        } as any,
+        'req-stream-timeout-no-uncaught',
+        { forceSSE: true, entryEndpoint: '/v1/responses' }
+      );
+
+      upstream.write('event: response.created\n');
+      upstream.write(
+        'data: {"type":"response.created","response":{"id":"resp_timeout_guard","object":"response","status":"in_progress","output":[]}}\n\n'
+      );
+
+      await finished;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+      const output = chunks.join('');
+      expect(output).toContain('event: error');
+      expect(output).toContain('"code":"HTTP_SSE_TIMEOUT"');
+      expect(uncaught).toBeUndefined();
+    } finally {
+      process.removeListener('uncaughtException', onUncaught);
+      upstream.destroy();
+      if (previousTimeout === undefined) {
+        delete process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
+      } else {
+        process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = previousTimeout;
+      }
+    }
+  });
+
   it('does not enforce stopless contract inside raw SSE handler path', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,

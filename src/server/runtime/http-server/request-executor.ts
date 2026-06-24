@@ -1406,6 +1406,7 @@ export class HubRequestExecutor implements RequestExecutor {
             readHubDecodeBreakdown
           });
         } catch (error) {
+          const entryPortForSnapshot = readEntryPort(metadataForAttempt) ?? readEntryPort(metadataRecord);
           const sendFailure = await processProviderSendFailure({
             error,
             requestId: input.requestId,
@@ -1452,6 +1453,18 @@ export class HubRequestExecutor implements RequestExecutor {
             metadata: metadataForAttempt,
             phase: providerFailurePhase,
             logNonBlockingError: logRequestExecutorNonBlockingError,
+            writeProviderSnapshot: async (snapshotArgs) => {
+              await writeProviderSnapshot({
+                ...snapshotArgs,
+                metadata: {
+                  ...(metadataForAttempt ?? {}),
+                  ...(snapshotArgs.metadata ?? {}),
+                  ...(typeof entryPortForSnapshot === 'number'
+                    ? { entryPort: entryPortForSnapshot, matchedPort: entryPortForSnapshot }
+                    : {})
+                }
+              });
+            },
             extractRetryErrorSnapshot
           });
           const failureState = applySendFailureState({

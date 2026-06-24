@@ -518,6 +518,8 @@ async function streamResponsesJsonAsSse(
   args: ResponsesJsonSseDispatchArgs & { responsesPayload: Record<string, unknown> }
 ): Promise<boolean> {
   const flushable = args.res as FlushableResponse;
+  let cleanupLogged = false;
+  let streamEnded = false;
   args.res.status(args.status);
   args.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   args.res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -555,19 +557,44 @@ async function streamResponsesJsonAsSse(
       );
       return true;
     }
-    stream.on('end', () => {
-      if (!args.res.writableEnded && !args.res.destroyed) {
-        args.res.end();
+    const cleanup = (trigger: 'close' | 'finish') => {
+      if (cleanupLogged) {
+        return;
+      }
+      cleanupLogged = true;
+      if (trigger === 'close' && !streamEnded) {
+        recordSseTransportClientClose(args.requestLabel, {
+          finishReason: undefined,
+          terminal: false,
+          closeBeforeStreamEnd: true,
+        });
+        try {
+          stream.unpipe(args.res);
+        } catch (error) {
+          logResponseNonBlockingError(`response.sse.json_bridge.unpipe:${args.requestLabel}`, error);
+        }
+        try {
+          stream.destroy(createSseClientResponseClosedError());
+        } catch (error) {
+          logResponseNonBlockingError(`response.sse.json_bridge.destroy:${args.requestLabel}`, error);
+        }
       }
       finalizeSseTransportCloseout({
         metadata: args.result.metadata as Record<string, unknown> | undefined,
-        releaseReason: 'json_to_sse_closeout',
+        releaseReason: `json_to_sse_${trigger}_closeout`,
         logResponseCompleted: args.logResponseCompleted,
         completedDetails: {
           status: args.status,
           mode: 'sse',
         },
       });
+    };
+    stream.on('end', () => {
+      streamEnded = true;
+      if (!args.res.writableEnded && !args.res.destroyed) {
+        args.res.end();
+      }
+      cleanup('finish');
     });
     stream.on('error', (error: Error) => {
       logResponseNonBlockingError(`response.sse.json_bridge.stream:${args.requestLabel}`, error);
@@ -581,6 +608,8 @@ async function streamResponsesJsonAsSse(
         );
       }
     });
+    args.res.on('close', () => cleanup('close'));
+    args.res.on('finish', () => cleanup('finish'));
     stream.pipe(args.res, { end: false });
   } catch (error) {
     logResponseNonBlockingError(`response.sse.json_bridge:${args.requestLabel}`, error);
@@ -613,6 +642,8 @@ async function streamChatCompletionsJsonAsSse(
     return false;
   }
   const flushable = args.res as FlushableResponse;
+  let cleanupLogged = false;
+  let streamEnded = false;
   args.res.status(args.status);
   args.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   args.res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -638,19 +669,44 @@ async function streamChatCompletionsJsonAsSse(
       );
       return true;
     }
-    stream.on('end', () => {
-      if (!args.res.writableEnded && !args.res.destroyed) {
-        args.res.end();
+    const cleanup = (trigger: 'close' | 'finish') => {
+      if (cleanupLogged) {
+        return;
+      }
+      cleanupLogged = true;
+      if (trigger === 'close' && !streamEnded) {
+        recordSseTransportClientClose(args.requestLabel, {
+          finishReason: undefined,
+          terminal: false,
+          closeBeforeStreamEnd: true,
+        });
+        try {
+          stream.unpipe(args.res);
+        } catch (error) {
+          logResponseNonBlockingError(`response.sse.chat_json_bridge.unpipe:${args.requestLabel}`, error);
+        }
+        try {
+          stream.destroy(createSseClientResponseClosedError());
+        } catch (error) {
+          logResponseNonBlockingError(`response.sse.chat_json_bridge.destroy:${args.requestLabel}`, error);
+        }
       }
       finalizeSseTransportCloseout({
         metadata: args.result.metadata as Record<string, unknown> | undefined,
-        releaseReason: 'json_to_sse_closeout',
+        releaseReason: `json_to_sse_${trigger}_closeout`,
         logResponseCompleted: args.logResponseCompleted,
         completedDetails: {
           status: args.status,
           mode: 'sse',
         },
       });
+    };
+    stream.on('end', () => {
+      streamEnded = true;
+      if (!args.res.writableEnded && !args.res.destroyed) {
+        args.res.end();
+      }
+      cleanup('finish');
     });
     stream.on('error', (error: Error) => {
       logResponseNonBlockingError(`response.sse.chat_json_bridge.stream:${args.requestLabel}`, error);
@@ -664,6 +720,8 @@ async function streamChatCompletionsJsonAsSse(
         );
       }
     });
+    args.res.on('close', () => cleanup('close'));
+    args.res.on('finish', () => cleanup('finish'));
     stream.pipe(args.res, { end: false });
     return true;
   } catch (error) {
@@ -1025,11 +1083,18 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         ? streamSource as Readable
         : stream;
     try {
-      if (error && isClientDisconnectAbortError(error)) {
+      if (error && typeof destroyTarget.once === 'function') {
         destroyTarget.once('error', (streamError) => {
-          if (!isClientDisconnectAbortError(streamError)) {
-            logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, streamError);
+          const streamCode = readErrorCode(streamError);
+          const expectedCode = readErrorCode(error);
+          const sameCode = expectedCode && streamCode === expectedCode;
+          const sameMessage =
+            streamError instanceof Error
+            && streamError.message === error.message;
+          if (sameCode || sameMessage || isClientDisconnectAbortError(streamError)) {
+            return;
           }
+          logResponseNonBlockingError(`response.sse.cleanup.destroy_stream:${requestLabel}`, streamError);
         });
       }
       destroyTarget.destroy?.(error);
@@ -1091,11 +1156,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       logResponseNonBlockingError(`response.sse.error.end:${requestLabel}`, error);
     }
     clientSseSnapshotRecorder?.flush();
-    try {
-      stream.destroy?.(Object.assign(new Error(message), { code }));
-    } catch (error) {
-      logResponseNonBlockingError(`response.sse.error.destroy_stream:${requestLabel}`, error);
-    }
+    destroySourceStream(Object.assign(new Error(message), { code }));
   };
 
   if (typeof totalTimeoutMs === 'number' && Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0) {

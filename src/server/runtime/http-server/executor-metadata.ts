@@ -18,6 +18,7 @@ import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { preserveLiveClientAbortCarriers } from './executor/request-executor-client-abort-block.js';
 import { hasStoplessDirectiveInRequestPayload } from './executor/provider-response-shared-pure-blocks.js';
 import { extractServertoolCliResultRouteHintFromRequestNative } from '../../../modules/llmswitch/bridge/native-exports.js';
+import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
 
 const ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER = {
   module: 'src/server/runtime/http-server/executor-metadata.ts',
@@ -773,7 +774,21 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     });
   }
 
+  projectNativeTopLevelRuntimeControl(metadata, readRuntimeControlProjection(metadata));
   return metadata;
+}
+
+function projectNativeTopLevelRuntimeControl(
+  target: Record<string, unknown>,
+  runtimeControl: ReturnType<typeof readRuntimeControlProjection>
+): void {
+  if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
+    target.stopMessageEnabled = runtimeControl.stopMessageEnabled;
+    target.routecodexPortStopMessageEnabled = runtimeControl.stopMessageEnabled;
+  }
+  if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
+    target.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
+  }
 }
 
 export function decorateMetadataForAttempt(

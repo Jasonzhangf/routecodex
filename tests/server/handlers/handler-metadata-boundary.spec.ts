@@ -118,7 +118,16 @@ describe('handler metadata boundary', () => {
     const executePipeline = jest.fn(async () => ({ status: 200, body: { object: 'response', output: [] } }));
     const app = express();
     app.use(express.json());
-    app.post('/v1/responses', (req, res) => void handleResponses(req as any, res as any, { executePipeline, errorHandling: null }));
+    app.post('/v1/responses', (req, res) => void handleResponses(req as any, res as any, {
+      executePipeline,
+      errorHandling: null,
+      portContext: {
+        matchedPort: 5555,
+        routingPolicyGroup: 'gateway_priority_5555',
+        stopMessageEnabled: true,
+        stopMessageExcludeDirect: true
+      }
+    }));
     const { server, baseUrl } = await listenApp(app);
     try {
       const result = await fetchJson(baseUrl, '/v1/responses', {
@@ -130,7 +139,10 @@ describe('handler metadata boundary', () => {
       expect(result.status).toBe(200);
       const input = executePipeline.mock.calls[0]?.[0] as any;
       expect(input.body.metadata).toBeUndefined();
-      expect(input.metadata.userAgent).toBe('responses-sess');
+      const runtimeControl = MetadataCenter.read(input.metadata)?.readRuntimeControl();
+      expect(runtimeControl?.stopMessageEnabled).toBe(true);
+      expect(input.metadata.stopMessageEnabled).toBe(true);
+      expect(input.metadata.routecodexPortStopMessageEnabled).toBe(true);
     } finally {
       await closeServer(server);
     }

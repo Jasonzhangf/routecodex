@@ -962,6 +962,69 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     }
   });
 
+  it('stops forceSSE JSON bridge writes after the client closes early', async () => {
+    const sendPipelineResponse = await loadSendPipelineResponse();
+    const bridgeModule = await import('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js');
+    const converterFactory = bridgeModule.createResponsesJsonToSseConverterForHttp as jest.Mock;
+    converterFactory.mockResolvedValueOnce({
+      convertResponseToJsonToSse: async () => {
+        const stream = Readable.from((async function* () {
+          yield 'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_json_bridge_close_1","status":"in_progress"}}\n\n';
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          yield 'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_json_bridge_close_1","status":"completed"}}\n\n';
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          yield 'event: response.done\ndata: {"type":"response.done","response":{"id":"resp_json_bridge_close_1","status":"completed"}}\n\n';
+        })());
+        return stream;
+      }
+    });
+
+    const app = express();
+    app.get('/responses-sse-from-slow-json', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            id: 'resp_json_bridge_close_1',
+            object: 'response',
+            status: 'completed',
+            output: []
+          }
+        } as any,
+        'req_force_sse_json_bridge_close',
+        { forceSSE: true, entryEndpoint: '/v1/responses' }
+      );
+    });
+    app.get('/healthz', (_req, res) => {
+      res.status(200).json({ ok: true });
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/responses-sse-from-slow-json`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      expect(reader).toBeDefined();
+      const first = await reader!.read();
+      const firstText = Buffer.from(first.value ?? []).toString('utf8');
+      expect(first.done).toBe(false);
+      expect(firstText).toContain('response.created');
+      await reader!.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 180));
+
+      const health = await fetch(`http://127.0.0.1:${addr.port}/healthz`);
+      expect(health.status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('encodes Responses function_call JSON into complete SSE terminal frames', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();

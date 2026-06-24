@@ -53,6 +53,30 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
     });
   });
 
+  it('projects stopMessage runtime control into Rust-visible top-level metadata at handler boundary', () => {
+    const internalMetadata = { providerProtocol: 'openai-responses' } as Record<string, unknown>;
+    const center = MetadataCenter.attach(internalMetadata);
+    center.writeRuntimeControl(
+      'stopMessageEnabled',
+      true,
+      {
+        module: 'tests/server/handlers/handler-utils.metadata.spec.ts',
+        symbol: 'projects stopMessage runtime control into Rust-visible top-level metadata at handler boundary',
+        stage: 'test'
+      },
+      'test stopless enablement'
+    );
+
+    const merged = buildHandlerPipelineMetadata(undefined, internalMetadata);
+
+    expect(merged).toMatchObject({
+      providerProtocol: 'openai-responses',
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true
+    });
+    expect(MetadataCenter.read(merged)).toBe(center);
+  });
+
   it('throws on client __rt metadata (no merge with internal __rt, no silent drop)', () => {
     expect(() => buildHandlerPipelineMetadata(
       { __rt: { routeHint: 'coding', keep: true } },

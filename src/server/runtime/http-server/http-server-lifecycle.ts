@@ -422,13 +422,21 @@ export function buildHttpHandlerContext(server: any, req: Request): HandlerConte
     typeof server?.getPortConfigForLocalPort === 'function'
       ? server.getPortConfigForLocalPort(localPort)
       : undefined;
+  const effectiveStopMessageEnabled = typeof matchedPortConfig?.stopMessage?.enabled === 'boolean'
+    ? matchedPortConfig.stopMessage.enabled
+    : true;
+  const effectiveStopMessageExcludeDirect = matchedPortConfig?.stopMessage?.includeDirect === true
+    ? false
+    : true;
   const portContext = {
     ...(typeof socketLocalPort === 'number' ? { localPort: socketLocalPort } : {}),
     ...(typeof matchedPortConfig?.port === 'number' ? { matchedPort: matchedPortConfig.port } : {}),
     ...(typeof matchedPortConfig?.routingPolicyGroup === 'string' && matchedPortConfig.routingPolicyGroup.trim()
       ? { routingPolicyGroup: matchedPortConfig.routingPolicyGroup.trim() }
       : {}),
-    ...(typeof matchedPortConfig?.port === 'number' ? { logNamespace: `server-${matchedPortConfig.port}` } : {})
+    ...(typeof matchedPortConfig?.port === 'number' ? { logNamespace: `server-${matchedPortConfig.port}` } : {}),
+    stopMessageEnabled: effectiveStopMessageEnabled,
+    stopMessageExcludeDirect: effectiveStopMessageExcludeDirect,
   };
   try {
     const requestPath =

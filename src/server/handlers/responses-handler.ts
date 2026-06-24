@@ -28,6 +28,7 @@ import {
   prepareResponsesRequestBodyForHttp,
   prepareResponsesHandlerRuntimeForHttp,
 } from '../../modules/llmswitch/bridge/responses-request-bridge.js';
+import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 import { markClientConnectionDisconnected, trackClientConnectionState } from '../utils/client-connection-state.js';
@@ -160,6 +161,31 @@ export async function handleResponses(
       resumeMeta,
       requestContext,
     });
+    const responsesPipelineCenter = MetadataCenter.attach(responsesPipelineMetadata);
+    if (typeof ctx.portContext?.stopMessageEnabled === 'boolean') {
+      responsesPipelineCenter.writeRuntimeControl(
+        'stopMessageEnabled',
+        ctx.portContext.stopMessageEnabled,
+        {
+          module: 'src/server/handlers/responses-handler.ts',
+          symbol: 'handleResponses',
+          stage: 'HubReqInbound02Standardized'
+        },
+        'responses port stop-message enablement'
+      );
+    }
+    if (typeof ctx.portContext?.stopMessageExcludeDirect === 'boolean') {
+      responsesPipelineCenter.writeRuntimeControl(
+        'stopMessageExcludeDirect',
+        ctx.portContext.stopMessageExcludeDirect,
+        {
+          module: 'src/server/handlers/responses-handler.ts',
+          symbol: 'handleResponses',
+          stage: 'HubReqInbound02Standardized'
+        },
+        'responses port stop-message direct exclusion'
+      );
+    }
     const preparedPipelineBody = prepareResponsesRequestBodyForHttp(
       payload as Record<string, unknown>,
       responsesPipelineMetadata

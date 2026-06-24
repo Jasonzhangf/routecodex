@@ -731,10 +731,24 @@ export function buildHandlerPipelineMetadata(
     HANDLER_RUNTIME_CONTROL_WRITER,
     'handler client abort state'
   );
+  projectNativeTopLevelRuntimeControl(merged, readRuntimeControlProjection(merged));
   delete merged.stream;
   delete merged.inboundStream;
   delete merged.outboundStream;
   return merged;
+}
+
+function projectNativeTopLevelRuntimeControl(
+  target: Record<string, unknown>,
+  runtimeControl: ReturnType<typeof readRuntimeControlProjection>
+): void {
+  if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
+    target.stopMessageEnabled = runtimeControl.stopMessageEnabled;
+    target.routecodexPortStopMessageEnabled = runtimeControl.stopMessageEnabled;
+  }
+  if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
+    target.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
+  }
 }
 
 // Phase Server-B: explicit whitelist + explicit denied list for client-supplied metadata.

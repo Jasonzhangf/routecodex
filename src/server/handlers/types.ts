@@ -25,8 +25,10 @@ export interface PipelineExecutionResult {
   usageLogInfo?: {
     providerKey?: string;
     model?: string;
+    requestModel?: string;
     routeName?: string;
     poolId?: string;
+    entryPort?: number;
     finishReason?: string;
     stoplessMode?: 'on' | 'off' | 'endless';
     stoplessArmed?: boolean;
@@ -76,6 +78,8 @@ export interface HandlerContext {
     matchedPort?: number;
     routingPolicyGroup?: string;
     logNamespace?: string;
+    stopMessageEnabled?: boolean;
+    stopMessageExcludeDirect?: boolean;
   };
 }
 

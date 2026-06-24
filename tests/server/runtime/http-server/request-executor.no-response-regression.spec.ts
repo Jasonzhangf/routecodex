@@ -139,6 +139,39 @@ describe('HubRequestExecutor no-response regression guard', () => {
     });
   });
 
+  it('passes writeProviderSnapshot into provider send failure handling', async () => {
+    const providerError = Object.assign(new Error('provider unavailable'), {
+      code: 'HTTP_503',
+      upstreamCode: 'HTTP_503',
+      status: 503,
+      statusCode: 503,
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.send'
+    });
+    const handle = createRuntimeHandle(async () => {
+      throw providerError;
+    });
+    mockProcessProviderSendFailure.mockResolvedValue({
+      lastError: providerError,
+      blockingRecoverableRouteHoldState: null,
+      allowBlockingRecoverableRetryBeyondAttemptBudget: false,
+      forcedRouteHint: undefined,
+      contextOverflowRetries: 0,
+      cumulativeExternalLatencyMs: 0
+    });
+    const { executor, request } = createExecutor(handle);
+
+    await expect(executor.execute(request)).rejects.toMatchObject({
+      message: 'provider unavailable'
+    });
+
+    expect(mockProcessProviderSendFailure).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'req_no_response_regression',
+      phase: 'provider_send',
+      writeProviderSnapshot: expect.any(Function)
+    }));
+  });
+
   it('should preserve provider code and status on final thrown error instead of throwing bare Provider execution failed without response', async () => {
     const providerError = Object.assign(new Error('provider raw stream ended with no content'), {
       code: 'HTTP_502',

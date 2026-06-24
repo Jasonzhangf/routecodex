@@ -383,6 +383,10 @@ describe('executor metadata session daemon extraction', () => {
     expect(center?.readRuntimeControl()).toMatchObject({
       stopMessageEnabled: true
     });
+    expect(metadata).toMatchObject({
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true
+    });
   });
 
   it('materializes request truth from factual Codex session headers', () => {
