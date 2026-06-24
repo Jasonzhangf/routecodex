@@ -405,6 +405,11 @@ describe('stopless CLI continuation', () => {
     expect(secondA.executed).toBe(true);
     const commandA2 = maybeExtractExecCommand(secondA.chat);
     expect(commandA2).toContain('routecodex hook run reasoningStop');
+    expect(extractInput(commandA2!)).toMatchObject({
+      repeatCount: 2,
+      maxRepeats: 3
+    });
+    expect(commandA2).toContain(`--session-id '${sessionA}'`);
     const stdoutA2 = await runStoplessCliStdout(commandA2!);
     expect(stdoutA2.sessionId).toBe(sessionA);
     expect(stdoutA2.repeatCount).toBe(3);
@@ -470,6 +475,53 @@ describe('stopless CLI continuation', () => {
     const stdoutB1 = await runStoplessCliStdout(commandB1!);
     expect(stdoutB1.sessionId).toBe(sessionB);
     expect(stdoutB1.repeatCount).toBe(2);
+  });
+
+  test('saved canonical loop state carries visible repeatCount when current tool output snapshot is absent', async () => {
+    const sessionId = `session-stopless-fallback-${Date.now()}`;
+    const requestId = `req-stopless-fallback-${Date.now()}`;
+    const adapterContext = bindMetadataCenter({
+      ...buildAdapterContext({
+        requestId,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        sessionId
+      }),
+      __rt: {
+        serverToolLoopState: {
+          flowId: 'stop_message_flow',
+          repeatCount: 2,
+          maxRepeats: 3
+        },
+        stopMessageState: {
+          stopMessageText: '继续执行原任务',
+          stopMessageMaxRepeats: 3,
+          stopMessageUsed: 1,
+          stopMessageStageMode: 'on'
+        }
+      }
+    } as any);
+    bindRequestTruth(adapterContext, requestId, sessionId);
+
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext,
+      requestId,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('saved canonical loop state fallback must not reenter');
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    const command = maybeExtractExecCommand(result.chat);
+    expect(command).toContain('routecodex hook run reasoningStop');
+    expect(extractInput(command!)).toMatchObject({
+      repeatCount: 2,
+      maxRepeats: 3
+    });
+    expect(command).toContain(`--session-id '${sessionId}'`);
   });
 
   test('missing session makes stopless terminal instead of projecting CLI', async () => {

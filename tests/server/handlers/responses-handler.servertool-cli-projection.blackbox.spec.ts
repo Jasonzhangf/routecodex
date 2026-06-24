@@ -91,7 +91,7 @@ describe('servertool CLI projection blackbox', () => {
     expect((result.chat as any).choices[0].finish_reason).toBe('stop');
     expect((result.chat as any).choices[0].message.tool_calls).toBeUndefined();
     expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
-    expect(String((result.chat as any).choices[0].message.content ?? '')).toContain('done');
+    expect(String((result.chat as any).choices[0].message.content ?? '')).toBe('完成，准备收尾。');
   });
 
   it('projects non-terminal reasoningStop tool calls to client exec_command', async () => {
@@ -327,6 +327,8 @@ describe('servertool CLI projection blackbox', () => {
     expect(reasoning?.summary?.[0]?.type).toBe('summary_text');
     expect(reasoning?.summary?.[0]?.text).toContain('已定位 stopless 投影问题');
     expect(reasoning?.content).toBeUndefined();
+    expect(JSON.stringify(responsesPayload)).not.toContain('<rcc_stop_schema>');
+    expect(JSON.stringify(responsesPayload)).not.toContain('</rcc_stop_schema>');
   });
 
   it('re-projects stop_message_auto on submit_tool_outputs resume when current response stops again', async () => {
@@ -556,7 +558,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(JSON.stringify(payload)).not.toContain('routecodex servertool run stop_message_auto');
     expect(payload.required_action).toBeUndefined();
     const message = payload.choices?.[0]?.message;
-    expect(String(message?.content)).toContain('## 完成内容');
+    expect(String(message?.content)).toBe('已完成在线验证。');
     expect(String(message?.content)).not.toContain('"stopreason"');
     expect(String(message?.content)).not.toContain('<rcc_stop_schema>');
     expect(String(message?.content)).not.toContain('</rcc_stop_schema>');
@@ -569,12 +571,68 @@ describe('servertool CLI projection blackbox', () => {
     }) as Record<string, any>;
     expect(Array.isArray(responsesPayload.output)).toBe(true);
     expect(responsesPayload.output.some((item: any) => item?.type === 'reasoning')).toBe(false);
-    expect(String(responsesPayload.output_text)).toContain('## 完成内容');
+    expect(String(responsesPayload.output_text)).toBe('已完成在线验证。');
     expect(JSON.stringify(responsesPayload)).not.toContain('stopreason');
     expect(JSON.stringify(responsesPayload)).not.toContain('needs_user_input');
     expect(JSON.stringify(responsesPayload)).not.toContain('has_evidence');
     expect(JSON.stringify(responsesPayload)).not.toContain('<rcc_stop_schema>');
     expect(JSON.stringify(responsesPayload)).not.toContain('</rcc_stop_schema>');
+  });
+
+  it('strips stopless reasoning residue from final responses terminal payload after finish_reason stop closeout', async () => {
+    isolateSessionDir('terminal-stop-reasoning-strip');
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_stop_terminal_strip_blackbox',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: [
+                '已完成。',
+                '<rcc_stop_schema>{"stopreason":0,"reason":"done","has_evidence":1,"evidence":"ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"1","done_steps":"done","next_step":"无","next_suggested_path":"无","needs_user_input":false,"learned":"ok"}</rcc_stop_schema>'
+              ].join('\n')
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      },
+      adapterContext: bindStoplessMetadataCenter({
+        requestId: 'req_stop_terminal_strip_blackbox',
+        sessionId: 'sess-stop-terminal-strip-blackbox',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: '继续执行' }]
+        }
+      } as any),
+      requestId: 'req_stop_terminal_strip_blackbox',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('terminal stop closeout must not reenter');
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    const payload = result.chat as any;
+    expect(payload.choices?.[0]?.finish_reason).toBe('stop');
+    expect(String(payload.choices?.[0]?.message?.content)).toBe('已完成。');
+    expect(payload.choices?.[0]?.message?.reasoning).toBeUndefined();
+    expect(payload.choices?.[0]?.message?.reasoning_text).toBeUndefined();
+
+    const responsesPayload = buildResponsesPayloadFromChatWithNative(payload, {
+      requestId: 'req_stop_terminal_strip_blackbox'
+    }) as Record<string, any>;
+    expect(Array.isArray(responsesPayload.output)).toBe(true);
+    expect(responsesPayload.output.some((item: any) => item?.type === 'reasoning')).toBe(false);
+    expect(JSON.stringify(responsesPayload)).not.toContain('reasoning_summary');
+    expect(JSON.stringify(responsesPayload)).not.toContain('<rcc_stop_schema>');
+    expect(JSON.stringify(responsesPayload)).not.toContain('stopreason');
+    expect(String(responsesPayload.output_text)).toBe('已完成。');
   });
 
   it('does not let malformed legacy CLI history suppress current stopless re-projection', async () => {

@@ -205,6 +205,66 @@ describe('stopless metadata center helper', () => {
     expect(MetadataCenter.read(adapterContext.metadata as Record<string, unknown>)).toBe(center);
   });
 
+  it('persists visible repeatCount into MetadataCenter stopless control and execution loop state after projection finalize', async () => {
+    const adapterContext: Record<string, unknown> = {
+      requestId: 'req-stopless-repeatcount-persist',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId: 'sess-stopless-repeatcount-persist',
+      __rt: {
+        stopMessageState: {
+          stopMessageText: '继续推进当前任务。',
+          stopMessageMaxRepeats: 3,
+          stopMessageUsed: 1,
+          stopMessageStageMode: 'on'
+        }
+      },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续执行' }]
+      }
+    };
+    const center = MetadataCenter.attach(adapterContext);
+
+    const result = await runServerSideToolEngine({
+      chatResponse: {
+        id: 'chatcmpl-stopless-repeatcount-persist',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '阶段结束'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      } as any,
+      adapterContext: adapterContext as any,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopless-repeatcount-persist',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(center.readRuntimeControl().stopless).toEqual(
+      expect.objectContaining({
+        flowId: 'stop_message_flow',
+        repeatCount: 2,
+        maxRepeats: 3,
+        active: true
+      })
+    );
+    expect((result.execution?.context as any)?.serverToolLoopState).toEqual(
+      expect.objectContaining({
+        flowId: 'stop_message_flow',
+        repeatCount: 2,
+        maxRepeats: 3
+      })
+    );
+  });
+
   it('normalizes stop schema reason codes into MetadataCenter triggerHint tokens', () => {
     expect(normalizeStoplessTriggerHintForMetadata('stop_schema_budget_exhausted')).toBe('budget_exhausted');
     expect(normalizeStoplessTriggerHintForMetadata('stop_schema_finished')).toBe('schema_pass');
