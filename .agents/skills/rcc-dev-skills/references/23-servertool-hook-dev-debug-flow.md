@@ -9,6 +9,9 @@
 
 ```text
 锁目标文档/wiki/mainline
+  -> 先生命周期/逐节点合同
+  -> 再设计白盒节点测试
+  -> 再设计 provider/client 两端黑盒
   -> 补红测/红 gate 证明活 TS 语义仍存在
   -> 分 slice 下沉 Rust owner
   -> 白盒 focused tests
@@ -20,6 +23,7 @@
 ```
 
 - 少一步都不能宣称“servertool Rust-only 闭环完成”。
+- 复杂 stopless / continuation / schema gate 问题若没有先完成“生命周期 -> 节点合同 -> 白盒 -> 黑盒”，后续代码修改一律视为乱改。
 - `binding pending` 期间，只能宣称目标/骨架锁定或局部 slice 已下沉，不能宣称主线 Rust-only 已完成。
 - 目标真源和执行真源必须双锁：
   - wiki/mainline/manifest 锁“应该长什么样”
@@ -151,6 +155,17 @@
 - 不要把 native build 和这些黑盒并行执行；否则很容易读到旧 `.node`，出现一串 `native unavailable` 假失败。
 - 遇到 `buildClientExecCliProjectionOutputJson native unavailable`、`planServertoolEngineSkipJson native unavailable`、`inspectStopGatewaySignal native unavailable` 这类成串报错，先确认 build 是否已完成并重新串行跑黑盒。
 
+6.1 standalone binary 黑盒也有“旧产物假红”
+- `tests/cli/servertool-command.spec.ts`、`routecodex hook/servertool run ...` 这类黑盒如果直接调用 `routecodex-servertool`，Rust owner 改完后必须先 `cargo build -p servertool-cli`。
+- 否则会出现：
+  - Rust 白盒已绿；
+  - JS 黑盒仍读旧 binary，继续吐旧 `modelGuidance` / 旧字段反馈；
+  - 这不是 owner 还没修好，而是黑盒消费的产物没更新。
+- 判别法：
+  - Rust focused tests 绿；
+  - JS 黑盒文本仍停留在旧文案；
+  - 重编 standalone binary 后黑盒立即转绿。
+
 7. live replay 要先看首轮，再看续轮
 - stopless / reasoningStop 的 live probe 先判首轮是否产出标准 `exec_command(routecodex hook run reasoningStop ...)`，再判有没有 raw `reasoningStop` 泄漏，最后才看续轮是否因 `Responses conversation expired or not found`、provider 4xx 或样本失活失败。
 - 不要把 probe 进程的最终退出码直接当成骨架回退；首轮命中标准 CLI 投影才是响应 hook 骨架是否工作的主证据。
@@ -182,6 +197,13 @@
 
 6. 回放样本
 - 用旧样本 replay 或 live probe 证明不是只对单测修好。
+
+6.1 回整链 gate
+- 当前 focused blocker 绿后，必须立刻回 `build:min` / `build:dev` / `install:global` 这类真实链路。
+- 目的不是重复跑大测试，而是确认：
+  - 当前问题确实不再是主 blocker；
+  - 下一处红是否是独立问题。
+- 如果整链已经跑到新的无关红点，说明当前 slice 已完成，不要继续围着旧问题猜。
 
 7. 回写 skills
 - 稳定步骤进 `23`；可复用卡片进 lessons；raw 证据才留 `note.md`。
@@ -236,6 +258,11 @@
 
 3. 只进 `note.md` 的内容必须是 raw
 - 临时样本、一次性日志、尚未证实的猜测、单次 shell 命令输出。
+
+## 2026-06-24 补充
+
+- allow-stop 终态若仍泄漏 `<rcc_stop_schema>` 空壳，先查 canonical strip SSOT 是否认识当前 fence，再查 responses outbound projection；不要只盯 SSE，也不要只清 JSON body。
+- stopless 黑盒若在改 Rust 后仍保持旧行为，先重编 native `.node` / standalone binary 再判 owner；旧产物假红在这条链上非常常见。
 
 4. 已验证后必须升级
 - 稳定流程 -> `references/23-servertool-hook-dev-debug-flow.md`

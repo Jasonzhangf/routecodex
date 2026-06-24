@@ -14782,3 +14782,21 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `npm run verify:function-map-owner-uniqueness` PASS
   - `npm run verify:function-map-canonical-builder-definitions` PASS
   - `npm run verify:function-map-compile-gate` PASS
+# 2026-06-24 stopless allow-stop client leak 修复
+
+- 新发现：
+  - `allow-stop` 终态的 client-visible `output_text` 之前仍泄漏空壳 `<rcc_stop_schema>\n</rcc_stop_schema>`。
+  - 根因不是 SSE，而是 canonical stop schema stripper 只识别 `<stop_schema>`，没有把 `<rcc_stop_schema>` 作为同级 fence 处理。
+- 已修复：
+  - `servertool-core::stop_visible_text` 现在同时剥离 `<rcc_stop_schema>` 和旧 `<stop_schema>`。
+  - `shared_responses_response_utils` 的 responses `output_text` 统一先过 reasoning 清洗，再过 stop schema 清洗。
+- 已验证：
+  - `cargo test -p servertool-core stop_visible_text --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi responses_response_utils_build_chat_response_strips_rcc_stop_schema_from_terminal_output_text --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi strips_stop_schema_control_text_via_servertool_core_bridge --lib -- --nocapture`
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`
+  - `node scripts/tests/stopless-5555-live-probe.mjs`
+- 反模式：
+  - 只修 response/outbound projection，不修 canonical stripper SSOT，会继续让别的出口复现同样空壳泄漏。
+  - 黑盒先红时，必须先排除旧 native/bin 产物，再判业务 owner。

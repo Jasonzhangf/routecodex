@@ -1,5 +1,6 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
+use servertool_core::stop_visible_text::strip_stop_schema_control_text;
 use serde_json::{Map, Value};
 
 // feature_id: hub.response_responses_chat_projection
@@ -460,11 +461,12 @@ pub(crate) fn build_chat_response_from_responses_impl(payload: &Value) -> Value 
     let has_tool_calls = !tool_calls.is_empty();
     let sanitize_output_text = |value: &str| -> String {
         let reasoning_sanitized = sanitize_reasoning_tagged_text(value);
+        let stop_sanitized = strip_stop_schema_control_text(reasoning_sanitized.as_str());
         if !has_tool_calls {
-            return reasoning_sanitized;
+            return stop_sanitized;
         }
         crate::resp_process_stage1_tool_governance_blocks::display_sanitize::strip_tool_markup_for_display_text(
-            reasoning_sanitized.as_str(),
+            stop_sanitized.as_str(),
         )
     };
     let explicit_output = output_text_raw
@@ -2035,5 +2037,34 @@ mod tests {
         assert_eq!(output["choices"][0]["message"]["content"], "");
         assert_eq!(output["__responses_output_text_meta"]["hasField"], true);
         assert_eq!(output["__responses_output_text_meta"]["value"], "");
+    }
+
+    #[test]
+    fn responses_response_utils_build_chat_response_strips_rcc_stop_schema_from_terminal_output_text(
+    ) {
+        let payload = serde_json::json!({
+            "id": "resp_stop_terminal",
+            "object": "response",
+            "model": "gpt-test",
+            "created": 1700000000,
+            "status": "completed",
+            "output_text": "## 完成内容\n- 结论: done\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\"}\n</rcc_stop_schema>",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "## 完成内容\n- 结论: done\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\"}\n</rcc_stop_schema>"
+                }]
+            }]
+        });
+
+        let output = build_chat_response_from_responses_impl(&payload);
+        assert_eq!(output["choices"][0]["finish_reason"], "stop");
+        assert_eq!(output["choices"][0]["message"]["content"], "## 完成内容\n- 结论: done");
+        assert_eq!(
+            output["__responses_output_text_meta"]["value"],
+            "## 完成内容\n- 结论: done"
+        );
     }
 }

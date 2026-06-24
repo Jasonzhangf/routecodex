@@ -144,20 +144,36 @@ fn strip_stop_schema_control_blocks(text: &str) -> String {
 }
 
 fn remove_tagged_stop_schema_blocks(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut cursor = 0usize;
+    let tags = [
+        ("<rcc_stop_schema>", "</rcc_stop_schema>"),
+        ("<stop_schema>", "</stop_schema>"),
+    ];
     let lower = text.to_lowercase();
-    while let Some(relative_start) = lower[cursor..].find("<stop_schema>") {
-        let start = cursor + relative_start;
+    let mut cursor = 0usize;
+    let mut out = String::with_capacity(text.len());
+    while cursor < text.len() {
+        let mut matched: Option<(usize, &'static str, &'static str)> = None;
+        for (start_tag, end_tag) in tags {
+            if let Some(relative_start) = lower[cursor..].find(start_tag) {
+                let start = cursor + relative_start;
+                match matched {
+                    Some((current_start, _, _)) if current_start <= start => {}
+                    _ => matched = Some((start, start_tag, end_tag)),
+                }
+            }
+        }
+        let Some((start, start_tag, end_tag)) = matched else {
+            out.push_str(&text[cursor..]);
+            return out;
+        };
         out.push_str(&text[cursor..start]);
-        let content_start = start + "<stop_schema>".len();
-        let Some(relative_end) = lower[content_start..].find("</stop_schema>") else {
+        let content_start = start + start_tag.len();
+        let Some(relative_end) = lower[content_start..].find(end_tag) else {
             out.push_str(&text[start..]);
             return out;
         };
-        cursor = content_start + relative_end + "</stop_schema>".len();
+        cursor = content_start + relative_end + end_tag.len();
     }
-    out.push_str(&text[cursor..]);
     out
 }
 
@@ -549,6 +565,7 @@ mod tests {
     fn strips_tagged_fenced_and_bare_stop_schema_control_text() {
         let input = r#"
 visible before
+<rcc_stop_schema>{"stopreason":"blocked","next_step":"repair"}</rcc_stop_schema>
 <stop_schema>{"stopreason":"blocked","next_step":"inspect"}</stop_schema>
 ```json
 {"stopreason":"blocked","evidence":["x"]}
@@ -578,7 +595,7 @@ visible after
                 "message": {
                     "content": [
                         { "type": "text", "text": "answer {\"stopreason\":\"x\",\"next_step\":\"n\"}" },
-                        { "type": "reasoning_text", "reasoning_text": "<stop_schema>{\"stopreason\":\"x\"}</stop_schema>plan" }
+                        { "type": "reasoning_text", "reasoning_text": "<rcc_stop_schema>{\"stopreason\":\"x\"}</rcc_stop_schema>plan" }
                     ],
                     "reasoning": {
                         "summary": [{ "text": "summary ```json\n{\"stopreason\":\"x\"}\n``` ok" }]

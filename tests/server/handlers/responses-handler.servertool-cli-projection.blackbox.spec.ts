@@ -147,6 +147,55 @@ describe('servertool CLI projection blackbox', () => {
     expect(command).not.toContain('stop_message_auto');
   });
 
+  it('projects malformed reasoningStop arguments to client exec_command instead of leaking the raw internal tool', async () => {
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_reasoning_stop_malformed_blackbox',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '工具参数损坏。',
+              tool_calls: [
+                {
+                  id: 'call_reasoning_stop_malformed_blackbox',
+                  type: 'function',
+                  function: {
+                    name: 'reasoningStop',
+                    arguments: '{"stopreason":2,"reason":"still running"'
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      },
+      adapterContext: bindStoplessMetadataCenter({
+        requestId: 'req_reasoning_stop_malformed_blackbox',
+        sessionId: 'sess-reasoning-stop-malformed-blackbox',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true
+      } as any),
+      requestId: 'req_reasoning_stop_malformed_blackbox',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('malformed reasoningStop must not reenter server-side followup');
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
+    const command = JSON.parse(toolCall.function.arguments).cmd;
+    expect((result.chat as any).choices[0].finish_reason).toBe('tool_calls');
+    expect(toolCall.function.name).toBe('exec_command');
+    expect(command).toContain('routecodex hook run reasoningStop');
+    expect(JSON.stringify(result.chat)).not.toContain('"reasoningStop"');
+  });
+
   it('returns exec_command projection and does not reenter for intercepted servertool call', async () => {
     let reenterCount = 0;
     const reenterPipeline = async () => {
@@ -509,6 +558,8 @@ describe('servertool CLI projection blackbox', () => {
     const message = payload.choices?.[0]?.message;
     expect(String(message?.content)).toContain('## 完成内容');
     expect(String(message?.content)).not.toContain('"stopreason"');
+    expect(String(message?.content)).not.toContain('<rcc_stop_schema>');
+    expect(String(message?.content)).not.toContain('</rcc_stop_schema>');
     expect(message?.reasoning_text).toBeUndefined();
     expect(message?.reasoning_content).toBeUndefined();
     expect(message?.reasoning).toBeUndefined();
@@ -522,6 +573,8 @@ describe('servertool CLI projection blackbox', () => {
     expect(JSON.stringify(responsesPayload)).not.toContain('stopreason');
     expect(JSON.stringify(responsesPayload)).not.toContain('needs_user_input');
     expect(JSON.stringify(responsesPayload)).not.toContain('has_evidence');
+    expect(JSON.stringify(responsesPayload)).not.toContain('<rcc_stop_schema>');
+    expect(JSON.stringify(responsesPayload)).not.toContain('</rcc_stop_schema>');
   });
 
   it('does not let malformed legacy CLI history suppress current stopless re-projection', async () => {
