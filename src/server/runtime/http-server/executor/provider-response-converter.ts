@@ -562,6 +562,30 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
   } else if (adapterCenter && pipelineCenter && pipelineCenter !== adapterCenter) {
     const runtimeControl = adapterCenter.readRuntimeControl();
     const stoplessGoalStatus = runtimeControl.stoplessGoalStatus;
+    if (runtimeControl.stopless) {
+      pipelineCenter.writeRuntimeControl(
+        'stopless',
+        runtimeControl.stopless,
+        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        'provider response stopless runtime pipeline sync'
+      );
+    }
+    if (runtimeControl.serverToolLoopState) {
+      pipelineCenter.writeRuntimeControl(
+        'serverToolLoopState',
+        runtimeControl.serverToolLoopState,
+        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        'provider response stopless loop-state pipeline sync'
+      );
+    }
+    if (runtimeControl.stopMessageState) {
+      pipelineCenter.writeRuntimeControl(
+        'stopMessageState',
+        runtimeControl.stopMessageState,
+        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        'provider response stop-message state pipeline sync'
+      );
+    }
     if (runtimeControl.stoplessGoal) {
       pipelineCenter.writeRuntimeControl(
         'stoplessGoal',
