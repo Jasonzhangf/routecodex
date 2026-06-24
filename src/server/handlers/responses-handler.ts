@@ -1,6 +1,8 @@
 import fs from 'fs';
 // feature_id: server.responses_handler_family
 // feature_id: server.responses_request_handler_bridge_surface
+// feature_id: hub.chat_process_responses_continuation
+// canonical_builders: buildResponsesConversationPortScopeForHttp, buildResponsesPipelineMetadataForHttp, captureResponsesPipelineRequestContextForHttp, prepareResponsesRequestBodyForHttp
 import path from 'path';
 import type { Request, Response } from 'express';
 import type { HandlerContext } from './types.js';

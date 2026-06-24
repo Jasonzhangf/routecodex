@@ -43,6 +43,110 @@ function bindStoplessMetadataCenter<T extends Record<string, unknown>>(adapterCo
 }
 
 describe('servertool CLI projection blackbox', () => {
+  it('intercepts terminal reasoningStop and releases it as a normal stop response', async () => {
+    let reenterCount = 0;
+    const reenterPipeline = async () => {
+      reenterCount += 1;
+      return { body: {} };
+    };
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_reasoning_stop_blackbox',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '完成，准备收尾。',
+              tool_calls: [
+                {
+                  id: 'call_reasoning_stop_blackbox',
+                  type: 'function',
+                  function: {
+                    name: 'reasoningStop',
+                    arguments: '{"stopreason":0,"reason":"done","has_evidence":1,"evidence":"ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"1","done_steps":"done","next_step":"无","next_suggested_path":"无","needs_user_input":false,"learned":"ok"}'
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      },
+      adapterContext: bindStoplessMetadataCenter({
+        requestId: 'req_reasoning_stop_blackbox',
+        sessionId: 'sess-reasoning-stop-blackbox',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true
+      } as any),
+      requestId: 'req_reasoning_stop_blackbox',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline
+    });
+
+    expect(reenterCount).toBe(0);
+    expect(result.executed).toBe(true);
+    expect((result.chat as any).choices[0].finish_reason).toBe('stop');
+    expect((result.chat as any).choices[0].message.tool_calls).toBeUndefined();
+    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
+    expect(String((result.chat as any).choices[0].message.content ?? '')).toContain('done');
+  });
+
+  it('projects non-terminal reasoningStop tool calls to client exec_command', async () => {
+    let reenterCount = 0;
+    const reenterPipeline = async () => {
+      reenterCount += 1;
+      return { body: {} };
+    };
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_reasoning_stop_continue_blackbox',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '还不能停。',
+              tool_calls: [
+                {
+                  id: 'call_reasoning_stop_continue_blackbox',
+                  type: 'function',
+                  function: {
+                    name: 'reasoningStop',
+                    arguments: '{"stopreason":2,"reason":"not done","has_evidence":1,"evidence":"partial","issue_cause":"still running","excluded_factors":"not blocked","diagnostic_order":"1","done_steps":"partial","next_step":"run next verification","next_suggested_path":"继续执行","needs_user_input":false,"learned":""}'
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      },
+      adapterContext: bindStoplessMetadataCenter({
+        requestId: 'req_reasoning_stop_continue_blackbox',
+        sessionId: 'sess-reasoning-stop-continue-blackbox',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true
+      } as any),
+      requestId: 'req_reasoning_stop_continue_blackbox',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline
+    });
+
+    expect(reenterCount).toBe(0);
+    expect(result.executed).toBe(true);
+    const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
+    const command = JSON.parse(toolCall.function.arguments).cmd;
+    expect((result.chat as any).choices[0].finish_reason).toBe('tool_calls');
+    expect(toolCall.function.name).toBe('exec_command');
+    expect(command).toContain('routecodex hook run reasoningStop');
+    expect(command).not.toContain('stop_message_auto');
+  });
+
   it('returns exec_command projection and does not reenter for intercepted servertool call', async () => {
     let reenterCount = 0;
     const reenterPipeline = async () => {
@@ -112,6 +216,7 @@ describe('servertool CLI projection blackbox', () => {
         ]
       },
       adapterContext: bindStoplessMetadataCenter({
+        requestId: 'req_stop_cli_lifecycle',
         sessionId: 'sess-stop-cli-lifecycle',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
@@ -146,9 +251,8 @@ describe('servertool CLI projection blackbox', () => {
     expect(input.schemaGuidance).toBeUndefined();
     expect(command).not.toContain('continuationPrompt');
     expect(command).not.toContain('继续执行');
-    expect(command).toContain('schemaFeedback');
-    expect(command).toContain('stopreason');
-    expect(command).toContain("--session-id 'sess-stop-cli-lifecycle'");
+    expect(command).not.toContain('schemaFeedback');
+    expect(command).not.toContain('stopreason');
     expect(command).toContain("--request-id 'req_stop_cli_lifecycle'");
     for (const forbidden of [
       'stopless',
@@ -248,7 +352,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(extractCommandInput(command).repeatCount).toBe(2);
   });
 
-  it('blackbox locks exact schemaFeedback into final stopless exec_command payload', async () => {
+  it('blackbox keeps schema feedback out of final stopless exec_command payload', async () => {
     isolateSessionDir('schema-feedback-lock');
     const result = await runServerToolOrchestration({
       chat: {
@@ -266,6 +370,7 @@ describe('servertool CLI projection blackbox', () => {
         ]
       },
       adapterContext: bindStoplessMetadataCenter({
+        requestId: 'req_stop_cli_schema_feedback_lock',
         sessionId: 'sess-stop-cli-schema-feedback-lock',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
@@ -295,12 +400,9 @@ describe('servertool CLI projection blackbox', () => {
     const command = JSON.parse(toolCall.function.arguments).cmd;
     const input = extractCommandInput(command);
     expect(input.triggerHint).toBe('no_schema');
-    expect(input.schemaFeedback).toMatchObject({
-      reasonCode: 'stop_schema_missing'
-    });
-    expect((input.schemaFeedback as any).missingFields).toEqual(
-      expect.arrayContaining(['stopreason', 'reason'])
-    );
+    expect(input.schemaFeedback).toBeUndefined();
+    expect(command).not.toContain('schemaFeedback');
+    expect(command).not.toContain('stopreason');
   });
 
   it('blackbox stops projecting new exec_command after third consecutive no_schema', async () => {

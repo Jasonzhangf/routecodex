@@ -2098,6 +2098,50 @@ owners:
       - "If identical duplicate `function_call` batches repeat, normalized relay context must collapse same-call outputs to the latest output for that call_id before reuse."
       - "TS bridge may only call native capture and reuse the normalized snapshot; it must not locally reserialize raw duplicate tool history or repair orphan tool_result ordering."
 
+  - feature_id: hub.req_chatprocess_governance
+    status: active
+    summary: "Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline"
+    owner_kind: rust_ssot
+    owner_scope: "Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+    canonical_types:
+      - HubReqChatProcess03Governed
+      - ToolGovernanceInput
+      - ToolGovernanceOutput
+    canonical_builders:
+      - apply_req_process_tool_governance
+      - apply_req_process_tool_governance_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_chatprocess_03_governance_boundary.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_chatprocess_03_governed.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts
+      - docs/architecture
+      - tests
+    forbidden_paths:
+      - src/providers
+      - src/server/handlers
+      - src/server/runtime/http-server/executor
+      - src/modules/llmswitch/bridge/responses-request-bridge.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
+      - tests/responses/responses-openai-bridge.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "Request-side tool governance, stop hook contract injection, and servertool-managed turn finalization belong to Rust req_chatprocess, not TS request bridge or handler code."
+      - "TS `native-hub-pipeline-req-process-semantics.ts` may only remain a native wrapper; it must not grow request message/tool/metadata rewrite logic."
+      - "The current bindable return edge is `ServertoolReqHook04RequestFinalized -> HubReqChatProcess03Governed`, backed by `apply_hub_req_chatprocess_03_tool_governance(...) -> run_hub_req_chatprocess_03_governed_entrypoint(...)` in `hub_pipeline_lib/engine.rs`."
+
   - feature_id: tool.apply_patch_freeform_contract
     status: active
     summary: "apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance"
@@ -3449,7 +3493,7 @@ owners:
       - ChatProcRespContinuation07CanonicalSaved
       - ChatProcRespContinuation08Released
     canonical_builders:
-      - buildStoplessInstructionsFromRuntimeMetadata
+      - recordResponsesResponseForHttpProjection
       - buildPersistResponsesRequestContextForHttp
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
@@ -3480,7 +3524,8 @@ owners:
       - "Response-side continuation save is positioned after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`."
       - "Tool governance, tool result governance, stopless hook restore/projection, and CLI result restoration belong to Chat Process. Handler/SSE code must not implement them."
       - "SSE is transport-only. No continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic may live in `handler-response-sse.ts` or `responses-sse-bridge.ts`."
-      - "Canonical builders above are current partial TS semantic anchors only; final Chat Process Rust adjacent builders are still pending and must not be faked in the mainline call map."
+      - "Responses handler/bridge may prepare request body and continuation carrier IO, but must not synthesize stopless instructions or request-side governance text. Chat Process Rust remains the semantic owner."
+      - "Canonical builders above are current partial TS/bridge adjacency anchors only; final Chat Process Rust adjacent builders are still pending and must not be faked in the mainline call map."
 
   - feature_id: server.responses_sse_bridge_surface
     status: active
@@ -3550,7 +3595,6 @@ owners:
       - captureResponsesRequestContextForHttpProjection
       - rebindResponsesConversationRequestIdForHttp
       - clearResponsesConversationByRequestIdForHttpProjection
-      - recordResponsesResponseForHttpProjection
       - finalizeResponsesConversationRequestRetentionForHttp
       - persistResponsesConversationLifecycleForHttp
       - resolveResponsesConversationClearReasonForHttp

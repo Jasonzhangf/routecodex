@@ -12,6 +12,23 @@ pub struct ServertoolTimeoutPolicyInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ServertoolStateLoadFailedErrorInput {
+    pub request_id: String,
+    pub sticky_key: String,
+    pub entry_endpoint: String,
+    pub provider_protocol: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolRequiredResponseHookEmptyErrorInput {
+    pub request_id: String,
+    pub response_hook_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ServertoolClientInjectTextInput {
     pub value: Value,
 }
@@ -222,6 +239,51 @@ pub fn plan_servertool_timeout_error(
     })
 }
 
+pub fn plan_servertool_state_load_failed_error(
+    input: &ServertoolStateLoadFailedErrorInput,
+) -> Result<ServertoolErrorPlan, String> {
+    let message = format!(
+        "[servertool] failed to load persisted state for sticky_key={} request_id={} entry_endpoint={} provider_protocol={}: {}",
+        input.sticky_key, input.request_id, input.entry_endpoint, input.provider_protocol, input.error
+    );
+    Ok(ServertoolErrorPlan {
+        message,
+        code: "SERVERTOOL_STATE_LOAD_FAILED".to_string(),
+        category: "INTERNAL_ERROR".to_string(),
+        status: 500,
+        details: serde_json::json!({
+            "requestId": input.request_id,
+            "stickyKey": input.sticky_key,
+            "entryEndpoint": input.entry_endpoint,
+            "providerProtocol": input.provider_protocol,
+            "error": input.error,
+        }),
+    })
+}
+
+pub fn plan_servertool_required_response_hook_empty_error(
+    input: &ServertoolRequiredResponseHookEmptyErrorInput,
+) -> Result<ServertoolErrorPlan, String> {
+    let response_hook_name = normalize_required_response_hook_name(&input.response_hook_name)?;
+    let mut details = details_with_request_flow(&input.request_id, None);
+    let Value::Object(ref mut record) = details else {
+        unreachable!("details builder returns object");
+    };
+    record.insert(
+        "responseHookName".to_string(),
+        Value::String(response_hook_name.clone()),
+    );
+    Ok(ServertoolErrorPlan {
+        message: format!(
+            "[servertool] required response hook empty: response_hook_name={response_hook_name}"
+        ),
+        code: "SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY".to_string(),
+        category: "INTERNAL_ERROR".to_string(),
+        status: 500,
+        details,
+    })
+}
+
 pub fn plan_stop_message_fetch_failed_error(
     input: &StopMessageFetchFailedErrorInput,
 ) -> Result<ServertoolErrorPlan, String> {
@@ -355,6 +417,17 @@ fn normalize_optional_string(value: Option<&str>) -> Option<String> {
     } else {
         Some(text.to_string())
     }
+}
+
+fn normalize_required_response_hook_name(value: &str) -> Result<String, String> {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return Err(
+            "planServertoolRequiredResponseHookEmptyError: responseHookName is required"
+                .to_string(),
+        );
+    }
+    Ok(normalized.to_string())
 }
 
 fn details_with_request_flow(request_id: &str, flow_id: Option<String>) -> Value {

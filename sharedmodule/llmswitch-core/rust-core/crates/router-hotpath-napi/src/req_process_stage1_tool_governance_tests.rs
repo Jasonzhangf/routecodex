@@ -50,17 +50,23 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
     let instructions = result.processed_request["instructions"]
         .as_str()
         .expect("responses instructions");
-    assert!(instructions.contains("简洁 summary"));
-    assert!(instructions.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
-    assert!(instructions.contains("示例 JSON"));
-    assert!(instructions.contains("\"stopreason\":0"));
-    assert!(instructions.contains("\"reason\":\"已完成并验证\""));
+    assert!(instructions.contains("必须使用唯一 stop schema 合同"));
+    assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"));
+    assert!(instructions.contains("<rcc_stop_schema>"));
+    assert!(instructions.contains("不要输出或执行 exec_command(cmd=\"reasoningStop\")"));
     assert!(result.processed_request["input"].is_array());
+    let tools = result.processed_request["tools"].as_array().expect("tools");
+    assert!(tools.iter().any(|tool| {
+        tool.get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(|name| name.as_str())
+            == Some("reasoningStop")
+    }));
 }
 
 #[test]
 fn test_req_process_does_not_duplicate_stopless_responses_instructions() {
-    let existing = "当你准备结束当前轮时，必须同时给出两部分：\n1. 简洁 summary，说明这轮完成了什么或为什么现在必须停。\n2. 回复末尾附一段 JSON，字段必须按真实情况填写。\n标准 JSON 字段：stopreason, reason, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\nfinished：表示已经完成，可停止；blocked：表示确实卡住且需要停止；continue_needed：表示还不能停，必须继续推进并给 next_step。";
+    let existing = "当你准备结束当前轮时，必须使用唯一 stop schema 合同。\n优先路径：直接调用名为 reasoningStop 的 function tool，并把完整 JSON schema 放进该 tool call 的 arguments。\n禁止把 reasoningStop 当成 shell / CLI 命令；不要输出或执行 exec_command(cmd=\"reasoningStop\")。\n如果你直接 finish_reason=stop，正文末尾必须附：\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"当前状态原因\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"如果仍需继续，写立刻执行的下一步；否则写无\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}\n</rcc_stop_schema>\n标准 JSON 字段：stopreason, reason, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\nfinished：表示已经完成，可停止；blocked：表示确实卡住且需要停止；continue_needed：表示还不能停，必须继续推进并给 next_step。\nneeds_user_input 只能是 true/false；true 只用于真的需要向用户提一个问题。\n无 arguments 且无 <rcc_stop_schema> 时，不允许停止。";
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-4",
@@ -121,8 +127,9 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
     let instructions = result.processed_request["instructions"]
         .as_str()
         .expect("responses instructions");
-    assert!(instructions.contains("简洁 summary"));
-    assert!(instructions.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+    assert!(instructions.contains("必须使用唯一 stop schema 合同"));
+    assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"));
+    assert!(instructions.contains("<rcc_stop_schema>"));
     assert!(result.processed_request["input"].is_array());
 }
 
@@ -156,8 +163,9 @@ fn test_req_process_responses_input_materializes_stopless_instructions_without_c
     let instructions = result.processed_request["instructions"]
         .as_str()
         .expect("responses instructions");
-    assert!(instructions.contains("简洁 summary"));
-    assert!(instructions.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+    assert!(instructions.contains("必须使用唯一 stop schema 合同"));
+    assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"));
+    assert!(instructions.contains("<rcc_stop_schema>"));
     assert!(result.processed_request["input"].is_array());
 }
 

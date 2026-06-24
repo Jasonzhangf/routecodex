@@ -53,6 +53,7 @@ const TOOL_MARKER_PATTERN: &[&str] = &[
     "<|tool_call_begin|>",
     "<|tool_call_argument_begin|>",
 ];
+const INTERNAL_STOP_TOOL_NAMES: &[&str] = &["reasoningstop", "stop_message_auto"];
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -181,11 +182,16 @@ fn inspect_chat(choices: Vec<(usize, ChatChoice)>) -> StopGatewayContext {
         let choice_index = i32::try_from(idx).unwrap_or(i32::MAX);
 
         if finish_reason == "tool_calls" {
+            let has_internal_stop_tool = has_internal_stop_tool_call(message);
             return StopGatewayContext {
                 observed: true,
-                eligible: false,
+                eligible: has_internal_stop_tool,
                 source: "chat".to_string(),
-                reason: "finish_reason_tool_calls".to_string(),
+                reason: if has_internal_stop_tool {
+                    "finish_reason_tool_calls_internal_stop_tool".to_string()
+                } else {
+                    "finish_reason_tool_calls".to_string()
+                },
                 choice_index: Some(choice_index),
                 has_tool_calls: Some(true),
             };
@@ -396,6 +402,26 @@ fn has_visible_text(value: Option<&serde_json::Value>) -> bool {
         }
         _ => false,
     }
+}
+
+fn has_internal_stop_tool_call(message: Option<&ChatMessage>) -> bool {
+    let tool_calls = match message.and_then(|msg| msg.tool_calls.as_ref()) {
+        Some(entries) if !entries.is_empty() => entries,
+        _ => return false,
+    };
+    tool_calls.iter().any(|tool_call| {
+        let name = tool_call
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(|value| value.as_str())
+            .or_else(|| tool_call.get("name").and_then(|value| value.as_str()))
+            .map(str::trim)
+            .map(str::to_ascii_lowercase);
+        matches!(
+            name.as_deref(),
+            Some(name) if INTERNAL_STOP_TOOL_NAMES.contains(&name)
+        )
+    })
 }
 
 fn is_reasoning_only_empty(message: Option<&ChatMessage>) -> bool {

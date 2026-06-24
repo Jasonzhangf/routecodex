@@ -18,6 +18,16 @@ pub fn has_stop_message_auto_cli_result_in_request(payload: &Value) -> bool {
     false
 }
 
+pub fn extract_servertool_cli_result_route_hint_from_request(payload: &Value) -> Option<String> {
+    let mut seen = 0usize;
+    for root in collect_scan_roots(payload) {
+        if let Some(route_hint) = scan_value_for_route_hint(root, 0, &mut seen) {
+            return Some(route_hint);
+        }
+    }
+    None
+}
+
 fn collect_scan_roots(payload: &Value) -> Vec<&Value> {
     let adapter = payload.get("adapterContext").and_then(Value::as_object);
     let runtime = payload.get("runtimeMetadata").and_then(Value::as_object);
@@ -62,6 +72,36 @@ fn scan_value(value: &Value, depth: usize, seen: &mut usize) -> bool {
     record
         .values()
         .any(|item| scan_value(item, depth + 1, seen))
+}
+
+fn scan_value_for_route_hint(value: &Value, depth: usize, seen: &mut usize) -> Option<String> {
+    if depth > MAX_SCAN_DEPTH {
+        return None;
+    }
+    *seen += 1;
+    if *seen > MAX_SCAN_NODES {
+        return None;
+    }
+    if let Some(route_hint) = extract_route_hint_from_value(value) {
+        return Some(route_hint);
+    }
+    if let Some(items) = value.as_array() {
+        for item in items {
+            if let Some(route_hint) = scan_value_for_route_hint(item, depth + 1, seen) {
+                return Some(route_hint);
+            }
+        }
+        return None;
+    }
+    let Some(record) = value.as_object() else {
+        return None;
+    };
+    for item in record.values() {
+        if let Some(route_hint) = scan_value_for_route_hint(item, depth + 1, seen) {
+            return Some(route_hint);
+        }
+    }
+    None
 }
 
 fn is_stop_message_auto_cli_result_object(value: &Value) -> bool {
@@ -147,6 +187,40 @@ fn text_contains_stop_message_auto_cli_result(text: &str) -> bool {
         }
     }
     false
+}
+
+fn extract_route_hint_from_value(value: &Value) -> Option<String> {
+    let record = value.as_object()?;
+    if let Some(route_hint) = read_route_hint_like(record.get("routeHint")) {
+        return Some(route_hint);
+    }
+    if let Some(route_hint) = read_route_hint_like(record.get("route_hint")) {
+        return Some(route_hint);
+    }
+    let text = read_result_text(record);
+    if text.trim().is_empty() {
+        return None;
+    }
+    for candidate in parse_json_object_candidates(&text) {
+        let Some(candidate_record) = candidate.as_object() else {
+            continue;
+        };
+        if let Some(route_hint) = read_route_hint_like(candidate_record.get("routeHint")) {
+            return Some(route_hint);
+        }
+        if let Some(route_hint) = read_route_hint_like(candidate_record.get("route_hint")) {
+            return Some(route_hint);
+        }
+    }
+    None
+}
+
+fn read_route_hint_like(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn parse_json_object_candidates(text: &str) -> Vec<Value> {

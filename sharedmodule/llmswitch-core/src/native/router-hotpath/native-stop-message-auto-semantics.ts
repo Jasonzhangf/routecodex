@@ -146,6 +146,7 @@ export function decideStopMessageActionWithNative(ctx: StopMessageDecisionContex
 
 export function evaluateStopSchemaGateWithNative(args: {
   assistantText: string;
+  reasoningStopArguments?: string;
   used: number;
   maxRepeats: number;
   prevObservationHash?: string;
@@ -163,7 +164,10 @@ export function evaluateStopSchemaGateWithNative(args: {
       args.used,
       args.maxRepeats,
       args.prevObservationHash ?? '',
-      args.prevNoChangeCount ?? 0
+      args.prevNoChangeCount ?? 0,
+      typeof args.reasoningStopArguments === 'string' && args.reasoningStopArguments.trim()
+        ? args.reasoningStopArguments
+        : undefined
     );
     if (typeof raw !== 'string') {
       return fail(`native_returned_non_string: ${typeof raw}`);

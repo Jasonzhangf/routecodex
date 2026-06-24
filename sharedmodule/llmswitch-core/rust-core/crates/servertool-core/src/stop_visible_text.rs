@@ -55,6 +55,26 @@ pub fn extract_current_assistant_stop_text(payload: &Value) -> String {
     texts.join("\n").trim().to_string()
 }
 
+pub fn extract_current_assistant_reasoning_stop_arguments(payload: &Value) -> Option<String> {
+    if let Some(choices) = payload.get("choices").and_then(Value::as_array) {
+        for choice in choices.iter().rev() {
+            if let Some(arguments) =
+                extract_reasoning_stop_arguments_from_chat_message(choice.get("message"))
+            {
+                return Some(arguments);
+            }
+        }
+    }
+    if let Some(output) = payload.get("output").and_then(Value::as_array) {
+        for item in output.iter().rev() {
+            if let Some(arguments) = extract_reasoning_stop_arguments_from_output_item(item) {
+                return Some(arguments);
+            }
+        }
+    }
+    None
+}
+
 pub fn build_stop_message_terminal_visible_payload(
     input: StopMessageTerminalVisiblePayloadInput,
 ) -> StopMessageTerminalVisiblePayloadOutput {
@@ -75,7 +95,33 @@ pub fn build_stop_message_terminal_visible_payload(
         };
     }
     strip_terminal_visible_reasoning_fields(&mut payload);
+    changed = normalize_terminal_stop_chat_payload(&mut payload) || changed;
     StopMessageTerminalVisiblePayloadOutput { payload, changed }
+}
+
+fn normalize_terminal_stop_chat_payload(payload: &mut Value) -> bool {
+    let Some(row) = payload.as_object_mut() else {
+        return false;
+    };
+    let Some(choices) = row.get_mut("choices").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for choice in choices.iter_mut() {
+        let Some(choice_row) = choice.as_object_mut() else {
+            continue;
+        };
+        if choice_row.get("finish_reason").and_then(Value::as_str) == Some("tool_calls") {
+            choice_row.insert("finish_reason".to_string(), Value::String("stop".to_string()));
+            changed = true;
+        }
+        if let Some(message_row) = choice_row.get_mut("message").and_then(Value::as_object_mut) {
+            if message_row.remove("tool_calls").is_some() {
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 fn strip_stop_schema_control_blocks(text: &str) -> String {
@@ -217,6 +263,59 @@ fn is_stop_schema_control_json(raw_json: &str) -> bool {
     ]
     .iter()
     .any(|key| record.contains_key(*key))
+}
+
+fn extract_reasoning_stop_arguments_from_chat_message(message: Option<&Value>) -> Option<String> {
+    let record = message?.as_object()?;
+    let tool_calls = record.get("tool_calls")?.as_array()?;
+    for tool_call in tool_calls.iter().rev() {
+        let tool_call_record = tool_call.as_object()?;
+        let function = tool_call_record.get("function")?.as_object()?;
+        let name = function.get("name").and_then(Value::as_str)?;
+        if !is_reasoning_stop_tool_name(name) {
+            continue;
+        }
+        let arguments = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        return Some(arguments.to_string());
+    }
+    None
+}
+
+fn extract_reasoning_stop_arguments_from_output_item(item: &Value) -> Option<String> {
+    let record = item.as_object()?;
+    let item_type = record
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if !matches!(item_type, "function_call" | "custom_tool_call") {
+        return None;
+    }
+    let name = record
+        .get("name")
+        .or_else(|| record.get("toolName"))
+        .and_then(Value::as_str)?;
+    if !is_reasoning_stop_tool_name(name) {
+        return None;
+    }
+    record
+        .get("arguments")
+        .or_else(|| record.get("input"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn is_reasoning_stop_tool_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "reasoningstop" | "reasoning_stop" | "stop_message_auto"
+    )
 }
 
 fn sanitize_stop_schema_visible_node(node: &mut Value) {

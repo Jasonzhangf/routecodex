@@ -3,7 +3,8 @@ mod response;
 
 pub(crate) use request::{
     apply_responses_c4m_request_compat, apply_responses_crs_request_compat,
-    normalize_responses_function_tools, strip_responses_reasoning_content_for_provider_wire,
+    apply_responses_instructions_to_input, normalize_responses_function_tools,
+    strip_responses_reasoning_content_for_provider_wire,
 };
 pub(crate) use response::{
     convert_responses_output_to_choices, detect_responses_c4m_rate_limit,

@@ -20,6 +20,7 @@ use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_control_text,
     is_synthetic_routecodex_tool_call_id,
 };
+use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::shared_json_utils::read_trimmed_string as read_optional_trimmed_string;
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
@@ -114,6 +115,15 @@ struct ServertoolResponseStageOutput {
 #[serde(rename_all = "camelCase")]
 struct ServertoolResponseStageGateOutput {
     should_bypass: bool,
+    next_action: String,
+    response_hook_matched: bool,
+    response_hook_required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_hook_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    intercept_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     skip_reason: Option<String>,
 }
@@ -1576,10 +1586,45 @@ pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResul
     let stop_eligible = read_stop_eligible_from_gate_input(&input.payload, adapter_context);
     let has_empty_assistant_payload_contract_signal =
         detect_empty_assistant_payload_contract_signal(&input.payload).is_some();
+    let stop_gateway_raw = inspect_stop_gateway_signal(&input.payload.to_string()).ok();
+    let stop_gateway: Option<Value> = match stop_gateway_raw {
+        Some(raw) => serde_json::from_str::<Value>(raw.as_str()).ok(),
+        None => None,
+    };
+    let stop_gateway_reason: Option<&str> = match stop_gateway.as_ref() {
+        Some(value) => value
+            .get("reason")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        None => None,
+    };
+    let stop_hook_match = stop_eligible
+        && matches!(
+            stop_gateway_reason,
+            Some("finish_reason_stop" | "finish_reason_tool_calls_internal_stop_tool")
+        );
+    let (intercept_kind, schema_source) = match stop_gateway_reason {
+        Some("finish_reason_stop") => (
+            Some("finish_reason_stop_text".to_string()),
+            Some("assistant_stop_text".to_string()),
+        ),
+        Some("finish_reason_tool_calls_internal_stop_tool") => (
+            Some("internal_tool_reasoning_stop".to_string()),
+            Some("reasoning_stop_arguments".to_string()),
+        ),
+        _ => (None, None),
+    };
 
     let output = if has_empty_assistant_payload_contract_signal && !stop_eligible {
         ServertoolResponseStageGateOutput {
             should_bypass: true,
+            next_action: "bypass".to_string(),
+            response_hook_matched: false,
+            response_hook_required: false,
+            response_hook_name: None,
+            intercept_kind: None,
+            schema_source: None,
             skip_reason: Some("empty_assistant_payload".to_string()),
         }
     } else if servertool_followup
@@ -1588,16 +1633,45 @@ pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResul
     {
         ServertoolResponseStageGateOutput {
             should_bypass: true,
+            next_action: "bypass".to_string(),
+            response_hook_matched: false,
+            response_hook_required: false,
+            response_hook_name: None,
+            intercept_kind: None,
+            schema_source: None,
             skip_reason: Some("followup_bypass".to_string()),
         }
     } else if input.has_servertool_support == Some(false) {
         ServertoolResponseStageGateOutput {
             should_bypass: true,
+            next_action: "bypass".to_string(),
+            response_hook_matched: false,
+            response_hook_required: false,
+            response_hook_name: None,
+            intercept_kind: None,
+            schema_source: None,
             skip_reason: Some("no_servertool_support".to_string()),
+        }
+    } else if stop_hook_match {
+        ServertoolResponseStageGateOutput {
+            should_bypass: false,
+            next_action: "run_auto_hooks".to_string(),
+            response_hook_matched: true,
+            response_hook_required: true,
+            response_hook_name: Some("stop_message_auto".to_string()),
+            intercept_kind,
+            schema_source,
+            skip_reason: None,
         }
     } else {
         ServertoolResponseStageGateOutput {
             should_bypass: false,
+            next_action: "continue_to_execution".to_string(),
+            response_hook_matched: false,
+            response_hook_required: false,
+            response_hook_name: None,
+            intercept_kind: None,
+            schema_source: None,
             skip_reason: None,
         }
     };
@@ -3678,6 +3752,21 @@ mod tests {
         .expect("gate");
         let value: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["shouldBypass"], Value::Bool(false));
+        assert_eq!(value["nextAction"], Value::String("run_auto_hooks".to_string()));
+        assert_eq!(value["responseHookMatched"], Value::Bool(true));
+        assert_eq!(value["responseHookRequired"], Value::Bool(true));
+        assert_eq!(
+            value["responseHookName"],
+            Value::String("stop_message_auto".to_string())
+        );
+        assert_eq!(
+            value["interceptKind"],
+            Value::String("finish_reason_stop_text".to_string())
+        );
+        assert_eq!(
+            value["schemaSource"],
+            Value::String("assistant_stop_text".to_string())
+        );
         assert_eq!(value.get("skipReason"), None);
     }
 
@@ -3711,7 +3800,61 @@ mod tests {
         .expect("gate");
         let value: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["shouldBypass"], Value::Bool(false));
+        assert_eq!(value["nextAction"], Value::String("run_auto_hooks".to_string()));
+        assert_eq!(value["responseHookMatched"], Value::Bool(true));
+        assert_eq!(value["responseHookRequired"], Value::Bool(true));
+        assert_eq!(
+            value["responseHookName"],
+            Value::String("stop_message_auto".to_string())
+        );
+        assert_eq!(
+            value["interceptKind"],
+            Value::String("internal_tool_reasoning_stop".to_string())
+        );
+        assert_eq!(
+            value["schemaSource"],
+            Value::String("reasoning_stop_arguments".to_string())
+        );
         assert_eq!(value.get("skipReason"), None);
+    }
+
+    #[test]
+    fn plan_servertool_response_stage_gate_leaves_non_stop_tool_calls_for_execution_stage() {
+        let raw = plan_servertool_response_stage_gate_json(
+            json!({
+                "payload": {
+                    "choices": [{
+                        "index": 0,
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": "call_regular_exec",
+                                "type": "function",
+                                "function": {
+                                    "name": "exec_command",
+                                    "arguments": "{\"cmd\":\"pwd\"}"
+                                }
+                            }]
+                        }
+                    }]
+                },
+                "adapterContext": {},
+                "runtimeControl": {},
+                "allowFollowup": false
+            })
+            .to_string(),
+        )
+        .expect("gate");
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["shouldBypass"], Value::Bool(false));
+        assert_eq!(
+            value["nextAction"],
+            Value::String("continue_to_execution".to_string())
+        );
+        assert_eq!(value["responseHookMatched"], Value::Bool(false));
+        assert_eq!(value["responseHookRequired"], Value::Bool(false));
+        assert_eq!(value.get("responseHookName"), None);
     }
 
     #[test]
@@ -3872,6 +4015,56 @@ mod tests {
                 .and_then(|v| v.as_bool()),
             Some(true)
         );
+    }
+
+    #[test]
+    fn test_plan_servertool_dispatch_routes_reasoning_stop_through_registered_stop_hook() {
+        let raw = serde_json::json!({
+            "toolCalls": [
+                {
+                    "id": "call_reasoning_stop",
+                    "name": "reasoningStop",
+                    "arguments": "{\"stopreason\":0,\"reason\":\"done\"}"
+                }
+            ],
+            "disableToolCallHandlers": false,
+            "registeredToolCallHandlers": [
+                {
+                    "name": "reasoningStop",
+                    "trigger": "tool_call",
+                    "executionMode": "guarded",
+                    "stripAfterExecute": true
+                }
+            ]
+        });
+        let output = plan_servertool_tool_call_dispatch_json(raw.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
+        let executable = parsed
+            .get("executableToolCalls")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let skipped = parsed
+            .get("skippedToolCalls")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(executable.len(), 1);
+        assert_eq!(
+            executable[0].get("name").and_then(|v| v.as_str()),
+            Some("reasoningStop")
+        );
+        assert_eq!(
+            executable[0].get("executionMode").and_then(|v| v.as_str()),
+            Some("guarded")
+        );
+        assert_eq!(
+            executable[0]
+                .get("stripAfterExecute")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(skipped.is_empty());
     }
 
     #[test]

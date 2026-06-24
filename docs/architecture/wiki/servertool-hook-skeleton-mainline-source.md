@@ -20,6 +20,11 @@ Current registry state:
 
 Until then the mainline edges stay `binding pending`; do not invent canonical builders or pretend the closeout gate means the runtime mainline is anchored.
 
+Current rustification direction:
+
+- Response-side stopless hook ownership is converging to Rust. The native gate must own hook-match classification for both `finish_reason=stop` and `finish_reason=tool_calls + reasoningStop`, including intercept kind, schema source, and required/optional hook status.
+- TS response-stage shells are transitional thin wrappers only. They may call native gate/runtime-action/materialization functions, but they must not independently decide whether `reasoningStop` matched, whether stop schema should be validated, or whether terminal vs CLI projection should be chosen.
+
 ## CLI Lifecycle Boundary
 
 Business execution remains client-visible CLI:
@@ -33,7 +38,7 @@ servertool response decision
   -> normal Hub request pipeline continues
 ```
 
-Hook skeleton does not execute the client CLI. Hook skeleton governs injection, restore, intercept, schema validation, followup/reenter effect planning, and finalization.
+Hook skeleton does not execute the client CLI. Hook skeleton governs injection, restore, intercept, schema validation, CLI projection, and terminal finalization.
 
 ## Hook / Continuation Isolation Boundary
 
@@ -46,7 +51,6 @@ Hard rules:
 - The response-side pair is `ServertoolRespHook03HookResponseInjected -> client-visible exec_command`; the request-side pair is `client-visible exec_command -> ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized`.
 - The Responses continuation owner may only consume the finalized request shape after `ServertoolReqHook04RequestFinalized`; it must never be asked to reconcile a shell projection into a built-in tool result.
 - `ServertoolReqHook01ResultParsed` consumes only the tool result of the **current** request. It does not look up continuation store state, does not synthesize session identity, and must not call into `responses-conversation-store` / `responses_resume` to decide whether to restore anything. The "restore" verb here means "rewrite shell `exec_command` output into model-visible `reasoningStop -> function_call_output` for this turn", not "rehydrate prior continuation history".
-- `ServertoolRespHook04FollowupPlanned` / `ServertoolRespHook05ReenterDispatched` plan origin-snapshot backend effect. They must not classify the request as a continuation entry; that classification happens before the request reaches `HubRespChatProcess03Governed`, in the Rust responses resume block.
 - `ServertoolRespHook01Intercepted` / `ServertoolRespHook02SchemaValidated` / `ServertoolRespHook03HookResponseInjected` never read continuation store, never rewrite `previous_response_id`, and never emit `submit_tool_outputs` shells. Their client-visible shell is always `routecodex hook run <toolName> --input-json <json>`.
 - Continuation `entryKind` / `continuationOwner` / `sessionId` / `conversationId` keys may be read by hooks only as the current request's metadata context, never as a restoration trigger.
 
@@ -59,9 +63,7 @@ HubRespChatProcess03Governed
   -> ServertoolRespHook01Intercepted
   -> ServertoolRespHook02SchemaValidated
   -> ServertoolRespHook03HookResponseInjected
-  -> ServertoolRespHook04FollowupPlanned
-  -> ServertoolRespHook05ReenterDispatched
-  -> ServertoolRespHook06ProjectionFinalized
+  -> ServertoolRespHook04ProjectionFinalized
   -> HubRespOutbound04ClientSemantic
 ```
 
@@ -93,10 +95,8 @@ only. It must never be returned to the client as a client-executable
 | --- | --- | --- | --- |
 | `ServertoolRespHook01Intercepted` | yes | normal/abnormal response intercept, stopless/internal-tool trigger detect | write client frame or build request |
 | `ServertoolRespHook02SchemaValidated` | yes for schema-managed flows | stop schema / hook schema / tool argument schema validation | silently fix malformed schema or wrap invalid as success |
-| `ServertoolRespHook03HookResponseInjected` | yes when feedback/client execution is needed | client-visible hook response or `exec_command` projection | execute client CLI or use server-side stopless followup |
-| `ServertoolRespHook04FollowupPlanned` | optional | origin-snapshot backend followup effect plan | guess from polluted current payload |
-| `ServertoolRespHook05ReenterDispatched` | optional | reenter/clientInject/providerInvoke IO effect plan | let TS decide retry/backoff/terminal policy |
-| `ServertoolRespHook06ProjectionFinalized` | yes | post-hook/post-followup governed truth, internal strip, normal projection handoff | create a second servertool response projector |
+| `ServertoolRespHook03HookResponseInjected` | conditional | client-visible `exec_command` projection for non-terminal / invalid / missing schema | execute client CLI or preserve raw internal tool call as client-visible truth |
+| `ServertoolRespHook04ProjectionFinalized` | yes | terminal stop pass-through, summary extraction, internal strip, normal projection handoff | create a second servertool response projector |
 
 ## Request-Side Skeleton
 
@@ -141,7 +141,7 @@ Unit tests must cover:
 | malformed hook args | schema error event, fail-fast or feedback according to managed-flow contract |
 | valid terminal schema | final stop allowed, no unnecessary continuation |
 | non-terminal / still-running | hook response or guidance path continues, no premature terminal |
-| already-terminal | no duplicate followup/reenter |
+| already-terminal | no duplicate terminal rewrite or duplicate CLI projection |
 | CLI stdout success | result parsed, optional text rewrite, tool injection as needed |
 | CLI stdout malformed | parse error event, no silent fallback |
 | required hook missing | fail-fast |
@@ -162,18 +162,6 @@ client in
   -> provider out
 ```
 
-Backend followup/reenter blackbox must additionally cover:
-
-```text
-client in
-  -> provider out
-  -> provider in
-  -> response hook followup plan
-  -> reenter/clientInject/providerInvoke effect execution by TS IO shell
-  -> post-followup governed truth
-  -> normal client projection
-```
-
 Negative blackbox:
 
 - same-protocol direct/provider-direct does not activate servertool hooks.
@@ -189,7 +177,7 @@ Reason: current runtime still has TS transitional orchestration in servertool en
 ## Review Checklist
 
 - Does the change keep client-visible CLI as the business execution lifecycle?
-- Does response-side processing pass through intercept -> schema validate -> hook response inject -> optional followup/reenter -> finalize?
+- Does response-side processing pass through intercept -> schema validate -> terminal pass-through or CLI projection -> finalize?
 - Does the response hook gate cover both `finish_reason=stop` text/fence schema and `finish_reason=tool_calls` registered internal servertool calls such as `reasoningStop`?
 - Does any client-visible continuation expose only shell `exec_command`, never raw internal `reasoningStop`?
 - Does request-side processing pass through result parse -> optional text rewrite -> tool inject -> finalize?

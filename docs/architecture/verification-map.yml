@@ -1153,6 +1153,43 @@ verification:
     notes:
       - "Provider response context helper semantics must stay Rust-owned; TS may only pass context/runtime metadata into native and map native output field names."
 
+  - feature_id: hub.web_search_tool_governance
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/web_search_mode.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_web_search_tool_schema.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/web_search.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
+      - src/cli/config/init-provider-catalog.ts
+      - src/config/toml-commented-template.ts
+      - src/provider-sdk/provider-inspect.ts
+      - src/provider-sdk/provider-runtime-inference.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/web_search_mode.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_tests.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/tests.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs
+    integration:
+      - tests/provider-sdk/provider-inspect.spec.ts
+      - tests/cli/config-command.spec.ts
+      - tests/sharedmodule/virtual-router-websearch-provider-resolution.spec.ts
+    smoke:
+      - npm run build:native-hotpath
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-manifest-sync
+    build:
+      - npm run build:base
+    notes:
+      - "`web_search` means a canonical function tool executed by RouteCodex/servertool; it must remain mixable with ordinary function tools."
+      - "`web_search_direct` is separate provider-native search capability and is required before direct/builtin search rewrite or direct search route activation."
+      - "TS catalog/provider-sdk files may only declare or serialize capability/config data; they must not reimplement tool governance or route qualification."
+
   - feature_id: hub.req_inbound_responses_context_capture
     change_risk: high
     unit:
@@ -1171,6 +1208,61 @@ verification:
     notes:
       - "Malformed relay tool history must be rejected or normalized in Rust before the request bridge can store/reuse it."
       - "Coverage must lock both directions: repeated identical tool-call batches collapse to the latest output, while ordinary distinct duplicate outputs remain preserved."
+
+  - feature_id: hub.req_chatprocess_governance
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_chatprocess_03_governance_boundary.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_chatprocess_03_governed.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
+      - tests/responses/responses-openai-bridge.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/stopless-cli-continuation.spec.ts
+    smoke:
+      - cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run build:base
+    notes:
+      - "Validation must prove request-side tool governance, stop hook contract injection, and final request semantic return to `HubReqChatProcess03Governed` stay Rust-owned."
+      - "Validation must also prove the TS req-process surface remains native-wrapper-only and does not regrow message/tool/metadata rewrite logic."
+      - "The currently anchored closeout edge for this module is `ServertoolReqHook04RequestFinalized -> HubReqChatProcess03Governed`; additional upstream request-hook edges may remain pending until their exact caller/callee bindings are proven."
+
+  - feature_id: hub.chat_process_responses_continuation
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - src/modules/llmswitch/bridge/responses-request-bridge.ts
+      - src/modules/llmswitch/bridge/responses-response-bridge.ts
+    contract:
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+      - tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
+    integration:
+      - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-manifest-sync
+    build:
+      - npm run build:base
+    notes:
+      - "Responses continuation is a Chat Process boundary block: request restore runs after `HubReqInbound02Standardized` and before `HubReqChatProcess03Governed`; response save runs after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`."
+      - "Tests must lock current-request explicit evidence, owner resolution, canonical restore, stopless CLI result restore, response schema judgment/projection, post-projection canonical save, stale transient request-id clearing, and released retained state."
+      - "SSE tests are not continuation gates. `handler-response-sse.ts` and `responses-sse-bridge.ts` must not contain continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic."
 
   - feature_id: tool.apply_patch_freeform_contract
     change_risk: high

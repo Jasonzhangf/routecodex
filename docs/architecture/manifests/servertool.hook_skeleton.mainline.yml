@@ -112,9 +112,9 @@ edges:
   - step_id: sth-req-05
     from_node: ServertoolReqHook04RequestFinalized
     to_node: HubReqChatProcess03Governed
-    status: binding pending
-    owner_feature_id: binding pending
-    binding_pending: true
+    status: anchored
+    owner_feature_id: hub.req_chatprocess_governance
+    binding_pending: false
     split_binding_id: null
 verification:
   required_gates:

@@ -124,12 +124,15 @@ chains:
       - step_id: sth-req-05
         from_node: ServertoolReqHook04RequestFinalized
         to_node: HubReqChatProcess03Governed
-        owner_feature_id: binding pending
+        caller_symbol: apply_hub_req_chatprocess_03_tool_governance
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_chatprocess_03_governance_boundary.rs
+        callee_symbol: run_hub_req_chatprocess_03_governed_entrypoint
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+        owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "final servertool-governed request semantic"
         semantic_output: "normal Hub request chat-process governed semantic"
-        status: binding pending
-        binding_pending: true
-        note: "Must return to normal Hub request chain."
+        status: anchored
+        note: "Anchored by the Rust request-side governance boundary re-entering the normal Hub request chain."
 
   - chain_id: request.mainline
     summary: "HTTP request enters host, standardizes in Hub, routes via VR, exits through provider wire build."

@@ -370,14 +370,17 @@ export function planServertoolResponseStageGateWithNative(input: {
   const capability = 'planServertoolResponseStageGateJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolResponseStageGate>(capability, reason);
   try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
+    const payload = {
       payload: input.payload ?? null,
       adapterContext: input.adapterContext ?? null,
       runtimeControl: input.runtimeControl ?? null,
       allowFollowup: input.allowFollowup === true,
-      hasServertoolSupport: input.hasServertoolSupport === true,
-      capabilities: input.capabilities ?? null
-    }]);
+      capabilities: input.capabilities ?? null,
+      ...(typeof input.hasServertoolSupport === 'boolean'
+        ? { hasServertoolSupport: input.hasServertoolSupport }
+        : {})
+    };
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload]);
     const parsed = parseServertoolResponseStageGatePayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {

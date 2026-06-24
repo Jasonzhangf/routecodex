@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::req_outbound_stage3_compat::responses::apply_responses_instructions_to_input;
+
 const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -304,6 +306,10 @@ fn build_openai_responses_request(format_envelope: &Value) -> Result<Value, Stri
         }
     }
 
+    if let Some(obj) = payload.as_object_mut() {
+        apply_responses_instructions_to_input(obj);
+    }
+
     // Ensure required fields for OpenAI Responses format
     if let Some(obj) = payload.as_object_mut() {
         // Remove any private fields
@@ -583,6 +589,46 @@ mod tests {
         assert_eq!(input_items[1]["type"], "function_call_output");
         assert_eq!(input_items[1]["call_id"], "call_1");
         assert_eq!(input_items[1]["output"], "ok");
+    }
+
+    #[test]
+    fn test_build_openai_responses_request_lifts_instructions_into_system_input() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "gpt-5.3-codex",
+                    "instructions": "<rcc_stop_schema>\nstopreason 取值：0=finished，1=blocked，2=continue_needed",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": "hello"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let input_items = result.payload["input"].as_array().expect("responses input");
+        assert!(result.payload.get("instructions").is_none());
+        assert_eq!(input_items[0]["type"], "message");
+        assert_eq!(input_items[0]["role"], "system");
+        assert_eq!(input_items[0]["content"][0]["type"], "input_text");
+        assert!(input_items[0]["content"][0]["text"]
+            .as_str()
+            .expect("system text")
+            .contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+        assert_eq!(input_items[1]["role"], "user");
+        assert_eq!(input_items[1]["content"][0]["text"], "hello");
     }
 
     #[test]

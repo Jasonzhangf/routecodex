@@ -309,22 +309,23 @@ fn input_looks_like_raw_reasoning_stop_schema(input: &Value) -> bool {
     let Some(row) = input.as_object() else {
         return false;
     };
-    if row.contains_key("repeatCount")
-        || row.contains_key("repeat_count")
-        || row.contains_key("maxRepeats")
-        || row.contains_key("max_repeats")
-        || row.contains_key("triggerHint")
-        || row.contains_key("trigger_hint")
-        || row.contains_key("schemaFeedback")
-        || row.contains_key("schema_feedback")
-        || row.contains_key("continuationPrompt")
-        || row.contains_key("continuation_prompt")
-    {
-        return false;
-    }
     stop_schema_field_keys()
         .iter()
         .any(|key| row.contains_key(*key))
+}
+
+fn extract_raw_reasoning_stop_schema(input: &Value) -> Option<Value> {
+    let row = input.as_object()?;
+    let mut extracted = serde_json::Map::new();
+    for key in stop_schema_field_keys() {
+        if let Some(value) = row.get(*key) {
+            extracted.insert((*key).to_string(), value.clone());
+        }
+    }
+    if extracted.is_empty() {
+        return None;
+    }
+    Some(Value::Object(extracted))
 }
 
 fn derive_stopless_feedback_from_raw_reasoning_stop_input(
@@ -336,8 +337,10 @@ fn derive_stopless_feedback_from_raw_reasoning_stop_input(
     if !input_looks_like_raw_reasoning_stop_schema(input) {
         return Ok(None);
     }
-    let raw_arguments =
-        serde_json::to_string(input).map_err(|_| ServertoolCliError::InvalidField("inputJson"))?;
+    let raw_schema = extract_raw_reasoning_stop_schema(input)
+        .ok_or(ServertoolCliError::InvalidField("inputJson"))?;
+    let raw_arguments = serde_json::to_string(&raw_schema)
+        .map_err(|_| ServertoolCliError::InvalidField("inputJson"))?;
     let used = current_repeat_count.saturating_sub(1);
     let no_change_count = current_repeat_count.saturating_sub(1);
     let decision = evaluate_stop_schema_gate_with_reasoning_stop_arguments(
@@ -2655,6 +2658,64 @@ mod tests {
                 .reason_code,
             reason_code
         );
+    }
+
+    #[test]
+    fn public_reasoning_stop_with_control_envelope_still_derives_invalid_schema_feedback() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "reasoningStop".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "stopreason": 2,
+                    "reason": "还没完成",
+                    "has_evidence": 0,
+                    "evidence": "",
+                    "issue_cause": "",
+                    "excluded_factors": "",
+                    "diagnostic_order": "",
+                    "done_steps": "",
+                    "next_suggested_path": "",
+                    "needs_user_input": false,
+                    "learned": ""
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+                session_id: Some("session-control-envelope".to_string()),
+                request_id: Some("req-control-envelope".to_string()),
+            },
+        )
+        .expect("reasoningStop output");
+        assert_eq!(output.flow_id, "stop_message_flow");
+        assert_eq!(output.input["repeatCount"], 2);
+        assert_eq!(output.input["maxRepeats"], 3);
+        assert_eq!(output.input["triggerHint"], "invalid_schema");
+        assert_eq!(
+            output
+                .schema_guidance
+                .as_ref()
+                .expect("schema guidance")
+                .trigger_hint,
+            "invalid_schema"
+        );
+        assert_eq!(
+            output
+                .schema_feedback
+                .as_ref()
+                .expect("schema feedback")
+                .reason_code,
+            "stop_schema_next_step_missing"
+        );
+        assert!(output
+            .schema_feedback
+            .as_ref()
+            .expect("schema feedback")
+            .missing_fields
+            .iter()
+            .any(|field| field == "next_step"));
     }
 
     #[test]
