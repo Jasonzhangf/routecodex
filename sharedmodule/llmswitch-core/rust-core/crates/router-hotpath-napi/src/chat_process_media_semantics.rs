@@ -258,10 +258,14 @@ fn text_for_part(part: &Value) -> Option<String> {
 }
 
 fn string_contains_inline_media(value: &str) -> bool {
-    if value.contains("data:image") || value.contains("data:video") {
+    let trimmed = value.trim();
+    if trimmed.starts_with("data:image") || trimmed.starts_with("data:video") {
         return true;
     }
-    serde_json::from_str::<Value>(value)
+    if !(trimmed.starts_with('[') || trimmed.starts_with('{')) {
+        return false;
+    }
+    serde_json::from_str::<Value>(trimmed)
         .ok()
         .map(|parsed| value_contains_structured_media_payload(&parsed))
         .unwrap_or(false)
@@ -1008,7 +1012,7 @@ mod tests {
                 json!({
                     "type": "function_call_output",
                     "call_id": "call_uLjTinTpyajt4dRN9pvLwErd",
-                    "output": "before data:image/png;base64,AAAA after"
+                    "output": "data:image/png;base64,AAAA"
                 }),
                 json!({
                     "role": "user",
@@ -1034,13 +1038,48 @@ mod tests {
     }
 
     #[test]
+    fn does_not_strip_html_exec_command_output_that_mentions_data_uri() {
+        let html = "<!DOCTYPE html><html><body><img src=\"data:image/png;base64,AAAA\" /><p>ok</p></body></html>";
+        let output = strip_responses_context_input_historical_media(
+            vec![
+                json!({
+                    "type": "function_call",
+                    "call_id": "call_html_exec_1",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"curl https://example.com\"}"
+                }),
+                json!({
+                    "type": "function_call_output",
+                    "call_id": "call_html_exec_1",
+                    "output": html
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{"type":"input_text","text":"继续"}]
+                }),
+            ],
+            "[Image omitted]".to_string(),
+        );
+
+        assert!(!output.changed);
+        assert_eq!(
+            output.messages[1]["type"].as_str(),
+            Some("function_call_output")
+        );
+        assert_eq!(
+            output.messages[1]["output"].as_str(),
+            Some(html)
+        );
+    }
+
+    #[test]
     fn preserves_stored_responses_function_call_output_role_when_replacing_media() {
         let output = strip_responses_stored_context_input_media(
             vec![
                 json!({
                     "type": "function_call_output",
                     "call_id": "call_uLjTinTpyajt4dRN9pvLwErd",
-                    "output": "before data:image/png;base64,AAAA after"
+                    "output": "data:image/png;base64,AAAA"
                 }),
                 json!({
                     "role": "user",

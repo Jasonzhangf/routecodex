@@ -1,0 +1,2232 @@
+{
+  "extensions": [
+    ".ts",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".rs"
+  ],
+  "ignorePaths": [
+    "dist/",
+    "dist.new/",
+    "node_modules/",
+    "vendor/llmswitch-core/dist/",
+    "sharedmodule/llmswitch-core/dist/",
+    "coverage/",
+    "tmp/",
+    "sharedmodule/llmswitch-core/test/",
+    "eslint.config.js",
+    "scripts/architecture/verify-no-fallback-diff.mjs",
+    "tests/",
+    "scripts/tests/"
+  ],
+  "linePatterns": [
+    {
+      "id": "fallback-keyword",
+      "pattern": "\\bfallback\\b"
+    },
+    {
+      "id": "degrade-keyword",
+      "pattern": "\\bdegrad(e|ed|ing|ation)\\b"
+    },
+    {
+      "id": "best-effort-keyword",
+      "pattern": "\\bbestEffort\\b|\\bbest effort\\b"
+    },
+    {
+      "id": "legacy-path-keyword",
+      "pattern": "\\blegacy path\\b|\\blegacy fallback\\b|\\bdual-path\\b"
+    },
+    {
+      "id": "empty-default-operator",
+      "pattern": "(\\?\\?|\\|\\|)\\s*(\\[\\]|\\{\\})"
+    }
+  ],
+  "contextRules": [
+    {
+      "id": "catch-return-or-continue",
+      "type": "catch-return-or-continue",
+      "lookbackLines": 6
+    }
+  ],
+  "allowlist": [
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "//"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/types/debug-types.ts",
+      "textContains": "degraded"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/verify-servertool-rust-only.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/camoufox/launch-auth.mjs",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "degrade-keyword",
+      "pathContains": "src/types/debug-types.ts"
+    },
+    {
+      "ruleId": "degrade-keyword",
+      "pathContains": "src/utils/runtime-instance-registry.ts"
+    },
+    {
+      "pathContains": "AGENTS.md"
+    },
+    {
+      "pathContains": "docs/architecture/README.md"
+    },
+    {
+      "pathContains": "docs/architecture/no-fallback-diff-rules.json"
+    },
+    {
+      "pathContains": "package.json",
+      "textContains": "verify:no-fallback"
+    },
+    {
+      "pathContains": "package.json",
+      "textContains": "verify:architecture-fallback-denylist"
+    },
+    {
+      "pathContains": "src/modules/llmswitch/bridge/native-exports.ts",
+      "textContains": "JSON.stringify(input ?? {})"
+    },
+    {
+      "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
+      "textContains": "pendingApplyPatchArgumentDeltas = projected.state.pendingApplyPatchArgumentDeltas ?? {}"
+    },
+    {
+      "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
+      "textContains": "applyPatchCallIds = projected.state.applyPatchCallIds ?? []"
+    },
+    {
+      "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
+      "textContains": "emittedApplyPatchDoneCallIds = projected.state.emittedApplyPatchDoneCallIds ?? []"
+    },
+    {
+      "pathContains": "src/modules/llmswitch/bridge/responses-sse-semantics.ts",
+      "textContains": "return false;"
+    },
+    {
+      "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
+      "textContains": "return undefined;"
+    },
+    {
+      "pathContains": "src/modules/llmswitch/bridge/responses-sse-semantics.ts",
+      "textContains": "return payload;"
+    },
+    {
+      "pathContains": "src/modules/llmswitch/bridge/responses-sse-semantics.ts",
+      "textContains": "continue;"
+    },
+    {
+      "pathContains": "src/server/runtime/http-server/http-server-runtime-setup.ts",
+      "textContains": "artifacts.runtime ?? {}"
+    },
+    {
+      "pathContains": "src/server/runtime/http-server/http-server-runtime-setup.ts",
+      "textContains": "artifacts.targetRuntime ?? {}"
+    },
+    {
+      "pathContains": "src/server/runtime/http-server/metadata-center/metadata-center.js",
+      "textContains": "args.previous?.history ?? []"
+    },
+    {
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts",
+      "textContains": "executedFlowIds: stringArray(parsed.executedFlowIds) ?? []"
+    },
+    {
+      "pathContains": "src/providers/core/strategies/ecodev-oauth-flow.ts",
+      "textContains": "continue;"
+    },
+    {
+      "pathContains": "src/providers/core/strategies/ecodev-oauth-flow.ts",
+      "textContains": "return null;"
+    },
+    {
+      "pathContains": "src/commands/oauth.ts",
+      "textContains": "return existingForAlias;"
+    },
+    {
+      "pathContains": "src/commands/oauth.ts",
+      "textContains": "return '';"
+    },
+    {
+      "pathContains": "src/commands/oauth.ts",
+      "textContains": "return null;"
+    },
+    {
+      "pathContains": "src/token-daemon/token-daemon.ts",
+      "textContains": "return existingForAlias;"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "src/",
+      "textContains": "?? {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "src/",
+      "textContains": "|| {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "src/",
+      "textContains": "?? []"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "src/",
+      "textContains": "|| []"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "sharedmodule/llmswitch-core/src/",
+      "textContains": "?? {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "sharedmodule/llmswitch-core/src/",
+      "textContains": "|| {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "sharedmodule/llmswitch-core/src/",
+      "textContains": "?? []"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "sharedmodule/llmswitch-core/src/",
+      "textContains": "|| []"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "scripts/",
+      "textContains": "?? {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "scripts/",
+      "textContains": "|| {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "scripts/",
+      "textContains": "?? []"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "scripts/",
+      "textContains": "|| []"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/",
+      "textContains": "?? {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/",
+      "textContains": "|| {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/",
+      "textContains": "?? []"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/",
+      "textContains": "|| []"
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/common-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/errorsamples.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/is-direct-execution.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/llms-engine-shadow.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/log-helpers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/managed-server-pids.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/process-lifecycle-logger.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/runtime-exit-forensics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/runtime-instance-registry.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/runtime-versions.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/server-runtime-pid.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/system-prompt-loader.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/tools/error-log.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/tools/semantic-replay-snapshot-loader.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/token-daemon/history-store.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/token-daemon/token-daemon.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/token-daemon/token-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/sharedmodule/process-snapshot.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server-lifecycle/port-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/http-server-lifecycle.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/hub-shadow-compare.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/port-log-context.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/routes.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/servertool-admin-state.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/stats-manager.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/provider-response-tool-validation-blocks.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/request-executor-error-report.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/request-executor-runtime-blocks.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/retry-payload-snapshot.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/servertool-adapter-context.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/servertool-followup-metadata.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/servertool-runtime-log.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/sse-error-handler.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/credentials-handler-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/providers-handler.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/status-handler.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/handlers/handler-response-common.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/handlers/handler-response-sse.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/handlers/images-handler.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/handlers/messages-handler.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/strategies/oauth-auth-code-flow.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/base-provider-series-cooldown.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/base-provider.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/deepseek-file-upload.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/deepseek-http-provider-helpers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/deepseek-http-provider.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/deepseek-session-pow-helpers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/http-request-executor.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/provider-configured-error-mapping.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/provider-http-executor-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/provider-startup-tasks.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/vision-debug-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-request-exec.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/transport/oauth-recovery-handler.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/apikey-auth.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/deepseek-account-auth.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/oauth-auth.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/oauth-lifecycle.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/tokenfile-auth.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/token-scanner/index.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/oauth-lifecycle/interactive-oauth-lock.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/oauth-lifecycle/token-helpers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/oauth-lifecycle/token-io.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/modules/llmswitch/core-loader.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/modules/llmswitch/bridge/module-loader.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/modules/llmswitch/bridge/responses-client-projection.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/modules/llmswitch/bridge/responses-response-bridge.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/modules/llmswitch/bridge/routing-integrations.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/manager/storage/file-store.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/manager/quota/provider-quota-store.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/manager/modules/quota/quota-adapter.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/manager/modules/quota/quota-manager.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/debug/policy/violations.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/config/provider-v2-loader.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/config/user-config-migration.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/commands/oauth.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/commands/provider-update-maintenance.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/commands/provider-update-shared.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/commands/provider-update.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/commands/quota-daemon.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/commands/token-daemon.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/client/gemini/gemini-protocol-client.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/spinner.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/utils/safe-read-json.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/server/port-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/guardian/client.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/commands/codex.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/commands/session-inject.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/commands/start.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/shared/common-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/servertool/loop-state-block.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-node-result-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-request-filter-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-compat-action-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-shared.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-shared.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-semantic-mappers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-quota-buckets.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-call-id.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-id-stream.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-metadata.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-misc.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-openai.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-reasoning.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-responses.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-shell-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tool-definitions.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-toolcalls.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-snapshot-hooks.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/bump-version.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/run-ts.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/verify-test-coverage-map.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tools/inspect-provider-paths.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/c4m-direct-sample-test.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/c4m-tools-debug.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/codex-matrix-regression.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-outbound-context-merge.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-outbound-format-build.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/coverage-virtual-router-native-hotpath.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/hub-chain-equivalence.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/hub-equivalence.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/hub-response-chain.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/inspect-simulated-paths.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/stop-message-global-clear-hard-reset.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/virtual-router-dry-run.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/lib/chat-sse-utils.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/lib/responses-sse-utils.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/analyze-apply-patch-exec-failures.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/analyze-apply-patch-samples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/analyze-codex-error-failures.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/backfill-apply-patch-exec-errorsamples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/build-core.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/check-stop-followup-shape.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/classify-sample-tools.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/clean-safe.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/cleanup-codex-error-samples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/ensure-cli-executable.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/ensure-llmswitch-mode.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/fc-responses-tool-loop.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/gen-build-info.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/generate-snapshot-data.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/local-replay-anthropic-response.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/monitor-diff.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/pack-mode.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/pack-rcc.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/policy-violations-report.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/responses-fai-capture.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/scan-apply-patch-samples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/scan-exec-command-samples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/scan-tool-shape-samples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/triage-errorsamples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/unified-hub-shadow-compare.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/v2-monitoring-analysis.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/verify-apply-patch-regressions.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/verify-apply-patch.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/verify-client-headers.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/verify-codex-error-samples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/verify-e2e-toolcall.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/verify-install-e2e.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/verify-sse-loop.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/virtual-router-dryrun.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/tools/capture-provider-goldens.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/tools/sync-apply-patch-regressions.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/monitor/memory-guard.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/mock-provider/capture-from-configs.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/mock-provider/extract.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/mock-provider/run-regressions.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/ci/check-file-line-limit.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/architecture/verify-architecture-wiki-browser-smoke.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/architecture/verify-function-map-forbidden-mentions.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/tests/",
+      "textContains": "'fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/tests/",
+      "textContains": "\"fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/tests/",
+      "textContains": "reason:"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/",
+      "textContains": "'fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/",
+      "textContains": "\"fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/",
+      "textContains": "toolCallSource"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-architecture-fallback-denylist.mjs",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-vr-no-fallback-semantics.mjs",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-responses-direct-tool-shape-no-ts-fallback.mjs",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-sse-architecture-boundary.mjs",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-responses-tool-parameters-normalization-rust-only.mjs",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "fn "
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "let "
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "\"fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "'fallback"
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/index.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor-metadata.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/http-server-runtime-providers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/utils/http-error-mapper.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/utils/non-blocking-error-logger.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/token-daemon/index.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/token-daemon/server-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/token-portal/fingerprint-summary.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/tools/stats-usage.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/debug-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/error-handling-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/http-health-probe.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/logger.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/module-config-reader.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/utils/server-runtime-stop-intent.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/index.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/managed-process-probe.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/provider-traffic-governor.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/session-client-route-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/session-dir.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/session-storage-cleanup.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/stats-manager-table.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/tmux-scope-cleanup-policy.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/tmux-session-probe.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/analyze-routing-samples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/analyze-usage-estimate.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/anthropic-four-config-e2e.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/architecture/verify-function-map-boundary-mentions.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/camoufox/launch-auth.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/cleanup-stale-server-pids.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/install-verify.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/monitor/daemon-kill-watch.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/replay-429-detect.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/replay-codex-sample.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/responses-sse-replay-golden.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/v2-consistency/comprehensive-consistency-test.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "scripts/verify-tool-arguments.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/c4m-golden-samples.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/c4m-tools-test.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/complex-tools-roundtrip.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/enhanced-tools-roundtrip.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/lmstudio-adaptive.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/lmstudio-real.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/lmstudio-sse-tools-test.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/protocol-bridge-matrix.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/responses-canonical.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/responses-rt.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/roundtrip-validator.mjs",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-blocks.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-tool-schema.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer/normalize.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-parsers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-vr-node-contracts.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-rcc-fence-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/servertool/handlers/memory/cache-writer.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/sse/shared/utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/tools/args-json.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/tools/tool-registry.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/commands/init/basic.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/commands/launcher-kernel.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/commands/launcher/utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/commands/restart.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/commands/status.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/config/bundled-default-config.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/config/bundled-docs.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/config/bundled-provider-pack.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/config/init-config.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/config/precommand-default-script.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/cli/main.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/commands/validate.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/config/unified-config-paths.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/debug/snapshot/writer.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/modules/llmswitch/bridge/responses-request-bridge.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/modules/llmswitch/bridge/snapshot-recorder-runtime.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/monitoring/semantic-tracker.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/provider-sdk/vercel-ai-doctor.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/deepseek-account-token-acquirer.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/auth/oauth-repair-cooldown.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/config/camoufox-actions.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/config/camoufox-launcher.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/config/oauth-flows.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/http-transport-provider.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/mimoweb/mimoweb-xml-parser.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/provider-factory-helpers.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/provider-failure-policy-native.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/responses-provider.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/responses-sse-error-guard.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-remote-image.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/strategies/oauth-device-flow.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/core/utils/http-client.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/providers/mock/mock-provider-runtime.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/handlers/handler-utils.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/auth-store.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/control-handler.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/quota-handler.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/routing-policy.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "catch-return-or-continue",
+      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts",
+      "textContains": ""
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "scripts/",
+      "textContains": "|| {}"
+    },
+    {
+      "ruleId": "empty-default-operator",
+      "pathContains": "scripts/",
+      "textContains": "|| []"
+    },
+    {
+      "ruleId": "degrade-keyword",
+      "pathContains": "scripts/v2-monitoring-analysis.mjs"
+    },
+    {
+      "ruleId": "degrade-keyword",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/virtual-router-pool-mode.mjs"
+    },
+    {
+      "ruleId": "degrade-keyword",
+      "pathContains": "src/cli/commands/restart.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/strategies/oauth-device-flow.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/status-handler.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/tmux-session-probe.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/http-server-bootstrap.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "fn "
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "let "
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "\"fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": ".rs",
+      "textContains": "'fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/tests/",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-responses-direct-tool-shape-no-ts-fallback.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-vr-no-fallback-semantics.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-sse-architecture-boundary.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-responses-tool-parameters-normalization-rust-only.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-architecture-fallback-denylist.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/wiki-html-lib.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-architecture-deleted-path.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/mock-provider/extract.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/stop-message-counter-and-fallback.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/lib/responses-sse-utils.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "sharedmodule/llmswitch-core/scripts/lib/chat-sse-utils.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/lib/",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/tools/responses-provider-replay.mjs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/utils/errorsamples.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/utils/llms-engine-shadow.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/utils/logger.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/utils/snapshot-payload-guard.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/utils/snapshot-request-retention.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/local-connect-host.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/tools/semantic-replay-snapshot-loader.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/utils/request-id-manager.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/utils/stage-logger.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/provider-traffic-governor.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/request-activity-tracker.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/stats-manager.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/hub-shadow-compare.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/tmux-session-probe.ts",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor/log-rollup.ts",
+      "textContains": "fallback"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/utils/http-error-mapper.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/runtime/deepseek-http-provider-helpers.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/utils/provider-error-reporter.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/runtime/transport/auth-mode-utils.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/runtime/transport/auth-provider-factory.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/strategies/oauth-auth-code-flow.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor-metadata.ts",
+      "textContains": "resolveClientRequestId"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/index.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/request-executor.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/runtime-manager.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor/log-rollup-format-blocks.ts",
+      "textContains": "normalizeLabel"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor/provider-response-converter.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor/provider-runtime-resolver.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor/request-executor-retry-decision.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts",
+      "textContains": "resolveRuntimeKey"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/handlers/handler-response-sse.ts",
+      "textContains": "readTimeoutMs"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/handlers/handler-utils.ts",
+      "textContains": "resolvePrimaryErrorLogSummary"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/provider-sdk/provider-runtime-inference.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/contracts/deepseek-provider-contract.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/runtime/vision-debug-utils.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/http-server-bootstrap.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/server/runtime/http-server/daemon-admin/status-handler.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/auth/oauth-error-message.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/auth/oauth-lifecycle/path-resolver.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/manager/modules/token/index.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/cli/commands/restart.ts"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/utils/local-connect-host.ts",
+      "textContains": "no-fallback policy"
+    },
+    {
+      "ruleId": "fallback-keyword",
+      "pathContains": "src/providers/core/config/camoufox-launcher.ts",
+      "textContains": "refusing direct oauthUrl retry"
+    }
+  ]
+}

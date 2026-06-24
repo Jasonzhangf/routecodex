@@ -1,0 +1,39 @@
+lifecycle_id: responses.continuation.mainline
+summary: "Responses continuation mainline is a Chat Process boundary block: request-side restore runs after HubReqInbound02Standardized and before HubReqChatProcess03Governed; response-side save runs after HubRespChatProcess03Governed and before HubRespOutbound04ClientSemantic; SSE remains transport-only after semantic finalization."
+owner_feature_id: hub.chat_process_responses_continuation
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+entrypoint:
+  node_id: ChatProcReqContinuation01EntryEvidence
+  wiki_page: docs/architecture/wiki/responses-continuation-mainline-source.md
+  call_map_chain_id: responses.continuation.mainline
+node_ids:
+  - ChatProcReqContinuation01EntryEvidence
+  - ChatProcReqContinuation02OwnerResolved
+  - ChatProcReqContinuation03CanonicalRestored
+  - ChatProcReqContinuation04HookRestored
+  - ChatProcReqContinuation05Governed
+  - ChatProcRespContinuation06ResponseGoverned
+  - ChatProcRespContinuation07CanonicalSaved
+  - ChatProcRespContinuation08Released
+step_ids:
+  - rct-01
+  - rct-02
+  - rct-03
+  - rct-04
+  - rct-05
+  - rct-06
+  - rct-07
+edge_status_counts:
+  anchored: 1
+  partial: 6
+  binding_pending: 0
+  total: 7
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: responses.continuation.mainline
+  min_function_feature: hub.chat_process_responses_continuation
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

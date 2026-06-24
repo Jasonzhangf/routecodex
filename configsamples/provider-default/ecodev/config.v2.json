@@ -1,0 +1,49 @@
+{
+  "version": "2.0.0",
+  "providerId": "ecodev",
+  "provider": {
+    "id": "ecodev",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://cn.devecostudio.huawei.com/sse/codeGenie/maas",
+    "compatibilityProfile": "chat:ecodev",
+    "auth": {
+      "type": "ecodev-oauth",
+      "entries": [
+        {
+          "alias": "default",
+          "type": "ecodev-oauth",
+          "tokenFile": "~/.rcc/auth/ecodev-oauth-1-default.json"
+        },
+        {
+          "alias": "backup",
+          "type": "ecodev-oauth",
+          "tokenFile": "~/.rcc/auth/ecodev-oauth-2-backup.json"
+        }
+      ]
+    },
+    "models": {
+      "GLM-5.1": {
+        "aliases": [
+          "glm-5.1"
+        ],
+        "supportsStreaming": true
+      },
+      "Qwen3_VL_235B_A22B_Instruct": {
+        "aliases": [
+          "qwen3-vl-235b-a22b-instruct",
+          "qwen3-vl"
+        ],
+        "supportsStreaming": true,
+        "capabilities": [
+          "vision"
+        ]
+      }
+    },
+    "concurrency": {
+      "maxInFlight": 2,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
+  }
+}

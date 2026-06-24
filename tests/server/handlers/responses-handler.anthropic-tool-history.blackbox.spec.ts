@@ -1039,6 +1039,153 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     }
   });
 
+  it('keeps HTML exec_command tool_result adjacent before later stopless continuation turns', async () => {
+    const artifacts = await bootstrapVirtualRouterConfig({
+      providers: {
+        minimax: {
+          id: 'minimax',
+          enabled: true,
+          type: 'anthropic',
+          baseURL: 'mock://minimax',
+          auth: { type: 'apikey', apiKey: 'mock' },
+          compatibilityProfile: 'anthropic:claude-code',
+          models: { 'MiniMax-M3': {} }
+        }
+      },
+      routing: {
+        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
+      }
+    } as any) as any;
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const pipeline = new HubPipeline({
+      virtualRouter: artifacts.config,
+      policy: { mode: 'off' }
+    });
+
+    let capturedProviderPayload: unknown;
+    const app = express();
+    app.use(express.json({ limit: '2mb' }));
+    app.post('/v1/responses', async (req, res) => {
+      await handleResponses(req as any, res as any, {
+        executePipeline: async (input: any) => {
+          const result = await pipeline.execute({
+            id: 'req_http_anthropic_html_exec_tool_result_history',
+            endpoint: '/v1/responses',
+            payload: input.body,
+            metadata: {
+              ...input.metadata,
+              entryEndpoint: '/v1/responses',
+              providerProtocol: 'openai-responses',
+              routeHint: 'thinking',
+              stream: true,
+              inboundStream: true,
+              outboundStream: true,
+            }
+          });
+          capturedProviderPayload = result.providerPayload;
+          const orderingViolation = findAnthropicToolOrderingViolation(result.providerPayload);
+          if (orderingViolation) {
+            return {
+              status: 400,
+              headers: {},
+              body: {
+                error: {
+                  message: 'invalid params, tool call result does not follow tool call (2013)',
+                  type: 'invalid_request_error',
+                  code: 'HTTP_400',
+                  orderingViolation
+                }
+              }
+            };
+          }
+          return {
+            status: 200,
+            headers: {},
+            body: {
+              id: 'resp_http_anthropic_html_exec_tool_result_history',
+              object: 'response',
+              status: 'completed',
+              model: 'MiniMax-M3',
+              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+            }
+          };
+        },
+        errorHandling: null,
+      });
+    });
+
+    const { server, baseUrl } = await listenApp(app);
+    try {
+      const htmlToolOutput = [
+        'Total output lines: 170',
+        '',
+        '<!DOCTYPE html><html><head><title>Static Residential Proxies</title></head><body>',
+        '<img src="data:image/svg+xml,%3csvg%20xmlns=\'http://www.w3.org/2000/svg\'%3e" />',
+        '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" />',
+        '<p>gateway.iproyal.com:19123</p>',
+        '</body></html>'
+      ].join('\n');
+      const htmlExecArguments = JSON.stringify({
+        cmd: "curl -s 'https://iproyal.com/static-residential-proxies/' 2>/dev/null | head -200",
+        yield_time_ms: 10000,
+      });
+      const stoplessOutput = JSON.stringify({
+        ok: true,
+        toolName: 'stop_message_auto',
+        flowId: 'stop_message_flow',
+        summary: 'stopless continuation ready',
+        repeatCount: 2,
+        maxRepeats: 3,
+        continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+        schemaGuidance: {
+          requiredFields: ['stopreason', 'reason', 'next_step'],
+          stopreasonValues: { finished: 0, blocked: 1, continueNeeded: 2 },
+          triggerHint: 'no_schema'
+        },
+        input: {
+          flowId: 'stop_message_flow',
+          repeatCount: 2,
+          maxRepeats: 3,
+          triggerHint: 'no_schema'
+        }
+      });
+
+      const response = await fetch(`${baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          accept: 'text/event-stream',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          stream: true,
+          input: [
+            { type: 'message', role: 'user', content: [{ type: 'input_text', text: '我其实想知道，我如何配置和它的连接IPRoyal 的静态 IP' }] },
+            { type: 'reasoning', summary: [{ type: 'summary_text', text: '**Thinking** search static proxy details' }] },
+            { type: 'function_call', call_id: 'call_html_exec_1', name: 'exec_command', arguments: htmlExecArguments },
+            { type: 'function_call_output', call_id: 'call_html_exec_1', output: htmlToolOutput },
+            { type: 'reasoning', summary: [{ type: 'summary_text', text: '**Thinking** summarize proxy setup' }] },
+            { type: 'function_call', call_id: 'call_stopless_1', name: 'reasoningStop', arguments: '{"stopreason":2,"reason":"continue_needed"}' },
+            { type: 'function_call_output', call_id: 'call_stopless_1', output: stoplessOutput },
+            { type: 'message', role: 'user', content: [{ type: 'input_text', text: '它是用一个特殊的协议做单次请求，请求本身包括鉴权和内容？无状态请求？' }] }
+          ],
+          tools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }]
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('resp_http_anthropic_html_exec_tool_result_history');
+      expect(findDanglingAnthropicToolUse(capturedProviderPayload)).toBeNull();
+      expect(findMixedAnthropicToolResultAndText(capturedProviderPayload)).toBeNull();
+      expect(findAnthropicToolOrderingViolation(capturedProviderPayload)).toBeNull();
+      expect(JSON.stringify(capturedProviderPayload)).toContain('call_html_exec_1');
+    } finally {
+      await closeServer(server);
+      pipeline.dispose?.();
+    }
+  });
+
   it('does not forward client MCP tools into Anthropic provider tools', async () => {
     const artifacts = await bootstrapVirtualRouterConfig({
       providers: {
