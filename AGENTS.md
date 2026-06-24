@@ -152,11 +152,24 @@ client-visible error
    - `docs/design/servertool-followup-rebuild-from-origin.md`
    - `docs/design/pipeline-type-topology-and-module-boundaries.md`
 
+## Debug 优先级（强制）
+1. 任何 debug / 设计 / 生命周期问题，先读 `.agents/skills/rcc-dev-skills/SKILL.md`。
+2. 若涉及 `servertool / stopless / continuation / reasoningStop / tool governance / hook restore / schema gate`，必须按优先级继续读：
+   - `references/24-node-contract-debug-method.md`
+   - `references/22-servertool-hook-skeleton-workflow.md`
+   - `references/23-servertool-hook-dev-debug-flow.md`
+3. 先查 `function map + owner registry + verification map`，确认唯一 owner、允许路径、required gates。
+4. 再查 `mainline source + wiki + manifest`，先判断生命周期、节点合同、正常/错误/超预期路径是否逻辑闭环。
+5. 只有在合同闭环正确后，才允许查实现、补白盒/黑盒、改代码。
+6. 若 `function map` / `mainline` / `wiki` 无法在 1-2 次查询内定位唯一 owner 或唯一调用边，先补 map/contract，再改代码。
+7. 禁止跳过上述顺序直接 grep 后改实现；这种改法视为违规捷径。
+
 ## 标准执行顺序
 1. 读本文件（项目入口 + 护栏）。
 2. 读 `docs/agent-routing/00-entry-routing.md` 选路。
-3. 打开对应路由文档与相关 skill 文档执行。
-4. 执行后用证据回报：变更、验证、剩余缺口、下一步。
+3. 如属 debug / 生命周期 / 架构问题，先进入 `.agents/skills/rcc-dev-skills/SKILL.md`，再按其路由表选引用文件。
+4. 打开对应路由文档与相关 skill 文档执行。
+5. 执行后用证据回报：变更、验证、剩余缺口、下一步。
 
 ## 维护原则
 - 本文件保持短小：只保留入口、护栏、路径。

@@ -15,8 +15,20 @@ description: RouteCodex 调试与架构路由入口
 ## 先读
 1. 项目 `AGENTS.md`
 2. `docs/agent-routing/00-entry-routing.md`
-3. `docs/agent-routing/40-task-memory-routing.md`
-4. 本 skill 路由表对应的小文件
+3. `references/24-node-contract-debug-method.md`
+4. `docs/agent-routing/40-task-memory-routing.md`
+5. 本 skill 路由表对应的小文件
+
+## Debug 首选顺序（强制）
+1. 先查 `function map / owner registry / verification map`
+- 锁唯一 owner、允许路径、required gates。
+2. 再查 `mainline source / wiki / manifest`
+- 先判断生命周期、节点合同、正常/错误/超预期路径是否逻辑闭环。
+3. 再设计测试
+- 先白盒节点测试，再 provider/client 两端黑盒。
+4. 最后才查实现并改代码
+- 合同没锁清楚时，禁止直接 grep 后改实现。
+- 1-2 次查询内找不到唯一 owner 或唯一主线边，先补 map/contract。
 
 ## 路由表
 
@@ -28,6 +40,7 @@ description: RouteCodex 调试与架构路由入口
 | 改动流程 | `references/21-change-workflow.md` | 功能变更先看什么、怎么锁唯一修改点 |
 | servertool hook 骨架 | `references/22-servertool-hook-skeleton-workflow.md` | servertool/stopless CLI lifecycle + hook-governed 请求/响应骨架、测试闭环 |
 | servertool 开发/调试流 | `references/23-servertool-hook-dev-debug-flow.md` | servertool hook skeleton 的实施顺序、debug 切段、证据链与删 TS 前置条件 |
+| 节点合同调试法 | `references/24-node-contract-debug-method.md` | 高优先级方法：先生命周期/节点合同，再设计白盒与两端黑盒，最后才 debug/改代码 |
 | 唯一功能块 | `references/30-unique-block-index.md` | 快速锁唯一功能块 |
 | owner / feature / gate | `references/40-owner-registry.md` | function map / verification map / source anchor |
 | `~/.rcc` / provider 配置 | `references/50-rcc-config-ssot.md` | runtime 配置真源、schema、排障命令 |
@@ -48,10 +61,17 @@ description: RouteCodex 调试与架构路由入口
 - 运行时配置 / provider → `50`
 - note / memory / skill 沉淀 → `60`
 
+### 生命周期/合同类问题的最小执行序
+1. `24`：锁生命周期、节点合同、白盒/黑盒设计方法
+2. `40` + `70`：锁 owner、feature、gate
+3. `22` / `23`：锁 servertool 主线、落点、切段法、验证顺序
+4. 再回真实实现
+
 ### servertool 专项必经流
 - 只要任务涉及 `servertool / stopless / reasoning_stop / hook run / followup / reenter / schema validation / tool injection`，必须先读 `22` 再读 `23`。
 - `22` 锁目标骨架、主线顺序、case matrix、黑盒闭环。
 - `23` 锁实施顺序、debug 切段、证据链、删 TS 准入条件。
+- `24` 锁高优先级方法：任何复杂 debug/设计先画生命周期，逐节点定义输入/输出/正常/错误/超预期，再补白盒节点测试和 provider/client 两端黑盒，最后才允许改代码。
 - 对 servertool hook skeleton，整个开发和 debug 流程本身也属于 repo 资产：稳定后的执行步骤、切段法、验证顺序、删 TS 准入条件，必须沉淀进 `23` 或 lessons，不能只留在 wiki、`note.md`、goal 或聊天。
 - `23` 也是 servertool 开发 + debug 的执行真源：每轮新增的稳定 slice 顺序、串行验证顺序、黑盒口径、删 TS 前置条件，都必须回写到 `23` 或当月 lessons，不能只留在聊天或 `note.md`。
 - servertool 相关开发/调试一旦形成稳定动作序列、切段法、反模式或验证口径，必须同步回写 `23` 或当月 lessons；禁止只留在 `note.md` 或聊天上下文里。
