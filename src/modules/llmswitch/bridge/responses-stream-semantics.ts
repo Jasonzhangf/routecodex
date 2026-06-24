@@ -5,6 +5,8 @@ import {
 } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 
+const ASSISTANT_DONE_REPAIR_GRACE_MS = 75;
+
 type ResponsesTerminalEventForHttp =
   | 'response.completed'
   | 'response.done'
@@ -314,6 +316,8 @@ export function attachResponsesStreamSemanticsForHttp(args: {
   let probe: Record<string, unknown> | undefined;
   let sealed = false;
   let sourceClosed = false;
+  let transformRef: Transform | undefined;
+  let assistantDoneRepairTimer: NodeJS.Timeout | undefined;
   let terminalState = {
     finishReason: undefined as string | undefined,
     seenTerminalEvent: false,
@@ -354,6 +358,62 @@ export function attachResponsesStreamSemanticsForHttp(args: {
     }
   };
 
+  const clearAssistantDoneRepairTimer = (): void => {
+    if (!assistantDoneRepairTimer) {
+      return;
+    }
+    clearTimeout(assistantDoneRepairTimer);
+    assistantDoneRepairTimer = undefined;
+  };
+
+  const sealWithRepairedTerminalFrames = (): void => {
+    if (sealed || terminalState.seenTerminalEvent || !transformRef) {
+      return;
+    }
+    const repairFrames = buildResponsesTerminalSseFramesFromProbeNative(probe, args.requestLabel);
+    for (const repairFrame of repairFrames) {
+      transformRef.push(repairFrame);
+    }
+    sealed = true;
+    pending = '';
+    clearAssistantDoneRepairTimer();
+    try {
+      args.stream.unpipe(transformRef);
+    } catch (error) {
+      args.onNonBlockingError?.(`responses-stream-semantics:unpipe:${args.requestLabel}`, error);
+    }
+    closeSourceStream();
+    queueMicrotask(() => {
+      try {
+        transformRef?.end();
+      } catch (error) {
+        args.onNonBlockingError?.(`responses-stream-semantics:end:${args.requestLabel}`, error);
+      }
+    });
+  };
+
+  const scheduleAssistantDoneRepair = (): void => {
+    if (
+      sealed
+      || terminalState.seenTerminalEvent
+      || !terminalState.sawAssistantMessageDoneTerminal
+    ) {
+      return;
+    }
+    clearAssistantDoneRepairTimer();
+    assistantDoneRepairTimer = setTimeout(() => {
+      assistantDoneRepairTimer = undefined;
+      if (
+        sealed
+        || terminalState.seenTerminalEvent
+        || !terminalState.sawAssistantMessageDoneTerminal
+      ) {
+        return;
+      }
+      sealWithRepairedTerminalFrames();
+    }, ASSISTANT_DONE_REPAIR_GRACE_MS);
+  };
+
   const transform = new Transform({
     transform(chunk, _encoding, callback) {
       if (sealed) {
@@ -368,6 +428,7 @@ export function attachResponsesStreamSemanticsForHttp(args: {
             : chunk instanceof Uint8Array
               ? Buffer.from(chunk).toString('utf8')
               : String(chunk ?? '');
+        clearAssistantDoneRepairTimer();
         pending += text;
         let boundary = /\r?\n\r?\n/.exec(pending);
         while (boundary) {
@@ -381,16 +442,7 @@ export function attachResponsesStreamSemanticsForHttp(args: {
             && terminalState.sawAssistantMessageDoneTerminal
             && !terminalState.seenTerminalEvent
           ) {
-            const repairFrames = buildResponsesTerminalSseFramesFromProbeNative(probe, args.requestLabel);
-            for (const repairFrame of repairFrames) {
-              this.push(repairFrame);
-            }
-            sealed = true;
-            pending = '';
-            closeSourceStream();
-            this.end();
-            callback();
-            return;
+            scheduleAssistantDoneRepair();
           }
           boundary = /\r?\n\r?\n/.exec(pending);
         }
@@ -405,6 +457,7 @@ export function attachResponsesStreamSemanticsForHttp(args: {
         return;
       }
       try {
+        clearAssistantDoneRepairTimer();
         if (pending.trim()) {
           const frame = `${pending}\n\n`;
           inspectFrame(frame);
@@ -426,6 +479,13 @@ export function attachResponsesStreamSemanticsForHttp(args: {
           }
           emittedRepairFrames = frames.length > 0;
         }
+        if (
+          !repairPlan.shouldProjectIncompleteError
+          && !emittedRepairFrames
+          && !terminalState.seenTerminalEvent
+        ) {
+          this.push(buildResponsesStreamIncompleteErrorFrameForHttp(args.requestLabel));
+        }
         if (repairPlan.shouldProjectIncompleteError && !emittedRepairFrames) {
           this.push(buildResponsesStreamIncompleteErrorFrameForHttp(args.requestLabel));
         }
@@ -436,5 +496,6 @@ export function attachResponsesStreamSemanticsForHttp(args: {
       }
     },
   });
+  transformRef = transform;
   return args.stream.pipe(transform);
 }

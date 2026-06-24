@@ -1,6 +1,552 @@
+# 2026-06-24 SSE 过早 completed 截断后续 tool_calls 根因锁定
+
+- live 样本：
+  - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782295750434_6301999a`
+  - requestId: `openai-responses-router-gpt-5.4-20260624T180910434-397606-101`
+  - provider: `XLC.key1.glm-5.2`
+- 直接证据：
+  1. `provider-response_2.json` / `_3.json`
+     - 同一条 provider SSE 先输出 assistant 文本：
+       - `Jason，copy 修复已验证通过。我现在锁定 gate（红测 + 真机验证记录），更新 MEMORY.md 和 function map。`
+     - 后续同一流继续输出真实 `tool_calls`
+       - `tool_calls[0].function.name = exec_command`
+     - 末尾明确：
+       - `finish_reason = "tool_calls"`
+  2. `client-response.json`
+     - 已被提前投影成：
+       - `event: response.completed`
+       - `event: response.done`
+     - 且不再包含任何 `response.function_call_arguments.*`
+  3. `provider-request.json`
+     - 历史里已有多轮 stopless/tool surface，不是“没历史”或“没 continuation”
+- 结论：
+  - 不是 SSE 以外的 continuation owner 问题。
+  - 真根因在 `src/modules/llmswitch/bridge/responses-stream-semantics.ts`：
+    - 看到 assistant `response.output_item.done` 后就立刻补 `response.completed/done` 并断流；
+    - 没给同一 provider stream 后续真实 `tool_calls` 留时间；
+    - 于是客户端看到“已经 completed”，但 usage/上游末尾其实是 `finish_reason=tool_calls`。
+- owner / gate 对齐：
+  - feature: `server.responses_sse_bridge_surface`
+  - owner module: `src/modules/llmswitch/bridge/responses-sse-bridge.ts` + `handler-response-sse.ts` / `handler-response-utils.ts`
+  - 本次具体修复落点：`responses-stream-semantics.ts`
+- 修复：
+  - 对 assistant message done 的 auto-close repair 增加短暂 grace window（75ms）；
+  - 若后续还有真实 frame 到达，则取消提前收口；
+  - flush 阶段若无 terminal event 且 repair frames 为空，显式补 `upstream_stream_incomplete` error frame，避免静默结束。
+- focused tests：
+  - `tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts`
+    - `does not auto-close assistant message when later tool-call frames still arrive`
+    - `projects upstream_stream_incomplete when stream closes before response.completed`
+    - `does not emit write-after-end when upstream writes after assistant auto-close`
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts --runInBand` -> PASS
+  - `npm run build:min` -> PASS
+  - `ROUTECODEX_INSTALL_SKIP_BUILD=1 npm run install:global` 后全局版本 -> `0.90.3204`
+  - `routecodex restart --port 5555`
+  - `routecodex status --port 5555 --json` -> version `0.90.3204`, ready `true`
+  - `curl http://127.0.0.1:5555/health` -> `ready=true`, `pipelineReady=true`, version `0.90.3204`
+- 当前缺口：
+  - 旧样本 `client-request.json` 因 oversize 被裁成摘要，不能直接原样 live replay 同一请求体。
+  - 但 root cause 已由 live provider/client 双侧样本 + focused transport test 锁死。
+
+# 2026-06-24 build:min gate latest blocker re-locked
+
+- 本轮按 Jason 最新要求重新实跑 `npm run build:min`，不再沿用旧 blocker 结论。
+- 最新 gate 证据：
+  - architecture/function-map/servertool-rust-only 前置 gate 全绿。
+  - 真实失败点在 `node scripts/build-core.mjs`，不是根仓 `tsc`。
+  - 过滤后的唯一 TS 诊断：
+    - `sharedmodule/llmswitch-core/src/servertool/dispatch-preparation-shell.ts(51,9): error TS2322: Type 'Record<string, unknown>' is not assignable to type 'JsonObject'.`
+- 根因：
+  - `dispatch-preparation-shell.ts` 上层本来拿到的是 `readRuntimeMetadata(...) -> JsonObject | undefined`。
+  - 近期改动把它先扩成 `Record<string, unknown>` 再传给 `buildServertoolDispatchPlanInput(...)`。
+  - 但 `buildServertoolDispatchPlanInput` 的 TS 合同仍要求 `runtimeMetadata?: JsonObject`；真正需要 `Record<string, unknown>` 的只有 native bridge 内层。
+- 修复动作：
+  - 在 `dispatch-preparation-shell.ts` 恢复传递原始 `runtimeMetadata`（`JsonObject`），不在上层提前扩型。
+  - native 边界继续由 `execution-queue-shell.ts` 负责与 `Record<string, unknown>` 适配。
+- `build-core` 转绿后，`build:min` 继续暴露的新真失败点已经聚类为 5 个共享类型/辅助函数 owner，而不是 13 个散点调用处：
+  - `src/debug/snapshot/provider-utils.ts`
+    - `buildSnapshotPayload(...)` 声明缺 `scope` / `entryPort`，但 provider/client snapshot 写入处都在传。
+  - `src/providers/profile/provider-profile.ts`
+    - `ApiKeyAuthConfig` 声明缺 `selectionMode`，但 `apikey-auth.ts` 与 tests 已在使用。
+  - `src/providers/profile/profile-contracts.ts`
+    - `ResolveOAuthTokenFileInput` 缺 `tokenFile`，但 `auth-provider-factory.ts` 与 `ecodev-profile.ts` 已按该字段决策。
+  - `src/server/handlers/types.ts`
+    - `PipelineExecutionResult.usageLogInfo` 缺 `requestModel` / `entryPort`，但 response logging/snapshot 已用。
+  - `src/token-daemon/token-types.ts`
+    - `OAuthProviderId` 漏掉 `qwen`，与现有 qwen token-daemon 代码和测试矛盾。
+- 复验结果：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ./node_modules/.bin/tsc -p tsconfig.json --pretty false --noEmit` -> PASS
+  - `npm run build:min` -> PASS
+  - 说明：
+    - `dispatch-preparation-shell` 的 `runtimeMetadata` 合同错位已修复；
+    - 共享 TS 类型面已重新对齐当前真实调用与测试面；
+    - servertool Rust-only gate 在本轮完整 build:min 中保持全绿。
+
 # 2026-06-23 OpenAI-compatible SSE 5xx regression audit
 
+# 2026-06-24 continuation red-test lock
+
+# 2026-06-24 Anthropic 2013 sample re-audit: HEAD gate added, source not reproducing
+
+- 用户新报 400：
+  - `[5555] ... invalid params, tool call result does not follow tool call (2013)`
+- 样本证据仍成立：
+  - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782292025270_31fa8b50/provider-request.json`
+    - `assistant tool_use call_6c14e44f72b54ab5b5e09c68`
+    - 紧接 `user text [Image omitted]`
+    - 后续才有 stopless `reasoningStop`
+  - 这是 Anthropic 非法顺序。
+- 继续下钻后的新分层证据：
+  - 同一样本 `__runtime.json` 里，`responsesRequestContext.context.input` 对应位置仍是：
+    - `function_call(call_6c14...)`
+    - `function_call_output(call_6c14...)`
+  - 说明样本里的脏形状不是“context 已经丢 tool_result”，而是更靠后某个 provider-facing 出站转换把它投成了普通 user placeholder 文本。
+- 但当前 repo HEAD 未复现：
+  1. Rust provider-facing gate 新增：
+     - `hub_req_outbound_format_build.rs`
+     - `test_build_anthropic_messages_keeps_html_exec_tool_result_before_later_stopless_turns`
+     - PASS
+  2. Rust request->anthropic chain gate 新增：
+     - `responses_openai_codec.rs`
+     - `request_codec_then_anthropic_codec_keeps_html_exec_tool_result_before_later_stopless_turns`
+     - PASS
+  3. 当前本机 5555 实例版本：
+     - `/health -> 0.90.3202`
+     - 全局安装 `/opt/homebrew/lib/node_modules/routecodex/dist/build-info.js -> 0.90.3202`
+  4. 旧 400 样本版本：
+     - sample meta `version=0.90.3196`
+- 当前判断：
+  - 旧样本中的 2013 形状已经被 gate 锁住，但 HEAD 主链未复现。
+  - 更像是：
+    - 旧运行产物 / 旧版本行为；
+    - 或者 exact live path 还存在 repo 测不到的额外桥接层差异。
+  - 不能宣称已修 live 400，只能宣称：
+    - 样本形状已被 Rust gate 锁住；
+    - HEAD 对 sample-like exact slice 是绿的；
+    - 需要再做 live replay/real request 复查当前 3202 是否还会产出同类 provider-request。
+
+# 2026-06-24 Anthropic 2013 root cause locked on media-strip overmatch
+
+- 新证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts --runInBand`
+    - 先红：`keeps HTML exec_command tool_result adjacent before later stopless continuation turns`
+    - 失败点：`orderingViolation=non_tool_result_user_content_before_tool_results_at_2`
+  - 直接打印 pipeline `providerPayload`（重编前）：
+    - `assistant tool_use(call_html_exec_1)`
+    - 后面不是 `user tool_result(call_html_exec_1)`，而是 `user text [Image omitted]`
+  - `captureReqInboundResponsesContextSnapshotWithNative(...)` 证据：
+    - `input` 仍保留 `function_call_output(call_html_exec_1)`
+    - 所以“tool output 丢了”不是 capture/store 根因
+  - 真 root cause 在 Rust 媒体清理：
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_process_media_semantics.rs`
+    - `string_contains_inline_media(...)` 之前只要字符串里包含 `data:image` / `data:video` 就判定为媒体
+    - `exec_command` 返回的 HTML 页面里带 `<img src="data:image...">`
+    - 于是历史 `function_call_output` 被误伤为 `[Image omitted]` 占位
+    - 后续 Anthropic provider-facing request 失去 `tool_result` 配对，触发 2013
+- 修复：
+  - 收窄 `string_contains_inline_media(...)`
+    - 只对“独立 data URI”或“可解析的结构化媒体 JSON”判定为媒体 payload
+    - 不再把普通 HTML / 文本里提到的 `data:image...` 当成整段媒体输出
+  - 新增/调整 focused tests：
+    - `does_not_strip_html_exec_command_output_that_mentions_data_uri`
+    - 旧 placeholder tests 改为真正的独立 `data:image...` payload
+- 复验：
+  - `cargo test -p router-hotpath-napi chat_process_media_semantics --lib -- --nocapture` -> PASS
+  - `cargo test -p router-hotpath-napi test_build_anthropic_messages_keeps_html_exec_tool_result_before_later_stopless_turns --lib -- --nocapture` -> PASS
+  - `cargo test -p router-hotpath-napi request_codec_then_anthropic_codec_keeps_html_exec_tool_result_before_later_stopless_turns --lib -- --nocapture` -> PASS
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` -> PASS
+  - 同一黑盒重跑 -> PASS
+  - 重编后直接打印 `providerPayload`：
+    - 已恢复为 `assistant tool_use(call_html_exec_1)` -> `user tool_result(call_html_exec_1)`，不再是 standalone `[Image omitted]`
+
+# 2026-06-24 stopless capture restore root-cause at req context capture
+
+- 新红点继续下钻后的直接证据：
+  - `cargo test -p router-hotpath-napi capture_responses_context_restores_stopless_cli_pair_into_reasoning_stop_and_guidance --lib -- --nocapture`
+    - FAIL，日志：`~/Library/Application Support/rtk/tee/1782277372_cargo_test.log`
+- 已定位到请求侧恢复 owner，不在 SSE / dispatch：
+  - `capture_req_inbound_responses_context_snapshot(...)`
+    - 先调用 `normalize_shell_like_tool_calls_before_governance(...)`
+  - 其中 `normalize_responses_input_function_calls(...)`
+    - 对 `exec_command(routecodex hook run reasoningStop ...)` 会命中 `is_auto_injected_stop_hook_function_call(...)`
+    - 并把它改写成：
+      - `function_call(name=reasoningStop)`
+      - `function_call_output(output=trimmed stopless payload)`
+      - `user guidance`
+  - 但紧接着 `hub_req_inbound_context_capture.rs::normalize_responses_input_items(...)`
+    - 仍按 `raw_request.tools` 建 `allowed_tool_names`
+    - 当前 stopless 恢复样本里 `tools=[exec_command]`
+    - 恢复后的 `reasoningStop` 不在 `allowed_tool_names`
+    - 于是 `reasoningStop` function_call 被当成非法工具历史丢弃
+    - 对应 output 因 `valid_call_ids` 为空也被继续丢弃
+    - 只剩 guidance 文本，正好解释：
+      - capture 白盒红
+      - codec 白盒红
+      - integrated provider-facing payload 只剩 guidance、没有 reasoningStop pair
+- 当前判断：
+  - 这是 request-side restore 真 root cause 之一：
+    - 恢复出来的 internal builtin tool 没被 context-capture allowlist 接纳
+  - 修复方向应在 request/context capture owner：
+    - `normalize_responses_input_items(...)` 必须允许 restore 出来的 builtin `reasoningStop`
+    - 不能再仅按 client-declared `tools` 过滤
+
+# 2026-06-24 stopless node-contract / dual-blackbox method lock
+
+- Jason 本轮新要求已经明确：
+  - 不允许继续“先改代码再看结果”。
+  - 当前 stopless 必须先按生命周期分轮次，再逐节点写 contract。
+  - 黑盒只锁结果面；白盒逐节点锁逻辑、顺序、caller/callee、正常/错误/超预期。
+  - 两端黑盒必须同时存在：
+    1. client-facing：客户端收什么响应；
+    2. provider-facing：我们发给 provider 的 request 到底是什么。
+- 已沉淀到 skills：
+  - `.agents/skills/rcc-dev-skills/references/24-node-contract-debug-method.md`
+  - `rcc-dev-skills/SKILL.md` 已把它升成高优先级路由。
+  - `references/23-servertool-hook-dev-debug-flow.md` 已把“先生命周期/节点合同/白盒/黑盒，再 debug”写进主流程。
+- 当前 stopless 正确生命周期（Jason 最新口径）：
+  1. Round 1 request
+     - servertool/chat-process 注入两类 guidance：
+       - `finish_reason=stop` 用的 stop summary / schema guidance；
+       - internal tool `reasoningStop`。
+     - 这两类都不是客户端输入。
+     - 同时正常 client tools（含 `exec_command`）不能丢。
+  2. Round 1 response
+     - 拦截两类 stop：
+       - `finish_reason=stop`
+       - `finish_reason=tool_calls + reasoningStop`
+     - 做 normalize / schema gate；
+     - terminal pass 就正常 stop；
+     - deny-stop/no-schema/invalid/malformed/harvest-miss 就投 CLI；
+     - 然后保存 canonical continuation context；
+     - 再交给客户端。
+  3. Round 2 request
+     - 先 restore continuation context；
+     - 再把第一轮 CLI 执行结果转成：
+       - model-visible guidance；
+       - internal `reasoningStop` call/result pair；
+     - 再重新注入同样的 system guidance + internal tool。
+  4. Round 3 guard
+     - `no_schema` 连续 3 次后，停止再把 `finish_reason=stop` 改写成 CLI loop。
+- 当前应该设计的白盒节点最小集：
+  - Request inject stop guidance
+  - Request inject `reasoningStop`
+  - Request preserve normal tools (`exec_command` 不丢)
+  - Response intercept `finish_reason=stop`
+  - Response intercept `finish_reason=tool_calls + reasoningStop`
+  - Harvest/parse/schema gate
+  - Normalize terminal vs CLI
+  - Save canonical continuation after normalize
+  - Restore continuation before request-side hook restore
+  - CLI stdout -> guidance rewrite
+  - CLI stdout -> internal `reasoningStop` pair restore
+  - `no_schema=3` loop guard
+- 当前应该设计的黑盒最小集：
+  - provider-facing round 1：
+    - 有 stop guidance
+    - 有 `reasoningStop`
+    - 有正常工具面
+  - client-facing round 1：
+    - terminal valid -> stop
+    - no schema / invalid / malformed / harvest miss -> `exec_command`
+    - 不泄漏 raw `reasoningStop`
+  - provider-facing round 2：
+    - 带回 repaired guidance
+    - 带回 restored `reasoningStop` pair semantics
+    - 正常工具面不丢
+  - client-facing round 2：
+    - 正确继续推进，不泄漏 raw internal tool
+  - client-facing round 3：
+    - 第 3 次 `no_schema` 后不再 endless CLI
+- 当前已确认的 gap：
+  - 现有 gate 已部分锁住结果，但还没有把“每个节点正常/错误/超预期”的白盒矩阵完整锁死。
+  - `harvest fail / parse fail / malformed harvest` 仍缺完整 provider/client 双端黑盒。
+  - “Round 2 CLI result 同时变 guidance + internal reasoningStop pair” 仍缺完整双端黑盒。
+
+# 2026-06-24 stopless blackbox/whitebox cleanup red evidence
+
+- Jason 新要求：
+  - stopless 相关黑盒/白盒里凡是继续锁旧 mainline 语义的 case，要直接替换，不允许让旧断言继续干扰。
+  - 先让新合同红出来，再据此补 owner 代码。
+- 本轮已替换的旧测试：
+  - `scripts/tests/stopless-contract-blackbox.mjs`
+    - 第二轮 provider-facing 断言不再只看 guidance 字符串；
+    - 改为强制要求：
+      - provider request round 1 必须已有 stop schema guidance + `reasoningStop` + `exec_command`
+      - provider request round 2 必须把 CLI 结果恢复成 `reasoningStop` call/result pair
+      - provider-facing restored output 不得泄漏 raw `stop_message_auto`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs`
+    - 旧测试只要求“rewrites to provider guidance”；
+    - 新测试要求“reasoningStop pair + guidance + normal tools”同时成立
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_tests.rs`
+    - 旧测试把 stopless resume 继续锁成 `exec_command` 历史；
+    - 新测试改成要求 provider-facing resume 为 `reasoningStop`
+  - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+    - 新增 malformed `reasoningStop.arguments` client-facing 黑盒
+- 新红证据：
+  1. provider-facing round 1 黑盒红：
+     - `node scripts/tests/stopless-contract-blackbox.mjs`
+     - 失败点：`case=no_schema missing stop schema instructions in provider-request`
+     - 现象：第一轮 provider request 没有命中新合同里的 stop schema guidance；script 打印出的 provider body 被大段系统/会话材料占满，说明请求侧 stopless guidance 注入主线没有按预期进入 provider-facing request truth
+  2. request/restore 白盒红：
+     - `cargo test stopless_resume_as_reasoning_stop_pair_without_declared_tools --lib -- --nocapture`
+     - 失败点：
+       - `left: "exec_command"`
+       - `right: "reasoningStop"`
+     - 说明：第二轮 provider-facing resume 仍在恢复 raw `exec_command` 历史，而不是恢复成 internal `reasoningStop` pair
+  3. integrated provider-payload 白盒红：
+     - `cargo test` 日志 `1782275107_cargo_test.log`
+     - 失败点：`provider payload must carry exact CLI feedback`
+     - 实际 payload 证据：
+       - messages[1] 仍是 `tool_use name=exec_command`
+       - messages[2] 仍是 raw `tool_result`，content 直接包含 `tool/toolName=stop_message_auto`
+     - 说明：当前实现还停留在“raw CLI transcript replay”，没有做 mainline 要求的：
+       - CLI result -> model-visible guidance
+       - CLI result -> `reasoningStop` call/result pair
+- 当前仍为绿的新增结果：
+  - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+    - 新增 malformed `reasoningStop.arguments` 黑盒通过
+    - 说明响应侧“拦截 raw internal tool -> CLI projection”这条 client-facing 面已有基础能力，但 request/provider-facing restore 主线仍错
+
+# 2026-06-24 stopless provider-facing round1 first red refined
+
+- 对 `scripts/tests/stopless-contract-blackbox.mjs` 第一轮 provider-facing 红点继续下钻后，发现“missing stop schema instructions”不是 runtime 未注入，而是黑盒还锁旧字面文案。
+- 直接证据：
+  - 用真实 fixture + `RouteCodexHttpServer` + `handleResponses` + 受控 upstream 复放后，provider request 已包含：
+    - `reasoningStop`
+    - `<rcc_stop_schema>`
+    - `stopreason values: 0=finished, 1=blocked, 2=continue_needed`
+    - `next_step`
+  - 但当前黑盒脚本断言仍写死：
+    - `stopreason 取值：0=finished，1=blocked，2=continue_needed`
+  - 说明红因是“旧中文整句匹配”，不是“没有 stop schema 合同”。
+- 进一步证据：
+  - provider request 的 `instructions` 顶层可为 `null`；stopless guidance 被 materialize 到 Responses `input` 文本里，而不是必须落在顶层 `instructions`。
+  - 所以 provider-facing 黑盒必须锁“合同语义存在”，不能再锁“固定落在 instructions 字段 + 固定中文字面”。
+- 已执行调整：
+  - `scripts/tests/stopless-contract-blackbox.mjs`
+    - 新增 `hasStopSchemaContractText(...)`
+    - 改为语义断言：
+      - 必须含 `<rcc_stop_schema>`
+      - 必须含 stopreason values/取值 之一
+      - 必须含 `next_step`
+  - 第二轮 provider-facing 黑盒继续下钻后，旧断言再次暴露“锚点错了”：
+    - 之前用 `expectedProviderText=stop_schema_missing/...` 去匹配 `function_call_output`
+    - 真实 Codex sample 历史里已有多条普通 `exec_command` 输出文本也会包含这些词
+    - 结果黑盒把“历史普通工具输出”误认成“当前 stopless restored output”
+  - 新证据：
+    - 第二轮 `pipelineInput.body` 尾部真实存在：
+      - `function_call(name=reasoningStop, call_id=call_servertool_cli_...)`
+      - 同 call_id 的 `function_call_output`
+      - 该 output JSON 含 `input.triggerHint=no_schema`
+      - 且当前这条 output 不含 `stop_message_auto`
+    - 同时历史里还有别的普通 `exec_command` 输出包含 `stop_message_auto` 字样，但那是 note/文档文本，不是当前 stopless pair。
+  - 进一步调整：
+    - 黑盒改为：
+      - 直接找最后一个 `reasoningStop` function_call；
+      - 再按同 `call_id` 找 paired `function_call_output`；
+      - 再校验 `output.input.triggerHint` 与预期一致；
+      - 再校验当前这条 paired output 不泄漏 `stop_message_auto`。
+- 第二轮 client-facing 触发 hint 也收了一处旧预期：
+  - 当前黑盒 upstream mock 第二轮统一返回 `finish_reason=stop` 且无 schema；
+  - 因此第二轮再投给客户端的 `exec_command.triggerHint` 应该统一重新判成 `no_schema`；
+  - 旧断言继续要求 `invalid_schema` / `next_step` 属于把“上一轮 provider-facing restored feedback”错套到“本轮响应侧重新判定”。
+
+# 2026-06-24 debug 方法优先级入口收束
+
+- Jason 最新要求已落盘：
+  - 项目 `AGENTS.md` 只负责声明 debug 优先级和入口顺序，不承载大段方法细节。
+  - 复杂 debug 必须先读 `.agents/skills/rcc-dev-skills/SKILL.md`。
+  - 复杂生命周期/contract 问题必须先读 `references/24-node-contract-debug-method.md`。
+  - 固定执行顺序：
+    1. `function map / owner registry / verification map`
+    2. `mainline source / wiki / manifest`
+    3. 白盒节点测试设计
+    4. provider/client 两端黑盒设计
+    5. 最后才看实现与改代码
+- 本轮文档收口目标：
+  - 把“先 owner/map，再 mainline/contract，再测试，再实现”的顺序钉死在 repo 入口层；
+  - 详细方法保留在 `rcc-dev-skills`，避免继续散落在聊天和临时 goal 里。
+
+# 2026-06-24 5520 orangeai/glm 400 recent-commit audit
+
+- Jason 新要求：先别猜 payload，先查最近修改/提交，看是不是近期改动引出的 `HTTP_400`。
+- 时间线已锁：
+  - 5520 日志里当前这轮报错时间是 `2026-06-24 11:17:08` / `11:18:08`。
+  - 当前 `HEAD` 是 `b4036fdfd refactor(servertool): rustify stopless hooks`，提交时间 `2026-06-24 11:29:55`。
+  - 结论：`b4036fdfd` 不可能是这次 11:17/11:18 的直接起点；它发生在报错之后。
+- 当前 `HEAD`/reflog 真相：
+  - `b4036fdfd` <- `11cd2ccad` <- `c75d6ceb4` <- `019bc75e8` <- `f9766fd9c`
+  - `git reflog` 证明分支在 11:29 又前进了一次，不应把 11:17 的问题误甩给最新 commit。
+- 近因候选排序（按“更可能影响 11:17 报错”的程度）：
+  1. `c640b43c1 fix: harvest GLM marker tool calls`
+     - 不只改 response parser，还改了 `virtual_router_engine/provider_bootstrap.rs`。
+     - 新增“按 model-level `compatibilityProfile` 给 target/runtime 套 profile”的逻辑。
+     - `orangeai` 配置只有 model-level `compatibilityProfile = "chat:glm"`，因此这个提交会改变 `orangeai.key1.glm-5.2` 的 compat 路径，是当前最像“行为面真变化”的提交。
+  2. `c75d6ceb4 fix: preserve responses continuation history`
+     - 改的是 `shared_responses_conversation_utils.rs`。
+     - 这会改变 `/v1/responses` continuation/history 保留量，可能把更多旧 tool history 带进后续 `chat/completions` body，属于“内容触发型”第二嫌疑。
+  3. `11cd2ccad fix: stop servertool gate false bypass`
+     - 只改 `chat_servertool_orchestration.rs` 响应侧 gate。
+     - 对“上游直接返回 400”解释力弱，暂排后。
+- 额外证据：
+  - 当前工作树里的 `src/providers/core/runtime/provider-request-shaping-utils.ts` 仍保留 `ensureGenericStreamField(...)` 修复；`stream:true` 修复没有被工作树踩回去。
+  - 旧 note 已记录：把某条失败 `orangeai` 样本的 `provider-request.json.body` 原样 replay 到上游时，未稳定复现 400。
+  - 因此现在不能直接下结论说“固定 wire shape 坏了”；更像“compat/profile 切换”或“continuation 内容变化”触发了上游某条模板/业务路径。
+- 新证据（online closeout）：
+  - repo 源码已在 `src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts` 加 `preserveOpenAiSdkChatWireSemantics(...)`；focused Jest `preserveOpenAiSdkChatWireSemantics` 通过。
+  - 受管 5520 当前 release 由于无关 wiki gate 挡住 `build:min/install-release`，本轮未混入那批无关脏改动；改为把同一 transport 补丁同步到 `~/.rcc/install/current/dist/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.js` 做最小 live 验证。
+  - `rcc restart --port 5520` 后，`curl http://127.0.0.1:5520/health` 返回 `ready=true` / `pipelineReady=true` / `version=0.90.3216`。
+  - 用 `__runtime.json` 还原出的原始 `/v1/responses` body 在线重放到 `http://127.0.0.1:5520/v1/responses`，返回 `HTTP 200` + 正常 SSE，不再出现 400。
+  - 更关键：用同一份失败样本 `~/.rcc/codex-samples/openai-responses/ports/5520/req_1782270999417_748db896/provider-request_2.json`，配 `~/.rcc/provider/orangeai/config.v2.toml` 里的真实 `orangeai` key，直接调用安装态 `VercelAiSdkOpenAiTransport.executePreparedRequest(...)` 在线复放，已拿到 `glm-5.2` 正常 SSE 首包；旧错误 `No filter named 'fromjson' found.` 未再复现。
+
+# 2026-06-24 hubpipeline M2 re-audit after servertool Rust recovery
+
+- Jason 新信息：`servertool` 已完整恢复 Rust，需要重审 M2，不再沿用“servertool compile blocker”旧前提。
+- 重新验证结果：
+  - `cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture`
+    - 已进入测试执行阶段；
+    - 4 个失败都在 `req_process_stage1_tool_governance_tests.rs` 的 stopless instructions 预期，旧断言仍要求 `简洁 summary / 示例 JSON` 老文案。
+  - `npm run verify:function-map-compile-gate`
+    - 当前首个失败不是 Rust 语义，而是 `package.json` 缺 `build:native-hotpath`。
+- 新判断：
+  - M2 当前主阻塞已从“servertool-core 编译恢复”切换为：
+    1. function-map build wiring 假阻塞；
+    2. req_chatprocess 自身的 stopless contract 漂移；
+    3. `src/modules/llmswitch/bridge/responses-request-bridge.ts` 仍在 TS 里拼 stopless `instructions`，这是 request-side governance 语义残留，M2 未闭环。
+
+- Jason 要求当前先锁 continuation，不扩 stopless 设计外延。
+- 新增锁测：
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts`
+  - case: `keeps first-round tool history after a second relay continuation save/release`
+- 锁定语义：
+  - `/v1/responses` relay continuation 首轮 `exec_command` tool pair 保存后；
+  - `submit_tool_outputs` 恢复出第二轮 request truth；
+  - 第二轮再次 `persistResponsesConversationLifecycleForHttp(...)` 保存后；
+  - 再次 resume 必须仍保留第一轮 `function_call + function_call_output`，不能只剩第二轮。
+- 同时修正该 spec 现有 mock 缺口：
+  - `responses-sse-bridge.js` mock 之前缺 `normalizeResponsesSseFrameForClientForHttp` / `projectResponsesSseFrameForClientForHttp` / `resolveResponsesProviderProtocolHintFromSseFrameForHttp` / `summarizeResponsesSseFrameForLogForHttp`
+  - 不补齐会先在模块装载期 SyntaxError，红不到 continuation 语义。
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts`
+  - 结果：3/3 PASS
+
+# 2026-06-24 request-executor provider-error snapshot wiring fix
+
+# 2026-06-24 stopless 5555 terminal-missing-fields + used-not-advancing evidence
+
+- Jason 新给的 5555 live 日志把 stopless 问题继续收紧：
+  - 多次请求均出现
+    - `stage=summary source=chat finish_reason=stop eligible=true`
+    - `result=trigger_stop_schema_terminal_missing_fields` 或 `result=trigger_stop_schema_missing`
+    - 且都还是 `used=0 left=3 active=true`
+- 直接结论：
+  1. 当前不是“没拦截到 finish_reason=stop”；response-side summary gate 已经命中。
+  2. 当前一类失败是 schema gate 认定终态 schema 缺字段/不合格。
+  3. 另一类失败是 stopless budget 没推进；如果同一闭环 continuation 正常保存恢复，不应连续多轮都停在 `used=0`.
+- 字段级证据：
+  - `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`
+    - `stop_schema_terminal_requires_evidence_and_diagnostics`
+    - 终态 `stopreason=0` / `1` 要求至少：
+      - `has_evidence=1`
+      - `evidence` 非空
+      - `issue_cause` 非空
+      - `excluded_factors` 非空
+      - `diagnostic_order` 非空
+      - `done_steps` 非空
+    - 任一缺失都会判成 `stop_schema_terminal_missing_fields`
+  - 因此，live 样本里如果模型给了 `<rcc_stop_schema>` 但仍是 `has_evidence=0` 或任一上述字段为空，当前 gate 按契约就会继续触发 stopless CLI，而不是放行 stop。
+- 下一步 owner：
+  1. 继续对白盒追 `used=0` 为何未推进，重点看 response chat-process save -> continuation restore；
+  2. 对 provider/client 双端黑盒补一条 terminal schema missing-fields case，锁住具体缺哪些字段时客户端应收到的 CLI 反馈。
+
+- live 日志结论：
+  - `TypeError: args.writeProviderSnapshot is not a function` 不是上游 503 根因；
+  - 真主故障仍是 provider `503`，这条 TypeError 只是在 `provider_send` failure path 上导致 non-blocking snapshot 写盘失败。
+- 真缺口：
+  - `src/server/runtime/http-server/request-executor.ts`
+  - 调 `processProviderSendFailure(...)` 时漏传 `writeProviderSnapshot`
+  - 而 `request-executor-provider-send-failure.ts` 内部会无条件调用该函数并自行 catch 为 non-blocking log
+- 修复：
+  - `request-executor.ts` 给 send-failure 调用面补回 `writeProviderSnapshot`
+- 锁测：
+  - `tests/server/runtime/http-server/request-executor.no-response-regression.spec.ts`
+  - 新增 case：`passes writeProviderSnapshot into provider send failure handling`
+  - 直接断言调用边传给 `processProviderSendFailure` 的参数里存在 `writeProviderSnapshot: Function`
+- 验证：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/server/runtime/http-server/request-executor.no-response-regression.spec.ts`
+  - 结果：3/3 PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/server/runtime/http-server/executor/request-executor-provider-send-failure.abort.spec.ts`
+  - 结果：5/5 PASS
+
 # 2026-06-24 5555 session history audit
+
+# 2026-06-24 stopless continuation focused verification after relay-normalization fix
+
+- 本轮新增直接证据：
+  - provider-facing 黑盒：
+    - `node scripts/tests/stopless-contract-blackbox.mjs`
+    - 结果：PASS
+    - 输出：`{"ok":true,"cases":["no_schema","invalid_schema","next_step"]}`
+    - 说明：
+      - Round 1 provider request 已带 stop schema contract（`<rcc_stop_schema>` / `stopreason values...` / `next_step`）
+      - Round 2 provider request 已恢复成 internal `reasoningStop` call/result pair
+      - normal tool surface 未因 `reasoningStop` 丢失
+  - request-side continuation restore focused white-box：
+    - `cargo test -p router-hotpath-napi capture_responses_context_restores_stopless_cli_pair_into_reasoning_stop_and_guidance --lib -- --nocapture`
+    - `cargo test -p router-hotpath-napi request_codec_restores_stopless_cli_result_as_reasoning_stop_pair_and_guidance --lib -- --nocapture`
+    - `cargo test -p router-hotpath-napi execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair_and_guidance --lib -- --nocapture`
+    - 结果：3/3 PASS
+    - 说明：
+      - relay continuation restore 后，当前轮 CLI result 已恢复为 model-visible `reasoningStop` pair + guidance
+      - provider-facing request 不再保留 raw `exec_command` 作为 model truth
+  - relay request-context normalization focused Jest：
+    - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts`
+    - 结果：9/9 PASS
+    - 关键锁点：
+      - relay fullInput stopless history 会被 normalize 成 provider-facing `reasoningStop` pair
+      - request bridge 不会在 TS bridge stage materialize stopless runtime control 到 instructions
+      - request payload metadata 不会被当成 stopless runtime control 真源
+  - continuation save/release focused Jest：
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts`
+    - 结果：3/3 PASS
+    - 关键锁点：
+      - canonical `response.id` continuation truth 保留
+      - stale router/provider request ids 被清掉
+      - 首轮 stopless tool history 在第二轮 save/release 后仍保留，不会只剩后轮
+  - client-facing stopless blackbox：
+    - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+    - 结果：10/10 PASS
+    - 关键锁点：
+      - terminal `reasoningStop` -> 正常 stop
+      - non-terminal / malformed `reasoningStop` -> client `exec_command`
+      - third consecutive `no_schema` 后不再继续投新的 `exec_command`
+      - raw internal `reasoningStop` 不泄漏给客户端
+
+- 本轮只读合同复核：
+  - `docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md`
+    - 已写死三轮合同：
+      - Round 1 request：注入 stop guidance + internal `reasoningStop`，保留 `exec_command`
+      - Round 1 response：拦截 `finish_reason=stop` / `tool_calls + reasoningStop`，normalize 后再 save continuation
+      - Round 2 request：先 restore continuation，再把 CLI result 还原成 `reasoningStop` pair + guidance
+      - Round 3 guard：`no_schema` 第 3 次停止 endless CLI rewrite
+  - `docs/architecture/wiki/responses-continuation-mainline-source.md`
+    - 已写死 continuation owner 顺序：
+      - request 侧：owner resolve -> canonical restore -> hook restore -> governed
+      - response 侧：response governed -> canonical save -> release
+    - 已明确：
+      - stopless 不拥有 continuation owner 判定权
+      - SSE 是 transport-only，不能承载 stopless/continuation 语义修复
+
+- 当前结论（基于本轮 focused 证据）：
+  - stopless 当前核心闭环已经被 focused 白盒 + provider/client 双端黑盒锁住：
+    - 第一轮请求 guidance/tool 注入
+    - 第一轮响应 stop/tool-call 拦截与 CLI projection
+    - continuation save after normalize
+    - 第二轮 restore before hook restore
+    - CLI result -> `reasoningStop` pair + guidance
+    - 第三轮 `no_schema` guard
+  - 当前未扩查 repo 其他无关 TS/compile 红点；本轮结论只覆盖 stopless continuation 这条主线。
 
 - Jason 要求：
   - 先提交当前已完成 slice；
@@ -164,6 +710,131 @@
   - `no_servertool_support` 误旁路已确认并修复。
   - live 还叠着第二个错误投影点；它发生在 provider 200 之后、client 响应之前，不是 SSE，也不是 upstream 真失败。
   - 下一步应继续追 `provider-response -> servertool runtime action -> client projection/error projection` 之间为何被投成 `status=286`。
+
+# 2026-06-24 5555 provider-200 reasoningStop 第二根因锁定
+
+- Jason 新要求：
+  - 空 `tool_result` 也必须和 `tool_call` 成对审；
+  - 只读复查，给结论和证据链，不要半截汇报。
+- 已锁定第二根因，不在 SSE，不在 upstream：
+  1. live 样本 `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782239686630_e9b808cf/provider-response.json`
+     - 明确 `status=200`
+     - `finish_reason=tool_calls`
+     - `tool_calls[0].function.name = reasoningStop`
+  2. 同 request 日志 `~/.rcc/logs/server-5555.log`（02:34:46 -> 02:35:01）
+     - 先命中 `XLC.key1.glm-5.2`
+     - 随后本地投影成 `failed: Upstream provider error (status=286)`
+     - 说明错误发生在 provider 200 之后、client 前
+  3. 主线调用边已对上：
+     - `sharedmodule/llmswitch-core/src/conversion/hub/process/response/provider-response.ts`
+       - `executeProviderResponseNativeServertoolEffects(...)`
+       - 明确调用 `runServertoolResponseStageOrchestrationShell(...)`
+     - `sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts`
+       - 顶层 import `../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js`
+  4. 运行时模块 import 直接可复现崩溃：
+     - `node -e "import('./sharedmodule/llmswitch-core/dist/servertool/response-stage-orchestration-shell.js')..."`
+     - `node -e "import('./sharedmodule/llmswitch-core/dist/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js')..."`
+     - 两者都报同一错误：
+       - `SyntaxError: ... native-router-hotpath-analysis.js does not provide an export named 'parseServertoolBackendExecutionPlanPayload'`
+  5. 缺 export 证据：
+     - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
+       - import 了
+         - `parseServertoolBackendExecutionPlanPayload`
+         - `parseServertoolHandlerContractPlanPayload`
+     - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts`
+       - 没有实现/导出这两个 parser
+     - dist 侧同样缺失：
+       - `native-router-hotpath-analysis.js` 当前只导出
+         - `parseServertoolAutoHookQueuesPayload`
+         - `parseServertoolDispatchPlanPayload`
+         - `parseServertoolFollowupRuntimePlanPayload`
+         - `parseServertoolGenericFollowupPayload`
+         - `parseServertoolOutcomePlanPayload`
+         - `parseServertoolResponseStagePayload`
+- 结论：
+  - 第二根因是 `native-chat-process-servertool-orchestration-semantics` 对 `native-router-hotpath-analysis` 的 import contract 已失配，导致 response-stage servertool 语义模块在装载期就 SyntaxError。
+  - 因为 provider 200 + `reasoningStop` 会进入 `runServertoolResponseStageOrchestrationShell(...)` 主线，所以 live 请求到这里直接炸，再被外层统一包装成 `HTTP_HANDLER_ERROR` / `status=286` 文本。
+  - 这解释了“历史在长、空 result 要成对、但看起来像死循环/收不住”的当前 live 异常面：stopless 主线没有真正执行到应用层收口，而是在 response-stage runtime 模块装载时失败。
+
+# 2026-06-24 5555 reasoningStop/result 配对缺口复查
+
+- Jason 新要求：
+  - 空 result 也要和 tool call 配对审；
+  - 但当前这类 result 按契约本不该缺失，要找出真原因。
+- 新结论：
+  - 当前 5555 live 异常不是 SSE、不是历史没写、也不是“空 result 被丢”。
+  - 真根因是 stopless 的 `reasoningStop` 在 response dispatch owner 没有被注册为 client-visible CLI projection，也没有被 skeleton 识别为可执行 tool-call handler。
+  - 结果：provider 返回 `finish_reason=tool_calls + reasoningStop` 后，RouteCodex 没把它投成 `exec_command(routecodex hook run reasoningStop ...)`，因此客户端根本不会执行 CLI，也就不会产生后续应配对的 tool result。
+- 证据链：
+  1. live 样本 `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782242966816_8bcac1b1/provider-response.json`
+     - provider `status=200`
+     - `choices[0].finish_reason = "tool_calls"`
+     - `tool_calls[0].function.name = "reasoningStop"`
+  2. 当前 dist 直接复查 skeleton：
+     - `getServertoolToolSpec('reasoningStop') === null`
+     - `getServertoolToolSpec('stop_message_auto')` 正常存在
+  3. Rust skeleton config 真源：
+     - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`
+     - 默认 `internalTools` 里只有 `stop_message_auto` auto hook，没有 `reasoningStop` tool-call spec
+     - 现有测试还显式锁了 `resolve_servertool_tool_spec_json({name:'reasoningStop'}) -> null`
+  4. Rust dispatch 真源：
+     - `chat_servertool_orchestration.rs`
+     - `CLIENT_EXEC_CLI_PROJECTION_TOOL_NAMES` 现在只有 `servertool_fixture`
+     - `reasoningStop` 不在这个 projection 白名单里
+     - 且当未命中 registered handler 时会明确落 `reason = "no_registered_tool_call_handler"`
+  5. 直接用 live 样本做本地 native 重放：
+     - `planServertoolToolCallDispatchWithNative(...)` 对 `reasoningStop` 返回：
+       - `executableToolCalls = []`
+       - `skippedToolCalls[0].reason = "no_registered_tool_call_handler"`
+     - `runServertoolResponseStageOrchestrationShell(...)` 返回：
+       - `executed = false`
+       - payload 保持原始 `reasoningStop` tool_call，不会变成 `exec_command`
+- 口径：
+  - “空 result 要配对审”这条规则本身没错。
+  - 但当前这批 5555 样本里更早的断点是：response-side 根本没投出 client exec，所以缺的不是“被写成空串的 result”，而是“本该产生的 result 整轮都没产生”。
+
+# 2026-06-24 stopless 首轮 guidance 丢失新证据
+
+- 新证据链：
+  - `req_process_stage1_tool_governance` 里 `processedRequest.instructions` 已经有完整 stopless guidance，且包含 `<rcc_stop_schema>` / `stopreason 取值：0=finished，1=blocked，2=continue_needed`。
+  - `runHubPipelineLibWithNative(...)` 最终 provider payload 里只剩 `input/model/stream/tool_choice/tools`，`instructions` 没了。
+  - 这说明不是 SSE，也不是 `reasoningStop` 工具本身，而是 request outbound 兼容/格式化阶段把 stopless guidance 从 provider body 丢了。
+- 当前修复方向：
+  - 把 `responses` 的 `instructions -> input[0].system message` 规范化接回 openai-responses outbound build。
+  - 黑盒 gate 要锁 provider body 里必须能看到 stopless guidance，而不是只看到 `reasoningStop` tool。
+
+# 2026-06-24 5555 live 进一步收口
+
+- 已完成的真修：
+  1. `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts`
+     - 补齐缺失 parser export：
+       - `parseServertoolDispatchPlanInputPayload`
+       - `parseServertoolOutcomePlanInputPayload`
+       - `parseServertoolResponseStageGatePayload`
+       - `parseServertoolHandlerContractPlanPayload`
+       - `parseServertoolBackendExecutionPlanPayload`
+     - 同步到 dist/global install。
+  2. `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
+     - `hasServertoolSupport` 只在显式传入时才下发，不再把缺省值硬编码成 `false`。
+  3. `sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts`
+     - 补 `readRequestTruthSessionIdFromBoundMetadataCenter(...)`。
+  4. `sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts`
+     - 关闭 `servertoolResponseOrchestration` 对 MetadataCenter 的强制写入，避免无绑定 adapterContext 直接抛错。
+- 已验证：
+  - 本地/绝对路径 import：
+    - `dist/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js` 成功 import
+    - `dist/servertool/response-stage-orchestration-shell.js` 成功 import
+  - focused jest：
+    - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+    - `tests/servertool/server-side-tools.failfast.spec.ts`
+    - 都通过
+  - local replay：
+    - 直接调用 `runServertoolResponseStageOrchestrationShell(...)` 不再抛 MetadataCenter 错误
+- 当前 live 结果：
+  - `286` 已经消失，不再是当前主错误。
+  - 5555 第一轮现返回 `status=requires_action`，说明 response-stage 已经穿过之前的装载崩溃层。
+  - 但第一轮仍未拿到 `exec_command`，且最新请求在日志里出现 provider switch / reroute 到 `orangeai.key1.glm-5.2` 后的 upstream error。
+  - 这表示剩余问题已转移到 provider 路由/切换层，不再是这次的 response-stage import / MetadataCenter 根因。
 
 # 2026-06-24 5555 live snapshot bucket split root cause
 
@@ -14050,3 +14721,64 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
   - `tests/sharedmodule/snapshot-hooks-entry-endpoint.spec.ts` PASS
   - `npm run verify:architecture-snapshot-stage-contract` PASS
   - Rust focused test 暂被仓库内已有无关编译错误阻塞，需单独处理/绕过后再做 native live 验证
+
+# 2026-06-24 SSE stream closeout uncaught + write-after-end root cause
+
+- 线上直接证据（Jason 提供）：
+  - `16:58:25`：
+    - `uncaught_exception @ node:internal/streams/writable:489:11`
+    - `ERR_STREAM_WRITE_AFTER_END`
+    - 栈顶：`Writable.write -> PassThrough.ondata`
+  - 同请求随后记录：
+    - `[handler-response] response.sse.client_close request=openai-responses-orangeai.key1-glm-5.2-... {"streamEnded":false,"closeBeforeStreamEnd":true}`
+  - `16:58:56`：
+    - `uncaught_exception @ .../handler-response-sse.js:875:44`
+    - `Error: SSE timeout after 300000ms`
+- 已确认两个独立 closeout 缺口：
+  1. `src/modules/llmswitch/bridge/responses-stream-semantics.ts`
+     - 在 `assistant response.output_item.done` 触发 auto-close repair 时，transform 内直接 `this.end()`，但上游 `PassThrough` 仍可能继续 pipe。
+     - 这与线上栈 `PassThrough.ondata -> write after end` 一致。
+     - 修复：先 `args.stream.unpipe(transform)`，再 `destroy` source，最后 microtask 再 `this.end()`。
+  2. `src/server/handlers/handler-response-sse.ts`
+     - `endWithSseError(...)` 里对 source `destroy(error)` 时，没有把“预期 destroy error”消费掉。
+     - timeout closeout 会把内部 `HTTP_SSE_TIMEOUT` 重新冒泡成 `uncaughtException`。
+     - 修复：统一走 `destroySourceStream(error)`，并在 destroy 前挂一次性 `error` listener，吞掉同 code / 同 message / client_disconnect 的预期错误。
+- 新锁测：
+  - `tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts`
+    - `does not emit write-after-end when upstream writes after assistant auto-close`
+  - `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts`
+    - `does not raise uncaughtException when SSE timeout closes upstream with an error`
+- 验证：
+  - 上述两个 focused Jest 均 PASS
+  - 5555 已做 scoped restart：
+    - `routecodex restart --port 5555`
+    - `curl http://127.0.0.1:5555/health -> {"status":"ok","ready":true,"pipelineReady":true,"server":"routecodex","version":"0.90.3201"}`
+
+# 2026-06-24 stopless req_outbound instructions materialize
+
+- 已在 `hub_req_outbound_format_build.rs` 补 focused test：`test_build_openai_responses_request_lifts_instructions_into_system_input`。
+- 锁定 contract：openai-responses provider outbound 不得丢 `instructions`；必须把 stopless guidance materialize 为 `input[0]=system message`，并移除顶层 `instructions`。
+
+# 2026-06-24 stopless reenter line removal
+
+- Jason 新要求：stopless 不再保留任何 reenter 整条线残支；continuation owner 另行修。
+- 已改：`servertool-core/engine_runtime_action_contract.rs` 删除 `ContinueFollowupMainline`，残余路径改为 fail-fast；`engine-postflight-shell.ts` 删除 retired reenter mainline 文案；`responses-handler.servertool-cli-projection.blackbox.spec.ts` 改为 terminal reasoningStop 放行、non-terminal 才投 CLI。
+
+# 2026-06-24 stopless function-map compile gate 收口（已验证）
+
+- 本轮没有改 stopless 运行逻辑，只修 `function-map` / owner / canonical builder 绑定，使 gate 能反映真实 owner，而不是卡在假阻塞。
+- 已证实的 gate 真因：
+  1. `hub.req_chatprocess_governance` 真实 canonical builder `apply_req_process_tool_governance_json` 定义在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`，旧 `allowed_paths` 没覆盖到该文件。
+  2. `hub.req_chatprocess_governance` 的 `owner_module` 若写父目录，会被 `verify:function-map-canonical-builder-definitions` 视为“owner 外重定义”；真源必须收敛到唯一文件 `.../orchestrator.rs`。
+  3. `hub.chat_process_responses_continuation` 不能把 `prepareResponsesRequestBodyForHttp` / `buildResponsesConversationPortScopeForHttp` 这种当前仍属于 request bridge surface 的 TS builder 也声明为 canonical builder，否则会和 `server.responses_request_handler_bridge_surface` 重复 owner。
+  4. `resolveResponsesRequestContextForHttp` 不能作为 continuation feature 的 canonical builder，因为 `responses-sse-bridge.ts` 有 `export const` re-export，`verify:function-map-canonical-builder-definitions` 会判成多重定义，且该文件本身还在 continuation 的 forbidden path。
+- 最终收口：
+  - `hub.req_chatprocess_governance.owner_module` 钉死到 `req_process_stage1_tool_governance_blocks/orchestrator.rs`
+  - `hub.req_chatprocess_governance.allowed_paths` 保留 wrapper/entry/boundary 文件，但移除会重复扫到 owner 定义的父目录
+  - `hub.chat_process_responses_continuation` 只保留不与 bridge surface 重复、且真定义落在 `responses-response-bridge.ts` 的 canonical builders：`buildPersistResponsesRequestContextForHttp` / `recordResponsesResponseForHttpProjection`
+  - `server.responses_response_handler_bridge_surface` 移除重复 builder `recordResponsesResponseForHttpProjection`
+- 线下验证：
+  - `npm run verify:architecture-feature-anchor-coverage` PASS
+  - `npm run verify:function-map-owner-uniqueness` PASS
+  - `npm run verify:function-map-canonical-builder-definitions` PASS
+  - `npm run verify:function-map-compile-gate` PASS

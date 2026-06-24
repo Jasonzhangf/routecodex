@@ -74,4 +74,122 @@ describe('responses stream semantics wrapper', () => {
     expect(output).toContain('"id":"resp_terminal_only_message"');
     expect(output).not.toContain('upstream_stream_incomplete');
   });
+
+  it('does not emit write-after-end when upstream writes after assistant auto-close', async () => {
+    const upstream = new PassThrough();
+    const wrapped = attachResponsesStreamSemanticsForHttp({
+      stream: upstream,
+      entryEndpoint: '/v1/responses',
+      requestLabel: 'req_stream_semantics_late_write',
+    });
+    let output = '';
+    let uncaught: Error | undefined;
+    const onUncaught = (error: Error) => {
+      uncaught = error;
+    };
+    process.prependOnceListener('uncaughtException', onUncaught);
+    try {
+      const ended = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('wrapped stream did not end after assistant auto-close')), 1000);
+        wrapped.on('data', (chunk) => {
+          output += String(chunk);
+        });
+        wrapped.on('end', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        wrapped.on('error', (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+      });
+      upstream.write(
+        'event: response.created\n'
+        + 'data: {"type":"response.created","response":{"id":"resp_terminal_late_write","object":"response","status":"in_progress","output":[{"id":"msg_terminal_late_write","type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"partial"}]}]}}\n\n'
+      );
+      upstream.write(
+        'event: response.output_item.done\n'
+        + 'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_terminal_late_write","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n'
+      );
+      await ended;
+      upstream.write(
+        'event: response.output_text.delta\n'
+        + 'data: {"type":"response.output_text.delta","delta":"late"}\n\n'
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(output).toContain('event: response.completed');
+      expect(output).toContain('event: response.done');
+      expect(uncaught?.message ?? '').not.toContain('write after end');
+    } finally {
+      process.removeListener('uncaughtException', onUncaught);
+      upstream.destroy();
+    }
+  });
+
+  it('does not auto-close assistant message when later tool-call frames still arrive', async () => {
+    const upstream = new PassThrough();
+    const wrapped = attachResponsesStreamSemanticsForHttp({
+      stream: upstream,
+      entryEndpoint: '/v1/responses',
+      requestLabel: 'req_stream_semantics_late_tool_call',
+    });
+    let output = '';
+    const ended = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('wrapped stream did not end for late tool-call followup')), 1000);
+      wrapped.on('data', (chunk) => {
+        output += String(chunk);
+      });
+      wrapped.on('end', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      wrapped.on('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+
+    upstream.write(
+      'event: response.created\n'
+      + 'data: {"type":"response.created","response":{"id":"resp_late_tool_call","object":"response","status":"in_progress","output":[{"id":"msg_late_tool_call","type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"partial"}]}]}}\n\n'
+    );
+    upstream.write(
+      'event: response.output_item.done\n'
+      + 'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_late_tool_call","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n'
+    );
+    upstream.write(
+      'event: response.output_item.added\n'
+      + 'data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_late_tool_call","type":"function_call","call_id":"call_late_tool_call","name":"exec_command","arguments":""}}\n\n'
+    );
+    upstream.write(
+      'event: response.function_call_arguments.done\n'
+      + 'data: {"type":"response.function_call_arguments.done","output_index":1,"item_id":"fc_late_tool_call","arguments":"{\\"cmd\\":\\"echo hi\\"}"}\n\n'
+    );
+    upstream.write(
+      'event: response.output_item.done\n'
+      + 'data: {"type":"response.output_item.done","output_index":1,"item":{"id":"fc_late_tool_call","type":"function_call","call_id":"call_late_tool_call","name":"exec_command","arguments":"{\\"cmd\\":\\"echo hi\\"}","status":"completed"}}\n\n'
+    );
+    upstream.write(
+      'event: response.completed\n'
+      + 'data: {"type":"response.completed","response":{"id":"resp_late_tool_call","object":"response","status":"completed","output":[{"id":"msg_late_tool_call","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]},{"id":"fc_late_tool_call","type":"function_call","call_id":"call_late_tool_call","name":"exec_command","arguments":"{\\"cmd\\":\\"echo hi\\"}","status":"completed"}]}}\n\n'
+    );
+    upstream.write(
+      'event: response.done\n'
+      + 'data: {"type":"response.done","response":{"id":"resp_late_tool_call","object":"response","status":"completed","output":[{"id":"msg_late_tool_call","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]},{"id":"fc_late_tool_call","type":"function_call","call_id":"call_late_tool_call","name":"exec_command","arguments":"{\\"cmd\\":\\"echo hi\\"}","status":"completed"}]}}\n\n'
+    );
+    upstream.end();
+
+    await ended;
+
+    expect(output).toContain('event: response.function_call_arguments.done');
+    expect(output).toContain('"call_id":"call_late_tool_call"');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('event: response.done');
+    expect(output.indexOf('event: response.function_call_arguments.done')).toBeGreaterThan(
+      output.indexOf('event: response.output_item.done')
+    );
+    expect(output.indexOf('event: response.completed')).toBeGreaterThan(
+      output.indexOf('event: response.function_call_arguments.done')
+    );
+  });
 });
