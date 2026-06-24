@@ -206,6 +206,102 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[response][req-stream-finish] completed t+0ms'));
   });
 
+  it('derives usage finish_reason from responses SSE terminal frames instead of logging unknown', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
+        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
+        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+        if (text.includes('"type":"response.output_item.done"')) {
+          next.id = 'resp_usage_finish_reason';
+          next.status = 'completed';
+          next.output = [{
+            id: 'msg_usage_finish_reason',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: 'done' }]
+          }];
+        }
+        return next;
+      },
+      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
+        if (!probe || typeof probe !== 'object') return [];
+        const response = {
+          id: probe.id ?? 'resp_usage_finish_reason',
+          object: 'response',
+          status: probe.status ?? 'completed',
+          ...(probe.output ? { output: probe.output } : {})
+        };
+        return [
+          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
+          'data: [DONE]\n\n'
+        ];
+      },
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const stream = Readable.from([
+      'event: response.output_item.done\n',
+      'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n',
+      'event: response.completed\n',
+      'data: {"type":"response.completed","response":{"id":"resp_usage_finish_reason","object":"response","status":"completed"}}\n\n',
+      'event: response.done\n',
+      'data: {"type":"response.done","response":{"id":"resp_usage_finish_reason","object":"response","status":"completed"}}\n\n',
+      'data: [DONE]\n\n'
+    ]);
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        sseStream: stream,
+        usageLogInfo: {
+          requestStartedAtMs: Date.now(),
+          routeName: 'router-direct:coding/-',
+          model: 'gpt-5.4',
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 2,
+            total_tokens: 12,
+            cache_read_input_tokens: 0,
+          }
+        }
+      } as any,
+      'req-stream-usage-finish-reason',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    await finished;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('req-stream-usage-finish-reason'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=\x1b[97mstop\x1b[0m'));
+    expect(logOutput).not.toContain('req-stream-usage-finish-reason completed');
+    expect(logOutput).not.toContain('finish_reason=\u001b[97munknown\u001b[0m');
+  });
+
   it('does not log successful request completion before incomplete stream is classified', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
@@ -732,6 +828,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       }
     }
   });
+
 
   it('does not enforce stopless contract inside raw SSE handler path', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({

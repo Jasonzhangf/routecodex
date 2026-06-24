@@ -165,4 +165,44 @@ describe('provider snapshot writer local mirror', () => {
     expect(raw).not.toContain('sessionDir');
     expect(raw).not.toContain('"snapshot"');
   });
+
+  it('accepts explicit entryPort for provider-error snapshots even when metadata omits port fields', async () => {
+    const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
+    const requestId = 'req_provider_snapshot_explicit_entry_port';
+    const providerKey = 'glm-router.key1';
+
+    allowSnapshotLocalDiskWrite(requestId);
+
+    await writeProviderSnapshot({
+      phase: 'provider-error',
+      requestId,
+      clientRequestId: requestId,
+      entryEndpoint: '/v1/responses',
+      providerKey,
+      entryPort: 5555,
+      metadata: {
+        routeName: 'default'
+      },
+      data: { status: 503, code: 'HTTP_503' }
+    });
+    await __flushProviderSnapshotQueueForTests();
+
+    const filePath = path.join(
+      tempDir,
+      'openai-responses',
+      'ports',
+      '5555',
+      providerKey,
+      requestId,
+      'provider-error.json'
+    );
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(raw) as { meta?: Record<string, unknown> };
+
+    expect(parsed.meta?.entryPort).toBe(5555);
+    expect(parsed.meta?.matchedPort).toBe(5555);
+    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
+      entryPort: 5555
+    }));
+  });
 });

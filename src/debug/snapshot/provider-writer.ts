@@ -69,6 +69,7 @@ export type ProviderSnapshotWriteOptions = {
   clientRequestId?: string;
   providerKey?: string;
   providerId?: string;
+  entryPort?: number;
   metadata?: Record<string, unknown>;
   forceLocalDiskWriteWhenDisabled?: boolean;
 };
@@ -89,7 +90,13 @@ function isErrorPhase(phase: string): boolean {
   return String(phase || '').trim().toLowerCase().includes('error');
 }
 
-function resolveProviderSnapshotEntryPort(metadata?: Record<string, unknown>): number | undefined {
+function resolveProviderSnapshotEntryPort(
+  entryPort?: number,
+  metadata?: Record<string, unknown>
+): number | undefined {
+  if (typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0) {
+    return Math.floor(entryPort);
+  }
   if (!metadata || typeof metadata !== 'object') {
     return undefined;
   }
@@ -119,7 +126,7 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
   const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
-  const entryPort = resolveProviderSnapshotEntryPort(options.metadata);
+  const entryPort = resolveProviderSnapshotEntryPort(options.entryPort, options.metadata);
   const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
     stage,
     data: options.data,
@@ -205,7 +212,7 @@ export async function writeProviderSnapshot(options: ProviderSnapshotWriteOption
       entryEndpoint: options.entryEndpoint,
       requestId: options.requestId,
       clientRequestId: options.clientRequestId,
-      entryPort: resolveProviderSnapshotEntryPort(options.metadata)
+      entryPort: resolveProviderSnapshotEntryPort(options.entryPort, options.metadata)
     };
     await purge429ProviderSnapshotArtifacts(purgeInput);
     schedule429ProviderSnapshotPurge(purgeInput);
@@ -274,7 +281,7 @@ export async function writeClientSnapshot(options: {
       options.metadata && typeof options.metadata === 'object'
         ? options.metadata
         : undefined;
-    const entryPort = resolveProviderSnapshotEntryPort(metadataSnapshot);
+    const entryPort = resolveProviderSnapshotEntryPort(undefined, metadataSnapshot);
     const snapshotPayload =
       typeof options.rawBodyText === 'string'
         ? options.rawBodyText

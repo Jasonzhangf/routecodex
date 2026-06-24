@@ -20,6 +20,29 @@ type DebugFallback = {
   requestId?: string;
 };
 
+function readSnapshotEntryPort(source?: UnknownObject): number | undefined {
+  const metadata = source ? extractProviderRuntimeMetadata(source) : undefined;
+  const record = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : undefined;
+  const portContext =
+    record?.portContext && typeof record.portContext === 'object' && !Array.isArray(record.portContext)
+      ? record.portContext as Record<string, unknown>
+      : undefined;
+  for (const value of [
+    record?.entryPort,
+    record?.matchedPort,
+    record?.routecodexLocalPort,
+    record?.localPort,
+    portContext?.matchedPort,
+    portContext?.localPort
+  ]) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
+}
+
 export function shouldCaptureVisionDebug(
   source?: UnknownObject,
   fallback?: DebugFallback
@@ -159,7 +182,8 @@ export async function captureVisionDebugPayloadSnapshot(
       phase: stage,
       requestId: debug.requestId,
       data: buildVisionSnapshotPayload(payload),
-      entryEndpoint
+      entryEndpoint,
+      entryPort: readSnapshotEntryPort(payload)
     });
   } catch {
     // snapshot is best-effort only

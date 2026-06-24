@@ -20,6 +20,30 @@ import type { PreparedHttpRequest } from '../http-request-executor.js';
 import type { UnknownObject } from '../../../../types/common-types.js';
 import type { HttpClient } from '../../utils/http-client.js';
 
+function readSnapshotEntryPort(metadata?: Record<string, unknown>): number | undefined {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+  const portContext =
+    metadata.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext)
+      ? metadata.portContext as Record<string, unknown>
+      : undefined;
+  for (const value of [
+    metadata.entryPort,
+    metadata.matchedPort,
+    metadata.routecodexLocalPort,
+    metadata.localPort,
+    portContext?.matchedPort,
+    portContext?.localPort
+  ]) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
+}
+
 type OAuthAuthExtended = OAuthAuth & { rawType?: string; oauthProviderId?: string; tokenFile?: string };
 
 export interface OAuthRecoveryContext {
@@ -101,6 +125,7 @@ export class OAuthRecoveryHandler {
           headers: finalRetryHeaders,
           url: requestInfo.targetUrl,
           entryEndpoint: requestInfo.entryEndpoint,
+          entryPort: readSnapshotEntryPort(context.metadata),
           clientRequestId: requestInfo.clientRequestId,
           providerKey: context.providerKey,
           providerId: context.providerId
@@ -121,6 +146,7 @@ export class OAuthRecoveryHandler {
         headers: finalRetryHeaders,
         url: requestInfo.targetUrl,
         entryEndpoint: requestInfo.entryEndpoint,
+        entryPort: readSnapshotEntryPort(context.metadata),
         clientRequestId: requestInfo.clientRequestId,
         providerKey: context.providerKey,
         providerId: context.providerId,
@@ -142,6 +168,7 @@ export class OAuthRecoveryHandler {
           headers: finalRetryHeaders,
           url: requestInfo.targetUrl,
           entryEndpoint: requestInfo.entryEndpoint,
+          entryPort: readSnapshotEntryPort(context.metadata),
           clientRequestId: requestInfo.clientRequestId,
           providerKey: context.providerKey,
           providerId: context.providerId
@@ -295,6 +322,7 @@ export class OAuthRecoveryHandler {
         headers: finalRetryHeaders,
         url: requestInfo.targetUrl,
         entryEndpoint: requestInfo.entryEndpoint,
+        entryPort: readSnapshotEntryPort(context.metadata),
         clientRequestId: requestInfo.clientRequestId,
         providerKey: context.providerKey,
         providerId: context.providerId

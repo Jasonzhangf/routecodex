@@ -11,6 +11,7 @@ type StreamSnapshotOptions = {
   headers?: Record<string, unknown>;
   url?: string;
   entryEndpoint?: string;
+  entryPort?: number;
   clientRequestId?: string;
   providerKey?: string;
   providerId?: string;
@@ -101,6 +102,7 @@ export function attachProviderSseSnapshotStream(
       headers: options.headers,
       url: options.url,
       entryEndpoint: options.entryEndpoint,
+      entryPort: options.entryPort,
       clientRequestId: options.clientRequestId,
       providerKey: options.providerKey,
       providerId: options.providerId,

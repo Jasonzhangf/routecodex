@@ -1365,7 +1365,23 @@ export class HubRequestExecutor implements RequestExecutor {
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logNonBlockingError: logRequestExecutorNonBlockingError,
             queuePayloadContractErrorsample,
-            writeProviderSnapshot,
+            writeProviderSnapshot: async (snapshotArgs) => {
+              const entryPortForSnapshot =
+                readEntryPort(mergedMetadata)
+                ?? readEntryPort(metadataForAttempt)
+                ?? readEntryPort(metadataRecord);
+              await writeProviderSnapshot({
+                ...snapshotArgs,
+                entryPort: entryPortForSnapshot,
+                metadata: {
+                  ...(mergedMetadata ?? {}),
+                  ...(snapshotArgs.metadata ?? {}),
+                  ...(typeof entryPortForSnapshot === 'number'
+                    ? { entryPort: entryPortForSnapshot, matchedPort: entryPortForSnapshot }
+                    : {})
+                }
+              });
+            },
             clearProviderTransportBackoff: () => {
               clearProviderTransportBackoff(providerTransportBackoffKey);
               clearRecoverableErrorBackoffForProvider({ providerKey: target.providerKey, runtimeKey });
@@ -1456,6 +1472,7 @@ export class HubRequestExecutor implements RequestExecutor {
             writeProviderSnapshot: async (snapshotArgs) => {
               await writeProviderSnapshot({
                 ...snapshotArgs,
+                entryPort: entryPortForSnapshot,
                 metadata: {
                   ...(metadataForAttempt ?? {}),
                   ...(snapshotArgs.metadata ?? {}),

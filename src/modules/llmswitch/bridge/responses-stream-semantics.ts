@@ -4,6 +4,7 @@ import {
   updateResponsesContractProbeFromSseChunkNative,
 } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
+import { resolveResponsesTerminalProbeFinishReasonForHttp } from './responses-response-bridge.js';
 
 const ASSISTANT_DONE_REPAIR_GRACE_MS = 75;
 
@@ -40,6 +41,34 @@ function assertResponsesTerminalEventForHttp(
   throw new Error(`[responses-stream] invalid pending terminal event from native layer: ${value}`);
 }
 
+function maybeResolveAssistantCompletedStopForHttp(args: {
+  derived?: string;
+  parsedType?: string;
+  parsedResponse?: Record<string, unknown>;
+  sawAssistantMessageDoneTerminal: boolean;
+}): string | undefined {
+  if (typeof args.derived === 'string' && args.derived.trim()) {
+    return args.derived.trim();
+  }
+  if (
+    args.parsedType !== 'response.completed'
+    && args.parsedType !== 'response.done'
+  ) {
+    return undefined;
+  }
+  if (!args.sawAssistantMessageDoneTerminal) {
+    return undefined;
+  }
+  const responseStatus =
+    typeof args.parsedResponse?.status === 'string'
+      ? args.parsedResponse.status.trim().toLowerCase()
+      : '';
+  if (responseStatus === 'completed') {
+    return 'stop';
+  }
+  return undefined;
+}
+
 export function updateResponsesContractProbeFromSseChunkForHttp(
   chunk: unknown,
   probe?: Record<string, unknown>
@@ -49,6 +78,7 @@ export function updateResponsesContractProbeFromSseChunkForHttp(
 
 export function inspectResponsesTerminalStateFromSseChunkForHttp(input: {
   chunk: unknown;
+  probe?: Record<string, unknown>;
   finishReason?: string;
   seenTerminalEvent?: boolean;
   sawTerminalChunk?: boolean;
@@ -59,6 +89,7 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(input: {
   terminalSource?: string;
   pendingTerminalEvent?: 'response.completed' | 'response.done' | 'response.error' | 'response.cancelled' | 'response.failed';
 }): {
+  probe: Record<string, unknown> | undefined;
   finishReason: string | undefined;
   seenTerminalEvent: boolean;
   sawTerminalChunk: boolean;
@@ -70,6 +101,7 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(input: {
   pendingTerminalEvent: 'response.completed' | 'response.done' | 'response.error' | 'response.cancelled' | 'response.failed' | undefined;
 } {
   const result = {
+    probe: input.probe,
     finishReason: input.finishReason,
     seenTerminalEvent: input.seenTerminalEvent === true,
     sawTerminalChunk: input.sawTerminalChunk === true,
@@ -94,6 +126,7 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(input: {
   if (!text) {
     return result;
   }
+  result.probe = updateResponsesContractProbeFromSseChunkForHttp(text, result.probe);
   if (text.includes('data: [DONE]') && !result.requiresResponsesTerminalEvent) {
     result.seenTerminalEvent = true;
     result.sawTerminalChunk = true;
@@ -132,6 +165,10 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(input: {
         parsed.item && typeof parsed.item === 'object' && !Array.isArray(parsed.item)
           ? (parsed.item as Record<string, unknown>)
           : undefined;
+      const parsedResponse =
+        parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
+          ? (parsed.response as Record<string, unknown>)
+          : undefined;
       if (
         parsedType === 'response.completed'
         || parsedType === 'response.done'
@@ -141,7 +178,22 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(input: {
       ) {
         result.pendingTerminalEvent = parsedType as typeof result.pendingTerminalEvent;
       }
-      const derived = deriveFinishReason(parsed);
+      const derived = maybeResolveAssistantCompletedStopForHttp({
+        derived:
+          deriveFinishReason(parsed)
+          ?? (parsedResponse
+            ? resolveResponsesTerminalProbeFinishReasonForHttp({
+              finishReason: result.finishReason,
+              probe: parsedResponse,
+            })
+            : undefined),
+        parsedType,
+        parsedResponse,
+        sawAssistantMessageDoneTerminal: result.sawAssistantMessageDoneTerminal,
+      }) ?? resolveResponsesTerminalProbeFinishReasonForHttp({
+        finishReason: result.finishReason,
+        probe: result.probe,
+      });
       if (!derived) {
         const itemType = typeof parsedItem?.type === 'string' ? parsedItem.type.trim() : '';
         const itemRole = typeof parsedItem?.role === 'string' ? parsedItem.role.trim() : '';
@@ -231,7 +283,29 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(input: {
     if (dataText && dataText !== '[DONE]') {
       try {
         const parsed = JSON.parse(dataText) as Record<string, unknown>;
-        derived = deriveFinishReason(parsed) ?? derived;
+        const parsedResponse =
+          parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
+            ? (parsed.response as Record<string, unknown>)
+            : undefined;
+        derived =
+          maybeResolveAssistantCompletedStopForHttp({
+            derived:
+              deriveFinishReason(parsed)
+              ?? (parsedResponse
+                ? resolveResponsesTerminalProbeFinishReasonForHttp({
+                  finishReason: derived,
+                  probe: parsedResponse,
+                })
+                : undefined),
+            parsedType: typeof parsed.type === 'string' ? parsed.type.trim() : '',
+            parsedResponse,
+            sawAssistantMessageDoneTerminal: result.sawAssistantMessageDoneTerminal,
+          })
+          ?? resolveResponsesTerminalProbeFinishReasonForHttp({
+            finishReason: derived,
+            probe: result.probe,
+          })
+          ?? derived;
       } catch {
         // Ignore parse failure; terminal event itself is enough.
       }
@@ -319,6 +393,7 @@ export function attachResponsesStreamSemanticsForHttp(args: {
   let transformRef: Transform | undefined;
   let assistantDoneRepairTimer: NodeJS.Timeout | undefined;
   let terminalState = {
+    probe: undefined as Record<string, unknown> | undefined,
     finishReason: undefined as string | undefined,
     seenTerminalEvent: false,
     sawTerminalChunk: false,
@@ -331,9 +406,9 @@ export function attachResponsesStreamSemanticsForHttp(args: {
   };
 
   const inspectFrame = (frame: string): void => {
-    probe = updateResponsesContractProbeFromSseChunkForHttp(frame, probe);
     terminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
       chunk: frame,
+      probe,
       finishReason: terminalState.finishReason,
       seenTerminalEvent: terminalState.seenTerminalEvent,
       sawTerminalChunk: terminalState.sawTerminalChunk,
@@ -344,6 +419,7 @@ export function attachResponsesStreamSemanticsForHttp(args: {
       terminalSource: terminalState.terminalSource,
       pendingTerminalEvent: terminalState.pendingTerminalEvent,
     });
+    probe = terminalState.probe;
   };
 
   const closeSourceStream = (): void => {

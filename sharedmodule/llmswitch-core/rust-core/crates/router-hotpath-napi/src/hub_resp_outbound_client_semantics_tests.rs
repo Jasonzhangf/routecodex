@@ -1084,8 +1084,8 @@ fn project_responses_client_payload_for_client_keeps_completed_when_tool_output_
 }
 
 #[test]
-fn project_responses_client_payload_for_client_strips_replay_unsafe_reasoning_content_and_status_fields()
-{
+fn project_responses_client_payload_for_client_strips_replay_unsafe_reasoning_content_and_status_fields(
+) {
     let payload = json!({
         "type": "response.completed",
         "response": {
@@ -1197,8 +1197,8 @@ fn project_responses_client_payload_for_client_mixed_message_and_function_calls_
 }
 
 #[test]
-fn project_responses_sse_frame_for_client_strips_replay_unsafe_fields_from_response_completed_frame()
-{
+fn project_responses_sse_frame_for_client_strips_replay_unsafe_fields_from_response_completed_frame(
+) {
     let frame = format!(
         "event: response.completed\ndata: {}\n\n",
         serde_json::to_string(&json!({
@@ -1360,7 +1360,8 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
 }
 
 #[test]
-fn project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_has_empty_arguments() {
+fn project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_has_empty_arguments(
+) {
     let patch =
         "*** Begin Patch\n*** Add File: tmp/apft/01-sse-empty-done.txt\n+hello from pending delta\n*** End Patch";
     let raw_args = serde_json::to_string(&json!({ "patch": patch })).unwrap();
@@ -1484,6 +1485,119 @@ fn project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_do
     assert!(frame.contains("event: response.output_item.done"));
     assert!(frame.contains("\"type\":\"custom_tool_call\""));
     assert!(frame.contains("tmp/apft/01-sse-missing-name.txt"));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_strips_stop_schema_from_reasoning_added_event() {
+    let projected = project_responses_sse_frame_for_client(
+        "event: response.output_item.added\ndata: {}\n\n",
+        Some("response.output_item.added"),
+        &json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {
+                "id": "reasoning_stop_schema_1",
+                "type": "reasoning",
+                "status": "in_progress",
+                "summary": [{
+                    "type": "summary_text",
+                    "text": "**Thinking** keep going\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
+                }]
+            }
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+
+    assert_eq!(projected["emit"], true);
+    let frame = projected["frame"].as_str().expect("frame");
+    assert!(frame.contains("event: response.output_item.added"));
+    assert!(frame.contains("**Thinking** keep going"));
+    assert!(!frame.contains("<rcc_stop_schema>"));
+    assert!(!frame.contains("\"status\":\"in_progress\""));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_replays_obfuscated_output_text_delta_from_done_text() {
+    let delta = project_responses_sse_frame_for_client(
+        "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"item_id\":\"msg_whitespace_1\",\"delta\":\"line\",\"obfuscation\":\"abc\"}\n\n",
+        Some("response.output_text.delta"),
+        &json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "content_index": 0,
+            "item_id": "msg_whitespace_1",
+            "delta": "line",
+            "obfuscation": "abc",
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+    assert_eq!(delta["emit"], false);
+
+    let done = project_responses_sse_frame_for_client(
+        "event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"output_index\":0,\"content_index\":0,\"item_id\":\"msg_whitespace_1\",\"text\":\"- line one\\n- line two\"}\n\n",
+        Some("response.output_text.done"),
+        &json!({
+            "type": "response.output_text.done",
+            "output_index": 0,
+            "content_index": 0,
+            "item_id": "msg_whitespace_1",
+            "text": "- line one\n- line two",
+        }),
+        &json!([]),
+        &json!({}),
+        &delta["state"],
+    );
+    assert_eq!(done["emit"], true);
+    let frame = done["frame"].as_str().expect("frame");
+    assert!(frame.contains("event: response.output_text.delta"));
+    assert!(frame.contains("\"delta\":\"- line one\\n- line two\""));
+    assert!(frame.contains("event: response.output_text.done"));
+    assert!(frame.contains("\"text\":\"- line one\\n- line two\""));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_replays_obfuscated_reasoning_summary_delta_from_done_text()
+{
+    let delta = project_responses_sse_frame_for_client(
+        "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"item_id\":\"rs_whitespace_1\",\"delta\":\"Drafting\",\"obfuscation\":\"abc\"}\n\n",
+        Some("response.reasoning_summary_text.delta"),
+        &json!({
+            "type": "response.reasoning_summary_text.delta",
+            "output_index": 0,
+            "summary_index": 0,
+            "item_id": "rs_whitespace_1",
+            "delta": "Drafting",
+            "obfuscation": "abc",
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+    assert_eq!(delta["emit"], false);
+
+    let done = project_responses_sse_frame_for_client(
+        "event: response.reasoning_summary_text.done\ndata: {\"type\":\"response.reasoning_summary_text.done\",\"output_index\":0,\"summary_index\":0,\"item_id\":\"rs_whitespace_1\",\"text\":\"**Thinking**\\n- first\\n- second\"}\n\n",
+        Some("response.reasoning_summary_text.done"),
+        &json!({
+            "type": "response.reasoning_summary_text.done",
+            "output_index": 0,
+            "summary_index": 0,
+            "item_id": "rs_whitespace_1",
+            "text": "**Thinking**\n- first\n- second",
+        }),
+        &json!([]),
+        &json!({}),
+        &delta["state"],
+    );
+    assert_eq!(done["emit"], true);
+    let frame = done["frame"].as_str().expect("frame");
+    assert!(frame.contains("event: response.reasoning_summary_text.delta"));
+    assert!(frame.contains("\"delta\":\"**Thinking**\\n- first\\n- second\""));
+    assert!(frame.contains("event: response.reasoning_summary_text.done"));
 }
 
 #[test]
@@ -2256,7 +2370,9 @@ fn build_responses_payload_from_chat_preserves_deepseek_reasoning_before_tool_ca
     assert!(output_items[0].get("content").is_none());
     assert_eq!(
         output_items[0]["summary"][0]["text"],
-        Value::String("**Thinking** Need original upstream reasoning before calling pwd.".to_string())
+        Value::String(
+            "**Thinking** Need original upstream reasoning before calling pwd.".to_string()
+        )
     );
     assert_eq!(
         output_items[1]["type"],
@@ -2936,7 +3052,10 @@ fn build_responses_payload_from_chat_never_emits_reasoning_content_in_client_pay
         reasoning_item["summary"][0]["text"],
         Value::String("**Thinking** plan".to_string())
     );
-    assert_eq!(reasoning_item["encrypted_content"], Value::String("opaque".to_string()));
+    assert_eq!(
+        reasoning_item["encrypted_content"],
+        Value::String("opaque".to_string())
+    );
 }
 
 #[test]

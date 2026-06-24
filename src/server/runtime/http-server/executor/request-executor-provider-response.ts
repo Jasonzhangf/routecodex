@@ -359,6 +359,7 @@ export async function processSuccessfulProviderResponse(args: {
     providerKey?: string;
     providerId?: string;
     forceLocalDiskWriteWhenDisabled?: boolean;
+    metadata?: Record<string, unknown>;
   }) => Promise<void>;
   clearProviderTransportBackoff: () => void;
 }): Promise<{
@@ -450,6 +451,7 @@ export async function processSuccessfulProviderResponse(args: {
         entryEndpoint: args.entryEndpoint,
         providerKey: args.providerKey,
         providerId: args.providerId,
+        metadata: args.mergedMetadata,
         providerRequestPayload: args.providerPayload,
         providerRequestHeaders: args.providerPayload.headers as Record<string, unknown> | undefined,
         providerRequestUrl: typeof args.providerPayload.url === 'string' ? args.providerPayload.url : undefined,
@@ -505,6 +507,7 @@ export async function processSuccessfulProviderResponse(args: {
         entryEndpoint: args.entryEndpoint,
         providerKey: args.providerKey,
         providerId: args.providerId,
+        metadata: args.mergedMetadata,
         providerRequestPayload: args.providerPayload,
         providerRequestHeaders: args.providerPayload.headers as Record<string, unknown> | undefined,
         providerRequestUrl: typeof args.providerPayload.url === 'string' ? args.providerPayload.url : undefined,

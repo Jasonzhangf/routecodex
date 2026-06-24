@@ -12,6 +12,30 @@ import type { HttpClient } from '../utils/http-client.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
 
+function readSnapshotEntryPort(metadata?: Record<string, unknown>): number | undefined {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+  const portContext =
+    metadata.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext)
+      ? metadata.portContext as Record<string, unknown>
+      : undefined;
+  for (const value of [
+    metadata.entryPort,
+    metadata.matchedPort,
+    metadata.routecodexLocalPort,
+    metadata.localPort,
+    portContext?.matchedPort,
+    portContext?.localPort
+  ]) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
+}
+
 function summarizeUnknownError(error: unknown): string {
   if (error instanceof Error) {
     return error.message || error.name || 'unknown_error';
@@ -189,6 +213,7 @@ export async function normalizeProviderHttpError(options: {
       entryEndpoint:
         options.requestInfo.entryEndpoint
         ?? ProviderPayloadUtils.extractEntryEndpointFromPayload(options.processedRequest),
+      entryPort: readSnapshotEntryPort(options.context.metadata),
       clientRequestId:
         options.requestInfo.clientRequestId
         ?? ProviderPayloadUtils.getClientRequestIdFromContext(options.context),

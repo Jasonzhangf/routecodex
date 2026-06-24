@@ -69,6 +69,31 @@ function readProviderSnapshotMetadata(context: ProviderContext): Record<string, 
     : undefined;
 }
 
+function readProviderSnapshotEntryPort(context: ProviderContext): number | undefined {
+  const metadata = readProviderSnapshotMetadata(context);
+  if (!metadata) {
+    return undefined;
+  }
+  const portContext =
+    metadata.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext)
+      ? metadata.portContext as Record<string, unknown>
+      : undefined;
+  for (const value of [
+    metadata.entryPort,
+    metadata.matchedPort,
+    metadata.routecodexLocalPort,
+    metadata.localPort,
+    portContext?.matchedPort,
+    portContext?.localPort
+  ]) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
+}
+
 function parseFirstSseDataPayload(frame: string): UnknownObject | undefined {
   const dataLines = frame
     .split('\n')
@@ -429,6 +454,7 @@ export class HttpRequestExecutor {
     }
     const requestId = debug.requestId ?? options.requestId;
     try {
+      const entryPort = readProviderSnapshotEntryPort({ metadata: options.metadata } as ProviderContext);
       await writeProviderSnapshot({
         phase: 'provider-body-debug',
         requestId,
@@ -436,6 +462,7 @@ export class HttpRequestExecutor {
           wantsSse: options.wantsSse
         }),
         entryEndpoint: options.entryEndpoint,
+        entryPort,
         clientRequestId: options.clientRequestId ?? options.requestId,
         providerKey: options.providerKey,
         providerId: options.providerId,
@@ -463,6 +490,7 @@ export class HttpRequestExecutor {
 
   private async snapshotProviderRequest(requestInfo: PreparedHttpRequest, context: ProviderContext): Promise<void> {
     try {
+      const entryPort = readProviderSnapshotEntryPort(context);
       await writeProviderSnapshot({
         phase: 'provider-request',
         requestId: context.requestId,
@@ -470,6 +498,7 @@ export class HttpRequestExecutor {
         headers: requestInfo.headers,
         url: requestInfo.targetUrl,
         entryEndpoint: requestInfo.entryEndpoint,
+        entryPort,
         clientRequestId: requestInfo.clientRequestId,
         providerKey: context.providerKey,
         providerId: context.providerId,
@@ -594,6 +623,7 @@ export class HttpRequestExecutor {
       ? await this.deps.executePreparedRequest(requestInfo, context, captureSse)
       : requestInfo.wantsSse
         ? await (async () => {
+            const entryPort = readProviderSnapshotEntryPort(context);
             const upstreamResult = typeof this.httpClient.postStreamOrResponse === 'function'
               ? await this.httpClient.postStreamOrResponse(
                   requestInfo.targetUrl,
@@ -627,6 +657,7 @@ export class HttpRequestExecutor {
                   headers: requestInfo.headers,
                   url: requestInfo.targetUrl,
                   entryEndpoint: requestInfo.entryEndpoint,
+                  entryPort,
                   clientRequestId: requestInfo.clientRequestId,
                   providerKey: context.providerKey,
                   providerId: context.providerId,
@@ -646,6 +677,7 @@ export class HttpRequestExecutor {
                 headers: requestInfo.headers,
                 url: requestInfo.targetUrl,
                 entryEndpoint: requestInfo.entryEndpoint,
+                entryPort,
                 clientRequestId: requestInfo.clientRequestId,
                 providerKey: context.providerKey,
                 providerId: context.providerId,
@@ -671,6 +703,7 @@ export class HttpRequestExecutor {
       if (!this.deps.executePreparedRequest) {
         return response;
       }
+      const entryPort = readProviderSnapshotEntryPort(context);
       const responseRecord = response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
       const sseStream = responseRecord?.sseStream;
       if (sseStream && typeof (sseStream as NodeJS.ReadableStream).pipe === 'function') {
@@ -701,6 +734,7 @@ export class HttpRequestExecutor {
               headers: requestInfo.headers,
               url: requestInfo.targetUrl,
               entryEndpoint: requestInfo.entryEndpoint,
+              entryPort,
               clientRequestId: requestInfo.clientRequestId,
               providerKey: context.providerKey,
               providerId: context.providerId,
@@ -730,6 +764,7 @@ export class HttpRequestExecutor {
               headers: requestInfo.headers,
               url: requestInfo.targetUrl,
               entryEndpoint: requestInfo.entryEndpoint,
+              entryPort,
               clientRequestId: requestInfo.clientRequestId,
               providerKey: context.providerKey,
               providerId: context.providerId,
@@ -749,6 +784,7 @@ export class HttpRequestExecutor {
             headers: requestInfo.headers,
             url: requestInfo.targetUrl,
             entryEndpoint: requestInfo.entryEndpoint,
+            entryPort,
             clientRequestId: requestInfo.clientRequestId,
             providerKey: context.providerKey,
             providerId: context.providerId,
@@ -773,6 +809,7 @@ export class HttpRequestExecutor {
     }
 
     try {
+      const entryPort = readProviderSnapshotEntryPort(context);
       await writeProviderSnapshot({
         phase: 'provider-response',
         requestId: context.requestId,
@@ -780,6 +817,7 @@ export class HttpRequestExecutor {
         headers: requestInfo.headers,
         url: requestInfo.targetUrl,
         entryEndpoint: requestInfo.entryEndpoint,
+        entryPort,
         clientRequestId: requestInfo.clientRequestId,
         providerKey: context.providerKey,
         providerId: context.providerId,

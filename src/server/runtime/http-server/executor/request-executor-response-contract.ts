@@ -31,6 +31,7 @@ type ProviderSnapshotWriteArgs = {
   providerKey?: string;
   providerId?: string;
   forceLocalDiskWriteWhenDisabled?: boolean;
+  metadata?: Record<string, unknown>;
 };
 
 import {
@@ -200,6 +201,7 @@ export async function persistPayloadContractProviderSnapshots(args: {
   entryEndpoint?: string;
   providerKey?: string;
   providerId?: string;
+  metadata?: Record<string, unknown>;
   providerRequestPayload: unknown;
   providerRequestHeaders?: Record<string, unknown>;
   providerRequestUrl?: string;
@@ -222,7 +224,8 @@ export async function persistPayloadContractProviderSnapshots(args: {
     headers: args.providerRequestHeaders,
     url: args.providerRequestUrl,
     data: requestPayload,
-    forceLocalDiskWriteWhenDisabled: true
+    forceLocalDiskWriteWhenDisabled: true,
+    metadata: args.metadata
   });
   await args.writeProviderSnapshot({
     phase: 'provider-response-contract',
@@ -252,6 +255,7 @@ export async function persistPayloadContractProviderSnapshots(args: {
         body: args.convertedResponse.body ?? null
       }
     },
-    forceLocalDiskWriteWhenDisabled: true
+    forceLocalDiskWriteWhenDisabled: true,
+    metadata: args.metadata
   });
 }

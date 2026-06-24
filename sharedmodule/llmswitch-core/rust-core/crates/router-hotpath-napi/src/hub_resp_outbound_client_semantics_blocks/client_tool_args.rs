@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
 use crate::shared_tool_mapping::build_flattened_namespace_child_alias;
+use servertool_core::stop_visible_text::strip_stop_schema_control_value;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ClientToolDefinition {
@@ -767,7 +768,9 @@ fn sanitize_responses_client_payload_for_replay_safety_deep(value: &Value) -> Va
                 );
             }
             sanitize_responses_output_item_for_replay_safety(&mut out);
-            Value::Object(out)
+            let mut next = Value::Object(out);
+            strip_stop_schema_control_value(&mut next);
+            next
         }
         _ => value.clone(),
     }
@@ -1180,6 +1183,7 @@ struct ResponsesClientSseProjectionState {
     pending_apply_patch_argument_deltas: HashMap<String, String>,
     apply_patch_call_ids: HashSet<String>,
     emitted_apply_patch_done_call_ids: HashSet<String>,
+    suppressed_obfuscated_text_delta_keys: HashSet<String>,
 }
 
 fn read_string_array(value: Option<&Value>) -> HashSet<String> {
@@ -1219,6 +1223,9 @@ impl ResponsesClientSseProjectionState {
             emitted_apply_patch_done_call_ids: read_string_array(
                 record.get("emittedApplyPatchDoneCallIds"),
             ),
+            suppressed_obfuscated_text_delta_keys: read_string_array(
+                record.get("suppressedObfuscatedTextDeltaKeys"),
+            ),
         }
     }
 
@@ -1247,12 +1254,82 @@ impl ResponsesClientSseProjectionState {
             .cloned()
             .collect::<Vec<String>>();
         emitted.sort();
+        let mut suppressed = self
+            .suppressed_obfuscated_text_delta_keys
+            .iter()
+            .cloned()
+            .collect::<Vec<String>>();
+        suppressed.sort();
         serde_json::json!({
             "pendingApplyPatchArgumentDeltas": pending,
             "applyPatchCallIds": call_ids,
             "emittedApplyPatchDoneCallIds": emitted,
+            "suppressedObfuscatedTextDeltaKeys": suppressed,
         })
     }
+}
+
+fn read_i64ish_string(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::Number(num)) => num.to_string(),
+        Some(Value::String(text)) => text.trim().to_string(),
+        _ => String::new(),
+    }
+}
+
+fn build_obfuscated_text_delta_key(event_name: &str, data: &Map<String, Value>) -> Option<String> {
+    let kind = match event_name {
+        "response.output_text.delta" | "response.output_text.done" => "output_text",
+        "response.reasoning_summary_text.delta" | "response.reasoning_summary_text.done" => {
+            "reasoning_summary_text"
+        }
+        _ => return None,
+    };
+    let item_id = data
+        .get("item_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let output_index = read_i64ish_string(data.get("output_index"));
+    let content_index = read_i64ish_string(data.get("content_index"));
+    let summary_index = read_i64ish_string(data.get("summary_index"));
+    Some(format!(
+        "{}|{}|{}|{}|{}",
+        kind, item_id, output_index, content_index, summary_index
+    ))
+}
+
+fn build_synthetic_text_delta_frame(
+    delta_event_name: &str,
+    done_data: &Map<String, Value>,
+    text: &str,
+) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+    let mut payload = Map::new();
+    payload.insert(
+        "type".to_string(),
+        Value::String(delta_event_name.to_string()),
+    );
+    for key in [
+        "output_index",
+        "item_id",
+        "content_index",
+        "summary_index",
+        "logprobs",
+        "sequence_number",
+    ] {
+        if let Some(value) = done_data.get(key).cloned() {
+            payload.insert(key.to_string(), value);
+        }
+    }
+    payload.insert("delta".to_string(), Value::String(text.to_string()));
+    Some(format!(
+        "event: {}\ndata: {}\n\n",
+        delta_event_name,
+        serde_json::to_string(&Value::Object(payload)).unwrap_or_else(|_| "{}".to_string())
+    ))
 }
 
 fn replace_frame_data(frame: &str, data: &Value) -> String {
@@ -1642,6 +1719,72 @@ pub(crate) fn project_responses_sse_frame_for_client(
         {
             output_frame = projected_frame;
         }
+    } else if matches!(
+        event_name,
+        "response.output_text.delta" | "response.reasoning_summary_text.delta"
+    ) {
+        if let Some(record) = data_record {
+            let has_obfuscation = record
+                .get("obfuscation")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some();
+            if has_obfuscation {
+                if let Some(key) = build_obfuscated_text_delta_key(event_name, record) {
+                    state.suppressed_obfuscated_text_delta_keys.insert(key);
+                    emit = false;
+                    output_frame.clear();
+                }
+            } else {
+                let normalized = project_responses_sse_client_event_payload(data, tools_raw, metadata);
+                if normalized != *data {
+                    output_frame = replace_frame_data(frame, &normalized);
+                }
+            }
+        }
+    } else if matches!(
+        event_name,
+        "response.output_text.done" | "response.reasoning_summary_text.done"
+    ) {
+        if let Some(record) = data_record {
+            let normalized = project_responses_sse_client_event_payload(data, tools_raw, metadata);
+            let normalized_record = normalized.as_object().unwrap_or(record);
+            let key = build_obfuscated_text_delta_key(event_name, normalized_record)
+                .or_else(|| build_obfuscated_text_delta_key(event_name, record));
+            let maybe_text = normalized_record
+                .get("text")
+                .and_then(Value::as_str)
+                .or_else(|| record.get("text").and_then(Value::as_str))
+                .unwrap_or("");
+            if let Some(key) = key {
+                if state.suppressed_obfuscated_text_delta_keys.remove(key.as_str()) {
+                    let delta_event_name = if event_name == "response.output_text.done" {
+                        "response.output_text.delta"
+                    } else {
+                        "response.reasoning_summary_text.delta"
+                    };
+                    if let Some(delta_frame) = build_synthetic_text_delta_frame(
+                        delta_event_name,
+                        normalized_record,
+                        maybe_text,
+                    ) {
+                        let done_frame = if normalized != *data {
+                            replace_frame_data(frame, &normalized)
+                        } else {
+                            frame.to_string()
+                        };
+                        output_frame = format!("{}{}", delta_frame, done_frame);
+                    } else if normalized != *data {
+                        output_frame = replace_frame_data(frame, &normalized);
+                    }
+                } else if normalized != *data {
+                    output_frame = replace_frame_data(frame, &normalized);
+                }
+            } else if normalized != *data {
+                output_frame = replace_frame_data(frame, &normalized);
+            }
+        }
     } else if event_name == "response.completed" || event_name == "response.done" {
         let normalized = project_responses_terminal_event_payload_for_client(data);
         if normalized != *data {
@@ -1667,21 +1810,22 @@ pub(crate) fn project_responses_sse_frame_for_client(
     } else if let Some(record) = data_record {
         let call_name = read_data_call_name(record);
         let call_id = read_data_call_id(record);
-        let is_apply_patch_call =
-            call_name.as_deref() == Some("apply_patch")
-                || state.apply_patch_call_ids.contains(call_id.as_str());
-        let call_arguments = read_data_call_arguments(record).and_then(|value| {
-            if value.trim().is_empty() {
-                None
-            } else {
-                Some(value)
-            }
-        }).or_else(|| {
-            state
-                .pending_apply_patch_argument_deltas
-                .get(call_id.as_str())
-                .cloned()
-        });
+        let is_apply_patch_call = call_name.as_deref() == Some("apply_patch")
+            || state.apply_patch_call_ids.contains(call_id.as_str());
+        let call_arguments = read_data_call_arguments(record)
+            .and_then(|value| {
+                if value.trim().is_empty() {
+                    None
+                } else {
+                    Some(value)
+                }
+            })
+            .or_else(|| {
+                state
+                    .pending_apply_patch_argument_deltas
+                    .get(call_id.as_str())
+                    .cloned()
+            });
         if is_apply_patch_call {
             if let Some(call_arguments) = call_arguments {
                 if call_arguments.is_empty() {
@@ -1750,7 +1894,9 @@ pub(crate) fn project_responses_sse_frame_for_client(
                     {
                         emit = false;
                     } else {
-                        state.emitted_apply_patch_done_call_ids.insert(call_id.clone());
+                        state
+                            .emitted_apply_patch_done_call_ids
+                            .insert(call_id.clone());
                         output_frame = project_apply_patch_done_frame(record, normalized_arguments);
                     }
                 }

@@ -40,6 +40,7 @@ import {
   normalizeClientVisibleResponsesSseFrameForHttp,
   type ResponsesSseClientProjectionStateForHttp,
 } from '../../modules/llmswitch/bridge/responses-client-projection.js';
+import { inspectResponsesTerminalStateFromSseChunkForHttp } from '../../modules/llmswitch/bridge/responses-stream-semantics.js';
 import {
   createChatJsonToSseConverterForHttp,
 } from '../../modules/llmswitch/bridge/responses-response-bridge.js';
@@ -208,11 +209,31 @@ function createSseClientResponseClosedError(): Error & { code: string; name: str
 
 function maybeUpdateUsageLogInfoFromSseFrame(
   result: PipelineExecutionResult,
-  frame: string
-): void {
+  frame: string,
+  terminalState?: ReturnType<typeof inspectResponsesTerminalStateFromSseChunkForHttp>
+): ReturnType<typeof inspectResponsesTerminalStateFromSseChunkForHttp> | undefined {
   const usageLogInfo = result.usageLogInfo;
-  if (!usageLogInfo || !frame || !/usage|usageMetadata|input_tokens|output_tokens|prompt_tokens|completion_tokens/.test(frame)) {
-    return;
+  if (!usageLogInfo || !frame) {
+    return terminalState;
+  }
+  const nextTerminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
+    chunk: frame,
+    probe: terminalState?.probe,
+    finishReason: terminalState?.finishReason ?? usageLogInfo.finishReason,
+    seenTerminalEvent: terminalState?.seenTerminalEvent,
+    sawTerminalChunk: terminalState?.sawTerminalChunk,
+    sawResponsesCompletedChunk: terminalState?.sawResponsesCompletedChunk,
+    sawResponsesDoneEvent: terminalState?.sawResponsesDoneEvent,
+    sawAssistantMessageDoneTerminal: terminalState?.sawAssistantMessageDoneTerminal,
+    requiresResponsesTerminalEvent: terminalState?.requiresResponsesTerminalEvent ?? true,
+    terminalSource: terminalState?.terminalSource,
+    pendingTerminalEvent: terminalState?.pendingTerminalEvent,
+  });
+  if (typeof nextTerminalState.finishReason === 'string' && nextTerminalState.finishReason.trim()) {
+    usageLogInfo.finishReason = nextTerminalState.finishReason.trim();
+  }
+  if (!/usage|usageMetadata|input_tokens|output_tokens|prompt_tokens|completion_tokens/.test(frame)) {
+    return nextTerminalState;
   }
   const usage = extractUsageFromResult({
     body: {
@@ -231,9 +252,10 @@ function maybeUpdateUsageLogInfoFromSseFrame(
     || (usage.cache_read_input_tokens ?? 0) > 0
     || (usage.cache_creation_input_tokens ?? 0) > 0;
   if (!hasNonZeroUsage) {
-    return;
+    return nextTerminalState;
   }
   usageLogInfo.usage = usage as unknown as Record<string, unknown>;
+  return nextTerminalState;
 }
 
 function createClientVisibleSseProjectionStream(stream: Readable, requestId: string): Readable {
@@ -1004,6 +1026,17 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     options?: { recordSnapshot?: boolean }
   ) => {
     if (
+      ended
+      || res.destroyed
+      || (res as unknown as { writableEnded?: boolean }).writableEnded === true
+      || (res as unknown as { writableFinished?: boolean }).writableFinished === true
+    ) {
+      logPipelineStage('response.sse.write_frame.skipped_closed_response', requestLabel, {
+        errorLabel,
+      });
+      return;
+    }
+    if (
       result.continuationOwner !== 'direct'
       && shouldDropClientSseFrameForHttp(frame, entryEndpoint)
     ) {
@@ -1185,6 +1218,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       return;
     }
     cleanupLogged = true;
+    if (trigger === 'close') {
+      ended = true;
+    }
     clearTimers();
     detachOutboundStream();
     const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
@@ -1231,6 +1267,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   };
 
   let ssePending = '';
+  let sseTerminalState:
+    | ReturnType<typeof inspectResponsesTerminalStateFromSseChunkForHttp>
+    | undefined;
   let clientWriteQueue = Promise.resolve();
   const responsesSseProjectionState: ResponsesSseClientProjectionStateForHttp = {
     pendingApplyPatchArgumentDeltas: {},
@@ -1310,7 +1349,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     for (const part of parts) {
       if (!part.trim()) continue;
       const frame = `${part}\n\n`;
-      maybeUpdateUsageLogInfoFromSseFrame(result, frame);
+      sseTerminalState = maybeUpdateUsageLogInfoFromSseFrame(result, frame, sseTerminalState) ?? sseTerminalState;
       enqueueClientSseFrame(frame, 'response.sse.stream.write_frame');
     }
   });
@@ -1327,9 +1366,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ended = true;
     clearTimers();
     detachOutboundStream();
+    const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
     recordSseTransportClientClose(requestLabel, {
-      finishReason: undefined,
-      terminal: false,
+      finishReason: observedFinishReason,
+      terminal: sseTerminalState?.seenTerminalEvent === true,
       closeBeforeStreamEnd: !streamEnded
     });
     logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
@@ -1383,13 +1423,14 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ended = true;
     streamEnded = true;
     clearTimers();
+    const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
     recordSseTransportStreamEnd(requestLabel, {
-      finishReason: undefined,
-      terminal: false
+      finishReason: observedFinishReason,
+      terminal: sseTerminalState?.seenTerminalEvent === true
     });
     if (ssePending.trim()) {
       const pendingFrame = `${ssePending}\n\n`;
-      maybeUpdateUsageLogInfoFromSseFrame(result, pendingFrame);
+      sseTerminalState = maybeUpdateUsageLogInfoFromSseFrame(result, pendingFrame, sseTerminalState) ?? sseTerminalState;
       enqueueClientSseFrame(pendingFrame, 'response.sse.stream.write_pending_frame');
       ssePending = '';
     }
@@ -1411,9 +1452,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   res.on('close', () => {
     abortSourceStreamForClientClose();
     if (!streamEnded) {
+      const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
       recordSseTransportClientClose(requestLabel, {
-        finishReason: undefined,
-        terminal: false,
+        finishReason: observedFinishReason,
+        terminal: sseTerminalState?.seenTerminalEvent === true,
         closeBeforeStreamEnd: true
       });
     }

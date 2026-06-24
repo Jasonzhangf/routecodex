@@ -101,6 +101,31 @@ const buildProviderSseStreamConfig = (context: ProviderContext): {
   return config;
 };
 
+function readProviderSnapshotEntryPort(metadata: unknown): number | undefined {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return undefined;
+  }
+  const record = metadata as Record<string, unknown>;
+  const portContext =
+    record.portContext && typeof record.portContext === 'object' && !Array.isArray(record.portContext)
+      ? record.portContext as Record<string, unknown>
+      : undefined;
+  for (const value of [
+    record.entryPort,
+    record.matchedPort,
+    record.routecodexLocalPort,
+    record.localPort,
+    portContext?.matchedPort,
+    portContext?.localPort
+  ]) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
+}
+
 function applyRequestRuntimeMetadataToProviderContext(
   context: ProviderContext,
   runtimeMetadata: ProviderRuntimeMetadata | undefined
@@ -583,6 +608,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url: targetUrl,
         entryEndpoint,
+        entryPort: readProviderSnapshotEntryPort(context.metadata),
         clientRequestId: extractClientRequestId(context),
         providerKey: context.providerKey,
         providerId: context.providerId
@@ -634,6 +660,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url,
         entryEndpoint,
+        entryPort: readProviderSnapshotEntryPort(context.metadata),
         clientRequestId,
         providerKey: context.providerKey,
         providerId: context.providerId,
@@ -692,6 +719,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url: targetUrl,
         entryEndpoint,
+        entryPort: readProviderSnapshotEntryPort(context.metadata),
         clientRequestId: extractClientRequestId(context),
         providerKey: context.providerKey,
         providerId: context.providerId
