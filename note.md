@@ -1,3 +1,84 @@
+# 2026-06-24 OrangeAI upstream model audit
+
+- Jason 纠偏后改成只查 upstream `https://api2.orangeai.cc/v1`，不再参考本地 RouteCodex `/v1/models`。
+- 直查 `GET /models` 结果：仅返回 `glm-5.1`、`glm-5.2`。
+- 直查 `POST /chat/completions` 最小活体验证：
+  - `glm-5.2`：`HTTP/2 200`，返回 `id=gen-1782307899-sW6V1cuENXCJNB2eiSoY`，首轮耗时约 `5.76s`；响应主体含 `reasoning`，`finish_reason=length`（因为 `max_tokens=32`）。
+  - `glm-5.1`：连续 3 次 `HTTP/2 429`，耗时约 `7.94s / 4.07s / 3.64s`，错误体固定为 `{"error":{"message":"openai_error","type":"bad_response_status_code","code":"bad_response_status_code"}}`。
+- 当前判断：
+  - OrangeAI upstream 当前可见模型只有 2 个。
+  - 当前可直接成功调用的是 `glm-5.2`。
+  - `glm-5.1` 至少在本轮排查窗口内处于限流/不可用状态，不能当稳定替代。
+
+# 2026-06-24 5520 direct responses usage finish_reason=unknown 根因锁定
+
+- 触发样本：
+  - log requestId: `openai-responses-router-gpt-5.4-20260624T213435609-398340-835`
+  - 5520 log:
+    - `router-direct.send ... completed`
+    - 紧随其后 `[usage] ... route=router-direct:coding ... finish_reason=unknown`
+- 直接证据：
+  1. `src/server/runtime/http-server/executor/usage-logger.ts`
+     - `info.finishReason` 为空时直接打印 `unknown`
+  2. `src/server/runtime/http-server/executor/request-executor-provider-response.ts`
+     - `usageLogInfo.finishReason` 只是透传 `args.finishReason`
+  3. `src/server/handlers/handler-response-sse.ts`
+     - `maybeUpdateUsageLogInfoFromSseFrame(...)` 只从 SSE frame 提取/更新 `usage`
+     - 不会从 SSE terminal frame 提取/更新 `finishReason`
+     - `outboundStream.on('end')` / client close / stream error 的 closeout 记录里 `finishReason` 也都写死为 `undefined`
+- 当前判断：
+  - `finish_reason=unknown` 不是 upstream 明确返回 unknown。
+  - 是 RouteCodex 在 direct `/v1/responses` SSE closeout 路径里没有把 terminal finish reason materialize 到 `usageLogInfo.finishReason`，最终 usage logger 回退成 `unknown`。
+  - 唯一 owner 首选落点：`src/server/handlers/handler-response-sse.ts`。
+
+# 2026-06-24 finish_reason=unknown 二次下钻：stop 推导缺口在 stream semantics owner
+
+- focused test 直接证据：
+  - `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts -t "derives usage finish_reason from responses SSE terminal frames instead of logging unknown"` 仍红
+  - 失败不是没打 usage log，而是没有出现 `finish_reason=stop`
+- 新根因：
+  - `src/modules/llmswitch/bridge/responses-stream-semantics.ts`
+    - `inspectResponsesTerminalStateFromSseChunkForHttp(...)` 只把 `response.completed/response.done` 识别为 terminal event
+    - 但当 `deriveFinishReasonNative()` 对 SSE terminal frame 返回空时，不会继续基于 probe/response payload 推导 `stop`
+  - repo 内已存在单一语义 owner：
+    - `src/modules/llmswitch/bridge/responses-response-bridge.ts`
+    - `resolveResponsesTerminalProbeFinishReasonForHttp(...)`
+    - 这里已经定义了：若 probe/output 中存在 `assistant message status=completed`，finish reason 应为 `stop`
+- 修复方向锁定：
+  - 复用 `resolveResponsesTerminalProbeFinishReasonForHttp(...)`
+  - 不在 `handler-response-sse.ts` 或 test 里新增第二套 stop 推导语义
+
+# 2026-06-24 5520 finish_reason=unknown 修复完成并 live 复验
+
+- 实现收口：
+  - `responses-stream-semantics.ts`
+    - `inspectResponsesTerminalStateFromSseChunkForHttp(...)` 现在把 `probe` 纳入 terminal state
+    - 每帧先更新 probe，再用 `resolveResponsesTerminalProbeFinishReasonForHttp(...)` 从累计 probe/terminal response 补 finish reason
+    - 对 `assistant message done -> response.completed|done(status=completed)` 的无 native finish_reason 场景，稳定补成 `stop`
+  - `handler-response-sse.ts`
+    - `maybeUpdateUsageLogInfoFromSseFrame(...)` 直接复用上述 state/probe，不再只靠单帧文本
+- 测试：
+  - `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts -t "derives usage finish_reason from responses SSE terminal frames instead of logging unknown"` -> PASS
+  - `tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts` -> PASS
+  - `npm run build:min` -> PASS
+- live 安装与真机验证：
+  - 全局 CLI 版本：`routecodex --version -> 0.90.3214`
+  - 受管 5520 真地址：`http://192.168.0.93:5520`
+  - `routecodex status --port 5520 --json` -> `version=0.90.3214 ready=true`
+  - live 请求：
+    - `POST /v1/responses`
+    - body: `{\"model\":\"gpt-5.4\",\"input\":\"Reply with exactly OK.\",\"stream\":true}`
+    - requestId: `openai-responses-router-gpt-5.4-20260624T220521007-398614-1109`
+  - live log 证据：
+    - `router-direct.send ... completed`
+    - 随后 usage 行：
+      - `route=router-direct:default`
+      - `finish_reason=stop`
+    - 位置：`~/.rcc/logs/server-5520.log` 约 `1203791-1203793`
+- 结论：
+  - 本次 `finish_reason=unknown` 已由真实 5520 direct `/v1/responses` 请求复验为 `stop`
+  - 根因不是 upstream unknown，而是 RouteCodex 之前未把 SSE terminal/probe 物化为 usage finish reason
+
 # 2026-06-24 SSE 过早 completed 截断后续 tool_calls 根因锁定
 
 - live 样本：
@@ -78,14 +159,86 @@
 - 复验结果：
   - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ./node_modules/.bin/tsc -p tsconfig.json --pretty false --noEmit` -> PASS
   - `npm run build:min` -> PASS
-  - 说明：
+- 说明：
     - `dispatch-preparation-shell` 的 `runtimeMetadata` 合同错位已修复；
     - 共享 TS 类型面已重新对齐当前真实调用与测试面；
     - servertool Rust-only gate 在本轮完整 build:min 中保持全绿。
 
+# 2026-06-24 stopless schema fence/parser owner repair
+
+- Jason 最新要求下，本轮继续只收 stopless owner，不碰 SSE 业务语义。
+- 纯 Rust owner 证据：
+  - `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`
+    - assistant text 现在只认：
+      - `<rcc_stop_schema>...</rcc_stop_schema>`
+      - 兼容 `<stop_schema>...</stop_schema>`
+      - ` ```json ... ``` ` 且内容必须长得像 stop schema
+    - assistant 裸 JSON 不再当 terminal stop schema；只在 `reasoningStop.arguments` 里接受 bare JSON。
+    - malformed tagged/fenced schema 现在回 `stop_schema_invalid_json`，不再错误降成 `stop_schema_missing`。
+    - `decide()` 恢复 followup_text owner，默认/legacy stopless prompt 重新由 Rust 生成，而不是返回 `null`。
+    - `stopreason` 收紧为只接受数字/数字字符串 `0/1/2`，不再接受 `"finished"` 这类字符串别名。
+- 白盒结果：
+  - `cargo test -p stop-message-core --test stop_schema_gate_closure -- --nocapture` PASS
+  - `cargo test -p stop-message-core --lib -- --nocapture` PASS
+- 相关黑盒/边界结果：
+  - `tests/servertool/stop-schema-lifecycle-contract.spec.ts` PASS
+  - `tests/servertool/stop-message-native-decision.spec.ts` PASS
+  - `tests/servertool/stopless-cli-continuation.spec.ts` PASS
+  - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts` PASS
+  - `cargo test -p router-hotpath-napi req_process_stage1_tool_governance_tests --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi resp_process_stage1_tool_governance_tests --lib -- --nocapture` PASS
+- 线上验证 blocker（独立于 stopless owner）：
+  - `npm run install:global` 当前存在递归脚本链：
+    - `install-global.sh -> npm run build:dev`
+    - `package.json#build:dev -> ... npm run install:global`
+  - 这会导致安装链路自调回环，无法把本轮 stopless 修复可靠地推到全局安装产物再做 live replay。
+  - 证据：
+    - `scripts/install-global.sh:156-160`
+    - `package.json:35`
+
 # 2026-06-23 OpenAI-compatible SSE 5xx regression audit
 
 # 2026-06-24 continuation red-test lock
+
+# 2026-06-24 metadata center dual-write / servertool / hub pipeline 计划前审计
+
+- 设计真源已定位：
+  - `docs/goals/metadata-center-js-rust-dualwrite-plan.md`
+  - `docs/goals/metadata-center-implementation-plan.md`
+  - `docs/goals/internal-metadata-center-migration-plan.md`
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`
+  - `docs/architecture/mainline-call-map.yml` `chain_id: metadata.center.mainline`
+- 文档结论一致：
+  - JS `MetadataCenter` 已是 request-scoped registry owner。
+  - `mtc-03` 仍是 `partial`，当前缺口不是“没有 runtime_control family”，而是 request-route / followup / stop-message 生产写点仍部分走 flat metadata / `runtime_control` payload / `__rt` 投影。
+  - dual-write 设计要求：所有共享 metadata 写入口统一走一个 sync owner，JS 读 JS center，Rust 读 Rust center，禁止调用点各自补同步。
+- 当前代码现状（已读到直接证据）：
+  - JS center 已真实存在并承载 `request_truth / continuation_context / runtime_control / provider_observation / client_attachment_scope / debug_snapshot`：
+    - `src/server/runtime/http-server/metadata-center/metadata-center.ts`
+  - request / responses / servertool 若干写点已经写 JS center：
+    - `src/server/runtime/http-server/executor-metadata.ts`
+    - `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+    - `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+    - `sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts`
+  - Rust 侧当前并不存在独立 Rust MetadataCenter registry；Hub/VR/servertool 仍主要从 request metadata payload 读：
+    - `runtime_control`
+    - `__rt`
+    - 顶层 `stopMessageEnabled`
+    - 直接证据文件：
+      - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs`
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs`
+  - 因此所谓“JS/Rust 双写”当前还停留在计划层；现状更接近“JS center + payload projection 给 Rust 读”。
+- servertool / Hub Pipeline 相关关键判断：
+  - servertool TS shell 已开始通过 bound JS center 读写 runtime_control，但 Rust servertool/hub owner 仍消费 payload 投影，不是 Rust center 读。
+  - `hub-pipeline-execute-request-stage.ts` 现在同时拼：
+    - `__rt`
+    - `runtime_control`
+    - JS center projection
+    - 然后再喂给 Rust native orchestration。
+  - 这说明 dual-write 真正第一刀不该直接全量迁移 servertool 业务逻辑，而该先补“Rust center registry + single sync bus + Rust read API”，再逐步砍 payload projection。
 
 # 2026-06-24 Anthropic 2013 sample re-audit: HEAD gate added, source not reproducing
 
@@ -256,8 +409,46 @@
     - 正常工具面不丢
   - client-facing round 2：
     - 正确继续推进，不泄漏 raw internal tool
-  - client-facing round 3：
-    - 第 3 次 `no_schema` 后不再 endless CLI
+- client-facing round 3：
+  - 第 3 次 `no_schema` 后不再 endless CLI
+
+# 2026-06-24 stopless live sample re-audit: schema leak mostly fixed, late-write crash still present
+
+- 新 live / sample 结论分层：
+  - `0.90.3205` 样本里，`<rcc_stop_schema>` 从 client-facing `client-response.json` 已基本剥离干净；当前看到的是正常 terminal 文本，没有继续把 schema fence 直接暴露给客户端。
+  - 但 stopless 多轮 submit_tool_outputs 仍存在更硬的 transport blocker：客户端已收到 `response.done` 并关闭后，上游晚到帧还会继续写入已结束的 SSE response，触发 `ERR_STREAM_WRITE_AFTER_END`，5555 进程崩溃。
+- 直接证据：
+  - live log `~/.rcc/logs/server-5555.log`
+    - `/v1/responses.submit_tool_outputs` 命中 `tool_calls_internal_stop_tool`
+    - 随后出现 `Error [ERR_STREAM_WRITE_AFTER_END]: write after end`
+    - 接着 `response.sse.client_close ... closeBeforeStreamEnd=true`
+  - stopless terminal sample：
+    - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782306215356_58b92647`
+    - `provider-response_2.json`
+      - provider 确实调用了 `reasoningStop(arguments=<合法 stop schema>)`
+      - finish_reason=`tool_calls`
+    - `client-response.json`
+      - 客户端已被放行为正常 terminal 文本 + `response.completed/done`
+      - 未再看到 `<rcc_stop_schema>` fence 泄漏
+- 当前判断：
+  - stopless 语义判断不是这次 crash 的根因；根因在 transport closeout。
+  - 精准形态是：
+    1. response governance 已把 internal `reasoningStop` 终态投成 client-visible terminal；
+    2. client 侧看到 `response.done` 后关闭连接；
+    3. transport 仍允许后续 late frame 继续 `res.write(...)`；
+    4. 命中 Node `write after end`。
+- 本轮补的 focused lock：
+  - transport owner 修复点：`src/server/handlers/handler-response-sse.ts`
+    - `writeClientSseFrame(...)` 写入前显式跳过 `ended/res.destroyed/writableEnded/writableFinished`
+    - `cleanup('close')` 时将 `ended=true`
+  - 新 focused blackbox：
+    - `tests/server/handlers/handler-response-sse-write-after-end.regression.spec.ts`
+    - 场景：client 在看到 `response.done` 后关闭，upstream 再晚写一帧，不得触发 `uncaughtException(write after end)`
+  - 回归：
+    - `tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts` 继续 PASS
+- 当前剩余 live 缺口：
+  - 还没有拿到 `0.90.3206+` 新产物下的 fresh live sample 重新证明“同一路径不再崩”。
+  - `install:global` / live refresh 链路本轮未拿到完整可审计结束输出，需下一轮继续把全局安装和在线重放补齐。
 - 当前已确认的 gap：
   - 现有 gate 已部分锁住结果，但还没有把“每个节点正常/错误/超预期”的白盒矩阵完整锁死。
   - `harvest fail / parse fail / malformed harvest` 仍缺完整 provider/client 双端黑盒。
@@ -14800,3 +14991,58 @@ live probe 必须先看首轮是否命中标准 exec_command CLI 投影，再判
 - 反模式：
   - 只修 response/outbound projection，不修 canonical stripper SSOT，会继续让别的出口复现同样空壳泄漏。
   - 黑盒先红时，必须先排除旧 native/bin 产物，再判业务 owner。
+
+## 2026-06-24T12:34:03.304Z stopless learned
+
+- requestId: openai-responses-minimonth.key1-MiniMax-M2.7-20260624T203054290-398159-654
+- sessionId: 019ef98a-03df-72c3-9926-6927b3cb08bb
+- stopReason: 15 个 dirty files 分 2 阶段 8 commits 已 review + push；Rust 层 4 commits + TS 层 4 commits + MEMORY.md 各 1 commit
+- evidence: git log --oneline -9 显示 9 commits（含 origin/main 基线）；git push 成功
+
+Review 必须逐文件 diff，不能跳过直接 commit；no-fallback 语义改动需确认所有调用点已同步更新
+
+# 2026-06-24 SSE newline audit
+
+- 现象：用户反馈 relay + direct 的 SSE 展示像是吞了换行。
+- 已查到的证据：
+  - `~/.rcc/codex-samples/openai-responses/ports/5520/req_1782308782991_4b32ea48/provider-request.json`
+    - `reasoning.summary.text` 原文带 `\n`，说明上游/请求侧文本保留换行。
+  - `src/server/handlers/handler-response-sse.ts`
+    - `createClientVisibleSseProjectionStream` / `createDirectPassthroughSseGuardStream` 只做 frame 边界和 JSON 校验，不改写 payload 文本。
+  - `src/modules/llmswitch/bridge/responses-sse-semantics.ts`
+    - 多行 `data:` 已按 `\n` 重新拼接；未见把正文换行压成空格的逻辑。
+- 当前判断：
+  - 这更像 client/render 层对 streamed delta 的拼接或展示问题，不像 SSE transport 主动吞换行。
+  - 还缺 live client-response 原始样本；当前只能锁到“server 侧未见主动改写换行”。
+
+# 2026-06-24 SSE 空格/换行回归修复闭环
+
+- Rust owner 收口：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/xml_text_utils.rs`
+    - `normalize_preserved_text_whitespace` 不再 `split_whitespace().join(" ")`；现在只统一 CRLF / tab，并保留可见内部空格与单个空白段。
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/display_sanitize.rs`
+    - tool wrapper 剥离后的最终显示文本统一走 `collapse_extra_newlines_and_trim`，只压 3+ 连续换行为一个空白段，不再吞掉原本可见空格。
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs`
+    - `output_text_raw` 不再 `trim()`；
+    - `text_parts.join("\n")` 不再尾部 `trim()`，避免在 responses chat projection 阶段丢失换行/空格。
+- focused Rust 白盒：
+  - `cargo test -p router-hotpath-napi normalize_preserved_text_whitespace_keeps_visible_inner_spaces_and_blank_lines --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi strip_tool_markup_for_display_text_preserves_visible_spaces_and_blank_lines --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi responses_response_utils_build_chat_response_preserves_visible_whitespace_around_tool_markup --lib -- --nocapture` PASS
+- 构建 / 安装 / 重启：
+  - `npm run build:min` PASS
+  - `ROUTECODEX_INSTALL_SKIP_BUILD=1 npm run install:global` PASS
+  - `routecodex restart --port 5520` PASS
+  - `routecodex restart --port 5555` PASS
+  - `/health`
+    - `http://127.0.0.1:5520/health -> {"status":"ok","ready":true,"pipelineReady":true,"server":"routecodex","version":"0.90.3217"}`
+    - `http://127.0.0.1:5555/health -> {"status":"ok","ready":true,"pipelineReady":true,"server":"routecodex","version":"0.90.3217"}`
+- live SSE 证据：
+  - direct 5520：
+    - `POST /v1/responses` 流式请求后，`response.output_text.done.text = "alpha   beta\ngamma    delta"`
+    - 说明多空格与换行已从 SSE end-to-end 保留下来。
+  - relay 5555：
+    - 同类流式请求里，`response.completed.response.output[0].summary[0].text` 已重新出现大量真实 `\n`
+    - 说明 relay 路径不再把 reasoning summary 整段压平为单行空格串。
+- 剩余缺口：
+  - 5555 relay live probe 这次模型最终 answer 没有稳定按提示词回显“多空格 + 空白行”字面内容，所以 relay 的“多空格” live 证据当前主要来自 multiline reasoning summary 已恢复，以及上述 Rust 白盒；若 Jason 需要，我下一步可以补一条固定旧样本 replay / 更强约束的 live probe 专门锁 relay 最终 answer 面。

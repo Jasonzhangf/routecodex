@@ -1,7 +1,9 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
-use servertool_core::stop_visible_text::strip_stop_schema_control_text;
 use serde_json::{Map, Value};
+use servertool_core::stop_visible_text::{
+    strip_stop_schema_control_payload, strip_stop_schema_control_text,
+};
 
 // feature_id: hub.response_responses_chat_projection
 
@@ -456,7 +458,7 @@ pub(crate) fn build_chat_response_from_responses_impl(payload: &Value) -> Value 
     let output_text_raw = response_obj
         .get("output_text")
         .and_then(Value::as_str)
-        .map(|value| value.trim().to_string())
+        .map(|value| value.to_string())
         .filter(|value| !value.is_empty());
     let has_tool_calls = !tool_calls.is_empty();
     let sanitize_output_text = |value: &str| -> String {
@@ -474,7 +476,7 @@ pub(crate) fn build_chat_response_from_responses_impl(payload: &Value) -> Value 
         .map(|value| sanitize_output_text(value.as_str()))
         .filter(|value| !value.is_empty());
     let message_content_text = explicit_output.unwrap_or_else(|| {
-        let joined = extracted.text_parts.join("\n").trim().to_string();
+        let joined = extracted.text_parts.join("\n");
         if !has_tool_calls {
             return joined;
         }
@@ -791,7 +793,9 @@ fn ensure_probe_chat_tool_call_buffers<'a>(
     if !entry.is_object() {
         *entry = Value::Object(Map::new());
     }
-    entry.as_object_mut().expect("chat tool call buffers object")
+    entry
+        .as_object_mut()
+        .expect("chat tool call buffers object")
 }
 
 fn upsert_probe_chat_tool_call_delta(
@@ -822,7 +826,10 @@ fn upsert_probe_chat_tool_call_delta(
         let Some(buffer_obj) = entry.as_object_mut() else {
             continue;
         };
-        buffer_obj.insert("type".to_string(), Value::String("function_call".to_string()));
+        buffer_obj.insert(
+            "type".to_string(),
+            Value::String("function_call".to_string()),
+        );
 
         let call_id = read_trimmed_string(call_obj.get("id"))
             .or_else(|| read_trimmed_string(call_obj.get("call_id")));
@@ -1058,9 +1065,8 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
         let response = parsed_obj.get("response").and_then(Value::as_object);
         let required_action = parsed_obj.get("required_action").and_then(Value::as_object);
         let output_item = parsed_obj.get("item");
-        let is_function_call_arguments_done =
-            event_name == "response.function_call_arguments.done"
-                || parsed_type == "response.function_call_arguments.done";
+        let is_function_call_arguments_done = event_name == "response.function_call_arguments.done"
+            || parsed_type == "response.function_call_arguments.done";
         let is_chat_completion_chunk = parsed_obj
             .get("object")
             .and_then(Value::as_str)
@@ -1503,12 +1509,11 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         .get("__seen_response_done")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let synthesized_required_action =
-        if required_action.is_none() {
-            build_required_action_from_output_items(probe.get("output").and_then(Value::as_array))
-        } else {
-            None
-        };
+    let synthesized_required_action = if required_action.is_none() {
+        build_required_action_from_output_items(probe.get("output").and_then(Value::as_array))
+    } else {
+        None
+    };
     let effective_required_action = required_action
         .cloned()
         .map(Value::Object)
@@ -1523,7 +1528,10 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         .and_then(Value::as_array)
         .map(|output| !output.is_empty())
         .unwrap_or(false);
-    if effective_required_action.is_none() && effective_status != "completed" && !has_completed_output {
+    if effective_required_action.is_none()
+        && effective_status != "completed"
+        && !has_completed_output
+    {
         return Ok("[]".to_string());
     }
     let response_id = read_trimmed_string(probe.get("id"))
@@ -1547,14 +1555,19 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
     if let Some(reasoning) = probe.get("reasoning").and_then(Value::as_object) {
         response_payload.insert("reasoning".to_string(), Value::Object(reasoning.clone()));
     }
-    let response_value = Value::Object(response_payload.clone());
+    let mut response_value = Value::Object(response_payload.clone());
+    strip_stop_schema_control_payload(&mut response_value);
+    let response_payload = response_value.as_object().cloned().unwrap_or_else(Map::new);
     let completed_payload = serde_json::json!({
         "type":"response.completed",
         "response": Value::Object(response_payload.clone())
     });
-    let done_payload = serde_json::json!({"type":"response.done","response":response_value});
+    let done_payload = serde_json::json!({"type":"response.done","response":Value::Object(response_payload.clone())});
     let mut frames: Vec<String> = Vec::new();
-    if let Some(required_action) = effective_required_action.as_ref().and_then(Value::as_object) {
+    if let Some(required_action) = effective_required_action
+        .as_ref()
+        .and_then(Value::as_object)
+    {
         if !seen_required_action {
             let required_payload = serde_json::json!({
                 "type":"response.required_action",
@@ -1579,9 +1592,9 @@ pub fn build_responses_terminal_sse_frames_from_probe_json(
         return serde_json::to_string(&frames).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
     if effective_status == "completed" || !probe.is_empty() {
-        if let Some(tool_frames) =
-            build_standard_tool_call_sse_frames_from_output_items(probe.get("output").and_then(Value::as_array))
-        {
+        if let Some(tool_frames) = build_standard_tool_call_sse_frames_from_output_items(
+            response_payload.get("output").and_then(Value::as_array),
+        ) {
             frames.push(tool_frames);
         }
         if !seen_completed {
@@ -2061,10 +2074,76 @@ mod tests {
 
         let output = build_chat_response_from_responses_impl(&payload);
         assert_eq!(output["choices"][0]["finish_reason"], "stop");
-        assert_eq!(output["choices"][0]["message"]["content"], "## 完成内容\n- 结论: done");
+        assert_eq!(
+            output["choices"][0]["message"]["content"],
+            "## 完成内容\n- 结论: done"
+        );
         assert_eq!(
             output["__responses_output_text_meta"]["value"],
             "## 完成内容\n- 结论: done"
+        );
+    }
+
+    #[test]
+    fn terminal_sse_frames_strip_rcc_stop_schema_from_reasoning_summary_and_output_text() {
+        let wire = build_responses_terminal_sse_frames_from_probe_json(
+            serde_json::json!({
+                "id": "resp_probe_stop_schema",
+                "status": "completed",
+                "output_text": "## 完成内容\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\"}\n</rcc_stop_schema>",
+                "output": [{
+                    "id": "reasoning_1",
+                    "type": "reasoning",
+                    "status": "completed",
+                    "summary": [{
+                        "type": "summary_text",
+                        "text": "**Thinking** done\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\"}\n</rcc_stop_schema>"
+                    }]
+                }]
+            })
+            .to_string(),
+            "req_probe_stop_schema".to_string(),
+        )
+        .expect("terminal frames");
+
+        assert!(!wire.contains("<rcc_stop_schema>"));
+        assert!(wire.contains("**Thinking** done"));
+        assert!(wire.contains("## 完成内容"));
+    }
+
+    #[test]
+    fn responses_response_utils_build_chat_response_preserves_visible_whitespace_around_tool_markup(
+    ) {
+        let payload = serde_json::json!({
+            "id": "resp_tool_whitespace",
+            "object": "response",
+            "model": "gpt-test",
+            "created": 1700000000,
+            "status": "requires_action",
+            "output_text": "before   text\n\n<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON\n\nafter    text",
+            "required_action": {
+                "submit_tool_outputs": {
+                    "tool_calls": [
+                        {
+                            "call_id": "call_required",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": { "cmd": "pwd" }
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+
+        let output = build_chat_response_from_responses_impl(&payload);
+        assert_eq!(
+            output["choices"][0]["message"]["content"],
+            "before   text\n\nafter    text"
+        );
+        assert_eq!(
+            output["__responses_output_text_meta"]["value"],
+            "before   text\n\nafter    text"
         );
     }
 }

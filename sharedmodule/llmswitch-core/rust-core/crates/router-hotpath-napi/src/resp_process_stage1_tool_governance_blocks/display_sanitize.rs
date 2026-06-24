@@ -2,7 +2,8 @@ use regex::Regex;
 use serde_json::{Map, Value};
 
 use crate::shared_tooling::{
-    split_provider_tool_sentinel_text, strip_provider_tool_sentinel_residue,
+    collapse_extra_newlines_and_trim, split_provider_tool_sentinel_text,
+    strip_provider_tool_sentinel_residue,
 };
 
 pub(crate) fn text_contains_explicit_tool_markup(text: &str) -> bool {
@@ -344,7 +345,7 @@ pub(crate) fn strip_tool_call_marker_payload(raw: &str) -> String {
         text = text[..start].to_string();
     }
     text = strip_known_non_tool_xml_tags_preserve_text(text.as_str());
-    text.trim().to_string()
+    collapse_extra_newlines_and_trim(text.as_str())
 }
 
 pub(crate) fn strip_orphan_tool_markup_lines(raw: &str) -> String {
@@ -368,7 +369,7 @@ pub(crate) fn strip_orphan_tool_markup_lines(raw: &str) -> String {
             text = re.replace_all(text.as_str(), "").to_string();
         }
     }
-    text.trim().to_string()
+    collapse_extra_newlines_and_trim(text.as_str())
 }
 
 fn strip_known_non_tool_xml_tags_preserve_text(raw: &str) -> String {
@@ -1277,4 +1278,16 @@ fn strip_supported_xml_named_tool_blocks(raw: &str) -> String {
         out.push_str(&normalized_raw[last..]);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_tool_markup_for_display_text;
+
+    #[test]
+    fn strip_tool_markup_for_display_text_preserves_visible_spaces_and_blank_lines() {
+        let raw = "before   text\n\n<<RCC_TOOL_CALLS_JSON\n{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"pwd\"}}]}\nRCC_TOOL_CALLS_JSON\n\nafter    text";
+        let cleaned = strip_tool_markup_for_display_text(raw);
+        assert_eq!(cleaned, "before   text\n\nafter    text");
+    }
 }

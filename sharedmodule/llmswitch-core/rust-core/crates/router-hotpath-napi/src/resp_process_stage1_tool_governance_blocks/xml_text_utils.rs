@@ -149,19 +149,20 @@ pub(crate) fn resolve_xml_wrapper_tool_name(raw_name: &str) -> Option<String> {
 }
 
 pub(crate) fn normalize_preserved_text_whitespace(raw: &str) -> String {
-    let normalized = raw.replace("\r\n", "\n");
+    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
     let mut lines: Vec<String> = Vec::new();
     let mut previous_blank = false;
     for line in normalized.lines() {
-        let collapsed = line.split_whitespace().collect::<Vec<&str>>().join(" ");
-        if collapsed.is_empty() {
+        let horizontal_normalized = line.replace('\t', " ");
+        let trimmed = horizontal_normalized.trim_matches(' ').to_string();
+        if trimmed.is_empty() {
             if !previous_blank && !lines.is_empty() {
                 lines.push(String::new());
             }
             previous_blank = true;
             continue;
         }
-        lines.push(collapsed);
+        lines.push(trimmed);
         previous_blank = false;
     }
     lines.join("\n").trim().to_string()
@@ -309,4 +310,16 @@ pub(crate) fn resolve_xml_named_child_arg_key(
         }
     }
     canonicalize_xml_named_tool_arg_key(raw_key, tool_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_preserved_text_whitespace;
+
+    #[test]
+    fn normalize_preserved_text_whitespace_keeps_visible_inner_spaces_and_blank_lines() {
+        let normalized =
+            normalize_preserved_text_whitespace("  alpha   beta  \r\n\r\n  gamma    delta  ");
+        assert_eq!(normalized, "alpha   beta\n\ngamma    delta");
+    }
 }
