@@ -101,7 +101,7 @@
 | --- | --- | --- | --- | --- | --- |
 | M1 | `hub.req_inbound_standardization` | `req-01 -> req-02` | P1 | 半收口 | req 标准化/entry capture 语义 Rust-only |
 | M2 | `hub.req_chatprocess_governance` | `req-02 -> req-03` 前 | P0 | 高价值 | request tool governance Rust-only |
-| M3 | `hub.route_selection_bridge` | `req-03` | P0 | binding pending | route selection caller/callee/typed split 锁定 |
+| M3 | `hub.route_selection_bridge` | `req-03` | P0 | anchored | route selection caller/callee/typed contract 锁定 |
 | M4 | `hub.req_outbound_provider_semantic` | `req-04 -> req-05` | P0 | partial | req outbound semantic + compat Rust-only |
 | M5 | `hub.resp_inbound_parsing` | `resp-01` | P1 | 部分 Rust | provider raw/parse/materialize Rust-only |
 | M6 | `hub.resp_chatprocess_governance` | `resp-02 -> resp-03` 前 | P0 | 高价值 | response governance/servertool/stopless Rust-only |
@@ -228,6 +228,33 @@
 #### 目标
 
 消除 `req-03` 的 `binding pending`。锁定 `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` 的 runtime caller/callee、typed contract、owner feature。
+
+#### 2026-06-24 当前状态
+
+- `req-03` 已从 `binding pending` 收口为 anchored：
+  - caller: `execute`
+  - callee: `run_vr_route_04_selected_target_entrypoint`
+  - owner feature: `hub.route_selection_bridge`
+- Rust typed contract 已显式落盘：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs`
+- route-control 真源收紧证据：
+  - `runtime_control.preselectedRoute` 优先于 legacy `__rt.preselectedRoute`
+  - legacy `__rt.retryProviderKey` 在无 `runtime_control` 时不再复活
+  - relay continuation scope 的 `routeHint/providerKey/sessionId/conversationId` 仍可在进入 Hub 前保持 queryable
+- 已实跑验证：
+  - `cargo test -p router-hotpath-napi request_typed_entrypoints_preserve_payload_for_live_path_wiring --lib -- --nocapture`
+  - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts`
+  - `tests/sharedmodule/hub-pipeline-router-metadata.spec.ts`
+  - `tests/server/http-server/executor-metadata.spec.ts` 两条 resumed relay/runtime-control focused case
+  - `npm run verify:function-map-compile-gate`
+  - `npm run verify:architecture-mainline-call-map`
+  - `npm run verify:architecture-mainline-binding-pending-gate`
+  - `npm run verify:servertool-rust-only`
+  - `npm run build:base`
+- 当前剩余 debt：
+  - `req-04` 仍是 `binding pending`，属于 M4，不得把本轮 M3 绿灯外推成整个 request path 已闭环。
+  - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts` 当前存在 `.js` 运行面导出不一致环境阻塞；本轮改用 `executor-metadata` request-route integration case 作为等价 request-path 证据。
 
 #### Owner 目标
 

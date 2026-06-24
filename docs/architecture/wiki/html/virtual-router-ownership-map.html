@@ -175,6 +175,7 @@
           <li><code>tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts</code></li>
           <li><code>tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts</code></li>
           <li><code>tests/servertool/virtual-router-servertool-routing.spec.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs</code></li>
         </ul>
         <p>Required gates:</p>
         <ul>
@@ -185,6 +186,7 @@
         <p>Notes:</p>
         <ul>
           <li>VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.</li>
+          <li>Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns.</li>
         </ul>
         <h2>vr.route_retry_pin_surface</h2>
         <p>Summary: Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</p>

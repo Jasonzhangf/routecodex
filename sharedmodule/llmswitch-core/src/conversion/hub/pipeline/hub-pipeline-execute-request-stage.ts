@@ -39,10 +39,26 @@ function readRuntimeControlPayload(metadata: Record<string, unknown>): Record<st
     : {};
 }
 
-function stripRouteControlProjection(runtimeControl: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...runtimeControl };
-  delete out.preselectedRoute;
-  delete out.retryProviderKey;
+function projectLegacyRuntimeControlWhitelist(runtimeControl: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (runtimeControl.serverToolFollowup !== undefined) {
+    out.serverToolFollowup = runtimeControl.serverToolFollowup;
+  }
+  if (typeof runtimeControl.serverToolFollowupSource === 'string' && runtimeControl.serverToolFollowupSource.trim()) {
+    out.serverToolFollowupSource = runtimeControl.serverToolFollowupSource.trim();
+  }
+  if (runtimeControl.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)) {
+    out.stopless = runtimeControl.stopless;
+  }
+  if (typeof runtimeControl.stoplessGoalStatus === 'string' && runtimeControl.stoplessGoalStatus.trim()) {
+    out.stoplessGoalStatus = runtimeControl.stoplessGoalStatus.trim();
+  }
+  if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
+    out.stopMessageEnabled = runtimeControl.stopMessageEnabled;
+  }
+  if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
+    out.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
+  }
   return out;
 }
 
@@ -226,8 +242,8 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     ...runtimeControlPayload,
     ...metadataCenterRuntimeControl,
   };
-  const legacyRuntimeProjectionWithoutRouteControl =
-    stripRouteControlProjection(legacyRuntimeProjection);
+  const legacyRuntimeProjectionWhitelist =
+    projectLegacyRuntimeControlWhitelist(legacyRuntimeProjection);
   const metadataBase = {
     ...normalized.metadata,
     ...(typeof requestTruthPayload.sessionId === 'string' && requestTruthPayload.sessionId.trim()
@@ -252,7 +268,6 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     continuationContext: continuationContextPayload,
   });
   const route = mergedRuntimeControl.preselectedRoute
-    ?? legacyRuntimeProjection.preselectedRoute
     ?? routerEngine.route(normalized.payload as never, routerMetadata as never);
   const metadata = {
     ...metadataBase,
@@ -262,8 +277,8 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     },
     ...nativeTopLevelRuntimeControl,
   } as Record<string, unknown>;
-  if (Object.keys(legacyRuntimeProjectionWithoutRouteControl).length > 0) {
-    metadata.__rt = legacyRuntimeProjectionWithoutRouteControl;
+  if (Object.keys(legacyRuntimeProjectionWhitelist).length > 0) {
+    metadata.__rt = legacyRuntimeProjectionWhitelist;
   } else {
     delete metadata.__rt;
   }

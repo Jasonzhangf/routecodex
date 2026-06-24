@@ -36,7 +36,7 @@ flowchart LR
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
   class ServerReqInbound01ClientRaw anchored;
   class HubReqInbound02Standardized anchored;
-  class HubReqChatProcess03Governed pending;
+  class HubReqChatProcess03Governed anchored;
   class VrRoute04SelectedTarget pending;
   class HubReqOutbound05ProviderSemantic pending;
   class ProviderReqOutbound06WirePayload partial;
@@ -47,11 +47,11 @@ flowchart LR
 | req-00 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `prepareResponsesHandlerEntryForHttp -> planResponsesHandlerEntry` |  | `server.responses_request_handler_bridge_surface`<br/>/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner |
 | req-01 | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | anchored | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
 | req-02 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
-| req-03 | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | binding pending | `binding pending` | `request.route_selection.runtime_vs_typed` | `binding pending` |
+| req-03 | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | anchored | `execute -> run_vr_route_04_selected_target_entrypoint` |  | `hub.route_selection_bridge`<br/>Hub req-03 Rust bridge that seals virtual-router decisions into `VrRoute04SelectedTarget` |
 | req-04 | `VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic` | binding pending | `binding pending` | `request.req_outbound_05.runtime_vs_typed` | `binding pending` |
 | req-05 | `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload` | partial | `runReqOutboundStage3CompatWithNative -> run_req_outbound_stage3_compat_json` |  | `responses.request_compat_normalization`<br/>Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only |
 
 
 ## Other Chains
 
-[response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [runtime.lifecycle.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [runtime.tmux_client_binding.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md)
+[servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [runtime.lifecycle.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [runtime.tmux_client_binding.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md)

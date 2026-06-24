@@ -176,12 +176,15 @@ chains:
       - step_id: req-03
         from_node: HubReqChatProcess03Governed
         to_node: VrRoute04SelectedTarget
-        binding_pending: true
-        split_binding_id: request.route_selection.runtime_vs_typed
-        owner_feature_id: binding pending
+        caller_symbol: execute
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: run_vr_route_04_selected_target_entrypoint
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+        owner_feature_id: hub.route_selection_bridge
         semantic_input: "governed Hub request plus route-selection-ready request metadata"
         semantic_output: "selected virtual-router target contract"
-        note: "Do not fake one edge here: runtime route select/apply and typed VrRoute04 contract builder are split. See split binding request.route_selection.runtime_vs_typed."
+        status: anchored
+        note: "Runtime route selection still resolves the route decision earlier in `HubPipelineEngine::select_route`, but `req-03` is now anchored at the Rust typed entrypoint that seals the decision into `VrRoute04SelectedTarget`. M4 still owns applying the selected target to outbound request semantics."
       - step_id: req-04
         from_node: VrRoute04SelectedTarget
         to_node: HubReqOutbound05ProviderSemantic
@@ -602,7 +605,7 @@ chains:
         status: anchored
 
   - chain_id: stopless.session.mainline
-    summary: "Stopless runtime-metadata continuation: stop response is evaluated, projected as client exec_command, executed by CLI, then restored from current request tool_output/runtime metadata into the next model turn."
+    summary: "Stopless three-round contract: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop->CLI rewriting."
     entry_contract:
       node: StoplessResp01StopDetected
       owner_doc: docs/architecture/wiki/stopless-session-mainline-source.md
@@ -618,6 +621,7 @@ chains:
         semantic_input: "HubRespChatProcess03Governed stop response + adapterContext carrying requestId/sessionId/entryEndpoint/routeName"
         semantic_output: "stop schema gate decision and stopless loop state candidate"
         status: anchored
+        note: "Response-side stage. Same-round provider request must already have injected stop guidance plus internal reasoningStop."
       - step_id: stl-02
         from_node: StoplessResp02SchemaGateEvaluated
         to_node: StoplessState03RuntimeSnapshotResolved
@@ -651,6 +655,7 @@ chains:
         semantic_input: "exec_command shell string with status-only input and repeat flags"
         semantic_output: "servertool CLI stdout JSON containing continuationPrompt, schemaGuidance, structured schemaFeedback, repeatCount, and maxRepeats"
         status: anchored
+        note: "Canonical continuation save belongs before client delivery, after Round-1 response normalization."
       - step_id: stl-05
         from_node: StoplessCli06ClientExecuted
         to_node: StoplessReq07ContinuationRestored
@@ -662,6 +667,7 @@ chains:
         semantic_input: "next request tool_outputs / runtime metadata"
         semantic_output: "stopless runtime snapshot restored into request turn without file persistence"
         status: anchored
+        note: "Round-2 starts only after continuation restore has completed."
       - step_id: stl-06
         from_node: StoplessReq07ContinuationRestored
         to_node: StoplessReq08GuidanceRewritten
@@ -695,6 +701,7 @@ chains:
         semantic_input: "stopless followup metadata/current-turn signal plus rebound schema contract"
         semantic_output: "thinking route; historical tools route hint must not dominate stopless turn"
         status: anchored
+        note: "Round-3 guard: after 3 consecutive no_schema rounds, do not rewrite another finish_reason=stop into CLI projection."
 
   - chain_id: metadata.center.mainline
     summary: "request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release."
@@ -899,20 +906,6 @@ shared_multi_reference_functions:
       - error.mainline
     note: "Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract."
 split_bindings:
-  - binding_id: request.route_selection.runtime_vs_typed
-    binding_status: confirmed
-    from_node: HubReqChatProcess03Governed
-    to_node: VrRoute04SelectedTarget
-    owner_feature_id: vr.route_selection
-    runtime_symbols:
-      - symbol: select_route
-        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
-      - symbol: apply_vr_route_04_selection
-        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/vr_route_04_selection_boundary.rs
-    typed_symbols:
-      - symbol: build_vr_route_04_from_hub_req_chatprocess_03
-        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs
-    note: "Runtime owner selects/applies target inside HubPipeline engine, while typed contract owner separately proves VrRoute04 payload boundary. These must not be collapsed into one fake caller/callee edge."
   - binding_id: request.req_outbound_05.runtime_vs_typed
     binding_status: confirmed
     from_node: VrRoute04SelectedTarget

@@ -135,6 +135,75 @@
           <li><code>partial</code> = edge is bound, but only part of the transition is concretely anchored</li>
           <li><code>binding pending</code> = edge intentionally left unresolved until code audit pins the real bridge</li>
         </ul>
+        <h2>servertool.hook_skeleton.mainline</h2>
+        <p>Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks.</p>
+        <p>Entry contract: <code>HubRespChatProcess03Governed</code> via <code>docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md</code></p>
+        <pre class="mermaid">flowchart LR
+          HubReqChatProcess03Governed[&quot;HubReqChatProcess03Governed&quot;]
+          ServertoolReqHook04RequestFinalized[&quot;ServertoolReqHook04RequestFinalized&quot;]
+          ServertoolReqHook03ToolInjected[&quot;ServertoolReqHook03ToolInjected&quot;]
+          ServertoolReqHook02TextRewritten[&quot;ServertoolReqHook02TextRewritten&quot;]
+          ServertoolReqHook01ResultParsed[&quot;ServertoolReqHook01ResultParsed&quot;]
+          HubReqInbound02Standardized[&quot;HubReqInbound02Standardized&quot;]
+          ServertoolCli04ClientExecuted[&quot;ServertoolCli04ClientExecuted&quot;]
+          HubRespOutbound04ClientSemantic[&quot;HubRespOutbound04ClientSemantic&quot;]
+          ServertoolRespHook06ProjectionFinalized[&quot;ServertoolRespHook06ProjectionFinalized&quot;]
+          ServertoolRespHook05ReenterDispatched[&quot;ServertoolRespHook05ReenterDispatched&quot;]
+          ServertoolRespHook04FollowupPlanned[&quot;ServertoolRespHook04FollowupPlanned&quot;]
+          ServertoolRespHook03HookResponseInjected[&quot;ServertoolRespHook03HookResponseInjected&quot;]
+          ServertoolRespHook02SchemaValidated[&quot;ServertoolRespHook02SchemaValidated&quot;]
+          ServertoolRespHook01Intercepted[&quot;ServertoolRespHook01Intercepted&quot;]
+          HubRespChatProcess03Governed[&quot;HubRespChatProcess03Governed&quot;]
+          HubRespChatProcess03Governed --&gt;|sth-resp-01| ServertoolRespHook01Intercepted
+          ServertoolRespHook01Intercepted --&gt;|sth-resp-02| ServertoolRespHook02SchemaValidated
+          ServertoolRespHook02SchemaValidated --&gt;|sth-resp-03| ServertoolRespHook03HookResponseInjected
+          ServertoolRespHook03HookResponseInjected --&gt;|sth-resp-04| ServertoolRespHook04FollowupPlanned
+          ServertoolRespHook04FollowupPlanned --&gt;|sth-resp-05| ServertoolRespHook05ReenterDispatched
+          ServertoolRespHook05ReenterDispatched --&gt;|sth-resp-06| ServertoolRespHook06ProjectionFinalized
+          ServertoolRespHook06ProjectionFinalized --&gt;|sth-resp-07| HubRespOutbound04ClientSemantic
+          ServertoolRespHook03HookResponseInjected --&gt;|sth-cli-01| ServertoolCli04ClientExecuted
+          HubReqInbound02Standardized --&gt;|sth-req-01| ServertoolReqHook01ResultParsed
+          ServertoolReqHook01ResultParsed --&gt;|sth-req-02| ServertoolReqHook02TextRewritten
+          ServertoolReqHook02TextRewritten --&gt;|sth-req-03| ServertoolReqHook03ToolInjected
+          ServertoolReqHook03ToolInjected --&gt;|sth-req-04| ServertoolReqHook04RequestFinalized
+          ServertoolReqHook04RequestFinalized --&gt;|sth-req-05| HubReqChatProcess03Governed
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class HubRespChatProcess03Governed pending;
+          class ServertoolRespHook01Intercepted pending;
+          class ServertoolRespHook02SchemaValidated pending;
+          class ServertoolRespHook03HookResponseInjected pending;
+          class ServertoolRespHook04FollowupPlanned pending;
+          class ServertoolRespHook05ReenterDispatched pending;
+          class ServertoolRespHook06ProjectionFinalized pending;
+          class HubRespOutbound04ClientSemantic pending;
+          class ServertoolCli04ClientExecuted pending;
+          class HubReqInbound02Standardized pending;
+          class ServertoolReqHook01ResultParsed pending;
+          class ServertoolReqHook02TextRewritten pending;
+          class ServertoolReqHook03ToolInjected pending;
+          class ServertoolReqHook04RequestFinalized pending;
+          class HubReqChatProcess03Governed anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>sth-resp-01</td><td><code>HubRespChatProcess03Governed -&gt; ServertoolRespHook01Intercepted</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-resp-02</td><td><code>ServertoolRespHook01Intercepted -&gt; ServertoolRespHook02SchemaValidated</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-resp-03</td><td><code>ServertoolRespHook02SchemaValidated -&gt; ServertoolRespHook03HookResponseInjected</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-resp-04</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolRespHook04FollowupPlanned</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-resp-05</td><td><code>ServertoolRespHook04FollowupPlanned -&gt; ServertoolRespHook05ReenterDispatched</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-resp-06</td><td><code>ServertoolRespHook05ReenterDispatched -&gt; ServertoolRespHook06ProjectionFinalized</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-resp-07</td><td><code>ServertoolRespHook06ProjectionFinalized -&gt; HubRespOutbound04ClientSemantic</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-cli-01</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolCli04ClientExecuted</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-req-01</td><td><code>HubReqInbound02Standardized -&gt; ServertoolReqHook01ResultParsed</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-req-02</td><td><code>ServertoolReqHook01ResultParsed -&gt; ServertoolReqHook02TextRewritten</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-req-03</td><td><code>ServertoolReqHook02TextRewritten -&gt; ServertoolReqHook03ToolInjected</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-req-04</td><td><code>ServertoolReqHook03ToolInjected -&gt; ServertoolReqHook04RequestFinalized</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-req-05</td><td><code>ServertoolReqHook04RequestFinalized -&gt; HubReqChatProcess03Governed</code></td><td>anchored</td><td><code>apply_hub_req_chatprocess_03_tool_governance -&gt; run_hub_req_chatprocess_03_governed_entrypoint</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>
+        </tbody>
+        </table>
         <h2>request.mainline</h2>
         <p>HTTP request enters host, standardizes in Hub, routes via VR, exits through provider wire build.</p>
         <p>Entry contract: <code>ServerReqInbound01ClientRaw</code> via <code>docs/design/pipeline-type-topology-and-module-boundaries.md</code></p>
@@ -156,7 +225,7 @@
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
           class ServerReqInbound01ClientRaw anchored;
           class HubReqInbound02Standardized anchored;
-          class HubReqChatProcess03Governed pending;
+          class HubReqChatProcess03Governed anchored;
           class VrRoute04SelectedTarget pending;
           class HubReqOutbound05ProviderSemantic pending;
           class ProviderReqOutbound06WirePayload partial;</pre>
@@ -167,7 +236,7 @@
         <tr><td>req-00</td><td><code>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized</code></td><td>anchored</td><td><code>prepareResponsesHandlerEntryForHttp -&gt; planResponsesHandlerEntry</code></td><td></td><td><code>server.responses_request_handler_bridge_surface</code>&lt;br/&gt;/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner</td></tr>
         <tr><td>req-01</td><td><code>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized</code></td><td>anchored</td><td><code>buildResponsesRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshotJson</code></td><td></td><td><code>hub.req_inbound_responses_context_capture</code>&lt;br/&gt;Rust req_inbound owner captures and normalizes relay <code>/v1/responses</code> request context before any TS bridge reuse</td></tr>
         <tr><td>req-02</td><td><code>HubReqInbound02Standardized -&gt; HubReqChatProcess03Governed</code></td><td>anchored</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.req_inbound_responses_context_capture</code>&lt;br/&gt;Rust req_inbound owner captures and normalizes relay <code>/v1/responses</code> request context before any TS bridge reuse</td></tr>
-        <tr><td>req-03</td><td><code>HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget</code></td><td>binding pending</td><td><code>binding pending</code></td><td><code>request.route_selection.runtime_vs_typed</code></td><td><code>binding pending</code></td></tr>
+        <tr><td>req-03</td><td><code>HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>execute -&gt; run_vr_route_04_selected_target_entrypoint</code></td><td></td><td><code>hub.route_selection_bridge</code>&lt;br/&gt;Hub req-03 Rust bridge that seals virtual-router decisions into <code>VrRoute04SelectedTarget</code></td></tr>
         <tr><td>req-04</td><td><code>VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic</code></td><td>binding pending</td><td><code>binding pending</code></td><td><code>request.req_outbound_05.runtime_vs_typed</code></td><td><code>binding pending</code></td></tr>
         <tr><td>req-05</td><td><code>HubReqOutbound05ProviderSemantic -&gt; ProviderReqOutbound06WirePayload</code></td><td>partial</td><td><code>runReqOutboundStage3CompatWithNative -&gt; run_req_outbound_stage3_compat_json</code></td><td></td><td><code>responses.request_compat_normalization</code>&lt;br/&gt;Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only</td></tr>
         </tbody>
@@ -201,6 +270,68 @@
         <tr><td>resp-02</td><td><code>HubRespInbound02Parsed -&gt; HubRespChatProcess03Governed</code></td><td>anchored</td><td><code>run_hub_resp_chatprocess_03_governed_entrypoint -&gt; build_hub_resp_chatprocess_03_from_hub_resp_inbound_02</code></td><td></td><td><code>hub.response_responses_chat_projection</code>&lt;br/&gt;OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers</td></tr>
         <tr><td>resp-03</td><td><code>HubRespChatProcess03Governed -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; projectResponsesClientPayloadForClientNative</code></td><td></td><td><code>hub.response_responses_client_projection</code>&lt;br/&gt;OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore</td></tr>
         <tr><td>resp-04</td><td><code>HubRespOutbound04ClientSemantic -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>sendPipelineResponse -&gt; sendSsePipelineResponse</code></td><td></td><td><code>server.responses_response_handler_bridge_surface</code>&lt;br/&gt;/v1/responses response lifecycle bridge uses one opaque continuation/conversation facade only; protocol semantics stay in Hub Pipeline/native owner</td></tr>
+        </tbody>
+        </table>
+        <h2>responses.continuation.mainline</h2>
+        <p>Responses continuation mainline is a Chat Process boundary block: request-side Responses restore runs after HubReqInbound02Standardized and before HubReqChatProcess03Governed; response-side save runs after HubRespChatProcess03Governed and before HubRespOutbound04ClientSemantic; SSE remains transport-only after semantic finalization.</p>
+        <p>Entry contract: <code>ChatProcReqContinuation01EntryEvidence</code> via <code>docs/architecture/wiki/responses-continuation-mainline-source.md</code></p>
+        <pre class="mermaid">flowchart LR
+          ChatProcRespContinuation08Released[&quot;ChatProcRespContinuation08Released&quot;]
+          ChatProcRespContinuation07CanonicalSaved[&quot;ChatProcRespContinuation07CanonicalSaved&quot;]
+          ChatProcRespContinuation06ResponseGoverned[&quot;ChatProcRespContinuation06ResponseGoverned&quot;]
+          ChatProcReqContinuation05Governed[&quot;ChatProcReqContinuation05Governed&quot;]
+          ChatProcReqContinuation04HookRestored[&quot;ChatProcReqContinuation04HookRestored&quot;]
+          ChatProcReqContinuation03CanonicalRestored[&quot;ChatProcReqContinuation03CanonicalRestored&quot;]
+          ChatProcReqContinuation02OwnerResolved[&quot;ChatProcReqContinuation02OwnerResolved&quot;]
+          ChatProcReqContinuation01EntryEvidence[&quot;ChatProcReqContinuation01EntryEvidence&quot;]
+          ChatProcReqContinuation01EntryEvidence -.-&gt;|rct-01| ChatProcReqContinuation02OwnerResolved
+          ChatProcReqContinuation02OwnerResolved -.-&gt;|rct-02| ChatProcReqContinuation03CanonicalRestored
+          ChatProcReqContinuation03CanonicalRestored --&gt;|rct-03| ChatProcReqContinuation04HookRestored
+          ChatProcReqContinuation04HookRestored -.-&gt;|rct-04| ChatProcReqContinuation05Governed
+          ChatProcReqContinuation05Governed -.-&gt;|rct-05| ChatProcRespContinuation06ResponseGoverned
+          ChatProcRespContinuation06ResponseGoverned -.-&gt;|rct-06| ChatProcRespContinuation07CanonicalSaved
+          ChatProcRespContinuation07CanonicalSaved --&gt;|rct-07| ChatProcRespContinuation08Released
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class ChatProcReqContinuation01EntryEvidence partial;
+          class ChatProcReqContinuation02OwnerResolved partial;
+          class ChatProcReqContinuation03CanonicalRestored pending;
+          class ChatProcReqContinuation04HookRestored pending;
+          class ChatProcReqContinuation05Governed partial;
+          class ChatProcRespContinuation06ResponseGoverned partial;
+          class ChatProcRespContinuation07CanonicalSaved partial;
+          class ChatProcRespContinuation08Released anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>rct-01</td><td><code>ChatProcReqContinuation01EntryEvidence -&gt; ChatProcReqContinuation02OwnerResolved</code></td><td>partial</td><td><code>prepareResponsesHandlerEntryForHttp -&gt; planResponsesHandlerEntry</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-02</td><td><code>ChatProcReqContinuation02OwnerResolved -&gt; ChatProcReqContinuation03CanonicalRestored</code></td><td>partial</td><td><code>buildResponsesRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshotJson</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-03</td><td><code>ChatProcReqContinuation03CanonicalRestored -&gt; ChatProcReqContinuation04HookRestored</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-04</td><td><code>ChatProcReqContinuation04HookRestored -&gt; ChatProcReqContinuation05Governed</code></td><td>partial</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-05</td><td><code>ChatProcReqContinuation05Governed -&gt; ChatProcRespContinuation06ResponseGoverned</code></td><td>partial</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; projectResponsesClientPayloadForClientNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-06</td><td><code>ChatProcRespContinuation06ResponseGoverned -&gt; ChatProcRespContinuation07CanonicalSaved</code></td><td>partial</td><td><code>persistResponsesConversationLifecycleForHttp -&gt; recordResponsesResponseForHttp</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-07</td><td><code>ChatProcRespContinuation07CanonicalSaved -&gt; ChatProcRespContinuation08Released</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; releaseMetadataCenterForHttpResponse</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        </tbody>
+        </table>
+        <h2>debug.unified_surface.mainline</h2>
+        <p>Debug unified surface governance shell for diag artifacts, snapshots, logger rendering, harness/replay, and policy observation.</p>
+        <p>Entry contract: <code>DebugObs01SurfaceRequested</code> via <code>docs/architecture/wiki/debug-unified-surface-mainline-source.md</code></p>
+        <pre class="mermaid">flowchart LR
+          DebugObs07ReplayedOrInspected[&quot;DebugObs07ReplayedOrInspected&quot;]
+          DebugObs01SurfaceRequested[&quot;DebugObs01SurfaceRequested&quot;]
+          DebugObs01SurfaceRequested --&gt;|dbg-01| DebugObs07ReplayedOrInspected
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class DebugObs01SurfaceRequested anchored;
+          class DebugObs07ReplayedOrInspected anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>dbg-01</td><td><code>DebugObs01SurfaceRequested -&gt; DebugObs07ReplayedOrInspected</code></td><td>anchored</td><td><code>createDebugToolkit -&gt; createDebugToolkit</code></td><td></td><td><code>debug.unified_surface</code>&lt;br/&gt;debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy</td></tr>
         </tbody>
         </table>
         <h2>error.mainline</h2>
@@ -325,7 +456,7 @@
         </tbody>
         </table>
         <h2>stopless.session.mainline</h2>
-        <p>Stopless runtime-metadata continuation: stop response is evaluated, projected as client exec_command, executed by CLI, then restored from current request tool_output/runtime metadata into the next model turn.</p>
+        <p>Stopless three-round contract: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop-&gt;CLI rewriting.</p>
         <p>Entry contract: <code>StoplessResp01StopDetected</code> via <code>docs/architecture/wiki/stopless-session-mainline-source.md</code></p>
         <pre class="mermaid">flowchart LR
           VrRoute04SelectedTarget[&quot;VrRoute04SelectedTarget&quot;]
@@ -430,6 +561,7 @@
         <tr><td>runtime.lifecycle.instance_registry_writer</td><td><code>writeRuntimeInstance</code></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td><td>Atomic write via temp file + rename; authoritative description of the instance, not the pid cache.</td></tr>
         <tr><td>runtime.lifecycle.instance_registry_status</td><td><code>updateRuntimeInstanceStatus</code></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td><td>Promotes instance.json status; caller must already have a record via writeRuntimeInstance.</td></tr>
         <tr><td>runtime.tmux_client_binding_lookup</td><td><code>resolveBoundTmuxSession</code></td><td><code>runtime.tmux_client_binding</code>&lt;br/&gt;tmux/client attachment registry persists daemon records plus conversation-&gt;tmux bindings under session-bindings.json</td><td>Conversation-&gt;tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership.</td></tr>
+        <tr><td>debug.surface_registry</td><td><code>createDebugToolkit</code></td><td><code>debug.unified_surface</code>&lt;br/&gt;debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy</td><td>Canonical debug owner entrypoint. createDebugToolkit is the unified facade constructor for debug diag/snapshot/logger/harness replay surfaces.</td></tr>
         <tr><td>error.err_04_router_policy_applied</td><td><code>ErrorErr04RouterPolicyApplied</code></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td><td>Router policy applied between ErrorErr03 and ErrorErr05; type is registered in topology doc table.</td></tr>
         <tr><td>error.err_04_executor_envelope</td><td><code>RequestExecutorErrorErr04RouterPolicyEnvelope</code></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td><td>Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract.</td></tr>
         </tbody>
@@ -440,7 +572,6 @@
         <thead><tr><th>binding_id</th><th>transition</th><th>owner</th><th>runtime symbols</th><th>typed symbols</th><th>note</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>request.route_selection.runtime_vs_typed</td><td><code>HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget</code></td><td><code>vr.route_selection</code>&lt;br/&gt;virtual router route classification and selected target truth</td><td><code>select_route</code>&lt;br/&gt;<code>apply_vr_route_04_selection</code></td><td><code>build_vr_route_04_from_hub_req_chatprocess_03</code></td><td>Runtime owner selects/applies target inside HubPipeline engine, while typed contract owner separately proves VrRoute04 payload boundary. These must not be collapsed into one fake caller/callee edge.</td></tr>
         <tr><td>request.req_outbound_05.runtime_vs_typed</td><td><code>VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic</code></td><td></td><td><code>run_hub_req_outbound_05_provider_semantic_entrypoint</code></td><td><code>run_hub_req_outbound_05_provider_semantic_entrypoint</code>&lt;br/&gt;<code>build_hub_req_outbound_05_from_hub_req_chatprocess_03</code></td><td>Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -&gt; outbound caller/callee edge.</td></tr>
         </tbody>
         </table>

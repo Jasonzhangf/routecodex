@@ -156,7 +156,7 @@
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
           class ServerReqInbound01ClientRaw anchored;
           class HubReqInbound02Standardized anchored;
-          class HubReqChatProcess03Governed pending;
+          class HubReqChatProcess03Governed anchored;
           class VrRoute04SelectedTarget pending;
           class HubReqOutbound05ProviderSemantic pending;
           class ProviderReqOutbound06WirePayload partial;</pre>
@@ -167,13 +167,13 @@
         <tr><td>req-00</td><td><code>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized</code></td><td>anchored</td><td><code>prepareResponsesHandlerEntryForHttp -&gt; planResponsesHandlerEntry</code></td><td></td><td><code>server.responses_request_handler_bridge_surface</code>&lt;br/&gt;/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner</td></tr>
         <tr><td>req-01</td><td><code>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized</code></td><td>anchored</td><td><code>buildResponsesRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshotJson</code></td><td></td><td><code>hub.req_inbound_responses_context_capture</code>&lt;br/&gt;Rust req_inbound owner captures and normalizes relay <code>/v1/responses</code> request context before any TS bridge reuse</td></tr>
         <tr><td>req-02</td><td><code>HubReqInbound02Standardized -&gt; HubReqChatProcess03Governed</code></td><td>anchored</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.req_inbound_responses_context_capture</code>&lt;br/&gt;Rust req_inbound owner captures and normalizes relay <code>/v1/responses</code> request context before any TS bridge reuse</td></tr>
-        <tr><td>req-03</td><td><code>HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget</code></td><td>binding pending</td><td><code>binding pending</code></td><td><code>request.route_selection.runtime_vs_typed</code></td><td><code>binding pending</code></td></tr>
+        <tr><td>req-03</td><td><code>HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>execute -&gt; run_vr_route_04_selected_target_entrypoint</code></td><td></td><td><code>hub.route_selection_bridge</code>&lt;br/&gt;Hub req-03 Rust bridge that seals virtual-router decisions into <code>VrRoute04SelectedTarget</code></td></tr>
         <tr><td>req-04</td><td><code>VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic</code></td><td>binding pending</td><td><code>binding pending</code></td><td><code>request.req_outbound_05.runtime_vs_typed</code></td><td><code>binding pending</code></td></tr>
         <tr><td>req-05</td><td><code>HubReqOutbound05ProviderSemantic -&gt; ProviderReqOutbound06WirePayload</code></td><td>partial</td><td><code>runReqOutboundStage3CompatWithNative -&gt; run_req_outbound_stage3_compat_json</code></td><td></td><td><code>responses.request_compat_normalization</code>&lt;br/&gt;Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only</td></tr>
         </tbody>
         </table>
         <h2>Other Chains</h2>
-        <p>[response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [runtime.lifecycle.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [runtime.tmux_client_binding.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md)</p>
+        <p>[servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [runtime.lifecycle.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [runtime.tmux_client_binding.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md)</p>
       </article>
     </section>
   </main>

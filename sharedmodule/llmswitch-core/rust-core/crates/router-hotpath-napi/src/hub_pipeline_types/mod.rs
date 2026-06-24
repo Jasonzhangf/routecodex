@@ -46,6 +46,7 @@ pub(crate) use provider_req_outbound_06_wire_payload::{
 pub(crate) use request_typed_entrypoints::{
     run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
     run_hub_req_outbound_05_provider_semantic_entrypoint,
+    run_vr_route_04_selected_target_entrypoint,
 };
 pub(crate) use response_typed_entrypoints::{
     run_hub_resp_chatprocess_03_governed_entrypoint, run_hub_resp_inbound_02_parsed_entrypoint,

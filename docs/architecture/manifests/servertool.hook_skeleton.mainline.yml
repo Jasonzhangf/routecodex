@@ -114,7 +114,7 @@ edges:
     to_node: HubReqChatProcess03Governed
     status: anchored
     owner_feature_id: hub.req_chatprocess_governance
-    binding_pending: false
+    binding_pending: null
     split_binding_id: null
 verification:
   required_gates:

@@ -40,7 +40,7 @@ function createNormalized(overrides: Record<string, unknown> = {}) {
     },
     metadata: {
       requestId: 'req_preselected_route',
-      __rt: {
+      runtime_control: {
         preselectedRoute,
       },
     },
@@ -127,6 +127,16 @@ describe('HubPipeline preselected route ownership', () => {
             requestTruth: {},
             providerObservation: {},
             runtimeControl: {
+              preselectedRoute: {
+                value: preselectedRoute,
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'projects MetadataCenter runtime stop-message control into native request metadata',
+                  stage: 'test'
+                },
+                reason: 'test route pin'
+              },
               stopMessageEnabled: {
                 value: true,
                 status: 'active',
@@ -138,10 +148,6 @@ describe('HubPipeline preselected route ownership', () => {
                 reason: 'port stop-message enablement'
               }
             }
-          },
-          __rt: {
-            preselectedRoute,
-            stopMessageEnabled: false,
           },
         },
       }),
@@ -217,6 +223,7 @@ describe('HubPipeline preselected route ownership', () => {
         }),
       }),
     }));
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.__rt).toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.preselectedRoute?.target?.providerKey)
       .toBe('preselected.key1.gpt-5.5');
   });
@@ -233,6 +240,16 @@ describe('HubPipeline preselected route ownership', () => {
             requestTruth: {},
             providerObservation: {},
             runtimeControl: {
+              preselectedRoute: {
+                value: preselectedRoute,
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'projects stopless runtime control into native top-level metadata for relay request owners',
+                  stage: 'test'
+                },
+                reason: 'test route pin'
+              },
               stopless: {
                 value: {
                   sessionId: 'sess-stopless-1',
@@ -256,9 +273,6 @@ describe('HubPipeline preselected route ownership', () => {
                 reason: 'stopless-runtime-state'
               }
             }
-          },
-          __rt: {
-            preselectedRoute,
           },
         },
       }),
@@ -338,6 +352,15 @@ describe('HubPipeline preselected route ownership', () => {
             },
             providerObservation: {},
             runtimeControl: {
+              preselectedRoute: {
+                value: preselectedRoute,
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
+                  stage: 'test'
+                }
+              },
               routeHint: {
                 value: 'search/gateway-priority-5555-priority-search',
                 status: 'active',
@@ -348,9 +371,6 @@ describe('HubPipeline preselected route ownership', () => {
                 }
               }
             }
-          },
-          __rt: {
-            preselectedRoute,
           },
         },
       }),
@@ -381,6 +401,70 @@ describe('HubPipeline preselected route ownership', () => {
     }));
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.retryProviderKey)
       .toBeUndefined();
+  });
+
+  it('does not reuse legacy __rt preselectedRoute when runtime_control route pin is absent', async () => {
+    const routerEngine = { route: jest.fn(() => preselectedRoute) };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+          __rt: {
+            preselectedRoute,
+          },
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(routerEngine.route).toHaveBeenCalledTimes(1);
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.preselectedRoute)
+      .toEqual(preselectedRoute);
+  });
+
+  it('whitelists only stopless followup legacy __rt fields into native request metadata', async () => {
+    const routerEngine = { route: jest.fn(() => preselectedRoute) };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+          __rt: {
+            preselectedRoute,
+            retryProviderKey: 'legacy.retry.key',
+            serverToolFollowup: true,
+            serverToolFollowupSource: 'servertool.stop_message_flow',
+            stopless: {
+              flowId: 'stopless-flow-1',
+              repeatCount: 2,
+            },
+            stoplessGoalStatus: 'active',
+            stopMessageEnabled: true,
+            stopMessageExcludeDirect: true,
+            servertoolResponseOrchestration: true,
+            providerFamily: 'should-not-leak',
+            randomLegacyKey: 'should-not-leak',
+          },
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(routerEngine.route).toHaveBeenCalledTimes(1);
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.__rt).toEqual({
+      serverToolFollowup: true,
+      serverToolFollowupSource: 'servertool.stop_message_flow',
+      stopless: {
+        flowId: 'stopless-flow-1',
+        repeatCount: 2,
+      },
+      stoplessGoalStatus: 'active',
+      stopMessageEnabled: true,
+      stopMessageExcludeDirect: true,
+    });
   });
 
   it('hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata', async () => {

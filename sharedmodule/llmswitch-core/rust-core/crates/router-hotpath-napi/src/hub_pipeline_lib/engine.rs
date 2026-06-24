@@ -1,3 +1,4 @@
+// feature_id: hub.route_selection_bridge
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -6,6 +7,7 @@ use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_reques
 use crate::hub_pipeline_types::{
     run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
     run_hub_req_outbound_05_provider_semantic_entrypoint,
+    run_vr_route_04_selected_target_entrypoint,
     run_hub_resp_chatprocess_03_governed_entrypoint, run_hub_resp_inbound_02_parsed_entrypoint,
     run_hub_resp_outbound_04_client_semantic_entrypoint,
 };
@@ -300,11 +302,24 @@ impl HubPipelineEngine {
             .and_then(|decision| decision.get("routeName"))
             .and_then(Value::as_str)
             .map(str::to_string);
+        let route_decision = route_output.get("decision").cloned().ok_or_else(|| {
+            HubPipelineError::new(
+                "hub_pipeline_missing_route_decision",
+                "Rust HubPipeline req route stage returned no decision",
+            )
+        })?;
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqProcessRouteSelect,
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "targetObject": target.is_object() })),
         ));
+        let vr_route_04 = run_vr_route_04_selected_target_entrypoint(
+            req_chatprocess_03.clone(),
+            route_decision.clone(),
+        )
+        .map_err(|message| {
+            HubPipelineError::new("hub_pipeline_vr_route_04_selected_target_failed", message)
+        })?;
         let mut routed = apply_vr_route_04_selection(RouteSelectionApplyInput {
             request: governed.processed_request,
             normalized_metadata,
@@ -326,9 +341,7 @@ impl HubPipelineEngine {
                 "capturedEntryRequest".to_string(),
                 entry_origin_request.clone(),
             );
-            if let Some(decision) = route_output.get("decision").cloned() {
-                metadata.insert("routingDecision".to_string(), decision);
-            }
+            metadata.insert("routingDecision".to_string(), vr_route_04.into_decision());
             if let Some(diagnostics_value) = route_output.get("diagnostics").cloned() {
                 metadata.insert("routingDiagnostics".to_string(), diagnostics_value);
             }
@@ -757,13 +770,19 @@ fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {
 }
 
 fn read_metadata_value(metadata: &Value, key: &str) -> Option<Value> {
-    metadata
-        .get(key)
-        .cloned()
-        .or_else(|| metadata.get("target").and_then(Value::as_object)?.get(key).cloned())
+    metadata.get(key).cloned().or_else(|| {
+        metadata
+            .get("target")
+            .and_then(Value::as_object)?
+            .get(key)
+            .cloned()
+    })
 }
 
-fn read_trimmed_metadata_string_with_target_fallback(metadata: &Value, key: &str) -> Option<String> {
+fn read_trimmed_metadata_string_with_target_fallback(
+    metadata: &Value,
+    key: &str,
+) -> Option<String> {
     read_metadata_value(metadata, key)
         .and_then(|value| value.as_str().map(str::to_string))
         .map(|value| value.trim().to_string())
@@ -1039,7 +1058,7 @@ fn build_adapter_context(
 
 #[cfg(test)]
 mod tests {
-    use super::build_adapter_context;
+    use super::{build_adapter_context, read_preselected_route};
     use serde_json::json;
 
     #[test]
@@ -1052,7 +1071,8 @@ mod tests {
             }
         });
 
-        let adapter_context = build_adapter_context(&metadata, "anthropic-messages", "req-stopless");
+        let adapter_context =
+            build_adapter_context(&metadata, "anthropic-messages", "req-stopless");
         assert_eq!(
             adapter_context.session_id.as_deref(),
             Some("sess-relay-stopless")
@@ -1062,13 +1082,73 @@ mod tests {
             Some("conv-relay-stopless")
         );
     }
+
+    #[test]
+    fn read_preselected_route_uses_runtime_control_route_pin() {
+        let metadata = json!({
+            "runtime_control": {
+                "preselectedRoute": {
+                    "target": {
+                        "providerKey": "runtime.provider.gpt-5.5"
+                    },
+                    "decision": {
+                        "routeName": "thinking"
+                    },
+                    "diagnostics": {
+                        "source": "runtime_control"
+                    }
+                }
+            },
+            "__rt": {
+                "preselectedRoute": {
+                    "target": {
+                        "providerKey": "legacy.provider.gpt-5.5"
+                    },
+                    "decision": {
+                        "routeName": "legacy"
+                    },
+                    "diagnostics": {
+                        "source": "__rt"
+                    }
+                }
+            }
+        });
+
+        let route = read_preselected_route(&metadata).expect("runtime control route pin");
+        assert_eq!(
+            route.pointer("/target/providerKey").and_then(|value| value.as_str()),
+            Some("runtime.provider.gpt-5.5")
+        );
+        assert_eq!(
+            route.pointer("/diagnostics/source").and_then(|value| value.as_str()),
+            Some("runtime_control")
+        );
+    }
+
+    #[test]
+    fn read_preselected_route_ignores_legacy_rt_route_pin_without_runtime_control() {
+        let metadata = json!({
+            "__rt": {
+                "preselectedRoute": {
+                    "target": {
+                        "providerKey": "legacy.provider.gpt-5.5"
+                    },
+                    "decision": {
+                        "routeName": "legacy"
+                    }
+                }
+            }
+        });
+
+        assert!(read_preselected_route(&metadata).is_none());
+    }
 }
 
 fn read_preselected_route(metadata: &Value) -> Option<Value> {
     let route = metadata
         .get("runtime_control")
         .and_then(|runtime| runtime.get("preselectedRoute"))
-        .or_else(|| metadata.get("__rt").and_then(|runtime| runtime.get("preselectedRoute")))?;
+        ?;
     let target = route.get("target")?;
     let decision = route.get("decision")?;
     if !target.is_object() || !decision.is_object() {

@@ -51,6 +51,7 @@ Required tests:
 - `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
 - `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
 - `tests/servertool/virtual-router-servertool-routing.spec.ts`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs`
 
 Required gates:
 - `npm run verify:vr-no-ts-runtime`
@@ -59,6 +60,7 @@ Required gates:
 
 Notes:
 - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
+- Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns.
 
 ## vr.route_retry_pin_surface
 

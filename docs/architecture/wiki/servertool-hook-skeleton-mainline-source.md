@@ -40,6 +40,70 @@ servertool response decision
 
 Hook skeleton does not execute the client CLI. Hook skeleton governs injection, restore, intercept, schema validation, CLI projection, and terminal finalization.
 
+## Three-Round Contract
+
+The stopless contract is locked as exactly three semantic rounds. Do not merge
+them, and do not move any of them into SSE/transport.
+
+### Round 1 request
+
+Round 1 request owns only stable per-request injection. These two guidance
+surfaces are injected on every stopless-managed request, not supplied by the
+client:
+
+1. stop-summary / `finish_reason=stop` schema guidance in the system-level stop
+   contract;
+2. model-facing internal tool declaration for `reasoningStop`.
+
+This round must ensure the provider-facing request already tells the model both
+legal stop paths:
+
+- if the model wants to stop without a tool call, it must provide stop schema in
+  assistant-visible text/fence form;
+- if the model wants to stop through the internal hook, it must call
+  `reasoningStop(arguments=<stop-schema-json>)`.
+
+`exec_command` remains part of the normal client tool surface and must not
+become mutually exclusive with `reasoningStop`.
+
+### Round 1 response
+
+Round 1 response owns only response-side interception and normalization:
+
+1. intercept `finish_reason=stop`;
+2. intercept `finish_reason=tool_calls + reasoningStop`;
+3. normalize both trigger arms through the same stop schema gate;
+4. if terminal schema passes, allow normal stop projection;
+5. otherwise convert to client-visible CLI (`exec_command(routecodex hook run reasoningStop ...)`);
+6. persist continuation canonical truth only after that normalized client-visible
+   response exists, then return to the client.
+
+The save point belongs here. Saving pre-normalize/pre-projection truth is
+invalid.
+
+### Round 2 request
+
+Round 2 always starts with continuation restore:
+
+1. restore current request context/canonical truth;
+2. restore the Round 1 CLI execution result into model-visible stopless truth;
+3. pair it as internal `reasoningStop` call/result semantics, not raw
+   `exec_command` model history;
+4. rewrite the CLI result into model-visible guidance;
+5. inject the same per-request stop contract and `reasoningStop` tool again for
+   the new round.
+
+Per-request system/tool injection is not Round-1-only behavior. It repeats on
+every stopless-managed request.
+
+### Round 3 guard
+
+Round 3 adds only one extra rule:
+
+- when `no_schema` has reached 3 consecutive stopless rounds, stop the
+  stop-to-CLI rewrite loop and allow terminal stop handling instead of
+  converting another `finish_reason=stop` into endless shell projection.
+
 ## Hook / Continuation Isolation Boundary
 
 The hook skeleton is a request/response processing surface, not a continuation owner. Continuation store/restore (responses `submit_tool_outputs`, `previous_response_id`, relay/materialize, direct vs relay ownership) belongs to the Responses continuation owner defined in `docs/design/responses-continuation-storage-ownership.md` and lives in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs` plus `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`.

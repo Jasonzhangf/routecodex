@@ -12,10 +12,53 @@ Hook placement rule: response-side stopless hooks run after `HubRespChatProcess0
 
 Ordering rule:
 
+- first-round request must inject stop guidance plus internal `reasoningStop`
+  before provider dispatch
 - response-side stopless interception/schema judgment must complete before the response continuation owner persists the canonical response truth
 - next-turn stopless restore must run only after the Responses continuation owner restores/materializes the request
 - stopless 3-round no-schema guard is evaluated on that restored current-turn truth, not on stale pre-hook saved context
 - if save happens before stopless interception/projection, the next restore will miss the injected guidance/shape change and the loop becomes misaligned
+
+## Three-Round Lock
+
+### Round 1 request
+
+This round owns only server-side per-request injection:
+
+1. stop-schema/system guidance for the `finish_reason=stop` path;
+2. internal `reasoningStop` tool declaration for the tool-call stop path;
+3. unchanged normal client tool surface, including `exec_command`.
+
+These are injected by chat-process/servertool owner on every stopless-managed
+request. They are not client input.
+
+### Round 1 response
+
+This round owns only:
+
+1. intercept `finish_reason=stop`;
+2. intercept `finish_reason=tool_calls + reasoningStop`;
+3. normalize both through the same stop schema gate;
+4. if stop is denied, project client-visible CLI;
+5. save canonical continuation context after the normalized client-visible
+   response exists;
+6. then return to client.
+
+### Round 2 request
+
+This round owns only:
+
+1. restore continuation context first;
+2. transform Round-1 CLI execution result into model-visible guidance;
+3. pair it back into internal `reasoningStop` call/result semantics;
+4. inject the same system/tool stop contract again for the new request.
+
+### Round 3 guard
+
+This round adds one extra rule only:
+
+- after 3 consecutive `no_schema` rounds, stop rewriting another
+  `finish_reason=stop` into CLI projection.
 
 ## Stopless Session Mainline
 

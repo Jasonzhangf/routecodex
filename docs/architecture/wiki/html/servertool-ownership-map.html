@@ -142,8 +142,25 @@
         <tr><td><code>hub.servertool_engine_selection</code></td><td>servertool primary auto-hook first pass and rerun selection planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_cli_projection</code></td><td>servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run build:base</code>&lt;br/&gt;<code>npm run verify:architecture-ci</code></td></tr>
         <tr><td><code>hub.servertool_stopless_cli_continuation</code></td><td>stop_message_auto current-turn CLI continuation planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_auto_hook_execution</code></td><td>servertool auto-hook execution decision and trace event planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_auto_hook_queue_progress</code></td><td>servertool auto-hook queue progress planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_engine_preflight_contract</code></td><td>servertool engine preflight early-return planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_engine_runtime_action_contract</code></td><td>servertool engine runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_engine_skip_contract</code></td><td>servertool engine skip planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_execution_branch_contract</code></td><td>servertool execution branch and CLI projection target planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_execution_dispatch_contract</code></td><td>servertool execution dispatch error and followup contract planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_execution_handler_contract</code></td><td>servertool handler contract, materialization, and runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_execution_loop_effect_contract</code></td><td>servertool execution loop effect planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_execution_loop_runtime_action_contract</code></td><td>servertool execution loop runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_execution_outcome_runtime_action_contract</code></td><td>servertool execution outcome runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_execution_state_contract</code></td><td>servertool execution loop state creation and append planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_registry_contract</code></td><td>servertool registry registration, lookup, auto-hook descriptor, and projection planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_response_stage_runtime_action_contract</code></td><td>servertool response-stage runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_server_side_tool_entry_contract</code></td><td>servertool entry preflight action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_stopless_cli_projection_context</code></td><td>stopless CLI projection context planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_flow_presentation</code></td><td>servertool progress log tool-name and highlight presentation policy</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_loop_warning</code></td><td>stop-message loop warning text/count injection and seed payload bridge</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/followup-core/src</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_rust_only_closeout</code></td><td>servertool hook skeleton closeout gate; proves remaining TS orchestration has been reduced to thin shells before physical deletion and anchors the Rust hook skeleton contract</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code></td></tr>
         <tr><td><code>hub.servertool_orchestration_policy</code></td><td>servertool timeout, client-inject, followup error, and adapter provider-key policy</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_backend_route_runtime</code></td><td>servertool backend-route followup endpoint, payload, injection, metadata, error envelope, and bootstrap replay planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         </tbody>
@@ -437,7 +454,6 @@
           <li><code>tests/servertool/stopless-vr-route-hint.spec.ts</code></li>
           <li><code>tests/responses/responses-openai-bridge.spec.ts</code></li>
           <li><code>tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts</code></li>
-          <li><code>tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts</code></li>
           <li><code>tests/sharedmodule/native-required-exports-sse-stream.spec.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs</code></li>
         </ul>
@@ -451,26 +467,702 @@
           <li>servertool-core owns stopless CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline.</li>
           <li>req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts.</li>
           <li>Stopless is a dual-gate stop contract: <code>finish_reason=stop</code> is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard.</li>
+          <li>Response hook gate must cover both <code>finish_reason=stop</code> text/fence schema and <code>finish_reason=tool_calls</code> registered internal servertool calls. For stopless, stop schema fence may arrive as <code>&lt;rcc_stop_schema&gt;...&lt;/rcc_stop_schema&gt;</code> or standalone stop-schema JSON code fence, while <code>reasoningStop.arguments</code> remains the schema source for the tool-call trigger arm.</li>
+          <li><code>reasoningStop</code> is a model-facing/internal servertool name, not a client-executable tool. It must be intercepted by the response hook gate; clients may only receive shell <code>exec_command(routecodex hook run reasoningStop ...)</code> when the schema gate requires client execution/feedback.</li>
           <li>Stopless must not activate on same-protocol direct/provider-direct response paths; existing runtime metadata routeName is the only allowed discriminator for this bypass.</li>
-          <li>If <code>finish_reason=stop</code> arrives without schema, RouteCodex must auto-project the same stop hook (internal <code>stop_message_auto</code>, public CLI alias <code>reasoning_stop</code>) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop.</li>
+          <li>If <code>finish_reason=stop</code> arrives without schema, RouteCodex must auto-project the same stop hook (internal <code>stop_message_auto</code>, public CLI alias <code>reasoningStop</code>) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop.</li>
           <li>If <code>finish_reason=stop</code> arrives with schema but the schema is non-terminal, invalid, or argument-malformed, RouteCodex must auto-project the same stop hook with schema-derived input so the hook can explain why stop is denied and what must be fixed.</li>
           <li>For invalid/malformed schema, the stop hook must return concise structured feedback (<code>reasonCode</code>, <code>missingFields</code>) plus schemaGuidance, and req_chatprocess must rewrite the paired tool result into natural-language corrective guidance instead of replaying raw tool history.</li>
           <li>If <code>finish_reason=stop</code> arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook.</li>
           <li>When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history.</li>
+          <li>When the client executes the shell projection and submits the result, request-side hooks must restore model-visible history as <code>reasoningStop -&gt; function_call_output</code>; raw <code>exec_command</code> shell history must not become model truth.</li>
           <li>For <code>/v1/responses</code>, req-side stopless contract cannot rely on <code>messages</code> only: the request mainline must preserve the contract in <code>instructions</code>, and the responses bridge must materialize that contract back into the outbound chat/system message before provider wire build.</li>
-          <li>Validation must prove the dual-port full-chain blackbox closes <code>client in -&gt; provider out -&gt; provider in -&gt; client out</code> for <code>no_schema</code>, <code>wrong_schema</code>, and <code>valid_terminal_schema</code>.</li>
           <li>CLI command input stays concise/status-only: <code>flowId/repeatCount/maxRepeats/triggerHint</code> plus optional structured <code>schemaFeedback{reasonCode,missingFields}</code>; continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string.</li>
-          <li>Client-visible exec_command must use the public stopless alias <code>reasoning_stop</code>; the client payload must not leak internal marker <code>__servertool_cli_projection</code>.</li>
+          <li>Client-visible exec_command must use the public stopless alias <code>reasoningStop</code>; the client payload must not leak internal marker <code>__servertool_cli_projection</code>.</li>
           <li>NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only.</li>
           <li>NoSchema stopless progression must advance <code>used/repeatCount</code> from current request tool_output/runtime metadata truth, not through file persistence or tmux/sessionDir fallback.</li>
-          <li>Model side must stay unaware of stopless identity; stopless CLI command and CLI stdout no longer require <code>sessionId/requestId/sessionDir</code>, and persisted writeback must stay absent.</li>
+          <li>Once the standard <code>reasoningStop</code> tool is exposed on the request, legacy shell-projected stop history such as <code>exec_command(cmd=&quot;reasoningStop&quot;)</code>, <code>reasoning_stop</code>, and their paired <code>command not found</code> tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests.</li>
+          <li>Model side must stay unaware of stopless identity, but runtime stopless CLI projection still requires active request-truth <code>sessionId/requestId</code> flags for same-session loop counting; <code>sessionDir</code> and persisted writeback remain forbidden.</li>
           <li>TS <code>engine.ts</code> may only call <code>planStoplessOrchestrationActionWithNative</code> and <code>buildServertoolCliProjectionForAutoFlow</code>; it must not reenter for stopless CLI flows.</li>
           <li>Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter.</li>
           <li><code>responsesRequestContext.sessionId/conversationId</code> is continuation-only context for <code>/v1/responses</code>; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material.</li>
         </ul>
+        <h2>hub.servertool_auto_hook_execution</h2>
+        <p>Summary: servertool auto-hook execution decision and trace event planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs</code> Owner scope: servertool auto-hook execution decision and trace event planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>AutoHookExecutionDecisionInput</code></li>
+          <li><code>AutoHookExecutionDecisionPlan</code></li>
+          <li><code>AutoHookExecutionAction</code></li>
+          <li><code>AutoHookTraceEventPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_auto_hook_execution_decision</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts</code></li>
+          <li><code>tests/servertool/servertool-auto-hook-trace.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/servertool-auto-hook-trace.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns required/optional auto-hook execution decision and trace planning.</li>
+        </ul>
+        <h2>hub.servertool_auto_hook_queue_progress</h2>
+        <p>Summary: servertool auto-hook queue progress planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs</code> Owner scope: servertool auto-hook queue progress planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>AutoHookQueueProgressInput</code></li>
+          <li><code>AutoHookQueueProgressPlan</code></li>
+          <li><code>AutoHookQueueProgressAction</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_auto_hook_queue_progress</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts</code></li>
+          <li><code>tests/servertool/servertool-auto-hook-trace.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/servertool-auto-hook-trace.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns auto-hook queue progress and action planning.</li>
+        </ul>
+        <h2>hub.servertool_engine_preflight_contract</h2>
+        <p>Summary: servertool engine preflight early-return planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs</code> Owner scope: servertool engine preflight early-return planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolEnginePreflightInput</code></li>
+          <li><code>ServertoolEnginePreflightAction</code></li>
+          <li><code>ServertoolEnginePreflightPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_engine_preflight</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/engine.ts</code></li>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+          <li><code>tests/servertool/engine.stopless-session-thin-shell.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns engine preflight action planning.</li>
+        </ul>
+        <h2>hub.servertool_engine_runtime_action_contract</h2>
+        <p>Summary: servertool engine runtime action planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs</code> Owner scope: servertool engine runtime action planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolEngineRuntimeActionInput</code></li>
+          <li><code>ServertoolEngineRuntimeAction</code></li>
+          <li><code>ServertoolEngineRuntimeActionPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_engine_runtime_action</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/engine.ts</code></li>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+          <li><code>tests/servertool/engine.stopless-session-thin-shell.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns engine runtime action selection.</li>
+        </ul>
+        <h2>hub.servertool_engine_skip_contract</h2>
+        <p>Summary: servertool engine skip planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs</code> Owner scope: servertool engine skip planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolEngineSkipInput</code></li>
+          <li><code>ServertoolEngineSkipAction</code></li>
+          <li><code>ServertoolEngineSkipPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_engine_skip</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/engine.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+          <li><code>tests/servertool/engine.stopless-session-thin-shell.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns engine skip planning.</li>
+        </ul>
+        <h2>hub.servertool_execution_branch_contract</h2>
+        <p>Summary: servertool execution branch and CLI projection target planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs</code> Owner scope: servertool execution branch and CLI projection target planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolExecutableToolCall</code></li>
+          <li><code>ServertoolExecutionBranchPlanInput</code></li>
+          <li><code>ServertoolExecutionBranchAction</code></li>
+          <li><code>ServertoolExecutionBranchPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_execution_branch</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts</code></li>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns execution branch selection and projected tool index planning.</li>
+        </ul>
+        <h2>hub.servertool_execution_dispatch_contract</h2>
+        <p>Summary: servertool execution dispatch error and followup contract planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs</code> Owner scope: servertool execution dispatch error and followup contract planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolDispatchSpecMismatchErrorInput</code></li>
+          <li><code>ServertoolInvalidMixedClientToolsOutcomeErrorInput</code></li>
+          <li><code>ServertoolMissingFollowupContractErrorInput</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_dispatch_spec_mismatch_error</code></li>
+          <li><code>plan_servertool_invalid_mixed_client_tools_outcome_error</code></li>
+          <li><code>plan_servertool_missing_followup_contract_error</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts</code></li>
+          <li><code>tests/servertool/execution-dispatch-outcome-shell.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/execution-dispatch-outcome-shell.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns dispatch mismatch and missing followup error planning.</li>
+        </ul>
+        <h2>hub.servertool_execution_handler_contract</h2>
+        <p>Summary: servertool handler contract, materialization, and runtime action planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs</code> Owner scope: servertool handler contract, materialization, and runtime action planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolHandlerContractInput</code></li>
+          <li><code>ServertoolMaterializationProgressInput</code></li>
+          <li><code>ServertoolHandlerRuntimeActionInput</code></li>
+          <li><code>ServertoolHandlerRuntimeActionPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_handler_contract</code></li>
+          <li><code>plan_servertool_materialization_progress</code></li>
+          <li><code>plan_servertool_handler_runtime_action</code></li>
+          <li><code>plan_servertool_handler_failed_error</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts</code></li>
+          <li><code>tests/servertool/execution-shell.backend-failfast.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/execution-shell.backend-failfast.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns handler contract and runtime action planning.</li>
+        </ul>
+        <h2>hub.servertool_execution_loop_effect_contract</h2>
+        <p>Summary: servertool execution loop effect planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs</code> Owner scope: servertool execution loop effect planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolExecutionLoopEffectInput</code></li>
+          <li><code>ServertoolExecutionLoopEffectPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_execution_loop_effect</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts</code></li>
+          <li><code>tests/servertool/execution-shell.backend-failfast.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/execution-shell.backend-failfast.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns execution loop effect planning; TS must not mutate loop state as a second owner.</li>
+        </ul>
+        <h2>hub.servertool_execution_loop_runtime_action_contract</h2>
+        <p>Summary: servertool execution loop runtime action planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs</code> Owner scope: servertool execution loop runtime action planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolExecutionLoopRuntimeActionInput</code></li>
+          <li><code>ServertoolExecutionLoopRuntimeActionPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_execution_loop_runtime_action</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts</code></li>
+          <li><code>tests/servertool/execution-dispatch-outcome-shell.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/execution-dispatch-outcome-shell.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns execution loop runtime action planning.</li>
+        </ul>
+        <h2>hub.servertool_execution_outcome_runtime_action_contract</h2>
+        <p>Summary: servertool execution outcome runtime action planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs</code> Owner scope: servertool execution outcome runtime action planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolExecutionOutcomeRuntimeActionInput</code></li>
+          <li><code>ServertoolExecutionOutcomeRuntimeActionPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_execution_outcome_runtime_action</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts</code></li>
+          <li><code>tests/servertool/execution-dispatch-outcome-shell.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/execution-dispatch-outcome-shell.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns execution outcome runtime action planning.</li>
+        </ul>
+        <h2>hub.servertool_execution_state_contract</h2>
+        <p>Summary: servertool execution loop state creation and append planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs</code> Owner scope: servertool execution loop state creation and append planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolExecutionSummary</code></li>
+          <li><code>ServertoolExecutedToolCall</code></li>
+          <li><code>ServertoolExecutedRecord</code></li>
+          <li><code>ServertoolExecutionLoopStateValue</code></li>
+          <li><code>ServertoolAppendExecutedRecordInput</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>create_servertool_execution_loop_state</code></li>
+          <li><code>append_executed_tool_record</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts</code></li>
+          <li><code>tests/servertool/execution-shell.backend-failfast.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/execution-shell.backend-failfast.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns execution state create/append semantics.</li>
+        </ul>
+        <h2>hub.servertool_registry_contract</h2>
+        <p>Summary: servertool registry registration, lookup, auto-hook descriptor, and projection planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs</code> Owner scope: servertool registry registration, lookup, auto-hook descriptor, and projection planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolRegistryRegistrationActionInput</code></li>
+          <li><code>ServertoolRegistryLookupActionInput</code></li>
+          <li><code>ServertoolRegistryAutoHookDescriptorInput</code></li>
+          <li><code>ServertoolRegistryProjectionInput</code></li>
+          <li><code>ServertoolRegistryProjectionPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_registry_registration_action</code></li>
+          <li><code>plan_servertool_registry_lookup_action</code></li>
+          <li><code>plan_servertool_registry_auto_hook_descriptors</code></li>
+          <li><code>plan_servertool_registry_projection</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/registry-impl.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.auto-hook-config.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/server-side-tools.auto-hook-config.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns registry registration, lookup, ordering, and projection planning.</li>
+        </ul>
+        <h2>hub.servertool_response_stage_runtime_action_contract</h2>
+        <p>Summary: servertool response-stage runtime action planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs</code> Owner scope: servertool response-stage runtime action planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolResponseStageRuntimeActionInput</code></li>
+          <li><code>ServertoolResponseStageRuntimeAction</code></li>
+          <li><code>ServertoolResponseStageRuntimeActionPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_response_stage_runtime_action</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns response-stage runtime action planning.</li>
+        </ul>
+        <h2>hub.servertool_server_side_tool_entry_contract</h2>
+        <p>Summary: servertool entry preflight action planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs</code> Owner scope: servertool entry preflight action planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolEntryPreflightInput</code></li>
+          <li><code>ServertoolEntryPreflightAction</code></li>
+          <li><code>ServertoolEntryPreflightPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_entry_preflight</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns non-object passthrough / disconnected fail-fast / continue entry preflight decisions.</li>
+        </ul>
+        <h2>hub.servertool_stopless_cli_projection_context</h2>
+        <p>Summary: stopless CLI projection context planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs</code> Owner scope: stopless CLI projection context planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>StoplessCliProjectionRuntimeSnapshotInput</code></li>
+          <li><code>StoplessCliProjectionContextInput</code></li>
+          <li><code>StoplessCliProjectionContextPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_stopless_cli_projection_context</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/engine.ts</code></li>
+          <li><code>tests/servertool/engine.stopless-session-thin-shell.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/engine.stopless-session-thin-shell.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns stopless CLI projection context planning; TS engine remains a thin shell.</li>
+        </ul>
         <h2>hub.servertool_flow_presentation</h2>
         <p>Summary: servertool progress log tool-name and highlight presentation policy</p>
-        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs</code> Owner scope: servertool progress log tool-name and highlight presentation policy</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs</code> Owner scope: file-scoped Rust owner for servertool progress log tool-name and highlight presentation policy</p>
         <p>Canonical types:</p>
         <ul>
           <li><code>ServertoolProgressPresentationInput</code></li>
@@ -486,9 +1178,9 @@
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/flow-presentation-block.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts</code></li>
           <li><code>tests/servertool/servertool-progress-logging.spec.ts</code></li>
           <li><code>docs</code></li>
         </ul>
@@ -511,7 +1203,7 @@
         <p>Notes:</p>
         <ul>
           <li>Rust skeleton config owns flow id normalization, progress tool-name resolution, and gold highlight decisions.</li>
-          <li>TS flow-presentation-block may only call native wrappers.</li>
+          <li>progress-log-block.ts may only call native flow presentation wrappers.</li>
           <li>TS skeleton-config must not expose progress presentation projection helpers.</li>
           <li>Do not restore local <code>normalizeFlowId</code>, <code>buildServertoolProgressConfig</code>, <code>toolNameByFlowId</code>, <code>goldHighlightFlowIds</code>, or Set-based highlight policy in TS.</li>
         </ul>
@@ -559,6 +1251,74 @@
           <li>Loop warning text and repeat-count policy stay Rust-owned in followup-core.</li>
           <li>TS may only build the native seed payload and pass the native warning injector as callback glue.</li>
           <li><code>appendStopMessageLoopWarning</code> must not return as a TS semantic owner/export.</li>
+        </ul>
+        <h2>hub.servertool_rust_only_closeout</h2>
+        <p>Summary: servertool hook skeleton closeout gate; proves remaining TS orchestration has been reduced to thin shells before physical deletion and anchors the Rust hook skeleton contract</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs</code> Owner scope: servertool rust-only closeout gate and Rust hook skeleton contract anchors (validate, scheduler, phase contract)</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolHookSpec</code></li>
+          <li><code>ServertoolHookSchedulerInput</code></li>
+          <li><code>ServertoolHookEvent</code></li>
+          <li><code>ServertoolHookProjection</code></li>
+          <li><code>ServertoolHookEffectPlan</code></li>
+          <li><code>ServertoolHookSkeletonError</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>validate_servertool_hook_spec</code></li>
+          <li><code>plan_servertool_hook_schedule</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+          <li><code>tests/servertool/response-stage-prepass-shell.spec.ts</code></li>
+          <li><code>tests/servertool/execution-queue-shell.spec.ts</code></li>
+          <li><code>tests/servertool/execution-stage-shell.spec.ts</code></li>
+          <li><code>tests/servertool/entry-context-shell.spec.ts</code></li>
+          <li><code>tests/servertool/run-server-side-tool-engine-shell.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.dispatch-native.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.auto-hook-config.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-auto-hook-trace.spec.ts</code></li>
+          <li><code>tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/handlers</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
+          <li><code>tests/servertool/response-stage-prepass-shell.spec.ts</code></li>
+          <li><code>tests/servertool/execution-queue-shell.spec.ts</code></li>
+          <li><code>tests/servertool/execution-stage-shell.spec.ts</code></li>
+          <li><code>tests/servertool/entry-context-shell.spec.ts</code></li>
+          <li><code>tests/servertool/run-server-side-tool-engine-shell.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.auto-hook-config.spec.ts</code></li>
+          <li><code>tests/servertool/servertool-auto-hook-trace.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.dispatch-native.spec.ts</code></li>
+          <li><code>tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+          <li><code>npm run verify:architecture-mainline-call-map</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>This feature registers the closeout gate only; it does not declare <code>servertool.hook_skeleton.mainline</code> anchored.</li>
+          <li><code>docs/architecture/mainline-call-map.yml</code> <code>chain_id: servertool.hook_skeleton.mainline</code> must remain <code>binding pending</code> until Rust owner symbols and blackbox gates exist for runtime owners.</li>
+          <li>Re-introducing TS business semantics in any of the listed allowed shell files is fail-fast.</li>
         </ul>
         <h2>hub.servertool_orchestration_policy</h2>
         <p>Summary: servertool timeout, client-inject, followup error, and adapter provider-key policy</p>
@@ -668,10 +1428,9 @@
         </ul>
         <p>Required tests:</p>
         <ul>
-          <li><code>tests/servertool/server-side-web-search.spec.ts</code></li>
-          <li><code>tests/servertool/vision-flow.spec.ts</code></li>
           <li><code>tests/servertool/servertool-mixed-tools.spec.ts</code></li>
-          <li><code>tests/servertool/followup-bootstrap-replay.spec.ts</code></li>
+          <li><code>tests/servertool/server-side-tools.dispatch-native.spec.ts</code></li>
+          <li><code>tests/servertool/execution-shell.backend-failfast.spec.ts</code></li>
           <li><code>tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts</code></li>
         </ul>
         <p>Required gates:</p>
@@ -684,6 +1443,7 @@
           <li>Rust owns followupPlan <code>entryEndpoint</code> precedence and payload/injection source recognition.</li>
           <li>Rust owns followup terminal error envelope classification and transparent bootstrap replay preflight/replay payload planning.</li>
           <li>TS backend-route runtime may only call native, invoke injection IO builders, mutate metadata from Rust plans, and throw Rust-described errors.</li>
+          <li>Retired backend/reenter/bootstrap replay mainline must fail fast through the native contract; do not restore deleted bootstrap replay tests as active required coverage.</li>
           <li>Do not restore local <code>followupPlan.payload</code> / <code>followupPlan.injection</code> / <code>entryEndpoint</code> scanning, chat endpoint defaults, followup terminal classification, preflight status parsing, or replay payload building in TS.</li>
         </ul>
       </article>

@@ -14,18 +14,27 @@ chains:
       binding-pending while Rust owner implementation is still being closed out.
   - chain_id: request.mainline
     expected_total_edges: 6
-    min_anchored_edges: 3
+    min_anchored_edges: 4
     max_partial_edges: 1
-    max_binding_pending_edges: 2
+    max_binding_pending_edges: 1
     note: >
-      Request route-selection and req_outbound typed/runtime split are still
-      intentionally open; do not add new pending edges without rebudgeting.
+      Request route-selection bridge is now anchored; only the req_outbound
+      typed/runtime split remains intentionally open until M4 closes it.
   - chain_id: response.mainline
     expected_total_edges: 4
     min_anchored_edges: 4
     max_partial_edges: 0
     max_binding_pending_edges: 0
     note: Fully anchored response mainline must not regress.
+  - chain_id: responses.continuation.mainline
+    expected_total_edges: 7
+    min_anchored_edges: 1
+    max_partial_edges: 5
+    max_binding_pending_edges: 1
+    note: >
+      Responses continuation Chat Process boundary is intentionally split while
+      restore/save owner closure is still being completed; do not grow debt
+      without rebudgeting.
   - chain_id: debug.unified_surface.mainline
     expected_total_edges: 1
     min_anchored_edges: 0

@@ -1200,6 +1200,43 @@ owners:
       - "VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair."
       - "Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns."
 
+  - feature_id: hub.route_selection_bridge
+    status: active
+    summary: "Hub req-03 Rust bridge that seals virtual-router decisions into `VrRoute04SelectedTarget`"
+    owner_kind: rust_ssot
+    owner_scope: "HubReqChatProcess03Governed -> VrRoute04SelectedTarget typed bridge and request-path route-control handoff"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+    canonical_types:
+      - HubReqChatProcess03Governed
+      - VrRoute04SelectedTarget
+    canonical_builders:
+      - run_vr_route_04_selected_target_entrypoint
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
+      - tests/sharedmodule
+      - docs
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/src/router
+      - src/client
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
+      - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-binding-pending-gate
+    migration_target: rust
+    notes:
+      - "TS request-stage shell may transport runtime_control and invoke native ingress, but it must not guess route policy, revive legacy `__rt` route pins, or fabricate VrRoute04 contract state."
+      - "Runtime route selection may stay split from typed route application, but req-03 must remain queryable through the Rust typed entrypoint instead of `binding pending` prose."
+
   - feature_id: hub.route_metadata_surface
     status: active
     summary: "Hub request-route metadata surfaces stay queryable as one Rust metadata surface"

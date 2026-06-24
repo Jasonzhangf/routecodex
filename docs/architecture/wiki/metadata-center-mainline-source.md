@@ -100,7 +100,6 @@ These are internal control semantics:
 - `routeName`
 - `routeId`
 - `providerProtocol`
-- `providerFamily`
 - `serverToolFollowup`
 - `stopMessage*`
 - `streamIntent`

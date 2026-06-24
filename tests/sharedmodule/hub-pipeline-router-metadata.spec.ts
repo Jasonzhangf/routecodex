@@ -140,4 +140,22 @@ describe('hub pipeline router metadata builder', () => {
       }
     });
   });
+
+  it('does not revive retryProviderKey from legacy __rt residue without runtime_control', () => {
+    const output = buildRouterMetadataInputWithNative({
+      requestId: 'req-legacy-rt-retry-provider-key',
+      entryEndpoint: '/v1/responses',
+      processMode: 'chat',
+      stream: false,
+      direction: 'request',
+      providerProtocol: 'openai-responses',
+      metadata: {
+        __rt: {
+          retryProviderKey: 'legacy.provider.gpt-5.5'
+        }
+      }
+    });
+
+    expect(output.retryProviderKey).toBeUndefined();
+  });
 });

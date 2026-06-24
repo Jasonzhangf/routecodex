@@ -41,7 +41,6 @@ families:
       - routeName
       - routeId
       - providerProtocol
-      - providerFamily
       - retryProviderKey
       - preselectedRoute
       - serverToolFollowup

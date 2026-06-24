@@ -664,6 +664,29 @@ verification:
       - "If route instruction parsing changes, include routing instruction regression set."
       - "Current-turn media routing must prove a user image in the active turn still routes multimodal even when trailing tool entries make latest_role non-user."
 
+  - feature_id: hub.route_selection_bridge
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs
+    contract:
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
+      - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+    integration:
+      - tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-binding-pending-gate
+    build:
+      - npm run build:base
+    notes:
+      - "At minimum prove runtime_control preselectedRoute wins, legacy `__rt` route pins do not revive, and relay continuation scope keeps routeHint/provider pin queryable before Hub req-03 seals VrRoute04."
+      - "If req-03 caller/callee changes, rerun the mainline binding gate before claiming M3 closure."
+
   - feature_id: hub.route_metadata_surface
     change_risk: medium
     unit:
