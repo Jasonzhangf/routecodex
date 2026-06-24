@@ -81,16 +81,19 @@
 
 - 旧判断“`servertool-core` 编译面阻塞 M2 验证”已失效。
 - 当前真相变为：
-  - `cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture` 已能进入 M2 定向测试执行；
-  - 失败面不在 `servertool-core` 编译，而在 `req_chatprocess` 自己的 stopless/request-side contract 断言；
-  - `npm run verify:function-map-compile-gate` 当前首个失败是 owner/queryability 基础脚本缺口：根 `package.json` 仍缺 `build:native-hotpath`。
-- 因此本轮 M2 closeout 不能再把“先恢复 servertool 编译面”当作前置；应改为先完成以下两个显式收口：
-  1. 补齐 `build:native-hotpath`，清掉 function-map 假阻塞；
-  2. 对齐 `req_process_stage1_tool_governance` 的 stopless contract 期望与 Rust 真源，决定是修测试旧预期，还是修 request-side rewrite 真源。
-- 新发现的 M2 真实 TS 语义残留：
-  - `src/modules/llmswitch/bridge/responses-request-bridge.ts` 仍在 TS 里从 runtime metadata 拼接 stopless `instructions` 文本；
-  - 这属于 request-side chat-process contract materialization，而不是单纯 host glue；
-  - 若继续保留在 TS，M2 不能宣称“request-side governance Rust-only”完成。
+  - `cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture` 当前为绿；
+  - `npm run verify:function-map-compile-gate` 当前为绿；
+  - 根 `package.json` 已存在 `build:native-hotpath`，此前“缺脚本导致 compile-gate 假阻塞”的判断已过期；
+  - `npm run verify:servertool-rust-only`、`npm run verify:architecture-mainline-call-map`、`npm run build:base` 当前均已实跑转绿；
+  - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`、`tests/servertool/stopless-cli-continuation.spec.ts`、`tests/responses/responses-openai-bridge.spec.ts` 当前均已转绿；
+  - `tests/servertool/stop-message-sample-replay.spec.ts` 当前已提供 codex-samples replay 旧样本复测证据。
+- 当前修正后的关键判断：
+  1. M2 当前不再被 compile-gate / focused Rust test 阻塞；
+  2. `responses-request-bridge.ts` 当前已不再持有 stopless instruction 文本真源，stopless contract 文本真源已回到 Rust `req_process_stage1_tool_governance_blocks/orchestrator.rs`；
+  3. 本轮实际需要修的不是 M2 owner 语义，而是 residue audit 对已删除 backend-route / handler 文件和已迁移 SSE owner 的过期断言。
+- 当前剩余 gap：
+  - M2 owner/gate 已有强证据，但 `request.mainline` 的 `req-03` / `req-04` 仍是后续模块 M3/M4 的 `binding pending` / `partial` 债务；
+  - 因此本轮最多只能宣称 “M2 closeout evidence refreshed and stabilized”，不能冒充整个 request path 已收完。
 
 ## 6. 模块拆分总表
 

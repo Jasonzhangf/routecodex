@@ -1409,14 +1409,19 @@ describe('hub pipeline stage residue audit', () => {
   it('servertool followup dispatch and backend route shells must not coerce tool semantics in TS', () => {
     const deletedFiles = [
       'sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts',
     ];
     const files = [
-      'sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.ts',
       'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
     ];
     const existingDeletedFiles = deletedFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
     const findings = files.flatMap((relativePath) => {
       const filePath = path.join(process.cwd(), relativePath);
+      if (!fs.existsSync(filePath)) {
+        return [];
+      }
       const source = fs.readFileSync(filePath, 'utf8');
       return collectMatches(source, [
         { label: `${relativePath}: converts chat messages to Responses input in TS`, pattern: /coerceMessageToResponsesInputItems|toResponsesInputTextItem|normalizeResponsesFollowupPayloadShape/ },
@@ -1430,11 +1435,19 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool handlers must not inject or strip tool protocol payloads in TS', () => {
-    const files = [
+    const deletedFiles = [
       'sharedmodule/llmswitch-core/src/servertool/handlers/web-search.ts',
     ];
+    const files = [
+      'sharedmodule/llmswitch-core/src/servertool/handlers/followup-sanitize.ts',
+      'sharedmodule/llmswitch-core/src/servertool/handlers/vision-eligibility.ts',
+    ];
+    const existingDeletedFiles = deletedFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
     const findings = files.flatMap((relativePath) => {
       const filePath = path.join(process.cwd(), relativePath);
+      if (!fs.existsSync(filePath)) {
+        return [];
+      }
       const source = fs.readFileSync(filePath, 'utf8');
       return collectMatches(source, [
         { label: `${relativePath}: appends Responses tool_outputs in TS`, pattern: /tool_outputs\s*=|tool_outputs\s*\?/ },
@@ -1443,7 +1456,7 @@ describe('hub pipeline stage residue audit', () => {
       ]);
     });
 
-    expect(findings).toEqual([]);
+    expect({ existingDeletedFiles, findings }).toEqual({ existingDeletedFiles: [], findings: [] });
   });
 
   it('request executor must not classify tool request semantics in TS', () => {
@@ -1494,11 +1507,11 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('server response handler SSE contract probe must not classify response tool semantics in TS', () => {
-    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-sse.ts');
+    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    const bodyStart = source.indexOf('function updateContractProbeFromSseChunk');
+    const bodyStart = source.indexOf('export function updateResponsesContractProbeFromSseChunkForHttp');
     expect(bodyStart).toBeGreaterThanOrEqual(0);
-    const bodyEnd = source.indexOf('\nfunction assertClientSseFrameHasNoInternalCarriers', bodyStart);
+    const bodyEnd = source.indexOf('\nexport function inspectResponsesTerminalStateFromSseChunkForHttp', bodyStart);
     expect(bodyEnd).toBeGreaterThan(bodyStart);
     const body = source.slice(bodyStart, bodyEnd);
     const findings = collectMatches(body, [
@@ -1506,16 +1519,16 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'maps output call_id in TS SSE probe', pattern: /call_id|output_item/ },
       { label: 'deduplicates output items in TS SSE probe', pattern: /alreadyExists|existingCallId|existingId/ },
     ]);
-    expect(body).toContain('updateResponsesContractProbeFromSseChunkForHttp(chunk, contractProbe.probe)');
+    expect(body).toContain('return updateResponsesContractProbeFromSseChunkNative(chunk, probe);');
     expect(findings).toEqual([]);
   });
 
   it('server response handler terminal probe frames must be built by native', () => {
-    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-sse.ts');
+    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).not.toContain('function buildResponsesTerminalSseFramesFromProbe');
-    expect(source).toContain('buildResponsesTerminalSseFramesFromProbeForHttp(contractProbe.probe, requestLabel)');
-    expect(source).not.toContain('buildResponsesTerminalSseFramesFromProbeNative(');
+    expect(source).not.toContain('buildResponsesTerminalSseFramesFromProbeForHttp(');
+    expect(source).toContain('buildResponsesTerminalSseFramesFromProbeNative(probe, args.requestLabel)');
   });
 
   it('server response handler Responses apply_patch client projection must stay native-owned', () => {
