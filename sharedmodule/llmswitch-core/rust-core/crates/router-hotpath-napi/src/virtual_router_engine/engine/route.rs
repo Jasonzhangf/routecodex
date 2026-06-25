@@ -127,7 +127,9 @@ fn resolve_route_hint(meta_route_03: &MetaRoute03RouteCarrier) -> Option<String>
     let hint = meta_route_03.get_string("routeHint")?;
     let hint_trim = hint.trim();
     let stopless_followup = meta_route_03.get_bool("serverToolFollowup")
-        && meta_route_03.get_string("serverToolFollowupSource").as_deref()
+        && meta_route_03
+            .get_string("serverToolFollowupSource")
+            .as_deref()
             == Some("servertool.stop_message");
     if stopless_followup || (hint_trim == "tools" && meta_route_03.get_bool("serverToolFollowup")) {
         // Stopless followup must not inherit historical route hints:
@@ -242,14 +244,6 @@ impl VirtualRouterEngineCore {
         {
             return false;
         }
-        let goal_state_is_newer = match (&existing.stopless_goal_state, &loaded.stopless_goal_state)
-        {
-            (None, Some(_)) => true,
-            (Some(existing_goal), Some(loaded_goal)) => {
-                loaded_goal.updated_at > existing_goal.updated_at
-            }
-            _ => false,
-        };
         let stop_message_state_is_newer = {
             let existing_ts = stop_message_event_ts(existing);
             let loaded_ts = stop_message_event_ts(loaded);
@@ -265,7 +259,7 @@ impl VirtualRouterEngineCore {
                 _ => false,
             }
         };
-        goal_state_is_newer || stop_message_state_is_newer
+        stop_message_state_is_newer
     }
 
     fn load_routing_state_for_scope(&mut self, key: &str) -> RoutingInstructionState {
@@ -739,132 +733,6 @@ impl VirtualRouterEngineCore {
 mod tests {
     use super::*;
     use crate::virtual_router_engine::instructions::{InstructionTarget, RoutingInstructionState};
-    use crate::virtual_router_engine::rcc_fence::StoplessGoalState;
-    use crate::virtual_router_engine::routing_state_store::{
-        persist_routing_instruction_state, with_session_dir_override,
-    };
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn load_routing_state_for_scope_reloads_disk_when_session_cache_is_stale_empty() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let temp_dir = std::env::temp_dir().join(format!("rcc-route-state-reload-{unique}"));
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        with_session_dir_override(temp_dir.to_str(), || {
-            let key = "session:goal-reload";
-            let mut persisted = RoutingInstructionState::default();
-            persisted.stopless_goal_state = Some(StoplessGoalState {
-                status: "active".to_string(),
-                objective: "reload goal from disk".to_string(),
-                latest_note: Some("persisted after first turn".to_string()),
-                completion_evidence: None,
-                next_step: None,
-                user_question: None,
-                cannot_continue_reason: None,
-                blocking_evidence: None,
-                attempts_exhausted: None,
-                error_class: None,
-                completion_summary: None,
-                ssot_assessment: None,
-                consecutive_irrecoverable_errors: None,
-                consecutive_validation_failures: Some(1),
-                consecutive_no_progress: None,
-                updated_at: 123,
-                created_at: 123,
-            });
-            persist_routing_instruction_state(key, Some(&persisted));
-
-            let mut engine = VirtualRouterEngineCore::new();
-            engine
-                .routing_instruction_state
-                .insert(key.to_string(), RoutingInstructionState::default());
-
-            let loaded = engine.load_routing_state_for_scope(key);
-            let goal = loaded
-                .stopless_goal_state
-                .expect("goal should reload from disk");
-            assert_eq!(goal.status, "active");
-            assert_eq!(goal.objective, "reload goal from disk");
-        });
-
-        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
-    }
-
-    #[test]
-    fn load_routing_state_for_scope_reloads_disk_when_session_cache_goal_state_is_stale() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let temp_dir = std::env::temp_dir().join(format!("rcc-route-goal-freshness-{unique}"));
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        with_session_dir_override(temp_dir.to_str(), || {
-            let key = "session:goal-freshness";
-            let mut persisted = RoutingInstructionState::default();
-            persisted.stopless_goal_state = Some(StoplessGoalState {
-                status: "active".to_string(),
-                objective: "reload richer goal state from disk".to_string(),
-                latest_note: Some("persisted validation failure".to_string()),
-                completion_evidence: None,
-                next_step: None,
-                user_question: None,
-                cannot_continue_reason: None,
-                blocking_evidence: None,
-                attempts_exhausted: None,
-                error_class: None,
-                completion_summary: None,
-                ssot_assessment: None,
-                consecutive_irrecoverable_errors: None,
-                consecutive_validation_failures: Some(1),
-                consecutive_no_progress: None,
-                updated_at: 200,
-                created_at: 100,
-            });
-            persist_routing_instruction_state(key, Some(&persisted));
-
-            let mut cached = RoutingInstructionState::default();
-            cached.stopless_goal_state = Some(StoplessGoalState {
-                status: "active".to_string(),
-                objective: "reload richer goal state from disk".to_string(),
-                latest_note: Some("stale cache".to_string()),
-                completion_evidence: None,
-                next_step: None,
-                user_question: None,
-                cannot_continue_reason: None,
-                blocking_evidence: None,
-                attempts_exhausted: None,
-                error_class: None,
-                completion_summary: None,
-                ssot_assessment: None,
-                consecutive_irrecoverable_errors: None,
-                consecutive_validation_failures: None,
-                consecutive_no_progress: None,
-                updated_at: 100,
-                created_at: 100,
-            });
-
-            let mut engine = VirtualRouterEngineCore::new();
-            engine
-                .routing_instruction_state
-                .insert(key.to_string(), cached);
-
-            let loaded = engine.load_routing_state_for_scope(key);
-            let goal = loaded
-                .stopless_goal_state
-                .expect("goal should reload from disk");
-            assert_eq!(goal.updated_at, 200);
-            assert_eq!(goal.consecutive_validation_failures, Some(1));
-        });
-
-        let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
-    }
 
     fn build_route_test_core() -> VirtualRouterEngineCore {
         let mut core = VirtualRouterEngineCore::new();
@@ -1154,7 +1022,10 @@ mod tests {
             .expect("router-direct alias request should route");
         let decision = result.get("decision").expect("should have decision");
         let target = result.get("target").expect("should have target");
-        assert_eq!(decision["providerKey"].as_str(), Some("DF.key1.deepseek-v4-pro"));
+        assert_eq!(
+            decision["providerKey"].as_str(),
+            Some("DF.key1.deepseek-v4-pro")
+        );
         assert_eq!(target["modelId"].as_str(), Some("DeepSeek-V4-Pro"));
         assert!(decision["reasoning"]
             .as_str()

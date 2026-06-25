@@ -50,9 +50,6 @@ function projectLegacyRuntimeControlWhitelist(runtimeControl: Record<string, unk
   if (runtimeControl.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)) {
     out.stopless = runtimeControl.stopless;
   }
-  if (typeof runtimeControl.stoplessGoalStatus === 'string' && runtimeControl.stoplessGoalStatus.trim()) {
-    out.stoplessGoalStatus = runtimeControl.stoplessGoalStatus.trim();
-  }
   if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
     out.stopMessageEnabled = runtimeControl.stopMessageEnabled;
   }
@@ -164,9 +161,6 @@ function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unkn
   if (runtimeControl.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)) {
     out.stopless = runtimeControl.stopless;
   }
-  if (typeof runtimeControl.stoplessGoalStatus === 'string' && runtimeControl.stoplessGoalStatus.trim()) {
-    out.stoplessGoalStatus = runtimeControl.stoplessGoalStatus.trim();
-  }
   return out;
 }
 
@@ -217,6 +211,30 @@ function projectRouterInputMetadata(args: {
     metadata.retryProviderKey = retryProviderKey;
   }
   return metadata;
+}
+
+function buildMetadataCenterSnapshot(args: {
+  requestTruth: Record<string, unknown>;
+  continuationContext: Record<string, unknown>;
+  runtimeControl: Record<string, unknown>;
+}): {
+  requestTruth?: Record<string, unknown>;
+  continuationContext?: Record<string, unknown>;
+  runtimeControl?: Record<string, unknown>;
+} | undefined {
+  const requestTruth = Object.keys(args.requestTruth).length > 0 ? { ...args.requestTruth } : undefined;
+  const continuationContext = Object.keys(args.continuationContext).length > 0
+    ? { ...args.continuationContext }
+    : undefined;
+  const runtimeControl = Object.keys(args.runtimeControl).length > 0 ? { ...args.runtimeControl } : undefined;
+  if (!requestTruth && !continuationContext && !runtimeControl) {
+    return undefined;
+  }
+  return {
+    ...(requestTruth ? { requestTruth } : {}),
+    ...(continuationContext ? { continuationContext } : {}),
+    ...(runtimeControl ? { runtimeControl } : {}),
+  };
 }
 
 // feature_id: hub.request_stage_pipeline_bridge
@@ -282,6 +300,11 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   } else {
     delete metadata.__rt;
   }
+  const metadataCenterSnapshot = buildMetadataCenterSnapshot({
+    requestTruth: requestTruthPayload,
+    continuationContext: continuationContextPayload,
+    runtimeControl: metadataCenterRuntimeControl,
+  });
 
   const nativePlan = runHubPipelineLibWithNative({
     config: {
@@ -296,6 +319,7 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
       providerProtocol: normalized.providerProtocol,
       payload: normalized.payload,
       metadata,
+      ...(metadataCenterSnapshot ? { metadataCenterSnapshot } : {}),
       stream: normalized.stream,
       processMode: normalized.processMode,
       direction: normalized.direction,

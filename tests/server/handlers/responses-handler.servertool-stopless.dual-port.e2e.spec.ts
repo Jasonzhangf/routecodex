@@ -9,12 +9,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integratio
   loadRoutingInstructionStateSync: jest.fn(() => undefined),
   saveRoutingInstructionStateAsync: jest.fn(() => undefined),
   saveRoutingInstructionStateSync: jest.fn(() => undefined),
-  syncStoplessGoalStateFromRequest: jest.fn(() => ({ stickyKey: 'test:stopless', hadDirective: false, directiveTypes: [] })),
-  persistStoplessGoalStateSnapshot: jest.fn((_adapterContext: unknown, state: unknown) => ({
-    stickyKey: 'test:stopless',
-    state
-  })),
-  readStoplessGoalState: jest.fn(() => ({ stickyKey: 'test:stopless' })),
   extractSessionIdentifiersFromMetadata: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: typeof metadata?.session_id === 'string' ? metadata.session_id : undefined,
     conversationId: typeof metadata?.conversation_id === 'string' ? metadata.conversation_id : undefined
@@ -28,12 +22,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integratio
   loadRoutingInstructionStateSync: jest.fn(() => undefined),
   saveRoutingInstructionStateAsync: jest.fn(() => undefined),
   saveRoutingInstructionStateSync: jest.fn(() => undefined),
-  syncStoplessGoalStateFromRequest: jest.fn(() => ({ stickyKey: 'test:stopless', hadDirective: false, directiveTypes: [] })),
-  persistStoplessGoalStateSnapshot: jest.fn((_adapterContext: unknown, state: unknown) => ({
-    stickyKey: 'test:stopless',
-    state
-  })),
-  readStoplessGoalState: jest.fn(() => ({ stickyKey: 'test:stopless' })),
   extractSessionIdentifiersFromMetadata: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: typeof metadata?.session_id === 'string' ? metadata.session_id : undefined,
     conversationId: typeof metadata?.conversation_id === 'string' ? metadata.conversation_id : undefined

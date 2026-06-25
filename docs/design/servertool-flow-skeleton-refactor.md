@@ -96,7 +96,7 @@ Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 已确认越界点：
 
 ```ts
-if (injectSource === 'servertool.stopless_goal_continue') {
+if (injectSource === 'servertool.stopless_continue') {
   return 'reenter';
 }
 if (args.flowId === 'stop_message_flow') {

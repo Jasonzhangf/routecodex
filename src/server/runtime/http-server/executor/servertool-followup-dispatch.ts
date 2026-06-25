@@ -66,7 +66,6 @@ const SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER: MetadataCenterWriter = {
 type FollowupRuntimeControl = {
   serverToolFollowup: boolean;
   followupSource?: string;
-  stoplessGoalStatus?: string;
 };
 
 
@@ -241,17 +240,6 @@ function clonePipelineInputForRetry(input: PipelineExecutionInput): PipelineExec
   return cloned;
 }
 
-function readManagedStoplessGoalStatusFromSemantics(
-  requestSemantics: Record<string, unknown> | undefined
-): string | undefined {
-  const statusCandidate =
-    requestSemantics?.stoplessGoalState && typeof requestSemantics.stoplessGoalState === 'object' && !Array.isArray(requestSemantics.stoplessGoalState)
-      ? (requestSemantics.stoplessGoalState as Record<string, unknown>).status
-      : undefined;
-  const normalized = typeof statusCandidate === 'string' ? statusCandidate.trim().toLowerCase() : '';
-  return normalized || undefined;
-}
-
 function readBooleanFlag(value: unknown): boolean {
   return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
 }
@@ -263,17 +251,11 @@ function readFollowupMarkerFromMetadata(
   const sourceCandidate = [
     runtimeControl?.serverToolFollowupSource,
   ].find((value) => typeof value === 'string' && value.trim().length > 0);
-  const stoplessGoalStatus = [
-    runtimeControl?.stoplessGoalStatus,
-  ].find((value) => typeof value === 'string' && value.trim().length > 0);
 
   return {
     serverToolFollowup: [
       runtimeControl?.serverToolFollowup,
     ].some(readBooleanFlag),
-    ...(typeof stoplessGoalStatus === 'string' && stoplessGoalStatus.trim()
-      ? { stoplessGoalStatus: stoplessGoalStatus.trim().toLowerCase() }
-      : {}),
     ...(typeof sourceCandidate === 'string' && sourceCandidate.trim()
       ? { followupSource: sourceCandidate.trim() }
       : {})
@@ -291,7 +273,6 @@ function mergeFollowupRuntimeControl(
       || Boolean(primary.followupSource)
       || Boolean(secondary.followupSource),
     followupSource: primary.followupSource ?? secondary.followupSource,
-    stoplessGoalStatus: primary.stoplessGoalStatus ?? secondary.stoplessGoalStatus
   };
 }
 
@@ -312,14 +293,6 @@ function writeFollowupRuntimeControlToMetadata(
     center.writeRuntimeControl(
       'serverToolFollowupSource',
       control.followupSource,
-      SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER,
-      'servertool-followup-dispatch'
-    );
-  }
-  if (control.stoplessGoalStatus) {
-    center.writeRuntimeControl(
-      'stoplessGoalStatus',
-      control.stoplessGoalStatus,
       SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER,
       'servertool-followup-dispatch'
     );
@@ -351,16 +324,10 @@ function materializeFollowupRequestSemantics(args: {
     readFollowupMarkerFromMetadata(args.metadata),
     readFollowupMarkerFromMetadata(args.baseMetadata)
   );
-  const stoplessGoalStatus =
-    runtimeControl.stoplessGoalStatus
-    ?? readManagedStoplessGoalStatusFromSemantics(args.requestSemantics);
 
   if (!args.requestSemantics) {
     return {
-      runtimeControl: {
-        ...runtimeControl,
-        ...(stoplessGoalStatus ? { stoplessGoalStatus } : {})
-      }
+      runtimeControl
     };
   }
 
@@ -368,10 +335,7 @@ function materializeFollowupRequestSemantics(args: {
   delete nextSemantics['__' + 'routecodex'];
   return {
     requestSemantics: nextSemantics,
-    runtimeControl: {
-      ...runtimeControl,
-      ...(stoplessGoalStatus ? { stoplessGoalStatus } : {})
-    }
+    runtimeControl
   };
 }
 
@@ -560,7 +524,7 @@ async function buildServerToolNestedInput(args: {
       ? nestedRuntimeControl.serverToolFollowupSource.trim()
       : undefined;
   const hasExplicitFollowupSource = typeof runtimeFollowupSource === 'string';
-  const hasExplicitFollowupFlow = Boolean(nestedRuntimeControl.serverToolLoopState);
+  const hasExplicitFollowupFlow = Boolean(nestedRuntimeControl.stopless);
   const runtimeStopMessageDisabled = nestedRuntimeControl.stopMessageEnabled === false;
   if ((hasExplicitFollowupSource || hasExplicitFollowupFlow) && !runtimeStopMessageDisabled) {
     writeStopMessageEnabledRuntimeControl(
@@ -621,14 +585,6 @@ async function buildServerToolNestedInput(args: {
       : '';
   if (portModeCandidate === 'router' && routeNameCandidate && typeof nestedMetadata.routeHint !== 'string') {
     nestedMetadata.routeHint = routeNameCandidate;
-  }
-  if (portModeCandidate) {
-    MetadataCenter.attach(nestedMetadata).writeRuntimeControl(
-      'serverToolFollowupMode',
-      portModeCandidate,
-      SERVERTOOL_FOLLOWUP_RUNTIME_CONTROL_WRITER,
-      'servertool followup port mode projection'
-    );
   }
 
   const body = await cloneNestedBodyWithSemantics(

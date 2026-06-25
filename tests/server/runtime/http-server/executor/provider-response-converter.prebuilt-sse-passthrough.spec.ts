@@ -58,9 +58,6 @@ const mockBridgeModule = () => ({
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
-  syncStoplessGoalStateFromRequest: () => null,
-  readStoplessGoalState: () => null,
-  persistStoplessGoalStateSnapshot: () => undefined,
   createResponsesJsonToSseConverter: async () => ({
     convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
       const response = payload && typeof payload === 'object'

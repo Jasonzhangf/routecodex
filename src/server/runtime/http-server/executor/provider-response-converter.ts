@@ -9,8 +9,6 @@ import {
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
-  persistStoplessGoalStateSnapshot,
-  readStoplessGoalState,
   resolveRelayResponsesClientSseStreamForHttp,
 } from '../../../../modules/llmswitch/bridge.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
@@ -54,26 +52,6 @@ import {
   STOPLESS_DIRECTIVE_PATTERN,
   shouldAllowDirectResponsesPrebuiltSsePassthrough
 } from './provider-response-shared-pure-blocks.js';
-
-type StoplessGoalProjection = {
-  status: 'active' | 'paused' | 'stopped' | 'completed';
-  objective: string;
-  latestNote?: string;
-  completionEvidence?: string;
-  nextStep?: string;
-  userQuestion?: string;
-  cannotContinueReason?: string;
-  blockingEvidence?: string;
-  attemptsExhausted?: boolean;
-  errorClass?: string;
-  completionSummary?: string;
-  ssotAssessment?: string;
-  consecutiveIrrecoverableErrors?: number;
-  consecutiveValidationFailures?: number;
-  consecutiveNoProgress?: number;
-  updatedAt: number;
-  createdAt: number;
-};
 
 export function buildBridgeProviderResponseSeed(
   response: PipelineExecutionResult,
@@ -129,15 +107,9 @@ function buildChoicesArrayBridgeDebugDetails(args: {
   };
 }
 
-const GOAL_IRRECOVERABLE_ERROR_STOP_THRESHOLD = 5;
-const GOAL_VALIDATION_FAILURE_STOP_THRESHOLD = 5;
-const GOAL_NO_PROGRESS_STOP_THRESHOLD = 5;
-const REPEATED_VALIDATION_FAILURE_ERROR_CLASS = 'repeated_validation_failure';
-const REPEATED_IRRECOVERABLE_ERROR_CLASS = 'repeated_irrecoverable_error';
-const REPEATED_NO_PROGRESS_STOP_ERROR_CLASS = 'repeated_no_progress_stop';
 const PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER = {
   module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
-  symbol: 'writeProjectedGoalState',
+  symbol: 'syncAdapterContextRuntimeBackToPipelineMetadata',
   stage: 'provider_response_runtime_control'
 } as const;
 
@@ -207,189 +179,6 @@ function normalizeGoalCounter(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
-function buildHostForcedStoppedGoalState(args: {
-  currentGoal: StoplessGoalProjection;
-  errorClass: string;
-  blockingEvidence: string;
-  counterField: 'consecutiveIrrecoverableErrors' | 'consecutiveValidationFailures' | 'consecutiveNoProgress';
-  counterValue: number;
-}): StoplessGoalProjection {
-  const nowMs = Date.now();
-  return {
-    status: 'stopped',
-    objective: args.currentGoal.objective,
-    blockingEvidence: args.blockingEvidence,
-    latestNote: args.blockingEvidence,
-    attemptsExhausted: true,
-    errorClass: args.errorClass,
-    updatedAt: nowMs,
-    createdAt:
-      readFiniteNonNegativeNumber(args.currentGoal.createdAt)
-      ?? nowMs,
-    [args.counterField]: args.counterValue
-  };
-}
-
-function readCurrentGoalState(args: {
-  adapterContext: Record<string, unknown>;
-  pipelineMetadata?: Record<string, unknown>;
-}): StoplessGoalProjection | undefined {
-  const persisted = readPersistedGoalState(args.adapterContext);
-  const metadataState = asGoalProjection(
-    MetadataCenter.read(args.pipelineMetadata)?.readRuntimeControl().stoplessGoal?.state
-  );
-  const adapterState = asGoalProjection(
-    MetadataCenter.read(args.adapterContext)?.readRuntimeControl().stoplessGoal?.state
-  );
-  const candidates = [persisted, metadataState, adapterState].filter((candidate): candidate is StoplessGoalProjection => Boolean(candidate));
-  if (!candidates.length) {
-    return undefined;
-  }
-  return mergeGoalStateCandidates(candidates);
-}
-
-function asGoalProjection(value: unknown): StoplessGoalProjection | undefined {
-  const record = asFlatRecord(value);
-  return record && typeof record.status === 'string' && typeof record.objective === 'string'
-    ? (record as StoplessGoalProjection)
-    : undefined;
-}
-
-function readPersistedGoalState(adapterContext: Record<string, unknown>): StoplessGoalProjection | undefined {
-  const persisted = asFlatRecord(readStoplessGoalState(adapterContext) as Record<string, unknown> | null);
-  return asGoalProjection(persisted?.state);
-}
-
-function mergeGoalStateCandidates(candidates: StoplessGoalProjection[]): StoplessGoalProjection {
-  const canonical = [...candidates].sort((a, b) => {
-    const updatedDiff =
-      (readFiniteNonNegativeNumber(b.updatedAt) ?? 0)
-      - (readFiniteNonNegativeNumber(a.updatedAt) ?? 0);
-    if (updatedDiff !== 0) {
-      return updatedDiff;
-    }
-    return (readFiniteNonNegativeNumber(b.createdAt) ?? 0) - (readFiniteNonNegativeNumber(a.createdAt) ?? 0);
-  })[0]!;
-
-  return {
-    ...canonical,
-    createdAt: candidates.reduce((min, candidate) => {
-      const createdAt = readFiniteNonNegativeNumber(candidate.createdAt);
-      return typeof createdAt === 'number' ? Math.min(min, createdAt) : min;
-    }, readFiniteNonNegativeNumber(canonical.createdAt) ?? Date.now()),
-    updatedAt: candidates.reduce((max, candidate) => {
-      const updatedAt = readFiniteNonNegativeNumber(candidate.updatedAt);
-      return typeof updatedAt === 'number' ? Math.max(max, updatedAt) : max;
-    }, readFiniteNonNegativeNumber(canonical.updatedAt) ?? Date.now()),
-    consecutiveIrrecoverableErrors: Math.max(...candidates.map((candidate) => normalizeGoalCounter(candidate.consecutiveIrrecoverableErrors))),
-    consecutiveValidationFailures: Math.max(...candidates.map((candidate) => normalizeGoalCounter(candidate.consecutiveValidationFailures))),
-    consecutiveNoProgress: Math.max(...candidates.map((candidate) => normalizeGoalCounter(candidate.consecutiveNoProgress)))
-  };
-}
-
-function writeProjectedGoalState(args: {
-  adapterContext: Record<string, unknown>;
-  pipelineMetadata?: Record<string, unknown>;
-  state: StoplessGoalProjection;
-}): StoplessGoalProjection {
-  const adapterCenter = MetadataCenter.attach(args.adapterContext);
-  adapterCenter.writeRuntimeControl(
-    'stoplessGoal',
-    {
-      state: args.state,
-      status: args.state.status
-    },
-    PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-    'provider response goal-state projection'
-  );
-  adapterCenter.writeRuntimeControl(
-    'stoplessGoalStatus',
-    args.state.status,
-    PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-    'provider response goal-state projection'
-  );
-  if (hasGoalPersistenceScope(args.adapterContext)) {
-    persistStoplessGoalStateSnapshot(args.adapterContext, args.state);
-  }
-  syncAdapterContextRuntimeBackToPipelineMetadata({
-    pipelineMetadata: args.pipelineMetadata,
-    adapterContext: args.adapterContext
-  });
-  return args.state;
-}
-
-function persistGoalProgressLedger(args: {
-  adapterContext: Record<string, unknown>;
-  pipelineMetadata?: Record<string, unknown>;
-  currentGoal: StoplessGoalProjection;
-  requestId: string;
-  finishReason?: string;
-}): StoplessGoalProjection {
-  const normalizedFinishReason = readNonEmptyString(args.finishReason)?.toLowerCase();
-  const nowMs = Date.now();
-  if (normalizedFinishReason === 'stop') {
-    const nextCount = normalizeGoalCounter(args.currentGoal.consecutiveNoProgress) + 1;
-    const details = [
-      'Goal followup produced finish_reason=stop without observable progress.',
-      `request_id=${args.requestId}`,
-      'finish_reason=stop'
-    ].join('\n');
-    const state =
-      nextCount >= GOAL_NO_PROGRESS_STOP_THRESHOLD
-        ? buildHostForcedStoppedGoalState({
-            currentGoal: args.currentGoal,
-            errorClass: REPEATED_NO_PROGRESS_STOP_ERROR_CLASS,
-            blockingEvidence: details,
-            counterField: 'consecutiveNoProgress',
-            counterValue: nextCount
-          })
-        : ({
-            ...args.currentGoal,
-            status: 'active',
-            latestNote: details,
-            consecutiveIrrecoverableErrors: 0,
-            consecutiveValidationFailures: 0,
-            consecutiveNoProgress: nextCount,
-            updatedAt: nowMs,
-            createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? nowMs
-          } as StoplessGoalProjection);
-    return writeProjectedGoalState({
-      adapterContext: args.adapterContext,
-      pipelineMetadata: args.pipelineMetadata,
-      state
-    });
-  }
-
-  return writeProjectedGoalState({
-    adapterContext: args.adapterContext,
-    pipelineMetadata: args.pipelineMetadata,
-    state: {
-      ...args.currentGoal,
-      consecutiveIrrecoverableErrors: 0,
-      consecutiveValidationFailures: 0,
-      consecutiveNoProgress: 0,
-      updatedAt: nowMs,
-      createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? nowMs
-    }
-  });
-}
-
-function hasGoalPersistenceScope(adapterContext: Record<string, unknown>): boolean {
-  const clientInject = MetadataCenter.read(adapterContext)?.readRuntimeControl().stopMessageClientInject;
-  const directScope = readNonEmptyString(clientInject?.sessionScope);
-  if (directScope) {
-    return true;
-  }
-  return Boolean(
-    readNonEmptyString(adapterContext.clientTmuxSessionId)
-    ?? readNonEmptyString(adapterContext.client_tmux_session_id)
-    ?? readNonEmptyString(adapterContext.tmuxSessionId)
-    ?? readNonEmptyString(adapterContext.tmux_session_id)
-    ?? readNonEmptyString(adapterContext.sessionId)
-    ?? readNonEmptyString(adapterContext.conversationId)
-  );
-}
-
 function readClientToolsRawForResponsesNormalization(args: {
   adapterContext?: Record<string, unknown>;
   requestSemantics?: Record<string, unknown>;
@@ -433,94 +222,6 @@ async function normalizeResponsesToolCallsViaRustSsot(args: {
 }
 
 
-function persistGoalValidationLedger(args: {
-  adapterContext: Record<string, unknown>;
-  pipelineMetadata?: Record<string, unknown>;
-  currentGoal: StoplessGoalProjection;
-  requestId: string;
-  validationReason?: string;
-  validationMessage?: string;
-  missingFields?: string[];
-}): StoplessGoalProjection {
-  const nextCount = normalizeGoalCounter(args.currentGoal.consecutiveValidationFailures) + 1;
-  const details = [
-    'Goal update was rejected by host transition contract validation.',
-    `request_id=${args.requestId}`,
-    ...(args.validationReason ? [`validation_reason=${args.validationReason}`] : []),
-    ...(args.validationMessage ? [`validation_message=${args.validationMessage}`] : []),
-    ...(args.missingFields?.length ? [`missing_fields=${args.missingFields.join(',')}`] : [])
-  ].join('\n');
-  const state =
-    nextCount >= GOAL_VALIDATION_FAILURE_STOP_THRESHOLD
-      ? buildHostForcedStoppedGoalState({
-          currentGoal: args.currentGoal,
-          errorClass: REPEATED_VALIDATION_FAILURE_ERROR_CLASS,
-          blockingEvidence: details,
-          counterField: 'consecutiveValidationFailures',
-          counterValue: nextCount
-        })
-      : ({
-          ...args.currentGoal,
-          status: 'active',
-          latestNote: details,
-          consecutiveIrrecoverableErrors: 0,
-          consecutiveValidationFailures: nextCount,
-          consecutiveNoProgress: 0,
-          updatedAt: Date.now(),
-          createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? Date.now()
-        } as StoplessGoalProjection);
-  return writeProjectedGoalState({
-    adapterContext: args.adapterContext,
-    pipelineMetadata: args.pipelineMetadata,
-    state
-  });
-}
-
-function persistGoalIrrecoverableErrorLedger(args: {
-  adapterContext: Record<string, unknown>;
-  pipelineMetadata?: Record<string, unknown>;
-  currentGoal: StoplessGoalProjection;
-  requestId: string;
-  code?: string;
-  upstreamCode?: string;
-  reason?: string;
-  message?: string;
-}): StoplessGoalProjection {
-  const nextCount = normalizeGoalCounter(args.currentGoal.consecutiveIrrecoverableErrors) + 1;
-  const details = [
-    'Goal followup failed irrecoverably and host stopped automatic continuation.',
-    `request_id=${args.requestId}`,
-    ...(args.code ? [`code=${args.code}`] : []),
-    ...(args.upstreamCode ? [`upstream_code=${args.upstreamCode}`] : []),
-    ...(args.reason ? [`reason=${args.reason}`] : []),
-    ...(args.message ? [`message=${args.message}`] : [])
-  ].join('\n');
-  const state =
-    nextCount >= GOAL_IRRECOVERABLE_ERROR_STOP_THRESHOLD
-      ? buildHostForcedStoppedGoalState({
-          currentGoal: args.currentGoal,
-          errorClass: REPEATED_IRRECOVERABLE_ERROR_CLASS,
-          blockingEvidence: details,
-          counterField: 'consecutiveIrrecoverableErrors',
-          counterValue: nextCount
-        })
-      : ({
-          ...args.currentGoal,
-          status: 'active',
-          latestNote: details,
-          consecutiveIrrecoverableErrors: nextCount,
-          consecutiveValidationFailures: 0,
-          consecutiveNoProgress: 0,
-          updatedAt: Date.now(),
-          createdAt: readFiniteNonNegativeNumber(args.currentGoal.createdAt) ?? Date.now()
-        } as StoplessGoalProjection);
-  return writeProjectedGoalState({
-    adapterContext: args.adapterContext,
-    pipelineMetadata: args.pipelineMetadata,
-    state
-  });
-}
-
 function logProviderResponseConverterNonBlockingError(
   stage: string,
   error: unknown,
@@ -561,7 +262,6 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
     MetadataCenter.bind(pipelineMetadata, adapterCenter);
   } else if (adapterCenter && pipelineCenter && pipelineCenter !== adapterCenter) {
     const runtimeControl = adapterCenter.readRuntimeControl();
-    const stoplessGoalStatus = runtimeControl.stoplessGoalStatus;
     if (runtimeControl.stopless) {
       pipelineCenter.writeRuntimeControl(
         'stopless',
@@ -570,36 +270,12 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
         'provider response stopless runtime pipeline sync'
       );
     }
-    if (runtimeControl.serverToolLoopState) {
+    if (runtimeControl.stopMessageCompareContext) {
       pipelineCenter.writeRuntimeControl(
-        'serverToolLoopState',
-        runtimeControl.serverToolLoopState,
+        'stopMessageCompareContext',
+        runtimeControl.stopMessageCompareContext,
         PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        'provider response stopless loop-state pipeline sync'
-      );
-    }
-    if (runtimeControl.stopMessageState) {
-      pipelineCenter.writeRuntimeControl(
-        'stopMessageState',
-        runtimeControl.stopMessageState,
-        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        'provider response stop-message state pipeline sync'
-      );
-    }
-    if (runtimeControl.stoplessGoal) {
-      pipelineCenter.writeRuntimeControl(
-        'stoplessGoal',
-        runtimeControl.stoplessGoal,
-        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        'provider response goal-state pipeline sync'
-      );
-    }
-    if (typeof stoplessGoalStatus === 'string' && stoplessGoalStatus.trim()) {
-      pipelineCenter.writeRuntimeControl(
-        'stoplessGoalStatus',
-        stoplessGoalStatus.trim(),
-        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        'provider response goal-state pipeline sync'
+        'provider response stop-message compare pipeline sync'
       );
     }
   }
@@ -815,13 +491,7 @@ export async function convertProviderResponseIfNeeded(
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol: options.providerProtocol,
-      serverToolsEnabled: options.serverToolsEnabled !== false,
-      onReasoningStopSeedError: (error) => {
-        logProviderResponseConverterNonBlockingError(
-          'seedReasoningStopStateFromCapturedRequest',
-          error
-        );
-      }
+      serverToolsEnabled: options.serverToolsEnabled !== false
     });
     adapterContext = baseContext;
     const serverToolsEnabled = options.serverToolsEnabled !== false;
@@ -942,22 +612,7 @@ export async function convertProviderResponseIfNeeded(
         }
       });
     }
-    const effectiveGoalState = adapterContext
-      ? readCurrentGoalState({
-          adapterContext,
-          pipelineMetadata: options.pipelineMetadata
-        })
-      : undefined;
-    const finishReason = deriveFinishReason(converted.body ?? body);
-    if (effectiveGoalState?.status === 'active' && adapterContext) {
-      persistGoalProgressLedger({
-        adapterContext,
-        pipelineMetadata: options.pipelineMetadata,
-        currentGoal: effectiveGoalState,
-        requestId: options.requestId,
-        finishReason
-      });
-    }
+    void deriveFinishReason(converted.body ?? body);
     return attachTimingBreakdown({
       ...options.response,
       body: converted.body ?? body
@@ -1008,23 +663,6 @@ export async function convertProviderResponseIfNeeded(
       ?? (typeof detailUpstreamCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(detailUpstreamCode) ? detailUpstreamCode : undefined);
 
     if (fatalConversionCode) {
-      if (adapterContext && fatalConversionCode === 'CLIENT_TOOL_ARGS_INVALID') {
-        const currentGoal = readCurrentGoalState({
-          adapterContext,
-          pipelineMetadata: options.pipelineMetadata
-        });
-        if (currentGoal?.status === 'active') {
-          persistGoalValidationLedger({
-            adapterContext,
-            pipelineMetadata: options.pipelineMetadata,
-            currentGoal,
-            requestId: options.requestId,
-            validationReason,
-            validationMessage,
-            missingFields
-          });
-        }
-      }
       logPipelineStage('convert.bridge.error', options.requestId, {
         code: errCode,
         upstreamCode: upstreamCode || detailUpstreamCode,
@@ -1081,29 +719,6 @@ export async function convertProviderResponseIfNeeded(
     const followupLogDetails = isServerToolFollowupFailure
       ? extractServerToolFollowupErrorLogDetails(error)
       : undefined;
-    const effectiveGoalState = adapterContext
-      ? readCurrentGoalState({
-          adapterContext,
-          pipelineMetadata: options.pipelineMetadata
-        })
-      : undefined;
-
-    if (
-      effectiveGoalState?.status === 'active'
-      && (effectiveErrorStage === 'provider.followup' || isServerToolFollowupRequest)
-      && adapterContext
-    ) {
-      persistGoalIrrecoverableErrorLedger({
-        adapterContext,
-        pipelineMetadata: options.pipelineMetadata,
-        currentGoal: effectiveGoalState,
-        requestId: options.requestId,
-        code: followupLogDetails?.code || errCode,
-        upstreamCode: followupLogDetails?.upstreamCode || upstreamCode || detailUpstreamCode,
-        reason: followupLogDetails?.reason || detailReason,
-        message
-      });
-    }
 
     if (convertErrorPlan.handled) {
       if (isSseDecodeError || isContextLengthExceeded) {
@@ -1132,24 +747,6 @@ export async function convertProviderResponseIfNeeded(
         );
       }
       throw error;
-    }
-
-    if (adapterContext && errCode === 'CLIENT_TOOL_ARGS_INVALID') {
-      const currentGoal = readCurrentGoalState({
-        adapterContext,
-        pipelineMetadata: options.pipelineMetadata
-      });
-      if (currentGoal?.status === 'active') {
-        persistGoalValidationLedger({
-          adapterContext,
-          pipelineMetadata: options.pipelineMetadata,
-          currentGoal,
-          requestId: options.requestId,
-          validationReason,
-          validationMessage,
-          missingFields
-        });
-      }
     }
 
     logPipelineStage('convert.bridge.error', options.requestId, {

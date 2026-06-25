@@ -50,9 +50,3 @@ export {
   applyResolveFailureState,
   applySendFailureState
 } from './request-executor-failure-state.js';
-
-// Goal state persistence
-export {
-  asFlatRecord,
-  persistGoalStateFromMergedMetadata
-} from './goal-state-persistence.js';

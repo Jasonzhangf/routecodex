@@ -92,28 +92,6 @@ describe('routing state store paths', () => {
     expect(fs.existsSync(path.join(tempRoot, 'state', 'routing', 'conversation-override-routing.json'))).toBe(false);
   });
 
-  test('round-trips stopless goal state through persisted routing snapshots', () => {
-    const state = {
-      stoplessGoalState: {
-        status: 'active',
-        objective: '统一 RCC stopless goal lifecycle',
-        latestNote: 'waiting for host inbound wiring',
-        updatedAt: 456,
-        createdAt: 123
-      },
-      allowedProviders: new Set<string>(),
-      disabledProviders: new Set<string>(),
-      disabledKeys: new Map<string, number>(),
-      disabledModels: new Map<string, number>()
-    } as any;
-
-    saveRoutingInstructionStateSync('session:goal-state', state);
-
-    const restored = loadRoutingInstructionStateSync('session:goal-state');
-    expect(restored?.stoplessGoalState).toEqual(state.stoplessGoalState);
-    expect(fs.existsSync(path.join(tempRoot, 'env-only', 'session-goal-state.json'))).toBe(false);
-  });
-
   test('ignores ROUTECODEX_SESSION_DIR env fallback when no explicit override is passed', () => {
     const envOnlyDir = path.join(tempRoot, 'env-only');
     process.env.ROUTECODEX_SESSION_DIR = envOnlyDir;

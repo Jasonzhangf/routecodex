@@ -74,6 +74,10 @@ pub struct RuntimeStopMessageStateSnapshot {
     pub max_repeats: i64,
     pub used: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_feedback: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<f64>,
@@ -317,6 +321,8 @@ pub fn resolve_runtime_stop_message_state(
             .and_then(|state| read_trimmed_string(state.get("stopMessageProviderKey"))),
         max_repeats,
         used,
+        trigger_hint: None,
+        schema_feedback: None,
         source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
         updated_at: None,
         last_used_at: None,
@@ -471,6 +477,35 @@ fn read_stopless_cli_result_snapshot_from_output_text(
         provider_key: None,
         max_repeats,
         used: repeat_count.saturating_sub(1),
+        trigger_hint: read_trimmed_string(
+            row.get("triggerHint")
+                .or_else(|| row.get("trigger_hint"))
+                .or_else(|| {
+                    row.get("schemaGuidance")
+                        .or_else(|| row.get("schema_guidance"))
+                        .and_then(Value::as_object)
+                        .and_then(|guidance| {
+                            guidance
+                                .get("triggerHint")
+                                .or_else(|| guidance.get("trigger_hint"))
+                        })
+                })
+                .or_else(|| {
+                    row.get("input")
+                        .or_else(|| row.get("input_json"))
+                        .and_then(Value::as_object)
+                        .and_then(|input| {
+                            input
+                                .get("triggerHint")
+                                .or_else(|| input.get("trigger_hint"))
+                        })
+                }),
+        ),
+        schema_feedback: row
+            .get("schemaFeedback")
+            .or_else(|| row.get("schema_feedback"))
+            .filter(|value| value.is_object())
+            .cloned(),
         source: Some("client_exec_result".to_string()),
         updated_at: None,
         last_used_at: None,
@@ -681,8 +716,7 @@ pub fn plan_persist_stop_message_state(
         .as_object()
         .ok_or_else(|| "persist stop-message state input must be an object".to_string())?;
 
-    let has_non_stop_message_state = js_truthy(state.get("stoplessGoalState"))
-        || js_truthy(state.get("forcedTarget"))
+    let has_non_stop_message_state = js_truthy(state.get("forcedTarget"))
         || js_truthy(state.get("preferTarget"))
         || json_collection_has_items(state.get("allowedProviders"))
         || json_collection_has_items(state.get("disabledProviders"))
@@ -724,6 +758,8 @@ pub fn resolve_default_stop_message_snapshot(
         provider_key: None,
         max_repeats,
         used: 0,
+        trigger_hint: None,
+        schema_feedback: None,
         source: Some("default".to_string()),
         updated_at: None,
         last_used_at: None,
@@ -769,6 +805,8 @@ pub fn resolve_implicit_gemini_stop_message_snapshot(
             .or_else(|| read_trimmed_string(input.record.get("providerId"))),
         max_repeats: 1,
         used: 0,
+        trigger_hint: None,
+        schema_feedback: None,
         source: Some("auto".to_string()),
         updated_at: None,
         last_used_at: None,
@@ -805,6 +843,8 @@ fn resolve_stop_message_snapshot(raw: Option<&Value>) -> Option<RuntimeStopMessa
         provider_key,
         max_repeats,
         used,
+        trigger_hint: None,
+        schema_feedback: None,
         source,
         updated_at,
         last_used_at,
@@ -1768,6 +1808,8 @@ mod tests {
                 provider_key: None,
                 max_repeats: DEFAULT_STOP_MESSAGE_MAX_REPEATS,
                 used: 2,
+                trigger_hint: None,
+                schema_feedback: None,
                 source: Some("explicit".to_string()),
                 updated_at: Some(1234.0),
                 last_used_at: None,
@@ -1799,6 +1841,8 @@ mod tests {
                 provider_key: None,
                 max_repeats: 3,
                 used: 2,
+                trigger_hint: None,
+                schema_feedback: None,
                 source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
                 updated_at: None,
                 last_used_at: None,
@@ -2100,6 +2144,8 @@ mod tests {
         assert_eq!(snapshot.text, "continue from result");
         assert_eq!(snapshot.max_repeats, 5);
         assert_eq!(snapshot.used, 2);
+        assert_eq!(snapshot.trigger_hint.as_deref(), None);
+        assert!(snapshot.schema_feedback.is_none());
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
     }
 
@@ -2130,6 +2176,8 @@ mod tests {
         assert_eq!(snapshot.text, "continue from current tool output");
         assert_eq!(snapshot.max_repeats, 4);
         assert_eq!(snapshot.used, 2);
+        assert_eq!(snapshot.trigger_hint.as_deref(), None);
+        assert!(snapshot.schema_feedback.is_none());
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
     }
 
@@ -2153,6 +2201,8 @@ mod tests {
         assert_eq!(snapshot.text, "continue from responses input");
         assert_eq!(snapshot.max_repeats, 3);
         assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.trigger_hint.as_deref(), None);
+        assert!(snapshot.schema_feedback.is_none());
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
     }
 
@@ -2190,6 +2240,8 @@ mod tests {
         assert_eq!(snapshot.text, "continue from relay responsesRequestContext");
         assert_eq!(snapshot.max_repeats, 3);
         assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.trigger_hint.as_deref(), None);
+        assert!(snapshot.schema_feedback.is_none());
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
     }
 
@@ -2229,6 +2281,45 @@ mod tests {
         assert_eq!(snapshot.text, "continue from relay submit output");
         assert_eq!(snapshot.max_repeats, 3);
         assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.trigger_hint.as_deref(), None);
+        assert!(snapshot.schema_feedback.is_none());
+        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
+    }
+
+    #[test]
+    fn adapter_context_restores_stopless_cli_result_trigger_hint_and_schema_feedback() {
+        let input = RuntimeStopMessageStateFromAdapterContextInput {
+            runtime_metadata: None,
+            adapter_context: json!({
+                "responsesResume": {
+                    "continuationOwner": "relay",
+                    "toolOutputsDetailed": [{
+                        "callId": "call_servertool_cli",
+                        "originalId": "call_servertool_cli",
+                        "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from invalid schema\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaGuidance\":{\"triggerHint\":\"invalid_schema\"},\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[\"next_step\"]}}"
+                    }],
+                    "fullInput": [{
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "上一轮执行结果：repeatCount=1/3。" }]
+                    }]
+                }
+            }),
+        };
+
+        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
+            .expect("responses resume invalid schema snapshot");
+        assert_eq!(snapshot.text, "continue from invalid schema");
+        assert_eq!(snapshot.max_repeats, 3);
+        assert_eq!(snapshot.used, 0);
+        assert_eq!(snapshot.trigger_hint.as_deref(), Some("invalid_schema"));
+        assert_eq!(
+            snapshot.schema_feedback,
+            Some(json!({
+                "reasonCode": "stop_schema_next_step_missing",
+                "missingFields": ["next_step"]
+            }))
+        );
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
     }
 

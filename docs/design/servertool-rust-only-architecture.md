@@ -1276,9 +1276,9 @@ record/runtimeMetadata
 
 当前真源：
 
-- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/loop_state_contract.rs`
+- Stopless goal state codec is removed; loop state must come from MetadataCenter/runtime request truth.
 
 职责：
 

@@ -201,8 +201,8 @@ describe('session storage startup cleanup', () => {
 
   test('preserves routing sticky scope files when ROUTECODEX_SESSION_DIR is the active storage root', () => {
     process.env.ROUTECODEX_SESSION_DIR = baseDir;
-    fs.writeFileSync(path.join(baseDir, 'session-goal-live.json'), '{"version":1,"state":{"stoplessGoalState":{"status":"active","objective":"live"}}}', 'utf8');
-    fs.writeFileSync(path.join(baseDir, 'conversation-goal-live.json'), '{"version":1,"state":{"stoplessGoalState":{"status":"active","objective":"live"}}}', 'utf8');
+    fs.writeFileSync(path.join(baseDir, 'session-routing-live.json'), '{"version":1,"state":{"stopMessageText":"continue","stopMessageMaxRepeats":3}}', 'utf8');
+    fs.writeFileSync(path.join(baseDir, 'conversation-routing-live.json'), '{"version":1,"state":{"stopMessageText":"continue","stopMessageMaxRepeats":3}}', 'utf8');
     fs.writeFileSync(path.join(baseDir, 'tmux-dead-tmux.json'), '{"version":1}', 'utf8');
 
     const summary = cleanupSessionStorageOnStartup({
@@ -212,8 +212,8 @@ describe('session storage startup cleanup', () => {
 
     expect(summary.removedLegacyScopeFiles).toBe(0);
     expect(summary.removedDeadTmuxStateFiles).toBe(1);
-    expect(fs.existsSync(path.join(baseDir, 'session-goal-live.json'))).toBe(true);
-    expect(fs.existsSync(path.join(baseDir, 'conversation-goal-live.json'))).toBe(true);
+    expect(fs.existsSync(path.join(baseDir, 'session-routing-live.json'))).toBe(true);
+    expect(fs.existsSync(path.join(baseDir, 'conversation-routing-live.json'))).toBe(true);
     expect(fs.existsSync(path.join(baseDir, 'tmux-dead-tmux.json'))).toBe(false);
   });
 });

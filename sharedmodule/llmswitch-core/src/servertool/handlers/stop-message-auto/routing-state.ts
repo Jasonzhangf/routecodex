@@ -58,7 +58,6 @@ export function applyStopMessageSnapshotToState(
   }
 ): RoutingInstructionState {
   const next = state ?? {
-    stoplessGoalState: undefined,
     forcedTarget: undefined,
     preferTarget: undefined,
     allowedProviders: new Set<string>(),

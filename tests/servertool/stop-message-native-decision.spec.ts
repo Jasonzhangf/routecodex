@@ -32,7 +32,6 @@ function buildMinimalDecisionContext(args: {
     runtime_snapshot: undefined,
     persisted_default_exhausted: args.persistedDefaultExhausted ?? false,
     explicit_mode: undefined,
-    goal_status: 'idle',
     plan_mode_active: false,
     default_enabled: args.defaultEnabled ?? true,
     default_max_repeats: args.defaultMaxRepeats ?? 3,
@@ -65,27 +64,6 @@ describe('stop-message native decision (blackbox)', () => {
     });
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
   });
-
-  test('goal active → skip', () => {
-    const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true }),
-      goal_status: 'active',
-    };
-    expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
-  });
-
-  test.each(['idle', 'paused', 'stopped', 'completed'] as const)(
-    'goal status %s does not skip clean stop',
-    (goalStatus) => {
-      const ctx: StopMessageDecisionContext = {
-        ...buildMinimalDecisionContext({ stopEligible: true }),
-        goal_status: goalStatus,
-      };
-      const decision = decideStopMessageActionWithNative(ctx);
-      expect(decision.action).toBe('trigger');
-      expect(decision.followup_text).toBeTruthy();
-    }
-  );
 
   test('plan mode active → skip', () => {
     const ctx: StopMessageDecisionContext = {
@@ -219,6 +197,17 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.followup_text).toContain('<rcc_stop_schema>');
   });
 
+  test('unterminated json fence is treated as invalid schema instead of missing schema', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '```json\n{"stopreason":2,"reason":"继续"}',
+      used: 0,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('followup');
+    expect(gate.reason_code).toBe('stop_schema_invalid_json');
+    expect(gate.count_budget).toBe(true);
+  });
+
   test('stop schema gate exhausts repeated missing schema loop', () => {
     const first = evaluateStopSchemaGateWithNative({
       assistantText: '还是无法继续，工具被拒绝。',
@@ -251,6 +240,29 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.reason_code).toBe('stop_schema_budget_exhausted');
     expect(gate.count_budget).toBe(true);
     expect(gate.no_change_count).toBe(3);
+  });
+
+  test('stopless budget does not reset when provider switches inside the same term', () => {
+    const decision = decideStopMessageActionWithNative({
+      ...buildMinimalDecisionContext({
+        stopEligible: true,
+      }),
+      persisted_snapshot: {
+        text: '继续执行',
+        max_repeats: 3,
+        used: 3,
+        source: 'persisted',
+        stage_mode: 'on',
+        provider_key: 'minimax.key1',
+      },
+      provider_pin: {
+        provider_key: 'orangeai.key1',
+        model_id: 'glm-5.2',
+        routecodex_port_mode: 'tools',
+      },
+    });
+    expect(decision.action).toBe('skip');
+    expect(decision.skip_reason).toBe('skip_reached_max_repeats');
   });
 
   test('stop schema gate requires evidence and diagnostics before terminal stop', () => {

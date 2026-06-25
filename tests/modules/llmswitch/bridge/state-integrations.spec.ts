@@ -41,30 +41,18 @@ describe('llmswitch bridge state-integrations', () => {
     expect(source).not.toContain('buildHeartbeatInjectTextSnapshot');
   });
 
-  it('sync stopless goal state bridge uses real exported function name', () => {
+  it('keeps removed stopless state integrations absent', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'src/modules/llmswitch/bridge/state-integrations.ts'),
       'utf8'
     );
-    expect(source).toContain('syncStoplessGoalStateFromRequest');
-    expect(source).not.toContain('syncStoplessGoalCarrierFromRequest');
-  });
-
-  it('persist stopless goal state bridge uses real exported function name', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'src/modules/llmswitch/bridge/state-integrations.ts'),
-      'utf8'
-    );
-    expect(source).toContain('persistStoplessGoalStateSnapshot');
-    expect(source).not.toContain('saveStoplessGoalCarrier');
-  });
-
-  it('read stopless goal state bridge uses real exported function name', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'src/modules/llmswitch/bridge/state-integrations.ts'),
-      'utf8'
-    );
-    expect(source).toContain('readStoplessGoalState');
-    expect(source).not.toContain('fetchStoplessGoalCarrier');
+    const removedStateApis = [
+      `syncStopless${'Goal'}StateFromRequest`,
+      `persistStopless${'Goal'}StateSnapshot`,
+      `readStopless${'Goal'}State`
+    ];
+    for (const api of removedStateApis) {
+      expect(source).not.toContain(api);
+    }
   });
 });

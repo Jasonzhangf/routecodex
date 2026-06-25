@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::orchestration_policy_contract::ServertoolErrorPlan;
 use crate::outcome_contract::{
     build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03,
     ServertoolHubRespChatProcess03Input, ServertoolOutcomeError,
 };
-use crate::orchestration_policy_contract::ServertoolErrorPlan;
 use crate::persisted_lookup::STOP_MESSAGE_FOLLOWUP_FLOW_ID;
 
 // feature_id: hub.servertool_backend_route_runtime
@@ -635,8 +635,6 @@ pub fn plan_followup_execution_mode(
 
     let execution_mode = if outcome_mode == "skip" || no_followup {
         ServertoolFollowupExecutionMode::Skip
-    } else if client_inject_source == Some("servertool.stopless_goal_continue") {
-        ServertoolFollowupExecutionMode::Reenter
     } else if metadata_client_inject_only
         || outcome_mode == "client_inject_only"
         || client_inject_only
@@ -822,9 +820,8 @@ pub fn plan_followup_auto_limit_error(
         );
     }
     Ok(ServertoolErrorPlan {
-        message:
-            "[servertool] followup auto limit reached before stopless contract was satisfied"
-                .to_string(),
+        message: "[servertool] followup auto limit reached before stopless contract was satisfied"
+            .to_string(),
         code: code.to_string(),
         category: category.to_string(),
         status,
@@ -841,7 +838,6 @@ pub fn plan_followup_runtime_metadata(
     let adapter_runtime = input.adapter_runtime.unwrap_or(Value::Null);
     let followup_mode = read_trimmed_string(metadata.get("routecodexPortMode"))
         .or_else(|| read_trimmed_string(adapter_context.get("routecodexPortMode")))
-        .or_else(|| read_trimmed_string(adapter_runtime.get("serverToolFollowupMode")))
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
     let route_hint = read_trimmed_string(metadata.get("routeHint"))
@@ -1821,8 +1817,8 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn plans_web_search_backend_route_policy() {
-        let plan = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
+    fn web_search_backend_route_policy_is_retired() {
+        let err = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
             ServertoolBackendRoutePolicyInput {
                 tool_name: "web_search".to_string(),
                 flow_id: None,
@@ -1831,30 +1827,20 @@ mod tests {
                 adapter_context: None,
             },
         )
-        .expect("web_search backend route plan");
-        assert_eq!(plan.tool_name, "web_search");
-        assert_eq!(plan.flow_id, "web_search_flow");
-        assert_eq!(plan.route_hint, "servertool_backend_route:web_search");
+        .expect_err("web_search backend route is retired");
         assert_eq!(
-            plan.execution_mode,
-            ServertoolBackendRouteExecutionMode::Reenter
-        );
-        assert!(plan.shape_guard.preserve_streaming);
-        assert!(plan.shape_guard.fail_on_missing_payload);
-        assert!(plan.origin_delta.requires_origin_seed);
-        assert!(plan.eligible);
-        assert!(plan.skip_reason.is_none());
-        assert_eq!(plan.input["query"], "latest rust");
-        assert_eq!(plan.input["count"], 10);
-        assert_eq!(
-            plan.finalize.context_decoration_mode.as_deref(),
-            Some("web_search_summary")
+            err,
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "web_search".to_string(),
+                expected: ServertoolOutcome::BackendRouteReenter,
+                actual: ServertoolOutcome::ClientExecCliProjection
+            }
         );
     }
 
     #[test]
-    fn parses_web_search_arguments_string_as_rust_owned_input() {
-        let plan = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
+    fn web_search_backend_route_rejects_before_argument_string_parse() {
+        let err = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
             ServertoolBackendRoutePolicyInput {
                 tool_name: "web_search".to_string(),
                 flow_id: None,
@@ -1863,14 +1849,20 @@ mod tests {
                 adapter_context: None,
             },
         )
-        .expect("web_search backend route plan");
-        assert_eq!(plan.input["query"], "routecodex");
-        assert_eq!(plan.input["count"], 3);
+        .expect_err("retired backend route rejects before parsing string payload");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "web_search".to_string(),
+                expected: ServertoolOutcome::BackendRouteReenter,
+                actual: ServertoolOutcome::ClientExecCliProjection
+            }
+        );
     }
 
     #[test]
-    fn normalizes_web_search_count_bounds() {
-        let plan = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
+    fn web_search_backend_route_rejects_before_count_normalization() {
+        let err = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
             ServertoolBackendRoutePolicyInput {
                 tool_name: "web_search".to_string(),
                 flow_id: None,
@@ -1879,13 +1871,20 @@ mod tests {
                 adapter_context: None,
             },
         )
-        .expect("web_search backend route plan");
-        assert_eq!(plan.input["count"], 10);
+        .expect_err("retired backend route rejects before count normalization");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "web_search".to_string(),
+                expected: ServertoolOutcome::BackendRouteReenter,
+                actual: ServertoolOutcome::ClientExecCliProjection
+            }
+        );
     }
 
     #[test]
-    fn plans_vision_backend_route_policy() {
-        let plan = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
+    fn vision_backend_route_policy_is_retired() {
+        let err = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
             ServertoolBackendRoutePolicyInput {
                 tool_name: "vision_auto".to_string(),
                 flow_id: None,
@@ -1894,18 +1893,20 @@ mod tests {
                 adapter_context: None,
             },
         )
-        .expect("vision backend route plan");
-        assert_eq!(plan.tool_name, "vision_auto");
-        assert_eq!(plan.flow_id, "vision_auto_flow");
-        assert_eq!(plan.route_hint, "servertool_backend_route:vision_auto");
-        assert!(plan.finalize.context_decoration_mode.is_none());
-        assert!(plan.eligible);
-        assert!(plan.skip_reason.is_none());
+        .expect_err("vision backend route is retired");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "vision_auto".to_string(),
+                expected: ServertoolOutcome::BackendRouteReenter,
+                actual: ServertoolOutcome::ClientExecCliProjection
+            }
+        );
     }
 
     #[test]
-    fn vision_backend_route_policy_rejects_qwen_image_generation() {
-        let plan = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
+    fn vision_backend_route_rejects_qwen_image_generation_before_policy_build() {
+        let err = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
             ServertoolBackendRoutePolicyInput {
                 tool_name: "vision_auto".to_string(),
                 flow_id: None,
@@ -1921,9 +1922,15 @@ mod tests {
                 })),
             },
         )
-        .expect("vision backend route plan");
-        assert!(!plan.eligible);
-        assert_eq!(plan.skip_reason.as_deref(), Some("qwen_image_generation"));
+        .expect_err("retired backend route rejects before qwen image-generation policy");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "vision_auto".to_string(),
+                expected: ServertoolOutcome::BackendRouteReenter,
+                actual: ServertoolOutcome::ClientExecCliProjection
+            }
+        );
     }
 
     #[test]
@@ -2031,14 +2038,10 @@ mod tests {
                 adapter_context: None,
             },
         )
-        .expect_err("memory cache is server io internal, not backend route");
+        .expect_err("memory cache is not a servertool backend route outcome");
         assert_eq!(
             err,
-            ServertoolOutcomeError::WrongOutcome {
-                tool_name: "memory_cache_auto".to_string(),
-                expected: ServertoolOutcome::BackendRouteReenter,
-                actual: ServertoolOutcome::ServerIoInternal
-            }
+            ServertoolOutcomeError::UnsupportedTool("memory_cache_auto".to_string())
         );
     }
 
@@ -2158,26 +2161,6 @@ mod tests {
         assert_eq!(
             plan.execution_mode,
             ServertoolFollowupExecutionMode::ClientInjectOnly
-        );
-    }
-
-    #[test]
-    fn followup_execution_mode_stopless_goal_continue_keeps_reenter() {
-        let plan = plan_followup_execution_mode(ServertoolFollowupExecutionModeInput {
-            flow_id: Some("stop_message_flow".to_string()),
-            decision: Some(ServertoolFollowupExecutionModeDecision {
-                outcome_mode: Some("client_inject_only".to_string()),
-                no_followup: Some(false),
-                client_inject_only: Some(true),
-            }),
-            metadata: None,
-            metadata_client_inject_only: true,
-            client_inject_source: Some("servertool.stopless_goal_continue".to_string()),
-        })
-        .expect("execution mode");
-        assert_eq!(
-            plan.execution_mode,
-            ServertoolFollowupExecutionMode::Reenter
         );
     }
 
@@ -2436,6 +2419,28 @@ mod tests {
             plan.runtime_set["serverToolOriginalEntryEndpoint"],
             "/v1/chat/completions"
         );
+    }
+
+    #[test]
+    fn followup_runtime_metadata_ignores_legacy_followup_mode_runtime_fallback() {
+        let plan = plan_followup_runtime_metadata(ServertoolFollowupRuntimeMetadataInput {
+            metadata: json!({
+                "routeHint": "coding"
+            }),
+            metadata_runtime: None,
+            adapter_context: Some(json!({})),
+            adapter_runtime: Some(json!({
+                "serverToolFollowupMode": "router",
+                "routeId": "legacy-runtime-route"
+            })),
+            loop_state: None,
+            original_entry_endpoint: Some("/v1/chat/completions".to_string()),
+            followup_entry_endpoint: Some("/v1/chat/completions".to_string()),
+        });
+        assert!(plan.root_set.get("routeHint").is_none());
+        assert_eq!(plan.root_delete, vec!["routeHint".to_string()]);
+        assert_eq!(plan.runtime_set["serverToolFollowup"], true);
+        assert_eq!(plan.runtime_set["preserveRouteHint"], false);
     }
 
     #[test]

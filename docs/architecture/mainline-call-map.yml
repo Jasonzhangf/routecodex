@@ -188,12 +188,15 @@ chains:
       - step_id: req-04
         from_node: VrRoute04SelectedTarget
         to_node: HubReqOutbound05ProviderSemantic
-        binding_pending: true
-        split_binding_id: request.req_outbound_05.runtime_vs_typed
-        owner_feature_id: binding pending
+        caller_symbol: execute
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: run_hub_req_outbound_05_provider_semantic_entrypoint
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+        owner_feature_id: hub.req_outbound_provider_semantic
         semantic_input: "virtual-router target selection and route decision"
         semantic_output: "provider-semantic outbound payload aligned to selected target"
-        note: "Do not fake one edge here: runtime route application and typed HubReqOutbound05 builder are split. See split binding request.req_outbound_05.runtime_vs_typed."
+        status: anchored
+        note: "Req-04 is now anchored at the Rust typed entrypoint: `execute(...)` passes `VrRoute04SelectedTarget` directly into `run_hub_req_outbound_05_provider_semantic_entrypoint(...)`, sealing the selected target into provider-neutral outbound semantics before req-05 compat."
       - step_id: req-05
         from_node: HubReqOutbound05ProviderSemantic
         to_node: ProviderReqOutbound06WirePayload
@@ -616,7 +619,7 @@ chains:
         caller_symbol: runServerToolOrchestration
         caller_file: sharedmodule/llmswitch-core/src/servertool/engine.ts
         callee_symbol: runStopMessageAutoHandlerWithNative
-        callee_file: sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts
+        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "HubRespChatProcess03Governed stop response + adapterContext carrying requestId/sessionId/entryEndpoint/routeName"
         semantic_output: "stop schema gate decision and stopless loop state candidate"
@@ -754,7 +757,7 @@ chains:
         callee_file: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "request metadata carrier plus pipeline result metadata"
-        semantic_output: "dual-write migration node for runtime-control contract: request-route (`routeHint/routeName/routeId/providerProtocol/retryProviderKey/preselectedRoute`), followup (`serverToolFollowup/serverToolFollowupSource/stoplessGoalStatus/stopless`), and stop-message (`stopMessageEnabled/stopMessageExcludeDirect`) must move behind one metadata-center API"
+        semantic_output: "dual-write migration node for runtime-control contract: request-route (`routeHint/routeName/routeId/providerProtocol/retryProviderKey/preselectedRoute`), followup (`serverToolFollowup/serverToolFollowupSource/stopless`), and stop-message (`stopMessageEnabled/stopMessageExcludeDirect`) must move behind one metadata-center API"
         status: partial
         note: "Closeout checklist: docs/goals/metadata-center-dualwrite-dualread-closeout-checklist.md. Current implementation has JS MetadataCenter plus partial Rust snapshot readers; it is not complete dual-write. All control writes must move to `hub.metadata_center_dualwrite_api`; payload residue remains migration-only and must be deleted field by field."
       - step_id: mtc-04
@@ -905,20 +908,7 @@ shared_multi_reference_functions:
     reused_by_chains:
       - error.mainline
     note: "Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract."
-split_bindings:
-  - binding_id: request.req_outbound_05.runtime_vs_typed
-    binding_status: confirmed
-    from_node: VrRoute04SelectedTarget
-    to_node: HubReqOutbound05ProviderSemantic
-    runtime_symbols:
-      - symbol: run_hub_req_outbound_05_provider_semantic_entrypoint
-        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
-    typed_symbols:
-      - symbol: run_hub_req_outbound_05_provider_semantic_entrypoint
-        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
-      - symbol: build_hub_req_outbound_05_from_hub_req_chatprocess_03
-        file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
-    note: "Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -> outbound caller/callee edge."
+split_bindings: []
 
 maintenance_rules:
   - "Do not invent symbols. Use binding_pending until concrete caller/callee is verified in code."

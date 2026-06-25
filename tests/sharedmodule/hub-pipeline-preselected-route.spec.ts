@@ -169,6 +169,96 @@ describe('HubPipeline preselected route ownership', () => {
     }));
   });
 
+  it('builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch', async () => {
+    const routerEngine = { route: jest.fn(() => preselectedRoute) };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+          routeHint: 'flat-route-should-not-enter-snapshot',
+          __rt: {
+            stopMessageEnabled: false,
+            retryProviderKey: 'legacy.retry.should-not-enter-snapshot',
+          },
+          runtime_control: {
+            retryProviderKey: 'payload.retry.should-not-enter-snapshot',
+          },
+          __metadataCenter: {
+            version: 1,
+            requestTruth: {
+              sessionId: {
+                value: 'sess-center-1',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch',
+                  stage: 'test',
+                },
+                reason: 'request truth from center',
+              },
+            },
+            continuationContext: {
+              responsesResume: {
+                value: {
+                  providerKey: 'resume.provider.key',
+                  routeHint: 'resume-hint',
+                },
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch',
+                  stage: 'test',
+                },
+                reason: 'continuation context from center',
+              },
+            },
+            providerObservation: {},
+            runtimeControl: {
+              retryProviderKey: {
+                value: 'center.retry.provider',
+                status: 'active',
+                writer: {
+                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+                  symbol: 'builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch',
+                  stage: 'test',
+                },
+                reason: 'runtime control from center',
+              },
+            },
+          },
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        metadataCenterSnapshot: {
+          requestTruth: {
+            sessionId: 'sess-center-1',
+          },
+          continuationContext: {
+            responsesResume: {
+              providerKey: 'resume.provider.key',
+              routeHint: 'resume-hint',
+            },
+          },
+          runtimeControl: {
+            retryProviderKey: 'center.retry.provider',
+          },
+        },
+      }),
+    }));
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.requestTruth?.routeHint)
+      .toBeUndefined();
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.runtimeControl?.routeHint)
+      .toBeUndefined();
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.runtimeControl?.stopMessageEnabled)
+      .toBeUndefined();
+  });
+
   it('reuses MetadataCenter runtime preselectedRoute without reading flat routecodex residue', async () => {
     const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
 
@@ -440,7 +530,6 @@ describe('HubPipeline preselected route ownership', () => {
               flowId: 'stopless-flow-1',
               repeatCount: 2,
             },
-            stoplessGoalStatus: 'active',
             stopMessageEnabled: true,
             stopMessageExcludeDirect: true,
             servertoolResponseOrchestration: true,
@@ -461,7 +550,6 @@ describe('HubPipeline preselected route ownership', () => {
         flowId: 'stopless-flow-1',
         repeatCount: 2,
       },
-      stoplessGoalStatus: 'active',
       stopMessageEnabled: true,
       stopMessageExcludeDirect: true,
     });

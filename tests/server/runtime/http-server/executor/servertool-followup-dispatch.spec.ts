@@ -50,16 +50,16 @@ function metadataWithFollowupRuntimeControl(
   return metadata;
 }
 
-function metadataWithServerToolLoopRuntimeControl(
+function metadataWithStoplessRuntimeControl(
   value: Record<string, unknown>
 ): Record<string, unknown> {
   const metadata = metadataWithFollowupRuntimeControl('servertool.stop_message');
   MetadataCenter.attach(metadata).writeRuntimeControl(
-    'serverToolLoopState',
+    'stopless',
     value,
     {
       module: 'tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts',
-      symbol: 'metadataWithServerToolLoopRuntimeControl',
+      symbol: 'metadataWithStoplessRuntimeControl',
       stage: 'test'
     }
   );
@@ -592,7 +592,7 @@ describe('servertool followup dispatch helper', () => {
         routecodexPortStopMessageEnabled: input.metadata?.routecodexPortStopMessageEnabled,
         rtStopMessageEnabled: input.metadata?.__rt?.stopMessageEnabled,
         rtPortStopMessageEnabled: input.metadata?.__rt?.routecodexPortStopMessageEnabled,
-        flowId: readBoundRuntimeControl(input.metadata).serverToolLoopState?.flowId
+        flowId: readBoundRuntimeControl(input.metadata).stopless?.flowId
       }
     }));
 
@@ -605,7 +605,7 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_loopstate_enabled_nested',
       body: { input: 'continue' },
-      metadata: metadataWithServerToolLoopRuntimeControl({ flowId: 'stop_message_flow', repeatCount: 1 }),
+      metadata: metadataWithStoplessRuntimeControl({ flowId: 'stop_message_flow', repeatCount: 1 }),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
@@ -630,7 +630,7 @@ describe('servertool followup dispatch helper', () => {
         routecodexPortStopMessageEnabled: input.metadata?.routecodexPortStopMessageEnabled,
         rtStopMessageEnabled: input.metadata?.__rt?.stopMessageEnabled,
         rtPortStopMessageEnabled: input.metadata?.__rt?.routecodexPortStopMessageEnabled,
-        flowId: readBoundRuntimeControl(input.metadata).serverToolLoopState?.flowId,
+        flowId: readBoundRuntimeControl(input.metadata).stopless?.flowId,
         policy: input.metadata?.__rt?.stopMessageFollowupPolicy
       }
     }));
@@ -653,7 +653,7 @@ describe('servertool followup dispatch helper', () => {
           }
         });
         MetadataCenter.attach(metadata).writeRuntimeControl(
-          'serverToolLoopState',
+          'stopless',
           { flowId: 'stop_message_flow', repeatCount: 1 },
           {
             module: 'tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts',
@@ -683,7 +683,7 @@ describe('servertool followup dispatch helper', () => {
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
       body: {
-        loopState: readBoundRuntimeControl(input.metadata).serverToolLoopState,
+        stopless: readBoundRuntimeControl(input.metadata).stopless,
         policy: input.metadata?.__rt?.stopMessageFollowupPolicy
       }
     }));
@@ -697,13 +697,13 @@ describe('servertool followup dispatch helper', () => {
       fallbackEntryEndpoint: '/v1/responses',
       requestId: 'req_followup_dispatch_stopmessage_root_budget_nested',
       body: { input: 'continue' },
-      metadata: metadataWithServerToolLoopRuntimeControl({ flowId: 'stop_message_flow', repeatCount: 1 }),
+      metadata: metadataWithStoplessRuntimeControl({ flowId: 'stop_message_flow', repeatCount: 1 }),
       baseMetadata: metadataWithStopMessageRuntimeControl(true),
       executeNested
     });
 
     expect(result.body).toEqual({
-      loopState: { flowId: 'stop_message_flow', repeatCount: 1 },
+      stopless: { flowId: 'stop_message_flow', repeatCount: 1 },
       policy: undefined
     });
   });
@@ -1237,7 +1237,7 @@ describe('servertool followup dispatch helper', () => {
     expect(nestedInput?.metadata?.requestSemantics).toBeUndefined();
   });
 
-  it('disables servertool followup semantics when stopless goal is active (from request semantics)', async () => {
+  it('strips requestSemantics followup payload before nested execute', async () => {
     mockRunClientInjectionFlowBeforeReenter.mockResolvedValue({ clientInjectOnlyHandled: false });
     const executeNested = jest.fn(async (input: any) => ({
       status: 200,
@@ -1259,7 +1259,6 @@ describe('servertool followup dispatch helper', () => {
       },
       metadata: metadataWithFollowupRuntimeControl('servertool.stop_message'),
       requestSemantics: {
-        stoplessGoalState: { status: 'active' },
         __routecodex: {
           serverToolFollowup: true,
           serverToolFollowupSource: 'servertool.stop_message'

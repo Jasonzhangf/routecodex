@@ -304,9 +304,8 @@ function pruneLegacySessionScopedStopAndPreCommandState(metadata: RouterMetadata
   state.preCommandUpdatedAt = undefined;
 
   const hasOtherRoutingState =
-    Boolean(state.stoplessGoalState) ||
-    Boolean(state.forcedTarget) ||
-    Boolean(state.preferTarget) ||
+        Boolean(state.forcedTarget) ||
+        Boolean(state.preferTarget) ||
     state.allowedProviders.size > 0 ||
     state.disabledProviders.size > 0 ||
     state.disabledKeys.size > 0 ||

@@ -29,11 +29,8 @@ const mockDeriveFinishReasonNative = (body: unknown): string | undefined => {
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
-  persistStoplessGoalStateSnapshot: () => undefined,
-  readStoplessGoalState: () => null,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
-  syncStoplessGoalStateFromRequest: () => null,
   deriveFinishReasonNative: mockDeriveFinishReasonNative,
   updateResponsesContractProbeFromSseChunkNative: () => ({}),
   buildResponsesTerminalSseFramesFromProbeNative: () => [],

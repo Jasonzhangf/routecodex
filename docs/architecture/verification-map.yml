@@ -112,7 +112,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/servertool/cli-projection.ts
@@ -126,7 +125,8 @@ verification:
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
-      - tests/servertool/stop-message-auto.goal-default.spec.ts
+      - tests/servertool/loop-state-block.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
     smoke:
       - npm run verify:servertool-rust-only
@@ -143,7 +143,7 @@ verification:
       - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while current-request restoration advances repeatCount 1 -> 2 -> 3."
       - "Validation must prove req_chatprocess rewrites the paired stopless tool result into model-transparent natural language + missing/error feedback, and VR still routes that turn to thinking."
       - "Validation must prove `/v1/responses` stopless turns do not lose the schema contract between req_chatprocess and the responses->chat bridge: req owner must preserve the contract in `instructions`, and bridge owner must materialize it into the outbound system message."
-      - "Validation must prove stopless CLI projection/CLI execution uses active request-truth `sessionId/requestId` for same-session counting, while `sessionDir` and any persisted writeback path remain absent."
+      - "Validation must prove stopless CLI projection/CLI execution uses active request-truth `sessionId/requestId` for same-session counting, and that `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only progression truth while `sessionDir` and any persisted writeback path remain absent."
       - "Validation must prove `responsesRequestContext.sessionId/conversationId` stays continuation-only and cannot materialize request session truth, stopless activation, stop-message scope, or state keys."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
@@ -686,6 +686,30 @@ verification:
     notes:
       - "At minimum prove runtime_control preselectedRoute wins, legacy `__rt` route pins do not revive, and relay continuation scope keeps routeHint/provider pin queryable before Hub req-03 seals VrRoute04."
       - "If req-03 caller/callee changes, rerun the mainline binding gate before claiming M3 closure."
+
+  - feature_id: hub.req_outbound_provider_semantic
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/provider_req_outbound_06_wire_payload.rs
+    contract:
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
+      - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+    integration:
+      - tests/server/runtime/http-server/request-executor-preselected-route.blackbox.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-binding-pending-gate
+      - npm run verify:responses-request-compat-rust-only
+    build:
+      - npm run build:base
+    notes:
+      - "At minimum prove `VrRoute04SelectedTarget` is a direct req-04 input, request executor reroute clears stale preselectedRoute before reselect, and req_outbound compat remains Rust-owned."
+      - "If req-04 caller/callee changes, rerun the mainline binding gate before claiming M4 closure."
 
   - feature_id: hub.route_metadata_surface
     change_risk: medium

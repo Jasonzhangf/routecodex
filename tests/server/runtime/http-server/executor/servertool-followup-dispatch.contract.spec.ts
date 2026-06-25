@@ -82,7 +82,6 @@ describe('servertool followup dispatch contract', () => {
     expect(combinedSource).not.toContain('rt?.serverToolFollowup');
     expect(combinedSource).not.toContain('rt?.clientInjectSource');
     expect(combinedSource).not.toContain('rt?.serverToolFollowupSource');
-    expect(combinedSource).not.toContain('rt?.stoplessGoalStatus');
     expect(combinedSource).not.toContain('runtimeMeta?.serverToolFollowup');
     expect(combinedSource).not.toContain('runtimeMeta.serverToolFollowup');
     expect(combinedSource).toContain('readRuntimeControlProjection(out)');

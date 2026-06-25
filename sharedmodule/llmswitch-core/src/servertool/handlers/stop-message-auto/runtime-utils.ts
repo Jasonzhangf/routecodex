@@ -6,7 +6,6 @@ import {
   planStopMessageDefaultConfigWithNative,
   planStopMessagePersistSnapshotWithNative,
   planStopMessagePersistedLookupWithNative,
-  planStoplessDecisionContextGoalStatusWithNative,
   planStoplessDecisionContextSignalsWithNative,
   readRuntimeStopMessageStageModeWithNative,
   readServertoolFollowupFlowIdWithNative,
@@ -146,16 +145,6 @@ export function planStoplessDecisionContextSignals(args: {
   planModeActive: boolean;
 } {
   return planStoplessDecisionContextSignalsWithNative(args);
-}
-
-export function planStoplessDecisionContextGoalStatus(args: {
-  adapterContext: unknown;
-  persistedGoalState?: unknown;
-}): {
-  goalStatus: string;
-  hasRequestScopedGoalState: boolean;
-} {
-  return planStoplessDecisionContextGoalStatusWithNative(args);
 }
 
 export function planStopMessageDefaultConfig(args: {

@@ -78,10 +78,6 @@ import {
   applyResolveFailureState,
   applySendFailureState
 } from './executor/request-executor-failure-state.js';
-import {
-  asFlatRecord,
-  persistGoalStateFromMergedMetadata
-} from './executor/goal-state-persistence.js';
 
 import { initializeRequestExecutorRequestState } from './executor/request-executor-request-state.js';
 import { prepareRequestExecutorAttemptState } from './executor/request-executor-attempt-state.js';
@@ -113,6 +109,12 @@ import {
   logNonBlockingError as logRequestExecutorNonBlockingError,
   resetErrorReportStateForTests
 } from './executor/request-executor-error-report.js';
+
+function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
 
 function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>): string | undefined {
   const routingDecision =

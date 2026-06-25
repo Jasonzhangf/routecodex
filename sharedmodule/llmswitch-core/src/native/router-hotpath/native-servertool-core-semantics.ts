@@ -302,8 +302,7 @@ export interface ServertoolEngineRuntimeActionPlan {
     | 'persist_pending_injection_and_return'
     | 'return_servertool_cli_projection_final'
     | 'return_stop_message_terminal_final'
-    | 'build_stop_message_cli_projection'
-    | 'continue_followup_mainline';
+    | 'build_stop_message_cli_projection';
 }
 
 export interface ServertoolEngineSkipPlan {
@@ -381,19 +380,6 @@ export interface ServertoolHandlerRuntimeActionPlan {
   backendKind?: string;
 }
 
-export interface StoplessGoalStateSyncPlanInput {
-  latestUserText: string;
-  currentState?: unknown;
-  nowMs?: number;
-}
-
-export interface StoplessGoalStateSyncPlan {
-  hadDirective: boolean;
-  directiveTypes: string[];
-  rewrittenText?: string | null;
-  nextState?: Record<string, unknown> | null;
-}
-
 export interface StoplessLearnedNoteWritePlanInput {
   adapterContext: Record<string, unknown>;
   requestId: string;
@@ -426,6 +412,8 @@ export interface StoplessOrchestrationActionPlan {
 export interface StoplessCliProjectionContextRuntimeSnapshot {
   used?: number;
   maxRepeats?: number;
+  triggerHint?: string;
+  schemaFeedback?: JsonObject;
 }
 
 export interface StoplessCliProjectionContextPlan {
@@ -434,6 +422,8 @@ export interface StoplessCliProjectionContextPlan {
   maxRepeats: number;
   triggerHint?: string;
   schemaFeedback?: JsonObject;
+  sessionId?: string;
+  requestId?: string;
 }
 
 export interface ServertoolBackendRoutePolicyInput {
@@ -671,11 +661,6 @@ export interface StoplessDecisionContextSignals {
   portStopMessageDisabled: boolean;
   hasResponsesSubmitToolOutputsResume: boolean;
   planModeActive: boolean;
-}
-
-export interface StoplessDecisionContextGoalStatusPlan {
-  goalStatus: string;
-  hasRequestScopedGoalState: boolean;
 }
 
 export interface StopMessageDefaultConfigPlan {
@@ -1356,37 +1341,6 @@ export function planStoplessDecisionContextSignalsWithNative(input: {
   };
 }
 
-export function planStoplessDecisionContextGoalStatusWithNative(input: {
-  adapterContext: unknown;
-  persistedGoalState?: unknown;
-}): StoplessDecisionContextGoalStatusPlan {
-  const capability = 'planStoplessDecisionContextGoalStatusJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStoplessDecisionContextGoalStatusJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStoplessDecisionContextGoalStatusJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${capability} native returned invalid payload`);
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    typeof record.goalStatus !== 'string' ||
-    !record.goalStatus.trim() ||
-    typeof record.hasRequestScopedGoalState !== 'boolean'
-  ) {
-    throw new Error(`${capability} native returned invalid goal status fields`);
-  }
-  return {
-    goalStatus: record.goalStatus,
-    hasRequestScopedGoalState: record.hasRequestScopedGoalState,
-  };
-}
-
 export function planStopMessageDefaultConfigWithNative(input: {
   tombstoneCleared?: boolean;
   configEnabled?: unknown;
@@ -1641,6 +1595,8 @@ export function planStoplessCliProjectionContextWithNative(input: {
   runtimeSnapshot?: StoplessCliProjectionContextRuntimeSnapshot;
   chatStopText?: string;
   adapterStopText?: string;
+  sessionId?: string;
+  requestId?: string;
 }): StoplessCliProjectionContextPlan {
   const capability = 'planStoplessCliProjectionContextJson';
   const fn = readNativeFunction(capability);
@@ -1684,6 +1640,13 @@ export function planStoplessCliProjectionContextWithNative(input: {
     ...(record.schemaFeedback && typeof record.schemaFeedback === 'object' && !Array.isArray(record.schemaFeedback)
       ? { schemaFeedback: record.schemaFeedback as JsonObject }
       : {})
+    ,
+    ...(typeof record.sessionId === 'string' && record.sessionId.trim()
+      ? { sessionId: record.sessionId.trim() }
+      : {}),
+    ...(typeof record.requestId === 'string' && record.requestId.trim()
+      ? { requestId: record.requestId.trim() }
+      : {})
   };
 }
 
@@ -1700,39 +1663,6 @@ export function normalizeStoplessTriggerHintForMetadataWithNative(reasonCode: un
     throw new Error(`normalizeStoplessTriggerHintForMetadataJson native returned non-string: ${typeof resultJson}`);
   }
   return resultJson;
-}
-
-export function planStoplessGoalStateSyncWithNative(
-  input: StoplessGoalStateSyncPlanInput,
-): StoplessGoalStateSyncPlan {
-  const capability = 'planStoplessGoalStateSyncJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStoplessGoalStateSyncJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
-    const nativeError = resultJson as Record<string, unknown>;
-    if (nativeError instanceof Error || typeof nativeError.message === 'string' || typeof nativeError.code === 'string') {
-      const message = typeof nativeError.message === 'string' && nativeError.message.trim()
-        ? nativeError.message.trim()
-        : String(resultJson);
-      throw new Error(`planStoplessGoalStateSyncJson native error: ${message}`);
-    }
-  }
-  const parsed = typeof resultJson === 'string' ? JSON.parse(resultJson) as unknown : resultJson;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planStoplessGoalStateSyncJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    typeof record.hadDirective !== 'boolean' ||
-    !Array.isArray(record.directiveTypes) ||
-    !record.directiveTypes.every((entry) => typeof entry === 'string')
-  ) {
-    throw new Error(`planStoplessGoalStateSyncJson native returned invalid fields: ${JSON.stringify(record)}`);
-  }
-  return record as unknown as StoplessGoalStateSyncPlan;
 }
 
 export function planStoplessLearnedNoteWriteWithNative(
@@ -2583,6 +2513,7 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   hasPendingInjection: boolean;
   isStopMessageFlow: boolean;
   executionContext?: unknown;
+  hasServertoolCliProjectionContext?: boolean;
   stoplessAction: string;
 }): ServertoolEngineRuntimeActionPlan {
   const capability = 'planServertoolEngineRuntimeActionJson';
@@ -2593,16 +2524,14 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   const payload: Record<string, unknown> = {
     hasPendingInjection: input.hasPendingInjection,
     isStopMessageFlow: input.isStopMessageFlow,
+    hasServertoolCliProjectionContext: input.hasServertoolCliProjectionContext === true,
     stoplessAction: input.stoplessAction
   };
   if (input.executionContext !== undefined) {
     payload.executionContext = input.executionContext;
   }
-  const resultJson = fn(JSON.stringify(payload));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolEngineRuntimeActionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
+  const raw = fn(JSON.stringify(payload));
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) as unknown : raw;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('planServertoolEngineRuntimeActionJson native returned invalid plan');
   }
@@ -2611,8 +2540,7 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
     record.action !== 'persist_pending_injection_and_return' &&
     record.action !== 'return_servertool_cli_projection_final' &&
     record.action !== 'return_stop_message_terminal_final' &&
-    record.action !== 'build_stop_message_cli_projection' &&
-    record.action !== 'continue_followup_mainline'
+    record.action !== 'build_stop_message_cli_projection'
   ) {
     throw new Error('planServertoolEngineRuntimeActionJson native returned invalid action');
   }
@@ -3916,6 +3844,29 @@ export function extractServertoolCliResultRouteHintFromRequestWithNative(input: 
   }
   const parsed = JSON.parse(resultJson) as unknown;
   return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
+}
+
+export function extractStopMessageAutoCliResultSnapshotFromRequestWithNative(input: {
+  adapterContext: unknown;
+  runtimeMetadata?: unknown;
+}): Record<string, unknown> | undefined {
+  const capability = 'extractStopMessageAutoCliResultSnapshotFromRequestJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('extractStopMessageAutoCliResultSnapshotFromRequestJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`extractStopMessageAutoCliResultSnapshotFromRequestJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('extractStopMessageAutoCliResultSnapshotFromRequestJson native returned invalid snapshot');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function planServertoolBackendRoutePolicyWithNative(

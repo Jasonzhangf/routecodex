@@ -14,12 +14,6 @@ const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
 const mockResumeResponsesConversation = jest.fn();
 const mockResumeLatestResponsesContinuationByScope = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
-const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({ stickyKey: 'test:stopless', hadDirective: false, directiveTypes: [] }));
-const mockPersistStoplessGoalStateSnapshot = jest.fn((_adapterContext: unknown, state: unknown) => ({
-  stickyKey: 'test:stopless',
-  state
-}));
-const mockReadStoplessGoalState = jest.fn(() => ({ stickyKey: 'test:stopless' }));
 
 function extractTextFromProviderResponseBody(body: any): string {
   const data = body && typeof body === 'object' && body.data && typeof body.data === 'object'
@@ -283,9 +277,6 @@ const mockBridgeModule = () => ({
   resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
   materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
   resumeResponsesConversation: mockResumeResponsesConversation,
-  syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
-  persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
-  readStoplessGoalState: mockReadStoplessGoalState,
   loadRoutingInstructionStateSync: () => undefined,
   saveRoutingInstructionStateAsync: async () => undefined,
   saveRoutingInstructionStateSync: () => undefined,
@@ -331,6 +322,34 @@ const mockBridgeModule = () => ({
     ])
   })),
   resolveResponsesRequestContextForHttp: jest.fn(({ fallback }: any) => fallback),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: any) => {
+    const adapterContext = input?.adapterContext && typeof input.adapterContext === 'object' && !Array.isArray(input.adapterContext)
+      ? input.adapterContext
+      : undefined;
+    const rawRequestBody = adapterContext?.__raw_request_body && typeof adapterContext.__raw_request_body === 'object' && !Array.isArray(adapterContext.__raw_request_body)
+      ? adapterContext.__raw_request_body
+      : undefined;
+    if (!rawRequestBody) {
+      return undefined;
+    }
+    const readRouteHint = (value: unknown) => {
+      if (!value || typeof value !== 'object') {
+        return undefined;
+      }
+      const record = value as Record<string, unknown>;
+      const routeHint = record.routeHint;
+      return typeof routeHint === 'string' && routeHint.trim() ? routeHint.trim() : undefined;
+    };
+    for (const item of Array.isArray((rawRequestBody as Record<string, unknown>).tool_outputs) ? (rawRequestBody as Record<string, unknown>).tool_outputs as unknown[] : []) {
+      const routeHint = readRouteHint(item);
+      if (routeHint) return routeHint;
+    }
+    for (const item of Array.isArray((rawRequestBody as Record<string, unknown>).input) ? (rawRequestBody as Record<string, unknown>).input as unknown[] : []) {
+      const routeHint = readRouteHint(item);
+      if (routeHint) return routeHint;
+    }
+    return undefined;
+  }),
   ...mockRuntimeIntegrationsModule(),
   ...mockNativeExportsModule(),
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
@@ -338,11 +357,14 @@ const mockBridgeModule = () => ({
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.ts', mockRuntimeIntegrationsModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations', mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', mockNativeExportsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', mockNativeExportsModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports', mockNativeExportsModule);
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge', mockBridgeModule);
 jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/provider-response-converter.js', () => ({
   convertProviderResponseIfNeeded: mockConvertProviderResponseIfNeeded
 }));

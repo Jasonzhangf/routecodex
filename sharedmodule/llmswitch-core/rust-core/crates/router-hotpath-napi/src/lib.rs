@@ -56,6 +56,7 @@ mod hub_standardized_bridge;
 mod hub_submit_tool_outputs;
 mod hub_text_markup_normalizer;
 mod hub_tool_session_compat;
+mod metadata_center;
 mod openai_openai_codec;
 mod primary_exhausted_to_default_pool_blocks;
 mod req_outbound_stage3_compat;
@@ -1404,12 +1405,6 @@ pub fn plan_stopless_decision_context_signals_json(input_json: String) -> NapiRe
 }
 
 #[napi]
-pub fn plan_stopless_decision_context_goal_status_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_stopless_decision_context_goal_status_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
 pub fn plan_stop_message_default_config_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stop_message_default_config_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1848,6 +1843,30 @@ pub fn build_servertool_cli_projection_execution_context_json(
 }
 
 #[napi]
+pub fn build_servertool_handler_error_tool_output_payload_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::build_servertool_handler_error_tool_output_payload_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn collect_servertool_additional_client_tool_calls_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::collect_servertool_additional_client_tool_calls_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn is_servertool_client_exec_cli_projection_tool_call_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::is_servertool_client_exec_cli_projection_tool_call_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn validate_client_exec_command_result_json(raw_output: String) -> NapiResult<String> {
     servertool_core_blocks::validate_client_exec_command_result_json(&raw_output)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1865,6 +1884,16 @@ pub fn extract_servertool_cli_result_route_hint_from_request_json(
 ) -> NapiResult<String> {
     servertool_core_blocks::extract_servertool_cli_result_route_hint_from_request_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn extract_stop_message_auto_cli_result_snapshot_from_request_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::extract_stop_message_auto_cli_result_snapshot_from_request_json(
+        &input_json,
+    )
+    .map_err(|e| napi::Error::from_reason(e))
 }
 
 #[napi]
@@ -2000,35 +2029,6 @@ pub fn strip_stop_schema_control_text_json(input_json: String) -> NapiResult<Str
 #[napi]
 pub fn build_stop_message_terminal_visible_payload_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::build_stop_message_terminal_visible_payload_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
-pub fn apply_stopless_goal_directive_json(payload_json: String) -> NapiResult<String> {
-    let payload = serde_json::from_str::<
-        virtual_router_engine::rcc_fence::StoplessGoalDirectiveTransitionInput,
-    >(&payload_json)
-    .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let next = virtual_router_engine::rcc_fence::apply_stopless_goal_directive(payload)
-        .map_err(napi::Error::from_reason)?;
-    serde_json::to_string(&next).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn plan_stopless_goal_state_sync_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_stopless_goal_state_sync_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
-pub fn plan_stopless_goal_state_read_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_stopless_goal_state_read_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
-pub fn plan_stopless_goal_state_persist_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_stopless_goal_state_persist_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

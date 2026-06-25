@@ -45,7 +45,6 @@ families:
       - preselectedRoute
       - serverToolFollowup
       - serverToolFollowupSource
-      - stoplessGoalStatus
       - stopless
       - stopMessageEnabled
       - stopMessageExcludeDirect

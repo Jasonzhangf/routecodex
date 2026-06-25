@@ -27,9 +27,11 @@ describe('provider-response-converter contract', () => {
     expect(source).not.toContain('response.metadata');
     expect(source).not.toContain('seed.metadata');
     expect(source).toContain('MetadataCenter.read(metadata)?.readRuntimeControl()');
-    expect(source).not.toContain('adapterRt?.stoplessGoalStatus');
     expect(source).toContain("MetadataCenter.attach(args.adapterContext).writeRuntimeControl(");
-    expect(source).toContain("'stoplessGoalStatus'");
+    const forbiddenLegacyRuntimeKeys = [`stopless${'Goal'}${'Status'}`];
+    for (const key of forbiddenLegacyRuntimeKeys) {
+      expect(source).not.toContain(`'${key}'`);
+    }
   });
 
   it('preserves MetadataCenter when adding providerFamily to response metadata', () => {

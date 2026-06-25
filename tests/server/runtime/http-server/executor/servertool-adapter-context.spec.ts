@@ -1,32 +1,8 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-const mockSyncStoplessGoalStateFromRequest = jest.fn((baseContext: Record<string, unknown>) => {
-  const state = {
-    status: 'active',
-    objective: 'continue',
-    updatedAt: 1,
-    createdAt: 1
-  };
-  return {
-    stateKey: 'session:test',
-    hadDirective: false,
-    directiveTypes: [],
-    state
-  };
-});
-
-const mockBridgeModule = () => ({
-  syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
-  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
-});
-
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
-
 describe('servertool adapter context builder', () => {
   it('builds shared adapter context from entry origin request and metadata', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -99,12 +75,88 @@ describe('servertool adapter context builder', () => {
     });
     expect(context.capturedEntryRequest).toBe(entryOriginRequest);
     expect(context.capturedChatRequest).toBe(entryOriginRequest);
-    expect(mockSyncStoplessGoalStateFromRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves canonical stopless runtime control and drops legacy stopmessage mirrors', async () => {
+    jest.resetModules();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRuntimeControl(
+      'stopless',
+      {
+        flowId: 'stop_message_flow',
+        repeatCount: 1,
+        maxRepeats: 3,
+        triggerHint: 'no_schema',
+        active: true
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'preserves canonical stopless runtime control and drops legacy stopmessage mirrors',
+        stage: 'test'
+      }
+    );
+    center.writeRuntimeControl(
+      'serverToolLoopState',
+      {
+        flowId: 'stop_message_flow',
+        repeatCount: 1,
+        maxRepeats: 3,
+        triggerHint: 'no_schema'
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'preserves canonical stopless runtime control and drops legacy stopmessage mirrors',
+        stage: 'test'
+      }
+    );
+    center.writeRuntimeControl(
+      'stopMessageState',
+      {
+        stopMessageText: '请补齐 stop schema 后继续。',
+        stopMessageMaxRepeats: 3,
+        stopMessageUsed: 1,
+        stopMessageStageMode: 'on'
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'preserves canonical stopless runtime control and drops legacy stopmessage mirrors',
+        stage: 'test'
+      }
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata,
+      entryOriginRequest: { model: 'gpt-5.5', input: '继续' },
+      requestSemantics: {},
+      requestId: 'req-stopless-runtime-control',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      serverToolsEnabled: true
+    });
+
+    const runtime = MetadataCenter.read(context)?.readRuntimeControl();
+    expect(runtime?.stopless).toMatchObject({
+      flowId: 'stop_message_flow',
+      repeatCount: 1,
+      maxRepeats: 3,
+      triggerHint: 'no_schema',
+      active: true
+    });
+    expect(runtime?.serverToolLoopState).toBeUndefined();
+    expect(runtime?.stopMessageState).toBeUndefined();
   });
 
   it('maps routeHint into routeId for stop followup planning', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -128,7 +180,6 @@ describe('servertool adapter context builder', () => {
 
   it('does not infer clientProtocol from entry endpoint when metadata center did not write one', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -147,7 +198,6 @@ describe('servertool adapter context builder', () => {
 
   it('backfills session and conversation identifiers from entry origin request metadata', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -173,7 +223,6 @@ describe('servertool adapter context builder', () => {
 
   it('reads request session and conversation identifiers only from metadata center request truth', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -224,7 +273,6 @@ describe('servertool adapter context builder', () => {
 
   it('preserves the bound MetadataCenter on the servertool adapter context', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -259,9 +307,35 @@ describe('servertool adapter context builder', () => {
     expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageEnabled).toBe(true);
   });
 
+  it('does not project providerFamily into MetadataCenter runtime_control', async () => {
+    jest.resetModules();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+
+    const metadata: Record<string, unknown> = {
+      providerFamily: 'anthropic'
+    };
+
+    const context = buildServerToolAdapterContext({
+      metadata,
+      entryOriginRequest: {
+        input: 'continue'
+      },
+      requestId: 'req-no-provider-family-runtime-control',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(MetadataCenter.read(context)?.readRuntimeControl()).not.toHaveProperty('providerFamily');
+  });
+
   it('binds a fresh MetadataCenter onto the adapter context when input metadata has no bound center', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -290,7 +364,6 @@ describe('servertool adapter context builder', () => {
 
   it('reads assigned model and compatibility profile from MetadataCenter provider observation when flat metadata is absent', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -336,7 +409,6 @@ describe('servertool adapter context builder', () => {
 
   it('does not synthesize request session and conversation identifiers from relay responsesRequestContext metadata', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -360,7 +432,6 @@ describe('servertool adapter context builder', () => {
 
   it('does not synthesize request truth from relay requestSessionId aliases inside responsesRequestContext', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -384,7 +455,6 @@ describe('servertool adapter context builder', () => {
 
   it('does not synthesize request session and conversation identifiers from nested __rt.responsesRequestContext metadata', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -410,7 +480,6 @@ describe('servertool adapter context builder', () => {
 
   it('does not treat top-level responsesRequestContext session fields as request truth when metadata bag is already flattened', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -436,7 +505,6 @@ describe('servertool adapter context builder', () => {
 
   it('does not backfill request session and conversation identifiers from metadata.sessionId without entry origin request', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -458,7 +526,6 @@ describe('servertool adapter context builder', () => {
 
   it('does not backfill request session and conversation identifiers from __rt.sessionId without entry origin request', async () => {
     jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
 
     const { buildServerToolAdapterContext } = await import(
       '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
@@ -480,138 +547,4 @@ describe('servertool adapter context builder', () => {
     expect(context.conversationId).toBeUndefined();
   });
 
-  it('forwards reasoning stop seed errors to onReasoningStopSeedError callback', async () => {
-    jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
-    const onError = jest.fn();
-    mockSyncStoplessGoalStateFromRequest.mockImplementationOnce(() => {
-      throw new Error('stopless-goal seed failed');
-    });
-
-    const { buildServerToolAdapterContext } = await import(
-      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
-    );
-
-    buildServerToolAdapterContext({
-      metadata: {},
-      entryOriginRequest: {
-        messages: [{ role: 'user', content: '<**rcc**>\nstopless start\n继续\n</rcc**>' }]
-      },
-      requestId: 'req-fail',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses',
-      onReasoningStopSeedError: onError
-    });
-
-    expect(onError).toHaveBeenCalledTimes(1);
-    expect(String(onError.mock.calls[0]?.[0] ?? '')).toContain('stopless-goal seed failed');
-  });
-
-  it('overrides captured chat request with RCC fenced entry origin request for goal sync', async () => {
-    jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
-
-    const { buildServerToolAdapterContext } = await import(
-      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
-    );
-    const { MetadataCenter } = await import(
-      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
-    );
-
-    const entryOriginRequest = {
-      messages: [{ role: 'user', content: '<**rcc**>\nstopless start\n继续\n</rcc**>' }]
-    };
-    const existingCaptured = {
-      messages: [{ role: 'user', content: '普通请求' }]
-    };
-
-    const context = buildServerToolAdapterContext({
-      metadata: {
-        capturedChatRequest: existingCaptured
-      },
-      entryOriginRequest,
-      requestId: 'req-2',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    });
-
-    expect(context.capturedChatRequest).toBe(entryOriginRequest);
-    expect(context.capturedEntryRequest).toBe(entryOriginRequest);
-    expect(MetadataCenter.read(context)).toBeDefined();
-  });
-
-  it('uses /v1/responses input-array entry origin request as captured chat request for RCC goal sync', async () => {
-    jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
-
-    const { buildServerToolAdapterContext } = await import(
-      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
-    );
-    const { MetadataCenter } = await import(
-      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
-    );
-
-    const entryOriginRequest = {
-      input: [
-        {
-          role: 'user',
-          content: '<**rcc**>\nstopless start\n继续推进 live goal\n</rcc**>\n继续执行验证'
-        }
-      ]
-    };
-
-    const context = buildServerToolAdapterContext({
-      metadata: {},
-      entryOriginRequest,
-      requestId: 'req-responses-rcc-goal-1',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    });
-
-    expect(context.capturedChatRequest).toBe(entryOriginRequest);
-    expect(context.capturedEntryRequest).toBe(entryOriginRequest);
-    expect(MetadataCenter.read(context)).toBeDefined();
-  });
-
-  it('falls back to metadata capturedEntryRequest when capturedChatRequest lost RCC fence', async () => {
-    jest.resetModules();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
-
-    const { buildServerToolAdapterContext } = await import(
-      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
-    );
-    const { MetadataCenter } = await import(
-      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
-    );
-
-    const metadataCapturedEntryRequest = {
-      input: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text: '<**rcc**>\nstopless start\n继续推进 goal sync\n</rcc**>\n继续执行验证'
-            }
-          ]
-        }
-      ]
-    };
-
-    const context = buildServerToolAdapterContext({
-      metadata: {
-        capturedEntryRequest: metadataCapturedEntryRequest,
-        capturedChatRequest: {
-          messages: [{ role: 'user', content: 'stopless start\n继续推进 goal sync\n</rcc**>\n继续执行验证' }]
-        }
-      },
-      requestId: 'req-responses-rcc-goal-fallback-1',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    });
-
-    expect(context.capturedChatRequest).toBe(metadataCapturedEntryRequest);
-    expect(context.capturedEntryRequest).toBe(metadataCapturedEntryRequest);
-    expect(MetadataCenter.read(context)).toBeDefined();
-  });
 });

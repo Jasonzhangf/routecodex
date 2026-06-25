@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::instructions::{InstructionTarget, RoutingInstructionState};
-use super::rcc_fence::StoplessGoalState;
 
 const RCC_HOME_ENV: &str = "RCC_HOME";
 const ROUTECODEX_USER_DIR_ENV: &str = "ROUTECODEX_USER_DIR";
@@ -333,8 +332,7 @@ fn atomic_write_file(filepath: &Path, content: &str) -> std::io::Result<()> {
 }
 
 pub(crate) fn is_state_empty(state: &RoutingInstructionState) -> bool {
-    is_stopless_goal_empty(state)
-        && state.forced_target.is_none()
+    state.forced_target.is_none()
         && state.prefer_target.is_none()
         && state.allowed_providers.is_empty()
         && state.disabled_providers.is_empty()
@@ -343,10 +341,6 @@ pub(crate) fn is_state_empty(state: &RoutingInstructionState) -> bool {
         && is_stop_message_empty(state)
         && is_pre_command_empty(state)
         && is_chat_process_usage_empty(state)
-}
-
-fn is_stopless_goal_empty(state: &RoutingInstructionState) -> bool {
-    state.stopless_goal_state.is_none()
 }
 
 fn is_stop_message_empty(state: &RoutingInstructionState) -> bool {
@@ -379,7 +373,6 @@ fn is_chat_process_usage_empty(state: &RoutingInstructionState) -> bool {
 
 pub(crate) fn serialize_routing_instruction_state(state: &RoutingInstructionState) -> Value {
     let mut out = Map::new();
-    serialize_stopless_goal_state(state, &mut out);
     if let Some(target) = &state.forced_target {
         out.insert(
             "forcedTarget".to_string(),
@@ -476,7 +469,6 @@ pub(crate) fn merge_stop_message_from_persisted(
                 })
                 .unwrap_or(true);
         if persisted_has_usage_progress && same_stop_message_config(existing, persisted) {
-            out.stopless_goal_state = merge_stopless_goal_state(existing, persisted);
             out.stop_message_state.stop_message_used =
                 persisted.stop_message_state.stop_message_used;
             out.stop_message_state.stop_message_last_used_at =
@@ -491,7 +483,6 @@ pub(crate) fn merge_stop_message_from_persisted(
         return out;
     }
 
-    out.stopless_goal_state = merge_stopless_goal_state(existing, persisted);
     out.stop_message_state = persisted.stop_message_state.clone();
     out
 }
@@ -530,141 +521,6 @@ fn same_stop_message_config(
 
 fn normalize_text(value: Option<&str>) -> String {
     value.unwrap_or("").trim().to_string()
-}
-
-fn merge_stopless_goal_state(
-    existing: &RoutingInstructionState,
-    persisted: &RoutingInstructionState,
-) -> Option<StoplessGoalState> {
-    match (
-        &existing.stopless_goal_state,
-        &persisted.stopless_goal_state,
-    ) {
-        (None, None) => None,
-        (Some(goal), None) => Some(goal.clone()),
-        (None, Some(goal)) => Some(goal.clone()),
-        (Some(existing_goal), Some(persisted_goal)) => {
-            if existing_goal.updated_at > persisted_goal.updated_at {
-                Some(existing_goal.clone())
-            } else {
-                Some(persisted_goal.clone())
-            }
-        }
-    }
-}
-
-fn serialize_stopless_goal_state(state: &RoutingInstructionState, out: &mut Map<String, Value>) {
-    let Some(goal) = &state.stopless_goal_state else {
-        return;
-    };
-    let mut goal_out = Map::new();
-    goal_out.insert("status".to_string(), Value::String(goal.status.clone()));
-    goal_out.insert(
-        "objective".to_string(),
-        Value::String(goal.objective.clone()),
-    );
-    if let Some(value) = &goal.latest_note {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "latestNote".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if let Some(value) = &goal.completion_evidence {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "completionEvidence".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if let Some(value) = &goal.next_step {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "nextStep".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if let Some(value) = &goal.user_question {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "userQuestion".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if let Some(value) = &goal.cannot_continue_reason {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "cannotContinueReason".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if let Some(value) = &goal.blocking_evidence {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "blockingEvidence".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if goal.attempts_exhausted == Some(true) {
-        goal_out.insert("attemptsExhausted".to_string(), Value::Bool(true));
-    }
-    if let Some(value) = &goal.error_class {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "errorClass".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if let Some(value) = &goal.completion_summary {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "completionSummary".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if let Some(value) = &goal.ssot_assessment {
-        if !value.trim().is_empty() {
-            goal_out.insert(
-                "ssotAssessment".to_string(),
-                Value::String(value.trim().to_string()),
-            );
-        }
-    }
-    if let Some(value) = goal.consecutive_irrecoverable_errors {
-        goal_out.insert(
-            "consecutiveIrrecoverableErrors".to_string(),
-            Value::Number(value.max(0).into()),
-        );
-    }
-    if let Some(value) = goal.consecutive_validation_failures {
-        goal_out.insert(
-            "consecutiveValidationFailures".to_string(),
-            Value::Number(value.max(0).into()),
-        );
-    }
-    if let Some(value) = goal.consecutive_no_progress {
-        goal_out.insert(
-            "consecutiveNoProgress".to_string(),
-            Value::Number(value.max(0).into()),
-        );
-    }
-    goal_out.insert(
-        "updatedAt".to_string(),
-        Value::Number(goal.updated_at.into()),
-    );
-    goal_out.insert(
-        "createdAt".to_string(),
-        Value::Number(goal.created_at.into()),
-    );
-    out.insert("stoplessGoalState".to_string(), Value::Object(goal_out));
 }
 
 fn serialize_instruction_target(target: &InstructionTarget) -> Value {
@@ -802,7 +658,6 @@ pub(crate) fn deserialize_routing_instruction_state(
 ) -> Option<RoutingInstructionState> {
     let obj = value.as_object()?;
     let mut state = RoutingInstructionState::default();
-    deserialize_stopless_goal_state(obj, &mut state);
     if let Some(target) = obj.get("forcedTarget") {
         state.forced_target = deserialize_instruction_target(target);
     }
@@ -873,99 +728,6 @@ pub(crate) fn deserialize_routing_instruction_state(
     deserialize_pre_command_state(obj, &mut state);
     deserialize_chat_process_usage_state(obj, &mut state);
     Some(state)
-}
-
-fn deserialize_stopless_goal_state(obj: &Map<String, Value>, state: &mut RoutingInstructionState) {
-    let Some(goal) = obj.get("stoplessGoalState").and_then(|v| v.as_object()) else {
-        return;
-    };
-    let status = goal
-        .get("status")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_ascii_lowercase());
-    let objective = goal
-        .get("objective")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string());
-    let updated_at = goal.get("updatedAt").and_then(|v| v.as_i64());
-    let created_at = goal.get("createdAt").and_then(|v| v.as_i64());
-    let Some(status) = status else { return };
-    let Some(objective) = objective else { return };
-    let Some(updated_at) = updated_at else { return };
-    let Some(created_at) = created_at else { return };
-    if objective.is_empty() {
-        return;
-    }
-    if !matches!(
-        status.as_str(),
-        "idle" | "active" | "paused" | "stopped" | "completed"
-    ) {
-        return;
-    }
-    state.stopless_goal_state = Some(StoplessGoalState {
-        status,
-        objective,
-        latest_note: goal
-            .get("latestNote")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        completion_evidence: goal
-            .get("completionEvidence")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        next_step: goal
-            .get("nextStep")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        user_question: goal
-            .get("userQuestion")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        cannot_continue_reason: goal
-            .get("cannotContinueReason")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        blocking_evidence: goal
-            .get("blockingEvidence")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        attempts_exhausted: goal.get("attemptsExhausted").and_then(|v| v.as_bool()),
-        error_class: goal
-            .get("errorClass")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        completion_summary: goal
-            .get("completionSummary")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        ssot_assessment: goal
-            .get("ssotAssessment")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty()),
-        consecutive_irrecoverable_errors: goal
-            .get("consecutiveIrrecoverableErrors")
-            .and_then(|v| v.as_i64())
-            .map(|v| v.max(0)),
-        consecutive_validation_failures: goal
-            .get("consecutiveValidationFailures")
-            .and_then(|v| v.as_i64())
-            .map(|v| v.max(0)),
-        consecutive_no_progress: goal
-            .get("consecutiveNoProgress")
-            .and_then(|v| v.as_i64())
-            .map(|v| v.max(0)),
-        updated_at: updated_at.max(0),
-        created_at: created_at.max(0),
-    });
 }
 
 fn deserialize_instruction_target(value: &Value) -> Option<InstructionTarget> {

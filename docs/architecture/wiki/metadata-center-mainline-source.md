@@ -110,7 +110,7 @@ Current schema gap:
 - the center now implements first-class `runtimeControl` state/read/write/release plus a host-side projection reader, so the family is no longer "manifest/type only"
 - the current repo already exposes a narrower first-batch runtime-control contract that is stronger than the generic manifest wording:
   - request-route control: `routeHint`, `routeName`, `routeId`, `providerProtocol`, `retryProviderKey`, `preselectedRoute`
-  - followup / stopless control: `serverToolFollowup`, `serverToolFollowupSource`, `stoplessGoalStatus`
+  - followup / stopless control: `serverToolFollowup`, `serverToolFollowupSource`, `stopless`
   - stop-message control: `stopMessageEnabled`, `stopMessageExcludeDirect`
 - this first batch is not speculative. It is directly evidenced by current writers/readers:
   - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
@@ -249,7 +249,7 @@ Still open:
 3. migrate the narrow request-attempt/runtime-entry writers onto the landed runtime-control family:
    - `routeHint`, `routeName`, `routeId`, `providerProtocol`
    - `retryProviderKey`, `preselectedRoute`
-   - `serverToolFollowup`, `serverToolFollowupSource`, `stoplessGoalStatus`
+   - `serverToolFollowup`, `serverToolFollowupSource`, `stopless`
    - `stopMessageEnabled`, `stopMessageExcludeDirect`
 4. move remaining followup/control readers to center-backed runtime-control projection
 5. continue replay closeout for the remaining upstream `/v1/messages` `HTTP_400` that is no longer a session-truth bug

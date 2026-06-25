@@ -11,26 +11,6 @@ import {
 export const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
 const NO_SESSION_DIR_OVERRIDE = '__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__';
 
-export interface StoplessGoalStateSnapshot {
-  status: 'idle' | 'active' | 'paused' | 'stopped' | 'completed';
-  objective: string;
-  latestNote?: string;
-  completionEvidence?: string;
-  nextStep?: string;
-  userQuestion?: string;
-  cannotContinueReason?: string;
-  blockingEvidence?: string;
-  attemptsExhausted?: boolean;
-  errorClass?: string;
-  completionSummary?: string;
-  ssotAssessment?: string;
-  consecutiveIrrecoverableErrors?: number;
-  consecutiveValidationFailures?: number;
-  consecutiveNoProgress?: number;
-  updatedAt: number;
-  createdAt: number;
-}
-
 export interface RoutingInstruction {
   type:
     | 'force'
@@ -59,7 +39,6 @@ export interface RoutingInstruction {
 }
 
 export interface RoutingInstructionState {
-  stoplessGoalState?: StoplessGoalStateSnapshot;
   forcedTarget?: {
     provider?: string;
     keyAlias?: string;
@@ -204,7 +183,6 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
   const stopText = typeof state.stopMessageText === 'string' ? state.stopMessageText.trim() : '';
   const preCommand = typeof state.preCommandScriptPath === 'string' ? state.preCommandScriptPath.trim() : '';
   return (
-    !state.stoplessGoalState &&
     !state.forcedTarget &&
     !state.preferTarget &&
     state.allowedProviders.size === 0 &&

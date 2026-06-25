@@ -8,7 +8,6 @@ import { failNativeRequired } from './native-router-hotpath-policy.js';
 
 export type StageMode = 'on' | 'off' | 'auto';
 export type SnapshotSource = 'persisted' | 'default' | 'implicit_gemini';
-export type GoalStatus = 'idle' | 'active' | 'paused' | 'stopped' | 'completed';
 export type DecisionAction = 'skip' | 'trigger';
 
 export interface StopMessageSnapshot {
@@ -35,7 +34,6 @@ export interface StopMessageDecisionContext {
   runtime_snapshot?: StopMessageSnapshot;
   persisted_default_exhausted: boolean;
   explicit_mode?: StageMode;
-  goal_status: GoalStatus;
   plan_mode_active: boolean;
   default_enabled: boolean;
   default_max_repeats: number;
@@ -64,8 +62,7 @@ type StopMessageHandlerResult = {
   chatResponse: Record<string, unknown>;
   flowId: string;
   followup: Record<string, unknown> | null;
-  persistKeys: string[];
-  stateUpdate: Record<string, unknown> | null;
+  stoplessRuntimeState: Record<string, unknown> | null;
 };
 
 export type StopSchemaGateDecision = {
@@ -101,10 +98,8 @@ export function runStopMessageAutoHandlerWithNative(input: {
   decision: StopMessageDecision;
   adapterContext: Record<string, unknown>;
   base: Record<string, unknown>;
-  candidateKeys: string[];
-  stickyKey?: string;
-  strictSessionScope?: string;
   followupFlowId?: string;
+  candidateKeys?: string[];
 }): StopMessageHandlerResult {
   const capability = 'runStopMessageAutoHandlerJson';
   const fail = (reason?: string) => failNativeRequired<StopMessageHandlerResult>(capability, reason);
@@ -115,6 +110,9 @@ export function runStopMessageAutoHandlerWithNative(input: {
     }
     const inputJson = JSON.stringify(input);
     const raw = fn(inputJson);
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      return raw as StopMessageHandlerResult;
+    }
     if (typeof raw !== 'string') {
       return fail(`native_returned_non_string: ${typeof raw}`);
     }

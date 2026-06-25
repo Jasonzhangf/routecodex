@@ -11,15 +11,6 @@ import { formatUnknownError } from '../../../utils/common-utils.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 type RoutingInstructionState = Record<string, unknown>;
-type StoplessGoalStateModule = {
-  syncStoplessGoalStateFromRequest?: (adapterContext: unknown) => unknown;
-  persistStoplessGoalStateSnapshot?: (adapterContext: unknown, state: unknown) => unknown;
-  readStoplessGoalState?: (adapterContext: unknown) => unknown;
-};
-
-function requireStoplessGoalStateModule(): StoplessGoalStateModule {
-  return requireCoreDist<StoplessGoalStateModule>('servertool/handlers/stopless-goal-state');
-}
 
 function buildStateIntegrationFailure(stage: string, error: unknown, details?: Record<string, unknown>): Error {
   const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
@@ -70,42 +61,6 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
     fn(key, state);
   } catch (error) {
     throw buildStateIntegrationFailure('routing_state_store.save_sync.invoke', error, { key });
-  }
-}
-
-export function syncStoplessGoalStateFromRequest(adapterContext: unknown): unknown {
-  try {
-    const fn = requireStoplessGoalStateModule().syncStoplessGoalStateFromRequest;
-    if (typeof fn !== 'function') {
-      throw new Error('syncStoplessGoalStateFromRequest unavailable');
-    }
-    return fn(adapterContext);
-  } catch (error) {
-    throw buildStateIntegrationFailure('stopless_goal_state.sync.invoke', error);
-  }
-}
-
-export function persistStoplessGoalStateSnapshot(adapterContext: unknown, state: unknown): unknown {
-  try {
-    const fn = requireStoplessGoalStateModule().persistStoplessGoalStateSnapshot;
-    if (typeof fn !== 'function') {
-      throw new Error('persistStoplessGoalStateSnapshot unavailable');
-    }
-    return fn(adapterContext, state);
-  } catch (error) {
-    throw buildStateIntegrationFailure('stopless_goal_state.persist.invoke', error);
-  }
-}
-
-export function readStoplessGoalState(adapterContext: unknown): unknown {
-  try {
-    const fn = requireStoplessGoalStateModule().readStoplessGoalState;
-    if (typeof fn !== 'function') {
-      throw new Error('readStoplessGoalState unavailable');
-    }
-    return fn(adapterContext);
-  } catch (error) {
-    throw buildStateIntegrationFailure('stopless_goal_state.read.invoke', error);
   }
 }
 

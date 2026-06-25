@@ -293,5 +293,8 @@ export function mergeMetadataPreservingDefined(
   return merged;
 }
 
-// Re-export asFlatRecord from goal-state-persistence for shared use
-export { asFlatRecord } from './goal-state-persistence.js';
+export function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}

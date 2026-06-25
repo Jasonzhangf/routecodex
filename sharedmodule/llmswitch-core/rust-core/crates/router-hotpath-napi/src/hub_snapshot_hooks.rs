@@ -678,7 +678,10 @@ fn write_json_file_if_missing_atomic(target: &Path, contents: &str) -> Result<()
     ))
 }
 
-fn merge_json_objects_missing_and_non_null(existing: &mut Map<String, Value>, incoming: &Map<String, Value>) {
+fn merge_json_objects_missing_and_non_null(
+    existing: &mut Map<String, Value>,
+    incoming: &Map<String, Value>,
+) {
     for (key, incoming_value) in incoming {
         match existing.get_mut(key) {
             Some(existing_value) => match (existing_value, incoming_value) {
@@ -753,9 +756,8 @@ fn upsert_runtime_metadata_file(target: &Path, payload: &Value) -> Result<(), st
         return write_json_file_if_missing_atomic(target, payload_str.as_str());
     }
     let existing_raw = fs::read_to_string(target)?;
-    let existing_parsed: Value = serde_json::from_str(existing_raw.as_str()).map_err(|error| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
-    })?;
+    let existing_parsed: Value = serde_json::from_str(existing_raw.as_str())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()))?;
 
     match (existing_parsed, payload.clone()) {
         (Value::Object(mut existing_obj), Value::Object(incoming_obj)) => {
@@ -797,7 +799,8 @@ fn build_runtime_metadata_payload(
             payload_obj.insert("matchedPort".to_string(), Value::from(port));
         }
     }
-    if let Some(request_truth) = build_runtime_request_truth_summary(options.runtime_metadata.as_ref())
+    if let Some(request_truth) =
+        build_runtime_request_truth_summary(options.runtime_metadata.as_ref())
     {
         if let Some(payload_obj) = payload.as_object_mut() {
             payload_obj.insert("requestTruth".to_string(), request_truth);
@@ -806,7 +809,11 @@ fn build_runtime_metadata_payload(
     payload
 }
 
-fn clone_trimmed_string_field(source: &Map<String, Value>, key: &str, out: &mut Map<String, Value>) {
+fn clone_trimmed_string_field(
+    source: &Map<String, Value>,
+    key: &str,
+    out: &mut Map<String, Value>,
+) {
     if let Some(value) = read_trimmed_string(source.get(key)) {
         out.insert(key.to_string(), Value::String(value));
     }
@@ -847,17 +854,13 @@ fn build_runtime_request_truth_summary(runtime_metadata: Option<&Value>) -> Opti
             "serverToolFollowup",
             "serverToolFollowupSource",
             "stopless",
-            "stoplessGoalStatus",
         ] {
             if let Some(value) = runtime_control.get(key) {
                 runtime_summary.insert(key.to_string(), value.clone());
             }
         }
         if !runtime_summary.is_empty() {
-            summary.insert(
-                "runtimeControl".to_string(),
-                Value::Object(runtime_summary),
-            );
+            summary.insert("runtimeControl".to_string(), Value::Object(runtime_summary));
         }
     }
 
@@ -1535,7 +1538,6 @@ mod tests {
                 "responsesRequestContext": { "sessionId": "sess-123", "conversationId": "conv-456" },
                 "runtime_control": {
                     "stopless": true,
-                    "stoplessGoalStatus": "continue_needed",
                     "serverToolFollowup": true
                 }
             })),
@@ -1556,7 +1558,10 @@ mod tests {
             .get("requestTruth")
             .and_then(Value::as_object)
             .expect("requestTruth object");
-        assert_eq!(truth.get("sessionId").and_then(Value::as_str), Some("sess-123"));
+        assert_eq!(
+            truth.get("sessionId").and_then(Value::as_str),
+            Some("sess-123")
+        );
         assert_eq!(
             truth.get("conversationId").and_then(Value::as_str),
             Some("conv-456")
@@ -1565,12 +1570,18 @@ mod tests {
             truth.get("continuationOwner").and_then(Value::as_str),
             Some("relay")
         );
-        assert_eq!(truth.get("responseId").and_then(Value::as_str), Some("resp_789"));
+        assert_eq!(
+            truth.get("responseId").and_then(Value::as_str),
+            Some("resp_789")
+        );
         assert_eq!(
             truth.get("previousResponseId").and_then(Value::as_str),
             Some("resp_prev_111")
         );
-        assert_eq!(truth.get("routeHint").and_then(Value::as_str), Some("thinking"));
+        assert_eq!(
+            truth.get("routeHint").and_then(Value::as_str),
+            Some("thinking")
+        );
         assert_eq!(
             truth
                 .get("continuation")
@@ -1625,7 +1636,8 @@ mod tests {
             runtime_metadata: None,
         };
 
-        write_snapshot_file(&options, Some(root.as_path())).expect("nested entryPort should resolve");
+        write_snapshot_file(&options, Some(root.as_path()))
+            .expect("nested entryPort should resolve");
 
         let entry_dir = root
             .join("openai-responses")
@@ -1738,7 +1750,10 @@ mod tests {
             .get("requestTruth")
             .and_then(Value::as_object)
             .expect("requestTruth object");
-        assert_eq!(truth.get("sessionId").and_then(Value::as_str), Some("sess-enrich-1"));
+        assert_eq!(
+            truth.get("sessionId").and_then(Value::as_str),
+            Some("sess-enrich-1")
+        );
         assert_eq!(
             truth.get("conversationId").and_then(Value::as_str),
             Some("conv-enrich-1")

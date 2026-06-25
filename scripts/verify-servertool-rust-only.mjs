@@ -53,11 +53,9 @@ const RUST_SERVERTOOL_ENGINE_SELECTION = `${ROOT}/sharedmodule/llmswitch-core/ru
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`;
 const RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_SIGNALS = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs`;
-const RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_GOAL = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_goal.rs`;
 const RUST_SERVERTOOL_STOP_MESSAGE_DEFAULT_CONFIG = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_default_config.rs`;
 const RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_persist_plan.rs`;
 const RUST_SERVERTOOL_STOPLESS_ORCHESTRATION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`;
-const RUST_SERVERTOOL_STOPLESS_GOAL_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`;
 const RUST_SERVERTOOL_STOPLESS_LEARNED_NOTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_learned_note_contract.rs`;
 const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_result_guard.rs`;
 const RUST_SERVERTOOL_BLOCKED_REPORT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/blocked_report_contract.rs`;
@@ -119,7 +117,6 @@ const TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL = `${SERVERTOOL_TS_DIR}/run-server-si
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
 const STOP_MESSAGE_AUTO_CONFIG = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`;
-const STOPLESS_GOAL_STATE_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stopless-goal-state.ts`;
 const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`;
 const STOP_MESSAGE_ROUTING_STATE = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/routing-state.ts`;
 const STOP_MESSAGE_BLOCKED_REPORT = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/blocked-report.ts`;
@@ -183,10 +180,6 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
     'tests/servertool/server-side-tools.dispatch-native.spec.ts',
     'tests/servertool/execution-shell.backend-failfast.spec.ts',
     'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
-  ],
-  'hub.servertool_stopless_cli_continuation': [
-    'tests/servertool/stopless-cli-continuation.spec.ts',
-    'tests/servertool/servertool-cli-projection.spec.ts',
   ],
   'hub.servertool_rust_only_closeout': [
     'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
@@ -1059,6 +1052,44 @@ function checkNoOldCliRestorationRuntime() {
   pass('no-old-cli-restoration-runtime', `scanned ${files.length} active runtime files`);
 }
 
+function checkLegacyStopMessageRuntimeMirrorsRemoved() {
+  const forbidden = [
+    'serverToolLoopState',
+    'stopMessageState',
+    'stopMessageUsed',
+    'stopMessageText',
+    'stopMessageMaxRepeats',
+    'stopMessageStageMode',
+  ];
+  const cleanupAllowlist = new Set([
+    `${ROOT}/src/server/runtime/http-server/executor/servertool-adapter-context.ts`,
+    `${ROOT}/src/server/runtime/http-server/executor/servertool-followup-metadata.ts`,
+  ]);
+  const files = listFiles(`${ROOT}/src/server/runtime/http-server`);
+  for (const file of files) {
+    const content = readFileSync(file, 'utf8');
+    const rel = file.replace(`${ROOT}/`, '');
+    for (const keyword of forbidden) {
+      if (!content.includes(keyword)) {
+        continue;
+      }
+      if (cleanupAllowlist.has(file) && keyword === 'serverToolLoopState') {
+        const badLine = content
+          .split('\n')
+          .find((line) => line.includes(keyword) && !line.trim().match(/^'serverToolLoopState',$/));
+        if (!badLine) {
+          continue;
+        }
+      }
+      fail(
+        'legacy-stopmessage-runtime-mirror-removed',
+        `Forbidden legacy stopmessage runtime mirror "${keyword}" found in ${rel}`
+      );
+    }
+  }
+  pass('legacy-stopmessage-runtime-mirror-removed', `scanned ${files.length} http runtime files`);
+}
+
 // ── Check 7: Migrated CLI paths must not reenter provider flow ──
 function checkMigratedProjectionDoesNotReenter() {
   for (const file of [CLI_PROJECTION]) {
@@ -1314,12 +1345,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'pub fn plan_stopless_decision_context_signals'
   );
   assertContains(
-    'stopless-decision-context-goal-rust-owner',
-    RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_GOAL,
-    readRequired(RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_GOAL),
-    'pub fn plan_stopless_decision_context_goal_status'
-  );
-  assertContains(
     'stop-message-default-config-rust-owner',
     RUST_SERVERTOOL_STOP_MESSAGE_DEFAULT_CONFIG,
     readRequired(RUST_SERVERTOOL_STOP_MESSAGE_DEFAULT_CONFIG),
@@ -1335,9 +1360,9 @@ function checkStopMessagePersistedLookupRustOwner() {
   const stopMessagePersistPlan = readRequired(RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN);
   const routingStateStore = readRequired(`${RUST_SRC_DIR}/virtual_router_engine/routing_state_store.rs`);
   for (const needle of [
-    'provider_change_resets_persisted_snapshot_budget',
+    'provider_change_preserves_persisted_snapshot_budget_inside_same_term',
     'provider_match_preserves_persisted_snapshot_budget',
-    'fn is_provider_continuous',
+    'fn bind_snapshot_to_current_provider',
   ]) {
     assertContains(
       'stop-message-provider-continuity-rust-gate',
@@ -1374,7 +1399,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'planStopMessageRoutingStateApplyWithNative',
     'planStopMessageRoutingStateClearWithNative',
     'planStoplessDecisionContextSignalsWithNative',
-    'planStoplessDecisionContextGoalStatusWithNative',
     'planStopMessageDefaultConfigWithNative',
     'planStopMessagePersistSnapshotWithNative',
     'readServertoolFollowupFlowIdWithNative',
@@ -1406,7 +1430,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"planStopMessageRoutingStateApplyJson"',
     '"planStopMessageRoutingStateClearJson"',
     '"planStoplessDecisionContextSignalsJson"',
-    '"planStoplessDecisionContextGoalStatusJson"',
     '"planStopMessageDefaultConfigJson"',
     '"planStopMessagePersistSnapshotJson"',
     '"readServertoolFollowupFlowIdJson"',
@@ -1530,12 +1553,6 @@ function checkStopMessagePersistedLookupRustOwner() {
       'stop-message-auto.ts must consume Rust-owned stopless decision context signal plan'
     );
   }
-  if (!stopMessageAuto.includes('planStoplessDecisionContextGoalStatus({')) {
-    fail(
-      'stopless-decision-context-goal-ts-thin-shell',
-      'stop-message-auto.ts must consume Rust-owned stopless decision context goal status plan'
-    );
-  }
   if (!stopMessageAuto.includes('planStopMessageDefaultConfig({')) {
     fail(
       'stop-message-default-config-ts-thin-shell',
@@ -1582,10 +1599,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'function resolveStopMessageDefaultEnabledLive',
     'function resolveStopMessageDefaultTextLive',
     'function resolveStopMessageDefaultMaxRepeatsLive',
-    'function isDirectStoplessGoalStateSnapshot',
-    'function readRequestScopedGoalState',
-    'stoplessGoalStateSource',
-    'hasExplicitGoalState',
     'const gateMaxRepeats',
     'const resolvedMaxRepeats',
     'const schemaBudgetMaxRepeats',
@@ -2776,14 +2789,6 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-outcome-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionOutcomeRuntimeActionJson'],
     ['servertool-execution-outcome-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
     ['servertool-execution-outcome-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
-    ['servertool-stopless-cli-projection-context-rust-owner', RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT, readRequired(RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT), 'feature_id: hub.servertool_stopless_cli_projection_context'],
-    ['servertool-stopless-cli-projection-context-rust-owner', RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT, readRequired(RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT), 'pub fn plan_stopless_cli_projection_context'],
-    ['servertool-stopless-cli-projection-context-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod stopless_cli_projection_context_contract'],
-    ['servertool-stopless-cli-projection-context-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_cli_projection_context_json'],
-    ['servertool-stopless-cli-projection-context-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_cli_projection_context_json'],
-    ['servertool-stopless-cli-projection-context-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessCliProjectionContextJson'],
-    ['servertool-stopless-cli-projection-context-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planStoplessCliProjectionContextWithNative'],
-    ['servertool-stopless-cli-projection-context-ts-thin-shell', `${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`), 'planStoplessCliProjectionContextWithNative'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'feature_id: hub.servertool_execution_state_contract'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn create_servertool_execution_loop_state'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn append_executed_tool_record'],
@@ -4498,7 +4503,6 @@ function checkBackendRoutePolicyRustOwner() {
     'if (decision.noFollowup',
     '|| decision.noFollowup',
     'decision.noFollowup ||',
-    "clientInjectSource === 'servertool.stopless_goal_continue'",
     "decision.outcomeMode === 'client_inject_only'",
     'if (decision.clientInjectOnly',
     '|| decision.clientInjectOnly',
@@ -4890,50 +4894,6 @@ function checkStoplessOrchestrationActionRustOwner() {
     }
   }
   pass('stopless-orchestration-action-rust-owner', 'servertool-core owns stopless CLI/terminal/followup action planning');
-}
-
-// ── Check 15e: stopless goal-state sync has Rust owner ────────
-function checkStoplessGoalStateSyncRustOwner() {
-  const rustGoalState = readRequired(RUST_SERVERTOOL_STOPLESS_GOAL_STATE);
-  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
-  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
-  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
-  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const tsGoalState = readRequired(STOPLESS_GOAL_STATE_HANDLER);
-
-  for (const [check, file, content, needle] of [
-    ['stopless-goal-state-sync-rust-owner', RUST_SERVERTOOL_STOPLESS_GOAL_STATE, rustGoalState, 'pub fn plan_stopless_goal_state_sync'],
-    ['stopless-goal-state-sync-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_goal_state_sync_json'],
-    ['stopless-goal-state-sync-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_goal_state_sync_json'],
-    ['stopless-goal-state-sync-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessGoalStateSyncJson'],
-    ['stopless-goal-state-sync-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planStoplessGoalStateSyncWithNative'],
-    ['stopless-goal-state-sync-thin-shell', STOPLESS_GOAL_STATE_HANDLER, tsGoalState, 'planStoplessGoalStateSyncWithNative'],
-  ]) {
-    assertContains(check, file, content, needle);
-  }
-
-  for (const keyword of [
-    'parseRccFenceDocumentWithNative',
-    'applyStoplessGoalDirectiveWithNative',
-    'consumeStoplessDirectivesFromText',
-    'compactRewrittenText',
-    'directive.domain',
-    'directive.passthrough',
-    'directive.directiveType',
-    'directive.body',
-    'block.startOffset',
-    'block.endOffset',
-    'RccDirective',
-    'RccFenceDocument',
-  ]) {
-    if (tsGoalState.includes(keyword)) {
-      fail(
-        'stopless-goal-state-sync-no-ts-owner',
-        `Forbidden TS stopless goal-state semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/handlers/stopless-goal-state.ts`
-      );
-    }
-  }
-  pass('stopless-goal-state-sync-rust-owner', 'servertool-core owns stopless goal directive sync and rewrite planning');
 }
 
 // ── Check 15f: stop blocked-report parser has Rust owner ──────
@@ -6041,18 +6001,12 @@ checkServertoolCliProjectionMap();
 checkServertoolRustificationVerificationRegistry();
 checkBuildIncludesServertoolGate();
 checkNoOldCliRestorationRuntime();
+checkLegacyStopMessageRuntimeMirrorsRemoved();
 checkMigratedProjectionDoesNotReenter();
 checkApplyPatchNotCliProjected();
 checkStandaloneServertoolBinary();
-checkResponsesRequestContextSessionIsolation();
-checkStoplessNoReenterContract();
 checkLegacyReviewToolDeleted();
-checkStopMessagePersistedLookupRustOwner();
-checkStopMessageLoopGuardRustOwner();
-checkStopGatewayContextRustOwner();
-checkStopMessageCompareContextRustOwner();
 checkOrchestrationPolicyRustOwner();
-checkStopMessageCounterRustOwner();
 checkServertoolExecutionDispatchRustOwner();
 checkFollowupMainlineNativeBridgeRustOwner();
 checkServertoolSkeletonConfigRustOwner();
@@ -6066,20 +6020,13 @@ checkEngineSelectionRustOwner();
 checkServertoolFlowPresentationRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
-checkStopVisibleTextRustOwner();
-checkStoplessOrchestrationActionRustOwner();
-checkStoplessGoalStateSyncRustOwner();
-checkStopMessageBlockedReportRustOwner();
-checkStoplessLearnedNoteRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
 checkServertoolAutoHookCallerThinShell();
 checkServertoolResponseStageGateThinShell();
-checkServertoolEngineStoplessSessionThinShell();
 checkServertoolActiveOrchestrationAuditRedGate();
 checkDeletedEmptyReplyContinueAbsent();
-checkDeletedAiFollowupAbsent();
 
 console.log();
 

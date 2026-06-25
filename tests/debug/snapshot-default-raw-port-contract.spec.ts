@@ -286,12 +286,6 @@ describe('snapshot default raw + port contract', () => {
       symbol: 'metadata_center_projection_test',
       stage: 'test'
     });
-    center.writeRuntimeControl('stoplessGoalStatus', 'continue_needed', {
-      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
-      symbol: 'metadata_center_projection_test',
-      stage: 'test'
-    });
-
     await writeClientSnapshot({
       entryEndpoint: '/v1/responses',
       requestId,
@@ -311,8 +305,7 @@ describe('snapshot default raw + port contract', () => {
         previousResponseId: 'resp-prev-1',
         responsesResume: expect.objectContaining({ previousRequestId: 'req-prev-1' }),
         runtime_control: expect.objectContaining({
-          stopless: expect.objectContaining({ active: true, repeatCount: 2 }),
-          stoplessGoalStatus: 'continue_needed'
+          stopless: expect.objectContaining({ active: true, repeatCount: 2 })
         })
       })
     }));

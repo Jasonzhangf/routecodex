@@ -1,6 +1,5 @@
 import { applyClientConnectionStateToContext } from '../../../utils/client-connection-state.js';
 // feature_id: hub.metadata_center_servertool_context
-import { syncStoplessGoalStateFromRequest } from '../../../../modules/llmswitch/bridge.js';
 import { resolveStopMessageClientInjectReadiness } from './client-injection-flow.js';
 import { extractClientModelId } from './provider-response-utils.js';
 import {
@@ -24,77 +23,23 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function hasRccFenceInRequestPayload(payload: unknown): boolean {
-  if (!payload || typeof payload !== 'object') {
-    return false;
-  }
-  try {
-    return JSON.stringify(payload).includes('<**rcc**>');
-  } catch {
-    return false;
-  }
-}
-
 const SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS = [
   'serverToolFollowup',
   'serverToolFollowupSource',
   'serverToolFollowupMode',
   'servertoolResponseOrchestration',
   'serverToolLoopState',
-  'stopMessageState',
   'stopMessageClientInject',
   'stopMessageClientInjectReady',
   'stopMessageClientInjectReason',
   'stopMessageClientInjectSessionScope',
   'stopMessageClientInjectTmuxSessionId',
-  'stoplessGoal',
-  'stoplessGoalHadDirective',
-  'stoplessGoalState',
-  'stoplessGoalStateSource',
-  'stoplessGoalStatus',
-  'stoplessGoalDirectiveTypes'
 ] as const;
 
 function stripServertoolRuntimeControlMetadataFields(metadata: Record<string, unknown>): void {
   for (const key of SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS) {
     delete metadata[key];
   }
-}
-
-function syncStoplessGoalStateFromCapturedRequest(
-  baseContext: Record<string, unknown>,
-  onError?: (error: unknown) => void
-): void {
-  const capturedChatRequest = asFlatRecord(baseContext.capturedChatRequest);
-  const capturedEntryRequest = asFlatRecord(baseContext.capturedEntryRequest);
-  if (
-    capturedEntryRequest
-    && hasRccFenceInRequestPayload(capturedEntryRequest)
-    && (!capturedChatRequest || !hasRccFenceInRequestPayload(capturedChatRequest))
-  ) {
-    baseContext.capturedChatRequest = capturedEntryRequest;
-  }
-  try {
-    syncStoplessGoalStateFromRequest(baseContext);
-  } catch (error) {
-    onError?.(error);
-  }
-}
-
-function preferEntryOriginRequestForStoplessGoalSync(
-  baseContext: Record<string, unknown>,
-  entryOriginRequest: unknown
-): void {
-  if (!asFlatRecord(entryOriginRequest)) {
-    return;
-  }
-  if (!hasRccFenceInRequestPayload(entryOriginRequest)) {
-    return;
-  }
-  if (hasRccFenceInRequestPayload(baseContext.capturedEntryRequest)) {
-    return;
-  }
-  baseContext.capturedEntryRequest = entryOriginRequest as Record<string, unknown>;
 }
 
 export function buildServerToolAdapterContext(args: {
@@ -105,7 +50,6 @@ export function buildServerToolAdapterContext(args: {
   entryEndpoint: string;
   providerProtocol: string;
   serverToolsEnabled?: boolean;
-  onReasoningStopSeedError?: (error: unknown) => void;
 }): Record<string, unknown> {
   const metadataBag = asFlatRecord(args.metadata) ?? {};
   const baseContext: Record<string, unknown> = {
@@ -131,7 +75,7 @@ export function buildServerToolAdapterContext(args: {
     baseContext.capturedEntryRequest = originRequest as Record<string, unknown>;
   }
   const existingCapturedChatRequest = asFlatRecord(baseContext.capturedChatRequest);
-  if (originRecord && (!existingCapturedChatRequest || hasRccFenceInRequestPayload(originRecord))) {
+  if (originRecord && !existingCapturedChatRequest) {
     baseContext.capturedChatRequest = originRecord;
   }
   const serverToolProjection = readRuntimeServerToolProjection(metadataBag);
@@ -145,9 +89,6 @@ export function buildServerToolAdapterContext(args: {
   } else {
     delete baseContext.conversationId;
   }
-  preferEntryOriginRequestForStoplessGoalSync(baseContext, originRequest);
-  syncStoplessGoalStateFromCapturedRequest(baseContext, args.onReasoningStopSeedError);
-
   const routeName = readNonEmptyString(metadataBag.routeName) ?? readNonEmptyString(metadataBag.routeHint);
   if (routeName) {
     baseContext.routeId = routeName;
@@ -173,7 +114,6 @@ export function buildServerToolAdapterContext(args: {
     : undefined;
 
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
-  const providerFamily = readNonEmptyString(metadataBag.providerFamily)?.toLowerCase();
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol);
   const baseCenter = MetadataCenter.attach(baseContext);
   if (runtimeControl.serverToolFollowup === true) {
@@ -186,18 +126,6 @@ export function buildServerToolAdapterContext(args: {
         stage: 'ServertoolAdapterContextRuntimeControl'
       },
       'servertool adapter context projection'
-    );
-  }
-  if (providerFamily) {
-    baseCenter.writeRuntimeControl(
-      'providerFamily',
-      providerFamily,
-      {
-        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
-        symbol: 'buildServerToolAdapterContext',
-        stage: 'ServertoolAdapterContextRuntimeControl'
-      },
-      'servertool adapter provider family projection'
     );
   }
   if (typeof stopMessagePortEnabled === 'boolean') {

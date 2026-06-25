@@ -1,6 +1,5 @@
-import type { StoplessGoalStateSnapshot } from './native-virtual-router-routing-state.js';
 import { failNativeRequired } from './native-router-hotpath-policy.js';
-import { parseRecord, readNativeFunction, safeStringify } from './native-shared-conversion-semantics-core.js';
+import { parseRecord, readNativeFunction } from './native-shared-conversion-semantics-core.js';
 
 export type RccFenceBlock = {
   raw: string;
@@ -27,12 +26,6 @@ export type RccFenceDocument = {
   directives: RccDirective[];
 };
 
-export type StoplessGoalDirectiveTransitionInput = {
-  currentState?: StoplessGoalStateSnapshot;
-  directive: RccDirective;
-  nowMs?: number | null;
-};
-
 function parseRccFenceDocumentPayload(raw: string): RccFenceDocument | null {
   const parsed = parseRecord(raw);
   if (!parsed) {
@@ -42,17 +35,6 @@ function parseRccFenceDocumentPayload(raw: string): RccFenceDocument | null {
     return null;
   }
   return parsed as unknown as RccFenceDocument;
-}
-
-function parseStoplessGoalStatePayload(raw: string): StoplessGoalStateSnapshot | null {
-  const parsed = parseRecord(raw);
-  if (!parsed) {
-    return null;
-  }
-  if (typeof parsed.status !== 'string' || typeof parsed.objective !== 'string') {
-    return null;
-  }
-  return parsed as unknown as StoplessGoalStateSnapshot;
 }
 
 export function parseRccFenceDocumentWithNative(text: string): RccFenceDocument {
@@ -70,33 +52,6 @@ export function parseRccFenceDocumentWithNative(text: string): RccFenceDocument 
       ?? failNativeRequired<RccFenceDocument>(capability, 'invalid payload');
   } catch (error) {
     return failNativeRequired<RccFenceDocument>(
-      capability,
-      error instanceof Error ? error.message : String(error ?? 'unknown')
-    );
-  }
-}
-
-export function applyStoplessGoalDirectiveWithNative(
-  input: StoplessGoalDirectiveTransitionInput
-): StoplessGoalStateSnapshot {
-  const capability = 'applyStoplessGoalDirectiveJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return failNativeRequired<StoplessGoalStateSnapshot>(capability);
-  }
-  const payloadJson = safeStringify(input);
-  if (!payloadJson) {
-    return failNativeRequired<StoplessGoalStateSnapshot>(capability, 'json stringify failed');
-  }
-  try {
-    const result = fn(payloadJson);
-    if (typeof result !== 'string' || !result) {
-      return failNativeRequired<StoplessGoalStateSnapshot>(capability, 'empty result');
-    }
-    return parseStoplessGoalStatePayload(result)
-      ?? failNativeRequired<StoplessGoalStateSnapshot>(capability, 'invalid payload');
-  } catch (error) {
-    return failNativeRequired<StoplessGoalStateSnapshot>(
       capability,
       error instanceof Error ? error.message : String(error ?? 'unknown')
     );

@@ -84,7 +84,7 @@ Provider response
 
 - Rust orchestration owner: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`
 - Rust persisted lookup / session scope owner: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`
-- Rust goal state scope owner: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_goal_state_contract.rs`
+- Stopless loop state owner: request-scoped MetadataCenter `runtime_control.stopless` plus current request tool output; goal state is removed.
 - NAPI bridge: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - TS native thin wrapper: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
 - TS execution shell: `sharedmodule/llmswitch-core/src/servertool/engine.ts`

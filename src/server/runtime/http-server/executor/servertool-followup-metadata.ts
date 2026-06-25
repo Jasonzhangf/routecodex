@@ -86,18 +86,11 @@ const SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS = [
   'servertoolResponseOrchestration',
   'serverToolLoopState',
   'stopMessageFollowupPolicy',
-  'stopMessageState',
   'stopMessageClientInject',
   'stopMessageClientInjectReady',
   'stopMessageClientInjectReason',
   'stopMessageClientInjectSessionScope',
   'stopMessageClientInjectTmuxSessionId',
-  'stoplessGoal',
-  'stoplessGoalHadDirective',
-  'stoplessGoalState',
-  'stoplessGoalStateSource',
-  'stoplessGoalStatus',
-  'stoplessGoalDirectiveTypes'
 ] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

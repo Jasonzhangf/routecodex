@@ -7,20 +7,7 @@ import { PassThrough } from 'node:stream';
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
-const mockSyncStoplessGoalStateFromRequest = jest.fn(() => ({
-  stateKey: 'session:test',
-  hadDirective: false,
-  directiveTypes: []
-}));
-const mockPersistStoplessGoalStateSnapshot = jest.fn();
 const mockLoadRoutingInstructionStateSync = jest.fn(() => null);
-const mockReadStoplessGoalState = jest.fn((adapterContext: Record<string, unknown>) => {
-  const sessionId = typeof adapterContext?.sessionId === 'string' ? adapterContext.sessionId : undefined;
-  return {
-    ...(sessionId ? { stateKey: `session:${sessionId}` } : {}),
-    state: mockLoadRoutingInstructionStateSync(sessionId ? `session:${sessionId}` : '')?.stoplessGoalState
-  };
-});
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
@@ -107,10 +94,7 @@ const mockBridgeModule = () => ({
     },
   })),
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
-  syncStoplessGoalStateFromRequest: mockSyncStoplessGoalStateFromRequest,
-  persistStoplessGoalStateSnapshot: mockPersistStoplessGoalStateSnapshot,
   loadRoutingInstructionStateSync: mockLoadRoutingInstructionStateSync,
-  readStoplessGoalState: mockReadStoplessGoalState,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
   deriveFinishReasonNative: jest.fn(() => undefined),
   updateResponsesContractProbeFromSseChunkNative: jest.fn(() => ({})),
@@ -578,7 +562,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
     mockSyncReasoningStopModeFromRequest.mockClear();
-    mockSyncStoplessGoalStateFromRequest.mockClear();
     mockLoadRoutingInstructionStateSync.mockReset();
     mockLoadRoutingInstructionStateSync.mockReturnValue(null);
 

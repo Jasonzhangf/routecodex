@@ -276,8 +276,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         inboundStream: true,
         routecodexLocalPort: 10000,
         routecodexPortMode: 'router',
-        routecodexRoutingPolicyGroup: 'gateway_coding_10000',
-        stoplessGoalState: { status: 'idle', objective: 'test', createdAt: 1, updatedAt: 1 }
+        routecodexRoutingPolicyGroup: 'gateway_coding_10000'
       }
     });
 
@@ -394,8 +393,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         inboundStream: true,
         routecodexLocalPort: 5555,
         routecodexPortMode: 'router',
-        routecodexRoutingPolicyGroup: 'gateway-priority-5555-weighted-longcontext',
-        stoplessGoalState: { status: 'idle', objective: 'test', createdAt: 1, updatedAt: 1 }
+        routecodexRoutingPolicyGroup: 'gateway-priority-5555-weighted-longcontext'
       }
     });
 

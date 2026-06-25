@@ -201,9 +201,9 @@ stopless start
 
 - 只解析最新 user turn 中的 `<**rcc**> ... </rcc**>` block；
 - parser 真源在 Rust hotpath；
-- `stopless start` 的 body 作为目标正文透传上游，同时写入本地 routing state 的 `stoplessGoalState`；
-- `pause/resume/stop/done` 只更新本地目标状态，不透传旧 marker；
-- followup owner 只看 `stoplessGoalState.status`，不再依赖 `reasoning.stop` / finalized marker。
+- `stopless start` 的 body 作为目标正文透传上游；不再写入本地 goal/routing state；
+- `pause/resume/stop/done` 不再维护本地目标状态；
+- stopless 是否继续只看当前请求闭环的 MetadataCenter `runtime_control.stopless` 与 tool output，不再读取 goal state。
 
 **唯一状态：**
 

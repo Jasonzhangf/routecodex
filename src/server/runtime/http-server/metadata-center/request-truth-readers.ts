@@ -44,14 +44,6 @@ export type RuntimeControlProjection = {
   preselectedRoute?: Record<string, unknown>;
   serverToolFollowup?: boolean;
   serverToolFollowupSource?: string;
-  stoplessGoalStatus?: string;
-  stoplessGoal?: {
-    state?: Record<string, unknown>;
-    hadDirective?: boolean;
-    source?: string;
-    status?: string;
-    directiveTypes?: string[];
-  };
   stopless?: {
     flowId?: string;
     repeatCount?: number;
@@ -61,20 +53,6 @@ export type RuntimeControlProjection = {
     schemaFeedback?: Record<string, unknown>;
     active?: boolean;
     updatedAt?: number;
-  };
-  stopMessageState?: {
-    stopMessageText?: string;
-    stopMessageProviderKey?: string;
-    stopMessageMaxRepeats?: number;
-    stopMessageUsed?: number;
-    stopMessageStageMode?: string;
-  };
-  serverToolLoopState?: {
-    flowId?: string;
-    repeatCount?: number;
-    maxRepeats?: number;
-    triggerHint?: string;
-    schemaFeedback?: Record<string, unknown>;
   };
   stopMessageCompareContext?: {
     armed?: boolean;
@@ -204,11 +182,7 @@ export function readRuntimeControlProjection(
   const preselectedRoute = asFlatRecord(runtimeControl?.preselectedRoute);
   const serverToolFollowup = readBoolean(runtimeControl?.serverToolFollowup);
   const serverToolFollowupSource = readTrimmedString(runtimeControl?.serverToolFollowupSource);
-  const stoplessGoalStatus = readTrimmedString(runtimeControl?.stoplessGoalStatus);
-  const stoplessGoal = asFlatRecord(runtimeControl?.stoplessGoal);
   const stopless = asFlatRecord(runtimeControl?.stopless);
-  const stopMessageState = asFlatRecord(runtimeControl?.stopMessageState);
-  const serverToolLoopState = asFlatRecord(runtimeControl?.serverToolLoopState);
   const stopMessageCompareContext = asFlatRecord(runtimeControl?.stopMessageCompareContext);
   const stopMessageEnabled = readBoolean(runtimeControl?.stopMessageEnabled);
   const stopMessageExcludeDirect = readBoolean(runtimeControl?.stopMessageExcludeDirect);
@@ -224,20 +198,6 @@ export function readRuntimeControlProjection(
     ...(preselectedRoute ? { preselectedRoute } : {}),
     ...(serverToolFollowup !== undefined ? { serverToolFollowup } : {}),
     ...(serverToolFollowupSource ? { serverToolFollowupSource } : {}),
-    ...(stoplessGoalStatus ? { stoplessGoalStatus } : {}),
-    ...(stoplessGoal
-      ? {
-          stoplessGoal: {
-            ...(asFlatRecord(stoplessGoal.state) ? { state: asFlatRecord(stoplessGoal.state) } : {}),
-            ...(typeof stoplessGoal.hadDirective === 'boolean' ? { hadDirective: stoplessGoal.hadDirective } : {}),
-            ...(readTrimmedString(stoplessGoal.source) ? { source: readTrimmedString(stoplessGoal.source) } : {}),
-            ...(readTrimmedString(stoplessGoal.status) ? { status: readTrimmedString(stoplessGoal.status) } : {}),
-            ...(Array.isArray(stoplessGoal.directiveTypes)
-              ? { directiveTypes: stoplessGoal.directiveTypes.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()) }
-              : {}),
-          }
-        }
-      : {}),
     ...(stopless
       ? {
           stopless: {
@@ -253,40 +213,6 @@ export function readRuntimeControlProjection(
               : {}),
             ...(typeof stopless.active === 'boolean' ? { active: stopless.active } : {}),
             ...(typeof stopless.updatedAt === 'number' ? { updatedAt: stopless.updatedAt } : {}),
-          }
-        }
-      : {}),
-    ...(stopMessageState
-      ? {
-          stopMessageState: {
-            ...(readTrimmedString(stopMessageState.stopMessageText)
-              ? { stopMessageText: readTrimmedString(stopMessageState.stopMessageText) }
-              : {}),
-            ...(readTrimmedString(stopMessageState.stopMessageProviderKey)
-              ? { stopMessageProviderKey: readTrimmedString(stopMessageState.stopMessageProviderKey) }
-              : {}),
-            ...(typeof stopMessageState.stopMessageMaxRepeats === 'number'
-              ? { stopMessageMaxRepeats: stopMessageState.stopMessageMaxRepeats }
-              : {}),
-            ...(typeof stopMessageState.stopMessageUsed === 'number'
-              ? { stopMessageUsed: stopMessageState.stopMessageUsed }
-              : {}),
-            ...(readTrimmedString(stopMessageState.stopMessageStageMode)
-              ? { stopMessageStageMode: readTrimmedString(stopMessageState.stopMessageStageMode) }
-              : {}),
-          }
-        }
-      : {}),
-    ...(serverToolLoopState
-      ? {
-          serverToolLoopState: {
-            ...(readTrimmedString(serverToolLoopState.flowId) ? { flowId: readTrimmedString(serverToolLoopState.flowId) } : {}),
-            ...(typeof serverToolLoopState.repeatCount === 'number' ? { repeatCount: serverToolLoopState.repeatCount } : {}),
-            ...(typeof serverToolLoopState.maxRepeats === 'number' ? { maxRepeats: serverToolLoopState.maxRepeats } : {}),
-            ...(readTrimmedString(serverToolLoopState.triggerHint) ? { triggerHint: readTrimmedString(serverToolLoopState.triggerHint) } : {}),
-            ...(asFlatRecord(serverToolLoopState.schemaFeedback)
-              ? { schemaFeedback: asFlatRecord(serverToolLoopState.schemaFeedback) }
-              : {}),
           }
         }
       : {}),
