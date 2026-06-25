@@ -153,11 +153,15 @@ build_project() {
         return
     fi
 
+    prepare_isolated_build_root
     echo "🔁 install:global 默认入口切到 build:dev（直面审计 gate）"
-    BUILD_MODE=dev \
-    ROUTECODEX_BUILD_RESTART_ONLY="${ROUTECODEX_BUILD_RESTART_ONLY:-1}" \
-    ROUTECODEX_INSTALL_VERIFY_PORT="${ROUTECODEX_INSTALL_VERIFY_PORT:-5555}" \
-    npm run build:dev
+    (
+        cd "$INSTALL_BUILD_ROOT"
+        BUILD_MODE=dev \
+        ROUTECODEX_BUILD_RESTART_ONLY="${ROUTECODEX_BUILD_RESTART_ONLY:-1}" \
+        ROUTECODEX_INSTALL_VERIFY_PORT="${ROUTECODEX_INSTALL_VERIFY_PORT:-5555}" \
+        npm run build:dev
+    )
 }
 
 # 全局安装

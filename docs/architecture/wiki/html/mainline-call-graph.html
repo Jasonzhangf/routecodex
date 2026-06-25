@@ -226,8 +226,8 @@
           class ServerReqInbound01ClientRaw anchored;
           class HubReqInbound02Standardized anchored;
           class HubReqChatProcess03Governed anchored;
-          class VrRoute04SelectedTarget pending;
-          class HubReqOutbound05ProviderSemantic pending;
+          class VrRoute04SelectedTarget anchored;
+          class HubReqOutbound05ProviderSemantic partial;
           class ProviderReqOutbound06WirePayload partial;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
@@ -237,7 +237,7 @@
         <tr><td>req-01</td><td><code>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized</code></td><td>anchored</td><td><code>buildResponsesRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshotJson</code></td><td></td><td><code>hub.req_inbound_responses_context_capture</code>&lt;br/&gt;Rust req_inbound owner captures and normalizes relay <code>/v1/responses</code> request context before any TS bridge reuse</td></tr>
         <tr><td>req-02</td><td><code>HubReqInbound02Standardized -&gt; HubReqChatProcess03Governed</code></td><td>anchored</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.req_inbound_responses_context_capture</code>&lt;br/&gt;Rust req_inbound owner captures and normalizes relay <code>/v1/responses</code> request context before any TS bridge reuse</td></tr>
         <tr><td>req-03</td><td><code>HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>execute -&gt; run_vr_route_04_selected_target_entrypoint</code></td><td></td><td><code>hub.route_selection_bridge</code>&lt;br/&gt;Hub req-03 Rust bridge that seals virtual-router decisions into <code>VrRoute04SelectedTarget</code></td></tr>
-        <tr><td>req-04</td><td><code>VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic</code></td><td>binding pending</td><td><code>binding pending</code></td><td><code>request.req_outbound_05.runtime_vs_typed</code></td><td><code>binding pending</code></td></tr>
+        <tr><td>req-04</td><td><code>VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic</code></td><td>anchored</td><td><code>execute -&gt; run_hub_req_outbound_05_provider_semantic_entrypoint</code></td><td></td><td><code>hub.req_outbound_provider_semantic</code>&lt;br/&gt;Hub req-04 Rust bridge that applies <code>VrRoute04SelectedTarget</code> to <code>HubReqOutbound05ProviderSemantic</code></td></tr>
         <tr><td>req-05</td><td><code>HubReqOutbound05ProviderSemantic -&gt; ProviderReqOutbound06WirePayload</code></td><td>partial</td><td><code>runReqOutboundStage3CompatWithNative -&gt; run_req_outbound_stage3_compat_json</code></td><td></td><td><code>responses.request_compat_normalization</code>&lt;br/&gt;Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only</td></tr>
         </tbody>
         </table>
@@ -564,15 +564,6 @@
         <tr><td>debug.surface_registry</td><td><code>createDebugToolkit</code></td><td><code>debug.unified_surface</code>&lt;br/&gt;debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy</td><td>Canonical debug owner entrypoint. createDebugToolkit is the unified facade constructor for debug diag/snapshot/logger/harness replay surfaces.</td></tr>
         <tr><td>error.err_04_router_policy_applied</td><td><code>ErrorErr04RouterPolicyApplied</code></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td><td>Router policy applied between ErrorErr03 and ErrorErr05; type is registered in topology doc table.</td></tr>
         <tr><td>error.err_04_executor_envelope</td><td><code>RequestExecutorErrorErr04RouterPolicyEnvelope</code></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td><td>Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract.</td></tr>
-        </tbody>
-        </table>
-        <h2>Split Bindings</h2>
-        <p>These records explain why some mainline edges intentionally stay <code>binding pending</code>. Use them when runtime orchestration and typed contract builders are separate layers.</p>
-        <table>
-        <thead><tr><th>binding_id</th><th>transition</th><th>owner</th><th>runtime symbols</th><th>typed symbols</th><th>note</th></tr></thead>
-        <tbody>
-        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>request.req_outbound_05.runtime_vs_typed</td><td><code>VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic</code></td><td></td><td><code>run_hub_req_outbound_05_provider_semantic_entrypoint</code></td><td><code>run_hub_req_outbound_05_provider_semantic_entrypoint</code>&lt;br/&gt;<code>build_hub_req_outbound_05_from_hub_req_chatprocess_03</code></td><td>Runtime mainline calls the typed req_outbound_05 entrypoint after route application, but VrRoute04 is not passed as a direct function argument. Record the split explicitly instead of inventing a fake VrRoute04 -&gt; outbound caller/callee edge.</td></tr>
         </tbody>
         </table>
         <h2>Maintenance Rules</h2>

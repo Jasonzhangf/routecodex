@@ -23,6 +23,9 @@ pub fn strip_stop_schema_control_text(text: &str) -> String {
 }
 
 pub fn strip_stop_schema_control_payload(payload: &mut Value) {
+    if let Some(output_text) = payload.get_mut("output_text") {
+        sanitize_stop_schema_visible_field(Some(output_text));
+    }
     if let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) {
         for choice in choices {
             if let Some(message) = choice.get_mut("message") {
@@ -35,6 +38,10 @@ pub fn strip_stop_schema_control_payload(payload: &mut Value) {
             sanitize_stop_schema_visible_node(item);
         }
     }
+}
+
+pub fn strip_stop_schema_control_value(value: &mut Value) {
+    sanitize_stop_schema_visible_value(value);
 }
 
 pub fn extract_current_assistant_stop_text(payload: &Value) -> String {
@@ -112,7 +119,10 @@ fn normalize_terminal_stop_chat_payload(payload: &mut Value) -> bool {
             continue;
         };
         if choice_row.get("finish_reason").and_then(Value::as_str) == Some("tool_calls") {
-            choice_row.insert("finish_reason".to_string(), Value::String("stop".to_string()));
+            choice_row.insert(
+                "finish_reason".to_string(),
+                Value::String("stop".to_string()),
+            );
             changed = true;
         }
         if let Some(message_row) = choice_row.get_mut("message").and_then(Value::as_object_mut) {
@@ -127,7 +137,8 @@ fn normalize_terminal_stop_chat_payload(payload: &mut Value) -> bool {
 fn strip_stop_schema_control_blocks(text: &str) -> String {
     let without_xml = remove_tagged_stop_schema_blocks(text);
     let without_fenced = remove_fenced_stop_schema_json(&without_xml);
-    let without_bare = remove_bare_stop_schema_json_objects(&without_fenced);
+    let without_inline = remove_inline_reasoning_stop_schema_residue(&without_fenced);
+    let without_bare = remove_bare_stop_schema_json_objects(&without_inline);
     let lines: Vec<&str> = without_bare.lines().collect();
     let mut kept = Vec::new();
     for line in lines {
@@ -141,6 +152,117 @@ fn strip_stop_schema_control_blocks(text: &str) -> String {
         }
     }
     kept.join("\n").trim().to_string()
+}
+
+fn remove_inline_reasoning_stop_schema_residue(text: &str) -> String {
+    let mut output = Vec::new();
+    for line in text.lines() {
+        output.push(strip_inline_reasoning_stop_schema_residue_line(line));
+    }
+    output.join("\n")
+}
+
+fn strip_inline_reasoning_stop_schema_residue_line(line: &str) -> String {
+    let lower = line.to_ascii_lowercase();
+    let Some(reasoning_start) = lower.find("reasoningstop") else {
+        return line.to_string();
+    };
+    if let Some(stripped) = strip_inline_reasoning_stop_json_call(line, reasoning_start) {
+        return stripped;
+    }
+    let Some(next_step_relative) = lower[reasoning_start..].find("next_step") else {
+        return line.to_string();
+    };
+    let next_step_start = reasoning_start + next_step_relative;
+    let prefix = line[..reasoning_start].trim_end();
+    let suffix = extract_inline_next_step_value_suffix(line, next_step_start);
+    join_visible_inline_parts(prefix, suffix.as_deref())
+}
+
+fn strip_inline_reasoning_stop_json_call(line: &str, reasoning_start: usize) -> Option<String> {
+    let object_start = line[reasoning_start..].find('{').map(|offset| reasoning_start + offset)?;
+    let object_end = find_json_object_end(line, object_start)?;
+    let candidate = &line[object_start..=object_end];
+    if !is_stop_schema_control_json(candidate) {
+        return None;
+    }
+    let prefix = line[..reasoning_start].trim_end();
+    let suffix_start = consume_inline_reasoning_stop_trailer(line, object_end + 1);
+    let suffix = line[suffix_start..]
+        .trim_start_matches(|ch: char| matches!(ch, ')' | ']' | '}' | ',' | ';' | '，' | '；'))
+        .trim();
+    Some(join_visible_inline_parts(prefix, Some(suffix)))
+}
+
+fn consume_inline_reasoning_stop_trailer(line: &str, mut cursor: usize) -> usize {
+    while cursor < line.len() {
+        let ch = line[cursor..].chars().next().unwrap_or_default();
+        if ch.is_whitespace() || matches!(ch, ')' | ']' | '}' | ',' | ';' | '，' | '；') {
+            cursor += ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+    cursor
+}
+
+fn extract_inline_next_step_value_suffix(line: &str, next_step_start: usize) -> Option<String> {
+    let mut cursor = next_step_start + "next_step".len();
+    let bytes = line.as_bytes();
+    while cursor < line.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if cursor < line.len() && (bytes[cursor] == b':' || bytes[cursor] == b'=') {
+        cursor += 1;
+    }
+    while cursor < line.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if cursor >= line.len() {
+        return None;
+    }
+    let first = line[cursor..].chars().next()?;
+    if first == '"' || first == '\'' {
+        let quote = first;
+        cursor += first.len_utf8();
+        let value_start = cursor;
+        let mut escaped = false;
+        for (offset, ch) in line[value_start..].char_indices() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+            if ch == quote {
+                return Some(line[value_start..value_start + offset].trim().to_string());
+            }
+        }
+        return Some(line[value_start..].trim().to_string());
+    }
+
+    let suffix = line[cursor..]
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, ',' | ';' | '，' | '；'))
+        .trim();
+    if suffix.is_empty() {
+        None
+    } else {
+        Some(suffix.to_string())
+    }
+}
+
+fn join_visible_inline_parts(prefix: &str, suffix: Option<&str>) -> String {
+    let prefix = prefix.trim();
+    let suffix = suffix.map(str::trim).filter(|value| !value.is_empty());
+    match (prefix.is_empty(), suffix) {
+        (true, Some(suffix)) => suffix.to_string(),
+        (false, Some(suffix)) => format!("{prefix}\n{suffix}"),
+        (false, None) => prefix.to_string(),
+        (true, None) => String::new(),
+    }
 }
 
 fn remove_tagged_stop_schema_blocks(text: &str) -> String {
@@ -169,12 +291,51 @@ fn remove_tagged_stop_schema_blocks(text: &str) -> String {
         out.push_str(&text[cursor..start]);
         let content_start = start + start_tag.len();
         let Some(relative_end) = lower[content_start..].find(end_tag) else {
+            if let Some(resume) = consume_unclosed_tagged_stop_schema_block(text, content_start) {
+                cursor = resume;
+                push_visible_separator_if_needed(&mut out, text, cursor);
+                continue;
+            }
             out.push_str(&text[start..]);
             return out;
         };
         cursor = content_start + relative_end + end_tag.len();
+        push_visible_separator_if_needed(&mut out, text, cursor);
     }
     out
+}
+
+fn push_visible_separator_if_needed(out: &mut String, text: &str, cursor: usize) {
+    if out.is_empty() || out.ends_with(char::is_whitespace) {
+        return;
+    }
+    let Some(next) = text[cursor..].chars().next() else {
+        return;
+    };
+    if !next.is_whitespace() {
+        out.push('\n');
+    }
+}
+
+fn consume_unclosed_tagged_stop_schema_block(text: &str, content_start: usize) -> Option<usize> {
+    let object_start = text[content_start..]
+        .find('{')
+        .map(|offset| content_start + offset)?;
+    let object_end = find_json_object_end(text, object_start)?;
+    let candidate = &text[object_start..=object_end];
+    if !is_stop_schema_control_json(candidate) {
+        return None;
+    }
+    let mut cursor = object_end + 1;
+    while cursor < text.len() {
+        let ch = text[cursor..].chars().next().unwrap_or_default();
+        if ch.is_whitespace() || matches!(ch, ')' | ']' | '}' | ',' | ';' | '，' | '；') {
+            cursor += ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+    Some(cursor)
 }
 
 fn remove_fenced_stop_schema_json(text: &str) -> String {
@@ -351,6 +512,36 @@ fn sanitize_stop_schema_visible_node(node: &mut Value) {
     sanitize_stop_schema_summary_array(row.get_mut("summary"));
 }
 
+fn sanitize_stop_schema_visible_value(value: &mut Value) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                sanitize_stop_schema_visible_value(item);
+            }
+        }
+        Value::Object(row) => {
+            for child in row.values_mut() {
+                sanitize_stop_schema_visible_value(child);
+            }
+            for field in [
+                "content",
+                "text",
+                "output_text",
+                "reasoning_text",
+                "reasoning_content",
+            ] {
+                sanitize_stop_schema_visible_field(row.get_mut(field));
+            }
+            sanitize_stop_schema_summary_array(row.get_mut("reasoning"));
+            sanitize_stop_schema_summary_array(row.get_mut("summary"));
+        }
+        Value::String(text) => {
+            *text = strip_stop_schema_control_blocks(text);
+        }
+        _ => {}
+    }
+}
+
 fn sanitize_stop_schema_visible_field(value: Option<&mut Value>) {
     let Some(value) = value else {
         return;
@@ -369,14 +560,24 @@ fn sanitize_stop_schema_visible_field(value: Option<&mut Value>) {
 }
 
 fn sanitize_stop_schema_summary_array(value: Option<&mut Value>) {
-    let Some(Value::Object(row)) = value else {
+    let Some(value) = value else {
         return;
     };
-    let Some(Value::Array(summary)) = row.get_mut("summary") else {
-        return;
-    };
-    for item in summary {
-        sanitize_stop_schema_visible_node(item);
+    match value {
+        Value::Array(summary) => {
+            for item in summary {
+                sanitize_stop_schema_visible_node(item);
+            }
+        }
+        Value::Object(row) => {
+            let Some(Value::Array(summary)) = row.get_mut("summary") else {
+                return;
+            };
+            for item in summary {
+                sanitize_stop_schema_visible_node(item);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -589,6 +790,36 @@ visible after
     }
 
     #[test]
+    fn strips_inline_reasoning_stop_schema_residue_without_truncating_next_step() {
+        assert_eq!(
+            strip_stop_schema_control_text(
+                r#"阶段结果：计数已修复。 reasoningStop with2 -> next_step: "继续补 provider 黑盒并重放线上样本" Jason, 我继续执行。"#
+            ),
+            "阶段结果：计数已修复。\n继续补 provider 黑盒并重放线上样本"
+        );
+    }
+
+    #[test]
+    fn strips_unclosed_tagged_stop_schema_without_dropping_visible_prefix_or_suffix() {
+        assert_eq!(
+            strip_stop_schema_control_text(
+                r#"结论：DONE<rcc_stop_schema>{"stopreason":0,"reason":"done","next_step":"无"} 尾部可见"#
+            ),
+            "结论：DONE\n尾部可见"
+        );
+    }
+
+    #[test]
+    fn strips_inline_reasoning_stop_json_call_without_truncating_visible_text() {
+        assert_eq!(
+            strip_stop_schema_control_text(
+                r#"阶段结果：已完成 reasoningStop({"stopreason":0,"reason":"done","next_step":"无"}); Jason, 后续可继续验证。"#
+            ),
+            "阶段结果：已完成\nJason, 后续可继续验证。"
+        );
+    }
+
+    #[test]
     fn strips_payload_visible_fields_recursively() {
         let mut payload = json!({
             "choices": [{
@@ -620,6 +851,59 @@ visible after
             "summary  ok"
         );
         assert_eq!(payload["output"][0]["content"][0]["output_text"], "ok");
+    }
+
+    #[test]
+    fn strips_payload_visible_summary_arrays_on_output_items() {
+        let mut payload = json!({
+            "output": [{
+                "type": "reasoning",
+                "summary": [{
+                    "type": "summary_text",
+                    "text": "**Thinking** done\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\"}\n</rcc_stop_schema>"
+                }]
+            }]
+        });
+
+        strip_stop_schema_control_payload(&mut payload);
+
+        assert_eq!(
+            payload["output"][0]["summary"][0]["text"],
+            "**Thinking** done"
+        );
+    }
+
+    #[test]
+    fn strips_payload_top_level_output_text() {
+        let mut payload = json!({
+            "output_text": "## 完成内容\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\"}\n</rcc_stop_schema>"
+        });
+
+        strip_stop_schema_control_payload(&mut payload);
+
+        assert_eq!(payload["output_text"], "## 完成内容");
+    }
+
+    #[test]
+    fn strips_arbitrary_nested_visible_value() {
+        let mut payload = json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "reasoning",
+                "summary": [{
+                    "type": "summary_text",
+                    "text": "**Thinking** keep going\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
+                }]
+            }
+        });
+
+        strip_stop_schema_control_value(&mut payload);
+
+        assert!(!payload.to_string().contains("<rcc_stop_schema>"));
+        assert_eq!(
+            payload["item"]["summary"][0]["text"],
+            "**Thinking** keep going"
+        );
     }
 
     #[test]

@@ -1237,6 +1237,49 @@ owners:
       - "TS request-stage shell may transport runtime_control and invoke native ingress, but it must not guess route policy, revive legacy `__rt` route pins, or fabricate VrRoute04 contract state."
       - "Runtime route selection may stay split from typed route application, but req-03 must remain queryable through the Rust typed entrypoint instead of `binding pending` prose."
 
+  - feature_id: hub.req_outbound_provider_semantic
+    status: active
+    summary: "Hub req-04 Rust bridge that applies `VrRoute04SelectedTarget` to `HubReqOutbound05ProviderSemantic`"
+    owner_kind: rust_ssot
+    owner_scope: "VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic typed bridge and provider-neutral outbound semantic handoff"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+    canonical_types:
+      - VrRoute04SelectedTarget
+      - HubReqOutbound05ProviderSemantic
+    canonical_builders:
+      - run_hub_req_outbound_05_provider_semantic_entrypoint
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/provider_req_outbound_06_wire_payload.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - tests/sharedmodule
+      - tests/server/runtime/http-server
+      - docs
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/src/router
+      - src/client
+    required_tests:
+      - tests/server/runtime/http-server/request-executor-preselected-route.blackbox.spec.ts
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
+      - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/provider_req_outbound_06_wire_payload.rs
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-binding-pending-gate
+      - npm run verify:responses-request-compat-rust-only
+    migration_target: rust
+    notes:
+      - "Req-04 must stay queryable as a Rust typed edge: outbound semantic builder must consume `VrRoute04SelectedTarget` directly instead of relying on metadata-only residue."
+      - "TS may invoke native req_outbound compat only; it must not invent a second provider-semantic outbound builder or patch request compat fields in host/runtime layers."
+
   - feature_id: hub.route_metadata_surface
     status: active
     summary: "Hub request-route metadata surfaces stay queryable as one Rust metadata surface"
