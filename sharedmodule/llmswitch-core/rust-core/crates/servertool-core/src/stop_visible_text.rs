@@ -101,6 +101,9 @@ pub fn build_stop_message_terminal_visible_payload(
             _ => false,
         };
     }
+    if !prefix.is_empty() && !payload_has_any_visible_stop_text(&payload) {
+        changed = ensure_visible_stop_content(&mut payload, &prefix) || changed;
+    }
     strip_terminal_visible_reasoning_fields(&mut payload);
     changed = normalize_terminal_stop_chat_payload(&mut payload) || changed;
     StopMessageTerminalVisiblePayloadOutput { payload, changed }
@@ -135,6 +138,9 @@ fn normalize_terminal_stop_chat_payload(payload: &mut Value) -> bool {
 }
 
 fn strip_stop_schema_control_blocks(text: &str) -> String {
+    if !has_stop_schema_control_signal(text) {
+        return text.to_string();
+    }
     let without_xml = remove_tagged_stop_schema_blocks(text);
     let without_fenced = remove_fenced_stop_schema_json(&without_xml);
     let without_inline = remove_inline_reasoning_stop_schema_residue(&without_fenced);
@@ -152,6 +158,16 @@ fn strip_stop_schema_control_blocks(text: &str) -> String {
         }
     }
     kept.join("\n").trim().to_string()
+}
+
+fn has_stop_schema_control_signal(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("<rcc_stop_schema>")
+        || lower.contains("<stop_schema>")
+        || lower.contains("reasoningstop")
+        || lower.contains("停止原因:")
+        || lower.contains("停止原因：")
+        || text.contains("\"stopreason\"")
 }
 
 fn remove_inline_reasoning_stop_schema_residue(text: &str) -> String {
@@ -180,7 +196,9 @@ fn strip_inline_reasoning_stop_schema_residue_line(line: &str) -> String {
 }
 
 fn strip_inline_reasoning_stop_json_call(line: &str, reasoning_start: usize) -> Option<String> {
-    let object_start = line[reasoning_start..].find('{').map(|offset| reasoning_start + offset)?;
+    let object_start = line[reasoning_start..]
+        .find('{')
+        .map(|offset| reasoning_start + offset)?;
     let object_end = find_json_object_end(line, object_start)?;
     let candidate = &line[object_start..=object_end];
     if !is_stop_schema_control_json(candidate) {
@@ -719,6 +737,106 @@ fn replace_responses_output_content(payload: &mut Value, prefix: &str) -> bool {
     changed
 }
 
+fn ensure_visible_stop_content(payload: &mut Value, text: &str) -> bool {
+    ensure_chat_visible_stop_content(payload, text) || ensure_responses_visible_stop_content(payload, text)
+}
+
+fn ensure_chat_visible_stop_content(payload: &mut Value, text: &str) -> bool {
+    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for choice in choices {
+        let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        if message.get("content").is_some_and(value_has_visible_stop_text) {
+            continue;
+        }
+        message.insert("content".to_string(), Value::String(text.to_string()));
+        changed = true;
+    }
+    changed
+}
+
+fn ensure_responses_visible_stop_content(payload: &mut Value, text: &str) -> bool {
+    let Some(row) = payload.as_object_mut() else {
+        return false;
+    };
+    let output = row
+        .entry("output".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Some(items) = output.as_array_mut() else {
+        return false;
+    };
+    for item in items.iter_mut() {
+        let Some(item_row) = item.as_object_mut() else {
+            continue;
+        };
+        let item_type = item_row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if item_type != "message" {
+            continue;
+        }
+        if item_row.get("content").is_some_and(value_has_visible_stop_text) {
+            row.insert("output_text".to_string(), Value::String(text.to_string()));
+            return true;
+        }
+        item_row.insert(
+            "content".to_string(),
+            json!([{ "type": "output_text", "text": text }]),
+        );
+        row.insert("output_text".to_string(), Value::String(text.to_string()));
+        return true;
+    }
+    items.push(json!({
+        "type": "message",
+        "role": "assistant",
+        "content": [{ "type": "output_text", "text": text }]
+    }));
+    row.insert("output_text".to_string(), Value::String(text.to_string()));
+    true
+}
+
+fn payload_has_any_visible_stop_text(payload: &Value) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|choice| {
+            choice
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .is_some_and(value_has_visible_stop_text)
+        })
+        || payload
+            .get("output_text")
+            .is_some_and(value_has_visible_stop_text)
+        || payload
+            .get("output")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|item| item.get("content").is_some_and(value_has_visible_stop_text))
+}
+
+fn value_has_visible_stop_text(value: &Value) -> bool {
+    match value {
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(items) => items.iter().any(value_has_visible_stop_text),
+        Value::Object(row) => row
+            .get("text")
+            .or_else(|| row.get("output_text"))
+            .or_else(|| row.get("content"))
+            .is_some_and(value_has_visible_stop_text),
+        _ => false,
+    }
+}
+
 fn strip_terminal_visible_reasoning_fields(value: &mut Value) {
     match value {
         Value::Array(items) => {
@@ -976,6 +1094,59 @@ visible after
         assert_eq!(
             output.payload["output"][0]["content"][0]["text"],
             "needs user"
+        );
+    }
+
+    #[test]
+    fn terminal_chat_schema_only_uses_stop_reason_as_visible_text() {
+        let output =
+            build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+                payload: json!({
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "content": "<rcc_stop_schema>{\"stopreason\":0,\"reason\":\"验证已经完成\"}</rcc_stop_schema>",
+                            "tool_calls": [{ "id": "call_stop", "type": "function" }]
+                        }
+                    }]
+                }),
+                mode: Some("replace".to_string()),
+                prefix: Some("停止原因：验证已经完成".to_string()),
+            });
+        assert!(output.changed);
+        assert_eq!(output.payload["choices"][0]["finish_reason"], "stop");
+        assert_eq!(
+            output.payload["choices"][0]["message"]["content"],
+            "停止原因：验证已经完成"
+        );
+        assert!(output.payload["choices"][0]["message"]
+            .get("tool_calls")
+            .is_none());
+    }
+
+    #[test]
+    fn terminal_responses_schema_only_uses_stop_reason_as_visible_output_text() {
+        let output =
+            build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+                payload: json!({
+                    "status": "completed",
+                    "output": [{
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{
+                            "type": "output_text",
+                            "text": "<rcc_stop_schema>{\"stopreason\":0,\"reason\":\"验证已经完成\"}</rcc_stop_schema>"
+                        }]
+                    }]
+                }),
+                mode: Some("replace".to_string()),
+                prefix: Some("停止原因：验证已经完成".to_string()),
+            });
+        assert!(output.changed);
+        assert_eq!(output.payload["output_text"], "停止原因：验证已经完成");
+        assert_eq!(
+            output.payload["output"][0]["content"][0]["text"],
+            "停止原因：验证已经完成"
         );
     }
 }

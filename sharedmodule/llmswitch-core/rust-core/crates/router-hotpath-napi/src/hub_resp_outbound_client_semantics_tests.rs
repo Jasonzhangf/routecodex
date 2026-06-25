@@ -1560,8 +1560,47 @@ fn project_responses_sse_frame_for_client_replays_obfuscated_output_text_delta_f
 }
 
 #[test]
-fn project_responses_sse_frame_for_client_replays_obfuscated_reasoning_summary_delta_from_done_text()
-{
+fn project_responses_sse_frame_for_client_preserves_output_text_delta_spacing() {
+    let projected = project_responses_sse_frame_for_client(
+        "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"item_id\":\"msg_spacing_1\",\"delta\":\" leading space\"}\n\n",
+        Some("response.output_text.delta"),
+        &json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "content_index": 0,
+            "item_id": "msg_spacing_1",
+            "delta": " leading space",
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+    assert_eq!(projected["emit"], true);
+    let frame = projected["frame"].as_str().expect("frame");
+    assert!(frame.contains("\"delta\":\" leading space\""));
+
+    let projected = project_responses_sse_frame_for_client(
+        "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"item_id\":\"msg_spacing_2\",\"delta\":\"The quick \"}\n\n",
+        Some("response.output_text.delta"),
+        &json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "content_index": 0,
+            "item_id": "msg_spacing_2",
+            "delta": "The quick ",
+        }),
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+    assert_eq!(projected["emit"], true);
+    let frame = projected["frame"].as_str().expect("frame");
+    assert!(frame.contains("\"delta\":\"The quick \""));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_replays_obfuscated_reasoning_summary_delta_from_done_text(
+) {
     let delta = project_responses_sse_frame_for_client(
         "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"item_id\":\"rs_whitespace_1\",\"delta\":\"Drafting\",\"obfuscation\":\"abc\"}\n\n",
         Some("response.reasoning_summary_text.delta"),
