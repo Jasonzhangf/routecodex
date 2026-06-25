@@ -229,7 +229,7 @@
 
 消除 `req-03` 的 `binding pending`。锁定 `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` 的 runtime caller/callee、typed contract、owner feature。
 
-#### 2026-06-24 当前状态
+#### 2026-06-25 当前状态
 
 - `req-03` 已从 `binding pending` 收口为 anchored：
   - caller: `execute`
@@ -246,15 +246,25 @@
   - `cargo test -p router-hotpath-napi request_typed_entrypoints_preserve_payload_for_live_path_wiring --lib -- --nocapture`
   - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts`
   - `tests/sharedmodule/hub-pipeline-router-metadata.spec.ts`
-  - `tests/server/http-server/executor-metadata.spec.ts` 两条 resumed relay/runtime-control focused case
+  - `tests/server/runtime/http-server/request-executor-preselected-route.blackbox.spec.ts`
+  - `tests/server/runtime/http-server/executor-metadata.binding.spec.ts`
+  - `tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts`
+  - `tests/server/http-server/executor-metadata.spec.ts`
   - `npm run verify:function-map-compile-gate`
   - `npm run verify:architecture-mainline-call-map`
   - `npm run verify:architecture-mainline-binding-pending-gate`
   - `npm run verify:servertool-rust-only`
   - `npm run build:base`
+- 等价 request-path 证据说明：
+  - handler 层 `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts` 当前仍因 `.js` 运行面 native export 不一致失败，
+    不是 M3 route bridge 语义红点；
+  - 本轮改用更贴近 request executor 真路径的等价 blackbox/contract 组合补齐尾证据：
+    - resumed relay 的 `routeHint/providerKey/sessionId/conversationId` 在 `req-03` 前保持 queryable；
+    - `runtime_control.preselectedRoute` 在 request executor / Hub 边界生效；
+    - legacy `__rt` / flat retry-preselected residue 不复活；
+    - provider failure reroute 前会清掉 relay `preselectedRoute`，让 Hub 重选目标。
 - 当前剩余 debt：
   - `req-04` 仍是 `binding pending`，属于 M4，不得把本轮 M3 绿灯外推成整个 request path 已闭环。
-  - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts` 当前存在 `.js` 运行面导出不一致环境阻塞；本轮改用 `executor-metadata` request-route integration case 作为等价 request-path 证据。
 
 #### Owner 目标
 
