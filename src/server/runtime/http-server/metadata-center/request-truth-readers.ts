@@ -1,4 +1,5 @@
 import { MetadataCenter } from './metadata-center.js';
+import { writeMetadataCenterSlot } from './dualwrite-api.js';
 
 function readTrimmedString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -39,13 +40,10 @@ export type RuntimeControlProjection = {
   routeName?: string;
   routeId?: string;
   providerProtocol?: string;
-  providerFamily?: string;
   retryProviderKey?: string;
   preselectedRoute?: Record<string, unknown>;
   serverToolFollowup?: boolean;
   serverToolFollowupSource?: string;
-  serverToolFollowupMode?: string;
-  servertoolResponseOrchestration?: boolean;
   stoplessGoalStatus?: string;
   stoplessGoal?: {
     state?: Record<string, unknown>;
@@ -78,6 +76,27 @@ export type RuntimeControlProjection = {
     triggerHint?: string;
     schemaFeedback?: Record<string, unknown>;
   };
+  stopMessageCompareContext?: {
+    armed?: boolean;
+    mode?: string;
+    allowModeOnly?: boolean;
+    textLength?: number;
+    maxRepeats?: number;
+    used?: number;
+    remaining?: number;
+    active?: boolean;
+    stopEligible?: boolean;
+    hasCapturedRequest?: boolean;
+    compactionRequest?: boolean;
+    hasSeed?: boolean;
+    decision?: string;
+    reason?: string;
+    stage?: string;
+    bdWorkState?: string;
+    observationHash?: string;
+    observationStableCount?: number;
+    toolSignatureHash?: string;
+  };
   stopMessageEnabled?: boolean;
   stopMessageExcludeDirect?: boolean;
   stopMessageClientInject?: {
@@ -106,12 +125,14 @@ export function writeStoplessRuntimeControl(args: {
   };
   reason?: string;
 }): void {
-  MetadataCenter.attach(args.metadata).writeRuntimeControl(
-    'stopless',
-    args.value,
-    args.writer,
-    args.reason
-  );
+  writeMetadataCenterSlot({
+    target: args.metadata,
+    family: 'runtime_control',
+    key: 'stopless',
+    value: args.value,
+    writer: args.writer,
+    reason: args.reason
+  });
 }
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
@@ -179,18 +200,16 @@ export function readRuntimeControlProjection(
   const routeName = readTrimmedString(runtimeControl?.routeName);
   const routeId = readTrimmedString(runtimeControl?.routeId);
   const providerProtocol = readTrimmedString(runtimeControl?.providerProtocol);
-  const providerFamily = readTrimmedString(runtimeControl?.providerFamily);
   const retryProviderKey = readTrimmedString(runtimeControl?.retryProviderKey);
   const preselectedRoute = asFlatRecord(runtimeControl?.preselectedRoute);
   const serverToolFollowup = readBoolean(runtimeControl?.serverToolFollowup);
   const serverToolFollowupSource = readTrimmedString(runtimeControl?.serverToolFollowupSource);
-  const serverToolFollowupMode = readTrimmedString(runtimeControl?.serverToolFollowupMode);
-  const servertoolResponseOrchestration = readBoolean(runtimeControl?.servertoolResponseOrchestration);
   const stoplessGoalStatus = readTrimmedString(runtimeControl?.stoplessGoalStatus);
   const stoplessGoal = asFlatRecord(runtimeControl?.stoplessGoal);
   const stopless = asFlatRecord(runtimeControl?.stopless);
   const stopMessageState = asFlatRecord(runtimeControl?.stopMessageState);
   const serverToolLoopState = asFlatRecord(runtimeControl?.serverToolLoopState);
+  const stopMessageCompareContext = asFlatRecord(runtimeControl?.stopMessageCompareContext);
   const stopMessageEnabled = readBoolean(runtimeControl?.stopMessageEnabled);
   const stopMessageExcludeDirect = readBoolean(runtimeControl?.stopMessageExcludeDirect);
   const stopMessageClientInject = asFlatRecord(runtimeControl?.stopMessageClientInject);
@@ -201,13 +220,10 @@ export function readRuntimeControlProjection(
     ...(routeName ? { routeName } : {}),
     ...(routeId ? { routeId } : {}),
     ...(providerProtocol ? { providerProtocol } : {}),
-    ...(providerFamily ? { providerFamily } : {}),
     ...(retryProviderKey ? { retryProviderKey } : {}),
     ...(preselectedRoute ? { preselectedRoute } : {}),
     ...(serverToolFollowup !== undefined ? { serverToolFollowup } : {}),
     ...(serverToolFollowupSource ? { serverToolFollowupSource } : {}),
-    ...(serverToolFollowupMode ? { serverToolFollowupMode } : {}),
-    ...(servertoolResponseOrchestration !== undefined ? { servertoolResponseOrchestration } : {}),
     ...(stoplessGoalStatus ? { stoplessGoalStatus } : {}),
     ...(stoplessGoal
       ? {
@@ -270,6 +286,47 @@ export function readRuntimeControlProjection(
             ...(readTrimmedString(serverToolLoopState.triggerHint) ? { triggerHint: readTrimmedString(serverToolLoopState.triggerHint) } : {}),
             ...(asFlatRecord(serverToolLoopState.schemaFeedback)
               ? { schemaFeedback: asFlatRecord(serverToolLoopState.schemaFeedback) }
+              : {}),
+          }
+        }
+      : {}),
+    ...(stopMessageCompareContext
+      ? {
+          stopMessageCompareContext: {
+            ...(typeof stopMessageCompareContext.armed === 'boolean' ? { armed: stopMessageCompareContext.armed } : {}),
+            ...(readTrimmedString(stopMessageCompareContext.mode) ? { mode: readTrimmedString(stopMessageCompareContext.mode) } : {}),
+            ...(typeof stopMessageCompareContext.allowModeOnly === 'boolean'
+              ? { allowModeOnly: stopMessageCompareContext.allowModeOnly }
+              : {}),
+            ...(typeof stopMessageCompareContext.textLength === 'number' ? { textLength: stopMessageCompareContext.textLength } : {}),
+            ...(typeof stopMessageCompareContext.maxRepeats === 'number' ? { maxRepeats: stopMessageCompareContext.maxRepeats } : {}),
+            ...(typeof stopMessageCompareContext.used === 'number' ? { used: stopMessageCompareContext.used } : {}),
+            ...(typeof stopMessageCompareContext.remaining === 'number' ? { remaining: stopMessageCompareContext.remaining } : {}),
+            ...(typeof stopMessageCompareContext.active === 'boolean' ? { active: stopMessageCompareContext.active } : {}),
+            ...(typeof stopMessageCompareContext.stopEligible === 'boolean'
+              ? { stopEligible: stopMessageCompareContext.stopEligible }
+              : {}),
+            ...(typeof stopMessageCompareContext.hasCapturedRequest === 'boolean'
+              ? { hasCapturedRequest: stopMessageCompareContext.hasCapturedRequest }
+              : {}),
+            ...(typeof stopMessageCompareContext.compactionRequest === 'boolean'
+              ? { compactionRequest: stopMessageCompareContext.compactionRequest }
+              : {}),
+            ...(typeof stopMessageCompareContext.hasSeed === 'boolean'
+              ? { hasSeed: stopMessageCompareContext.hasSeed }
+              : {}),
+            ...(readTrimmedString(stopMessageCompareContext.decision) ? { decision: readTrimmedString(stopMessageCompareContext.decision) } : {}),
+            ...(readTrimmedString(stopMessageCompareContext.reason) ? { reason: readTrimmedString(stopMessageCompareContext.reason) } : {}),
+            ...(readTrimmedString(stopMessageCompareContext.stage) ? { stage: readTrimmedString(stopMessageCompareContext.stage) } : {}),
+            ...(readTrimmedString(stopMessageCompareContext.bdWorkState) ? { bdWorkState: readTrimmedString(stopMessageCompareContext.bdWorkState) } : {}),
+            ...(readTrimmedString(stopMessageCompareContext.observationHash)
+              ? { observationHash: readTrimmedString(stopMessageCompareContext.observationHash) }
+              : {}),
+            ...(typeof stopMessageCompareContext.observationStableCount === 'number'
+              ? { observationStableCount: stopMessageCompareContext.observationStableCount }
+              : {}),
+            ...(readTrimmedString(stopMessageCompareContext.toolSignatureHash)
+              ? { toolSignatureHash: readTrimmedString(stopMessageCompareContext.toolSignatureHash) }
               : {}),
           }
         }

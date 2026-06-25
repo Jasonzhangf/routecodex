@@ -213,6 +213,52 @@ describe('request-truth-readers', () => {
     });
   });
 
+  it('does not project dead servertoolResponseOrchestration runtime control residue', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    (center.writeRuntimeControl as (
+      key: string,
+      value: unknown,
+      writtenBy: { module: string; symbol: string; stage: string },
+      reason?: string
+    ) => void)(
+      'servertoolResponseOrchestration',
+      true,
+      {
+        module: 'tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts',
+        symbol: 'does not project dead servertoolResponseOrchestration runtime control residue',
+        stage: 'test'
+      },
+      'legacy dead slot injection'
+    );
+
+    expect(center.readRuntimeControl()).toEqual({});
+    expect(readRuntimeControlProjection(metadata)).toEqual({});
+  });
+
+  it('does not project dead serverToolFollowupMode runtime control residue', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    (center.writeRuntimeControl as (
+      key: string,
+      value: unknown,
+      writtenBy: { module: string; symbol: string; stage: string },
+      reason?: string
+    ) => void)(
+      'serverToolFollowupMode',
+      'router',
+      {
+        module: 'tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts',
+        symbol: 'does not project dead serverToolFollowupMode runtime control residue',
+        stage: 'test'
+      },
+      'legacy dead slot injection'
+    );
+
+    expect(center.readRuntimeControl()).toEqual({});
+    expect(readRuntimeControlProjection(metadata)).toEqual({});
+  });
+
   it('reads stopless runtime control from MetadataCenter only', () => {
     const metadata: Record<string, unknown> = {
       stopless: {
@@ -246,7 +292,6 @@ describe('request-truth-readers', () => {
 
     expect(readRuntimeControlProjection(metadata)).toEqual({
       stopless: {
-        sessionId: 'sess-1',
         flowId: 'stop_message_flow',
         repeatCount: 2,
         maxRepeats: 3,

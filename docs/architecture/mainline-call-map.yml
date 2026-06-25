@@ -754,9 +754,9 @@ chains:
         callee_file: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "request metadata carrier plus pipeline result metadata"
-        semantic_output: "partial runtime-control contract attached without redefining request truth: request-route (`routeHint/routeName/routeId/providerProtocol/retryProviderKey/preselectedRoute`), followup (`serverToolFollowup/serverToolFollowupSource/stoplessGoalStatus/stopless`), and stop-message (`stopMessageEnabled/stopMessageExcludeDirect`) remain partly first-class"
+        semantic_output: "dual-write migration node for runtime-control contract: request-route (`routeHint/routeName/routeId/providerProtocol/retryProviderKey/preselectedRoute`), followup (`serverToolFollowup/serverToolFollowupSource/stoplessGoalStatus/stopless`), and stop-message (`stopMessageEnabled/stopMessageExcludeDirect`) must move behind one metadata-center API"
         status: partial
-        note: "Current implementation now has first-class `runtimeControl` state/read/write/release coverage plus a host-side projection reader. Stopless followup materialization writes `runtime_control.stopless` through the bound MetadataCenter side-channel; broader request-route writers still need migration, and request truth is rebound from the center and no longer overwritten by pipeline metadata."
+        note: "Closeout checklist: docs/goals/metadata-center-dualwrite-dualread-closeout-checklist.md. Current implementation has JS MetadataCenter plus partial Rust snapshot readers; it is not complete dual-write. All control writes must move to `hub.metadata_center_dualwrite_api`; payload residue remains migration-only and must be deleted field by field."
       - step_id: mtc-04
         from_node: MetaReq04RuntimeControlBound
         to_node: MetaReq05ProviderObservationProjected

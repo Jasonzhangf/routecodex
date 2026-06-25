@@ -252,7 +252,8 @@
     "verify:function-map-test-coverage-integrity": "node scripts/architecture/verify-function-map-test-coverage-integrity.mjs",
     "verify:architecture-topology-type-consistency": "node scripts/architecture/verify-architecture-topology-type-consistency.mjs",
     "render:architecture-mainline-chain-manifests": "node scripts/architecture/generate-mainline-chain-manifests.mjs",
-    "verify:request-executor-routepool-contract": "node scripts/architecture/verify-request-executor-routepool-contract.mjs"
+    "verify:request-executor-routepool-contract": "node scripts/architecture/verify-request-executor-routepool-contract.mjs",
+    "verify:metadata-center-dualwrite-api": "node scripts/architecture/verify-metadata-center-dualwrite-api.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

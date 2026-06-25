@@ -78,3 +78,4 @@ verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-mainline-manifest-sync
+    - npm run verify:metadata-center-dualwrite-api

@@ -5,6 +5,7 @@ import type {
   MetadataCenterFamily,
   MetadataCenterProviderObservation,
   MetadataCenterRequestTruth,
+  MetadataCenterStopMessageCompareContext,
   MetadataCenterRuntimeControl,
   MetadataCenterSlot,
   MetadataCenterState,
@@ -15,6 +16,8 @@ import type {
 
 // feature_id: hub.metadata_center_mainline
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+const METADATA_CENTER_SESSION_BUFFER_SYMBOL = Symbol.for('routecodex.metadataCenter.sessionBuffer');
+const METADATA_CENTER_SESSION_BUFFER_LIMIT = 10;
 
 function now(): number {
   return Date.now();
@@ -252,18 +255,16 @@ export class MetadataCenter {
       routeName: this.state.runtimeControl.routeName?.value as string | undefined,
       routeId: this.state.runtimeControl.routeId?.value as string | undefined,
       providerProtocol: this.state.runtimeControl.providerProtocol?.value as string | undefined,
-      providerFamily: this.state.runtimeControl.providerFamily?.value as string | undefined,
       retryProviderKey: this.state.runtimeControl.retryProviderKey?.value as string | undefined,
       preselectedRoute: this.state.runtimeControl.preselectedRoute?.value as Record<string, unknown> | undefined,
       serverToolFollowup: this.state.runtimeControl.serverToolFollowup?.value as boolean | undefined,
       serverToolFollowupSource: this.state.runtimeControl.serverToolFollowupSource?.value as string | undefined,
-      serverToolFollowupMode: this.state.runtimeControl.serverToolFollowupMode?.value as string | undefined,
-      servertoolResponseOrchestration: this.state.runtimeControl.servertoolResponseOrchestration?.value as boolean | undefined,
       stoplessGoalStatus: this.state.runtimeControl.stoplessGoalStatus?.value as string | undefined,
       stoplessGoal: this.state.runtimeControl.stoplessGoal?.value as MetadataCenterRuntimeControl['stoplessGoal'] | undefined,
       stopless: this.state.runtimeControl.stopless?.value as MetadataCenterRuntimeControl['stopless'] | undefined,
       stopMessageState: this.state.runtimeControl.stopMessageState?.value as MetadataCenterRuntimeControl['stopMessageState'] | undefined,
       serverToolLoopState: this.state.runtimeControl.serverToolLoopState?.value as MetadataCenterRuntimeControl['serverToolLoopState'] | undefined,
+      stopMessageCompareContext: this.state.runtimeControl.stopMessageCompareContext?.value as MetadataCenterStopMessageCompareContext | undefined,
       stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,
       stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value as boolean | undefined,
       stopMessageClientInject: this.state.runtimeControl.stopMessageClientInject?.value as MetadataCenterRuntimeControl['stopMessageClientInject'] | undefined,
@@ -444,10 +445,68 @@ export class MetadataCenter {
 
 export const METADATA_CENTER_RUNTIME_SYMBOL = METADATA_CENTER_SYMBOL;
 
+export type MetadataCenterReleasedSnapshot = {
+  requestId?: string;
+  sessionId?: string;
+  releasedAt: number;
+  reason?: string;
+  state: MetadataCenterState;
+};
+
+type MetadataCenterSessionBuffer = Map<string, MetadataCenterReleasedSnapshot[]>;
+
+function getSessionBuffer(): MetadataCenterSessionBuffer {
+  const globalRecord = globalThis as Record<symbol, unknown>;
+  const existing = globalRecord[METADATA_CENTER_SESSION_BUFFER_SYMBOL];
+  if (existing instanceof Map) {
+    return existing as MetadataCenterSessionBuffer;
+  }
+  const created: MetadataCenterSessionBuffer = new Map();
+  globalRecord[METADATA_CENTER_SESSION_BUFFER_SYMBOL] = created;
+  return created;
+}
+
+function cloneMetadataCenterState(state: MetadataCenterState): MetadataCenterState {
+  return structuredClone(state) as MetadataCenterState;
+}
+
+function rememberReleasedMetadataCenter(center: MetadataCenter, reason?: string): void {
+  const requestTruth = center.readRequestTruth();
+  const sessionId = requestTruth.sessionId?.trim();
+  if (!sessionId) {
+    return;
+  }
+  const buffer = getSessionBuffer();
+  const entries = buffer.get(sessionId) ?? [];
+  entries.push({
+    ...(requestTruth.requestId ? { requestId: requestTruth.requestId } : {}),
+    sessionId,
+    releasedAt: now(),
+    ...(reason ? { reason } : {}),
+    state: cloneMetadataCenterState(center.snapshot()),
+  });
+  if (entries.length > METADATA_CENTER_SESSION_BUFFER_LIMIT) {
+    entries.splice(0, entries.length - METADATA_CENTER_SESSION_BUFFER_LIMIT);
+  }
+  buffer.set(sessionId, entries);
+}
+
+export function readReleasedMetadataCenterSessionBuffer(sessionId: string): MetadataCenterReleasedSnapshot[] {
+  const trimmed = sessionId.trim();
+  if (!trimmed) {
+    return [];
+  }
+  return (getSessionBuffer().get(trimmed) ?? []).map((entry) => structuredClone(entry) as MetadataCenterReleasedSnapshot);
+}
+
 export function releaseMetadataCenterForHttpResponse(metadata: unknown, reason?: string): void {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return;
   }
-  MetadataCenter.read(metadata as Record<string, unknown>)
-    ?.markReleased(HTTP_RESPONSE_METADATA_RELEASE_WRITER, reason);
+  const center = MetadataCenter.read(metadata as Record<string, unknown>);
+  if (!center) {
+    return;
+  }
+  center.markReleased(HTTP_RESPONSE_METADATA_RELEASE_WRITER, reason);
+  rememberReleasedMetadataCenter(center, reason);
 }

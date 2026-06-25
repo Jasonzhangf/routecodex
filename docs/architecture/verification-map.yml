@@ -925,6 +925,31 @@ verification:
       - "Retired stop-message state codec native export/module must stay deleted; no zero-consumer standalone state codec control surface outside current servertool-core state contracts."
       - "Retired shared-conversion thought-signature and normalizeTools public wrappers must stay deleted; `thought_signature_validator.rs` must stay absent, `normalizeArgsBySchemaJson` remains the only shared args-mapping public bridge."
 
+  - feature_id: hub.metadata_center_dualwrite_api
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/metadata-center/metadata-center.ts
+      - src/server/runtime/http-server/metadata-center/request-truth-readers.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/metadata_center
+    contract:
+      - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
+      - tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
+    integration:
+      - tests/servertool/stopless-cli-continuation.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-metadata-center-manifest-code-sync
+      - npm run verify:metadata-center-dualwrite-api
+    build:
+      - npm run build:base
+    notes:
+      - "Execution checklist: docs/goals/metadata-center-dualwrite-dualread-closeout-checklist.md."
+      - "Gate must fail on direct business writes to `runtime_control`, `__rt`, top-level control projections, or stopless/servertool control fields outside the unified API."
+      - "Rust reader tests must prove typed center is preferred over payload residue before each residue allowlist entry is removed."
+
   - feature_id: hub.metadata_center_request_capture
     change_risk: high
     unit:

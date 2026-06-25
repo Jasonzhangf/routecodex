@@ -91,6 +91,28 @@ export type MetadataCenterServerToolLoopState = {
   schemaFeedback?: Record<string, unknown>;
 };
 
+export type MetadataCenterStopMessageCompareContext = {
+  armed?: boolean;
+  mode?: 'off' | 'on' | 'auto' | string;
+  allowModeOnly?: boolean;
+  textLength?: number;
+  maxRepeats?: number;
+  used?: number;
+  remaining?: number;
+  active?: boolean;
+  stopEligible?: boolean;
+  hasCapturedRequest?: boolean;
+  compactionRequest?: boolean;
+  hasSeed?: boolean;
+  decision?: 'trigger' | 'skip' | string;
+  reason?: string;
+  stage?: string;
+  bdWorkState?: string;
+  observationHash?: string;
+  observationStableCount?: number;
+  toolSignatureHash?: string;
+};
+
 export type MetadataCenterStopMessageClientInject = {
   ready?: boolean;
   reason?: string;
@@ -111,18 +133,16 @@ export type MetadataCenterRuntimeControl = {
   routeName?: string;
   routeId?: string;
   providerProtocol?: string;
-  providerFamily?: string;
   retryProviderKey?: string;
   preselectedRoute?: Record<string, unknown>;
   serverToolFollowup?: boolean;
   serverToolFollowupSource?: string;
-  serverToolFollowupMode?: string;
-  servertoolResponseOrchestration?: boolean;
   stoplessGoalStatus?: string;
   stoplessGoal?: MetadataCenterStoplessGoalRuntime;
   stopless?: MetadataCenterStoplessRuntimeControl;
   stopMessageState?: MetadataCenterStopMessageState;
   serverToolLoopState?: MetadataCenterServerToolLoopState;
+  stopMessageCompareContext?: MetadataCenterStopMessageCompareContext;
   stopMessageEnabled?: boolean;
   stopMessageExcludeDirect?: boolean;
   stopMessageClientInject?: MetadataCenterStopMessageClientInject;
