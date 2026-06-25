@@ -1,5 +1,4 @@
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
-const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
 
 type RuntimeControlWriter = {
   module: string;
@@ -35,33 +34,14 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function readRustSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
-  return structuredClone(asRecord(Reflect.get(metadata, RUST_SNAPSHOT_SYMBOL)) ?? {});
-}
-
-function writeRustRuntimeControlMirror(args: {
-  metadata: Record<string, unknown>;
-  key: string;
-  value: unknown;
-  reason?: string;
-}): void {
-  const snapshot = readRustSnapshot(args.metadata);
-  const runtimeControl = asRecord(snapshot.runtimeControl) ?? {};
-  runtimeControl[args.key] = structuredClone(args.value);
-  snapshot.runtimeControl = runtimeControl;
-  Reflect.set(args.metadata, RUST_SNAPSHOT_SYMBOL, snapshot);
-}
-
 function writeBoundRuntimeControl(args: {
   center: MetadataCenterLike;
-  metadata: Record<string, unknown>;
   key: string;
   value: unknown;
   writer: RuntimeControlWriter;
   reason?: string;
 }): void {
   args.center.writeRuntimeControl?.(args.key, args.value, args.writer, args.reason);
-  writeRustRuntimeControlMirror(args);
 }
 
 export function writeStoplessRuntimeControlToBoundMetadataCenter(args: {
@@ -71,7 +51,14 @@ export function writeStoplessRuntimeControlToBoundMetadataCenter(args: {
   reason?: string;
   required?: boolean;
 }): void {
-  const center = Reflect.get(args.metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  const directCenter = Reflect.get(args.metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  const nestedMetadata = asRecord(args.metadata.metadata);
+  const nestedCenter = nestedMetadata
+    ? (Reflect.get(nestedMetadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined)
+    : undefined;
+  const center = directCenter && typeof directCenter.writeRuntimeControl === 'function'
+    ? directCenter
+    : nestedCenter;
   if (!center || typeof center.writeRuntimeControl !== 'function') {
     if (args.required) {
       throw new Error('MetadataCenter runtime_control.stopless writer requires a bound MetadataCenter');
@@ -80,7 +67,6 @@ export function writeStoplessRuntimeControlToBoundMetadataCenter(args: {
   }
   writeBoundRuntimeControl({
     center,
-    metadata: args.metadata,
     key: 'stopless',
     value: args.value,
     writer: args.writer,
@@ -96,7 +82,14 @@ export function writeRuntimeControlToBoundMetadataCenter(args: {
   reason?: string;
   required?: boolean;
 }): void {
-  const center = Reflect.get(args.metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  const directCenter = Reflect.get(args.metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  const nestedMetadata = asRecord(args.metadata.metadata);
+  const nestedCenter = nestedMetadata
+    ? (Reflect.get(nestedMetadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined)
+    : undefined;
+  const center = directCenter && typeof directCenter.writeRuntimeControl === 'function'
+    ? directCenter
+    : nestedCenter;
   if (!center || typeof center.writeRuntimeControl !== 'function') {
     if (args.required) {
       throw new Error(`MetadataCenter runtime_control.${args.key} writer requires a bound MetadataCenter`);
@@ -105,7 +98,6 @@ export function writeRuntimeControlToBoundMetadataCenter(args: {
   }
   writeBoundRuntimeControl({
     center,
-    metadata: args.metadata,
     key: args.key,
     value: args.value,
     writer: args.writer,
@@ -142,4 +134,26 @@ export function readRequestTruthSessionIdFromBoundMetadataCenter(
   const requestTruth = center.readRequestTruth();
   const sessionId = requestTruth?.sessionId;
   return typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : undefined;
+}
+
+export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): string | undefined {
+  const direct = readRequestTruthSessionIdFromBoundMetadataCenter(target);
+  if (direct) {
+    return direct;
+  }
+  const metadata = asRecord(target?.metadata);
+  return readRequestTruthSessionIdFromBoundMetadataCenter(metadata);
+}
+
+export function readRuntimeControlFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const direct = readRuntimeControlFromBoundMetadataCenter(target);
+  if (direct) {
+    return direct;
+  }
+  const metadata = asRecord(target?.metadata);
+  return readRuntimeControlFromBoundMetadataCenter(metadata);
 }

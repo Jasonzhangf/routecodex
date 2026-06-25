@@ -331,11 +331,11 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       reasoningText: '来自 chat 的 stop 文本',
-      repeatCount: 2,
-      maxRepeats: 3,
-      triggerHint: 'loop-hint',
+      repeatCount: 4,
+      maxRepeats: 6,
+      triggerHint: 'context-hint',
       schemaFeedback: {
-        reason_code: 'loop_feedback'
+        reason_code: 'context_feedback'
       }
     });
   });
@@ -583,7 +583,7 @@ describe('servertool CLI native bridge', () => {
         responseHookRequired: true
       })
     ).toEqual({
-      action: 'return_required_response_hook_empty'
+      action: 'return_passthrough_no_auto_hook_result'
     });
   });
 

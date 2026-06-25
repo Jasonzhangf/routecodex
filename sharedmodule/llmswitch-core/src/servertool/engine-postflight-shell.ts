@@ -4,70 +4,58 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineResult
 } from './types.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
-import { buildServertoolCliProjectionForAutoFlow as buildServertoolCliProjectionForAutoFlowShell } from './cli-projection.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
-import { readRuntimeControlFromBoundMetadataCenter } from './stopless-metadata-carrier.js';
-import {
-  extractCurrentAssistantStopTextWithNative,
-  planStoplessCliProjectionContextWithNative,
-  resolveRuntimeStopMessageStateFromAdapterContextWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
+import { planStoplessCliProjectionContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
-type StoplessProjectionContext = {
+type EnginePostflightAction = {
+  action: string;
+};
+
+function resolveStoplessCliProjectionContext(args: {
+  engineResult: ServerSideToolEngineResult;
+  adapterContext: AdapterContext;
+}): {
   reasoningText: string;
   repeatCount: number;
   maxRepeats: number;
   triggerHint?: string;
   schemaFeedback?: JsonObject;
-};
-
-export function resolveStoplessCliProjectionContext(
-  execution: ServerSideToolEngineResult['execution'],
-  adapterContext?: unknown,
-  chatResponse?: JsonObject
-): StoplessProjectionContext {
-  const context =
-    execution?.context && typeof execution.context === 'object' && !Array.isArray(execution.context)
-      ? (execution.context as Record<string, unknown>)
-      : {};
-  const adapterRecord =
-    adapterContext && typeof adapterContext === 'object' && !Array.isArray(adapterContext)
-      ? (adapterContext as Record<string, unknown>)
+  sessionId?: string;
+  requestId?: string;
+} {
+  const executionContext =
+    args.engineResult.execution?.context && typeof args.engineResult.execution.context === 'object' && !Array.isArray(args.engineResult.execution.context)
+      ? args.engineResult.execution.context as Record<string, unknown>
       : undefined;
-  const metadata =
-    adapterRecord?.metadata &&
-    typeof adapterRecord.metadata === 'object' &&
-    !Array.isArray(adapterRecord.metadata)
-      ? (adapterRecord.metadata as Record<string, unknown>)
-      : undefined;
-  const runtimeMetadata = adapterRecord ? readRuntimeMetadata(adapterRecord) : undefined;
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(metadata);
   const stoplessControl =
-    runtimeControl?.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)
-      ? (runtimeControl.stopless as Record<string, unknown>)
-      : {};
-  const runtimeSnapshot = resolveRuntimeStopMessageStateFromAdapterContextWithNative({
-    adapterContext: adapterRecord ?? null,
-    ...(runtimeMetadata ? { runtimeMetadata } : {})
-  });
+    executionContext?.stopless && typeof executionContext.stopless === 'object' && !Array.isArray(executionContext.stopless)
+      ? executionContext.stopless
+      : undefined;
+  const runtimeSnapshot = stoplessControl && typeof stoplessControl.repeatCount === 'number' && typeof stoplessControl.maxRepeats === 'number'
+    ? {
+        used: stoplessControl.repeatCount,
+        maxRepeats: stoplessControl.maxRepeats
+      }
+    : undefined;
+  const chatStopText =
+    typeof executionContext?.assistantStopText === 'string' && executionContext.assistantStopText.trim()
+      ? executionContext.assistantStopText.trim()
+      : undefined;
   return planStoplessCliProjectionContextWithNative({
-    executionContext: context,
+    executionContext,
     stoplessControl,
-    runtimeSnapshot: runtimeSnapshot
-      ? {
-          used: runtimeSnapshot.used,
-          maxRepeats: runtimeSnapshot.maxRepeats
-        }
+    runtimeSnapshot,
+    chatStopText,
+    adapterStopText: chatStopText,
+    sessionId: typeof (args.adapterContext as Record<string, unknown>).sessionId === 'string'
+      ? String((args.adapterContext as Record<string, unknown>).sessionId)
       : undefined,
-    chatStopText: extractCurrentAssistantStopTextWithNative(chatResponse ?? null),
-    adapterStopText: extractCurrentAssistantStopTextWithNative(adapterRecord ?? null)
+    requestId: typeof (args.adapterContext as Record<string, unknown>).requestId === 'string'
+      ? String((args.adapterContext as Record<string, unknown>).requestId)
+      : undefined
   });
 }
-
-type EnginePostflightAction = {
-  action: string;
-};
 
 export async function runServertoolEnginePostflight(args: {
   options: {
@@ -78,12 +66,7 @@ export async function runServertoolEnginePostflight(args: {
   runtimeAction: EnginePostflightAction;
   flowId: string;
   totalSteps: number;
-  stoplessPlan: {
-    reason: string;
-    isStopMessageFlow: boolean;
-  };
   stageRecorder?: StageRecorder;
-  resolveStoplessCliProjectionContext: () => StoplessProjectionContext;
   logProgress: (step: number, total: number, status: string, details?: Record<string, unknown>) => void;
   logNonBlocking: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 }): Promise<
@@ -94,7 +77,7 @@ export async function runServertoolEnginePostflight(args: {
     }
   | undefined
 > {
-  const { engineResult, runtimeAction, options, flowId, totalSteps, stoplessPlan } = args;
+  const { engineResult, runtimeAction, options, flowId, totalSteps } = args;
 
   if (args.stageRecorder) {
     try {
@@ -192,10 +175,7 @@ export async function runServertoolEnginePostflight(args: {
   }
 
   if (runtimeAction.action === 'return_stop_message_terminal_final') {
-    args.logProgress(5, totalSteps, 'completed (stop_message_auto final terminal result)', {
-      flowId,
-      reason: args.stoplessPlan.reason
-    });
+    args.logProgress(5, totalSteps, 'completed (stop_message terminal)', { flowId });
     return {
       chat: engineResult.finalChatResponse,
       executed: true,
@@ -204,11 +184,18 @@ export async function runServertoolEnginePostflight(args: {
   }
 
   if (runtimeAction.action === 'build_stop_message_cli_projection') {
-    const projectionContext = args.resolveStoplessCliProjectionContext();
-    const projection = buildServertoolCliProjectionForAutoFlowShell({
-      options,
+    const projectionContext = resolveStoplessCliProjectionContext({
+      engineResult,
+      adapterContext: options.adapterContext
+    });
+    const projection = buildServertoolCliProjectionForAutoFlow({
+      options: {
+        requestId: options.requestId,
+        adapterContext: options.adapterContext
+      },
       flowId,
       reasoningText: projectionContext.reasoningText,
+      ...(projectionContext.sessionId ? { sessionId: projectionContext.sessionId } : {}),
       input: {
         flowId,
         repeatCount: projectionContext.repeatCount,
@@ -217,19 +204,16 @@ export async function runServertoolEnginePostflight(args: {
         ...(projectionContext.schemaFeedback ? { schemaFeedback: projectionContext.schemaFeedback } : {})
       }
     });
-    args.logProgress(5, totalSteps, 'completed (stop_message_auto cli projection)', {
-      flowId,
-      reason: args.stoplessPlan.reason
-    });
+    args.logProgress(5, totalSteps, 'completed (stop_message cli projection; no reenter)', { flowId });
     return {
       chat: projection.chatResponse,
       executed: true,
-      flowId: engineResult.execution?.flowId
+      flowId
     };
   }
 
-  throw Object.assign(new Error(`[servertool] retired followup/reenter mainline reached for flow ${flowId}`), {
-    code: 'SERVERTOOL_REENTER_RETIRED',
+  throw Object.assign(new Error(`[servertool] unexpected runtime action for flow ${flowId}`), {
+    code: 'SERVERTOOL_RUNTIME_ACTION_INVALID',
     details: {
       requestId: options.requestId,
       flowId,

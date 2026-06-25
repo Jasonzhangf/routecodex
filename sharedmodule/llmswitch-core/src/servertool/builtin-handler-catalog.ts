@@ -2,6 +2,7 @@ import type { ServerToolHandler } from './types.js';
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
 import { getServertoolToolSpec } from './skeleton-config.js';
+import { stopMessageAutoServerToolHandler } from './handlers/stop-message-auto.js';
 
 function readSkeletonOwnedRegistration(name: string): ServerToolHandlerRegistrationSpec | null {
   const spec = getServertoolToolSpec(name);
@@ -27,10 +28,7 @@ function readSkeletonOwnedRegistration(name: string): ServerToolHandlerRegistrat
 }
 
 const BUILTIN_TOOL_HANDLERS: Record<string, ServerToolHandler> = {
-  stop_message_auto: async (ctx) => {
-    const mod = await import('./handlers/stop-message-auto.js');
-    return await mod.stopMessageAutoServerToolHandler(ctx);
-  }
+  stop_message_auto: stopMessageAutoServerToolHandler,
 };
 
 export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | undefined {

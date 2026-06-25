@@ -1,3 +1,40 @@
+# 2026-06-25 stopless runtime recovery slice verified
+
+- 本轮先按 `function map + mainline call map + servertool lifecycle routing` 重新核对，确认当前仓库真相仍是：
+  - `hub.servertool_stopless_cli_continuation` 在文档和 gate 里仍被视为 active feature；
+  - 这与 Jason 当前“继续删 stopmessage family 残留”的最终目标不一致，但在彻底删 owner 前，必须先修回正在运行的 stopless 主线，否则无从做后续收口验证。
+- 已修回的运行主线：
+  - `sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts`
+    - `stop_message_auto` 重新绑定到实际 handler owner，不再空注册。
+  - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+    - stopless runtime action 重新走 native orchestration plan；
+    - 从 MetadataCenter 读取 stopless/runtime session truth，不再靠本地散拼旧路径。
+  - `sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts`
+    - stopless CLI projection context 改回由 native contract 统一规划；
+    - CLI projection 继续走 `buildServertoolCliProjectionForAutoFlow(...)`，不走 SSE/transport owner。
+  - `sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts`
+    - 修复 nested metadata bag 绑定，允许 root 和 `metadata.metadataCenter` 两种绑定点读写同一个 MetadataCenter；
+    - 删掉本地 rust snapshot mirror 写法，避免再长第二真源。
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+    - `planStoplessOrchestrationActionWithNative(...)` 兼容 native 直接返回 object，不再强依赖 string JSON。
+- focused 失败根因与修正：
+  - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+    - 旧预期把 stopless CLI projection context 仍当成“loop state triggerHint/schemaFeedback 优先、runtime snapshot 覆盖 repeat/max”的旧语义；
+    - 当前 Rust 真相是：
+      1. `repeatCount/maxRepeats` 优先取当前 execution loop state；
+      2. `triggerHint/schemaFeedback` 优先取 execution context 的 stop schema feedback；
+      3. runtime snapshot 只在当前上下文缺失时兜作当前轮恢复输入。
+    - 旧预期也把 response-stage runtime action 仍当成存在 `return_required_response_hook_empty`；当前 Rust contract 已物理删除该分支，只保留 `bypass/run/result/no-result-passthrough` 四态，因此测试已对齐新真相。
+- 本轮验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/servertool/engine.stopless-session-thin-shell.spec.ts` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/servertool/servertool-cli-native-bridge.spec.ts` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH ./node_modules/.bin/tsc -p tsconfig.json --noEmit && echo TSC_OK` => `TSC_OK`
+- 当前剩余事实：
+  - 这轮只是把 stopless 当前活主线修回并重新锁到 Rust/native contract；
+  - `metadata-center-types.ts` / `request-truth-readers.ts` / request-stage pipeline 里仍有 `stopless/stopMessage*` 字段残留；
+  - 后续若继续按 Jason 目标收口，下一层应继续删 metadata center / request-stage 的 stopmessage family 暴露面，并同步 function-map / verification-map / wiki / gate。
+
 # 2026-06-25 stopmessage/stopless/reasoningStop family removal slice 1
 
 - Jason 最新目标再次确认：

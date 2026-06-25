@@ -1558,11 +1558,8 @@ export function planStoplessOrchestrationActionWithNative(
   if (!fn) {
     throw new Error('planStoplessOrchestrationActionJson native unavailable');
   }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStoplessOrchestrationActionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
+  const raw = fn(JSON.stringify(input));
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) as unknown : raw;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('planStoplessOrchestrationActionJson native returned invalid plan');
   }

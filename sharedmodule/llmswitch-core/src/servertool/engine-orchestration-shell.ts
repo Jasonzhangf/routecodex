@@ -14,8 +14,7 @@ import {
   runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
 import {
-  runServertoolEnginePostflight,
-  resolveStoplessCliProjectionContext
+  runServertoolEnginePostflight
 } from './engine-postflight-shell.js';
 import {
   createServertoolObservation,
@@ -25,10 +24,13 @@ import {
 import {
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineSkipWithNative,
-  planStoplessOrchestrationActionWithNative as planStoplessOrchestrationActionShell,
+  planStoplessOrchestrationActionWithNative,
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { runEnginePreflight } from './engine-preflight-shell.js';
-import { readRequestTruthSessionIdFromBoundMetadataCenter } from './stopless-metadata-carrier.js';
+import {
+  readRuntimeControlFromBoundMetadataCenter,
+  readRequestTruthSessionIdFromAnyBoundMetadataCenter
+} from './stopless-metadata-carrier.js';
 
 export interface ServerToolOrchestrationOptions {
   chat: JsonObject;
@@ -159,35 +161,57 @@ export async function runServerToolOrchestrationShell(
     execution: engineResult.execution
   });
   const totalSteps = 5;
-  const requestTruthSessionId = readRequestTruthSessionIdFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
-  const stoplessPlan = planStoplessOrchestrationActionShell({
-    flowId,
-    execution: {
-      ...engineResult.execution,
-      context: {
-        ...(engineResult.execution?.context && typeof engineResult.execution.context === 'object' && !Array.isArray(engineResult.execution.context)
-          ? (engineResult.execution.context as Record<string, unknown>)
-          : {}),
-        requestTruth: {
-          ...(requestTruthSessionId ? { sessionId: requestTruthSessionId } : {})
-        }
-      }
+  const executionContext =
+    engineResult.execution?.context && typeof engineResult.execution.context === 'object' && !Array.isArray(engineResult.execution.context)
+      ? engineResult.execution.context as Record<string, unknown>
+      : undefined;
+  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
+  const stoplessControl =
+    runtimeControl?.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)
+      ? runtimeControl.stopless
+      : undefined;
+  const requestTruthSessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(
+    options.adapterContext as Record<string, unknown>
+  );
+  const stoplessExecution = {
+    ...(engineResult.execution && typeof engineResult.execution === 'object' ? engineResult.execution : {}),
+    ...(flowId ? { flowId } : {}),
+    context: {
+      ...(executionContext ?? {}),
+      ...(requestTruthSessionId ? { sessionId: requestTruthSessionId } : {}),
+      ...(requestTruthSessionId ? { requestTruth: { sessionId: requestTruthSessionId } } : {}),
+      ...(stoplessControl
+        ? {
+            serverToolLoopState: {
+              flowId,
+              ...(typeof stoplessControl.repeatCount === 'number' ? { repeatCount: stoplessControl.repeatCount } : {}),
+              ...(typeof stoplessControl.maxRepeats === 'number' ? { maxRepeats: stoplessControl.maxRepeats } : {}),
+              ...(typeof stoplessControl.triggerHint === 'string' ? { triggerHint: stoplessControl.triggerHint } : {}),
+              ...(stoplessControl.schemaFeedback && typeof stoplessControl.schemaFeedback === 'object'
+                ? { schemaFeedback: stoplessControl.schemaFeedback }
+                : {}),
+            }
+          }
+        : {})
     }
-  });
+  };
+  const stoplessPlan = flowId === 'stop_message_flow'
+    ? planStoplessOrchestrationActionWithNative({
+        flowId,
+        execution: stoplessExecution
+      })
+    : {
+        action: 'cli_projection',
+        isStopMessageFlow: false
+      };
   const runtimeAction = planServertoolEngineRuntimeActionWithNative({
     hasPendingInjection: Boolean(engineResult.pendingInjection),
-    isStopMessageFlow: stoplessPlan.isStopMessageFlow,
-    executionContext: engineResult.execution.context,
-    hasServertoolCliProjectionContext: Boolean(
-      engineResult.execution?.context
-      && typeof engineResult.execution.context === 'object'
-      && !Array.isArray(engineResult.execution.context)
-      && (engineResult.execution.context as Record<string, unknown>).servertoolCliProjection
-    ),
+    isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
+    executionContext,
     stoplessAction: stoplessPlan.action
   });
   if (stopSignal.observed) {
-    logStopEntry('trigger', stoplessPlan.isStopMessageFlow ? 'activated' : 'non_stop_flow', {
+    logStopEntry('trigger', 'non_stop_flow', {
       flowId,
       reason: stopSignal.reason,
       source: stopSignal.source,
@@ -205,15 +229,7 @@ export async function runServerToolOrchestrationShell(
     runtimeAction,
     flowId,
     totalSteps,
-    stoplessPlan,
     stageRecorder: options.stageRecorder,
-    resolveStoplessCliProjectionContext: () =>
-      resolveStoplessCliProjectionContext(
-        engineResult.execution,
-        options.adapterContext,
-        engineResult.finalChatResponse,
-        options.requestId
-      ),
     logProgress,
     logNonBlocking
   });
