@@ -1,3 +1,56 @@
+# 2026-06-25 responses continuation save owner收口：删 handler/SSE 旧保存链
+
+- Jason 本轮 goal 真源再次确认：
+  - request side：`Inbound -> /v1/responses continuation restore -> hook restore / CLI->builtin normalization -> ReqChatProcess -> Outbound`
+  - response side：`RespInbound -> RespChatProcess response governance -> stop/reasoningStop normalization -> continuation save -> RespOutbound -> ClientFrame`
+  - SSE 必须 transport-only
+  - continuation 只对 `/v1/responses` 生效，stopless 不得接管 continuation owner
+- 本轮重新按 contract 文档 + 主线实现审计后的关键发现：
+  1. request side Rust owner 方向基本正确：
+     - `req_process_stage1_tool_governance_blocks/orchestrator.rs`
+     - `request_result.rs`
+     - stopless contract 注入仍属于 ReqChatProcess owner
+  2. response side 当前实际存在“双 owner 并存”：
+     - 正向 owner：
+       - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
+       - `executeProviderResponseNativeRuntimeStateEffect(...)`
+       - `persistResponsesConversationLifecycleAtChatProcessExitWithinCore(...)`
+       - 这条链已在 core/chat-process closeout 做 `/v1/responses` continuation save
+     - 旧链：
+       - `src/server/handlers/handler-response-utils.ts`
+       - `src/modules/llmswitch/bridge/responses-response-bridge.ts::attachResponsesConversationLifecycleStreamForHttp(...)`
+       - 仍试图在 handler/SSE stream closeout 里做 continuation lifecycle persist
+  3. 这与 goal 的“response normalize -> continuation save 都属于 chat-process owner；SSE only transport”冲突。
+- 本轮实际删除：
+  - `src/server/handlers/handler-response-utils.ts`
+    - 物理移除 `attachResponsesConversationLifecycleStreamForHttp(...)` 包装
+    - relay `/v1/responses` SSE 现在只保留：
+      1. `attachResponsesStreamSemanticsForHttp(...)`
+      2. transport dispatch
+    - handler/SSE 不再承担 continuation save
+- 同轮发现并收紧的测试 contract：
+  - `tests/server/handlers/handler-response-sse-write-after-end.regression.spec.ts`
+    - 旧断言要求 SSE 在缺失终止帧时补 `response.completed` / `response.done`
+    - 这属于 transport 层语义修补，违背本轮 goal 的 `SSE transport-only`
+    - 已改为新 contract：
+      - SSE 透传已有 frame
+      - 不 fabricated 缺失 terminal frame
+- focused 验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/server/handlers/handler-response-utils.responses-conversation.spec.ts` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/server/handlers/handler-response-sse-write-after-end.regression.spec.ts` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/servertool/stopless-cli-continuation.spec.ts` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/verify-servertool-rust-only.mjs` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:architecture-mainline-call-map` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run verify:function-map-compile-gate` PASS
+- 当前结论：
+  - `/v1/responses` continuation save 的唯一 runtime 主线已可收束到 chat-process/core closeout；
+  - handler/SSE 旧保存链至少在 `handler-response-utils.ts` 入口层可以删且不破 focused runtime 行为；
+  - 仍未完成的下一层是：
+    1. 继续物理删除 `responses-response-bridge.ts` 里残留的 stream lifecycle persist owner；
+    2. 同步清理仍要求 SSE/handler 补 terminal semantic 的 wiki / tests / docs；
+    3. request side 再补“restore before normalize”更直接的白盒/黑盒证据，避免只靠 stopless continuation 间接证明。
+
 # 2026-06-25 stopless runtime recovery slice verified
 
 - 本轮先按 `function map + mainline call map + servertool lifecycle routing` 重新核对，确认当前仓库真相仍是：

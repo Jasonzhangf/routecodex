@@ -23,7 +23,6 @@ import { registerRequestLogContext } from '../utils/request-log-color.js';
 import { attachResponsesStreamSemanticsForHttp } from '../../modules/llmswitch/bridge/responses-stream-semantics.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
-  attachResponsesConversationLifecycleStreamForHttp,
   buildResponsesRequestLogContextForHttp,
   clearResponsesConversationRequestIdsForHttp,
   importResponsesHandlerCoreDist,
@@ -31,7 +30,6 @@ import {
   prepareResponsesJsonBodyForSseBridgeForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
   prepareResponsesJsonSseDispatchPlanForHttp,
-  persistResponsesConversationLifecycleForHttp,
   resolveResponsesClientPayloadFinishReasonForHttp,
   resolveResponsesConversationClearReasonForHttp,
   resolveResponsesRequestContextForHttp,
@@ -190,26 +188,6 @@ export async function sendPipelineResponse(
       metadata: resultMetadata,
       resolveBridge: importResponsesHandlerCoreDist,
     });
-    await persistResponsesConversationLifecycleForHttp({
-      entryEndpoint,
-      requestLabel,
-      usageLogInfo: result.usageLogInfo,
-      metadata: resultMetadata,
-      requestContext: effectiveResponsesRequestContext,
-      body: forceSseJsonDispatchPlan.sanitizedBody,
-      onTrace: (stage, details) => {
-        if ((process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() !== '1') {
-          return;
-        }
-        try {
-          const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
-          console.warn(`[responses-continuation] json.force_sse.persist.${stage} request=${requestLabel}${suffix}`);
-        } catch {
-          console.warn(`[responses-continuation] json.force_sse.persist.${stage} request=${requestLabel}`);
-        }
-      },
-      onNonBlockingError: logResponseNonBlockingError,
-    });
   }
 
   const responseForDispatch =
@@ -229,26 +207,7 @@ export async function sendPipelineResponse(
         });
         return {
           ...result,
-          sseStream: attachResponsesConversationLifecycleStreamForHttp({
-            stream: semanticsStream,
-            entryEndpoint,
-            requestLabel,
-            usageLogInfo: result.usageLogInfo,
-            metadata: resultMetadata,
-            requestContext: effectiveResponsesRequestContext,
-            onTrace: (stage, details) => {
-              if ((process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() !== '1') {
-                return;
-              }
-              try {
-                const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
-                console.warn(`[responses-continuation] outbound_stream.${stage} request=${requestLabel}${suffix}`);
-              } catch {
-                console.warn(`[responses-continuation] outbound_stream.${stage} request=${requestLabel}`);
-              }
-            },
-            onNonBlockingError: logResponseNonBlockingError,
-          }),
+          sseStream: semanticsStream,
         };
       })()
       : result;
@@ -381,26 +340,6 @@ export async function sendPipelineResponse(
   const jsonFinishReason = usageNormalized.normalized
     ? resolveResponsesClientPayloadFinishReasonForHttp(clientBody)
     : jsonDispatchPlan.finishReason;
-  await persistResponsesConversationLifecycleForHttp({
-    entryEndpoint,
-    requestLabel,
-    usageLogInfo: result.usageLogInfo,
-    metadata: resultMetadata,
-    requestContext: effectiveResponsesRequestContext,
-    body: sanitized,
-    onTrace: (stage, details) => {
-      if ((process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() !== '1') {
-        return;
-      }
-      try {
-        const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
-        console.warn(`[responses-continuation] json.persist.${stage} request=${requestLabel}${suffix}`);
-      } catch {
-        console.warn(`[responses-continuation] json.persist.${stage} request=${requestLabel}`);
-      }
-    },
-    onNonBlockingError: logResponseNonBlockingError,
-  });
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (shouldCaptureClientResponseSnapshotStage('client-response')) {
     void writeServerSnapshot({
