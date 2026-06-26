@@ -153,7 +153,7 @@ Current schema gap:
     - request-stage Hub TS shell may transport it, but must not invent or extend its meaning
   - `stopMessageEnabled` / `stopMessageExcludeDirect`
     - current write owners are request/runtime entry shells (`src/server/runtime/http-server/index.ts`) plus the narrow stopless-directive request capture in `src/server/runtime/http-server/executor-metadata.ts`
-    - top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` mirrors are stale residues and must not be treated as authoritative write points
+    - top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` mirrors are stale residues and must not be treated as compatibility projections, authoritative write points, or repair targets
   - `providerProtocol`
     - current repo still carries this mainly as protocol-shell transport on top-level metadata / normalized request, not as a completed runtime-control-first write path
     - until that migration lands, docs and gates must not overclaim `runtime_control.providerProtocol` as fully anchored owner truth

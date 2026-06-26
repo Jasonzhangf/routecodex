@@ -998,7 +998,7 @@ verification:
     notes:
       - "Request capture must keep request truth, client attachment scope, and retry-attempt carrier seeding request-local and queryable."
       - "Validation must prove relay `/v1/responses` bridge entry keeps `responsesResume` in continuation_context, binds `routeHint`, and does not claim effective `retryProviderKey` ownership at the handler shell boundary."
-      - "Validation must prove the narrow stopless-directive entry write only lands `runtime_control.stopMessageEnabled`, and any remaining top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` references are stale residue, not independent truth."
+      - "Validation must prove the narrow stopless-directive entry write only lands `runtime_control.stopMessageEnabled`, and any remaining top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` references are stale residue, not independent truth or compatibility projections."
 
   - feature_id: hub.metadata_center_attempt_merge
     change_risk: high
