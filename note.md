@@ -1,3 +1,21 @@
+# 2026-06-27 provider error truth collapse - generic HTTP 400 catalog fallback slice
+
+- 当前 `HEAD` 已在 `743ac3d refactor(policy): drop duplicate invalid400`；本线没有新的未提交 focused 改动，工作树其余脏文件属于 quota/servertool/doc 删除面，不能混提。
+- 继续沿 provider failure owner 收口 `special_400` 残留，未触碰 servertool 活逻辑。
+- 已锁定当前最小残留点：
+  - `src/providers/core/runtime/provider-error-catalog.ts`
+    - `normalizeKnownProviderError(status=400)` 仍 generic 返回 `HTTP_400/special_400`
+  - `src/providers/core/runtime/provider-failure-policy-impl.ts`
+    - policy 已提前把多类本地 contract 400 分流成 `unrecoverable`
+- 这两层真相尚未完全对齐；当前最小切片是先移除 catalog 的 generic 400 fallback，让 generic 400 只由 policy owner 判断。
+- 先红证据：
+  - `tests/providers/core/runtime/provider-auto-retry-business-error.spec.ts`
+    - 把 “does NOT mis-map a generic HTTP 400 without pool/exhaustion hints” 期望改成 `undefined`
+    - 当前 red 原因明确为 catalog fallback 仍返回 `{ key: HTTP_400, class: special_400 }`
+- 同一 spec 文件里还存在一个与本切片无关的独立旧红：
+  - `detects OpenAI-compatible SSE error payload with string type`
+  - 后续验证必须用 `--testNamePattern` 缩窄，避免把该旧红误算进本切片
+
 # 2026-06-26 servertool followup stopmessage backend retirement
 
 - Jason 已明确纠偏：`servertool followup`、`stopmessage/stopless`、`apply_patch` servertool、backend route/followup 都不再是活功能面，不能继续按 active capability 保留。

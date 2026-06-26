@@ -86,8 +86,7 @@ describe('Provider business error detection', () => {
         statusCode: 400,
         message: 'Invalid request payload: missing field "input"',
       });
-      expect(normalized?.key).toBe('HTTP_400');
-      expect(normalized?.class).toBe('special_400');
+      expect(normalized).toBeUndefined();
     });
   });
 

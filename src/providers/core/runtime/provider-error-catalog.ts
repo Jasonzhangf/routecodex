@@ -82,9 +82,9 @@ export function normalizeKnownProviderError(input: {
   // account-pool exhaustion as HTTP 400 with the message
   // "All available accounts exhausted". That is a quota-style condition, not a real
   // request validation error, so it must be normalised to the same quota class as
-  // 429 INSUFFICIENT_QUOTA. Without this, the call would fall through to
-  // HTTP_400/special_400 and the relay would surface a hard failure to the client
-  // instead of going through the recoverable/quota-cooldown path.
+  // 429 INSUFFICIENT_QUOTA. Generic HTTP 400 does not belong to this catalog truth:
+  // unknown/local contract 400s must stay undefined here and be classified by the
+  // provider failure policy owner instead of being force-collapsed into special_400.
   if (
     status === 400
     && (
@@ -104,7 +104,6 @@ export function normalizeKnownProviderError(input: {
   if (status === 429) {
     return ALIAS_INDEX.get('HTTP_429');
   }
-  if (status === 400) return { code: '400.0000', key: 'HTTP_400', class: 'special_400', aliases: ['HTTP_400'], status: 400, description: 'Special 400 class (no health mutation)' };
   if (status === 500) return ALIAS_INDEX.get('HTTP_500');
   if (status === 502) return ALIAS_INDEX.get('HTTP_502');
   if (status === 503) return ALIAS_INDEX.get('HTTP_503');
