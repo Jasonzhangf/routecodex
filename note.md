@@ -17400,3 +17400,24 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
   3. 补 focused contract test，锁住 version 不递增，证明没有发生重复写。
 - focused 验证：
   - `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts --runInBand` PASS
+
+# 2026-06-26 metadata center stop-message reader priority closeout slice 8
+
+- 本轮继续按 metadata 收口顺序前推，但只改 reader，不碰更大的 writer 链：
+  - `router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+  - `router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+  - `servertool-core/src/stopless_decision_context_signals.rs`
+- 现状核对：
+  - 这三处 reader 之前仍直接读 top-level `stopMessageEnabled` / `stopMessageExcludeDirect`；
+  - 这会把 top-level residue 继续维持成活真源，挡住后续 mirror 删除。
+- 本轮动作：
+  1. req-side stopless contract 注入判断改成：
+     `MetadataCenter.stopMessage -> metadata.runtime_control -> top-level metadata`
+  2. direct-route stop-message exclude 判定改成：
+     `metadataCenterSnapshot -> runtime_control -> top-level metadata`
+  3. stopless decision context signal 改成优先看 metadata center snapshot / runtime_control，
+     top-level 只保留 fallback。
+- focused 验证：
+  - `cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi responses_client_tools_prefer_metadata_center_stop_message_controls_for_direct_decision --lib -- --nocapture` PASS
+  - `cargo test -p servertool-core stopless_decision_context_signals --lib -- --nocapture` PASS

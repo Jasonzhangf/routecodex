@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::metadata_center::{build_metadata_center_from_snapshot, MetadataCenterReader};
+
 fn has_declared_apply_patch_tool(payload: &Value) -> bool {
     let Some(root) = payload.as_object() else {
         return false;
@@ -89,31 +91,40 @@ fn stop_message_excludes_direct(metadata: &Value) -> bool {
     let Some(root) = metadata.as_object() else {
         return false;
     };
-    let rt = root.get("__rt").and_then(Value::as_object);
-    let stop_message_enabled = root
-        .get("stopMessageEnabled")
-        .map(|value| read_boolish(Some(value)))
-        .or_else(|| {
-            rt.and_then(|record| {
-                record
-                    .get("stopMessageEnabled")
-                    .map(|value| read_boolish(Some(value)))
-            })
-        })
-        .unwrap_or(false);
+    let center = root
+        .get("metadataCenterSnapshot")
+        .map(build_metadata_center_from_snapshot);
+    let stop_message_enabled = center
+        .as_ref()
+        .and_then(MetadataCenterReader::stop_message_enabled)
+        .unwrap_or_else(|| {
+            root.get("runtime_control")
+                .and_then(Value::as_object)
+                .and_then(|runtime_control| runtime_control.get("stopMessageEnabled"))
+                .map(|value| read_boolish(Some(value)))
+                .unwrap_or_else(|| {
+                    root.get("stopMessageEnabled")
+                        .map(|value| read_boolish(Some(value)))
+                        .unwrap_or(false)
+                })
+        });
     if !stop_message_enabled {
         return false;
     }
-    root.get("stopMessageExcludeDirect")
-        .map(|value| read_boolish(Some(value)))
-        .or_else(|| {
-            rt.and_then(|record| {
-                record
-                    .get("stopMessageExcludeDirect")
-                    .map(|value| read_boolish(Some(value)))
-            })
+    center
+        .as_ref()
+        .and_then(MetadataCenterReader::stop_message_exclude_direct)
+        .unwrap_or_else(|| {
+            root.get("runtime_control")
+                .and_then(Value::as_object)
+                .and_then(|runtime_control| runtime_control.get("stopMessageExcludeDirect"))
+                .map(|value| read_boolish(Some(value)))
+                .unwrap_or_else(|| {
+                    root.get("stopMessageExcludeDirect")
+                        .map(|value| read_boolish(Some(value)))
+                        .unwrap_or(false)
+                })
         })
-        .unwrap_or(false)
 }
 
 fn read_trimmed_lower(value: Option<&Value>) -> Option<String> {
@@ -234,6 +245,45 @@ mod responses_direct_route_decision_tests {
             "client",
         )
         .expect("same-protocol client tools must stay direct when stopless is only configured");
+
+        assert_eq!(decision["providerWireValid"], true);
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
+    }
+
+    #[test]
+    fn responses_client_tools_prefer_metadata_center_stop_message_controls_for_direct_decision() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "hello" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    { "type": "function", "name": "exec_command", "parameters": { "type": "object" } }
+                ]
+            }),
+            &serde_json::json!({
+                "stopMessageEnabled": false,
+                "stopMessageExcludeDirect": false,
+                "metadataCenterSnapshot": {
+                    "runtimeControl": {
+                        "stopMessage": {
+                            "enabled": true,
+                            "excludeDirect": true
+                        }
+                    }
+                }
+            }),
+            "openai-responses",
+            "client",
+        )
+        .expect("metadata-center stop-message controls should drive direct decision first");
 
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], false);
@@ -366,6 +416,36 @@ mod responses_direct_route_decision_tests {
             "client",
         )
         .expect("stopless followup metadata direct decision should stay direct");
+
+        assert_eq!(decision["providerWireValid"], true);
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
+    }
+
+    #[test]
+    fn legacy_rt_stop_message_toggle_does_not_control_direct_decision() {
+        let decision = evaluate_responses_direct_route_decision(
+            &serde_json::json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "hello" }
+                        ]
+                    }
+                ]
+            }),
+            &serde_json::json!({
+                "__rt": {
+                    "stopMessageEnabled": true,
+                    "stopMessageExcludeDirect": true
+                }
+            }),
+            "openai-responses",
+            "client",
+        )
+        .expect("legacy rt stop-message residue must not drive same-protocol direct decision");
 
         assert_eq!(decision["providerWireValid"], true);
         assert_eq!(decision["requiresHubRelay"], false);

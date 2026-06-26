@@ -45,9 +45,20 @@ fn has_disabled_port_signal(
     runtime_metadata: Option<&Value>,
 ) -> bool {
     [
+        metadata
+            .and_then(|row| row.get("metadataCenterSnapshot"))
+            .and_then(|snapshot| snapshot.get("runtimeControl"))
+            .and_then(|runtime_control| runtime_control.get("stopMessage"))
+            .and_then(|stop_message| stop_message.get("enabled")),
+        metadata
+            .and_then(|row| row.get("runtime_control"))
+            .and_then(|runtime_control| runtime_control.get("stopMessageEnabled")),
         adapter_context.get("stopMessageEnabled"),
         metadata.and_then(|row| row.get("stopMessageEnabled")),
         runtime_metadata.and_then(|row| row.get("stopMessagePortEnabled")),
+        runtime_metadata
+            .and_then(|row| row.get("runtime_control"))
+            .and_then(|runtime_control| runtime_control.get("stopMessageEnabled")),
         runtime_metadata.and_then(|row| row.get("stopMessageEnabled")),
     ]
     .into_iter()
@@ -114,6 +125,28 @@ mod tests {
         assert!(plan.port_stop_message_disabled);
         assert!(plan.has_responses_submit_tool_outputs_resume);
         assert!(!plan.plan_mode_active);
+    }
+
+    #[test]
+    fn prefers_metadata_center_snapshot_stop_message_signal_over_flat_metadata() {
+        let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
+            adapter_context: json!({
+                "metadata": {
+                    "stopMessageEnabled": true,
+                    "metadataCenterSnapshot": {
+                        "runtimeControl": {
+                            "stopMessage": {
+                                "enabled": false
+                            }
+                        }
+                    }
+                }
+            }),
+            runtime_metadata: None,
+            captured_request: None,
+        });
+
+        assert!(plan.port_stop_message_disabled);
     }
 
     #[test]

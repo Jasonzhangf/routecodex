@@ -95,6 +95,12 @@ fn should_inject_stopless_system_instruction(
 ) -> bool {
     center.stop_message_enabled().unwrap_or(false)
         || metadata
+            .get("runtime_control")
+            .and_then(Value::as_object)
+            .and_then(|runtime_control| runtime_control.get("stopMessageEnabled"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || metadata
             .get("stopMessageEnabled")
             .and_then(Value::as_bool)
             .unwrap_or(false)
