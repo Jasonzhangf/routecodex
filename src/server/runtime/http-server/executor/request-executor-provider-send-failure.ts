@@ -369,7 +369,6 @@ export async function processProviderSendFailure(
         providerKey: args.providerKey,
         runtimeKey: args.runtimeKey,
         retryError,
-        holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
         explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
         routePoolForSameProviderRetry: undefined
       }

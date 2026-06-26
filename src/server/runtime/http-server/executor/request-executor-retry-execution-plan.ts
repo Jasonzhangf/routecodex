@@ -229,9 +229,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
-      excludedCurrentProvider: keepTerminalExclusion,
-      holdOnLastAvailable429,
-      retryBackoffMs: 0
+      excludedCurrentProvider: keepTerminalExclusion
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
@@ -250,17 +248,13 @@ export async function resolveProviderRetryExecutionPlan(args: {
       return attachErrorErr05ExhaustionGate({
         shouldRetry: false,
         blockingRecoverable: eligibilityPlan.blockingRecoverable,
-        excludedCurrentProvider: true,
-        holdOnLastAvailable429,
-        retryBackoffMs: 0
+        excludedCurrentProvider: true
       }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
     }
     return attachErrorErr05ExhaustionGate({
       shouldRetry: true,
       blockingRecoverable: false,
       excludedCurrentProvider: true,
-      holdOnLastAvailable429,
-      retryBackoffMs: 0,
       retrySwitchPlan,
       retryExecutionPolicyReason: nativeExecutionPolicy.reason
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
@@ -280,17 +274,13 @@ export async function resolveProviderRetryExecutionPlan(args: {
     return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
-      excludedCurrentProvider: retryExcludedCurrentProvider,
-      holdOnLastAvailable429,
-      retryBackoffMs: 0
+      excludedCurrentProvider: retryExcludedCurrentProvider
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
   return attachErrorErr05ExhaustionGate({
     shouldRetry: true,
     blockingRecoverable: eligibilityPlan.blockingRecoverable,
     excludedCurrentProvider: retryExcludedCurrentProvider,
-    holdOnLastAvailable429,
-    retryBackoffMs: 0,
     retrySwitchPlan,
     retryExecutionPolicyReason: nativeExecutionPolicy.reason
   }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);

@@ -41,8 +41,6 @@ export type ProviderRetryExecutionPlan = {
   shouldRetry: boolean;
   blockingRecoverable: boolean;
   excludedCurrentProvider: boolean;
-  holdOnLastAvailable429: boolean;
-  retryBackoffMs: number;
   retrySwitchPlan?: ProviderRetrySwitchPlan;
   retryExecutionPolicyReason?: string;
   /**
@@ -65,7 +63,6 @@ export type ProviderRetryTelemetryPlan = {
     providerKey?: string;
     nextAttempt: number;
     reason: string;
-    backoffMs?: number;
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
@@ -104,7 +101,6 @@ export type BlockingRecoverableRouteHoldState = {
   providerKey?: string;
   runtimeKey?: string;
   retryError: RetryErrorSnapshot;
-  holdOnLastAvailable429: boolean;
   explicitSingletonPool: boolean;
   routePoolForSameProviderRetry?: string[];
 };

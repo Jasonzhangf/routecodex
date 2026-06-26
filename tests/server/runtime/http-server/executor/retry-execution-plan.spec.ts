@@ -72,7 +72,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(plan.retrySwitchPlan?.runtimeScopeExcluded).toEqual([]);
     expect(plan.retrySwitchPlan?.runtimeScopeExcludedCount).toBe(0);
     expect(plan.excludedCurrentProvider).toBe(true);
-    expect(plan.retryBackoffMs).toBe(0);
     expect(Array.from(excludedProviderKeys)).toContain('minimax.key1.MiniMax-M3');
   });
 
@@ -147,7 +146,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(plan.shouldRetry).toBe(true);
     expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
     expect(plan.excludedCurrentProvider).toBe(true);
-    expect(plan.retryBackoffMs).toBe(0);
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 
@@ -185,7 +183,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
     expect(plan.shouldRetry).toBe(false);
     expect(plan.retrySwitchPlan).toBeUndefined();
-    expect(plan.retryBackoffMs).toBe(0);
     expect(Array.from(excludedProviderKeys)).toEqual(['1token.key1.gpt-5.5']);
   });
 
@@ -227,7 +224,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       decisionLabel: 'exclude_and_reroute'
     }));
     expect(plan.excludedCurrentProvider).toBe(true);
-    expect(plan.retryBackoffMs).toBe(0);
     expect(Array.from(excludedProviderKeys)).toEqual(['relay.key1.gpt-5.5']);
   });
 

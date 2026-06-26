@@ -49,7 +49,6 @@ export function buildProviderRetryTelemetryPlan(args: {
     providerKey: args.providerKey,
     nextAttempt,
     reason: args.retryError.reason,
-    backoffMs: args.retryExecutionPlan.retryBackoffMs,
     statusCode: args.retryError.statusCode,
     errorCode: args.retryError.errorCode,
     upstreamCode: args.retryError.upstreamCode,
@@ -72,13 +71,11 @@ export function buildProviderRetryTelemetryPlan(args: {
     ...(args.retryError.errorCode ? { errorCode: args.retryError.errorCode } : {}),
     ...(args.retryError.upstreamCode ? { upstreamCode: args.retryError.upstreamCode } : {}),
     ...(typeof args.retryError.upstreamStatus === 'number' ? { upstreamStatus: args.retryError.upstreamStatus } : {}),
-    retryBackoffMs: args.retryExecutionPlan.retryBackoffMs,
     decisionLabel: retrySwitchPlan.decisionLabel,
     retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
     ...(retrySwitchPlan.runtimeScopeExcludedCount > 0
       ? { runtimeScopeExcludedCount: retrySwitchPlan.runtimeScopeExcludedCount }
       : {}),
-    holdOnLastAvailable429: args.retryExecutionPlan.holdOnLastAvailable429,
     blockingRecoverable: args.retryExecutionPlan.blockingRecoverable,
     ...(args.promptTooLong
       ? {

@@ -115,7 +115,6 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.reportPlan.stageHint).toBe('provider.send');
     expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
     expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
-    expect(plan.retryExecutionPlan.retryBackoffMs).toBe(0);
     expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
   });
 
