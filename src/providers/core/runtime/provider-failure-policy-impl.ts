@@ -738,8 +738,6 @@ export function resolveProviderFailureActionPlan(args: {
   attempt?: number;
   maxAttempts?: number;
   promptTooLong?: boolean;
-  forceProviderScopedBackoff?: boolean;
-  forceAttemptScopedBackoff?: boolean;
   retryAction?: ProviderFailureRetryAction;
 }): ProviderFailureActionPlan {
   const classification =
