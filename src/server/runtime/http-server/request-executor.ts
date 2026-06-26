@@ -193,17 +193,12 @@ import { processProviderSendFailure } from './executor/request-executor-provider
 import {
   reportRequestExecutorProviderError,
   resolveRequestExecutorProviderErrorClassification,
-  resolveRequestExecutorProviderErrorReportPlan,
-  shouldApplyProviderTransportBackoff
+  resolveRequestExecutorProviderErrorReportPlan
 } from './executor/request-executor-provider-failure.js';
 import { readRuntimeRequestTruthIdentifiers } from './metadata-center/request-truth-readers.js';
 import { buildProviderRetryTelemetryPlan } from './executor/request-executor-retry-telemetry.js';
 import {
-  buildRecoverableErrorBackoffKey,
-  clearRecoverableErrorBackoff,
   consumeLogicalChainRecoverableRetry,
-  consumeProviderScopedRetryBackoffMs,
-  consumeRecoverableErrorBackoffMs,
   deriveLogicalRequestChainKey,
   releaseLogicalRequestChain,
   retainLogicalRequestChain,
@@ -1282,8 +1277,7 @@ export class HubRequestExecutor implements RequestExecutor {
                     : {})
                 }
               });
-            },
-            clearProviderTransportBackoff: () => undefined
+            }
           });
           aggregatedUsage = providerResponseResult.aggregatedUsage;
 
@@ -1478,10 +1472,6 @@ export const __requestExecutorTestables = {
   readString,
   extractRetryErrorSnapshot,
   truncateReason,
-  shouldApplyProviderTransportBackoff,
-  buildRecoverableErrorBackoffKey,
-  clearRecoverableErrorBackoff,
-  consumeRecoverableErrorBackoffMs,
   hasRequestedToolsInSemantics,
   isRequiredToolCallTurn,
   isToolResultFollowupTurn,

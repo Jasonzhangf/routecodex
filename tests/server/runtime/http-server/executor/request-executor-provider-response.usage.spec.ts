@@ -31,7 +31,6 @@ function baseArgs(overrides: Record<string, unknown>) {
     logNonBlockingError: () => undefined,
     queuePayloadContractErrorsample: () => undefined,
     writeProviderSnapshot: async () => undefined,
-    clearProviderTransportBackoff: () => undefined,
     ...overrides
   };
 }

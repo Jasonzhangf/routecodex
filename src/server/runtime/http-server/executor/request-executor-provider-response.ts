@@ -365,7 +365,6 @@ export async function processSuccessfulProviderResponse(args: {
     forceLocalDiskWriteWhenDisabled?: boolean;
     metadata?: Record<string, unknown>;
   }) => Promise<void>;
-  clearProviderTransportBackoff: () => void;
 }): Promise<{
   aggregatedUsage?: UsageMetrics;
   convertedStatus?: number;
@@ -395,8 +394,6 @@ export async function processSuccessfulProviderResponse(args: {
     convertedStatus,
     attempt: args.attempt
   });
-
-  args.clearProviderTransportBackoff();
 
   if (!args.bypassTrafficGovernor) {
     try {

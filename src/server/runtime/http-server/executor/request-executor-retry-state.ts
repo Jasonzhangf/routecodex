@@ -1,6 +1,5 @@
 import {
   readString,
-  normalizeCodeKey,
 } from './request-executor-error-shared.js';
 import {
   type ErrorActionCategory,
@@ -10,8 +9,6 @@ import {
   resetErrorActionQueueStateForTests,
 } from './request-executor-error-action-queue.js';
 
-const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
-
 const logicalChainRetryState = new Map<string, {
   recoverableRetries: number;
   updatedAtMs: number;
@@ -19,82 +16,6 @@ const logicalChainRetryState = new Map<string, {
 }>();
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
-
-export function buildRecoverableErrorBackoffKey(args: {
-  providerKey?: string;
-  runtimeKey?: string;
-  statusCode?: number;
-  errorCode?: string;
-  upstreamCode?: string;
-  reason?: string;
-}): string {
-  const providerScope = (() => {
-    const raw =
-      (typeof args.providerKey === 'string' && args.providerKey.trim())
-      || (typeof args.runtimeKey === 'string' && args.runtimeKey.trim())
-      || 'unknown';
-    return `provider:${raw}`;
-  })();
-  const statusPart = typeof args.statusCode === 'number' ? `status:${args.statusCode}` : 'status:none';
-  const is429 = args.statusCode === 429
-    || normalizeCodeKey(args.errorCode) === 'HTTP_429'
-    || normalizeCodeKey(args.upstreamCode) === 'HTTP_429';
-  if (is429) {
-    // Keep 429 backoff scope stable across provider-specific wording/code noise.
-    return `${providerScope}|status:429|rate_limit`;
-  }
-  const errorPart = normalizeCodeKey(args.errorCode) ?? 'error:none';
-  const upstreamPart = normalizeCodeKey(args.upstreamCode) ?? 'upstream:none';
-  const reasonPart = (() => {
-    if (typeof args.reason !== 'string') {
-      return 'reason:none';
-    }
-    const normalized = args.reason.trim().toLowerCase();
-    if (!normalized) {
-      return 'reason:none';
-    }
-    if (normalized.includes('fetch failed')) return 'reason:fetch_failed';
-    if (normalized.includes('building not completed')) return 'reason:building_not_completed';
-    if (normalized.includes('network')) return 'reason:network';
-    if (normalized.includes('timeout')) return 'reason:timeout';
-    return 'reason:other';
-  })();
-  return `${providerScope}|${statusPart}|${errorPart}|${upstreamPart}|${reasonPart}`;
-}
-
-export function consumeRecoverableErrorBackoffMs(
-  key: string,
-  args: {
-    statusCode?: number;
-    errorCode?: string;
-    upstreamCode?: string;
-    reason?: string;
-  }
-): number {
-  void key;
-  void args;
-  return 0;
-}
-
-export function consumeProviderScopedRetryBackoffMs(
-  key: string,
-  args: {
-    error: unknown;
-    statusCode?: number;
-  }
-): number {
-  void key;
-  void args;
-  return 0;
-}
-
-export function clearProviderTransportBackoff(key?: string): void {
-  void key;
-}
-
-export function clearRecoverableErrorBackoff(key?: string): void {
-  void key;
-}
 
 export function deriveLogicalRequestChainKey(requestId: string): string {
   const normalized = typeof requestId === 'string' ? requestId.trim() : '';
@@ -109,7 +30,7 @@ export function retainLogicalRequestChain(key: string): string {
   const normalizedKey = key.trim() || 'request-chain:unknown';
   const now = Date.now();
   for (const [existingKey, state] of logicalChainRetryState.entries()) {
-    if (state.activeExecutions <= 0 && now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
+    if (state.activeExecutions <= 0 && now - state.updatedAtMs >= 5 * 60_000) {
       logicalChainRetryState.delete(existingKey);
     }
   }

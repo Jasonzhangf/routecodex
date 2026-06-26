@@ -26,6 +26,7 @@
 - 已确认 `docs/routing-awrr-health-weighted-round-robin.md` 在仓库内没有任何引用，且其 `quotaView` / AWRR 叙述与 `docs/VIRTUAL_ROUTER_PRIORITY_AND_HEALTH.md` 重复。
 - 这份文档属于可物理删除的旧设计草案，不再承担唯一真源职责。
 - `docs/QUOTA_MANAGER_V3.md` 仍被 `README.md` 作为历史入口引用，不能单独删成无入口文档；README 已改成历史参考。
+- `shouldApplyProviderTransportBackoff` 已从 `request-executor.ts` 导出面删除，`request-executor-provider-send-failure.ts` 里的 import 也属于可删残留，不再有生产调用。
 
 # 2026-06-27 TS rate-limit state cleanup slice
 

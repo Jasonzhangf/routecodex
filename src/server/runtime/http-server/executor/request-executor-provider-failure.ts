@@ -69,22 +69,6 @@ export function resolveRequestExecutorProviderFailureOutcome(args: {
   });
 }
 
-export function shouldApplyProviderTransportBackoff(args: {
-  error: unknown;
-  retryError: RetryErrorSnapshot;
-  stage?: RequestExecutorProviderErrorStage;
-}): boolean {
-  const stage = args.stage ?? 'provider.send';
-  if (stage === 'provider.followup' || isHostRequestExecutorErrorStage(stage)) {
-    return false;
-  }
-  return resolveRequestExecutorProviderFailureOutcome({
-    error: args.error,
-    retryError: args.retryError,
-    stage
-  }).recoverable;
-}
-
 export function resolveRequestExecutorProviderErrorReportPlan(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;

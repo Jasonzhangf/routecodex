@@ -43,8 +43,7 @@ describe('processSuccessfulProviderResponse legacy stopless contract removal', (
       logStage: () => undefined,
       logNonBlockingError: () => undefined,
       queuePayloadContractErrorsample: () => undefined,
-      writeProviderSnapshot: async () => undefined,
-      clearProviderTransportBackoff: () => undefined
+      writeProviderSnapshot: async () => undefined
     })).resolves.toMatchObject({
       convertedStatus: 200
     });
@@ -108,8 +107,7 @@ describe('processSuccessfulProviderResponse legacy stopless contract removal', (
       logStage: () => undefined,
       logNonBlockingError: () => undefined,
       queuePayloadContractErrorsample: () => undefined,
-      writeProviderSnapshot: async () => undefined,
-      clearProviderTransportBackoff: () => undefined
+      writeProviderSnapshot: async () => undefined
     })).resolves.toMatchObject({
       convertedStatus: 200
     });

@@ -11,7 +11,6 @@ import {
   extractStatusCodeFromError,
 } from './request-retry-helpers.js';
 import { isPromptTooLongError } from './retry-engine.js';
-import { shouldApplyProviderTransportBackoff } from './request-executor-provider-failure.js';
 import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normalizer.js';
 import { extractRequestExecutorProviderErrorStage } from './request-executor-error-shared.js';

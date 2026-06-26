@@ -1,9 +1,5 @@
 import {
-  buildRecoverableErrorBackoffKey,
-  clearRecoverableErrorBackoff,
   consumeLogicalChainRecoverableRetry,
-  consumeProviderScopedRetryBackoffMs,
-  consumeRecoverableErrorBackoffMs,
   deriveLogicalRequestChainKey,
   releaseLogicalRequestChain,
   resetRequestExecutorRetryStateForTests,
@@ -29,11 +25,7 @@ import type {
 
 export {
   buildProviderRetryTelemetryPlan,
-  buildRecoverableErrorBackoffKey,
-  clearRecoverableErrorBackoff,
   consumeLogicalChainRecoverableRetry,
-  consumeProviderScopedRetryBackoffMs,
-  consumeRecoverableErrorBackoffMs,
   deriveLogicalRequestChainKey,
   emitRequestExecutorProviderRetryTelemetry,
   releaseLogicalRequestChain,
