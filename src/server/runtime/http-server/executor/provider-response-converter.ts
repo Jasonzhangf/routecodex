@@ -10,6 +10,7 @@ import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
   resolveRelayResponsesClientSseStreamForHttp,
+  reprojectDirectChatToolCallStreamForHttp,
 } from '../../../../modules/llmswitch/bridge.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
@@ -114,13 +115,7 @@ const PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER = {
 } as const;
 
 type NativeRespSemanticsModule = {
-  normalizeResponsesToolCallArgumentsForClientWithNative?: (
-    responsesPayload: unknown,
-    toolsRaw: unknown[]
-  ) => Record<string, unknown>;
 };
-
-let nativeRespSemanticsModulePromise: Promise<NativeRespSemanticsModule> | null = null;
 
 function attachTimingBreakdown(response: PipelineExecutionResult): PipelineExecutionResult {
   const clientInjectWaitMsRaw = response.usageLogInfo?.clientInjectWaitMs;
@@ -141,28 +136,6 @@ function attachTimingBreakdown(response: PipelineExecutionResult): PipelineExecu
   };
 }
 
-async function loadNativeRespSemanticsModule(): Promise<NativeRespSemanticsModule> {
-  if (!nativeRespSemanticsModulePromise) {
-    nativeRespSemanticsModulePromise = importCoreDist<NativeRespSemanticsModule>(
-      'native/router-hotpath/native-hub-pipeline-resp-semantics'
-    );
-  }
-  return nativeRespSemanticsModulePromise;
-}
-
-async function normalizeResponsesToolCallArgumentsForClientWithNative(
-  responsesPayload: unknown,
-  toolsRaw: unknown[]
-): Promise<Record<string, unknown>> {
-  const mod = await loadNativeRespSemanticsModule();
-  const fn = mod.normalizeResponsesToolCallArgumentsForClientWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] normalizeResponsesToolCallArgumentsForClientWithNative not available');
-  }
-  return fn(responsesPayload, toolsRaw);
-}
-
-
 function readNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -179,46 +152,84 @@ function normalizeGoalCounter(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
-function readClientToolsRawForResponsesNormalization(args: {
-  adapterContext?: Record<string, unknown>;
-  requestSemantics?: Record<string, unknown>;
-  entryOriginRequest?: Record<string, unknown>;
-}): unknown[] {
-  const adapterCapturedRequest = asFlatRecord(args.adapterContext?.capturedEntryRequest) ?? asFlatRecord(args.adapterContext?.capturedChatRequest);
-  const adapterTools = Array.isArray(adapterCapturedRequest?.tools) ? adapterCapturedRequest.tools : undefined;
-  if (adapterTools?.length) {
-    return adapterTools;
+async function readStreamTextForDirectChatReprojection(stream: unknown): Promise<string | undefined> {
+  if (!stream || typeof (stream as AsyncIterable<unknown>)[Symbol.asyncIterator] !== 'function') {
+    return undefined;
   }
-  const semanticsTools = asFlatRecord(args.requestSemantics?.tools);
-  const clientToolsRaw = Array.isArray(semanticsTools?.clientToolsRaw) ? semanticsTools.clientToolsRaw : undefined;
-  if (clientToolsRaw?.length) {
-    return clientToolsRaw;
+  const chunks: string[] = [];
+  for await (const chunk of stream as AsyncIterable<unknown>) {
+    if (typeof chunk === 'string') {
+      chunks.push(chunk);
+      continue;
+    }
+    if (Buffer.isBuffer(chunk)) {
+      chunks.push(chunk.toString('utf8'));
+      continue;
+    }
+    if (chunk instanceof Uint8Array) {
+      chunks.push(Buffer.from(chunk).toString('utf8'));
+    }
   }
-  const rootTools = Array.isArray(args.requestSemantics?.tools) ? args.requestSemantics.tools : undefined;
-  if (rootTools?.length) {
-    return rootTools;
-  }
-  const originalTools = Array.isArray(args.entryOriginRequest?.tools) ? args.entryOriginRequest.tools : undefined;
-  return originalTools?.length ? originalTools : [];
+  return chunks.length > 0 ? chunks.join('') : undefined;
 }
 
-async function normalizeResponsesToolCallsViaRustSsot(args: {
-  payload: Record<string, unknown>;
-  adapterContext?: Record<string, unknown>;
-  requestSemantics?: Record<string, unknown>;
-  entryOriginRequest?: Record<string, unknown>;
-  entryEndpoint?: string;
-}): Promise<Record<string, unknown>> {
-  const entry = String(args.entryEndpoint || '').toLowerCase();
-  if (!entry.includes('/v1/responses')) {
-    return args.payload;
+function recoverVisibleAssistantContentFromChatSseText(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
   }
-  const toolsRaw = readClientToolsRawForResponsesNormalization({
-    adapterContext: args.adapterContext,
-    requestSemantics: args.requestSemantics,
-    entryOriginRequest: args.entryOriginRequest
-  });
-  return normalizeResponsesToolCallArgumentsForClientWithNative(args.payload, toolsRaw);
+  const parts = text.split(/\r?\n\r?\n/);
+  const visible: string[] = [];
+  for (const part of parts) {
+    for (const line of part.split(/\r?\n/)) {
+      if (!line.startsWith('data:')) {
+        continue;
+      }
+      const payload = line.slice('data:'.length).trim();
+      if (!payload || payload === '[DONE]') {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(payload) as Record<string, unknown>;
+        const choices = Array.isArray(parsed.choices) ? parsed.choices as Array<Record<string, unknown>> : [];
+        for (const choice of choices) {
+          const delta =
+            choice && typeof choice === 'object' && choice.delta && typeof choice.delta === 'object' && !Array.isArray(choice.delta)
+              ? choice.delta as Record<string, unknown>
+              : undefined;
+          const content = typeof delta?.content === 'string' ? delta.content : undefined;
+          if (content) {
+            visible.push(content);
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  const joined = visible.join('');
+  return joined.trim() ? joined : undefined;
+}
+
+async function restoreDirectChatVisibleContentFromSse(args: {
+  body: Record<string, unknown>;
+  sseStream: unknown;
+}): Promise<{ body: Record<string, unknown>; consumedText?: string }> {
+  const text = await readStreamTextForDirectChatReprojection(args.sseStream);
+  const recoveredContent = recoverVisibleAssistantContentFromChatSseText(text);
+  if (!recoveredContent) {
+    return { body: args.body, consumedText: text };
+  }
+  const cloned = JSON.parse(JSON.stringify(args.body)) as Record<string, unknown>;
+  const choices = Array.isArray(cloned.choices) ? cloned.choices as Array<Record<string, unknown>> : [];
+  const firstChoice = choices[0];
+  const message =
+    firstChoice && typeof firstChoice === 'object' && firstChoice.message && typeof firstChoice.message === 'object' && !Array.isArray(firstChoice.message)
+      ? firstChoice.message as Record<string, unknown>
+      : undefined;
+  if (message && (message.content === null || message.content === undefined || message.content === '')) {
+    message.content = recoveredContent;
+  }
+  return { body: cloned, consumedText: text };
 }
 
 
@@ -566,16 +577,31 @@ export async function convertProviderResponseIfNeeded(
       hasBody: converted.body !== undefined && converted.body !== null,
       elapsedMs: Date.now() - bridgeStartMs
     });
-    if (converted.body && typeof converted.body === 'object' && !Array.isArray(converted.body)) {
-      converted.body = await normalizeResponsesToolCallsViaRustSsot({
-        payload: converted.body as Record<string, unknown>,
-        adapterContext,
-        requestSemantics: effectiveRequestSemantics,
-        entryOriginRequest: options.entryOriginRequest,
-        entryEndpoint: options.entryEndpoint || entry
-      });
-    }
     if (converted.sseStream) {
+      const directChatToolCallStreamNeedsReprojection = (
+        needsChatConversion
+        && options.wantsStream
+        && options.response.continuationOwner === 'direct'
+        && converted.body
+        && typeof converted.body === 'object'
+        && !Array.isArray(converted.body)
+        && deriveFinishReason(converted.body) === 'tool_calls'
+      );
+      if (directChatToolCallStreamNeedsReprojection) {
+        const restoredDirectChat = await restoreDirectChatVisibleContentFromSse({
+          body: converted.body as Record<string, unknown>,
+          sseStream: converted.sseStream,
+        });
+        const reprojectedChatSseStream = await reprojectDirectChatToolCallStreamForHttp({
+          body: restoredDirectChat.body,
+          requestId: options.requestId,
+        });
+        return attachTimingBreakdown({
+          ...options.response,
+          body: restoredDirectChat.body,
+          sseStream: reprojectedChatSseStream,
+        });
+      }
       const projectedRelayResponsesSseStream = await resolveRelayResponsesClientSseStreamForHttp({
         entryEndpoint: options.entryEndpoint || entry,
         continuationOwner: options.response.continuationOwner,

@@ -287,6 +287,25 @@
   - 这是按“单 request 一个 center”方向前进的有效收口。
   - 仍需继续审后续阶段是否还有 request truth / continuation_context 的越权回填或 top-level 镜像残留。
 
+# 2026-06-26 metadata center top-level stopmessage projection removal slice 7
+
+- 本轮删除了两处 top-level stopmessage 镜像投影：
+  - `src/server/runtime/http-server/executor-metadata.ts`
+  - `src/server/handlers/handler-utils.ts`
+- 删除内容：
+  - `runtime_control.stopMessageEnabled -> target.stopMessageEnabled`
+  - `runtime_control.stopMessageExcludeDirect -> target.stopMessageExcludeDirect`
+- 同步调整测试：
+  - `tests/server/http-server/executor-metadata.spec.ts`
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts`
+- 证据：
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/http-server/executor-metadata.spec.ts tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts tests/server/handlers/handler-utils.metadata.spec.ts`
+  - `npm run verify:metadata-center-dualwrite-api`
+  - `npm run verify:architecture-metadata-center-write-boundaries`
+- 结论：
+  - top-level `stopMessageEnabled` / `stopMessageExcludeDirect` 不再作为 projection truth 输出。
+  - 当前 contract 更接近“只在 MetadataCenter.runtime_control 内保留 truth”，继续向唯一真源收口。
+
 # 2026-06-26 5555 continuation 顺序审计 slice 2
 
 - Jason 最新边界已锁：
@@ -17867,3 +17886,24 @@ Jason 要求：先确认唯一语义点（`normalizeChatUsagePayloadForHttp` 归
 - evidence: git diff确认变量修复；NODE_OPTIONS='--experimental-vm-modules' pnpm exec jest跑通chat usage新增用例和同文件其余用例
 
 NODE_OPTIONS='--experimental-vm-modules'是本地调试ESM测试的正确方式；直接pnpm exec jest without NODE_OPTIONS会触发.js/.ts冲突导致SyntaxError
+
+# 2026-06-26 metadata-center slice 7 - top-level stopMessage projection 清理
+
+## 本轮结论
+- 已确认 `responses-request-bridge.ts` 里的 `writeRequestTruth(...)` 仍是入口态写点，不是后续阶段回填，保留。
+- 已确认真正可删的是 handler / executor 的 top-level stopMessage 镜像投影：
+  - `executor-metadata.ts`
+  - `handler-utils.ts`
+- `request_truth` / `continuation_context` / `runtime_control` 仍然只保留在 `MetadataCenter` 内，不再投到 top-level `stopMessageEnabled` / `routecodexPortStopMessageEnabled`。
+
+## 已验证
+- `npm run jest:run -- --runInBand --runTestsByPath tests/server/http-server/executor-metadata.spec.ts tests/server/handlers/handler-utils.metadata.spec.ts tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts`
+  - `48 passed`
+- `npm run verify:metadata-center-dualwrite-api`
+  - `ok`
+- `npm run verify:architecture-metadata-center-write-boundaries`
+  - `ok`
+
+## 剩余工作
+- 继续找真正的后续阶段回填点，而不是删入口态写点。
+- 这轮只提交 metadata-center 收口相关文件，不合并其它脏改动。

@@ -819,12 +819,6 @@ function projectNativeTopLevelRuntimeControl(
   if (shouldProjectRouteHintToTopLevel(routeHint)) {
     target.routeHint = routeHint;
   }
-  if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
-    target.stopMessageEnabled = runtimeControl.stopMessageEnabled;
-  }
-  if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
-    target.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
-  }
 }
 
 function shouldProjectRouteHintToTopLevel(routeHint: string | undefined): boolean {
