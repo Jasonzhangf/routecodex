@@ -3,58 +3,44 @@ import type { ServerToolHandlerContext, ServerToolHandlerResult } from './types.
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
 import { getServertoolToolSpec, listServertoolToolSpecs } from './skeleton-config.js';
-import { readRuntimeControlFromBoundMetadataCenter, writeRuntimeControlToBoundMetadataCenter } from './stopless-metadata-carrier.js';
-import { readStopMessageCompareContext, attachStopMessageCompareContext } from './stop-message-compare-context.js';
+import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import {
-} from '../native/router-hotpath/native-stop-message-auto-semantics.js';
-import {
-  extractCurrentAssistantStopTextWithNative,
   extractStopMessageAutoCliResultSnapshotFromRequestWithNative,
-  normalizeStoplessTriggerHintForMetadataWithNative,
-  planStopMessageAutoHandlerWithNative,
+  getCapturedRequestWithNative,
+  planStopMessageDefaultConfigWithNative,
+  planStoplessDecisionContextSignalsWithNative,
+  resolveRuntimeStopMessageStateFromAdapterContextWithNative,
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  getCapturedRequest,
-  planStopMessageDefaultConfig,
-  planStoplessDecisionContextSignals,
-  resolveAdapterContextProviderKey,
-  resolveRuntimeStopMessageStateFromAdapterContext,
-} from './handlers/stop-message-auto/runtime-utils.js';
-
-type StoplessRuntimeControlValue = {
-  flowId: string;
-  repeatCount: number;
-  maxRepeats: number;
-  triggerHint?: string;
-  continuationPrompt?: string;
-  schemaFeedback?: Record<string, unknown>;
-  active: boolean;
-  updatedAt?: number;
-};
+  applyStoplessMetadataCenterWritePlan,
+  buildStoplessMetadataCenterWritePlan
+} from './stopless-metadata-center-writer.js';
+import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 type StopMessageHandlerPlan = {
   action:
     | 'return_null'
     | 'return_terminal_final'
-    | 'throw_stopless_loop'
+    | 'throw_goal_active_loop'
     | 'return_schema_fail_fast'
     | 'return_schema_allow_stop'
     | 'return_handler_plan';
-  compareContext?: Record<string, unknown>;
+  compareContext: Record<string, unknown>;
   terminalChatResponse?: Record<string, unknown>;
   shouldWriteLearnedNote?: boolean;
   learnedNote?: Record<string, unknown>;
-  stoplessLoopErrorMessage?: string;
-  stoplessLoopErrorCode?: string;
-  stoplessLoopRepeatCount?: number;
-  stoplessLoopThreshold?: number;
-  stoplessLoopGoalContextCount?: number;
+  goalLoopErrorMessage?: string;
+  goalLoopErrorCode?: string;
+  goalLoopRepeatCount?: number;
+  goalLoopThreshold?: number;
+  goalLoopGoalContextCount?: number;
   flowId?: string;
   effectiveDecision?: Record<string, unknown>;
   persistPlan?: { nextUsed: number; nextMaxRepeats: number };
   stoplessTriggerHint?: string;
   schemaFeedback?: { reasonCode: string; missingFields: string[] };
   assistantStopText?: string;
+  nativeHandlerResult?: { followup?: unknown; chatResponse?: unknown };
 } & Record<string, unknown>;
 
 function isBuiltinRuntimeSupported(name: string): boolean {
@@ -66,158 +52,154 @@ function isBuiltinRuntimeSupported(name: string): boolean {
   }
 }
 
-function buildStoplessRuntimeStateFromPlan(
-  plan: StopMessageHandlerPlan,
-): StoplessRuntimeControlValue | null {
-  if (plan.action !== 'return_handler_plan') {
-    return null;
+/**
+ * Read the Rust-built MetadataCenter snapshot (from `metadataCenterSnapshot` carrier).
+ */
+function readMetadataCenterSnapshot(record: Record<string, unknown>): Record<string, unknown> {
+  const direct = record.metadataCenterSnapshot;
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
+    return direct as Record<string, unknown>;
   }
-  const persistPlan = plan.persistPlan;
-  if (!persistPlan) {
-    return null;
+  const nested = (record.metadata as Record<string, unknown> | undefined)?.metadataCenterSnapshot;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
   }
-  const continuationPrompt =
-    typeof plan.effectiveDecision?.followup_text === 'string'
-      ? String(plan.effectiveDecision.followup_text)
-      : undefined;
+  return {};
+}
+
+function readStopMessageCompareContextFromRuntimeControl(
+  record: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(record);
+  const compare = runtimeControl?.stopMessageCompareContext;
+  return compare && typeof compare === 'object' && !Array.isArray(compare)
+    ? compare as Record<string, unknown>
+    : undefined;
+}
+
+function buildStoplessAutoHandlerInput(ctx: ServerToolHandlerContext): Record<string, unknown> {
+  const adapterContext = ctx.adapterContext as Record<string, unknown>;
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext);
+  const capturedRequest = getCapturedRequestWithNative(adapterContext);
+  const currentToolOutputSnapshot = extractStopMessageAutoCliResultSnapshotFromRequestWithNative({
+    adapterContext,
+    runtimeMetadata: runtimeControl,
+  });
+  const defaultConfig = planStopMessageDefaultConfigWithNative({
+    tombstoneCleared: false,
+    configEnabled: true,
+    configText: undefined,
+    configMaxRepeats: undefined,
+    envText: undefined,
+    envMaxRepeats: undefined,
+  });
+  const decisionSignals = planStoplessDecisionContextSignalsWithNative({
+    adapterContext,
+    runtimeMetadata: runtimeControl,
+    capturedRequest,
+  });
+  const effectiveRuntimeLoopState = resolveRuntimeStopMessageStateFromAdapterContextWithNative({
+    adapterContext,
+    runtimeMetadata: runtimeControl,
+  });
   return {
-    flowId: plan.flowId || 'stop_message_flow',
-    repeatCount: persistPlan.nextUsed,
-    maxRepeats: persistPlan.nextMaxRepeats,
-    ...(typeof plan.stoplessTriggerHint === 'string' && plan.stoplessTriggerHint.trim()
-      ? { triggerHint: normalizeStoplessTriggerHintForMetadataWithNative(plan.stoplessTriggerHint) }
-      : {}),
-    ...(continuationPrompt ? { continuationPrompt } : {}),
-    ...(plan.schemaFeedback ? { schemaFeedback: plan.schemaFeedback as unknown as Record<string, unknown> } : {}),
-    active: true,
-    updatedAt: Date.now(),
+    adapterContext,
+    base: ctx.base,
+    requestId: ctx.requestId,
+    followupFlowId: undefined,
+    shouldRunVisionFlow: false,
+    shouldBypassStopMessageForMedia: false,
+    metadataRuntimeControl: runtimeControl ?? null,
+    metadataPreviousCompare: readStopMessageCompareContextFromRuntimeControl(adapterContext) ?? null,
+    defaultConfig,
+    decisionSignals,
+    capturedRequest,
+    effectiveRuntimeLoopState: currentToolOutputSnapshot ?? effectiveRuntimeLoopState,
+    providerKey: undefined,
   };
 }
 
-function buildStopMessageHandlerInput(
+function buildStoplessRuntimeExecutionContext(
   ctx: ServerToolHandlerContext,
-  record: Record<string, unknown>,
-  runtimeControl: Record<string, unknown> | undefined,
-  previousCompare: Record<string, unknown> | undefined
-): Record<string, unknown> {
-  const captured = getCapturedRequest(ctx.adapterContext);
-  const metadataCenterStoplessState =
-    runtimeControl?.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)
-      ? runtimeControl.stopless as Partial<StoplessRuntimeControlValue>
-      : undefined;
-  const cliLoopState = extractStopMessageAutoCliResultSnapshotFromRequestWithNative({
-    adapterContext: record
-  });
-  const effectiveRuntimeLoopState =
-    (cliLoopState && typeof cliLoopState.repeatCount === 'number' ? cliLoopState : undefined)
-    ?? metadataCenterStoplessState
-    ?? (() => {
-      const legacy = resolveRuntimeStopMessageStateFromAdapterContext(ctx.adapterContext);
-      return legacy
-        ? {
-            continuationPrompt: legacy.text,
-            repeatCount: legacy.used,
-            maxRepeats: legacy.maxRepeats,
-            active: true
-          }
-        : undefined;
-    })()
-    ?? { continuationPrompt: '', repeatCount: 0, maxRepeats: 3, active: true };
-
-  const decisionSignals = planStoplessDecisionContextSignals({
-    adapterContext: ctx.adapterContext,
-    capturedRequest: captured
-  }) as {
-    portStopMessageDisabled: boolean;
-    hasResponsesSubmitToolOutputsResume: boolean;
-    planModeActive: boolean;
-  };
-  const defaultConfig = planStopMessageDefaultConfig({
-    envText: process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT,
-    envMaxRepeats: process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS
-  });
-
+  plan: StopMessageHandlerPlan
+): JsonObject | undefined {
+  if (plan.action !== 'return_handler_plan') return undefined;
+  const persistPlan = plan.persistPlan;
+  if (!persistPlan) return undefined;
   return {
-    captured,
-    previousCompare,
-    effectiveRuntimeLoopState,
-    defaultConfig,
-    decisionSignals,
+    stopless: {
+      flowId: plan.flowId ?? 'stop_message_flow',
+      repeatCount: persistPlan.nextUsed,
+      maxRepeats: persistPlan.nextMaxRepeats,
+      ...(typeof plan.stoplessTriggerHint === 'string' ? { triggerHint: plan.stoplessTriggerHint } : {}),
+      ...(plan.schemaFeedback ? { schemaFeedback: plan.schemaFeedback as unknown as JsonObject } : {})
+    }
   };
+}
+
+async function planStoplessAutoHandlerNapi(input: Record<string, unknown>): Promise<StopMessageHandlerPlan> {
+  const fn = readNativeFunction('planStoplessAutoHandlerJson');
+  if (!fn) {
+    throw new Error('planStoplessAutoHandlerJson native unavailable');
+  }
+  const raw = fn(JSON.stringify(input));
+  if (typeof raw === 'string') {
+    return JSON.parse(raw) as StopMessageHandlerPlan;
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as StopMessageHandlerPlan;
+  }
+  throw new Error(`planStoplessAutoHandlerJson native returned unsupported payload: ${typeof raw}`);
+}
+
+async function writeStoplessLearnedNoteNapi(args: {
+  adapterContext: Record<string, unknown>;
+  requestId: string;
+  parsed: Record<string, unknown>;
+  timestampMs: number;
+}): Promise<void> {
+  const fn = readNativeFunction('writeStoplessLearnedNoteJson');
+  if (!fn) return;
+  fn(JSON.stringify(args));
 }
 
 async function runBuiltinStopMessageAutoHandler(
   ctx: ServerToolHandlerContext
 ): Promise<{ flowId: string; finalize: () => Promise<ServerToolHandlerResult> } | null> {
   const record = ctx.adapterContext as Record<string, unknown>;
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(record);
-  const previousCompare = readStopMessageCompareContext(ctx.adapterContext);
-  const handlerInputContext = buildStopMessageHandlerInput(
-    ctx,
-    record,
-    runtimeControl,
-    previousCompare as unknown as Record<string, unknown> | undefined
-  ) as {
-    captured?: unknown;
-    previousCompare?: Record<string, unknown>;
-    effectiveRuntimeLoopState?: Record<string, unknown>;
-    defaultConfig: Record<string, unknown>;
-    decisionSignals: Record<string, unknown>;
-  };
-  const assistantStopText = extractCurrentAssistantStopTextWithNative(ctx.base as Record<string, unknown>);
-  const plan = planStopMessageAutoHandlerWithNative<StopMessageHandlerPlan>({
-    adapterContext: record,
-    base: ctx.base,
-    requestId: ctx.requestId,
-    followupFlowId: runtimeControl?.serverToolFollowup === true ? '__servertool_followup__' : '',
-    shouldRunVisionFlow: false,
-    shouldBypassStopMessageForMedia: false,
-    metadataRuntimeControl: runtimeControl,
-    metadataPreviousCompare: handlerInputContext.previousCompare,
-    defaultConfig: handlerInputContext.defaultConfig,
-    decisionSignals: handlerInputContext.decisionSignals,
-    capturedRequest: handlerInputContext.captured as Record<string, unknown> | undefined,
-    effectiveRuntimeLoopState: handlerInputContext.effectiveRuntimeLoopState,
-    providerKey: resolveAdapterContextProviderKey(ctx.adapterContext) || undefined,
-    assistantStopText,
-  });
+  const plan = await planStoplessAutoHandlerNapi(buildStoplessAutoHandlerInput(ctx));
 
-  if (plan.compareContext && typeof plan.compareContext === 'object' && !Array.isArray(plan.compareContext)) {
-    attachStopMessageCompareContext(ctx.adapterContext, plan.compareContext as any);
-    writeRuntimeControlToBoundMetadataCenter({
-      metadata: record,
-      key: 'stopMessageCompareContext',
-      value: plan.compareContext as unknown as JsonObject,
-      writer: {
-        module: 'sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts',
-        symbol: 'runBuiltinStopMessageAutoHandler',
-        stage: 'stop_message_compare_context_writer'
-      },
-      reason: 'stop-message-compare-context'
+  if (plan.compareContext) {
+    const centerSnapshot = readMetadataCenterSnapshot(record);
+    const writePlan = buildStoplessMetadataCenterWritePlan({
+      handlerPlan: plan as unknown as Record<string, unknown>,
+      center: centerSnapshot,
+      requestId: ctx.requestId,
+      timestampMs: Date.now()
     });
-  } else if (previousCompare) {
-    attachStopMessageCompareContext(ctx.adapterContext, previousCompare);
+    if (writePlan) {
+      applyStoplessMetadataCenterWritePlan({
+        adapterContext: record,
+        plan: writePlan,
+        reason: 'stop-message-compare-context'
+      });
+    }
   }
 
-  const stoplessRuntimeState = buildStoplessRuntimeStateFromPlan(plan);
-  if (stoplessRuntimeState) {
-    writeRuntimeControlToBoundMetadataCenter({
-      metadata: record,
-      key: 'stopless',
-      value: stoplessRuntimeState as unknown as JsonObject,
-      writer: {
-        module: 'sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts',
-        symbol: 'runBuiltinStopMessageAutoHandler',
-        stage: 'stopless_runtime_control_writer'
-      },
-      reason: 'stopless-runtime-state'
+  if (plan.shouldWriteLearnedNote && plan.learnedNote) {
+    const parsed = (plan.learnedNote.parsed as Record<string, unknown> | undefined) ?? plan.learnedNote;
+    await writeStoplessLearnedNoteNapi({
+      adapterContext: record,
+      requestId: ctx.requestId,
+      parsed,
+      timestampMs: Date.now()
     });
   }
 
   switch (plan.action) {
     case 'return_null':
       return null;
-    case 'throw_stopless_loop': {
+    case 'throw_goal_active_loop': {
       const err: Error & {
         code?: string;
         status?: number;
@@ -225,13 +207,13 @@ async function runBuiltinStopMessageAutoHandler(
         threshold?: number;
         goalContextCount?: number;
       } = Object.assign(
-        new Error(plan.stoplessLoopErrorMessage ?? '[servertool] stopless stop loop detected'),
+        new Error(plan.goalLoopErrorMessage ?? '[servertool] goal active stop loop detected'),
         {
-          code: plan.stoplessLoopErrorCode ?? 'STOPLESS_STOP_LOOP_DETECTED',
+          code: plan.goalLoopErrorCode ?? 'GOAL_ACTIVE_STOP_LOOP_DETECTED',
           status: 500,
-          repeatCount: plan.stoplessLoopRepeatCount,
-          threshold: plan.stoplessLoopThreshold,
-          goalContextCount: plan.stoplessLoopGoalContextCount
+          repeatCount: plan.goalLoopRepeatCount,
+          threshold: plan.goalLoopThreshold,
+          goalContextCount: plan.goalLoopGoalContextCount
         }
       );
       throw err;
@@ -240,30 +222,30 @@ async function runBuiltinStopMessageAutoHandler(
     case 'return_schema_fail_fast':
     case 'return_schema_allow_stop':
       return {
-        flowId: plan.flowId || 'stop_message_flow',
+        flowId: plan.flowId ?? 'stop_message_flow',
         finalize: async (): Promise<ServerToolHandlerResult> => ({
           chatResponse: (plan.terminalChatResponse ?? ctx.base) as JsonObject,
           execution: {
-            flowId: plan.flowId || 'stop_message_flow',
+            flowId: plan.flowId ?? 'stop_message_flow',
             context: { stopMessageTerminalFinal: true }
           }
         })
       };
     case 'return_handler_plan':
       return {
-        flowId: plan.flowId || 'stop_message_flow',
+        flowId: plan.flowId ?? 'stop_message_flow',
         finalize: async (): Promise<ServerToolHandlerResult> => ({
           chatResponse: ctx.base as JsonObject,
           execution: {
-            flowId: plan.flowId || 'stop_message_flow',
+            flowId: plan.flowId ?? 'stop_message_flow',
             context: {
               decision: (plan.effectiveDecision ?? {}) as JsonObject,
               assistantStopText: plan.assistantStopText ?? '',
-              ...(stoplessRuntimeState ? { stopless: stoplessRuntimeState as unknown as JsonObject } : {}),
-              ...(typeof plan.stoplessTriggerHint === 'string' && plan.stoplessTriggerHint.trim()
-                ? { stopSchemaTriggerHint: normalizeStoplessTriggerHintForMetadataWithNative(plan.stoplessTriggerHint) }
+              ...(typeof plan.stoplessTriggerHint === 'string'
+                ? { stopSchemaTriggerHint: plan.stoplessTriggerHint }
                 : {}),
-              ...(plan.schemaFeedback ? { stopSchemaFeedback: plan.schemaFeedback } : {})
+              ...(plan.schemaFeedback ? { stopSchemaFeedback: plan.schemaFeedback } : {}),
+              ...(buildStoplessRuntimeExecutionContext(ctx, plan) ?? {})
             }
           }
         })
@@ -338,7 +320,7 @@ export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | u
       phase: registration.autoHook.phase,
       priority: registration.autoHook.priority,
       order: -1
-    };
+    }
   }
   return entry;
 }

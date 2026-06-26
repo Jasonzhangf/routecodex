@@ -177,6 +177,90 @@ fn filter_orphan_responses_tool_outputs(items: Vec<Value>) -> Vec<Value> {
         .collect()
 }
 
+fn normalize_message_shape_responses_items(items: &[Value]) -> Vec<Value> {
+    let mut normalized: Vec<Value> = Vec::new();
+    for entry in items {
+        let Some(row) = entry.as_object() else {
+            normalized.push(entry.clone());
+            continue;
+        };
+        let role = read_trimmed_string(row.get("role"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let item_type = read_trimmed_string(row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if role == "assistant" {
+            let tool_calls = row.get("tool_calls").and_then(Value::as_array);
+            if let Some(tool_calls) = tool_calls.filter(|calls| !calls.is_empty()) {
+                for call in tool_calls {
+                    let Some(call_row) = call.as_object() else {
+                        continue;
+                    };
+                    let function_row = call_row
+                        .get("function")
+                        .and_then(Value::as_object)
+                        .cloned()
+                        .unwrap_or_default();
+                    let name = read_trimmed_string(function_row.get("name"))
+                        .or_else(|| read_trimmed_string(call_row.get("name")));
+                    let call_id = read_trimmed_string(call_row.get("call_id"))
+                        .or_else(|| read_trimmed_string(call_row.get("tool_call_id")))
+                        .or_else(|| read_trimmed_string(call_row.get("id")));
+                    let Some(name) = name else {
+                        continue;
+                    };
+                    let Some(call_id) = call_id else {
+                        continue;
+                    };
+                    let arguments = function_row
+                        .get("arguments")
+                        .cloned()
+                        .or_else(|| call_row.get("arguments").cloned())
+                        .unwrap_or_else(|| Value::String("{}".to_string()));
+                    normalized.push(serde_json::json!({
+                        "type": "function_call",
+                        "id": call_id,
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": arguments
+                    }));
+                }
+                continue;
+            }
+        }
+
+        if role == "tool" {
+            let call_id = read_trimmed_string(row.get("tool_call_id"))
+                .or_else(|| read_trimmed_string(row.get("call_id")))
+                .or_else(|| read_trimmed_string(row.get("id")));
+            if let Some(call_id) = call_id {
+                let output = row
+                    .get("content")
+                    .cloned()
+                    .or_else(|| row.get("output").cloned())
+                    .unwrap_or_else(|| Value::String(String::new()));
+                normalized.push(serde_json::json!({
+                    "type": "function_call_output",
+                    "id": call_id,
+                    "call_id": call_id,
+                    "output": output
+                }));
+                continue;
+            }
+        }
+
+        if item_type == "message" || role == "user" {
+            normalized.push(entry.clone());
+            continue;
+        }
+
+        normalized.push(entry.clone());
+    }
+    normalized
+}
+
 fn canonicalize_tool_arguments_value(value: Option<&Value>) -> String {
     let Some(raw) = value else {
         return String::new();
@@ -596,10 +680,32 @@ pub(crate) fn normalize_responses_input_items(
             if items.is_empty() {
                 return None;
             }
+            let mut pre_normalized_payload = Value::Object(Map::new());
+            if let Some(payload_obj) = pre_normalized_payload.as_object_mut() {
+                payload_obj.insert(
+                    "input".to_string(),
+                    Value::Array(normalize_message_shape_responses_items(items)),
+                );
+                if let Some(tools) = raw_request.get("tools").cloned() {
+                    payload_obj.insert("tools".to_string(), tools);
+                }
+            }
+            if normalize_shell_like_tool_calls_before_governance(&mut pre_normalized_payload).is_err()
+            {
+                return None;
+            }
+            let normalized_items = pre_normalized_payload
+                .get("input")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if normalized_items.is_empty() {
+                return None;
+            }
             let has_previous_response_id =
                 read_trimmed_string(raw_request.get("previous_response_id")).is_some();
             let allow_output_only_resume = has_previous_response_id
-                && items.iter().all(|entry| {
+                && normalized_items.iter().all(|entry| {
                     let Some(row) = entry.as_object() else {
                         return true;
                     };
@@ -634,7 +740,7 @@ pub(crate) fn normalize_responses_input_items(
                 })
                 .unwrap_or_default();
             let call_id_rewrites =
-                build_duplicate_responses_call_id_rewrites(items, &allowed_tool_names);
+                build_duplicate_responses_call_id_rewrites(normalized_items.as_slice(), &allowed_tool_names);
 
             let mut normalized: Vec<Value> = Vec::with_capacity(items.len());
             let mut valid_call_ids = std::collections::HashSet::new();
@@ -648,7 +754,7 @@ pub(crate) fn normalize_responses_input_items(
             let mut latest_tool_output_index_by_call_id =
                 std::collections::HashMap::<String, usize>::new();
 
-            for (index, entry) in items.iter().enumerate() {
+            for (index, entry) in normalized_items.iter().enumerate() {
                 let Some(row) = entry.as_object() else {
                     continue;
                 };
@@ -689,7 +795,7 @@ pub(crate) fn normalize_responses_input_items(
                 }
             }
 
-            for (index, entry) in items.iter().enumerate() {
+            for (index, entry) in normalized_items.iter().enumerate() {
                 let Some(row) = entry.as_object() else {
                     normalized.push(entry.clone());
                     continue;

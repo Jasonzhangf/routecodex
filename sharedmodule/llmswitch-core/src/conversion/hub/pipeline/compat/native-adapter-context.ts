@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../../types/chat-envelope.js';
 import type { JsonObject } from '../../types/json.js';
 import type { NativeReqOutboundCompatAdapterContextInput } from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
-import { readRuntimeControlFromBoundMetadataCenter } from '../../../../servertool/stopless-metadata-carrier.js';
+import { readRuntimeControlFromBoundMetadataCenter } from '../../../../servertool/metadata-center-carrier.js';
 
 export function buildNativeReqOutboundCompatAdapterContext(
   adapterContext?: AdapterContext

@@ -4,7 +4,7 @@ import type {
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 export function resolveServertoolEntryContext(args: {
   options: ServerSideToolEngineOptions;

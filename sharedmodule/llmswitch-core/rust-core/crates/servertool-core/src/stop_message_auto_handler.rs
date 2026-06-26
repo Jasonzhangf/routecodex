@@ -962,11 +962,29 @@ fn build_decision_context(
             ctx.as_object_mut().unwrap().insert("explicit_mode".to_string(), json!("off"));
         }
     }
-    if let Some(used) = snap_repeat {
+    let fallback_used = metadata_center_stopless
+        .and_then(|mc| mc.get("repeatCount").or_else(|| mc.get("repeat_count")))
+        .and_then(Value::as_i64)
+        .filter(|value| *value >= 0);
+    let fallback_max = metadata_center_stopless
+        .and_then(|mc| mc.get("maxRepeats").or_else(|| mc.get("max_repeats")))
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0);
+    let fallback_text = metadata_center_stopless
+        .and_then(|mc| mc.get("continuationPrompt"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+
+    let runtime_used = snap_repeat.or(fallback_used);
+    let runtime_max = snap_max.or(fallback_max);
+    let runtime_text = fallback_text.unwrap_or(snap_text);
+
+    if let Some(used) = runtime_used {
         ctx.as_object_mut().unwrap().insert("runtime_snapshot".to_string(), json!({
             "used": used,
-            "maxRepeats": snap_max.unwrap_or(0),
-            "text": snap_text,
+            "maxRepeats": runtime_max.unwrap_or(default_config.max_repeats as i64),
+            "text": runtime_text,
         }));
     }
     if let Some(ref pk) = provider_key {

@@ -859,6 +859,142 @@ fn test_execute_hub_pipeline_live_slice_keeps_public_catalog_tool_result_before_
 }
 
 #[test]
+fn test_execute_hub_pipeline_live_stopless_chat_provider_restores_reasoning_stop_pair_instead_of_raw_tool_message()
+{
+    let input_json = json!({
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "XLC.key1.glm-5.2",
+                    "providerType": "openai",
+                    "outboundProfile": "openai-chat",
+                    "runtimeKey": "XLC.key1.glm-5.2"
+                },
+                "routeName": "thinking/gateway-priority-5555-priority-thinking"
+            }
+        },
+        "request": {
+            "requestId": "req_1782485411953_57627b4d",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "stream": false,
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound",
+            "payload": {
+                "model": "gpt-5.4",
+                "stream": false,
+                "input": [
+                    {
+                        "content": [],
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"invalid_schema\\\"}'\"}",
+                                    "name": "exec_command"
+                                },
+                                "id": "call_servertool_cli_live_verify_fix_2",
+                                "type": "function"
+                            }
+                        ],
+                        "type": "message"
+                    },
+                    {
+                        "content": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"invalid_schema\"}}",
+                        "name": "reasoningStop",
+                        "role": "tool",
+                        "tool_call_id": "call_servertool_cli_live_verify_fix_2"
+                    },
+                    {
+                        "content": [
+                            {
+                                "text": "继续修正 stop schema 并继续执行",
+                                "type": "input_text"
+                            }
+                        ],
+                        "role": "user",
+                        "type": "message"
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "description": "Runs a shell command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": { "type": "string" }
+                            },
+                            "required": ["cmd"]
+                        }
+                    }
+                ]
+            },
+            "metadata": {
+                "stream": false,
+                "providerProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "sessionId": "stopless-live-5555-fixcheck-2",
+                "conversationId": "stopless-live-5555-fixcheck-2"
+            }
+        }
+    })
+    .to_string();
+
+    let result = execute_hub_pipeline_json(input_json).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(output["success"], json!(true));
+    let messages = output["payload"]["messages"]
+        .as_array()
+        .expect("provider-facing chat messages");
+    assert!(
+        !messages.iter().any(|message| {
+            message["role"] == json!("tool")
+                && message["content"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("stop_message_auto")
+        }),
+        "provider-facing request must not leak raw stopless tool result: {}",
+        output["payload"]
+    );
+    let assistant_tool_call = messages
+        .iter()
+        .find(|message| message["role"] == json!("assistant") && message.get("tool_calls").is_some())
+        .expect("restored reasoningStop assistant tool call");
+    assert_eq!(
+        assistant_tool_call["tool_calls"][0]["function"]["name"],
+        json!("reasoningStop")
+    );
+    let restored_tool_result = messages
+        .iter()
+        .find(|message| {
+            message["role"] == json!("tool")
+                && message["tool_call_id"] == json!("call_servertool_cli_live_verify_fix_2")
+        })
+        .expect("restored reasoningStop tool result");
+    assert!(
+        !restored_tool_result["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("stop_message_auto"),
+        "restored reasoningStop tool result must not leak stop_message_auto: {}",
+        output["payload"]
+    );
+    let guidance = messages
+        .iter()
+        .rev()
+        .find(|message| message["role"] == json!("user"))
+        .and_then(|message| message["content"].as_str())
+        .expect("restored guidance user turn");
+    assert!(!guidance.trim().is_empty());
+    assert!(guidance.contains("继续修正 stop schema 并继续执行"));
+}
+
+#[test]
 fn test_resolve_stop_message_router_metadata_prefers_client_tmux_and_sets_aliases() {
     let metadata = json!({
         "runtime_control": {

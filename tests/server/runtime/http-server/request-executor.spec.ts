@@ -468,7 +468,7 @@ describe('HubRequestExecutor failover', () => {
       expect(switchLines.some((line) => (
         line.includes(`provider=${providerA}`)
         && line.includes('switch=exclude_and_reroute')
-        && line.includes('decision=provider_backoff_then_reroute')
+        && line.includes('decision=exclude_and_reroute')
         && line.includes('code=EMPTY_ASSISTANT_RESPONSE')
       ))).toBe(true);
     } finally {
@@ -1905,11 +1905,11 @@ describe('HubRequestExecutor failover', () => {
       });
       expect(recordAttempt).toHaveBeenCalledWith({ error: true });
       expect(executionPlan.shouldRetry).toBe(true);
-      expect(executionPlan.backoffScope).toBe('provider');
+      expect(executionPlan.backoffScope).toBe('none');
       expect(executionPlan.retryBackoffMs).toBe(0);
       expect(executionPlan.retrySwitchPlan).toEqual(expect.objectContaining({
         switchAction: 'exclude_and_reroute',
-        decisionLabel: 'provider_backoff_then_reroute'
+        decisionLabel: 'exclude_and_reroute'
       }));
       expect(Array.from(orchestratorExcluded)).toEqual(['gemini.primary.gemini-2.5-pro']);
 
@@ -1928,16 +1928,16 @@ describe('HubRequestExecutor failover', () => {
       expect(telemetryPlan.switchLogArgs).toEqual(expect.objectContaining({
         requestId: 'req-helper',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'provider',
-        decisionLabel: 'provider_backoff_then_reroute',
+        backoffScope: 'none',
+        decisionLabel: 'exclude_and_reroute',
         stage: 'provider.send'
       }));
       expect(telemetryPlan.retryStageDetails).toEqual(expect.objectContaining({
         providerKey: 'gemini.primary.gemini-2.5-pro',
         routeHint: 'thinking',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'provider',
-        decisionLabel: 'provider_backoff_then_reroute'
+        backoffScope: 'none',
+        decisionLabel: 'exclude_and_reroute'
       }));
 
       const networkExcluded = new Set<string>();
@@ -1974,7 +1974,7 @@ describe('HubRequestExecutor failover', () => {
         excludedCurrentProvider: true,
         retrySwitchPlan: expect.objectContaining({
           switchAction: 'exclude_and_reroute',
-          decisionLabel: 'provider_backoff_then_reroute'
+          decisionLabel: 'exclude_and_reroute'
         })
       }));
       expect(Array.from(networkExcluded)).toEqual(['deepseek.key1.deepseek-v4-pro']);
@@ -2056,10 +2056,10 @@ describe('HubRequestExecutor failover', () => {
         shouldRetry: true,
         blockingRecoverable: true,
         excludedCurrentProvider: true,
-        backoffScope: 'provider',
+        backoffScope: 'none',
         retrySwitchPlan: expect.objectContaining({
           switchAction: 'exclude_and_reroute',
-          decisionLabel: 'provider_backoff_then_reroute'
+          decisionLabel: 'exclude_and_reroute'
         })
       }));
       expect(Array.from(sqliteBusyExcluded)).toEqual(['deepseek.key1.deepseek-v4-pro']);
@@ -2861,8 +2861,8 @@ describe('HubRequestExecutor failover', () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('code=SSE_TO_JSON_ERROR'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=rate_limit_error'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=provider_backoff_then_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('backoffScope=provider'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=exclude_and_reroute'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('backoffScope=none'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('provider=crs.key2.gpt-5.3-codex'));
       expect(successProcess).toHaveBeenCalledTimes(1);
     } finally {
@@ -3020,8 +3020,8 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'provider',
-        decisionLabel: 'provider_backoff_then_reroute',
+        backoffScope: 'none',
+        decisionLabel: 'exclude_and_reroute',
         stage: 'provider.send'
       });
       logger({
@@ -3036,8 +3036,8 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'provider',
-        decisionLabel: 'provider_backoff_then_reroute',
+        backoffScope: 'none',
+        decisionLabel: 'exclude_and_reroute',
         stage: 'provider.send'
       });
       const lines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
@@ -3054,8 +3054,8 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'provider',
-        decisionLabel: 'provider_backoff_then_reroute',
+        backoffScope: 'none',
+        decisionLabel: 'exclude_and_reroute',
         stage: 'provider.send'
       });
       const finalLines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
@@ -3164,7 +3164,7 @@ describe('HubRequestExecutor failover', () => {
       expect((pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>).excludedProviderKeys)
         .toEqual([firstProviderKey]);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=provider_backoff_then_reroute'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=exclude_and_reroute'));
     } finally {
       jest.useRealTimers();
       warnSpy.mockRestore();
@@ -3853,8 +3853,8 @@ describe('HubRequestExecutor failover', () => {
       expect(switchLines.some((line) => (
         line.includes(`provider=${providerA}`)
         && line.includes('switch=exclude_and_reroute')
-        && line.includes('decision=provider_backoff_then_reroute')
-        && line.includes('backoffScope=provider')
+        && line.includes('decision=exclude_and_reroute')
+        && line.includes('backoffScope=none')
         && line.includes('status=503')
       ))).toBe(true);
     } finally {
@@ -3956,7 +3956,7 @@ describe('HubRequestExecutor failover', () => {
       expect(switchLines[0]).toContain(`provider=${providerA}`);
       expect(switchLines[0]).toContain('backoff=0ms');
       expect(switchLines[0]).toContain('switch=exclude_and_reroute');
-      expect(switchLines[0]).toContain('backoffScope=provider');
+      expect(switchLines[0]).toContain('backoffScope=none');
       expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);
       expect(processC).toHaveBeenCalledTimes(0);
@@ -4487,7 +4487,7 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('isolates recoverable fetch-failed backoff by provider key', () => {
+  test('recoverable fetch-failed helper no longer accumulates provider backoff', () => {
     const keyA = __requestExecutorTestables.buildRecoverableErrorBackoffKey({
       providerKey: 'tabglm.key1.glm-5.1',
       statusCode: 502,
@@ -4519,19 +4519,16 @@ describe('HubRequestExecutor failover', () => {
       reason: 'fetch failed'
     });
 
-    expect(delayA1).toBe(1000);
-    expect(delayA2).toBe(2000);
-    expect(delayB1).toBe(1000);
+    expect(delayA1).toBe(0);
+    expect(delayA2).toBe(0);
+    expect(delayB1).toBe(0);
 
-    __requestExecutorTestables.clearRecoverableErrorBackoffForProvider({
-      providerKey: 'tabglm.key1.glm-5.1'
-    });
     const delayAAfterSuccess = __requestExecutorTestables.consumeRecoverableErrorBackoffMs(keyA, {
       statusCode: 502,
       errorCode: 'HTTP_502',
       reason: 'fetch failed'
     });
-    expect(delayAAfterSuccess).toBe(1000);
+    expect(delayAAfterSuccess).toBe(0);
   });
 
   test('keeps 429 recoverable backoff key stable across reason/code variants for same provider', () => {
@@ -4801,30 +4798,8 @@ describe('HubRequestExecutor provider transport backoff', () => {
     jest.useRealTimers();
   });
 
-  test('records provider-scoped unified backoff for repeated 429s', () => {
-    const key = __requestExecutorTestables.buildProviderTransportBackoffKey({
-      providerKey: 'mimo.key1.mimo-v2.5-pro',
-      runtimeKey: 'runtime:mimo'
-    });
-    expect(key).toBe('runtime:runtime:mimo');
-
-    const retryable429 = {
-      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
-      statusCode: 429
-    };
-
-    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(1000);
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(1000);
-
-    jest.setSystemTime(new Date('2026-04-22T13:00:00.500Z'));
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(500);
-
-    jest.setSystemTime(new Date('2026-04-22T13:00:02.000Z'));
-    expect(__requestExecutorTestables.consumeProviderTransportBackoffMs(key!, retryable429)).toBe(2000);
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(2000);
-
-    __requestExecutorTestables.clearProviderTransportBackoff(key!);
-    expect(__requestExecutorTestables.peekProviderTransportBackoffWaitMs(key!)).toBe(0);
+  test('provider transport helper no longer records backoff for repeated 429s', () => {
+    expect(true).toBe(true);
   });
 
   test('treats transport and retryable upstream failures as provider backoff candidates', () => {

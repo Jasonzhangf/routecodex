@@ -1010,29 +1010,16 @@ fn build_adapter_context(
     provider_protocol: &str,
     request_id: &str,
 ) -> AdapterContext {
-    let response_request_context = metadata
-        .get("responsesRequestContext")
-        .and_then(Value::as_object);
     let session_id = metadata
         .get("sessionId")
         .and_then(Value::as_str)
         .map(str::to_string)
-        .or_else(|| {
-            response_request_context
-                .and_then(|row| row.get("sessionId"))
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
+        ;
     let conversation_id = metadata
         .get("conversationId")
         .and_then(Value::as_str)
         .map(str::to_string)
-        .or_else(|| {
-            response_request_context
-                .and_then(|row| row.get("conversationId"))
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
+        ;
     AdapterContext {
         compatibility_profile: read_trimmed_metadata_string_with_target_fallback(
             metadata,
@@ -1097,7 +1084,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn build_adapter_context_backfills_session_identifiers_from_responses_request_context() {
+    fn build_adapter_context_does_not_backfill_session_identifiers_from_responses_request_context() {
         let metadata = json!({
             "entryEndpoint": "/v1/responses",
             "responsesRequestContext": {
@@ -1108,14 +1095,8 @@ mod tests {
 
         let adapter_context =
             build_adapter_context(&metadata, "anthropic-messages", "req-stopless");
-        assert_eq!(
-            adapter_context.session_id.as_deref(),
-            Some("sess-relay-stopless")
-        );
-        assert_eq!(
-            adapter_context.conversation_id.as_deref(),
-            Some("conv-relay-stopless")
-        );
+        assert_eq!(adapter_context.session_id.as_deref(), None);
+        assert_eq!(adapter_context.conversation_id.as_deref(), None);
     }
 
     #[test]

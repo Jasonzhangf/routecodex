@@ -12,7 +12,7 @@ import {
 } from './execution-dispatch-outcome-shell.js';
 import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
 import { patchToolCallArgumentsById } from './orchestration-blocks.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 export function prepareServertoolDispatchStage(args: {
   options: ServerSideToolEngineOptions;

@@ -14,7 +14,7 @@ import {
 } from "../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { isRecord } from "../../../shared/common-utils.js";
-import { readRuntimeControlFromBoundMetadataCenter } from "../../../servertool/stopless-metadata-carrier.js";
+import { readRuntimeControlFromBoundMetadataCenter } from "../../../servertool/metadata-center-carrier.js";
 import type {
   HubPipelineConfig,
   HubPipelineRequest,

@@ -2,23 +2,16 @@ import {
   computeProviderFailureBackoffDelayMs
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
-  buildProviderTransportBackoffKey,
   buildRecoverableErrorBackoffKey,
   clearRecoverableErrorBackoff,
-  clearRecoverableErrorBackoffForProvider,
-  clearProviderTransportBackoff,
   consumeLogicalChainRecoverableRetry,
   consumeProviderScopedRetryBackoffMs,
-  consumeProviderTransportBackoffMs,
   consumeRecoverableErrorBackoffMs,
   deriveLogicalRequestChainKey,
   peekProviderTransportBackoffConsecutiveForTests,
-  peekProviderTransportBackoffWaitMs,
   releaseLogicalRequestChain,
   resetRequestExecutorRetryStateForTests,
   retainLogicalRequestChain,
-  waitProviderTransportBackoffWithGate,
-  waitRecoverableBackoffWithGlobalGate
 } from './request-executor-retry-state.js';
 import {
   buildSessionStormHardBlockError,
@@ -59,28 +52,21 @@ import type {
 
 export {
   buildProviderRetryTelemetryPlan,
-  buildProviderTransportBackoffKey,
   buildRecoverableErrorBackoffKey,
   clearRecoverableErrorBackoff,
-  clearRecoverableErrorBackoffForProvider,
-  clearProviderTransportBackoff,
   consumeLogicalChainRecoverableRetry,
   consumeProviderScopedRetryBackoffMs,
-  consumeProviderTransportBackoffMs,
   consumeRecoverableErrorBackoffMs,
   deriveLogicalRequestChainKey,
   emitRequestExecutorProviderRetryTelemetry,
   isLastAvailableProvider429,
   peekProviderTransportBackoffConsecutiveForTests,
-  peekProviderTransportBackoffWaitMs,
   releaseLogicalRequestChain,
   resolveExcludedProviderReselectionPlan,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExecutionPlan,
   resolveProviderRetryExclusionPlan,
-  retainLogicalRequestChain,
-  waitProviderTransportBackoffWithGate,
-  waitRecoverableBackoffWithGlobalGate
+  retainLogicalRequestChain
 };
 
 export function resetRequestExecutorRetryPlannerState(): void {

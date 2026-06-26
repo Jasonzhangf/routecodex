@@ -9,8 +9,7 @@ import type {
 import {
   buildRecoverableErrorBackoffKey,
   consumeProviderScopedRetryBackoffMs,
-  consumeRecoverableErrorBackoffMs,
-  waitRecoverableBackoffWithGlobalGate
+  consumeRecoverableErrorBackoffMs
 } from './request-executor-retry-state.js';
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;

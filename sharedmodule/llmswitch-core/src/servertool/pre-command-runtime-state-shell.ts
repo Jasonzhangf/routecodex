@@ -5,7 +5,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 export function resolveServertoolRuntimePreCommandState(args: {
   adapterContext: unknown;

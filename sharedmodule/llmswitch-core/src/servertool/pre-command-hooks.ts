@@ -14,7 +14,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { isPreCommandScriptPathAllowedWithNative } from '../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 export const SERVERTOOL_PRE_COMMAND_HOOKS_FEATURE_ID = 'feature_id: hub.servertool_pre_command_hooks';
 

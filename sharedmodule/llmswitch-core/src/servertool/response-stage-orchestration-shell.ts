@@ -13,7 +13,7 @@ import {
 import {
   readRuntimeControlFromBoundMetadataCenter,
   writeRuntimeControlToBoundMetadataCenter
-} from './stopless-metadata-carrier.js';
+} from './metadata-center-carrier.js';
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 type ChatCompletionLike = JsonObject;

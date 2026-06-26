@@ -3,7 +3,7 @@ import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { createServertoolProgressLogger } from './progress-log-block.js';
 import { recordServertoolMatchHit, recordServertoolMatchSkipped } from './match-log-block.js';
 import type { ServerToolExecution } from './types.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 type ServertoolProgressLogger = ReturnType<typeof createServertoolProgressLogger>;
 

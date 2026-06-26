@@ -151,7 +151,7 @@ export function resolveProviderTypeFromProtocolWithNative(
 
 export function resolveProviderResponseContextHelpersWithNative(input: {
   context: unknown;
-  serverToolFollowupRaw: unknown;
+  legacyFollowupMarkerRaw: unknown;
   entryEndpoint: string | undefined;
   toolSurfaceModeRaw: string | undefined;
 }): ProviderResponseContextHelpersOutput {
@@ -169,7 +169,7 @@ export function resolveProviderResponseContextHelpersWithNative(input: {
   if (!contextJson) {
     return fail('context json stringify failed');
   }
-  const followupRawJson = safeStringify(input.serverToolFollowupRaw ?? null);
+  const followupRawJson = safeStringify(input.legacyFollowupMarkerRaw ?? null);
   if (!followupRawJson) {
     return fail('followup json stringify failed');
   }

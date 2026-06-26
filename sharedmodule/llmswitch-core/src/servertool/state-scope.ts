@@ -3,7 +3,7 @@ import {
   resolveStopMessageSessionScopeWithNative,
   resolveServertoolStickyKeyWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { readRuntimeControlFromBoundMetadataCenter } from './stopless-metadata-carrier.js';
+import { readRuntimeControlFromBoundMetadataCenter } from './metadata-center-carrier.js';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

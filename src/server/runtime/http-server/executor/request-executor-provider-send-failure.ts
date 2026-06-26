@@ -71,8 +71,6 @@ type RequestExecutorProviderSendFailureArgs = {
   trafficGovernor: ProviderTrafficGovernorLike;
   trafficActiveInFlightAtAcquire: number;
   trafficPolicyMaxInFlight: number;
-  providerTransportBackoffKey?: string;
-  consumeProviderTransportBackoffMs: (key: string, args: { error: unknown; statusCode?: number }) => number;
   sessionStormBackoffScopes?: string[];
   isSessionStormBackoffCandidate: (error: unknown) => boolean;
   consumeSessionStormBackoffMs: (key: string, error?: unknown) => number;

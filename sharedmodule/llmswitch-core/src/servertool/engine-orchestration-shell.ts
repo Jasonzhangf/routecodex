@@ -27,7 +27,7 @@ import {
   readProviderProtocolFromAnyBoundMetadataCenter,
   readRequestTruthSessionIdFromAnyBoundMetadataCenter,
   readStoplessRuntimeControlFromAnyBoundMetadataCenter
-} from './stopless-metadata-carrier.js';
+} from './metadata-center-carrier.js';
 
 function planServertoolEngineRuntimeActionWithNativeLocal(input: {
   hasPendingInjection: boolean;
@@ -60,7 +60,7 @@ function planServertoolEngineRuntimeActionWithNativeLocal(input: {
   }
 }
 
-function planServertoolEngineSkipWithNativeLocal(input: {
+function planServertoolEngineSkipWithNative(input: {
   engineMode: string;
   hasExecution: boolean;
 }): { action: string; skipReason?: string } {
@@ -212,7 +212,7 @@ export async function runServerToolOrchestrationShell(
   const engineResult = await runPrimaryServerToolEngineSelection({
     runEngine
   });
-  const engineSkipPlan = planServertoolEngineSkipWithNativeLocal({
+  const engineSkipPlan = planServertoolEngineSkipWithNative({
     engineMode: engineResult.mode,
     hasExecution: Boolean(engineResult.execution)
   });

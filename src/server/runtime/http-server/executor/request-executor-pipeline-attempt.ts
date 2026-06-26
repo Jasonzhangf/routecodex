@@ -2,7 +2,6 @@ import type { HubPipelineResult } from '../executor-pipeline.js';
 import { finalizeRequestExecutorAttemptMetadata } from './request-executor-attempt-state.js';
 import { resolveExcludedProviderReselectionPlan } from './request-executor-reselection-plan.js';
 import { applyRetryExclusionForCurrentProvider } from './request-executor-retry-decision.js';
-import { buildProviderTransportBackoffKey, peekProviderTransportBackoffWaitMs } from './request-executor-retry-state.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
@@ -118,40 +117,6 @@ export function resolveRequestExecutorPipelineAttempt(args: {
 
   const providerPayload = args.pipelineResult.providerPayload;
   const target = args.pipelineResult.target;
-
-  const targetRuntimeKey =
-    target && typeof target.runtimeKey === 'string' && target.runtimeKey.trim()
-      ? target.runtimeKey.trim()
-      : undefined;
-  const providerTransportBackoffKey = buildProviderTransportBackoffKey({
-    providerKey: target?.providerKey,
-    runtimeKey: targetRuntimeKey
-  });
-  const pendingTransportBackoffMs =
-    providerTransportBackoffKey
-      ? peekProviderTransportBackoffWaitMs(providerTransportBackoffKey)
-      : 0;
-  if (pendingTransportBackoffMs > 0 && target?.providerKey) {
-    const targetAlreadyExcluded = args.excludedProviderKeys.has(target.providerKey);
-    if (targetAlreadyExcluded) {
-      applyRetryExclusionForCurrentProvider({
-        providerKey: target.providerKey,
-        excludedProviderKeys: args.excludedProviderKeys
-      });
-      args.logStage('provider.transport_backoff_target_reselected', args.providerRequestId, {
-        providerKey: target.providerKey,
-        runtimeKey: targetRuntimeKey,
-        waitMs: pendingTransportBackoffMs,
-        excluded: Array.from(args.excludedProviderKeys),
-        attempt: args.attempt,
-        targetAlreadyExcluded
-      });
-      return {
-        kind: 'retry_next_attempt',
-        initialRoutePool
-      };
-    }
-  }
 
   if (!providerPayload || !target?.providerKey) {
     throw Object.assign(new Error('Virtual router did not produce a provider target'), {

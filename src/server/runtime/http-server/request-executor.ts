@@ -207,22 +207,17 @@ import { readRuntimeRequestTruthIdentifiers } from './metadata-center/request-tr
 import { buildProviderRetryTelemetryPlan } from './executor/request-executor-retry-telemetry.js';
 import {
   isLastAvailableProvider429,
-  buildProviderTransportBackoffKey,
   buildRecoverableErrorBackoffKey,
   clearRecoverableErrorBackoff,
-  clearRecoverableErrorBackoffForProvider,
   clearSessionStormBackoff,
-  clearProviderTransportBackoff,
   consumeLogicalChainRecoverableRetry,
   consumeProviderScopedRetryBackoffMs,
-  consumeProviderTransportBackoffMs,
   consumeRecoverableErrorBackoffMs,
   deriveLogicalRequestChainKey,
   buildSessionStormHardBlockError,
   consumeSessionStormBackoffMs,
   isSessionStormBackoffCandidate,
   peekSessionStormBackoffConsecutiveForTests,
-  peekProviderTransportBackoffWaitMs,
   peekSessionStormBackoffWaitMs,
   releaseLogicalRequestChain,
   retainLogicalRequestChain,
@@ -234,8 +229,6 @@ import {
   resolveSessionStormBackoffScope,
   resolveSessionStormBackoffScopes,
   sessionStormBackoffGateState,
-  waitProviderTransportBackoffWithGate,
-  waitRecoverableBackoffWithGlobalGate,
   waitSessionStormBackoffWithGate
 } from './executor/request-executor-retry-planner.js';
 import type {
@@ -338,10 +331,35 @@ function readEntryServerId(metadataRecord: Record<string, unknown> | undefined):
 
 function readEntryPort(metadataRecord: Record<string, unknown> | undefined): number | undefined {
   if (!metadataRecord) return undefined;
+  const runtimeControl =
+    metadataRecord.__rt && typeof metadataRecord.__rt === 'object' && !Array.isArray(metadataRecord.__rt)
+      ? metadataRecord.__rt as Record<string, unknown>
+      : undefined;
+  const requestTruth =
+    metadataRecord.__requestTruth && typeof metadataRecord.__requestTruth === 'object' && !Array.isArray(metadataRecord.__requestTruth)
+      ? metadataRecord.__requestTruth as Record<string, unknown>
+      : undefined;
+  const portContext =
+    metadataRecord.portContext && typeof metadataRecord.portContext === 'object' && !Array.isArray(metadataRecord.portContext)
+      ? metadataRecord.portContext as Record<string, unknown>
+      : undefined;
   const candidates = [
     metadataRecord.entryPort,
     metadataRecord.matchedPort,
-    metadataRecord.routecodexLocalPort
+    metadataRecord.routecodexLocalPort,
+    metadataRecord.localPort,
+    metadataRecord.portScope,
+    requestTruth?.portScope,
+    runtimeControl?.entryPort,
+    runtimeControl?.matchedPort,
+    runtimeControl?.routecodexLocalPort,
+    runtimeControl?.localPort,
+    runtimeControl?.portScope,
+    portContext?.matchedPort,
+    portContext?.localPort,
+    portContext?.port,
+    portContext?.entryPort,
+    portContext?.portScope
   ];
   for (const value of candidates) {
     if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
@@ -1063,38 +1081,11 @@ export class HubRequestExecutor implements RequestExecutor {
           mergedMetadata
         );
         const providerOwnedContinuationForAttempt = await isProviderNativeResumeContinuation(requestSemanticsForAttempt);
-        const providerTransportBackoffKey = buildProviderTransportBackoffKey({
-          providerKey: target.providerKey,
-          runtimeKey
-        });
         const bypassTrafficGovernor = false;
         let retryAfterProviderFailure = false;
         let providerFailurePhase: 'provider_send' | 'provider_response_processing' = 'provider_send';
         try {
           throwIfClientAbortSignalAborted(clientAbortSignal);
-          if (providerTransportBackoffKey) {
-            const pendingProviderTransportWaitMs = peekProviderTransportBackoffWaitMs(providerTransportBackoffKey);
-            if (pendingProviderTransportWaitMs > 0) {
-              logStage('provider.transport_backoff_wait', input.requestId, {
-                providerKey: target.providerKey,
-                runtimeKey,
-                waitMs: pendingProviderTransportWaitMs,
-                attempt
-              });
-              await waitProviderTransportBackoffWithGate({
-                key: providerTransportBackoffKey,
-                ms: pendingProviderTransportWaitMs,
-                signal: clientAbortSignal,
-                logNonBlockingError: logRequestExecutorNonBlockingError
-              });
-              logStage('provider.transport_backoff_wait.completed', input.requestId, {
-                providerKey: target.providerKey,
-                runtimeKey,
-                waitMs: pendingProviderTransportWaitMs,
-                attempt
-              });
-            }
-          }
           if (bypassTrafficGovernor) {
             logStage('provider.traffic.acquire.bypassed', input.requestId, {
               providerKey: target.providerKey,
@@ -1410,10 +1401,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 }
               });
             },
-            clearProviderTransportBackoff: () => {
-              clearProviderTransportBackoff(providerTransportBackoffKey);
-              clearRecoverableErrorBackoffForProvider({ providerKey: target.providerKey, runtimeKey });
-            }
+            clearProviderTransportBackoff: () => undefined
           });
           aggregatedUsage = providerResponseResult.aggregatedUsage;
 
@@ -1479,8 +1467,6 @@ export class HubRequestExecutor implements RequestExecutor {
             trafficGovernor: this.trafficGovernor,
             trafficActiveInFlightAtAcquire,
             trafficPolicyMaxInFlight,
-            providerTransportBackoffKey,
-            consumeProviderTransportBackoffMs,
             sessionStormBackoffScopes,
             isSessionStormBackoffCandidate,
             consumeSessionStormBackoffMs,
@@ -1638,12 +1624,7 @@ export const __requestExecutorTestables = {
   shouldApplyProviderTransportBackoff,
   buildRecoverableErrorBackoffKey,
   clearRecoverableErrorBackoff,
-  clearRecoverableErrorBackoffForProvider,
   consumeRecoverableErrorBackoffMs,
-  buildProviderTransportBackoffKey,
-  consumeProviderTransportBackoffMs,
-  peekProviderTransportBackoffWaitMs,
-  clearProviderTransportBackoff,
   hasRequestedToolsInSemantics,
   isRequiredToolCallTurn,
   isToolResultFollowupTurn,

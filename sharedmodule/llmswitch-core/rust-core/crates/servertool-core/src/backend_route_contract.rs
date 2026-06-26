@@ -8,8 +8,6 @@ use crate::outcome_contract::{
 };
 use crate::persisted_lookup::STOP_MESSAGE_FOLLOWUP_FLOW_ID;
 
-// feature_id: hub.servertool_backend_route_runtime
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolBackendRoutePolicyInput {

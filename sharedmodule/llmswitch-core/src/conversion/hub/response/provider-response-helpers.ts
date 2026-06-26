@@ -19,10 +19,10 @@ export function resolveProviderResponseContextSignals(
   context: AdapterContext,
   entryEndpoint?: string
 ): ProviderResponseContextSignals {
-  const runtimeMeta = readRuntimeMetadata(context as unknown as Record<string, unknown>);
+  void readRuntimeMetadata;
   const resolved = resolveProviderResponseContextHelpersWithNative({
     context,
-    serverToolFollowupRaw: (runtimeMeta as any)?.serverToolFollowup,
+    legacyFollowupMarkerRaw: null,
     entryEndpoint,
     toolSurfaceModeRaw: String(process.env.ROUTECODEX_HUB_TOOL_SURFACE_MODE || '')
   });
