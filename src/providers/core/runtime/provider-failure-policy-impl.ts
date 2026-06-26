@@ -11,9 +11,7 @@ import type {
   ProviderFailureRateLimitKind,
   ProviderFailureRetryAction,
   ProviderFailureAction,
-  ProviderFailureBackoffScope,
   ProviderFailureDecisionLabel,
-  ProviderFailureBackoffPlan,
   ProviderFailureActionPlan,
   ProviderFailureRetryEligibilityPlan,
   ProviderFailureOutcome,
@@ -22,10 +20,6 @@ import type {
 } from './provider-failure-policy.js';
 import type { ErrorErr02HostCaptured } from '../utils/provider-error-reporter.js';
 import { loadNativeFailurePolicyBridge } from './provider-failure-policy-native.js';
-import {
-  computeProviderFailureBackoffDelayMsBlock,
-  resolveProviderFailureBackoffPlanBlock
-} from './provider-failure-policy-backoff.js';
 import {
   normalizeKnownProviderError,
   PROVIDER_BLOCKING_RECOVERABLE_CODES,
@@ -725,30 +719,11 @@ export function isBlockingRecoverableProviderFailure(args: {
 
 export function describeProviderFailureDecision(args: {
   action: ProviderFailureAction;
-  backoffScope?: ProviderFailureBackoffScope;
 }): Exclude<ProviderFailureDecisionLabel, 'direct_return'> {
   if (args.action !== 'reroute_explicit_alternative') {
     throw new Error(`unsupported provider failure retry action: ${String(args.action)}`);
   }
   return 'exclude_and_reroute';
-}
-
-export function resolveProviderFailureBackoffPlan(args: {
-  scope: ProviderFailureBackoffScope;
-  error?: unknown;
-  statusCode?: number;
-}): ProviderFailureBackoffPlan {
-  return resolveProviderFailureBackoffPlanBlock(args);
-}
-
-export function computeProviderFailureBackoffDelayMs(args: {
-  scope: ProviderFailureBackoffScope;
-  error?: unknown;
-  statusCode?: number;
-  attempt?: number;
-  consecutive?: number;
-}): number {
-  return computeProviderFailureBackoffDelayMsBlock(args);
 }
 
 export function resolveProviderFailureActionPlan(args: {
@@ -812,7 +787,6 @@ export function resolveProviderFailureActionPlan(args: {
       blockingRecoverable: false,
       shouldRetry: false,
       action: 'direct_return',
-      backoff: resolveProviderFailureBackoffPlan({ scope: 'none' }),
       decisionLabel: 'direct_return'
     };
   }
@@ -824,11 +798,6 @@ export function resolveProviderFailureActionPlan(args: {
     blockingRecoverable,
     shouldRetry: true,
     action,
-    backoff: resolveProviderFailureBackoffPlan({
-      scope: 'none',
-      error: args.error,
-      statusCode: args.statusCode
-    }),
     decisionLabel: describeProviderFailureDecision({
       action
     })

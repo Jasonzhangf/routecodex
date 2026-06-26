@@ -7,8 +7,6 @@ export {
   resolveProviderFailureOutcome,
   isBlockingRecoverableProviderFailure,
   describeProviderFailureDecision,
-  resolveProviderFailureBackoffPlan,
-  computeProviderFailureBackoffDelayMs,
   resolveProviderFailureActionPlan,
   resolveProviderFailureRetryEligibility,
   resolveProviderFailureExclusionDecision,
@@ -37,18 +35,9 @@ export type ProviderFailureAction =
   | 'direct_return'
   | ProviderFailureRetryAction;
 
-export type ProviderFailureBackoffScope =
-  | 'none';
-
 export type ProviderFailureDecisionLabel =
   | 'direct_return'
   | 'exclude_and_reroute';
-
-export type ProviderFailureBackoffPlan = {
-  scope: ProviderFailureBackoffScope;
-  keyKind: ProviderFailureBackoffScope;
-  delaySequenceMs: readonly number[];
-};
 
 export type ProviderFailureActionPlan = {
   classification?: ProviderFailureClassification;
@@ -56,7 +45,6 @@ export type ProviderFailureActionPlan = {
   blockingRecoverable: boolean;
   shouldRetry: boolean;
   action: ProviderFailureAction;
-  backoff: ProviderFailureBackoffPlan;
   decisionLabel: ProviderFailureDecisionLabel;
 };
 

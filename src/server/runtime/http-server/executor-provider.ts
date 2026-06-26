@@ -1,6 +1,5 @@
 import type { ProviderError } from '../../../providers/core/api/provider-types.js';
 import {
-  computeProviderFailureBackoffDelayMs,
   resolveProviderFailureRetryEligibility
 } from '../../../providers/core/runtime/provider-failure-policy.js';
 
@@ -135,15 +134,9 @@ type WaitBeforeRetryOptions = {
 };
 
 export function computeRetryDelayMs(error: unknown, options?: WaitBeforeRetryOptions): number {
-  const status = extractErrorStatusCode(error);
-  const attemptRaw = typeof options?.attempt === 'number' && Number.isFinite(options.attempt) ? options.attempt : 1;
-  const attempt = Math.max(1, Math.floor(attemptRaw));
-  return computeProviderFailureBackoffDelayMs({
-    scope: 'none',
-    error,
-    statusCode: status,
-    attempt
-  });
+  void error;
+  void options;
+  return 0;
 }
 
 export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryOptions): Promise<number> {

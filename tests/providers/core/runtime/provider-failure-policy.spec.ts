@@ -41,11 +41,7 @@ describe('provider failure policy ssot', () => {
       affectsHealth: true,
       shouldRetry: false,
       action: 'direct_return',
-      decisionLabel: 'direct_return',
-      backoff: expect.objectContaining({
-        scope: 'none',
-        delaySequenceMs: []
-      })
+      decisionLabel: 'direct_return'
     }));
   });
 
@@ -143,10 +139,7 @@ describe('provider failure policy ssot', () => {
       affectsHealth: true,
       shouldRetry: false,
       action: 'direct_return',
-      decisionLabel: 'direct_return',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
+      decisionLabel: 'direct_return'
     }));
   });
 
@@ -183,10 +176,7 @@ describe('provider failure policy ssot', () => {
       affectsHealth: false,
       shouldRetry: false,
       action: 'direct_return',
-      decisionLabel: 'direct_return',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
+      decisionLabel: 'direct_return'
     }));
   });
 
@@ -314,10 +304,7 @@ describe('provider failure policy ssot', () => {
       affectsHealth: false,
       shouldRetry: false,
       action: 'direct_return',
-      decisionLabel: 'direct_return',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
+      decisionLabel: 'direct_return'
     }));
   });
 
@@ -490,10 +477,7 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'exclude_and_reroute',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
+      decisionLabel: 'exclude_and_reroute'
     }));
   });
 
@@ -527,10 +511,7 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'exclude_and_reroute',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
+      decisionLabel: 'exclude_and_reroute'
     }));
   });
 
@@ -554,14 +535,11 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'exclude_and_reroute',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
+      decisionLabel: 'exclude_and_reroute'
     }));
   });
 
-  it('treats transport fetch failed as recoverable same-provider blocking backoff', () => {
+  it('treats transport fetch failed as recoverable blocking reroute', () => {
     const error = Object.assign(new Error('fetch failed'), {
       code: 'HTTP_502',
       statusCode: 502
@@ -582,10 +560,7 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'exclude_and_reroute',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
+      decisionLabel: 'exclude_and_reroute'
     }));
   });
 
@@ -652,10 +627,7 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'exclude_and_reroute',
-      backoff: expect.objectContaining({
-        scope: 'none'
-      })
+      decisionLabel: 'exclude_and_reroute'
     }));
   });
 
