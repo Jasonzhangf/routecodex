@@ -33,7 +33,6 @@ type ProviderFailureDecisionLabel =
   | 'direct_return'
   | 'exclude_and_reroute';
 
-
 // Phase 2: SSOT composition - provider-agnostic catalog + provider-specific contracts.
 const UNRECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
   ...PROVIDER_UNRECOVERABLE_CODES,
