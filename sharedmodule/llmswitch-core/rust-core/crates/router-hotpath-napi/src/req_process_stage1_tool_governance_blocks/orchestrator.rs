@@ -100,10 +100,6 @@ fn should_inject_stopless_system_instruction(
             .and_then(|runtime_control| runtime_control.get("stopMessageEnabled"))
             .and_then(Value::as_bool)
             .unwrap_or(false)
-        || metadata
-            .get("stopMessageEnabled")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
 }
 
 fn request_has_tool(request: &Map<String, Value>, tool_name: &str) -> bool {

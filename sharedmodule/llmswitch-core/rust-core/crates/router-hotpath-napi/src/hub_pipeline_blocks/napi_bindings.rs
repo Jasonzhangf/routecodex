@@ -102,11 +102,7 @@ fn stop_message_excludes_direct(metadata: &Value) -> bool {
                 .and_then(Value::as_object)
                 .and_then(|runtime_control| runtime_control.get("stopMessageEnabled"))
                 .map(|value| read_boolish(Some(value)))
-                .unwrap_or_else(|| {
-                    root.get("stopMessageEnabled")
-                        .map(|value| read_boolish(Some(value)))
-                        .unwrap_or(false)
-                })
+                .unwrap_or(false)
         });
     if !stop_message_enabled {
         return false;
@@ -119,11 +115,7 @@ fn stop_message_excludes_direct(metadata: &Value) -> bool {
                 .and_then(Value::as_object)
                 .and_then(|runtime_control| runtime_control.get("stopMessageExcludeDirect"))
                 .map(|value| read_boolish(Some(value)))
-                .unwrap_or_else(|| {
-                    root.get("stopMessageExcludeDirect")
-                        .map(|value| read_boolish(Some(value)))
-                        .unwrap_or(false)
-                })
+                .unwrap_or(false)
         })
 }
 
@@ -238,8 +230,10 @@ mod responses_direct_route_decision_tests {
                 ]
             }),
             &serde_json::json!({
-                "stopMessageEnabled": true,
-                "stopMessageExcludeDirect": true
+                "runtime_control": {
+                    "stopMessageEnabled": true,
+                    "stopMessageExcludeDirect": true
+                }
             }),
             "openai-responses",
             "client",
@@ -269,8 +263,10 @@ mod responses_direct_route_decision_tests {
                 ]
             }),
             &serde_json::json!({
-                "stopMessageEnabled": false,
-                "stopMessageExcludeDirect": false,
+                "runtime_control": {
+                    "stopMessageEnabled": false,
+                    "stopMessageExcludeDirect": false
+                },
                 "metadataCenterSnapshot": {
                     "runtimeControl": {
                         "stopMessage": {
@@ -305,8 +301,10 @@ mod responses_direct_route_decision_tests {
                 ]
             }),
             &serde_json::json!({
-                "stopMessageEnabled": true,
-                "stopMessageExcludeDirect": false
+                "runtime_control": {
+                    "stopMessageEnabled": true,
+                    "stopMessageExcludeDirect": false
+                }
             }),
             "openai-responses",
             "client",

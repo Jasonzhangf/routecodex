@@ -16,10 +16,12 @@ function fail(message) {
 const functionMap = read('docs/architecture/function-map.yml');
 const verificationMap = read('docs/architecture/verification-map.yml');
 const mainlineMap = read('docs/architecture/mainline-call-map.yml');
-const manifest = read('docs/architecture/manifests/metadata.center.mainline.yml');
+const manifest = read('docs/architecture/metadata-center-manifest.yml');
 const dualwriteApi = read('src/server/runtime/http-server/metadata-center/dualwrite-api.ts');
 const metadataCenter = read('src/server/runtime/http-server/metadata-center/metadata-center.ts');
 const dualwriteTest = read('tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts');
+const rustDirectDecision = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
+const rustReqGovernance = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs');
 
 if (!functionMap.includes('feature_id: hub.metadata_center_dualwrite_api')) {
   fail('function-map missing hub.metadata_center_dualwrite_api');
@@ -82,6 +84,30 @@ const requiredTestNeedles = [
 for (const needle of requiredTestNeedles) {
   if (!dualwriteTest.includes(needle)) {
     fail(`dualwrite contract test missing coverage needle: ${needle}`);
+  }
+}
+
+const forbiddenRustTruthResidueNeedles = [
+  {
+    source: rustDirectDecision,
+    needle: 'root.get("stopMessageEnabled")',
+    label: 'direct decision top-level stopMessageEnabled truth read',
+  },
+  {
+    source: rustDirectDecision,
+    needle: 'root.get("stopMessageExcludeDirect")',
+    label: 'direct decision top-level stopMessageExcludeDirect truth read',
+  },
+  {
+    source: rustReqGovernance,
+    needle: 'metadata\n            .get("stopMessageEnabled")',
+    label: 'req governance top-level stopMessageEnabled truth read',
+  }
+];
+
+for (const { source, needle, label } of forbiddenRustTruthResidueNeedles) {
+  if (source.includes(needle)) {
+    fail(`forbidden Rust truth residue present: ${label}`);
   }
 }
 
