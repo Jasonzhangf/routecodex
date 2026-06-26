@@ -4,6 +4,7 @@ import {
   computeCacheHitRatio,
   mergeUsageMetrics
 } from '../../../../../src/server/runtime/http-server/executor/usage-aggregator.js';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('usage log text', () => {
   it('caps cache hit ratio at 100 percent', () => {
@@ -139,6 +140,47 @@ describe('usage log text', () => {
     }, {
       providerProtocol: 'openai-responses'
     });
+
+    expect(usage).toEqual({
+      prompt_tokens: 306,
+      completion_tokens: 40,
+      total_tokens: 346,
+      cache_read_input_tokens: 12,
+      cache_creation_input_tokens: undefined
+    });
+  });
+
+  it('prefers metadata center runtime_control.providerProtocol over flat metadata providerProtocol', () => {
+    const metadata: Record<string, unknown> = {
+      providerProtocol: 'anthropic'
+    };
+    const center = new MetadataCenter();
+    center.writeRuntimeControl(
+      'providerProtocol',
+      'openai-responses',
+      {
+        module: 'tests/server/runtime/http-server/executor/usage-aggregator.spec.ts',
+        symbol: 'metadataCenterProviderProtocolOverride',
+        stage: 'test',
+      },
+      'verify usage aggregator prefers metadata center provider protocol',
+    );
+    MetadataCenter.bind(metadata, center);
+
+    const usage = extractUsageFromResult({
+      body: {
+        data: {
+          usage: {
+            input_tokens: 306,
+            input_tokens_details: {
+              cached_tokens: 12
+            },
+            output_tokens: 40,
+            total_tokens: 346
+          }
+        }
+      }
+    }, metadata);
 
     expect(usage).toEqual({
       prompt_tokens: 306,

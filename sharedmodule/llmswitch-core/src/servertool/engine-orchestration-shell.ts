@@ -21,16 +21,88 @@ import {
   recordServertoolEngineMatchHit,
   recordServertoolEngineMatchSkipped
 } from './engine-observation-shell.js';
-import {
-  planServertoolEngineRuntimeActionWithNative,
-  planServertoolEngineSkipWithNative,
-  planStoplessOrchestrationActionWithNative,
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { runEnginePreflight } from './engine-preflight-shell.js';
+import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import {
+  readProviderProtocolFromAnyBoundMetadataCenter,
   readRequestTruthSessionIdFromAnyBoundMetadataCenter,
   readStoplessRuntimeControlFromAnyBoundMetadataCenter
 } from './stopless-metadata-carrier.js';
+
+function planServertoolEngineRuntimeActionWithNativeLocal(input: {
+  hasPendingInjection: boolean;
+  isStopMessageFlow: boolean;
+  executionContext?: Record<string, unknown>;
+  stoplessAction: string;
+}): { action: string } {
+  const fn = readNativeFunction('planServertoolEngineRuntimeActionJson');
+  if (!fn) {
+    return { action: 'return_servertool_cli_projection_final' };
+  }
+  const executionContext = input.executionContext ?? {};
+  const hasServertoolCliProjectionContext = Boolean(
+    executionContext.servertoolCliProjection && typeof executionContext.servertoolCliProjection === 'object'
+  );
+  const raw = fn(JSON.stringify({
+    hasPendingInjection: input.hasPendingInjection,
+    isStopMessageFlow: input.isStopMessageFlow,
+    executionContext: executionContext,
+    hasServertoolCliProjectionContext,
+    stoplessAction: input.stoplessAction
+  }));
+  if (typeof raw !== 'string') {
+    return { action: 'return_servertool_cli_projection_final' };
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { action: 'return_servertool_cli_projection_final' };
+  }
+}
+
+function planServertoolEngineSkipWithNativeLocal(input: {
+  engineMode: string;
+  hasExecution: boolean;
+}): { action: string; skipReason?: string } {
+  const fn = readNativeFunction('planServertoolEngineSkipJson');
+  if (!fn) {
+    return { action: 'return_skipped_passthrough', skipReason: 'native_unavailable' };
+  }
+  const raw = fn(JSON.stringify({
+    engineMode: input.engineMode,
+    hasExecution: input.hasExecution
+  }));
+  if (typeof raw !== 'string') {
+    return { action: 'return_skipped_passthrough', skipReason: 'native_returned_non_string' };
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { action: 'return_skipped_passthrough', skipReason: 'native_parse_failed' };
+  }
+}
+
+function planStoplessOrchestrationActionWithNativeLocal(input: {
+  flowId?: string;
+  execution: Record<string, unknown>;
+}): { action: string; isStopMessageFlow: boolean; reason: string } {
+  const fn = readNativeFunction('planStoplessOrchestrationActionJson');
+  if (!fn) {
+    return { action: 'cli_projection', isStopMessageFlow: false, reason: 'native_unavailable' };
+  }
+  const raw = fn(JSON.stringify({
+    flowId: input.flowId ?? null,
+    execution: input.execution
+  }));
+  if (typeof raw !== 'string') {
+    return { action: 'cli_projection', isStopMessageFlow: false, reason: 'native_returned_non_string' };
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { action: 'cli_projection', isStopMessageFlow: false, reason: 'native_parse_failed' };
+  }
+}
 
 export interface ServerToolOrchestrationOptions {
   chat: JsonObject;
@@ -39,6 +111,16 @@ export interface ServerToolOrchestrationOptions {
   entryEndpoint: string;
   providerProtocol: string;
   stageRecorder?: StageRecorder;
+  reenterPipeline?: (options: {
+    entryEndpoint: string;
+    requestId: string;
+    body?: JsonObject;
+    metadata?: JsonObject;
+  }) => Promise<{
+    body?: JsonObject;
+    sseStream?: unknown;
+    format?: string;
+  }>;
 }
 
 export interface ServerToolOrchestrationResult {
@@ -77,6 +159,11 @@ function createServerToolEngineRunner(args: {
 export async function runServerToolOrchestrationShell(
   options: ServerToolOrchestrationOptions
 ): Promise<ServerToolOrchestrationResult> {
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
+  if (!providerProtocol) {
+    throw new Error('Servertool engine orchestration requires metadata center runtime_control.providerProtocol');
+  }
   const {
     logStopEntry,
     logProgress,
@@ -86,7 +173,7 @@ export async function runServerToolOrchestrationShell(
   } = createServertoolObservation({
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
-    providerProtocol: options.providerProtocol,
+    providerProtocol,
     adapterContext: options.adapterContext,
     stageRecorder: options.stageRecorder
   });
@@ -112,7 +199,7 @@ export async function runServerToolOrchestrationShell(
     adapterContext: options.adapterContext,
     entryEndpoint: options.entryEndpoint,
     requestId: options.requestId,
-    providerProtocol: options.providerProtocol,
+    providerProtocol,
     onAutoHookTrace: logAutoHookTrace
   };
 
@@ -125,7 +212,7 @@ export async function runServerToolOrchestrationShell(
   const engineResult = await runPrimaryServerToolEngineSelection({
     runEngine
   });
-  const engineSkipPlan = planServertoolEngineSkipWithNative({
+  const engineSkipPlan = planServertoolEngineSkipWithNativeLocal({
     engineMode: engineResult.mode,
     hasExecution: Boolean(engineResult.execution)
   });
@@ -145,9 +232,10 @@ export async function runServerToolOrchestrationShell(
     recordServertoolEngineMatchSkipped({
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint,
-      providerProtocol: options.providerProtocol,
+      providerProtocol,
       engineMode: engineResult.mode,
-      stageRecorder: options.stageRecorder
+      stageRecorder: options.stageRecorder,
+      adapterContext: options.adapterContext
     });
     return {
       chat: engineResult.finalChatResponse,
@@ -195,7 +283,7 @@ export async function runServerToolOrchestrationShell(
     }
   };
   const stoplessPlan = flowId === 'stop_message_flow'
-    ? planStoplessOrchestrationActionWithNative({
+    ? planStoplessOrchestrationActionWithNativeLocal({
         flowId,
         execution: stoplessExecution
       })
@@ -203,7 +291,7 @@ export async function runServerToolOrchestrationShell(
         action: 'cli_projection',
         isStopMessageFlow: false
       };
-  const runtimeAction = planServertoolEngineRuntimeActionWithNative({
+  const runtimeAction = planServertoolEngineRuntimeActionWithNativeLocal({
     hasPendingInjection: Boolean(engineResult.pendingInjection),
     isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
     executionContext,

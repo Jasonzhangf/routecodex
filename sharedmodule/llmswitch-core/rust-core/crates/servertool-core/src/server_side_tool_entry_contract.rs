@@ -77,6 +77,9 @@ mod tests {
             has_base_object: true,
             adapter_client_disconnected: false,
         });
-        assert_eq!(plan.action, ServertoolEntryPreflightAction::ContinueToToolFlow);
+        assert_eq!(
+            plan.action,
+            ServertoolEntryPreflightAction::ContinueToToolFlow
+        );
     }
 }

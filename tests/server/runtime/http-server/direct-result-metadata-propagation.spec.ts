@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { Readable } from 'node:stream';
 
 jest.unstable_mockModule(
   '../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.js',
@@ -215,6 +216,69 @@ describe('http-server direct result metadata propagation', () => {
 
     expect(result.body).toBe(readonlyBody);
     expect((result.body as Record<string, unknown>).model).toBe('gpt-5.4');
+  });
+
+  it('router-direct streamed chat tool_calls retains client model metadata for downstream SSE restore', async () => {
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'MiniMax-M3';
+
+    const result = await server.buildRouterDirectResult({
+      response: {
+        status: 200,
+        sseStream: Readable.from([
+          'data: {"id":"chatcmpl_router_direct_stream_restore","object":"chat.completion.chunk","created":1782386212,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_router_direct_stream_restore","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}\n\n',
+          'data: {"id":"chatcmpl_router_direct_stream_restore","object":"chat.completion.chunk","created":1782386212,"model":"MiniMax-M3","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+        data: {
+          id: 'chatcmpl_router_direct_stream_restore',
+          object: 'chat.completion',
+          model: 'MiniMax-M3',
+          choices: [
+            {
+              index: 0,
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_router_direct_stream_restore',
+                    type: 'function',
+                    function: {
+                      name: 'read_file',
+                      arguments: '{"path":"src/main.rs"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      providerHandle: { providerProtocol: 'openai-chat', providerType: 'openai' },
+      auditContext: { providerKey: 'minimax.key1.MiniMax-M3', routingDecision: { routeName: 'tools' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 12,
+    }, {
+      requestId: 'req-router-direct-stream-restore',
+      body: { model: 'gpt-5.4', stream: true },
+      metadata: {
+        clientModelId: 'gpt-5.4',
+        originalModelId: 'gpt-5.4',
+      },
+    });
+
+    expect(result.continuationOwner).toBe('direct');
+    expect(result.metadata).toMatchObject({
+      clientModelId: 'gpt-5.4',
+      originalModelId: 'gpt-5.4',
+    });
+    expect(result.sseStream).toBeDefined();
+    expect(result.usageLogInfo).toMatchObject({
+      model: 'MiniMax-M3',
+      finishReason: 'tool_calls',
+    });
   });
   it('router-direct completed responses clear captured request state instead of leaving stale continuation history', async () => {
     captureResponsesRequestContext({

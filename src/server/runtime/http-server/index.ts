@@ -205,7 +205,6 @@ import { mapProviderProtocol } from './provider-utils.js';
 import { mapErrorToPublicLogSummary } from '../../utils/http-error-mapper.js';
 import { emitRequestExecutorProviderRetryTelemetry } from './executor/request-executor-retry-telemetry.js';
 import {
-  isServerToolFollowupRequest,
   logProviderRetrySwitchCompact,
   REQUEST_EXECUTOR_NON_BLOCKING_LOG_THROTTLE_MS,
 } from './executor/request-executor-runtime-blocks.js';
@@ -252,10 +251,10 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
   };
 }
 
-function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
+function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'routeHint' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
   metadata: Record<string, unknown>,
   key: K,
-  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' ? string : boolean,
+  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' | 'routeHint' ? string : boolean,
   reason: string
 ): void {
   MetadataCenter.attach(metadata).writeRuntimeControl(
@@ -1255,9 +1254,16 @@ export class RouteCodexHttpServer {
       routecodexRoutingPolicyGroup: portConfig?.routingPolicyGroup,
       routecodexServerId: this.resolvePortServerId(portConfig, localPort),
       entryPort: typeof portConfig?.port === 'number' ? portConfig.port : localPort,
-      ...(routeHint ? { routeHint } : {}),
       ...(allowedProviders ? { allowedProviders } : {}),
     };
+    if (routeHint) {
+      writeMetadataCenterRuntimeControl(
+        metadata,
+        'routeHint',
+        routeHint,
+        'request header route hint'
+      );
+    }
     writeMetadataCenterRuntimeControl(
       metadata,
       'stopMessageEnabled',
@@ -1309,14 +1315,10 @@ export class RouteCodexHttpServer {
       const mustRelayLocalResponsesContinuation =
         portConfig?.mode === 'router'
         && resumeContinuationOwner === 'relay';
-      const mustRelayServerToolFollowup =
-        portConfig?.mode === 'router'
-        && isServerToolFollowupRequest(metadata);
       if (
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
         && !mustRelayLocalResponsesContinuation
-        && !mustRelayServerToolFollowup
       ) {
         const routerDirectStormScopes = resolveSessionStormBackoffScopes(asMetadataRecord(nextInput.metadata));
         this.logStage('router-direct.entry', input.requestId, {
@@ -1746,12 +1748,14 @@ export class RouteCodexHttpServer {
         providerKey,
         providerType,
         runtimeKey,
+        modelId: typeof target.modelId === 'string' ? target.modelId : undefined,
       },
       routingDecision: routingDecision as { routeName?: string; pool?: string[] } | undefined,
       requestInfo: {
         path: input.entryEndpoint,
         headers: input.headers as Record<string, string | string[] | undefined>,
       },
+      pipelineMetadata: metadataForHub,
       resolveProviderByRuntimeKey: (runtimeKey?: string) => {
         if (!runtimeKey) return undefined;
         return this.isProviderVisibleInMetadataScope(runtimeKey, metadataForHub)
@@ -1903,7 +1907,7 @@ export class RouteCodexHttpServer {
           excludedProviderKeys: retryState.excludedProviderKeys,
           recordAttempt: () => {},
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
-          routeHint: typeof metadataForHub.routeHint === 'string' ? metadataForHub.routeHint : undefined,
+          routeHint: readRuntimeControlProjection(metadataForHub).routeHint,
           transientRetryTracker: retryState.transientRetryTracker,
           isStreamingRequest: readRuntimeControlProjection(metadataForHub).streamIntent === 'stream',
           logNonBlockingError: logRouterDirectNonBlockingError,
@@ -1951,12 +1955,7 @@ export class RouteCodexHttpServer {
         retryState.excludedProviderKeys = new Set(retryDecision.mutatedExcluded);
         directRetryRequested = retryDecision.shouldRecurse;
         const switchAction = retryPlan.retrySwitchPlan?.switchAction ?? 'exclude_and_reroute';
-        if (switchAction === 'retry_same_provider_once') {
-          retryState.retryProviderKey = ctx.providerKey;
-          retryState.excludedProviderKeys.delete(ctx.providerKey);
-        } else {
-          retryState.retryProviderKey = undefined;
-        }
+        retryState.retryProviderKey = undefined;
         this.logStage('router-direct.unified_decision.applied', input.requestId, {
           providerKey: ctx.providerKey,
           switchAction,
@@ -2119,13 +2118,27 @@ export class RouteCodexHttpServer {
         });
       }
     }
+    const directResponseMetadata =
+      input.metadata && typeof input.metadata === 'object'
+        ? { ...(input.metadata as Record<string, unknown>) }
+        : { ...(normalized.metadata ?? {}) };
+    const inputMetadataCenter =
+      input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+        ? MetadataCenter.read(input.metadata as Record<string, unknown>)
+        : undefined;
+    const normalizedMetadataCenter =
+      normalized.metadata && typeof normalized.metadata === 'object' && !Array.isArray(normalized.metadata)
+        ? MetadataCenter.read(normalized.metadata as Record<string, unknown>)
+        : undefined;
+    if (inputMetadataCenter) {
+      MetadataCenter.bind(directResponseMetadata, inputMetadataCenter);
+    } else if (normalizedMetadataCenter) {
+      MetadataCenter.bind(directResponseMetadata, normalizedMetadataCenter);
+    }
     const baseResult: PipelineExecutionResult = {
       ...normalized,
       continuationOwner: 'direct',
-      metadata:
-        input.metadata && typeof input.metadata === 'object'
-          ? { ...(input.metadata as Record<string, unknown>) }
-          : { ...(normalized.metadata ?? {}) },
+      metadata: directResponseMetadata,
       usageLogInfo: {
         ...normalized.usageLogInfo ?? {},
         providerKey: auditContext.providerKey,
@@ -2386,7 +2399,7 @@ export class RouteCodexHttpServer {
             excludedProviderKeys: new Set<string>(),
             recordAttempt: () => {},
             logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
-            routeHint: typeof metadata?.routeHint === 'string' ? metadata.routeHint : undefined,
+            routeHint: readRuntimeControlProjection(metadata).routeHint,
             isStreamingRequest: readRuntimeControlProjection(metadata).streamIntent === 'stream',
             logNonBlockingError: logRouterDirectNonBlockingError,
             metadata: {

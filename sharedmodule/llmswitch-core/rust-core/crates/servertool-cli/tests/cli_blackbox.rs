@@ -73,7 +73,9 @@ fn stop_message_auto_outputs_rust_owned_schema() {
     assert_eq!(value["tool"], "stop_message_auto");
     assert_eq!(value["flowId"], "stop_message_flow");
     assert_eq!(value["summary"], "stopless continuation ready");
-    let prompt = value["continuationPrompt"].as_str().expect("continuation prompt");
+    let prompt = value["continuationPrompt"]
+        .as_str()
+        .expect("continuation prompt");
     assert!(!prompt.is_empty());
     for forbidden in [
         "schema",
@@ -105,7 +107,10 @@ fn stop_message_auto_outputs_rust_owned_schema() {
         .contains("避免模型只写泛泛的总结"));
     assert_eq!(value["schemaGuidance"]["stopreasonValues"]["finished"], 0);
     assert_eq!(value["schemaGuidance"]["stopreasonValues"]["blocked"], 1);
-    assert_eq!(value["schemaGuidance"]["stopreasonValues"]["continueNeeded"], 2);
+    assert_eq!(
+        value["schemaGuidance"]["stopreasonValues"]["continueNeeded"],
+        2
+    );
     assert!(value["schemaGuidance"]["requiredFields"]
         .as_array()
         .expect("required fields")
@@ -177,11 +182,17 @@ fn missing_continuation_prompt_still_succeeds_status_only() {
         ])
         .output()
         .expect("run routecodex-servertool");
-    assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["toolName"], "stop_message_auto");
     assert_eq!(value["flowId"], "stop_message_flow");
-    let prompt = value["continuationPrompt"].as_str().expect("continuation prompt");
+    let prompt = value["continuationPrompt"]
+        .as_str()
+        .expect("continuation prompt");
     assert!(!prompt.is_empty());
     assert!(value["input"].get("continuationPrompt").is_none());
     assert!(value["input"].get("schemaGuidance").is_none());
@@ -247,7 +258,11 @@ fn stopless_repeat_count_depends_only_on_current_input() {
         ])
         .output()
         .expect("run routecodex-servertool");
-    assert!(first.status.success(), "stderr={}", String::from_utf8_lossy(&first.stderr));
+    assert!(
+        first.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&first.stderr)
+    );
     let first_value: serde_json::Value =
         serde_json::from_slice(&first.stdout).expect("json stdout");
     assert_eq!(first_value["repeatCount"], 2);
@@ -266,7 +281,11 @@ fn stopless_repeat_count_depends_only_on_current_input() {
         ])
         .output()
         .expect("run routecodex-servertool");
-    assert!(second.status.success(), "stderr={}", String::from_utf8_lossy(&second.stderr));
+    assert!(
+        second.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&second.stderr)
+    );
     let second_value: serde_json::Value =
         serde_json::from_slice(&second.stdout).expect("json stdout");
     assert_eq!(second_value["repeatCount"], 3);
@@ -421,7 +440,11 @@ fn exhausted_stop_message_repeat_budget_returns_terminal_summary() {
             ])
             .output()
             .expect("run routecodex-servertool");
-        assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
         assert_eq!(value["summary"], "stopless budget exhausted");
         assert_eq!(value["repeatCount"], value["maxRepeats"]);
@@ -449,7 +472,11 @@ fn exhausted_explicit_repeat_args_return_terminal_summary() {
         ])
         .output()
         .expect("run routecodex-servertool");
-    assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["summary"], "stopless budget exhausted");
     assert_eq!(value["repeatCount"], 3);
@@ -785,6 +812,41 @@ fn reasoning_stop_raw_partial_schema_derives_missing_schema_feedback() {
     assert!(guidance.contains("怎么填："));
     assert!(guidance.contains("stopreason 取值："));
     assert!(guidance.contains("最小可复制样本："));
+}
+
+#[test]
+fn reasoning_stop_control_envelope_keeps_invalid_schema_feedback() {
+    let (session_id, request_id) = unique_identity("reasoning-control-envelope");
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "reasoning_stop",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
+            "--input-json",
+            r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3,"stopreason":2,"reason":"还没完成","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_suggested_path":"","needs_user_input":false,"learned":""}"#,
+        ])
+        .output()
+        .expect("run routecodex-servertool reasoning_stop");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["input"]["triggerHint"], "invalid_schema");
+    assert_eq!(value["schemaGuidance"]["triggerHint"], "invalid_schema");
+    assert_eq!(
+        value["schemaFeedback"]["reasonCode"],
+        "stop_schema_next_step_missing"
+    );
+    assert!(value["schemaFeedback"]["missingFields"]
+        .as_array()
+        .expect("missing fields")
+        .iter()
+        .any(|field| field.as_str() == Some("next_step")));
 }
 
 #[test]

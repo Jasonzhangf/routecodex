@@ -1,4 +1,20 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function bindProviderProtocol(adapterContext: Record<string, unknown>, providerProtocol = 'openai-responses'): void {
+  const center = MetadataCenter.attach(adapterContext);
+  if (!center.readRuntimeControl().providerProtocol) {
+    center.writeRuntimeControl(
+      'providerProtocol',
+      providerProtocol,
+      {
+        module: 'tests/servertool/dispatch-preparation-shell.spec.ts',
+        symbol: 'bindProviderProtocol',
+        stage: 'test'
+      }
+    );
+  }
+}
 
 const readRuntimeMetadataMock = jest.fn(() => undefined);
 const resolveServertoolRuntimePreCommandStateMock = jest.fn(() => undefined);
@@ -79,12 +95,15 @@ describe('dispatch-preparation-shell', () => {
   });
 
   test('builds dispatch plan after pre-command application', () => {
+    const adapterContext: Record<string, unknown> = {};
+    bindProviderProtocol(adapterContext, 'openai-responses');
     const toolCalls = [{ id: 'call_1', name: 'web_search', arguments: '{}' }];
     const result = prepareServertoolDispatchStage({
       options: {
         requestId: 'req-1',
         entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses'
+        providerProtocol: 'openai-responses',
+        adapterContext
       } as any,
       toolCalls,
       baseObject: { choices: [] } as any,
@@ -112,5 +131,55 @@ describe('dispatch-preparation-shell', () => {
       })
     );
     expect(result.dispatchPlan.executableToolCalls).toEqual(toolCalls);
+  });
+
+  test('fails fast when metadata center runtimeControl.providerProtocol is absent', () => {
+    expect(() => prepareServertoolDispatchStage({
+      options: {
+        requestId: 'req-1',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        adapterContext: {}
+      } as any,
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+      baseObject: { choices: [] } as any,
+      baseForExecution: { choices: [] } as any,
+      includeToolCallNames: null,
+      excludeToolCallNames: null
+    })).toThrow('Servertool dispatch preparation requires metadata center runtime_control.providerProtocol');
+  });
+
+  test('prefers bound metadata center providerProtocol when resolving pre-command runtime state', () => {
+    const adapterContext: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(adapterContext);
+    center.writeRuntimeControl(
+      'providerProtocol',
+      'anthropic-messages',
+      {
+        module: 'tests/servertool/dispatch-preparation-shell.spec.ts',
+        symbol: 'prefers bound metadata center providerProtocol when resolving pre-command runtime state',
+        stage: 'test'
+      }
+    );
+
+    prepareServertoolDispatchStage({
+      options: {
+        requestId: 'req-center-provider-protocol',
+        entryEndpoint: '/v1/messages',
+        providerProtocol: 'openai-chat',
+        adapterContext
+      } as any,
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+      baseObject: { choices: [] } as any,
+      baseForExecution: { choices: [] } as any,
+      includeToolCallNames: null,
+      excludeToolCallNames: null
+    });
+
+    expect(resolveServertoolRuntimePreCommandStateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerProtocol: 'anthropic-messages'
+      })
+    );
   });
 });

@@ -1,10 +1,12 @@
 // feature_id: hub.metadata_center_dualwrite_api
 import type {
   MetadataCenterClientAttachmentScope,
+  MetadataCenterCloseoutStatus,
   MetadataCenterContinuationContext,
   MetadataCenterDebugSnapshot,
   MetadataCenterFamily,
   MetadataCenterProviderObservation,
+  MetadataCenterResponseObservation,
   MetadataCenterRequestTruth,
   MetadataCenterRuntimeControl,
   MetadataCenterWriter
@@ -18,6 +20,8 @@ type FamilyPayload = {
   continuation_context: MetadataCenterContinuationContext;
   runtime_control: MetadataCenterRuntimeControl;
   provider_observation: MetadataCenterProviderObservation;
+  response_observation: MetadataCenterResponseObservation;
+  closeout_status: MetadataCenterCloseoutStatus;
   client_attachment_scope: MetadataCenterClientAttachmentScope;
   debug_snapshot: MetadataCenterDebugSnapshot;
 };
@@ -26,6 +30,8 @@ type CamelFamilyName = 'requestTruth'
   | 'continuationContext'
   | 'runtimeControl'
   | 'providerObservation'
+  | 'responseObservation'
+  | 'closeoutStatus'
   | 'clientAttachmentScope'
   | 'debugSnapshot';
 
@@ -34,6 +40,8 @@ const CAMEL_FAMILY: Record<MetadataCenterFamily, CamelFamilyName> = {
   continuation_context: 'continuationContext',
   runtime_control: 'runtimeControl',
   provider_observation: 'providerObservation',
+  response_observation: 'responseObservation',
+  closeout_status: 'closeoutStatus',
   client_attachment_scope: 'clientAttachmentScope',
   debug_snapshot: 'debugSnapshot'
 };
@@ -58,6 +66,8 @@ export type MetadataCenterRustSnapshot = {
   continuationContext?: MetadataCenterContinuationContext;
   runtimeControl?: MetadataCenterRuntimeControl;
   providerObservation?: MetadataCenterProviderObservation;
+  responseObservation?: MetadataCenterResponseObservation;
+  closeoutStatus?: MetadataCenterCloseoutStatus;
   clientAttachmentScope?: MetadataCenterClientAttachmentScope;
   debugSnapshot?: MetadataCenterDebugSnapshot;
 };
@@ -148,6 +158,22 @@ function writeJsMirror(input: MetadataCenterDualWriteInput): void {
         input.reason
       );
       return;
+    case 'response_observation':
+      center.writeResponseObservation(
+        input.key as keyof MetadataCenterResponseObservation,
+        input.value as MetadataCenterResponseObservation[keyof MetadataCenterResponseObservation],
+        input.writer,
+        input.reason
+      );
+      return;
+    case 'closeout_status':
+      center.writeCloseoutStatus(
+        input.key as keyof MetadataCenterCloseoutStatus,
+        input.value as MetadataCenterCloseoutStatus[keyof MetadataCenterCloseoutStatus],
+        input.writer,
+        input.reason
+      );
+      return;
     case 'client_attachment_scope':
       center.writeClientAttachmentScope(
         input.key as keyof MetadataCenterClientAttachmentScope,
@@ -176,48 +202,6 @@ function writeRustMirror(input: MetadataCenterDualWriteInput): void {
   writeRustSnapshot(input.target, snapshot);
 }
 
-function writeMigrationMirrors(input: MetadataCenterDualWriteInput): void {
-  if (input.family !== 'runtime_control' || input.key !== 'stopless') {
-    return;
-  }
-  const stopless = asRecord(input.value);
-  if (!stopless) {
-    return;
-  }
-  const flowId = typeof stopless.flowId === 'string' ? stopless.flowId : undefined;
-  const repeatCount = typeof stopless.repeatCount === 'number' ? stopless.repeatCount : undefined;
-  const maxRepeats = typeof stopless.maxRepeats === 'number' ? stopless.maxRepeats : undefined;
-  if (!flowId || repeatCount === undefined || maxRepeats === undefined) {
-    return;
-  }
-  const loopState = {
-    flowId,
-    repeatCount,
-    maxRepeats,
-    ...(typeof stopless.triggerHint === 'string' ? { triggerHint: stopless.triggerHint } : {}),
-    ...(asRecord(stopless.schemaFeedback) ? { schemaFeedback: asRecord(stopless.schemaFeedback) } : {})
-  };
-  writeMetadataCenterSlot({
-    ...input,
-    key: 'serverToolLoopState',
-    value: loopState,
-    reason: input.reason ? `${input.reason}:migration-serverToolLoopState` : 'migration-serverToolLoopState'
-  });
-  writeMetadataCenterSlot({
-    ...input,
-    key: 'stopMessageState',
-    value: {
-      stopMessageText: typeof stopless.continuationPrompt === 'string'
-        ? stopless.continuationPrompt
-        : '继续执行',
-      stopMessageMaxRepeats: maxRepeats,
-      stopMessageUsed: repeatCount,
-      stopMessageStageMode: 'on'
-    },
-    reason: input.reason ? `${input.reason}:migration-stopMessageState` : 'migration-stopMessageState'
-  });
-}
-
 export function writeMetadataCenterSlot(input: MetadataCenterDualWriteInput): void {
   if (input.family !== 'request_truth') {
     assertMetadataCenterScope({
@@ -228,7 +212,6 @@ export function writeMetadataCenterSlot(input: MetadataCenterDualWriteInput): vo
   }
   writeJsMirror(input);
   writeRustMirror(input);
-  writeMigrationMirrors(input);
 }
 
 export function readMetadataCenterSlot(_input: {
@@ -261,6 +244,10 @@ export function readMetadataCenterSlot(_input: {
       return center.readRuntimeControl()[_input.key as keyof MetadataCenterRuntimeControl];
     case 'provider_observation':
       return center.readProviderObservation()[_input.key as keyof MetadataCenterProviderObservation];
+    case 'response_observation':
+      return center.readResponseObservation()[_input.key as keyof MetadataCenterResponseObservation];
+    case 'closeout_status':
+      return center.readCloseoutStatus()[_input.key as keyof MetadataCenterCloseoutStatus];
     case 'client_attachment_scope':
       return center.readClientAttachmentScope()[_input.key as keyof MetadataCenterClientAttachmentScope];
     case 'debug_snapshot':

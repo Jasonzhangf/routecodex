@@ -29,7 +29,6 @@ import { runServertoolResponseStageOrchestrationShell } from '../../../servertoo
 import {
   buildProviderSseStreamReadErrorDescriptorWithNative,
   materializeProviderResponseSsePayloadWithNative,
-  normalizeResponsesToolCallArgumentsForClientWithNative,
   projectPostServertoolHubRespOutbound04ClientSemanticWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
@@ -115,43 +114,6 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
-}
-
-function readClientToolsRawForResponsesNormalization(args: {
-  context: AdapterContext;
-  requestSemantics?: JsonObject;
-}): unknown[] {
-  const capturedEntryRequest = asFlatRecord((args.context as Record<string, unknown>).capturedEntryRequest);
-  const capturedChatRequest = asFlatRecord((args.context as Record<string, unknown>).capturedChatRequest);
-  const capturedRequest = capturedEntryRequest ?? capturedChatRequest;
-  const capturedTools = Array.isArray(capturedRequest?.tools) ? capturedRequest.tools : undefined;
-  if (capturedTools?.length) {
-    return capturedTools;
-  }
-  const semantics = asFlatRecord(args.requestSemantics);
-  const semanticsTools = asFlatRecord(semantics?.tools);
-  const clientToolsRaw = Array.isArray(semanticsTools?.clientToolsRaw) ? semanticsTools.clientToolsRaw : undefined;
-  if (clientToolsRaw?.length) {
-    return clientToolsRaw;
-  }
-  const rootTools = Array.isArray(semantics?.tools) ? semantics.tools : undefined;
-  return rootTools?.length ? rootTools : [];
-}
-
-function normalizeResponsesToolCallsAtChatProcessExit(args: {
-  entryEndpoint: string;
-  payload: JsonObject;
-  context: AdapterContext;
-  requestSemantics?: JsonObject;
-}): JsonObject {
-  if (!String(args.entryEndpoint).toLowerCase().includes('/v1/responses')) {
-    return args.payload;
-  }
-  const toolsRaw = readClientToolsRawForResponsesNormalization({
-    context: args.context,
-    requestSemantics: args.requestSemantics
-  });
-  return normalizeResponsesToolCallArgumentsForClientWithNative(args.payload, toolsRaw) as JsonObject;
 }
 
 function throwServertoolRuntimeErrorDescriptor(descriptor: ProviderResponseServertoolRuntimeErrorDescriptor): never {
@@ -469,12 +431,6 @@ async function executeProviderResponseNativeOutboundEffects(args: {
       responseSemantics: args.context as Record<string, unknown>
     }) as JsonObject
     : respProcessEffect.payload;
-  hubRespOutbound04ClientSemantic = normalizeResponsesToolCallsAtChatProcessExit({
-    entryEndpoint: args.entryEndpoint,
-    payload: hubRespOutbound04ClientSemantic,
-    context: args.context,
-    requestSemantics: args.requestSemantics
-  });
   const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.runtimeEffects);
   await executeProviderResponseNativeRuntimeStateEffect({
     runtimeEffects: args.nativeResponsePlan.runtimeEffects,

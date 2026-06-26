@@ -1,3 +1,4 @@
+// feature_id: hub.web_search_tool_governance
 use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

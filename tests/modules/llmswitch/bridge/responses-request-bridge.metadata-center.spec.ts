@@ -86,10 +86,7 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(metadata.inboundStream).toBeUndefined();
     expect(metadata.outboundStream).toBeUndefined();
     expect(metadata.clientAbortSignal).toBeUndefined();
-    expect(center?.readRequestTruth()).toMatchObject({
-      sessionId: 'sess-resp-1',
-      conversationId: 'conv-resp-1'
-    });
+    expect(center?.readRequestTruth()).toEqual({});
     expect(readRuntimeControlProjection(metadata)).toMatchObject({
       streamIntent: 'stream',
       clientAbort: false
@@ -150,16 +147,18 @@ describe('responses-request-bridge metadata center projection', () => {
     const center = MetadataCenter.read(metadata);
     expect(center?.readContinuationContext()).toMatchObject({
       responsesRequestContext: requestContext,
-      responsesResume: resumeMeta
+      responsesResume: {
+        responseId: 'resp_stopless_live_1',
+        continuationOwner: 'relay',
+        routeHint: 'search',
+        providerKey: 'minimonth.key1.MiniMax-M2.7'
+      }
     });
     expect(readRuntimeControlProjection(metadata)).toMatchObject({
       routeHint: 'search'
     });
     expect(readRuntimeControlProjection(metadata).retryProviderKey).toBeUndefined();
-    expect(center?.readRequestTruth()).toMatchObject({
-      sessionId: 'sess-stopless-live-1',
-      conversationId: 'conv-stopless-live-1'
-    });
+    expect(center?.readRequestTruth()).toEqual({});
   });
 
   it('does not upgrade resumeMeta-only session scope into request truth', () => {
@@ -192,7 +191,11 @@ describe('responses-request-bridge metadata center projection', () => {
 
     const center = MetadataCenter.read(metadata);
     expect(center?.readContinuationContext()).toMatchObject({
-      responsesResume: resumeMeta
+      responsesResume: {
+        responseId: 'resp_resume_only_1',
+        continuationOwner: 'relay',
+        routeHint: 'thinking'
+      }
     });
     expect(center?.readRequestTruth()).toEqual({});
     expect(readRuntimeControlProjection(metadata)).toMatchObject({

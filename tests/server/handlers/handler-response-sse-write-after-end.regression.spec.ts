@@ -190,6 +190,177 @@ describe('handler-response SSE write-after-end regression', () => {
     }
   });
 
+  it('does not raise uncaughtException when submit_tool_outputs requires_action closes after response.done and upstream writes late', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => {
+          throw new Error('json_to_sse_not_expected_in_this_test');
+        }
+      }),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
+        probe && typeof probe === 'object' && !Array.isArray(probe)
+          ? probe as Record<string, unknown>
+          : {}
+      ),
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const upstream = new PassThrough();
+    let output = '';
+    let uncaught: Error | undefined;
+    const onUncaught = (error: Error) => {
+      uncaught = error;
+    };
+    process.prependOnceListener('uncaughtException', onUncaught);
+    res.on('data', (chunk) => {
+      output += String(chunk);
+      if (output.includes('event: response.done')) {
+        res.destroy();
+      }
+    });
+
+    try {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          sseStream: upstream,
+          metadata: {
+            outboundStream: true,
+            stream: true,
+          },
+          continuationOwner: 'relay',
+          usageLogInfo: {
+            providerKey: 'minimonth.key1.MiniMax-M2.7',
+            finishReason: 'tool_calls',
+          }
+        } as any,
+        'req_submit_tool_outputs_done_client_close_no_uncaught',
+        { forceSSE: true, entryEndpoint: '/v1/responses.submit_tool_outputs' }
+      );
+
+      upstream.write('event: response.completed\n');
+      upstream.write(
+        `data: ${JSON.stringify({
+          type: 'response.completed',
+          response: {
+            id: 'resp_submit_tool_outputs_done_close',
+            object: 'response',
+            status: 'requires_action',
+            output: [
+              {
+                id: 'fc_submit_tool_outputs_done_close',
+                type: 'function_call',
+                status: 'completed',
+                call_id: 'call_submit_tool_outputs_done_close',
+                name: 'exec_command',
+                arguments: '{"cmd":"true"}'
+              }
+            ],
+            required_action: {
+              type: 'submit_tool_outputs',
+              submit_tool_outputs: {
+                tool_calls: [
+                  {
+                    id: 'call_submit_tool_outputs_done_close',
+                    type: 'function_call',
+                    name: 'exec_command',
+                    arguments: '{"cmd":"true"}'
+                  }
+                ]
+              }
+            }
+          },
+          required_action: {
+            type: 'submit_tool_outputs',
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: 'call_submit_tool_outputs_done_close',
+                  type: 'function_call',
+                  name: 'exec_command',
+                  arguments: '{"cmd":"true"}'
+                }
+              ]
+            }
+          }
+        })}\n\n`
+      );
+      upstream.write('event: response.done\n');
+      upstream.write(
+        `data: ${JSON.stringify({
+          type: 'response.done',
+          response: {
+            id: 'resp_submit_tool_outputs_done_close',
+            object: 'response',
+            status: 'requires_action',
+            output: [
+              {
+                id: 'fc_submit_tool_outputs_done_close',
+                type: 'function_call',
+                status: 'completed',
+                call_id: 'call_submit_tool_outputs_done_close',
+                name: 'exec_command',
+                arguments: '{"cmd":"true"}'
+              }
+            ],
+            required_action: {
+              type: 'submit_tool_outputs',
+              submit_tool_outputs: {
+                tool_calls: [
+                  {
+                    id: 'call_submit_tool_outputs_done_close',
+                    type: 'function_call',
+                    name: 'exec_command',
+                    arguments: '{"cmd":"true"}'
+                  }
+                ]
+              }
+            }
+          }
+        })}\n\n`
+      );
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+      upstream.write('event: response.output_text.delta\n');
+      upstream.write(
+        `data: ${JSON.stringify({
+          type: 'response.output_text.delta',
+          delta: 'late after submit_tool_outputs done'
+        })}\n\n`
+      );
+      upstream.end();
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 120));
+
+      expect(output).toContain('event: response.done');
+      expect(output).toContain('"status":"requires_action"');
+      expect(uncaught?.message ?? '').not.toContain('write after end');
+    } finally {
+      process.removeListener('uncaughtException', onUncaught);
+      upstream.destroy();
+      res.destroy();
+    }
+  });
+
   it('emits repaired responses terminal frames only after outbound SSE end flush', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,

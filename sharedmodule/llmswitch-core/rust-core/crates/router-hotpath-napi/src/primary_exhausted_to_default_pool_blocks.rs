@@ -36,8 +36,8 @@ use napi_derive::napi;
 /// `parse_routing`'s contract in `config.rs`). The function never mutates input.
 #[napi(js_name = "planPrimaryExhaustedToDefaultPoolJson")]
 pub fn plan_primary_exhausted_to_default_pool_json(input_json: String) -> NapiResult<String> {
-    let input: PrimaryExhaustedPlanInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: PrimaryExhaustedPlanInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = plan_primary_exhausted_to_default_pool(&input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

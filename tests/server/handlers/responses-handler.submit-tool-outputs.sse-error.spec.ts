@@ -39,6 +39,14 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.j
     },
     responseId: responseIdFromPath,
   })),
+  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
+  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
+  projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string }) => ({
+    emit: true,
+    frame: args.frame ?? '',
+    state: undefined,
+  })),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
   resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
 }));
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', () => ({
@@ -58,6 +66,14 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.t
     },
     responseId: responseIdFromPath,
   })),
+  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
+  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
+  projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string }) => ({
+    emit: true,
+    frame: args.frame ?? '',
+    state: undefined,
+  })),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
   resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
 }));
 
@@ -112,7 +128,6 @@ const createResponsesBridgeMock = () => ({
     convertResponseToJsonToSse: async () => ({})
   })),
   sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
-  finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
   importResponsesHandlerCoreDist: jest.fn(async () => ({})),
   inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn(() => ({ sawTerminalChunk: false })),
   isDirectPassthroughTransportKeepaliveFrameForHttp: jest.fn(() => false),
@@ -122,7 +137,6 @@ const createResponsesBridgeMock = () => ({
     source: undefined,
   })),
   normalizeResponsesSseFrameForClientForHttp: jest.fn((frame: string) => frame),
-  persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
   planResponsesContinuationCloseActionForHttp: jest.fn(() => ({ action: 'none' })),
   planResponsesStreamEndRepairForHttp: jest.fn(() => ({ shouldRepair: false })),
   prepareResponsesJsonBodyForSseBridgeForHttp: jest.fn((body: unknown) => body),
@@ -141,8 +155,6 @@ const createResponsesBridgeMock = () => ({
   shouldClearResponsesConversationOnFailureForHttp: jest.fn(() => false),
   shouldDispatchResponsesSseToClientForHttp: jest.fn(() => false),
   shouldDropClientSseFrameForHttp: jest.fn(() => false),
-  shouldPersistResponsesContinuationOnProbeUpdateForHttp: jest.fn(() => false),
-  shouldPersistResponsesConversationStateForHttp: jest.fn(() => false),
   shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),
   summarizeResponsesSseFrameForLogForHttp: jest.fn(() => ({ kind: 'sse_frame' })),
   updateResponsesContractProbeFromSseChunkForHttp: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),

@@ -19,6 +19,7 @@ import {
 import {
   appendExecutedToolRecordFromNative,
   createServertoolExecutionLoopStateFromNative,
+  executeBuiltinServerToolHandler,
   materializeServertoolPlannedResult,
   type ServertoolExecutedRecord,
   type ServertoolExecutionLoopState,
@@ -92,7 +93,12 @@ export async function runServertoolIoExecutionQueue(args: {
     let planned = null;
     let lastErr: unknown;
     try {
-      planned = await runServertoolHandler(entry.handler, ctx);
+      planned = entry.execution.kind === 'builtin'
+        ? await executeBuiltinServerToolHandler({
+            builtinName: entry.execution.builtinName,
+            ctx
+          })
+        : await runServertoolHandler(entry.execution.handler, ctx);
     } catch (err) {
       lastErr = err;
     }

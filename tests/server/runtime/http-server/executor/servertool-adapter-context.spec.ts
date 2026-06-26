@@ -1,4 +1,24 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function bindProviderProtocolCenter(
+  metadata: Record<string, unknown>,
+  providerProtocol = 'openai-responses'
+): Record<string, unknown> {
+  const center = MetadataCenter.attach(metadata);
+  if (!center.readRuntimeControl().providerProtocol) {
+    center.writeRuntimeControl(
+      'providerProtocol',
+      providerProtocol,
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'bindProviderProtocolCenter',
+        stage: 'test'
+      }
+    );
+  }
+  return metadata;
+}
 
 describe('servertool adapter context builder', () => {
   it('builds shared adapter context from entry origin request and metadata', async () => {
@@ -15,14 +35,14 @@ describe('servertool adapter context builder', () => {
       model: 'client-model',
       messages: [{ role: 'user', content: '继续' }]
     };
-    const metadata: Record<string, unknown> = {
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({
       routeName: 'thinking-primary',
       sessionId: 'sess-1',
       clientTmuxSessionId: 'tmux-1',
       __rt: {
         existing: true
       }
-    };
+    });
     const center = MetadataCenter.attach(metadata);
     center.writeProviderObservation(
       'assignedModelId',
@@ -87,7 +107,7 @@ describe('servertool adapter context builder', () => {
       '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
-    const metadata: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({});
     const center = MetadataCenter.attach(metadata);
     center.writeRuntimeControl(
       'stopless',
@@ -163,10 +183,10 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {
+      metadata: bindProviderProtocolCenter({
         routeHint: 'search',
         routecodexPortMode: 'router'
-      },
+      }),
       entryOriginRequest: { model: 'gpt-5.5', input: 'continue' },
       requestSemantics: {},
       requestId: 'req-route-hint',
@@ -186,7 +206,7 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {},
+      metadata: bindProviderProtocolCenter({}, 'openai-chat'),
       entryOriginRequest: { model: 'gpt-5.4', input: 'continue' },
       requestId: 'req-no-client-protocol-infer',
       entryEndpoint: '/v1/responses',
@@ -194,6 +214,55 @@ describe('servertool adapter context builder', () => {
     });
 
     expect(context.clientProtocol).toBeUndefined();
+  });
+
+  it('prefers metadata center runtimeControl.providerProtocol over explicit providerProtocol argument', async () => {
+    jest.resetModules();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({}, 'anthropic-messages');
+    const center = MetadataCenter.attach(metadata);
+    center.writeRuntimeControl(
+      'providerProtocol',
+      'anthropic-messages',
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'prefers metadata center runtimeControl.providerProtocol over explicit providerProtocol argument',
+        stage: 'test'
+      }
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata,
+      entryOriginRequest: { model: 'claude', messages: [{ role: 'user', content: 'continue' }] },
+      requestId: 'req-provider-protocol-center-first',
+      entryEndpoint: '/v1/messages',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(context.providerProtocol).toBe('anthropic-messages');
+  });
+
+  it('fails fast when metadata center runtimeControl.providerProtocol is absent even if explicit providerProtocol argument exists', async () => {
+    jest.resetModules();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+
+    expect(() => buildServerToolAdapterContext({
+      metadata: {},
+      entryOriginRequest: { model: 'gpt-5.5', input: 'continue' },
+      requestId: 'req-provider-protocol-failfast',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    })).toThrow('Servertool adapter context requires metadata center runtime_control.providerProtocol');
   });
 
   it('backfills session and conversation identifiers from entry origin request metadata', async () => {
@@ -204,7 +273,7 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {},
+      metadata: bindProviderProtocolCenter({}),
       entryOriginRequest: {
         metadata: {
           sessionId: 'sess-origin',
@@ -231,7 +300,7 @@ describe('servertool adapter context builder', () => {
       '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
-    const metadata: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({});
     const center = MetadataCenter.attach(metadata);
     center.writeRequestTruth(
       'sessionId',
@@ -281,7 +350,7 @@ describe('servertool adapter context builder', () => {
       '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
-    const metadata: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({});
     const center = MetadataCenter.attach(metadata);
     center.writeRuntimeControl(
       'stopMessageEnabled',
@@ -317,18 +386,8 @@ describe('servertool adapter context builder', () => {
       '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
-    const metadata: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({});
     const center = MetadataCenter.attach(metadata);
-    center.writeRuntimeControl(
-      'serverToolFollowup',
-      true,
-      {
-        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
-        symbol: 'does not overwrite existing runtime_control fields on the bound MetadataCenter',
-        stage: 'test'
-      },
-      'seed existing followup truth'
-    );
     center.writeRuntimeControl(
       'stopMessageClientInject',
       {
@@ -355,7 +414,6 @@ describe('servertool adapter context builder', () => {
     });
 
     const snapshot = MetadataCenter.read(context)?.snapshot();
-    expect(snapshot?.runtimeControl.serverToolFollowup?.version).toBe(1);
     expect(snapshot?.runtimeControl.stopMessageClientInject?.version).toBe(1);
     expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageClientInject).toEqual({
       ready: false,
@@ -374,9 +432,9 @@ describe('servertool adapter context builder', () => {
       '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
-    const metadata: Record<string, unknown> = {
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({
       providerFamily: 'anthropic'
-    };
+    });
 
     const context = buildServerToolAdapterContext({
       metadata,
@@ -401,9 +459,9 @@ describe('servertool adapter context builder', () => {
       '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
-    const metadata: Record<string, unknown> = {
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({
       routeName: 'thinking'
-    };
+    });
 
     const context = buildServerToolAdapterContext({
       metadata,
@@ -415,8 +473,8 @@ describe('servertool adapter context builder', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(MetadataCenter.read(metadata)).toBeUndefined();
-    expect(MetadataCenter.read(context)).toBeDefined();
+    expect(MetadataCenter.read(metadata)).toBeDefined();
+    expect(MetadataCenter.read(context)).toBe(MetadataCenter.read(metadata));
   });
 
   it('reads assigned model and compatibility profile from MetadataCenter provider observation when flat metadata is absent', async () => {
@@ -429,7 +487,7 @@ describe('servertool adapter context builder', () => {
       '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
     );
 
-    const metadata: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = bindProviderProtocolCenter({});
     const center = MetadataCenter.attach(metadata);
     center.writeProviderObservation(
       'assignedModelId',
@@ -472,12 +530,12 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {
+      metadata: bindProviderProtocolCenter({
         responsesRequestContext: {
           sessionId: 'sess-relay',
           conversationId: 'conv-relay'
         }
-      },
+      }),
       requestId: 'req-session-relay-backfill',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
@@ -495,12 +553,12 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {
+      metadata: bindProviderProtocolCenter({
         responsesRequestContext: {
           requestSessionId: 'sess-relay-request-alias',
           requestConversationId: 'conv-relay-request-alias'
         }
-      },
+      }),
       requestId: 'req-session-relay-request-alias',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
@@ -518,14 +576,14 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {
+      metadata: bindProviderProtocolCenter({
         __rt: {
           responsesRequestContext: {
             sessionId: 'sess-relay-rt',
             conversationId: 'conv-relay-rt'
           }
         }
-      },
+      }),
       requestId: 'req-session-relay-rt-backfill',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
@@ -543,14 +601,14 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {
+      metadata: bindProviderProtocolCenter({
         responsesRequestContext: {
           sessionId: 'sess-relay-flat',
           conversationId: 'conv-relay-flat'
         },
         sessionId: 'sess-relay-flat',
         conversationId: 'conv-relay-flat'
-      },
+      }),
       requestId: 'req-session-relay-flat-backfill',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
@@ -568,10 +626,10 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {
+      metadata: bindProviderProtocolCenter({
         sessionId: 'sess-meta-direct',
         conversationId: 'conv-meta-direct'
-      },
+      }),
       requestId: 'req-session-meta-direct-backfill',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
@@ -589,12 +647,12 @@ describe('servertool adapter context builder', () => {
     );
 
     const context = buildServerToolAdapterContext({
-      metadata: {
+      metadata: bindProviderProtocolCenter({
         __rt: {
           sessionId: 'sess-rt-direct',
           conversationId: 'conv-rt-direct'
         }
-      },
+      }),
       requestId: 'req-session-rt-direct-backfill',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'

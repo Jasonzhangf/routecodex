@@ -6,7 +6,6 @@ import type {
   ServertoolSkeletonConfig,
   ServertoolStateConfig,
   ServertoolToolSpec,
-  ServertoolResponseHookGateConfig,
   ServertoolSkeletonDocument,
   ServerToolHandlerRegistrationSpec,
   ServerToolRegisteredHandlerRecord,
@@ -26,11 +25,12 @@ export type {
   ServertoolSkeletonConfig,
   ServertoolStateConfig,
   ServertoolToolSpec,
-  ServertoolResponseHookGateConfig,
   ServertoolSkeletonDocument,
   ServerToolHandlerRegistrationSpec,
   ServerToolRegisteredHandlerRecord,
 } from '../native/router-hotpath/native-followup-mainline-semantics.js';
+
+export type ServertoolResponseHookGateConfig = Record<string, unknown>;
 
 type ServertoolFlowProfile = {
   noFollowup?: boolean;

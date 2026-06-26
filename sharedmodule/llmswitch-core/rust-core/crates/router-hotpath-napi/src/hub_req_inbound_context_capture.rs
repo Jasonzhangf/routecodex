@@ -1,8 +1,8 @@
 // feature_id: hub.req_inbound_responses_context_capture
 use crate::hub_bridge_actions::convert_bridge_input_to_chat_messages;
 use crate::hub_bridge_actions::BridgeInputToChatInput;
-use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use crate::hub_req_inbound_tool_call_normalization::normalize_apply_patch_output_text;
+use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use crate::hub_tool_session_compat::{
     filter_namespace_mcp_aggregator_tool_definitions, normalize_tool_session_messages,
@@ -208,11 +208,12 @@ fn build_function_call_semantic_signature(row: &Map<String, Value>) -> Option<St
 
 fn normalize_tool_output_text_for_storage(tool_name: Option<&str>, raw: &str) -> String {
     let stripped = strip_provider_tool_sentinel_residue(raw);
-    let normalized = if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(stripped.as_str()) {
-        unwrapped
-    } else {
-        stripped.trim().to_string()
-    };
+    let normalized =
+        if let Some(unwrapped) = unwrap_chunked_exec_transcript_shape(stripped.as_str()) {
+            unwrapped
+        } else {
+            stripped.trim().to_string()
+        };
     if tool_name
         .map(|value| value.trim().eq_ignore_ascii_case("apply_patch"))
         .unwrap_or(false)
@@ -269,9 +270,7 @@ fn build_duplicate_responses_call_id_rewrites(
             let Some(call_id) = call_id else {
                 continue;
             };
-            occurrences
-                .entry(call_id.clone())
-                .or_default();
+            occurrences.entry(call_id.clone()).or_default();
             let occurrence = occurrences.get_mut(&call_id).expect("occurrence inserted");
             occurrence.call_indexes.push(index);
             occurrence
@@ -575,15 +574,30 @@ fn is_bare_client_mcp_bridge_tool(tool_row: &Map<String, Value>, name: Option<&s
         .unwrap_or(false)
 }
 
-pub(crate) fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<Vec<Value>> {
+fn is_allowed_responses_history_tool_name(
+    lowered_name: &str,
+    allowed_tool_names: &std::collections::HashSet<String>,
+) -> bool {
+    if allowed_tool_names.is_empty() {
+        return true;
+    }
+    if allowed_tool_names.contains(lowered_name) {
+        return true;
+    }
+    matches!(lowered_name, "reasoningstop")
+}
+
+pub(crate) fn normalize_responses_input_items(
+    raw_request: &Map<String, Value>,
+) -> Option<Vec<Value>> {
     let input = raw_request.get("input")?;
     match input {
         Value::Array(items) => {
             if items.is_empty() {
                 return None;
             }
-    let has_previous_response_id =
-        read_trimmed_string(raw_request.get("previous_response_id")).is_some();
+            let has_previous_response_id =
+                read_trimmed_string(raw_request.get("previous_response_id")).is_some();
             let allow_output_only_resume = has_previous_response_id
                 && items.iter().all(|entry| {
                     let Some(row) = entry.as_object() else {
@@ -626,8 +640,7 @@ pub(crate) fn normalize_responses_input_items(raw_request: &Map<String, Value>) 
             let mut valid_call_ids = std::collections::HashSet::new();
             let mut tool_name_by_call_id = std::collections::HashMap::<String, String>::new();
             let mut saw_function_calls = false;
-            let mut seen_function_call_signatures =
-                std::collections::HashSet::<String>::new();
+            let mut seen_function_call_signatures = std::collections::HashSet::<String>::new();
             let mut deduped_identical_function_call_ids =
                 std::collections::HashSet::<String>::new();
             let mut completed_tool_output_signatures =
@@ -658,8 +671,10 @@ pub(crate) fn normalize_responses_input_items(raw_request: &Map<String, Value>) 
                     continue;
                 };
                 let lowered_name = name.to_ascii_lowercase();
-                let name_allowed = allowed_tool_names.is_empty()
-                    || allowed_tool_names.contains(lowered_name.as_str());
+                let name_allowed = is_allowed_responses_history_tool_name(
+                    lowered_name.as_str(),
+                    &allowed_tool_names,
+                );
                 if name.len() > 128 || !name_allowed {
                     continue;
                 }
@@ -694,8 +709,10 @@ pub(crate) fn normalize_responses_input_items(raw_request: &Map<String, Value>) 
                         continue;
                     };
                     let lowered_name = name.to_ascii_lowercase();
-                    let name_allowed = allowed_tool_names.is_empty()
-                        || allowed_tool_names.contains(lowered_name.as_str());
+                    let name_allowed = is_allowed_responses_history_tool_name(
+                        lowered_name.as_str(),
+                        &allowed_tool_names,
+                    );
                     if name.len() > 128 || !name_allowed {
                         continue;
                     }
@@ -747,9 +764,11 @@ pub(crate) fn normalize_responses_input_items(raw_request: &Map<String, Value>) 
                     }
                     let mut rewritten_row =
                         rewrite_responses_tool_history_entry_call_id(index, row, &call_id_rewrites);
-                    let compare_tool_name =
-                        tool_name_by_call_id.get(call_id.as_str()).map(String::as_str);
-                    if let Some(output_value) = rewritten_row.get("output").and_then(Value::as_str) {
+                    let compare_tool_name = tool_name_by_call_id
+                        .get(call_id.as_str())
+                        .map(String::as_str);
+                    if let Some(output_value) = rewritten_row.get("output").and_then(Value::as_str)
+                    {
                         rewritten_row.insert(
                             "output".to_string(),
                             Value::String(normalize_tool_output_text_for_storage(
@@ -761,7 +780,9 @@ pub(crate) fn normalize_responses_input_items(raw_request: &Map<String, Value>) 
                     let compare_output = rewritten_row
                         .get("output")
                         .and_then(Value::as_str)
-                        .map(|text| canonicalize_tool_output_text_for_compare(compare_tool_name, text))
+                        .map(|text| {
+                            canonicalize_tool_output_text_for_compare(compare_tool_name, text)
+                        })
                         .unwrap_or_default();
                     let payload_signature = format!("{call_id}\n{compare_output}");
                     let seen_signatures = completed_tool_output_signatures
@@ -774,8 +795,9 @@ pub(crate) fn normalize_responses_input_items(raw_request: &Map<String, Value>) 
                     let normalized_output =
                         Value::Object(strip_provider_tool_sentinel_residue_from_row(rewritten_row));
                     if deduped_identical_function_call_ids.contains(call_id.as_str()) {
-                        if let Some(existing_index) =
-                            latest_tool_output_index_by_call_id.get(call_id.as_str()).copied()
+                        if let Some(existing_index) = latest_tool_output_index_by_call_id
+                            .get(call_id.as_str())
+                            .copied()
                         {
                             normalized[existing_index] = normalized_output;
                         } else {
@@ -1879,5 +1901,63 @@ mod tests {
         );
         assert_eq!(row.get("isResponsesPayload"), Some(&Value::Bool(false)));
         assert_eq!(row.get("isChatPayload"), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn capture_responses_context_restores_stopless_cli_pair_into_reasoning_stop_and_guidance() {
+        let input = ResponsesContextCaptureInput {
+            raw_request: json!({
+                "model": "gpt-5.5",
+                "previous_response_id": "resp_prev_stopless_1",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "继续执行 stopless 在线验证" }
+                        ]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_stopless_cli_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_stopless_cli_1",
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续往下做；如果能收尾就直接说做完。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            }),
+            request_id: Some("req_stopless_context_restore".to_string()),
+            tool_call_id_style: None,
+        };
+
+        let captured = capture_req_inbound_responses_context_snapshot(input)
+            .expect("stopless context capture");
+        let input_items = captured["input"].as_array().expect("captured input");
+        assert_eq!(input_items.len(), 4);
+        assert_eq!(input_items[1]["type"], json!("function_call"));
+        assert_eq!(input_items[1]["name"], json!("reasoningStop"));
+        assert_eq!(input_items[2]["type"], json!("function_call_output"));
+        assert!(!input_items[2]["output"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("stop_message_auto"));
+        assert_eq!(input_items[3]["role"], json!("user"));
+        let guidance = input_items[3]["content"][0]["text"]
+            .as_str()
+            .expect("guidance text");
+        assert!(guidance.contains("上一轮执行结果：repeatCount=2/3"));
+        assert!(guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+        assert!(guidance.contains("继续往下做；如果能收尾就直接说做完。"));
     }
 }

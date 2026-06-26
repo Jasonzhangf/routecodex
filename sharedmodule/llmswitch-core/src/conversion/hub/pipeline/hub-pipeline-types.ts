@@ -46,7 +46,6 @@ interface HubPipelineRequestMetadata extends Record<string, unknown> {
   stage?: "inbound" | "outbound";
   direction?: "request" | "response";
   stream?: boolean;
-  routeHint?: string;
 }
 
 export interface HubPipelineRequest {
@@ -106,6 +105,5 @@ export interface NormalizedRequest {
   direction: "request" | "response";
   stage: "inbound" | "outbound";
   stream: boolean;
-  routeHint?: string;
   hubEntryMode?: "chat_process";
 }

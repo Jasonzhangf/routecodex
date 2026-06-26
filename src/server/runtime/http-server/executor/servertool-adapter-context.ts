@@ -24,9 +24,6 @@ function readNonEmptyString(value: unknown): string | undefined {
 }
 
 const SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS = [
-  'serverToolFollowup',
-  'serverToolFollowupSource',
-  'serverToolFollowupMode',
   'servertoolResponseOrchestration',
   'serverToolLoopState',
   'stopMessageClientInject',
@@ -44,7 +41,7 @@ function stripServertoolRuntimeControlMetadataFields(metadata: Record<string, un
 
 function hasOwnRuntimeControlValue(
   center: MetadataCenter,
-  key: 'serverToolFollowup' | 'stopMessageClientInject'
+  key: 'stopMessageClientInject'
 ): boolean {
   const runtimeControl = center.snapshot().runtimeControl;
   return runtimeControl[key] !== undefined;
@@ -106,9 +103,9 @@ export function buildServerToolAdapterContext(args: {
   const runtimeControl = readRuntimeControlProjection(metadataBag);
   const providerProtocol = typeof runtimeControl.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
     ? runtimeControl.providerProtocol.trim()
-    : args.providerProtocol.trim();
+    : undefined;
   if (!providerProtocol) {
-    throw new Error('Servertool adapter context requires providerProtocol');
+    throw new Error('Servertool adapter context requires metadata center runtime_control.providerProtocol');
   }
   const providerProtocolCenter = MetadataCenter.attach(baseContext);
   if (readRuntimeControlProjection(baseContext).providerProtocol !== providerProtocol) {
@@ -139,21 +136,6 @@ export function buildServerToolAdapterContext(args: {
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol);
   const baseCenter = MetadataCenter.attach(baseContext);
-  if (
-    runtimeControl.serverToolFollowup === true
-    && !hasOwnRuntimeControlValue(baseCenter, 'serverToolFollowup')
-  ) {
-    baseCenter.writeRuntimeControl(
-      'serverToolFollowup',
-      true,
-      {
-        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
-        symbol: 'buildServerToolAdapterContext',
-        stage: 'ServertoolAdapterContextRuntimeControl'
-      },
-      'servertool adapter context projection'
-    );
-  }
   if (!hasOwnRuntimeControlValue(baseCenter, 'stopMessageClientInject')) {
     baseCenter.writeRuntimeControl(
       'stopMessageClientInject',

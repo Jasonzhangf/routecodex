@@ -101,6 +101,19 @@ fn read_media_candidate(obj: &Map<String, Value>, key: &str) -> Option<String> {
     None
 }
 
+fn read_media_source_candidate(obj: &Map<String, Value>) -> Option<String> {
+    let nested = obj.get("source").and_then(|v| v.as_object())?;
+    for nested_key in ["url", "uri", "data", "base64"] {
+        if let Some(value) = nested.get(nested_key).and_then(|v| v.as_str()) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn read_part_media_candidate(part: &Value) -> String {
     let obj = match part.as_object() {
         Some(v) => v,
@@ -112,7 +125,7 @@ fn read_part_media_candidate(part: &Value) -> String {
     if let Some(value) = read_media_candidate(obj, "video_url") {
         return value;
     }
-    if let Some(value) = read_media_candidate(obj, "source") {
+    if let Some(value) = read_media_source_candidate(obj) {
         return value;
     }
     for key in ["url", "uri", "data", "base64"] {
@@ -277,7 +290,7 @@ fn value_contains_structured_media_payload(value: &Value) -> bool {
         Value::Object(obj) => {
             if read_media_candidate(obj, "image_url").is_some()
                 || read_media_candidate(obj, "video_url").is_some()
-                || read_media_candidate(obj, "source").is_some()
+                || read_media_source_candidate(obj).is_some()
             {
                 return true;
             }
@@ -1066,10 +1079,40 @@ mod tests {
             output.messages[1]["type"].as_str(),
             Some("function_call_output")
         );
-        assert_eq!(
-            output.messages[1]["output"].as_str(),
-            Some(html)
+        assert_eq!(output.messages[1]["output"].as_str(), Some(html));
+    }
+
+    #[test]
+    fn does_not_strip_json_exec_command_output_with_business_source_field() {
+        let stdout =
+            "{\"owner\":\"backend\",\"source\":\"db\",\"type\":\"all\",\"items\":[],\"count\":0}";
+        let output = strip_responses_context_input_historical_media(
+            vec![
+                json!({
+                    "type": "function_call",
+                    "call_id": "call_catalog",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"curl /api/catalog/products\"}"
+                }),
+                json!({
+                    "type": "function_call_output",
+                    "call_id": "call_catalog",
+                    "output": stdout
+                }),
+                json!({
+                    "role": "user",
+                    "content": [{"type":"input_text","text":"继续"}]
+                }),
+            ],
+            "[Image omitted]".to_string(),
         );
+
+        assert!(!output.changed);
+        assert_eq!(
+            output.messages[1]["type"].as_str(),
+            Some("function_call_output")
+        );
+        assert_eq!(output.messages[1]["output"].as_str(), Some(stdout));
     }
 
     #[test]

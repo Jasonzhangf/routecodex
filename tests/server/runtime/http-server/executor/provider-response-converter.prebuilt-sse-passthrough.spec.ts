@@ -1,5 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { PassThrough, Readable } from 'node:stream';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];
@@ -53,10 +54,62 @@ const mockResolveRelayResponsesClientSseStreamForHttp = async (args: {
   ]);
 };
 
+const mockCreateChatJsonToSseConverterForHttp = async () => ({
+  convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
+    const response = payload && typeof payload === 'object'
+      ? payload
+      : { id: 'chat_resp_from_test', object: 'chat.completion', choices: [] };
+    const requestId = typeof options.requestId === 'string' ? options.requestId : 'req_test_chat_sse';
+    return Readable.from([
+      `data: ${JSON.stringify({
+        id: response.id ?? requestId,
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: (response as any).model ?? 'test-model',
+        choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        id: response.id ?? requestId,
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: (response as any).model ?? 'test-model',
+        choices: Array.isArray((response as any).choices) ? (response as any).choices : []
+      })}\n\n`,
+      'data: [DONE]\n\n'
+    ]);
+  }
+});
+
+const mockReprojectDirectChatToolCallStreamForHttp = async (args: {
+  body: Record<string, unknown>;
+  requestId?: string;
+}) => {
+  const requestId = typeof args.requestId === 'string' ? args.requestId : 'req_test_chat_sse';
+  return Readable.from([
+    `data: ${JSON.stringify({
+      id: args.body.id ?? requestId,
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: args.body.model ?? 'test-model',
+      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
+    })}\n\n`,
+    `data: ${JSON.stringify({
+      id: args.body.id ?? requestId,
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: args.body.model ?? 'test-model',
+      choices: Array.isArray(args.body.choices) ? args.body.choices : []
+    })}\n\n`,
+    'data: [DONE]\n\n'
+  ]);
+};
+
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
+  createChatJsonToSseConverterForHttp: mockCreateChatJsonToSseConverterForHttp,
+  reprojectDirectChatToolCallStreamForHttp: mockReprojectDirectChatToolCallStreamForHttp,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
   createResponsesJsonToSseConverter: async () => ({
     convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
@@ -151,6 +204,23 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-c
   convertProviderResponse: mockConvertProviderResponse
 }));
 
+const TEST_METADATA_WRITER = {
+  module: 'tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts',
+  symbol: 'buildPipelineMetadata',
+  stage: 'test_runtime_control_provider_protocol'
+} as const;
+
+function buildPipelineMetadata(providerProtocol: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const metadata = { ...extra };
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    TEST_METADATA_WRITER,
+    'seed provider protocol for converter test'
+  );
+  return metadata;
+}
+
 describe('provider-response-converter prebuilt SSE passthrough gate', () => {
   it('does not bridge openai responses prebuilt SSE through stopless in the converter', async () => {
     jest.resetModules();
@@ -186,10 +256,10 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
           sseStream: prebuiltSse,
           continuationOwner: 'direct',
         } as any,
-        pipelineMetadata: {
+        pipelineMetadata: buildPipelineMetadata('openai-responses', {
           routecodexPortStopMessageEnabled: true,
           stopMessageEnabled: true
-        }
+        })
       },
       {
         runtimeManager: {
@@ -250,7 +320,7 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
           sseStream: relaySse,
           continuationOwner: 'relay',
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-responses')
       },
       {
         runtimeManager: {
@@ -325,7 +395,7 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
           },
           continuationOwner: 'relay'
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
       },
       {
         runtimeManager: {
@@ -391,7 +461,7 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
           body: {},
           sseStream: anthropicRawSse,
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
       },
       {
         runtimeManager: {
@@ -453,7 +523,7 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
             'content-type': 'text/event-stream; charset=utf-8'
           }
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
       },
       {
         runtimeManager: {

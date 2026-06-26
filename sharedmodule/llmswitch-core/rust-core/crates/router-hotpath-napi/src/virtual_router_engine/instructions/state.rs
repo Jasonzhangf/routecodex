@@ -1,8 +1,7 @@
 use serde_json::{Map, Value};
 
 use crate::{
-    hub_pipeline_types::MetaRoute03RouteCarrier,
-    shared_json_utils::normalize_on_off_auto_string,
+    hub_pipeline_types::MetaRoute03RouteCarrier, shared_json_utils::normalize_on_off_auto_string,
     virtual_router_engine::time_utils::now_ms,
 };
 

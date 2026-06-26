@@ -6,7 +6,6 @@ import {
 import {
   shouldCancelUnrecoverableRerouteWithoutAlternative,
   shouldDirectReturnUnrecoverableWithoutForcedExclusion,
-  shouldRerouteTerminalPeriodicRecovery,
   shouldRerouteTerminalUnrecoverableProviderFailure,
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
@@ -213,17 +212,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
           }) || baseExclusionPlan.excludedCurrentProvider
         }
       : { excludedCurrentProvider: false };
-  const requestLocalTransient =
-    classification === 'recoverable'
-    && !hostContractFailure
-    && !args.forceExcludeCurrentProviderOnRetry
-    && !args.promptTooLong
-    && !exclusionPlan.excludedCurrentProvider
-    && shouldApplyProviderTransportBackoff({
-      error: args.error,
-      retryError: args.retryError,
-      stage: args.stage
-    });
+  const requestLocalTransient = false;
 
   const holdOnLastAvailable429 = isLastAvailableProvider429({
     providerKey: args.providerKey,
@@ -249,14 +238,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     && (
       exclusionPlan.excludedCurrentProvider
       || classification === 'unrecoverable'
-      || classification === 'periodic_recovery'
     );
-  const terminalPeriodicPolicyDecision =
-    shouldRerouteTerminalPeriodicRecovery({
-      classification,
-      shouldRetry: eligibilityPlan.shouldRetry,
-      hasTerminalAlternativeCandidate
-    });
   const terminalUnrecoverablePolicyDecision =
     shouldRerouteTerminalUnrecoverableProviderFailure({
       classification,
@@ -266,7 +248,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       errorCode: args.retryError.errorCode,
       upstreamCode: args.retryError.upstreamCode
     });
-  if (!eligibilityPlan.shouldRetry && !terminalPeriodicPolicyDecision && !terminalUnrecoverablePolicyDecision) {
+  if (!eligibilityPlan.shouldRetry && !terminalUnrecoverablePolicyDecision) {
     const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
     return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
@@ -279,20 +261,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
-  if (terminalPeriodicPolicyDecision || terminalUnrecoverablePolicyDecision) {
-    const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
-          error: args.error,
-          retryError: args.retryError,
-          providerKey: args.providerKey,
-          runtimeKey: args.runtimeKey,
-          stage: args.stage,
-          attempt: args.attempt,
-          forceProviderScopedBackoff: true,
-          forceAttemptScopedBackoff: false,
-          skipBackoffWait: shouldSkipBackoffForImmediate429Reroute,
-          abortSignal: args.abortSignal,
-          logNonBlockingError: args.logNonBlockingError
-    });
+  if (terminalUnrecoverablePolicyDecision) {
     const retrySwitchPlan = buildProviderRetrySwitchPlan({
       runtimeKey: args.runtimeKey,
       routePool: args.routePool,
@@ -302,7 +271,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       promptTooLong: args.promptTooLong,
       error: args.error,
       retryError: args.retryError,
-      backoffScope: retryBackoffPlan.backoffScope
+      backoffScope: undefined
     });
     if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
       return attachErrorErr05ExhaustionGate({
@@ -321,9 +290,8 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedCurrentProvider: true,
       requestLocalTransient,
       holdOnLastAvailable429,
-      retryBackoffMs: retryBackoffPlan.retryBackoffMs,
-      recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,
-      backoffScope: retryBackoffPlan.backoffScope,
+      retryBackoffMs: 0,
+      recoverableBackoffMs: 0,
       retrySwitchPlan,
       retryExecutionPolicyReason: nativeExecutionPolicy.reason
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
@@ -347,20 +315,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
-  const retryBackoffPlan = await resolveProviderRetryBackoffPlan({
-    error: args.error,
-    retryError: args.retryError,
-    providerKey: args.providerKey,
-    runtimeKey: args.runtimeKey,
-    stage: args.stage,
-    attempt: args.attempt,
-    forceProviderScopedBackoff: retryExcludedCurrentProvider,
-    forceAttemptScopedBackoff: hostContractFailure && !retryExcludedCurrentProvider,
-    requestLocal: requestLocalTransient,
-    skipBackoffWait: shouldSkipBackoffForImmediate429Reroute,
-    abortSignal: args.abortSignal,
-    logNonBlockingError: args.logNonBlockingError
-  });
   const retrySwitchPlan = buildProviderRetrySwitchPlan({
     runtimeKey: args.runtimeKey,
     routePool: args.routePool,
@@ -370,7 +324,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     promptTooLong: args.promptTooLong,
     error: args.error,
     retryError: args.retryError,
-    backoffScope: retryBackoffPlan.backoffScope
+    backoffScope: undefined
   });
   if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
     return attachErrorErr05ExhaustionGate({
@@ -406,9 +360,8 @@ export async function resolveProviderRetryExecutionPlan(args: {
     excludedCurrentProvider: retryExcludedCurrentProvider,
     requestLocalTransient,
     holdOnLastAvailable429,
-    retryBackoffMs: retryBackoffPlan.retryBackoffMs,
-    recoverableBackoffMs: retryBackoffPlan.recoverableBackoffMs,
-    backoffScope: retryBackoffPlan.backoffScope,
+    retryBackoffMs: 0,
+    recoverableBackoffMs: 0,
     retrySwitchPlan,
     retryExecutionPolicyReason: nativeExecutionPolicy.reason
   }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);

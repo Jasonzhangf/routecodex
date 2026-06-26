@@ -43,7 +43,7 @@ describe('hub pipeline Rust responses provider payload regression', () => {
         metadata: {
           entryEndpoint: '/v1/responses',
           providerProtocol: 'openai-responses',
-          __rt: {
+          runtime_control: {
             preselectedRoute: {
               target: {
                 providerKey: 'minimonth.key1.MiniMax-M2.7',
@@ -54,16 +54,6 @@ describe('hub pipeline Rust responses provider payload regression', () => {
               decision: { routeName: 'tools/gateway-priority-5555-weighted-tools' },
               diagnostics: {}
             }
-          },
-          __routecodexPreselectedRoute: {
-            target: {
-              providerKey: 'minimonth.key1.MiniMax-M2.7',
-              providerId: 'minimonth',
-              modelId: 'MiniMax-M2.7',
-              outboundProfile: 'openai-responses'
-            },
-            decision: { routeName: 'tools/gateway-priority-5555-weighted-tools' },
-            diagnostics: {}
           }
         }
       }
@@ -84,6 +74,68 @@ describe('hub pipeline Rust responses provider payload regression', () => {
     expect(result.payload?.tools).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'function', name: 'exec_command' })
     ]));
+  });
+
+  it('uses metadataCenterSnapshot preselectedRoute for bootstrapped request routing without runtime_control residue', () => {
+    const result = runHubPipelineLibWithNative({
+      config: { virtualRouter: {} },
+      request: {
+        requestId: 'req_responses_snapshot_preselected_route',
+        endpoint: '/v1/responses',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        stream: true,
+        processMode: 'chat',
+        direction: 'request',
+        stage: '',
+        payload: {
+          model: 'gpt-5.5',
+          stream: true,
+          input: [
+            {
+              role: 'user',
+              content: [{ type: 'input_text', text: 'route from snapshot only' }]
+            }
+          ]
+        },
+        metadata: {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses'
+        },
+        metadataCenterSnapshot: {
+          runtimeControl: {
+            preselectedRoute: {
+              target: {
+                providerKey: 'snapshot.key1.gpt-5.5',
+                providerId: 'snapshot',
+                modelId: 'gpt-5.5',
+                outboundProfile: 'openai-responses'
+              },
+              decision: { routeName: 'thinking/gateway-priority-5555-priority-thinking' },
+              diagnostics: { source: 'metadataCenterSnapshot' }
+            }
+          }
+        }
+      }
+    });
+
+    if (result.success !== true) {
+      // eslint-disable-next-line no-console
+      console.error('snapshot preselectedRoute request routing failure', JSON.stringify(result, null, 2));
+    }
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.metadata).toMatchObject({
+      target: expect.objectContaining({
+        providerKey: 'snapshot.key1.gpt-5.5'
+      }),
+      routingDecision: expect.objectContaining({
+        routeName: 'thinking/gateway-priority-5555-priority-thinking'
+      })
+    });
+    expect(result.payload).toMatchObject({
+      model: 'gpt-5.5'
+    });
   });
 
   it('RED: keeps stopless schema feedback and guidance in final provider payload for /v1/responses', () => {
@@ -158,7 +210,7 @@ describe('hub pipeline Rust responses provider payload regression', () => {
           entryEndpoint: '/v1/responses',
           providerProtocol: 'openai-responses',
           clientInjectReady: true,
-          __rt: {
+          runtime_control: {
             preselectedRoute: {
               target: {
                 providerKey: 'minimonth.key1.MiniMax-M2.7',
@@ -169,16 +221,6 @@ describe('hub pipeline Rust responses provider payload regression', () => {
               decision: { routeName: 'thinking/gateway-priority-5555-weighted-thinking' },
               diagnostics: {}
             }
-          },
-          __routecodexPreselectedRoute: {
-            target: {
-              providerKey: 'minimonth.key1.MiniMax-M2.7',
-              providerId: 'minimonth',
-              modelId: 'MiniMax-M2.7',
-              outboundProfile: 'openai-responses'
-            },
-            decision: { routeName: 'thinking/gateway-priority-5555-weighted-thinking' },
-            diagnostics: {}
           }
         }
       }
@@ -223,6 +265,24 @@ describe('hub pipeline Rust responses provider payload regression', () => {
     expect(MetadataCenter.read(metadata)?.readRuntimeControl()).toMatchObject({
       stopMessageEnabled: true
     });
+    MetadataCenter.read(metadata)?.writeRuntimeControl(
+      'preselectedRoute',
+      {
+        target: {
+          providerKey: 'minimax.key1.MiniMax-M2.7',
+          providerId: 'minimax',
+          modelId: 'MiniMax-M2.7',
+          outboundProfile: 'anthropic-messages'
+        },
+        decision: { routeName: 'search/gateway-priority-5555-priority-search' },
+        diagnostics: {}
+      },
+      {
+        module: 'tests/sharedmodule/hub-pipeline-rust-responses-provider-payload.regression.spec.ts',
+        symbol: 'materializes stopless instructions into final provider payload from real request metadata entrypoint',
+        stage: 'test'
+      }
+    );
 
     const result = await executeRequestStagePipeline({
       normalized: {
@@ -242,22 +302,7 @@ describe('hub pipeline Rust responses provider payload regression', () => {
           stream: false
         },
         metadata: {
-          ...metadata,
-          __rt: {
-            ...((metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt))
-              ? metadata.__rt as Record<string, unknown>
-              : {}),
-            preselectedRoute: {
-              target: {
-                providerKey: 'minimax.key1.MiniMax-M2.7',
-                providerId: 'minimax',
-                modelId: 'MiniMax-M2.7',
-                outboundProfile: 'anthropic-messages'
-              },
-              decision: { routeName: 'search/gateway-priority-5555-priority-search' },
-              diagnostics: {}
-            }
-          }
+          ...metadata
         },
         processMode: 'chat',
         direction: 'request',
@@ -272,7 +317,14 @@ describe('hub pipeline Rust responses provider payload regression', () => {
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as any,
     });
 
+    // eslint-disable-next-line no-console
+    console.error('stopless real entry provider payload diag', JSON.stringify({
+      providerPayload: result.providerPayload,
+      metadata: result.metadata,
+      nodeResults: result.nodeResults
+    }, null, 2));
     const payloadText = JSON.stringify(result.providerPayload ?? {});
     expect(payloadText).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
   });
+
 });

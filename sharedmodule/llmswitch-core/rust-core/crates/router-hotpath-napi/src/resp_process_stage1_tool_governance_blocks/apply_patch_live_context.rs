@@ -330,9 +330,10 @@ pub(crate) fn repair_line_number_update_hunks_with_live_context(patch_text: &str
             if let Some(rebuilt) = rebuilt {
                 out.extend(rebuilt);
             } else if extract_unified_hunk_inline_context(header.as_str()).is_some() {
-                if let Some(rebuilt) =
-                    rebuild_line_number_hunk_to_apply_patch_context(header.as_str(), body.as_slice())
-                {
+                if let Some(rebuilt) = rebuild_line_number_hunk_to_apply_patch_context(
+                    header.as_str(),
+                    body.as_slice(),
+                ) {
                     out.extend(rebuilt);
                 } else {
                     out.push(header);

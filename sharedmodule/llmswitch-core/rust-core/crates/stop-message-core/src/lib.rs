@@ -209,7 +209,7 @@ pub struct StopSchemaGateDecision {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct GoalActiveStopLoopInput {
+pub struct StoplessLoopGuardInput {
     pub captured_request: Value,
     pub assistant_text: String,
     pub threshold: Option<u32>,
@@ -217,7 +217,7 @@ pub struct GoalActiveStopLoopInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct GoalActiveStopLoopDecision {
+pub struct StoplessLoopGuardDecision {
     pub loop_detected: bool,
     pub repeat_count: u32,
     pub threshold: u32,
@@ -225,7 +225,7 @@ pub struct GoalActiveStopLoopDecision {
     pub reason_code: String,
 }
 
-const DEFAULT_GOAL_ACTIVE_STOP_LOOP_THRESHOLD: u32 = 3;
+const DEFAULT_STOPLESS_LOOP_GUARD_THRESHOLD: u32 = 3;
 
 // ── Core decision function ──────────────────────────────────────────────────
 
@@ -856,36 +856,36 @@ pub fn evaluate_stop_schema_gate_with_reasoning_stop_arguments(
         ),
     }
 }
-pub fn evaluate_goal_active_stop_loop(
-    input: &GoalActiveStopLoopInput,
-) -> GoalActiveStopLoopDecision {
+pub fn evaluate_stopless_loop_guard(
+    input: &StoplessLoopGuardInput,
+) -> StoplessLoopGuardDecision {
     let threshold = input
         .threshold
         .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_GOAL_ACTIVE_STOP_LOOP_THRESHOLD);
+        .unwrap_or(DEFAULT_STOPLESS_LOOP_GUARD_THRESHOLD);
     let assistant_text = normalize_loop_text(&input.assistant_text);
     if assistant_text.is_empty() {
-        return goal_active_loop_decision(false, 0, threshold, 0, "goal_active_stop_empty_text");
+        return stopless_loop_guard_decision(false, 0, threshold, 0, "stopless_stop_empty_text");
     }
 
     let Some(items) = request_items(&input.captured_request) else {
-        return goal_active_loop_decision(
+        return stopless_loop_guard_decision(
             false,
             0,
             threshold,
             0,
-            "goal_active_stop_no_request_items",
+            "stopless_stop_no_request_items",
         );
     };
 
     let goal_context_count = current_goal_context_count(items);
     if goal_context_count == 0 {
-        return goal_active_loop_decision(
+        return stopless_loop_guard_decision(
             false,
             0,
             threshold,
             0,
-            "goal_active_stop_no_goal_context",
+            "stopless_stop_no_goal_context",
         );
     }
 
@@ -910,15 +910,15 @@ pub fn evaluate_goal_active_stop_loop(
         break;
     }
 
-    goal_active_loop_decision(
+    stopless_loop_guard_decision(
         repeat_count >= threshold,
         repeat_count,
         threshold,
         goal_context_count,
         if repeat_count >= threshold {
-            "goal_active_repeated_stop"
+            "stopless_repeated_stop"
         } else {
-            "goal_active_stop_not_repeated"
+            "stopless_stop_not_repeated"
         },
     )
 }
@@ -944,14 +944,14 @@ fn current_goal_context_count(items: &[Value]) -> u32 {
     count
 }
 
-fn goal_active_loop_decision(
+fn stopless_loop_guard_decision(
     loop_detected: bool,
     repeat_count: u32,
     threshold: u32,
     goal_context_count: u32,
     reason_code: &str,
-) -> GoalActiveStopLoopDecision {
-    GoalActiveStopLoopDecision {
+) -> StoplessLoopGuardDecision {
+    StoplessLoopGuardDecision {
         loop_detected,
         repeat_count,
         threshold,
@@ -2605,8 +2605,8 @@ mod tests {
     }
 
     #[test]
-    fn detects_goal_active_repeated_stop_text() {
-        let input = GoalActiveStopLoopInput {
+    fn detects_stopless_repeated_stop_text() {
+        let input = StoplessLoopGuardInput {
             assistant_text: "立刻跑全测试 + 远端验证。".to_string(),
             threshold: Some(3),
             captured_request: serde_json::json!({
@@ -2625,16 +2625,16 @@ mod tests {
             }),
         };
 
-        let decision = evaluate_goal_active_stop_loop(&input);
+        let decision = evaluate_stopless_loop_guard(&input);
 
         assert!(decision.loop_detected);
         assert_eq!(decision.repeat_count, 3);
-        assert_eq!(decision.reason_code, "goal_active_repeated_stop");
+        assert_eq!(decision.reason_code, "stopless_repeated_stop");
     }
 
     #[test]
-    fn goal_active_loop_guard_resets_on_tool_signal() {
-        let input = GoalActiveStopLoopInput {
+    fn stopless_loop_guard_resets_on_tool_signal() {
+        let input = StoplessLoopGuardInput {
             assistant_text: "立刻跑全测试 + 远端验证。".to_string(),
             threshold: Some(3),
             captured_request: serde_json::json!({
@@ -2646,17 +2646,17 @@ mod tests {
             }),
         };
 
-        let decision = evaluate_goal_active_stop_loop(&input);
+        let decision = evaluate_stopless_loop_guard(&input);
 
         assert!(!decision.loop_detected);
         assert_eq!(decision.repeat_count, 0);
         assert_eq!(decision.goal_context_count, 0);
-        assert_eq!(decision.reason_code, "goal_active_stop_no_goal_context");
+        assert_eq!(decision.reason_code, "stopless_stop_no_goal_context");
     }
 
     #[test]
-    fn historical_goal_context_does_not_mark_current_request_goal_active() {
-        let input = GoalActiveStopLoopInput {
+    fn historical_stopless_context_does_not_mark_current_request_stopless() {
+        let input = StoplessLoopGuardInput {
             assistant_text: "当前普通停止。".to_string(),
             threshold: Some(3),
             captured_request: serde_json::json!({
@@ -2669,11 +2669,11 @@ mod tests {
             }),
         };
 
-        let decision = evaluate_goal_active_stop_loop(&input);
+        let decision = evaluate_stopless_loop_guard(&input);
 
         assert!(!decision.loop_detected);
         assert_eq!(decision.goal_context_count, 0);
-        assert_eq!(decision.reason_code, "goal_active_stop_no_goal_context");
+        assert_eq!(decision.reason_code, "stopless_stop_no_goal_context");
     }
 
     #[test]

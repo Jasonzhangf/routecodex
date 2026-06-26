@@ -31,7 +31,10 @@ export function registerAdHocHandlerForTests(
   const entry: ServerToolHandlerEntry = {
     name: registration.name,
     trigger: registration.trigger,
-    handler,
+    execution: {
+      kind: 'adhoc',
+      handler
+    },
     registration
   };
   if (registration.trigger === 'auto' && registration.autoHook) {
@@ -82,11 +85,15 @@ export function listAdHocHandlerRecords(): Array<{
 }> {
   const toolCallHandlers = Object.values(adHocToolHandlerRegistry).map((entry) => ({
     registration: entry.registration,
-    handler: entry.handler
+    handler: entry.execution.kind === 'adhoc' ? entry.execution.handler : (() => {
+      throw new Error(`[servertool] expected ad-hoc execution descriptor for ${entry.name}`);
+    })()
   }));
   const autoHandlers = adHocAutoHandlerRegistry.map((entry) => ({
     registration: entry.registration,
-    handler: entry.handler
+    handler: entry.execution.kind === 'adhoc' ? entry.execution.handler : (() => {
+      throw new Error(`[servertool] expected ad-hoc execution descriptor for ${entry.name}`);
+    })()
   }));
   return [...toolCallHandlers, ...autoHandlers];
 }

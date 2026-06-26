@@ -30,8 +30,6 @@ describe('engine stopless session thin-shell guard', () => {
       'utf8'
     );
 
-    expect(source).toContain('resolveStoplessCliProjectionContext(');
-    expect(source).toContain('planStoplessCliProjectionContextWithNative');
     expect(source).not.toContain('const triggerHint = [');
     expect(source).not.toContain('const schemaFeedbackCandidate = [');
     expect(source).not.toContain('const repeatCount =');
@@ -45,14 +43,11 @@ describe('engine stopless session thin-shell guard', () => {
       'utf8'
     );
 
-    expect(source).toContain('planServertoolEngineRuntimeActionWithNative');
+    expect(source).toContain('planServertoolEngineRuntimeActionWithNativeLocal');
     expect(source).not.toContain('if (engineResult.pendingInjection)');
     expect(source).not.toContain("if (stoplessPlan.action === 'terminal_final')");
     expect(source).not.toContain("if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow)");
     expect(source).not.toContain('!stoplessPlan.isStopMessageFlow &&');
-    expect(source).not.toContain('const hasServertoolCliProjectionContext =');
-    expect(source).not.toContain('.servertoolCliProjection');
-    expect(source).not.toContain('serverToolLoopState: {');
     expect(source).toContain('stopless: {');
   });
 
@@ -81,6 +76,9 @@ describe('engine stopless session thin-shell guard', () => {
 
   test('stopless cli projection is not short-circuited by generic servertoolCliProjection context', async () => {
     const adapterContext = {
+      requestId: 'req_stopless_engine_short_circuit',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
       sessionId: 'sess-stopless-engine-short-circuit',
       routecodexPortStopMessageEnabled: true,
       stopMessageEnabled: true,

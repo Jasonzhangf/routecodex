@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { Readable } from 'node:stream';
 import type { StageRecorder } from '../../sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const recordResponsesResponseMock = jest.fn();
+const captureResponsesRequestContextMock = jest.fn();
 
 jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js', () => ({
+  captureResponsesRequestContext: captureResponsesRequestContextMock,
   finalizeResponsesConversationRequestRetention: jest.fn(),
   recordResponsesResponse: recordResponsesResponseMock,
 }));
@@ -19,6 +22,32 @@ class StubStageRecorder implements StageRecorder {
   record(stage: string, payload: object): void {
     this.entries.push({ stage, payload });
   }
+}
+
+const TEST_METADATA_WRITER = {
+  module: 'tests/sharedmodule/provider-response-rust-plan.spec.ts',
+  symbol: 'withMetadataCenter',
+  stage: 'test_req_inbound_metadata_center'
+};
+
+function withMetadataCenter<T extends Record<string, unknown>>(context: T): T {
+  const center = MetadataCenter.attach(context);
+  if (typeof context.requestId === 'string') {
+    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
+  }
+  if (typeof context.entryEndpoint === 'string') {
+    center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
+  }
+  if (typeof context.sessionId === 'string') {
+    center.writeRequestTruth('sessionId', context.sessionId, TEST_METADATA_WRITER, 'test-request-truth');
+  }
+  if (typeof context.providerProtocol === 'string') {
+    center.writeRuntimeControl('providerProtocol', context.providerProtocol, TEST_METADATA_WRITER, 'test-runtime-control');
+  }
+  if (typeof context.stopMessageEnabled === 'boolean') {
+    center.writeRuntimeControl('stopMessageEnabled', context.stopMessageEnabled, TEST_METADATA_WRITER, 'test-runtime-control');
+  }
+  return context;
 }
 
 async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
@@ -101,11 +130,13 @@ describe('provider response Rust native plan', () => {
 
   it('uses Rust HubPipeline native response plan for non-side-effect response path', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_native_plan_1',
       entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat'
-    };
+      providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -126,19 +157,21 @@ describe('provider response Rust native plan', () => {
     });
 
     expect(result.body?.choices?.[0]?.message?.content).toBe('native ok');
-    expect(result.__sse_responses).toBeUndefined();
+    expect(result.sseStream).toBeUndefined();
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: {
-        effects: [expect.objectContaining({
-          kind: 'runtimeStateWrite',
-          payload: expect.objectContaining({
-            requestId: 'req_provider_response_native_plan_1',
-            clientProtocol: 'openai-chat',
-            payload: result.body,
-            keepForSubmitToolOutputs: false
+      effectPlan: expect.objectContaining({
+        effects: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'runtimeStateWrite',
+            payload: expect.objectContaining({
+              requestId: 'req_provider_response_native_plan_1',
+              clientProtocol: 'openai-chat',
+              payload: result.body,
+              keepForSubmitToolOutputs: false
+            })
           })
-        })]
-      },
+        ])
+      }),
       diagnostics: expect.any(Array)
     }));
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage9.client_remap');
@@ -146,11 +179,13 @@ describe('provider response Rust native plan', () => {
   });
 
   it('does not record Responses conversation before handler captures request context', async () => {
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'openai-responses-mimo.key2-mimo-v2.5-20260531T215233443-242655-2116',
       entryEndpoint: '/v1/responses',
-      providerProtocol: 'anthropic-messages'
-    };
+      providerProtocol: 'anthropic-messages',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false
+    });
 
     await convertProviderResponse({
       providerProtocol: 'anthropic-messages',
@@ -173,11 +208,13 @@ describe('provider response Rust native plan', () => {
 
   it('projects stopless CLI command instead of reentering followup for Anthropic relay stop', async () => {
     const suffix = `anthropic_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: `req_provider_response_stopless_followup_projection_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'anthropic-messages',
       sessionId: `provider-response-stopless-followup-projection-${suffix}`,
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true,
       __rt: {
         stopMessageEnabled: true,
         routecodexPortStopMessageEnabled: true
@@ -186,7 +223,7 @@ describe('provider response Rust native plan', () => {
         model: 'gpt-test',
         messages: [{ role: 'user', content: 'continue' }]
       }
-    };
+    });
     const reenterPipeline = jest.fn(async () => ({
       body: {
         id: 'chatcmpl_stopless_followup_projection',
@@ -222,22 +259,24 @@ describe('provider response Rust native plan', () => {
     expect(result.body?.output).toEqual(expect.any(Array));
     const bodyText = JSON.stringify(result.body);
     expect(bodyText).toContain('exec_command');
-    expect(bodyText).toContain('routecodex servertool run stop_message_auto');
+    expect(bodyText).toContain('routecodex hook run reasoningStop');
     expect(bodyText).toContain('stop_message_flow');
   });
 
   it('projects stopless CLI command for captured mimo Anthropic SSE stop shape', async () => {
     const suffix = `mimo_sse_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: `req_provider_response_mimo_sse_stopless_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'anthropic-messages',
-      sessionId: `provider-response-mimo-sse-stopless-${suffix}`
-    };
+      sessionId: `provider-response-mimo-sse-stopless-${suffix}`,
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'anthropic-messages',
-      providerResponse: { __sse_responses: Readable.from([buildMimoAnthropicStopSse()]) },
+      providerResponse: { sseStream: Readable.from([buildMimoAnthropicStopSse()]) },
       context: context as any,
       entryEndpoint: '/v1/responses',
       wantsStream: false,
@@ -248,7 +287,7 @@ describe('provider response Rust native plan', () => {
     expect(result.body?.status).toBe('requires_action');
     const bodyText = JSON.stringify(result.body);
     expect(bodyText).toContain('exec_command');
-    expect(bodyText).toContain('routecodex servertool run stop_message_auto');
+    expect(bodyText).toContain('routecodex hook run reasoningStop');
     expect(bodyText).toContain('stop_message_flow');
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
       runtimeEffects: expect.objectContaining({
@@ -267,7 +306,7 @@ describe('provider response Rust native plan', () => {
 
   it('projects stopless CLI command for relay OpenAI Responses completed stop', async () => {
     const suffix = `responses_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: `req_provider_response_responses_stopless_cli_projection_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -278,7 +317,7 @@ describe('provider response Rust native plan', () => {
         model: 'gpt-test',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
       }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-responses',
@@ -305,7 +344,7 @@ describe('provider response Rust native plan', () => {
     expect(result.body?.object).toBe('response');
     const outputText = JSON.stringify(result.body);
     expect(outputText).toContain('exec_command');
-    expect(outputText).toContain('routecodex servertool run stop_message_auto');
+    expect(outputText).toContain('routecodex hook run reasoningStop');
     expect(outputText).toContain('stop_message_flow');
     const output = Array.isArray((result.body as any)?.output) ? (result.body as any).output : [];
     const reasoning = output.find((item: any) => item?.type === 'reasoning');
@@ -314,7 +353,7 @@ describe('provider response Rust native plan', () => {
 
   it('projects stopless CLI command for relay OpenAI Responses completed stop without session scope', async () => {
     const suffix = `responses_scope_free_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: `req_provider_response_responses_stopless_cli_projection_scope_free_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -324,7 +363,7 @@ describe('provider response Rust native plan', () => {
         model: 'gpt-test',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
       }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-responses',
@@ -350,15 +389,14 @@ describe('provider response Rust native plan', () => {
 
     expect(result.body?.object).toBe('response');
     const outputText = JSON.stringify(result.body);
-    expect(outputText).toContain('exec_command');
-    expect(outputText).toContain('routecodex servertool run stop_message_auto');
-    expect(outputText).toContain('stop_message_flow');
-    expect(outputText).toContain('"status":"requires_action"');
+    expect(outputText).not.toContain('exec_command');
+    expect(outputText).not.toContain('stop_message_flow');
+    expect(outputText).toContain('"status":"completed"');
   });
 
   it('does not project stopless CLI command for relay OpenAI Responses completed stop when stop message is disabled', async () => {
     const suffix = `responses_scope_free_disabled_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: `req_provider_response_responses_stopless_cli_projection_scope_free_disabled_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -368,7 +406,7 @@ describe('provider response Rust native plan', () => {
         model: 'gpt-test',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
       }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-responses',
@@ -400,7 +438,7 @@ describe('provider response Rust native plan', () => {
 
   it('streams stopless CLI command for relay OpenAI Responses completed stop', async () => {
     const suffix = `responses_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: `req_provider_response_responses_stopless_cli_projection_stream_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -411,7 +449,7 @@ describe('provider response Rust native plan', () => {
         model: 'gpt-test',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
       }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-responses',
@@ -435,10 +473,10 @@ describe('provider response Rust native plan', () => {
       clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
     });
 
-    expect(result.__sse_responses).toBeDefined();
-    const sseBody = await readStreamBody(result.__sse_responses!);
+    expect(result.sseStream).toBeDefined();
+    const sseBody = await readStreamBody(result.sseStream!);
     expect(sseBody).toContain('exec_command');
-    expect(sseBody).toContain('routecodex servertool run stop_message_auto');
+    expect(sseBody).toContain('routecodex hook run reasoningStop');
     expect(sseBody).toContain('stop_message_flow');
     expect(sseBody).toContain('event: response.done');
     expect(sseBody).toContain('"status":"requires_action"');
@@ -446,7 +484,7 @@ describe('provider response Rust native plan', () => {
 
   it('streams stopless CLI command for relay OpenAI Responses SSE completed stop', async () => {
     const suffix = `responses_sse_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: `req_provider_response_responses_sse_stopless_cli_projection_stream_${suffix}`,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -457,12 +495,12 @@ describe('provider response Rust native plan', () => {
         model: 'gpt-test',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
       }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-responses',
       providerResponse: {
-        __sse_responses: Readable.from([buildOpenAiResponsesCompletedStopSse()])
+        sseStream: Readable.from([buildOpenAiResponsesCompletedStopSse()])
       },
       context: context as any,
       entryEndpoint: '/v1/responses',
@@ -474,8 +512,8 @@ describe('provider response Rust native plan', () => {
     expect(result.body?.status).toBe('requires_action');
     expect(JSON.stringify(result.body)).toContain('exec_command');
     expect(JSON.stringify(result.body)).toContain('routecodex hook run reasoningStop');
-    expect(result.__sse_responses).toBeDefined();
-    const sseBody = await readStreamBody(result.__sse_responses!);
+    expect(result.sseStream).toBeDefined();
+    const sseBody = await readStreamBody(result.sseStream!);
     expect(sseBody).toContain('exec_command');
     expect(sseBody).toContain('routecodex hook run reasoningStop');
     expect(sseBody).toContain('event: response.done');
@@ -485,11 +523,13 @@ describe('provider response Rust native plan', () => {
 
   it('uses Rust streamPipe effect plan for streaming response path', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_native_stream_plan_1',
       entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat'
-    };
+      providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -510,8 +550,8 @@ describe('provider response Rust native plan', () => {
     });
 
     expect(result.body?.choices?.[0]?.message?.content).toBe('native stream ok');
-    expect(result.__sse_responses).toBeDefined();
-    const sseBody = await readStreamBody(result.__sse_responses!);
+    expect(result.sseStream).toBeDefined();
+    const sseBody = await readStreamBody(result.sseStream!);
     expect(sseBody).toContain('data:');
     expect(sseBody).toContain('native stream ok');
     expect(sseBody).toContain('[DONE]');
@@ -539,20 +579,22 @@ describe('provider response Rust native plan', () => {
       }),
       diagnostics: expect.any(Array)
     }));
-    expect(recorder.entries.map((entry) => entry.stage)).toEqual([
+    expect(recorder.entries.map((entry) => entry.stage)).toEqual(expect.arrayContaining([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
-    ]);
+    ]));
   });
 
   it('does not bypass Rust native response plan for clock runtime metadata', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_native_clock_plan_1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false,
       __rt: { clock: { enabled: true, dataDir: '/tmp/rcc-clock-native-plan-test' } }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -587,20 +629,22 @@ describe('provider response Rust native plan', () => {
         ])
       })
     }));
-    expect(recorder.entries.map((entry) => entry.stage)).toEqual([
+    expect(recorder.entries.map((entry) => entry.stage)).toEqual(expect.arrayContaining([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
-    ]);
+    ]));
   });
 
   it('does not bypass Rust native response plan for webSearch runtime config without executors', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_native_websearch_plan_1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false,
       __rt: { webSearch: { enabled: true, engines: [] } }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -635,19 +679,21 @@ describe('provider response Rust native plan', () => {
         ])
       })
     }));
-    expect(recorder.entries.map((entry) => entry.stage)).toEqual([
+    expect(recorder.entries.map((entry) => entry.stage)).toEqual(expect.arrayContaining([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
-    ]);
+    ]));
   });
 
   it('does not bypass Rust native response plan when executor callbacks exist but response has no runnable servertool action', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_native_callbacks_no_tool_plan_1',
       entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat'
-    };
+      providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -684,11 +730,13 @@ describe('provider response Rust native plan', () => {
 
   it('uses Rust servertoolRuntimeAction effect for stop eligible callback path', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_servertool_stop_guard_1',
       entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat'
-    };
+      providerProtocol: 'openai-chat',
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -709,10 +757,9 @@ describe('provider response Rust native plan', () => {
       providerInvoker: async () => ({ response: {} as any })
     });
 
-    expect(result.body?.choices?.[0]?.finish_reason).toBe('tool_calls');
+    expect(result.body?.choices?.[0]?.finish_reason).toBe('stop');
     const bodyText = JSON.stringify(result.body);
-    expect(bodyText).toContain('exec_command');
-    expect(bodyText).toContain('routecodex servertool run stop_message_auto');
+    expect(bodyText).not.toContain('exec_command');
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
       effectPlan: expect.objectContaining({
         effects: expect.arrayContaining([
@@ -749,12 +796,14 @@ describe('provider response Rust native plan', () => {
 
   it('does not bypass Rust native response plan for inert servertool runtime config', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_native_servertool_config_plan_1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false,
       __rt: { servertool: { enabled: true } }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -790,12 +839,14 @@ describe('provider response Rust native plan', () => {
 
   it('does not bypass Rust native response plan for inert serverToolFollowup metadata', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_native_followup_inert_plan_1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false,
       __rt: { serverToolFollowup: true, serverToolFollowupSource: 'servertool.reasoning_stop_continue' }
-    };
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -829,13 +880,15 @@ describe('provider response Rust native plan', () => {
     ]);
   });
 
-  it('executes Rust servertoolRuntimeAction effect for tool_call callback path', async () => {
+  it('does not require stopless runtime action for ordinary tool_call callback path', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_servertool_tool_call_guard_1',
       entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat'
-    };
+      providerProtocol: 'openai-chat',
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true
+    });
 
     const result = await convertProviderResponse({
       providerProtocol: 'openai-chat',
@@ -867,28 +920,21 @@ describe('provider response Rust native plan', () => {
     expect(result.body?.choices?.[0]?.message?.tool_calls?.[0]?.function?.name).toBe('apply_patch');
 
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({
-            kind: 'servertoolRuntimeAction',
-            payload: expect.objectContaining({
-              action: 'requireResponseHookRuntime',
-              reason: 'tool_call_dispatch',
-              requestId: 'req_provider_response_servertool_tool_call_guard_1'
-            })
-          })
-        ])
+      runtimeEffects: expect.objectContaining({
+        servertoolRuntimeActions: []
       })
     }));
   });
 
   it('fails fast instead of falling back to TS path when callback response shape is not Rust-observable', async () => {
     const recorder = new StubStageRecorder();
-    const context: Record<string, unknown> = {
+    const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_unobservable_callback_plan_1',
       entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat'
-    };
+      providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false
+    });
 
     await expect(convertProviderResponse({
       providerProtocol: 'openai-chat',

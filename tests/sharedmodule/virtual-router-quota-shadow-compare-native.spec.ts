@@ -1,9 +1,13 @@
 import { describe, expect, test } from '@jest/globals';
 
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
-import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
-const FUTURE_RESET_AT = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+function buildRouteMetadata(requestId: string): any {
+  return {
+    requestId,
+    metadataCenterSnapshot: {}
+  };
+}
 
 function buildDualProviderConfig(providerA = 'quota.key1.gpt-test', providerB = 'quota.key2.gpt-test'): any {
   return {
@@ -94,7 +98,7 @@ describe('virtual router quota shadow compare against TS second center', () => {
     const providerB = 'quota.key2.gpt-test';
     const config = buildDualProviderConfig(providerA, providerB);
     const request = { messages: [{ role: 'user', content: 'hello' }] } as any;
-    const metadata = { requestId: 'req-quota-shadow-compare-route' } as any;
+    const metadata = buildRouteMetadata('req-quota-shadow-compare-route');
 
     const rustOnly = new VirtualRouterEngine({} as any);
     rustOnly.initialize(config);
@@ -125,78 +129,27 @@ describe('virtual router quota shadow compare against TS second center', () => {
     expect(tsPoisonedDecision.decision.routeName).toBe(rustOnlyDecision.decision.routeName);
   });
 
-  test('same-shape singleton quota exhausted error stays identical even if TS quotaView advertises a conflicting pool state', () => {
+  test('singleton route still selects the only provider even if TS quotaView advertises an out-of-pool cooldown', () => {
     const providerKey = 'quota.key1.gpt-test';
     const config = buildSingleProviderConfig(providerKey);
     const request = { messages: [{ role: 'user', content: 'hello' }] } as any;
-    const metadata = { requestId: 'req-quota-shadow-compare-singleton' } as any;
-    const errorEvent = {
-      code: 'QUOTA_DEPLETED',
-      message: 'HTTP 429: quota exhausted',
-      status: 429,
-      quotaScope: 'daily',
-      quotaReason: 'quota_exhausted',
-      resetAt: FUTURE_RESET_AT,
-      runtime: {
-        requestId: 'req-singleton-quota-shadow',
-        routeName: 'default',
-        providerKey,
-        runtimeKey: 'quota.key1'
-      },
-      timestamp: Date.now(),
-      details: {}
-    } as any;
-
+    const metadata = buildRouteMetadata('req-quota-shadow-compare-singleton');
     const rustOnly = new VirtualRouterEngine({} as any);
     rustOnly.initialize(config);
-    rustOnly.handleProviderError(errorEvent);
 
     const tsPoisoned = createEngineWithPoisonedQuotaView(config, (key) => ({
       providerKey: key,
-      inPool: true,
-      reason: 'ok',
-      priorityTier: 100
+      inPool: false,
+      reason: 'quotaDepleted',
+      cooldownUntil: Date.now() + 60_000,
+      priorityTier: 100,
     }));
-    tsPoisoned.handleProviderError(errorEvent);
 
-    const readFailure = (engine: VirtualRouterEngine) => {
-      try {
-        engine.route(request, metadata);
-        throw new Error('expected route to fail');
-      } catch (error) {
-        expect(error).toBeInstanceOf(VirtualRouterError);
-        const err = error as VirtualRouterError & { details?: Record<string, unknown> };
-        expect(err.code).toBe('PROVIDER_NOT_AVAILABLE');
-        return {
-          code: err.code,
-          minRecoverableCooldownMs: err.details?.minRecoverableCooldownMs,
-          recoverableCooldownHints: err.details?.recoverableCooldownHints
-        };
-      }
-    };
+    const rustOnlyDecision = rustOnly.route(request, metadata);
+    const tsPoisonedDecision = tsPoisoned.route(request, metadata);
 
-    const rustOnlyFailure = readFailure(rustOnly);
-    const tsPoisonedFailure = readFailure(tsPoisoned);
-
-    expect(typeof rustOnlyFailure.minRecoverableCooldownMs).toBe('number');
-    expect(tsPoisonedFailure.code).toBe(rustOnlyFailure.code);
-    expect(typeof tsPoisonedFailure.minRecoverableCooldownMs).toBe('number');
-    expect((tsPoisonedFailure.minRecoverableCooldownMs as number) > 0).toBe(true);
-    expect((tsPoisonedFailure.minRecoverableCooldownMs as number) <= 10_000).toBe(true);
-    expect(Array.isArray(rustOnlyFailure.recoverableCooldownHints)).toBe(true);
-    expect(Array.isArray(tsPoisonedFailure.recoverableCooldownHints)).toBe(true);
-    expect((tsPoisonedFailure.recoverableCooldownHints as Array<Record<string, unknown>>)[0]).toMatchObject({
-      providerKey,
-      source: 'rust.quota'
-    });
-    expect((rustOnlyFailure.recoverableCooldownHints as Array<Record<string, unknown>>)[0]).toMatchObject({
-      providerKey,
-      source: 'rust.quota'
-    });
-    const rustWaitMs = Number((rustOnlyFailure.recoverableCooldownHints as Array<Record<string, unknown>>)[0]?.waitMs);
-    const tsWaitMs = Number((tsPoisonedFailure.recoverableCooldownHints as Array<Record<string, unknown>>)[0]?.waitMs);
-    expect(Number.isFinite(rustWaitMs)).toBe(true);
-    expect(Number.isFinite(tsWaitMs)).toBe(true);
-    expect(Math.abs(tsWaitMs - rustWaitMs)).toBeLessThanOrEqual(50);
+    expect(rustOnlyDecision.target.providerKey).toBe(providerKey);
+    expect(tsPoisonedDecision.target.providerKey).toBe(providerKey);
+    expect(tsPoisonedDecision.decision.routeName).toBe('default');
   });
 });

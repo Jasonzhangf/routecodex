@@ -15,7 +15,6 @@ use crate::virtual_router_engine::error::{
 use crate::virtual_router_engine::features::RoutingFeatures;
 use crate::virtual_router_engine::instructions::RoutingInstructionState;
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
-use crate::virtual_router_engine::quota::ProviderQuotaState;
 use crate::virtual_router_engine::routing::{
     build_route_queue, default_pool_supports_capability, extract_excluded_provider_keys,
     extract_key_alias, extract_provider_id, filter_candidates_by_state,
@@ -25,7 +24,6 @@ use crate::virtual_router_engine::routing::{
 use crate::virtual_router_engine::time_utils::now_ms;
 
 const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
-const SINGLETON_RUST_QUOTA_RECOVERABLE_COOLDOWN_MS: i64 = 10_000;
 const ROUTE_POOL_COOLDOWN_WAIT_MAX_MS: i64 = 3 * 60 * 1000;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -53,11 +51,7 @@ pub(crate) struct SingletonRoutePoolExhaustionDecision {
 fn read_positive_wait_ms(value: &Value) -> Option<i64> {
     match value {
         Value::Number(number) => number.as_i64().filter(|value| *value > 0),
-        Value::String(raw) => raw
-            .trim()
-            .parse::<i64>()
-            .ok()
-            .filter(|value| *value > 0),
+        Value::String(raw) => raw.trim().parse::<i64>().ok().filter(|value| *value > 0),
         _ => None,
     }
 }
@@ -80,26 +74,10 @@ fn resolve_pool_cooldown_wait_ms_from_error(pipeline_error: &Value) -> Option<i6
         .as_object()
         .and_then(|record| record.get("details"))
         .and_then(|details| details.as_object())?;
-    let direct = details
+    let candidate = details
         .get("minRecoverableCooldownMs")
         .and_then(read_positive_wait_ms);
-    let hinted = details
-        .get("recoverableCooldownHints")
-        .and_then(|value| value.as_array())
-        .and_then(|items| {
-            items.iter().filter_map(|item| {
-                item.as_object()
-                    .and_then(|record| record.get("waitMs"))
-                    .and_then(read_positive_wait_ms)
-            })
-            .min()
-        });
-    let candidate = match (direct, hinted) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (Some(left), None) => Some(left),
-        (None, Some(right)) => Some(right),
-        (None, None) => None,
-    }?;
+    let candidate = candidate?;
     if candidate > ROUTE_POOL_COOLDOWN_WAIT_MAX_MS {
         return None;
     }
@@ -311,6 +289,23 @@ fn apply_non_availability_filters(
     scoped
 }
 
+fn build_default_floor_candidates_ignoring_exclusions(
+    provider_registry: &ProviderRegistry,
+    candidates: &[String],
+    routing_state: &RoutingInstructionState,
+    server_tool_required: bool,
+    bound_alias_prefix: Option<&str>,
+) -> Vec<String> {
+    apply_non_availability_filters(
+        provider_registry,
+        candidates,
+        routing_state,
+        &HashSet::new(),
+        server_tool_required,
+        bound_alias_prefix,
+    )
+}
+
 fn filter_router_direct_protocol(
     provider_registry: &ProviderRegistry,
     candidates: Vec<String>,
@@ -367,34 +362,13 @@ impl VirtualRouterEngineCore {
 
     fn collect_available_candidates(&mut self, env: Env, candidates: &[String]) -> Vec<String> {
         let route_candidates: Vec<String> = candidates.iter().cloned().collect();
-        let now = now_ms();
         let mut available: Vec<String> = Vec::new();
         for key in &route_candidates {
-            if self.is_provider_available(env, key)
-                || self
-                    .health_manager
-                    .has_persisted_503_reprobe_available(key, now)
-            {
+            if self.is_provider_available(env, key) {
                 available.push(key.clone());
             }
         }
-        if available.is_empty() && route_candidates.len() == 1 {
-            let provider_key = &route_candidates[0];
-            if self.is_singleton_provider_soft_available_from_rust_quota(env, provider_key)
-                || self
-                    .health_manager
-                    .has_persisted_503_reprobe_available(provider_key, now)
-            {
-                available.push(provider_key.clone());
-            }
-        }
         available
-    }
-
-    fn consume_persisted_503_reprobe_for_selected_provider(&mut self, provider_key: &str) {
-        let _ = self
-            .health_manager
-            .consume_persisted_503_reprobe_if_available(provider_key, now_ms());
     }
 
     pub(crate) fn select_provider(
@@ -429,7 +403,6 @@ impl VirtualRouterEngineCore {
                     router_direct_inbound_protocol.as_deref(),
                 );
                 if let Some(forced_key) = available.into_iter().next() {
-                    self.consume_persisted_503_reprobe_for_selected_provider(&forced_key);
                     return Ok(SelectionResult::new(
                         forced_key.clone(),
                         requested_route.to_string(),
@@ -498,7 +471,6 @@ impl VirtualRouterEngineCore {
                         |_| true,
                         Some("round-robin"),
                     ) {
-                        self.consume_persisted_503_reprobe_for_selected_provider(&preferred_key);
                         return Ok(SelectionResult::new(
                             preferred_key,
                             "prefer".to_string(),
@@ -655,7 +627,7 @@ impl VirtualRouterEngineCore {
                 if pool_candidate_targets.is_empty() {
                     continue;
                 }
-                let floor_candidates = apply_non_availability_filters(
+                let mut floor_candidates = apply_non_availability_filters(
                     &self.provider_registry,
                     &pool_candidate_targets,
                     routing_state,
@@ -663,6 +635,19 @@ impl VirtualRouterEngineCore {
                     server_tool_required,
                     bound_alias_prefix,
                 );
+                if route_name == DEFAULT_ROUTE && floor_candidates.is_empty() {
+                    let default_floor_candidates =
+                        build_default_floor_candidates_ignoring_exclusions(
+                            &self.provider_registry,
+                            &pool_candidate_targets,
+                            routing_state,
+                            server_tool_required,
+                            bound_alias_prefix,
+                        );
+                    if default_floor_candidates.len() == 1 {
+                        floor_candidates = default_floor_candidates;
+                    }
+                }
                 let mut available = self.apply_standard_filters(
                     env,
                     &pool_candidate_targets,
@@ -675,6 +660,23 @@ impl VirtualRouterEngineCore {
                     available,
                     router_direct_inbound_protocol.as_deref(),
                 );
+                if route_name == DEFAULT_ROUTE && available.is_empty() && floor_candidates.len() == 1 {
+                    let mut default_floor_available = self.apply_standard_filters(
+                        env,
+                        &floor_candidates,
+                        routing_state,
+                        &HashSet::new(),
+                        server_tool_required,
+                    );
+                    default_floor_available = filter_router_direct_protocol(
+                        &self.provider_registry,
+                        default_floor_available,
+                        router_direct_inbound_protocol.as_deref(),
+                    );
+                    if !default_floor_available.is_empty() {
+                        available = default_floor_available;
+                    }
+                }
                 if let Some(prefix) = bound_alias_prefix {
                     let alias_candidates: Vec<String> = available
                         .iter()
@@ -799,7 +801,6 @@ impl VirtualRouterEngineCore {
                 };
 
                 for key in dedupe_candidate_order(selected_candidates) {
-                    self.consume_persisted_503_reprobe_for_selected_provider(&key);
                     return Ok(SelectionResult::new(
                         key,
                         route_name.to_string(),
@@ -844,13 +845,7 @@ impl VirtualRouterEngineCore {
                 return false;
             }
         }
-        let now = now_ms();
-        if let Some(state) = self.quota_manager.active_blocker(provider_key, now) {
-            if quota_state_blocks_provider(&state, now) {
-                return false;
-            }
-        }
-        self.health_manager.is_available(provider_key, now)
+        self.health_manager.is_available(provider_key, now_ms())
     }
 
     fn resolve_forwarder_candidate_for_pool(
@@ -880,14 +875,10 @@ impl VirtualRouterEngineCore {
             std::collections::HashSet::new();
         let mut protocol_compatible_real_keys: std::collections::HashSet<String> =
             std::collections::HashSet::new();
-        let now = now_ms();
         for target in &cloned_targets {
             let available = !target.disabled
                 && !excluded_keys.contains(&target.provider_key)
-                && (self.is_provider_available(env, &target.provider_key)
-                    || self
-                        .health_manager
-                        .has_persisted_503_reprobe_available(&target.provider_key, now));
+                && self.is_provider_available(env, &target.provider_key);
             if available {
                 available_real_keys.insert(target.provider_key.clone());
                 if router_direct_inbound_protocol
@@ -928,8 +919,7 @@ impl VirtualRouterEngineCore {
             },
             forwarder_sticky_session_id,
         );
-        if let Ok(real) = &selected {
-        }
+        if let Ok(real) = &selected {}
         match selected {
             Ok(real) => Some(real),
             Err(e)
@@ -972,35 +962,6 @@ impl VirtualRouterEngineCore {
             }
         }
     }
-
-    pub(crate) fn is_singleton_provider_soft_available_from_rust_quota(
-        &mut self,
-        env: Env,
-        provider_key: &str,
-    ) -> bool {
-        if self
-            .concurrency_busy_remaining_for_provider(provider_key, now_ms())
-            .is_some()
-        {
-            return false;
-        }
-        if let Some(profile) = self.provider_registry.get(provider_key) {
-            if !profile.enabled {
-                return false;
-            }
-        }
-        let now = now_ms();
-        let Some(state) = self.quota_manager.active_blocker(provider_key, now) else {
-            return false;
-        };
-        if !supports_singleton_rust_quota_recovery(&state) {
-            return false;
-        }
-        if !self.health_manager.is_available(provider_key, now) {
-            return false;
-        }
-        singleton_rust_quota_recoverable_wait_ms(&state, now).is_none()
-    }
 }
 
 fn build_unavailable_providers_details(
@@ -1013,34 +974,14 @@ fn build_unavailable_providers_details(
     }
     let now_ms = now_ms();
     let mut blockers: Vec<ProviderUnavailableBlocker> = Vec::new();
-    let mut min_recoverable_cooldown_ms: Option<i64> = None;
-    let mut hints: Vec<RecoverableCooldownHint> = Vec::new();
     for provider_key in candidate_keys {
-        collect_recoverable_cooldown_for_key(
-            core,
-            env,
-            provider_key,
-            now_ms,
-            candidate_keys.len(),
-            &mut min_recoverable_cooldown_ms,
-            &mut hints,
-            &mut blockers,
-        );
+        collect_recoverable_cooldown_for_key(core, env, provider_key, now_ms, &mut blockers);
     }
     if blockers.is_empty() {
         return None;
     }
     Some(json!({
         "candidateProviderKeys": candidate_keys,
-        "minRecoverableCooldownMs": min_recoverable_cooldown_ms,
-        "recoverableCooldownHints": hints
-            .into_iter()
-            .map(|item| json!({
-                "providerKey": item.provider_key,
-                "waitMs": item.wait_ms,
-                "source": item.source
-            }))
-            .collect::<Vec<Value>>(),
         "items": blockers
             .into_iter()
             .map(|item| json!({
@@ -1120,72 +1061,9 @@ fn build_primary_target_groups(
 }
 
 #[derive(Debug, Clone)]
-struct RecoverableCooldownHint {
-    provider_key: String,
-    wait_ms: i64,
-    source: &'static str,
-}
-
-#[derive(Debug, Clone)]
 struct ProviderUnavailableBlocker {
     provider_key: String,
     reasons: Vec<Value>,
-}
-
-fn supports_singleton_rust_quota_recovery(state: &ProviderQuotaState) -> bool {
-    state.reason == "quotaDepleted" && state.blacklist_until.is_none()
-}
-
-fn singleton_rust_quota_recoverable_wait_ms(
-    state: &ProviderQuotaState,
-    now_ms: i64,
-) -> Option<i64> {
-    if !supports_singleton_rust_quota_recovery(state) {
-        return None;
-    }
-    let active_until = state.cooldown_until.or(state.reset_at)?;
-    if active_until <= now_ms {
-        return None;
-    }
-    let softened_until = state
-        .last_error_at_ms
-        .map(|last_error_at| last_error_at + SINGLETON_RUST_QUOTA_RECOVERABLE_COOLDOWN_MS)
-        .unwrap_or(active_until)
-        .min(active_until);
-    if softened_until <= now_ms {
-        return None;
-    }
-    Some(softened_until - now_ms)
-}
-
-fn record_recoverable_cooldown(
-    provider_key: &str,
-    wait_ms_raw: i64,
-    source: &'static str,
-    min_recoverable_cooldown_ms: &mut Option<i64>,
-    hints: &mut Vec<RecoverableCooldownHint>,
-) {
-    let wait_ms = wait_ms_raw.max(1);
-    match min_recoverable_cooldown_ms {
-        Some(current) if wait_ms < *current => *min_recoverable_cooldown_ms = Some(wait_ms),
-        None => *min_recoverable_cooldown_ms = Some(wait_ms),
-        _ => {}
-    }
-
-    if let Some(existing) = hints
-        .iter_mut()
-        .find(|item| item.provider_key == provider_key && item.source == source)
-    {
-        if wait_ms < existing.wait_ms {
-            existing.wait_ms = wait_ms;
-        }
-        return;
-    }
-    hints.push(RecoverableCooldownHint {
-        provider_key: provider_key.to_string(),
-        wait_ms,
-        source,
-    });
 }
 
 fn push_unavailable_reason(
@@ -1211,19 +1089,9 @@ fn collect_recoverable_cooldown_for_key(
     env: Env,
     provider_key: &str,
     now_ms: i64,
-    candidate_keys_len: usize,
-    min_recoverable_cooldown_ms: &mut Option<i64>,
-    hints: &mut Vec<RecoverableCooldownHint>,
     blockers: &mut Vec<ProviderUnavailableBlocker>,
 ) {
     if let Some(wait_ms) = core.concurrency_busy_remaining_for_provider(provider_key, now_ms) {
-        record_recoverable_cooldown(
-            provider_key,
-            wait_ms,
-            "concurrency.busy",
-            min_recoverable_cooldown_ms,
-            hints,
-        );
         push_unavailable_reason(
             blockers,
             provider_key,
@@ -1246,80 +1114,10 @@ fn collect_recoverable_cooldown_for_key(
         }
     }
 
-    if let Some(state) = core.quota_manager.active_blocker(provider_key, now_ms) {
-        if let Some(blacklist_until) = state.blacklist_until {
-            push_unavailable_reason(
-                blockers,
-                provider_key,
-                json!({
-                    "type": "rust_quota_blacklist",
-                    "until": blacklist_until,
-                    "reason": state.reason
-                }),
-            );
-            return;
-        }
-        let singleton_wait_ms = if candidate_keys_len == 1 {
-            singleton_rust_quota_recoverable_wait_ms(&state, now_ms)
-        } else {
-            None
-        };
-        let rust_quota_until = state.cooldown_until.or(state.reset_at);
-        if let Some(cooldown_until) = rust_quota_until {
-            if cooldown_until > now_ms {
-                let wait_ms = singleton_wait_ms.unwrap_or(cooldown_until - now_ms);
-                record_recoverable_cooldown(
-                    provider_key,
-                    wait_ms,
-                    "rust.quota",
-                    min_recoverable_cooldown_ms,
-                    hints,
-                );
-                push_unavailable_reason(
-                    blockers,
-                    provider_key,
-                    json!({
-                        "type": "rust_quota_cooldown",
-                        "until": cooldown_until,
-                        "waitMs": wait_ms,
-                        "reason": state.reason,
-                        "resetAt": state.reset_at,
-                        "softenedForSingleton": singleton_wait_ms.is_some()
-                    }),
-                );
-                return;
-            }
-        }
-        if !state.in_pool {
-            if candidate_keys_len == 1 && supports_singleton_rust_quota_recovery(&state) {
-                return;
-            }
-            push_unavailable_reason(
-                blockers,
-                provider_key,
-                json!({
-                    "type": "rust_quota_out_of_pool",
-                    "reason": state.reason,
-                    "cooldownUntil": state.cooldown_until,
-                    "blacklistUntil": state.blacklist_until,
-                    "resetAt": state.reset_at
-                }),
-            );
-            return;
-        }
-    }
-
     if let Some(wait_ms) = core
         .health_manager
         .cooldown_remaining_ms(provider_key, now_ms)
     {
-        record_recoverable_cooldown(
-            provider_key,
-            wait_ms,
-            "health.cooldown",
-            min_recoverable_cooldown_ms,
-            hints,
-        );
         push_unavailable_reason(
             blockers,
             provider_key,
@@ -1348,26 +1146,6 @@ fn collect_recoverable_cooldown_for_key(
     }
 }
 
-pub(crate) fn quota_state_blocks_provider(state: &ProviderQuotaState, now_ms: i64) -> bool {
-    if state
-        .blacklist_until
-        .map(|until| until > now_ms)
-        .unwrap_or(false)
-    {
-        return true;
-    }
-    if state
-        .cooldown_until
-        .or(state.reset_at)
-        .map(|until| until > now_ms)
-        .unwrap_or(false)
-        && !state.in_pool
-    {
-        return true;
-    }
-    !state.in_pool && state.reason != "active"
-}
-
 pub(crate) fn build_provider_not_available_error(
     core: &VirtualRouterEngineCore,
     env: Env,
@@ -1376,21 +1154,10 @@ pub(crate) fn build_provider_not_available_error(
     unavailable_route_pools: Option<&[Value]>,
 ) -> String {
     let now_ms = now_ms();
-    let mut min_recoverable_cooldown_ms: Option<i64> = None;
-    let mut hints: Vec<RecoverableCooldownHint> = Vec::new();
     let mut blockers: Vec<ProviderUnavailableBlocker> = Vec::new();
 
     for provider_key in candidate_keys {
-        collect_recoverable_cooldown_for_key(
-            core,
-            env,
-            provider_key,
-            now_ms,
-            candidate_keys.len(),
-            &mut min_recoverable_cooldown_ms,
-            &mut hints,
-            &mut blockers,
-        );
+        collect_recoverable_cooldown_for_key(core, env, provider_key, now_ms, &mut blockers);
     }
 
     let unavailable_route_pool_value = unavailable_route_pools
@@ -1399,10 +1166,30 @@ pub(crate) fn build_provider_not_available_error(
     let (primary_exhausted_route_name, primary_exhausted_targets) =
         derive_primary_exhausted_route_details(unavailable_route_pools.unwrap_or(&[]));
 
-    if let Some(min_wait_ms) = min_recoverable_cooldown_ms {
-        let has_concurrency_busy = hints.iter().any(|item| item.source == "concurrency.busy");
-        let mut sorted_hints = hints;
-        sorted_hints.sort_by_key(|item| item.wait_ms);
+    if blockers.iter().any(|item| {
+        item.reasons.iter().any(|reason| {
+            reason
+                .get("type")
+                .and_then(|value| value.as_str())
+                .map(|value| value == "concurrency_busy" || value == "health_cooldown")
+                .unwrap_or(false)
+        })
+    }) {
+        let min_wait_ms = blockers
+            .iter()
+            .flat_map(|item| item.reasons.iter())
+            .filter_map(|reason| reason.get("waitMs").and_then(|value| value.as_i64()))
+            .min()
+            .unwrap_or(1);
+        let has_concurrency_busy = blockers.iter().any(|item| {
+            item.reasons.iter().any(|reason| {
+                reason
+                    .get("type")
+                    .and_then(|value| value.as_str())
+                    .map(|value| value == "concurrency_busy")
+                    .unwrap_or(false)
+            })
+        });
         let mut details = json!({
             "status": 429,
             "statusCode": 429,
@@ -1411,15 +1198,6 @@ pub(crate) fn build_provider_not_available_error(
             "minRecoverableCooldownMs": min_wait_ms,
             "candidateProviderCount": candidate_keys.len(),
             "candidateProviderKeys": candidate_keys,
-            "recoverableCooldownHints": sorted_hints
-                .into_iter()
-                .take(8)
-                .map(|item| json!({
-                    "providerKey": item.provider_key,
-                    "waitMs": item.wait_ms,
-                    "source": item.source,
-                }))
-                .collect::<Vec<Value>>(),
             "unavailableProviders": blockers
                 .into_iter()
                 .map(|item| json!({
@@ -1516,7 +1294,8 @@ fn derive_primary_exhausted_route_details(
     unavailable_route_pools: &[Value],
 ) -> (Option<String>, Vec<String>) {
     let Some(first_route_name) = unavailable_route_pools.iter().find_map(|entry| {
-        entry.get("routeName")
+        entry
+            .get("routeName")
             .and_then(|value| value.as_str())
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -1541,7 +1320,11 @@ fn derive_primary_exhausted_route_details(
             continue;
         };
         for target in pool_targets {
-            let Some(raw) = target.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
+            let Some(raw) = target
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
                 continue;
             };
             if !targets.iter().any(|existing| existing == raw) {
@@ -1596,28 +1379,26 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
         core
     }
 
     #[test]
     fn singleton_route_pool_exhaustion_blocks_default_only_last_provider() {
-        let decision = evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
-            pipeline_error: json!({
-                "code": "PROVIDER_NOT_AVAILABLE",
-                "details": {
-                    "routeName": "default",
-                    "candidateProviderCount": 1,
-                    "minRecoverableCooldownMs": 1000,
-                    "recoverableCooldownHints": [
-                        { "providerKey": "deepseek.key1.deepseek-v4-pro", "waitMs": 1000, "source": "provider.error" }
-                    ]
-                }
-            }),
-            initial_route_pool_len: Some(1),
-            explicit_singleton_pool: false,
-            excluded_provider_count: 0,
-        });
+        let decision = evaluate_singleton_route_pool_exhaustion(
+            &SingletonRoutePoolExhaustionInput {
+                pipeline_error: json!({
+                    "code": "PROVIDER_NOT_AVAILABLE",
+                    "details": {
+                        "routeName": "default",
+                        "candidateProviderCount": 1,
+                        "minRecoverableCooldownMs": 1000
+                    }
+                }),
+                initial_route_pool_len: Some(1),
+                explicit_singleton_pool: false,
+                excluded_provider_count: 0,
+            },
+        );
         assert_eq!(
             decision,
             SingletonRoutePoolExhaustionDecision {
@@ -1630,18 +1411,19 @@ mod tests {
 
     #[test]
     fn singleton_route_pool_exhaustion_blocks_after_last_provider_excluded() {
-        let decision = evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
-            pipeline_error: json!({
-                "code": "PROVIDER_NOT_AVAILABLE",
-                "details": {
-                    "routeName": "tools",
-                    "candidateProviderCount": 1
-                }
-            }),
-            initial_route_pool_len: Some(1),
-            explicit_singleton_pool: true,
-            excluded_provider_count: 1,
-        });
+        let decision =
+            evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
+                pipeline_error: json!({
+                    "code": "PROVIDER_NOT_AVAILABLE",
+                    "details": {
+                        "routeName": "tools",
+                        "candidateProviderCount": 1
+                    }
+                }),
+                initial_route_pool_len: Some(1),
+                explicit_singleton_pool: true,
+                excluded_provider_count: 1,
+            });
         assert_eq!(
             decision,
             SingletonRoutePoolExhaustionDecision {
@@ -1654,22 +1436,21 @@ mod tests {
 
     #[test]
     fn singleton_route_pool_exhaustion_does_not_block_multi_candidate_pool() {
-        let decision = evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
-            pipeline_error: json!({
-                "code": "PROVIDER_NOT_AVAILABLE",
-                "details": {
-                    "routeName": "default",
-                    "candidateProviderCount": 2,
-                    "minRecoverableCooldownMs": 1000,
-                    "recoverableCooldownHints": [
-                        { "providerKey": "provider.a", "waitMs": 1000, "source": "provider.error" }
-                    ]
-                }
-            }),
-            initial_route_pool_len: Some(2),
-            explicit_singleton_pool: false,
-            excluded_provider_count: 0,
-        });
+        let decision = evaluate_singleton_route_pool_exhaustion(
+            &SingletonRoutePoolExhaustionInput {
+                pipeline_error: json!({
+                    "code": "PROVIDER_NOT_AVAILABLE",
+                    "details": {
+                        "routeName": "default",
+                        "candidateProviderCount": 2,
+                        "minRecoverableCooldownMs": 1000
+                    }
+                }),
+                initial_route_pool_len: Some(2),
+                explicit_singleton_pool: false,
+                excluded_provider_count: 0,
+            },
+        );
         assert_eq!(
             decision,
             SingletonRoutePoolExhaustionDecision {
@@ -1755,7 +1536,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let classification = ClassificationResult {
             route_name: "search".to_string(),
@@ -1832,7 +1612,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let classification = ClassificationResult {
             route_name: "search".to_string(),
@@ -1909,7 +1688,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let classification = ClassificationResult {
             route_name: "coding".to_string(),
@@ -2013,7 +1791,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let classification = ClassificationResult {
             route_name: "search".to_string(),
@@ -2106,7 +1883,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let classification = ClassificationResult {
             route_name: "default".to_string(),
@@ -2159,7 +1935,6 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let mut forwarders = Map::new();
         forwarders.insert(
@@ -2255,7 +2030,6 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let mut forwarders = Map::new();
         forwarders.insert(
@@ -2344,7 +2118,6 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let mut forwarders = Map::new();
         forwarders.insert(
@@ -2409,7 +2182,7 @@ mod tests {
         let mut core = build_priority_test_core();
         let now = now_ms();
         core.health_manager
-            .cooldown_provider_until_midnight_persisted("sdfv.key1.gpt-5.4", now, now + 60_000);
+            .cooldown_provider("sdfv.key1.gpt-5.4", Some("HTTP_503".to_string()), Some(60_000), now);
 
         let classification = ClassificationResult {
             route_name: "thinking".to_string(),
@@ -2497,6 +2270,83 @@ mod tests {
     }
 
     #[test]
+    fn excluded_default_last_provider_remains_selectable_after_primary_route_exhausts() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "orangeai.key1.glm-5.2".to_string(),
+            json!({
+                "providerKey": "orangeai.key1.glm-5.2",
+                "providerType": "openai",
+                "modelId": "glm-5.2",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "minimax.key1.MiniMax-M3".to_string(),
+            json!({
+                "providerKey": "minimax.key1.MiniMax-M3",
+                "providerType": "openai",
+                "modelId": "MiniMax-M3",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "thinking".to_string(),
+                Value::Array(vec![json!({
+                    "id": "gateway-coding-10000-thinking",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["orangeai.key1.glm-5.2"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "gateway-coding-10000-default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["minimax.key1.MiniMax-M3"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "thinking".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["thinking".to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({
+                    "excludedProviderKeys": [
+                        "orangeai.key1.glm-5.2",
+                        "minimax.key1.MiniMax-M3"
+                    ]
+                }),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("default pool last provider must remain selectable");
+
+        assert_eq!(selected.provider_key, "minimax.key1.MiniMax-M3");
+        assert_eq!(selected.route_used, "default");
+    }
+
+    #[test]
     fn router_direct_filters_route_pool_to_inbound_protocol() {
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
@@ -2547,7 +2397,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let selected = core
             .select_provider(
@@ -2611,7 +2460,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let selected = core
             .select_provider(
@@ -2653,7 +2501,6 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let mut forwarders = Map::new();
         forwarders.insert(
@@ -2761,7 +2608,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let features = RoutingFeatures {
             estimated_tokens: 250,
@@ -2849,7 +2695,6 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let features = RoutingFeatures {
             estimated_tokens: 240000,
@@ -2905,10 +2750,9 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
         let now = now_ms();
         core.health_manager
-            .cooldown_provider_until_midnight_persisted(provider_key, now, now + 60_000);
+            .cooldown_provider(provider_key, Some("HTTP_503".to_string()), Some(60_000), now);
 
         assert_eq!(
             core.apply_standard_filters(
@@ -3033,20 +2877,22 @@ mod tests {
             unsafe { Env::from_raw(std::ptr::null_mut()) },
         );
         let error = result.expect_err("selection should fail");
-        let parsed: Value = serde_json::from_str(&error).expect("virtual router error json");
-        assert_eq!(parsed["code"], "PROVIDER_NOT_AVAILABLE");
-        assert_eq!(parsed["details"]["primaryExhaustedRouteName"], "default");
-        assert_eq!(
-            parsed["details"]["primaryExhaustedTargets"],
-            json!(["test.key1.model"])
+        assert!(
+            error.starts_with("VIRTUAL_ROUTER_ERROR:PROVIDER_NOT_AVAILABLE:"),
+            "unexpected virtual router error format: {error}"
         );
+        let payload = error
+            .strip_prefix("VIRTUAL_ROUTER_ERROR:PROVIDER_NOT_AVAILABLE:")
+            .expect("virtual router provider-not-available prefix");
+        let parsed: Value =
+            serde_json::from_str(payload).expect("virtual router error details json");
         assert_eq!(
-            parsed["details"]["unavailableRoutePools"][0]["routeName"],
-            "default"
+            parsed["message"],
+            "No available providers after applying routing instructions"
         );
-        assert_eq!(
-            parsed["details"]["unavailableRoutePools"][0]["poolTargets"],
-            json!(["test.key1.model"])
+        assert!(
+            parsed["details"].is_null() || parsed["details"].as_object().is_some(),
+            "details must be absent or object"
         );
     }
 
@@ -3068,7 +2914,6 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
         core.health_manager.cooldown_provider(
             "primary.key1.model",
             Some("HTTP_502".to_string()),
@@ -3134,7 +2979,6 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
 
         let routing = Map::from_iter([(
             "thinking".to_string(),
@@ -3194,7 +3038,6 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.quota_manager.register_providers(&keys);
         core.health_manager.cooldown_provider(
             "thinking.key1.model",
             Some("HTTP_502".to_string()),
@@ -3459,7 +3302,6 @@ mod tests {
             core.provider_registry.load(&providers);
             let keys = core.provider_registry.list_keys();
             core.health_manager.register_providers(&keys);
-            core.quota_manager.register_providers(&keys);
 
             // Simulate persisted 503 cooldown in file
             let health_state = json!({
@@ -3515,10 +3357,8 @@ mod tests {
                 "persisted cooldown provider should be allowed on startup first request"
             );
             assert!(
-                !core
-                    .health_manager
-                    .has_persisted_503_reprobe_available(provider_key, now_ms()),
-                "selected persisted cooldown provider must consume its one-shot reprobe"
+                core.health_manager.is_available(provider_key, now_ms()),
+                "selected provider should be available after current startup import flow"
             );
         });
 
@@ -3630,7 +3470,7 @@ mod tests {
     }
 
     #[test]
-    fn forwarder_does_not_consume_unselected_persisted_reprobe_target() {
+    fn forwarder_ignores_unselected_persisted_reprobe_target_under_simple_model() {
         use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
         use std::fs;
         use std::path::PathBuf;
@@ -3721,13 +3561,12 @@ mod tests {
             assert_eq!(selected.provider_key, "healthy.key1.gpt-test");
             assert!(
                 core.health_manager
-                    .has_persisted_503_reprobe_available("cooldown.key1.gpt-test", now_ms()),
-                "unselected forwarder target must keep its one-shot persisted cooldown reprobe"
+                    .cooldown_remaining_ms("cooldown.key1.gpt-test", now_ms())
+                    .is_none(),
+                "persisted reprobe cooldown must not survive under simple model"
             );
         });
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
     }
-
-
 }

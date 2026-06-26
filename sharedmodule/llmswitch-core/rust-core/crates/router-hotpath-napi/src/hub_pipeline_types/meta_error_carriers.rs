@@ -73,9 +73,11 @@ impl MetaRoute03RouteCarrier {
     }
 }
 
-pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03RouteCarrier {
+pub(crate) fn build_meta_route_03_from_metadata(
+    metadata_center_snapshot: &Value,
+) -> MetaRoute03RouteCarrier {
     let mut control = Map::new();
-    let Some(source) = metadata.as_object() else {
+    let Some(source) = metadata_center_snapshot.as_object() else {
         return MetaRoute03RouteCarrier { control };
     };
     let runtime_control = source
@@ -86,9 +88,6 @@ pub(crate) fn build_meta_route_03_from_metadata(metadata: &Value) -> MetaRoute03
     copy_normalized_string_array(source, &mut control, "excludedProviderKeys");
     copy_normalized_string_array(source, &mut control, "disabledProviderKeyAliases");
     copy_non_empty_string(source, &mut control, "__shadowCompareForcedProviderKey");
-    if let Some(rt) = source.get("__rt").and_then(|value| value.as_object()) {
-        copy_non_empty_string(rt, &mut control, "retryProviderKey");
-    }
     copy_non_empty_string(source, &mut control, "routeHint");
     copy_non_empty_string(source, &mut control, "routerDirectInboundProtocol");
     copy_non_empty_string(source, &mut control, "routecodexRoutingPolicyGroup");

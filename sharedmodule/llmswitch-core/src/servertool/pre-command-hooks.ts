@@ -14,6 +14,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { isPreCommandScriptPathAllowedWithNative } from '../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
 
 export const SERVERTOOL_PRE_COMMAND_HOOKS_FEATURE_ID = 'feature_id: hub.servertool_pre_command_hooks';
 
@@ -70,10 +71,15 @@ export function applyPreCommandHooksToToolCall(args: {
   bases?: JsonObject[];
   patchToolCallArgumentsById?: (chatResponse: JsonObject, toolCallId: string, argumentsText: string) => void;
 }): void {
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(args.options.adapterContext as Record<string, unknown>);
+  if (!providerProtocol) {
+    throw new Error('Servertool pre-command hooks require metadata center runtime_control.providerProtocol');
+  }
   const preHookResult = runPreCommandHooks({
     requestId: args.options.requestId,
     entryEndpoint: args.options.entryEndpoint,
-    providerProtocol: args.options.providerProtocol,
+    providerProtocol,
     toolName: args.toolCall.name,
     toolCallId: args.toolCall.id,
     toolArguments: args.toolCall.arguments,

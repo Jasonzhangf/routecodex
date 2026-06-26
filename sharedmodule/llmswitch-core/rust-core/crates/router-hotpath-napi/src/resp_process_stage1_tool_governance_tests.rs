@@ -199,6 +199,47 @@ fn test_govern_response_does_not_repair_reasoning_stop_into_exec_command_without
 }
 
 #[test]
+fn test_govern_response_terminal_reasoning_stop_releases_normal_stop_even_when_requested_tools_only_list_client_tools(
+) {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "__rcc_tool_governance": { "requestedToolNames": ["exec_command"] },
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": "我会按 stop hook 收尾",
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_reasoning_stop_requested_exec_only",
+                        "type": "function",
+                        "function": {
+                            "name": "reasoningStop",
+                            "arguments": "{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"verified\",\"issue_cause\":\"fixed\",\"excluded_factors\":\"none\",\"diagnostic_order\":\"1. inspect 2. verify\",\"done_steps\":\"confirmed stopless path\",\"next_step\":\"无\",\"next_suggested_path\":\"无\",\"needs_user_input\":false,\"learned\":\"preserve internal stop hook before later interception\"}"
+                        }
+                    }]
+                }
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_preserve_reasoning_stop_requested_exec_only".to_string(),
+    };
+
+    let governed = govern_response(input).unwrap();
+    assert_eq!(
+        governed.governed_payload["choices"][0]["finish_reason"],
+        "stop"
+    );
+    assert!(governed.governed_payload["choices"][0]["message"]
+        .get("tool_calls")
+        .is_none());
+    assert_eq!(
+        governed.governed_payload["choices"][0]["message"]["content"],
+        "我会按 stop hook 收尾"
+    );
+}
+
+#[test]
 fn test_govern_response_repairs_malformed_exec_command_reasoning_stop_back_to_reasoning_stop() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
@@ -1175,6 +1216,38 @@ fn test_structured_tool_calls_strip_chunking_noise_from_content_and_reasoning() 
     assert!(message.get("content").is_none() || message["content"] == "");
     assert!(message.get("reasoning_content").is_none());
     assert!(message.get("thinking").is_none());
+}
+
+#[test]
+fn test_structured_tool_calls_strip_plain_visible_content_from_chat_message() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "choices": [{
+                "message": {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "search_content",
+                            "arguments": "{\"context\":3,\"path\":\"note.md\",\"pattern\":\"2026-06-24|2026-06-25\"}"
+                        }
+                    }],
+                    "content": "关键测试已经看到了。现在我有了完整证据链。先把这些结论直接记到 note.md，再给你出只读审计报告。",
+                    "role": "assistant"
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/chat/completions".to_string(),
+        request_id: "req_structured_tool_plain_text_1".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    let message = &result.governed_payload["choices"][0]["message"];
+    assert_eq!(message["tool_calls"][0]["function"]["name"], "search_content");
+    assert!(
+        message.get("content").is_none() || message["content"].is_null() || message["content"] == "",
+        "tool_calls round must not leak plain assistant content to chat clients"
+    );
 }
 
 #[test]

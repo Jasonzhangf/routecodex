@@ -39,9 +39,7 @@ describe('provider-error-reporter', () => {
       error: Object.assign(new Error('fetch failed'), {
         code: 'HTTP_502',
         retryable: false,
-        cooldownOverrideMs: 4321,
-        quotaScope: 'weekly',
-        quotaReason: 'weekly_exhausted'
+        cooldownOverrideMs: 4321
       }),
       stage: 'provider.send',
       runtime: {
@@ -54,8 +52,7 @@ describe('provider-error-reporter', () => {
       statusCode: 502,
       details: {
         source: 'provider.send',
-        errorClassification: 'recoverable',
-        resetAt: '2026-05-28T00:00:00.000Z'
+        errorClassification: 'recoverable'
       }
     });
 
@@ -66,9 +63,6 @@ describe('provider-error-reporter', () => {
       affectsHealth: false,
       fatal: false,
       cooldownOverrideMs: 4321,
-      quotaScope: 'weekly',
-      quotaReason: 'weekly_exhausted',
-      resetAt: '2026-05-28T00:00:00.000Z',
       errorClassification: 'recoverable',
       status: 502,
       runtime: expect.objectContaining({

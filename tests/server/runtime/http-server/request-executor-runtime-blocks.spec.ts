@@ -1,6 +1,5 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import {
-  isServerToolFollowupRequest,
   logProviderRetrySwitchCompact,
   shouldBypassProviderResponseConversion
 } from '../../../../src/server/runtime/http-server/executor/request-executor-runtime-blocks.js';
@@ -138,6 +137,74 @@ describe('request-executor-runtime-blocks', () => {
     })).toBe(true);
   });
 
+  test('prefers metadata center runtime_control.providerProtocol over flat providerProtocol for responses bypass', () => {
+    const metadata: Record<string, unknown> = {
+      providerProtocol: 'anthropic-messages'
+    };
+    const center = new MetadataCenter();
+    center.writeRuntimeControl(
+      'providerProtocol',
+      'openai-responses',
+      {
+        module: 'tests/server/runtime/http-server/request-executor-runtime-blocks.spec.ts',
+        symbol: 'prefers metadata center runtime_control.providerProtocol over flat providerProtocol for responses bypass',
+        stage: 'test'
+      }
+    );
+    MetadataCenter.bind(metadata, center);
+
+    expect(shouldBypassProviderResponseConversion({
+      status: 200,
+      body: {
+        id: 'resp_center_truth_bypass',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            id: 'msg_center_truth_bypass',
+            type: 'message',
+            role: 'assistant',
+            content: [
+              {
+                type: 'output_text',
+                text: 'done'
+              }
+            ]
+          }
+        ]
+      }
+    }, {
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'anthropic-messages',
+      serverToolsEnabled: true,
+      metadata
+    })).toBe(false);
+  });
+
+  test('does not let options.providerProtocol block final responses bypass when metadata center runtime_control.providerProtocol is missing', () => {
+    expect(shouldBypassProviderResponseConversion({
+      status: 200,
+      body: {
+        id: 'chatcmpl_no_center_protocol_bypass',
+        object: 'chat.completion.chunk',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              content: 'done'
+            },
+            finish_reason: null
+          }
+        ]
+      }
+    }, {
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      serverToolsEnabled: false,
+      metadata: {}
+    })).toBe(true);
+  });
+
   test('does not bypass cross-protocol completed responses bodies on /v1/responses when stopless is enabled', () => {
     expect(shouldBypassProviderResponseConversion({
       status: 200,
@@ -208,28 +275,5 @@ describe('request-executor-runtime-blocks', () => {
       providerProtocol: 'openai-chat',
       serverToolsEnabled: false
     })).toBe(false);
-  });
-
-  test('reads servertool followup request truth from MetadataCenter runtime_control', () => {
-    const metadata: Record<string, unknown> = {};
-    MetadataCenter.attach(metadata).writeRuntimeControl(
-      'serverToolFollowup',
-      true,
-      {
-        module: 'tests/server/runtime/http-server/request-executor-runtime-blocks.spec.ts',
-        symbol: 'reads servertool followup request truth from MetadataCenter runtime_control',
-        stage: 'test'
-      }
-    );
-
-    expect(isServerToolFollowupRequest(metadata)).toBe(true);
-  });
-
-  test('does not revive servertool followup request truth from legacy __rt fallback', () => {
-    const metadata: Record<string, unknown> = {
-      __rt: { serverToolFollowup: true }
-    };
-
-    expect(isServerToolFollowupRequest(metadata)).toBe(false);
   });
 });

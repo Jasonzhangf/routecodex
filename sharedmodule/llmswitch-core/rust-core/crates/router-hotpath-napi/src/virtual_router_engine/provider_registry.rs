@@ -20,7 +20,6 @@ pub(crate) struct ProviderProfile {
     pub max_context_tokens: Option<i64>,
     pub server_tools_disabled: bool,
     pub series: Option<String>,
-    pub auth_family: Option<String>,
     pub alias_to_model: Option<BTreeMap<String, String>>,
     pub provider_specific_config: HashMap<String, Value>,
 }
@@ -84,14 +83,6 @@ impl ProviderRegistry {
             .get(provider_key)
             .map(|profile| profile.provider_protocol == expected)
             .unwrap_or(false)
-    }
-
-    pub(crate) fn list_by_auth_family(&self, auth_family: &str) -> Vec<String> {
-        self.providers
-            .iter()
-            .filter(|(_, profile)| profile.auth_family.as_deref() == Some(auth_family))
-            .map(|(key, _)| key.clone())
-            .collect()
     }
 
     pub(crate) fn resolve_runtime_key_by_index(
@@ -296,11 +287,6 @@ impl ProviderRegistry {
             .and_then(|v| v.as_str())
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
-        let auth_family = map
-            .get("authFamily")
-            .and_then(|v| v.as_str())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
         let alias_to_model = read_model_alias_map(map.get("aliasToModel"));
         // Collect provider-specific config keys (everything not in the common schema)
         let common_keys: &[&str] = &[
@@ -317,7 +303,6 @@ impl ProviderRegistry {
             "streaming",
             "modelCapabilities",
             "series",
-            "authFamily",
             "aliasToModel",
             "maxContext",
             "max_context",
@@ -351,7 +336,6 @@ impl ProviderRegistry {
             max_context_tokens,
             server_tools_disabled,
             series,
-            auth_family,
             alias_to_model,
             provider_specific_config,
         })
@@ -574,5 +558,9 @@ fn read_model_alias_map(value: Option<&Value>) -> Option<BTreeMap<String, String
         }
         out.insert(alias.to_string(), canonical.to_string());
     }
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }

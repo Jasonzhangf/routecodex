@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+
 type BridgeMock = Record<string, unknown>;
 
 function deriveFinishReasonFromMockBody(body: unknown): string | undefined {
@@ -100,6 +102,52 @@ export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMo
     createResponsesJsonToSseConverterForHttp: async () => ({
       convertResponseToJsonToSse: async () => ({})
     }),
+    createChatJsonToSseConverterForHttp: async () => ({
+      convertResponseToJsonToSse: async (payload: unknown, options?: Record<string, unknown>) => {
+        const body =
+          payload && typeof payload === 'object' && !Array.isArray(payload)
+            ? payload as Record<string, unknown>
+            : {};
+        const requestId = typeof options?.requestId === 'string' ? options.requestId : 'req_test_chat_sse';
+        return Readable.from([
+          `data: ${JSON.stringify({
+            id: body.id ?? requestId,
+            object: 'chat.completion.chunk',
+            created: 1,
+            model: body.model ?? 'test-model',
+            choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: body.id ?? requestId,
+            object: 'chat.completion.chunk',
+            created: 1,
+            model: body.model ?? 'test-model',
+            choices: Array.isArray(body.choices) ? body.choices : []
+          })}\n\n`,
+          'data: [DONE]\n\n'
+        ]);
+      }
+    }),
+    reprojectDirectChatToolCallStreamForHttp: async (args: { body: Record<string, unknown>; requestId?: string }) => {
+      const requestId = typeof args.requestId === 'string' ? args.requestId : 'req_test_chat_sse';
+      return Readable.from([
+        `data: ${JSON.stringify({
+          id: args.body.id ?? requestId,
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: args.body.model ?? 'test-model',
+          choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          id: args.body.id ?? requestId,
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: args.body.model ?? 'test-model',
+          choices: Array.isArray(args.body.choices) ? args.body.choices : []
+        })}\n\n`,
+        'data: [DONE]\n\n'
+      ]);
+    },
     importResponsesHandlerCoreDist: async () => ({}),
     inspectResponsesContinuationProbeForHttp: () => ({}),
     inspectResponsesTerminalStateFromSseChunkForHttp: () => ({}),
@@ -124,10 +172,7 @@ export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMo
     resolveResponsesTerminalProbeFinishReasonForHttp: () => undefined,
     shouldDispatchResponsesSseToClientForHttp: () => false,
     shouldDropClientSseFrameForHttp: () => false,
-    shouldPersistResponsesContinuationOnProbeUpdateForHttp: () => false,
-    shouldPersistResponsesConversationStateForHttp: () => false,
     shouldReprojectRelayResponsesSseForHttp: () => false,
-    shouldRepairResponsesContinuationTerminalForHttp: () => false,
     shouldRequireResponsesTerminalEventForHttp: () => false,
     summarizeResponsesSseFrameForLogForHttp: () => '',
     updateResponsesContractProbeFromSseChunkForHttp: () => ({}),

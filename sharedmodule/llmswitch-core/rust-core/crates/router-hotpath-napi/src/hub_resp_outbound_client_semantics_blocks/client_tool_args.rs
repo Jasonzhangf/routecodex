@@ -1737,7 +1737,8 @@ pub(crate) fn project_responses_sse_frame_for_client(
                     output_frame.clear();
                 }
             } else {
-                let normalized = project_responses_sse_client_event_payload(data, tools_raw, metadata);
+                let normalized =
+                    project_responses_sse_client_event_payload(data, tools_raw, metadata);
                 if normalized != *data {
                     output_frame = replace_frame_data(frame, &normalized);
                 }
@@ -1758,7 +1759,10 @@ pub(crate) fn project_responses_sse_frame_for_client(
                 .or_else(|| record.get("text").and_then(Value::as_str))
                 .unwrap_or("");
             if let Some(key) = key {
-                if state.suppressed_obfuscated_text_delta_keys.remove(key.as_str()) {
+                if state
+                    .suppressed_obfuscated_text_delta_keys
+                    .remove(key.as_str())
+                {
                     let delta_event_name = if event_name == "response.output_text.done" {
                         "response.output_text.delta"
                     } else {

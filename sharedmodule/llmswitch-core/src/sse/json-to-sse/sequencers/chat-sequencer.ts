@@ -145,10 +145,21 @@ async function* sequenceMessageContent(
     mode: config.reasoningMode,
     prefix: config.reasoningTextPrefix
   });
-  if (reasoningDispatch.appendToContent) {
-    appendReasoningToContent(message, reasoningDispatch.appendToContent);
-  }
   const reasoningForChannel = reasoningDispatch.channel;
+
+  // chat protocol explicit projection rule: when reasoning exists but
+  // content is empty, project reasoning text into content so the client
+  // always receives visible assistant text, not an empty message.
+  // This is a resp_chatprocess -> resp_outbound contract, not a normalizer
+  // side-effect. Do NOT lift reasoning into content inside the normalizer;
+  // only project here at the outbound boundary.
+  // Outbound projection: reasoning-only assistant turns get their
+  // reasoning text projected into the `content` channel for chat protocol.
+  // This preserves user-visible assistant text while keeping the original
+  // reasoning in its own channel for downstream consumption.
+  if (reasoningForChannel && !message?.tool_calls?.length && !hasMeaningfulContent(message.content)) {
+    message.content = reasoningForChannel;
+  }
 
   // 2. 处理reasoning（如果有）
   if (reasoningForChannel) {

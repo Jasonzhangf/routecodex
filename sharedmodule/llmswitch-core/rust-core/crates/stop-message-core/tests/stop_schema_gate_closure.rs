@@ -177,6 +177,22 @@ fn t3_three_invalid_schema_fails_fast() {
 }
 
 #[test]
+fn t3_unclosed_json_fence_is_invalid_json_not_missing() {
+    let bad = "```json\n{\"stopreason\":2,\"reason\":\"still running\"}";
+    let decision = evaluate_stop_schema_gate(bad, 0, 3, "", 0);
+    assert_eq!(decision.action, StopSchemaGateAction::Followup);
+    assert_eq!(decision.reason_code, "stop_schema_invalid_json");
+}
+
+#[test]
+fn t3_bare_json_in_assistant_text_is_not_accepted_as_terminal_schema() {
+    let bare = r#"{"stopreason":0,"reason":"done","has_evidence":1,"evidence":"ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"1","done_steps":"done","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"ok"}"#;
+    let decision = evaluate_stop_schema_gate(bare, 0, 3, "", 0);
+    assert_eq!(decision.action, StopSchemaGateAction::Followup);
+    assert_eq!(decision.reason_code, "stop_schema_missing");
+}
+
+#[test]
 fn t3_invalid_schema_with_empty_arguments_fails_fast_after_three_rounds() {
     let d1 =
         evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(r#"{}"#), 0, 3, "", 0);

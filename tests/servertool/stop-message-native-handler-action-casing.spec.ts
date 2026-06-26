@@ -9,7 +9,7 @@ function nativePath(): string {
 }
 
 describe('stop_message native handler action casing', () => {
-  it('lowercase trigger action produces reenter stopless plan', async () => {
+  it('lowercase trigger action produces metadata-center stopless runtime state', async () => {
     process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = nativePath();
     const { runStopMessageAutoHandlerWithNative } = await import(
       '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.js'
@@ -34,21 +34,10 @@ describe('stop_message native handler action casing', () => {
         object: 'chat.completion',
         choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'done' } }]
       },
-      candidateKeys: ['session:native-action-casing'],
-      stickyKey: 'session:native-action-casing'
     });
 
     expect(result.flowId).toBe('stop_message_flow');
-    expect(result.persistKeys).toContain('session:native-action-casing');
-    expect(result.stateUpdate).toMatchObject({ used: 1, maxRepeats: 3 });
-    expect(result.followup).toMatchObject({
-      requestIdSuffix: ':stop_followup',
-      metadata: {},
-      injection: {
-        ops: expect.arrayContaining([
-          expect.objectContaining({ op: 'append_user_text', text: '继续执行' })
-        ])
-      }
-    });
+    expect(result.stoplessRuntimeState).toMatchObject({ used: 1, maxRepeats: 3 });
+    expect(result.followup).toBeNull();
   });
 });

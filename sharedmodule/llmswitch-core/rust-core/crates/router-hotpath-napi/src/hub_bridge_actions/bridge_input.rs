@@ -267,7 +267,7 @@ fn append_harvested_assistant_tool_message(
 fn serialize_tool_output(entry: &Map<String, Value>) -> Option<String> {
     let out = entry.get("output")?;
     match out {
-        Value::String(text) => Some(normalize_tool_result_text(text)),
+        Value::String(text) => Some(text.clone()),
         Value::Object(_) | Value::Array(_) => Some(normalize_tool_result_value(out)),
         _ => Some(normalize_tool_result_value(out)),
     }

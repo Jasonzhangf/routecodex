@@ -258,8 +258,6 @@ function buildSnapshotRuntimeMetadata(
 
   const runtimeControlSummary: Record<string, unknown> = {};
   for (const key of [
-    'serverToolFollowup',
-    'serverToolFollowupSource',
     'stopless'
   ] as const) {
     if (runtimeControl[key] !== undefined) {

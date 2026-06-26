@@ -317,8 +317,8 @@ describe('servertool CLI projection blackbox', () => {
     ]) {
       expect(command).not.toContain(forbidden);
     }
-    expect(input.repeatCount).toBeGreaterThanOrEqual(0);
-    expect(input.maxRepeats).toBeGreaterThanOrEqual(1);
+    expect(input.repeatCount).toBe(2);
+    expect(input.maxRepeats).toBe(3);
 
     const responsesPayload = buildResponsesPayloadFromChatWithNative(result.chat as any, {
       requestId: 'req_stop_cli_lifecycle'
@@ -329,6 +329,55 @@ describe('servertool CLI projection blackbox', () => {
     expect(reasoning?.content).toBeUndefined();
     expect(JSON.stringify(responsesPayload)).not.toContain('<rcc_stop_schema>');
     expect(JSON.stringify(responsesPayload)).not.toContain('</rcc_stop_schema>');
+  });
+
+  it('strips inline reasoningStop schema residue from responses summary without truncating useful text', async () => {
+    const responsesPayload = buildResponsesPayloadFromChatWithNative({
+      id: 'chatcmpl_stop_projection_inline_schema_residue',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      created: 1700000000,
+      choices: [
+        {
+          index: 0,
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: '阶段结果：计数已修复。',
+            reasoning: {
+              summary: [
+                {
+                  type: 'summary_text',
+                  text: '阶段结果：计数已修复。 reasoningStop with2 -> next_step: "继续补 provider 黑盒并重放线上样本" Jason, 我继续执行。'
+                }
+              ]
+            },
+            tool_calls: [
+              {
+                id: 'call_exec_inline_schema_residue',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: '{"cmd":"pwd"}'
+                }
+              }
+            ]
+          }
+        }
+      ]
+    } as any, {
+      requestId: 'req_stop_projection_inline_schema_residue'
+    }) as Record<string, any>;
+
+    const serialized = JSON.stringify(responsesPayload);
+    const reasoning = responsesPayload.output.find((item: any) => item.type === 'reasoning');
+    const summaryText = String(reasoning?.summary?.[0]?.text ?? '');
+    expect(serialized).not.toContain('reasoningStop');
+    expect(serialized).not.toContain('next_step');
+    expect(summaryText).toContain('阶段结果：计数已修复。');
+    expect(summaryText).toContain('继续补 provider 黑盒并重放线上样本');
+    expect(summaryText).not.toContain('Jason, 我继续执行');
+    expect(summaryText.trim()).not.toBe('**Thinking**');
   });
 
   it('re-projects stop_message_auto on submit_tool_outputs resume when current response stops again', async () => {
@@ -467,7 +516,13 @@ describe('servertool CLI projection blackbox', () => {
             index: 0,
             message: {
               role: 'assistant',
-              content: '还是没补 schema。'
+              content: [
+                '还是没补 schema，但已经完成日志排查。',
+                '<rcc_stop_schema>',
+                '{"stopreason":2,"reason":"continue","next_step":"继续循环"}',
+                '</rcc_stop_schema>',
+                'reasoningStop with2 -> next_step: "不要再投 CLI，应直接回传当前总结"'
+              ].join('\n')
             },
             finish_reason: 'stop'
           }
@@ -503,6 +558,14 @@ describe('servertool CLI projection blackbox', () => {
     expect(JSON.stringify(payload)).not.toContain('routecodex hook run reasoningStop');
     expect(payload.required_action).toBeUndefined();
     expect(payload.choices?.[0]?.message?.tool_calls).toBeUndefined();
+    expect(payload.choices?.[0]?.finish_reason).toBe('stop');
+    const visibleText = String(payload.choices?.[0]?.message?.content ?? '');
+    expect(visibleText).toContain('还是没补 schema，但已经完成日志排查。');
+    expect(visibleText).toContain('不要再投 CLI，应直接回传当前总结');
+    expect(visibleText).not.toContain('stopless budget exhausted');
+    expect(visibleText).not.toContain('<rcc_stop_schema>');
+    expect(visibleText).not.toContain('reasoningStop');
+    expect(visibleText).not.toContain('next_step');
   });
 
   it('returns terminal allow-stop result without re-projecting exec_command', async () => {

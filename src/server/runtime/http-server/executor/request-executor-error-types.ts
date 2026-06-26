@@ -26,7 +26,7 @@ export type ProviderRetryBackoffPlan = {
   backoffScope: 'provider' | 'recoverable' | 'attempt';
 };
 
-export type ProviderRetrySwitchAction = 'exclude_and_reroute' | 'retry_same_provider_once';
+export type ProviderRetrySwitchAction = 'exclude_and_reroute';
 
 export type ProviderRetryBackoffScope = ProviderRetryBackoffPlan['backoffScope'];
 
@@ -126,7 +126,6 @@ export type BlockingRecoverableRouteHoldState = {
   retryError: RetryErrorSnapshot;
   holdOnLastAvailable429: boolean;
   explicitSingletonPool: boolean;
-  preserveSameProviderRetry?: boolean;
   routePoolForSameProviderRetry?: string[];
 };
 

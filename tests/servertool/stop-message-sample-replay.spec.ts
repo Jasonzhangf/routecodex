@@ -131,7 +131,7 @@ describe('stopMessage sample replay', () => {
     }
   });
 
-  test('preserves current stopless CLI projection tool shape in codex-samples replay', () => {
+  test('preserves current provider-facing stopless tool shape in codex-samples replay', () => {
     expect(currentSampleDirs.length).toBeGreaterThanOrEqual(1);
     for (const dir of currentSampleDirs) {
       const request = readJsonFile(path.join(dir, 'provider-request.json'));
@@ -142,7 +142,7 @@ describe('stopMessage sample replay', () => {
       const toolNames = collectToolNames(tools);
       const toolNameSet = new Set(toolNames);
       expect(tools.length).toBe(1);
-      expect(toolNameSet).toEqual(new Set(['exec_command']));
+      expect(toolNameSet).toEqual(new Set(['reasoningStop']));
       const digest = createHash('sha256').update(JSON.stringify(tools)).digest('hex');
       expect(digest).toHaveLength(64);
     }

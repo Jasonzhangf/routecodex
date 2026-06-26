@@ -532,7 +532,7 @@ describe('responses-handler stream closed before completed regression', () => {
             outboundStream: true,
             stream: true,
           },
-          continuationOwner: 'direct',
+          continuationOwner: 'relay',
         } as any,
         'req_stream_closed_tool_continuation',
         { entryEndpoint: '/v1/responses' }

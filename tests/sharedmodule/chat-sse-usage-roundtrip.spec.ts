@@ -208,6 +208,46 @@ describe('chat SSE usage compatibility', () => {
     });
   });
 
+  it('keeps one stable chat completion id and created timestamp across tool call SSE chunks', async () => {
+    const response: ChatCompletionResponse = {
+      id: 'chatcmpl_stable_tool_stream',
+      object: 'chat.completion',
+      created: 1782384831,
+      model: 'MiniMax-M3',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'call_019efe6a2c097513a6744b71',
+            type: 'function',
+            function: {
+              name: 'search_content',
+              arguments: '{"context":3,"glob":"**/function-map.yml","pattern":"stopless"}'
+            }
+          }]
+        },
+        finish_reason: 'tool_calls'
+      }]
+    };
+
+    const jsonToSse = new ChatJsonToSseConverterRefactored();
+    const sseStream = await jsonToSse.convertResponseToJsonToSse(response, {
+      requestId: 'req_chat_tool_stable_stream',
+      model: response.model
+    });
+    const sseText = await collectText(sseStream);
+    const chunks = extractChatChunksFromWireText(sseText);
+
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(chunks.map((chunk) => chunk.id))).toEqual(new Set(['chatcmpl_stable_tool_stream']));
+    expect(new Set(chunks.map((chunk) => chunk.created))).toEqual(new Set([1782384831]));
+    expect(chunks.some((chunk) => chunk.choices?.[0]?.delta?.tool_calls?.[0]?.function?.name === 'search_content')).toBe(true);
+    expect(chunks.some((chunk) => chunk.choices?.[0]?.delta?.tool_calls?.[0]?.function?.arguments?.includes('function-map.yml'))).toBe(true);
+    expect(chunks.at(-1)?.choices?.[0]?.finish_reason).toBe('tool_calls');
+  });
+
   it('preserves final chunk usage when converting chat SSE back to JSON', async () => {
     const sseText = [
       'data: {"id":"chatcmpl_usage_parse","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}',

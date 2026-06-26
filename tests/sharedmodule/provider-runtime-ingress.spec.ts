@@ -22,9 +22,6 @@ describe('provider runtime ingress', () => {
       affectsHealth: false,
       fatal: true,
       cooldownOverrideMs: 1234,
-      quotaScope: 'weekly',
-      quotaReason: 'weekly_exhausted',
-      resetAt: '2026-05-28T00:00:00.000Z',
       errorClassification: 'unrecoverable',
       runtime: undefined as any,
       timestamp: undefined as any,
@@ -39,9 +36,6 @@ describe('provider runtime ingress', () => {
     expect(returned.affectsHealth).toBe(false);
     expect(returned.fatal).toBe(true);
     expect(returned.cooldownOverrideMs).toBe(1234);
-    expect(returned.quotaScope).toBe('weekly');
-    expect(returned.quotaReason).toBe('weekly_exhausted');
-    expect(returned.resetAt).toBe('2026-05-28T00:00:00.000Z');
     expect(returned.errorClassification).toBe('unrecoverable');
     expect(returned.runtime).toEqual({});
     expect(returned.timestamp).toBeGreaterThanOrEqual(before);

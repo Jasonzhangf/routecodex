@@ -6,7 +6,6 @@ use super::super::health::{ProviderHealthConfig, ProviderHealthManager};
 use super::super::instructions::RoutingInstructionState;
 use super::super::load_balancer::{LoadBalancingPolicy, RouteLoadBalancer};
 use super::super::provider_registry::ProviderRegistry;
-use super::super::quota::ProviderQuotaManager;
 use super::super::routing::{parse_routing, RoutingPools};
 use super::super::routing_state_store::{
     load_provider_health_state, persist_provider_health_state,
@@ -22,7 +21,6 @@ pub(crate) struct VirtualRouterEngineCore {
     pub routing: RoutingPools,
     pub provider_registry: ProviderRegistry,
     pub health_manager: ProviderHealthManager,
-    pub quota_manager: ProviderQuotaManager,
     pub load_balancer: RouteLoadBalancer,
     pub classifier: RoutingClassifier,
     pub routing_instruction_state: HashMap<String, RoutingInstructionState>,
@@ -39,7 +37,6 @@ impl VirtualRouterEngineCore {
             routing: RoutingPools::default(),
             provider_registry: ProviderRegistry::default(),
             health_manager: ProviderHealthManager::new(),
-            quota_manager: ProviderQuotaManager::new(),
             load_balancer: RouteLoadBalancer::new(None),
             forwarder_registry: crate::virtual_router_engine::forwarder::ForwarderRegistry::new(),
             classifier: RoutingClassifier::new(&Value::Object(Map::new())),
@@ -87,15 +84,6 @@ impl VirtualRouterEngineCore {
         self.health_manager.configure(health_config);
         let provider_keys = self.provider_registry.list_keys();
         self.health_manager.register_providers(&provider_keys);
-        self.quota_manager.register_providers(&provider_keys);
-        for provider_key in provider_keys.iter() {
-            if let Some(profile) = self.provider_registry.get(provider_key) {
-                self.quota_manager.register_provider_profile(profile);
-            }
-        }
-        // Clear ALL runtime quota state on startup so every provider gets
-        // one chance to be selected regardless of previous cooldown/blacklist.
-        self.quota_manager.clear_runtime_state();
         self.refresh_provider_health_from_store(true);
         let load_balancing = config
             .get("loadBalancing")

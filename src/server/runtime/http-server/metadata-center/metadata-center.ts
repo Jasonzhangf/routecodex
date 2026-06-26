@@ -1,9 +1,11 @@
 import type {
   MetadataCenterClientAttachmentScope,
+  MetadataCenterCloseoutStatus,
   MetadataCenterContinuationContext,
   MetadataCenterDebugSnapshot,
   MetadataCenterFamily,
   MetadataCenterProviderObservation,
+  MetadataCenterResponseObservation,
   MetadataCenterRequestTruth,
   MetadataCenterRuntimeControl,
   MetadataCenterSlot,
@@ -65,6 +67,11 @@ const HTTP_RESPONSE_METADATA_RELEASE_WRITER: MetadataCenterWriter = {
   stage: 'ServerRespOutbound05ClientFrame',
 };
 
+function bindInternalStateCarrier(target: Record<string, unknown>, center: MetadataCenter): void {
+  Reflect.set(target, METADATA_CENTER_SYMBOL, center);
+  target.__metadataCenter = center.snapshot() as unknown as Record<string, unknown>;
+}
+
 function transitionSlotStatus<T>(args: {
   previous: MetadataCenterSlot<T>;
   status: MetadataCenterStatus;
@@ -119,6 +126,8 @@ export class MetadataCenter {
       continuationContext: {},
       runtimeControl: {},
       providerObservation: {},
+      responseObservation: {},
+      closeoutStatus: {},
       clientAttachmentScope: {},
       debugSnapshot: {}
     };
@@ -127,15 +136,16 @@ export class MetadataCenter {
   static attach(target: Record<string, unknown>): MetadataCenter {
     const existing = Reflect.get(target, METADATA_CENTER_SYMBOL);
     if (isMetadataCenterLike(existing)) {
+      bindInternalStateCarrier(target, existing);
       return existing;
     }
     const created = new MetadataCenter();
-    Reflect.set(target, METADATA_CENTER_SYMBOL, created);
+    bindInternalStateCarrier(target, created);
     return created;
   }
 
   static bind(target: Record<string, unknown>, center: MetadataCenter): void {
-    Reflect.set(target, METADATA_CENTER_SYMBOL, center);
+    bindInternalStateCarrier(target, center);
   }
 
   static read(target: Record<string, unknown> | undefined): MetadataCenter | undefined {
@@ -183,7 +193,7 @@ export class MetadataCenter {
       value,
       family: 'continuation_context',
       writtenBy,
-      writePolicy: 'replaceable',
+      writePolicy: 'replaceable_by_owner_only',
       previous,
       reason
     });
@@ -229,7 +239,7 @@ export class MetadataCenter {
       value,
       family: 'runtime_control',
       writtenBy,
-      writePolicy: 'replaceable',
+      writePolicy: 'replaceable_by_owner_only',
       previous,
       reason
     });
@@ -256,8 +266,8 @@ export class MetadataCenter {
       providerProtocol: this.state.runtimeControl.providerProtocol?.value as string | undefined,
       retryProviderKey: this.state.runtimeControl.retryProviderKey?.value as string | undefined,
       preselectedRoute: this.state.runtimeControl.preselectedRoute?.value as Record<string, unknown> | undefined,
-      serverToolFollowup: this.state.runtimeControl.serverToolFollowup?.value as boolean | undefined,
-      serverToolFollowupSource: this.state.runtimeControl.serverToolFollowupSource?.value as string | undefined,
+      responsesContinuationSavedAtChatProcessExit:
+        this.state.runtimeControl.responsesContinuationSavedAtChatProcessExit?.value as boolean | undefined,
       stopless: this.state.runtimeControl.stopless?.value as MetadataCenterRuntimeControl['stopless'] | undefined,
       stopMessageCompareContext: this.state.runtimeControl.stopMessageCompareContext?.value as MetadataCenterRuntimeControl['stopMessageCompareContext'] | undefined,
       stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,
@@ -282,7 +292,7 @@ export class MetadataCenter {
       value,
       family: 'provider_observation',
       writtenBy,
-      writePolicy: 'replaceable',
+      writePolicy: 'append_only',
       previous,
       reason
     });
@@ -301,6 +311,65 @@ export class MetadataCenter {
     };
   }
 
+  writeResponseObservation<K extends keyof MetadataCenterResponseObservation>(
+    key: K,
+    value: MetadataCenterResponseObservation[K],
+    writtenBy: MetadataCenterWriter,
+    reason?: string
+  ): void {
+    if (value === undefined) {
+      return;
+    }
+    const previous = this.state.responseObservation[key] as MetadataCenterSlot<MetadataCenterResponseObservation[K]> | undefined;
+    this.state.responseObservation[key] = buildSlot({
+      value,
+      family: 'response_observation',
+      writtenBy,
+      writePolicy: 'append_only',
+      previous,
+      reason
+    });
+  }
+
+  readResponseObservation(): MetadataCenterResponseObservation {
+    return {
+      responseId: this.state.responseObservation.responseId?.value as string | undefined,
+      status: this.state.responseObservation.status?.value as string | undefined,
+      finishReason: this.state.responseObservation.finishReason?.value as string | undefined,
+      protocolKind: this.state.responseObservation.protocolKind?.value as string | undefined
+    };
+  }
+
+  writeCloseoutStatus<K extends keyof MetadataCenterCloseoutStatus>(
+    key: K,
+    value: MetadataCenterCloseoutStatus[K],
+    writtenBy: MetadataCenterWriter,
+    reason?: string
+  ): void {
+    if (value === undefined) {
+      return;
+    }
+    const previous = this.state.closeoutStatus[key] as MetadataCenterSlot<MetadataCenterCloseoutStatus[K]> | undefined;
+    this.state.closeoutStatus[key] = buildSlot({
+      value,
+      family: 'closeout_status',
+      writtenBy,
+      writePolicy: 'finalize_only',
+      previous,
+      reason
+    });
+  }
+
+  readCloseoutStatus(): MetadataCenterCloseoutStatus {
+    return {
+      finalized: this.state.closeoutStatus.finalized?.value as boolean | undefined,
+      released: this.state.closeoutStatus.released?.value as boolean | undefined,
+      releasedAt: this.state.closeoutStatus.releasedAt?.value as number | undefined,
+      releaseReason: this.state.closeoutStatus.releaseReason?.value as string | undefined,
+      releasedByStage: this.state.closeoutStatus.releasedByStage?.value as string | undefined
+    };
+  }
+
   writeClientAttachmentScope<K extends keyof MetadataCenterClientAttachmentScope>(
     key: K,
     value: MetadataCenterClientAttachmentScope[K],
@@ -315,7 +384,7 @@ export class MetadataCenter {
       value,
       family: 'client_attachment_scope',
       writtenBy,
-      writePolicy: 'replaceable',
+      writePolicy: 'replaceable_by_owner_only',
       previous,
       reason
     });
@@ -354,7 +423,8 @@ export class MetadataCenter {
     return {
       snapshotId: this.state.debugSnapshot.snapshotId?.value as string | undefined,
       bridgeHistory: this.state.debugSnapshot.bridgeHistory?.value as unknown[] | undefined,
-      traceMarkers: this.state.debugSnapshot.traceMarkers?.value as unknown[] | undefined
+      traceMarkers: this.state.debugSnapshot.traceMarkers?.value as unknown[] | undefined,
+      hubStageTop: this.state.debugSnapshot.hubStageTop?.value as MetadataCenterDebugSnapshot['hubStageTop'] | undefined
     };
   }
 
@@ -401,6 +471,30 @@ export class MetadataCenter {
         continue;
       }
       this.state.providerObservation[key] = transitionSlotStatus({
+        previous: slot,
+        status: 'released',
+        changedBy: writtenBy,
+        reason,
+      });
+    }
+    for (const key of Object.keys(this.state.responseObservation) as Array<keyof MetadataCenterResponseObservation>) {
+      const slot = this.state.responseObservation[key];
+      if (!slot) {
+        continue;
+      }
+      this.state.responseObservation[key] = transitionSlotStatus({
+        previous: slot,
+        status: 'released',
+        changedBy: writtenBy,
+        reason,
+      });
+    }
+    for (const key of Object.keys(this.state.closeoutStatus) as Array<keyof MetadataCenterCloseoutStatus>) {
+      const slot = this.state.closeoutStatus[key];
+      if (!slot) {
+        continue;
+      }
+      this.state.closeoutStatus[key] = transitionSlotStatus({
         previous: slot,
         status: 'released',
         changedBy: writtenBy,

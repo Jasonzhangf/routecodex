@@ -738,7 +738,8 @@ fn replace_responses_output_content(payload: &mut Value, prefix: &str) -> bool {
 }
 
 fn ensure_visible_stop_content(payload: &mut Value, text: &str) -> bool {
-    ensure_chat_visible_stop_content(payload, text) || ensure_responses_visible_stop_content(payload, text)
+    ensure_chat_visible_stop_content(payload, text)
+        || ensure_responses_visible_stop_content(payload, text)
 }
 
 fn ensure_chat_visible_stop_content(payload: &mut Value, text: &str) -> bool {
@@ -750,7 +751,10 @@ fn ensure_chat_visible_stop_content(payload: &mut Value, text: &str) -> bool {
         let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
             continue;
         };
-        if message.get("content").is_some_and(value_has_visible_stop_text) {
+        if message
+            .get("content")
+            .is_some_and(value_has_visible_stop_text)
+        {
             continue;
         }
         message.insert("content".to_string(), Value::String(text.to_string()));
@@ -781,7 +785,10 @@ fn ensure_responses_visible_stop_content(payload: &mut Value, text: &str) -> boo
         if item_type != "message" {
             continue;
         }
-        if item_row.get("content").is_some_and(value_has_visible_stop_text) {
+        if item_row
+            .get("content")
+            .is_some_and(value_has_visible_stop_text)
+        {
             row.insert("output_text".to_string(), Value::String(text.to_string()));
             return true;
         }
@@ -1099,8 +1106,8 @@ visible after
 
     #[test]
     fn terminal_chat_schema_only_uses_stop_reason_as_visible_text() {
-        let output =
-            build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+        let output = build_stop_message_terminal_visible_payload(
+            StopMessageTerminalVisiblePayloadInput {
                 payload: json!({
                     "choices": [{
                         "finish_reason": "tool_calls",
@@ -1112,7 +1119,8 @@ visible after
                 }),
                 mode: Some("replace".to_string()),
                 prefix: Some("停止原因：验证已经完成".to_string()),
-            });
+            },
+        );
         assert!(output.changed);
         assert_eq!(output.payload["choices"][0]["finish_reason"], "stop");
         assert_eq!(
@@ -1126,8 +1134,8 @@ visible after
 
     #[test]
     fn terminal_responses_schema_only_uses_stop_reason_as_visible_output_text() {
-        let output =
-            build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+        let output = build_stop_message_terminal_visible_payload(
+            StopMessageTerminalVisiblePayloadInput {
                 payload: json!({
                     "status": "completed",
                     "output": [{
@@ -1141,7 +1149,8 @@ visible after
                 }),
                 mode: Some("replace".to_string()),
                 prefix: Some("停止原因：验证已经完成".to_string()),
-            });
+            },
+        );
         assert!(output.changed);
         assert_eq!(output.payload["output_text"], "停止原因：验证已经完成");
         assert_eq!(

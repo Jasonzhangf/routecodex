@@ -290,10 +290,21 @@ mod tests {
             &metadata,
         );
 
-        let processed_metadata = processed["metadata"].as_object().expect("processed metadata");
-        assert_eq!(processed_metadata.get("serverToolFollowup"), Some(&json!(false)));
-        assert_eq!(processed_metadata.get("clientInjectReady"), Some(&json!(true)));
-        assert_eq!(processed_metadata.get("requestId"), Some(&json!("req_meta_truth_1")));
+        let processed_metadata = processed["metadata"]
+            .as_object()
+            .expect("processed metadata");
+        assert_eq!(
+            processed_metadata.get("serverToolFollowup"),
+            Some(&json!(false))
+        );
+        assert_eq!(
+            processed_metadata.get("clientInjectReady"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            processed_metadata.get("requestId"),
+            Some(&json!("req_meta_truth_1"))
+        );
         assert_eq!(
             processed_metadata
                 .get("chatProcessSanitizer")

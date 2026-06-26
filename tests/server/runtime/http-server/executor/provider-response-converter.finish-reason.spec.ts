@@ -1,5 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { PassThrough } from 'node:stream';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
@@ -30,10 +31,15 @@ const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
+  createChatJsonToSseConverterForHttp: async () => ({
+    convertResponseToJsonToSse: async () => ({ pipe: () => undefined })
+  }),
+  reprojectDirectChatToolCallStreamForHttp: async () => ({ pipe: () => undefined }),
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
   deriveFinishReasonNative: mockDeriveFinishReasonNative,
   updateResponsesContractProbeFromSseChunkNative: () => ({}),
   buildResponsesTerminalSseFramesFromProbeNative: () => [],
+  resolveRelayResponsesClientSseStreamForHttp: async (args: { sseStream?: unknown }) => args.sseStream,
   importCoreDist: async () => ({
     normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
   }),
@@ -44,6 +50,23 @@ const mockBridgeModule = () => ({
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+
+const TEST_METADATA_WRITER = {
+  module: 'tests/server/runtime/http-server/executor/provider-response-converter.finish-reason.spec.ts',
+  symbol: 'buildPipelineMetadata',
+  stage: 'test_runtime_control_provider_protocol'
+} as const;
+
+function buildPipelineMetadata(providerProtocol: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const metadata = { ...extra };
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    TEST_METADATA_WRITER,
+    'seed provider protocol for converter test'
+  );
+  return metadata;
+}
 
 describe('provider-response-converter finish reason wrapper metadata', () => {
   it('does not bypass response-side servertool for streamed passthrough relay', async () => {
@@ -81,7 +104,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
         processMode: 'chat',
         serverToolsEnabled: true,
         response: { body: {}, sseStream: sseStream } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
       },
       {
         runtimeManager: {
@@ -126,7 +149,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
         requestId: 'req_stream_finish_reason',
         wantsStream: true,
         response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
       },
       {
         runtimeManager: {
@@ -176,7 +199,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
         requestId: 'req_stream_reasoning_stop_finalized',
         wantsStream: true,
         response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
       },
       {
         runtimeManager: {
@@ -229,7 +252,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
         requestId: 'req_stream_reasoning_stop_hidden_marker_only',
         wantsStream: true,
         response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
       },
       {
         runtimeManager: {
@@ -290,7 +313,7 @@ describe('provider-response-converter finish reason wrapper metadata', () => {
           body: {},
           sseStream: anthropicRawSse,
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
       },
       {
         runtimeManager: {

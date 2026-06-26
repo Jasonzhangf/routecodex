@@ -110,7 +110,11 @@ pub fn plan_primary_exhausted_to_default_pool(
 
     // Primary exhausted. Find the first backup tier with at least one
     // known + non-exhausted target.
-    for tier in input.tiers.iter().skip(if primary_is_backup { 0 } else { 1 }) {
+    for tier in input
+        .tiers
+        .iter()
+        .skip(if primary_is_backup { 0 } else { 1 })
+    {
         if !tier.backup.unwrap_or(false) {
             continue;
         }
@@ -155,7 +159,12 @@ pub fn plan_primary_exhausted_to_default_pool(
 mod tests {
     use super::*;
 
-    fn tier(id: &str, priority: i64, targets: Vec<&str>, backup: Option<bool>) -> RoutePoolTierInput {
+    fn tier(
+        id: &str,
+        priority: i64,
+        targets: Vec<&str>,
+        backup: Option<bool>,
+    ) -> RoutePoolTierInput {
         RoutePoolTierInput {
             id: id.to_string(),
             priority,
@@ -173,7 +182,11 @@ mod tests {
                 tier("backup", 100, vec!["fwd.c"], Some(true)),
             ],
             exhausted_targets: vec!["fwd.b".to_string()],
-            known_targets: vec!["fwd.a".to_string(), "fwd.b".to_string(), "fwd.c".to_string()],
+            known_targets: vec![
+                "fwd.a".to_string(),
+                "fwd.b".to_string(),
+                "fwd.c".to_string(),
+            ],
         };
         let plan = plan_primary_exhausted_to_default_pool(&input);
         assert_eq!(plan.status, PrimaryExhaustedPlanStatus::NoDefaultPoolNeeded);
@@ -190,7 +203,11 @@ mod tests {
                 tier("backup", 100, vec!["fwd.c"], Some(true)),
             ],
             exhausted_targets: vec!["fwd.a".to_string(), "fwd.b".to_string()],
-            known_targets: vec!["fwd.a".to_string(), "fwd.b".to_string(), "fwd.c".to_string()],
+            known_targets: vec![
+                "fwd.a".to_string(),
+                "fwd.b".to_string(),
+                "fwd.c".to_string(),
+            ],
         };
         let plan = plan_primary_exhausted_to_default_pool(&input);
         assert_eq!(plan.status, PrimaryExhaustedPlanStatus::DefaultPool);

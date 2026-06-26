@@ -186,7 +186,6 @@ describe('hub pipeline request materialization sse protocol matrix', () => {
       request: expect.objectContaining({
         metadata: expect.objectContaining({
           stopMessageEnabled: true,
-          routecodexPortStopMessageEnabled: true,
         }),
       }),
     }));

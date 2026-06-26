@@ -11,10 +11,24 @@ interface ServerToolAutoHookSpec {
   order: number;
 }
 
+type ServerToolBuiltinExecutionDescriptor = {
+  kind: 'builtin';
+  builtinName: string;
+};
+
+type ServerToolAdHocExecutionDescriptor = {
+  kind: 'adhoc';
+  handler: ServerToolHandler;
+};
+
+export type ServerToolExecutionDescriptor =
+  | ServerToolBuiltinExecutionDescriptor
+  | ServerToolAdHocExecutionDescriptor;
+
 export interface ServerToolHandlerEntry {
   name: string;
   trigger: TriggerMode;
-  handler: ServerToolHandler;
+  execution: ServerToolExecutionDescriptor;
   registration: ServerToolHandlerRegistrationSpec;
   autoHook?: ServerToolAutoHookSpec;
 }
@@ -25,5 +39,5 @@ export interface ServerToolAutoHookDescriptor {
   priority: number;
   order: number;
   registration: ServerToolHandlerRegistrationSpec;
-  handler: ServerToolHandler;
+  execution: ServerToolExecutionDescriptor;
 }

@@ -1,6 +1,13 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
+function buildRouteMetadata(requestId: string): any {
+  return {
+    requestId,
+    metadataCenterSnapshot: {}
+  };
+}
+
 function buildConfig(providerKeys = ['deepseek.key1.deepseek-v4-pro']): any {
   const providers = Object.fromEntries(
     providerKeys.map((providerKey, index) => [
@@ -49,7 +56,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
       {
         messages: [{ role: 'user', content: 'hello' }]
       } as any,
-      { requestId: 'req-native-default-floor' } as any
+      buildRouteMetadata('req-native-default-floor')
     );
 
     expect(result.target.providerKey).toBe(providerKey);
@@ -74,7 +81,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
       {
         messages: [{ role: 'user', content: 'hello' }]
       } as any,
-      { requestId: 'req-native-cooldown' } as any
+      buildRouteMetadata('req-native-cooldown')
     );
     expect([providerA, providerB]).toContain(result.target.providerKey);
     expect(result.decision.routeName).toBe('default');
@@ -120,7 +127,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
       {
         messages: [{ role: 'user', content: 'hello' }]
       } as any,
-      { requestId: 'req-native-concurrency-runtime-key' } as any
+      buildRouteMetadata('req-native-concurrency-runtime-key')
     );
     expect(result.target.providerKey).toBe(providerKey);
     expect(result.decision.routeName).toBe('default');
@@ -190,7 +197,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
       {
         messages: [{ role: 'user', content: 'hello' }]
       } as any,
-      { requestId: 'req-last-default-after-recoverable-three-strikes' } as any
+      buildRouteMetadata('req-last-default-after-recoverable-three-strikes')
     );
 
     expect(result.target.providerKey).toBe(providerKey);
@@ -227,7 +234,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
       {
         messages: [{ role: 'user', content: 'hello' }]
       } as any,
-      { requestId: 'req-recoverable-alt-failure' } as any
+      buildRouteMetadata('req-recoverable-alt-failure')
     );
 
     expect(result.target.providerKey).toBe(providerB);

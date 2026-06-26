@@ -150,7 +150,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     });
   }
   const retryTelemetryPlan =
-    retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan && retryExecutionPlan.backoffScope
+    retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan
       ? buildProviderRetryTelemetryPlan({
         requestId: args.requestId,
         attempt: args.attempt,
@@ -167,22 +167,9 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
         maxContextOverflowRetries: args.maxContextOverflowRetries
       })
       : undefined;
-  const requestLocalProviderRetryState =
-    retryExecutionPlan.requestLocalTransient && retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan
-      ? {
-        switchAction: retryExecutionPlan.retrySwitchPlan.switchAction,
-        ...(retryExecutionPlan.retrySwitchPlan.switchAction === 'retry_same_provider_once' && args.providerKey
-          ? {
-            retryProviderKey: args.providerKey,
-            rotateApiKey: true
-          }
-          : {})
-      }
-      : undefined;
   return {
     reportPlan,
     retryExecutionPlan,
-    ...(requestLocalProviderRetryState ? { requestLocalProviderRetryState } : {}),
     ...(retryTelemetryPlan ? { retryTelemetryPlan } : {})
   };
 }

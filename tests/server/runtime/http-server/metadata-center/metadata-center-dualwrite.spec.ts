@@ -78,7 +78,7 @@ describe('metadata center dual-write API', () => {
     })).toEqual(expect.objectContaining({ repeatCount: 1 }));
   });
 
-  it('materializes stopless migration mirrors from the canonical stopless slot', () => {
+  it('does not materialize legacy stopmessage mirrors from the canonical stopless slot', () => {
     const target: Record<string, unknown> = {};
 
     writeMetadataCenterSlot({
@@ -94,23 +94,15 @@ describe('metadata center dual-write API', () => {
       writer: TEST_WRITER
     });
 
-    expect(MetadataCenter.read(target)?.readRuntimeControl().serverToolLoopState).toEqual({
+    expect(MetadataCenter.read(target)?.readRuntimeControl().stopless).toEqual({
       flowId: 'stop_message_flow',
       repeatCount: 2,
-      maxRepeats: 3
+      maxRepeats: 3,
+      active: true
     });
-    expect(buildMetadataCenterRustSnapshot(target).runtimeControl?.serverToolLoopState).toEqual({
-      flowId: 'stop_message_flow',
-      repeatCount: 2,
-      maxRepeats: 3
-    });
-    expect(buildMetadataCenterRustSnapshot(target).runtimeControl?.stopMessageState).toEqual(
-      expect.objectContaining({
-        stopMessageMaxRepeats: 3,
-        stopMessageUsed: 2,
-        stopMessageStageMode: 'on'
-      })
-    );
+    expect(MetadataCenter.read(target)?.readRuntimeControl().serverToolLoopState).toBeUndefined();
+    expect((buildMetadataCenterRustSnapshot(target).runtimeControl as any)?.serverToolLoopState).toBeUndefined();
+    expect((buildMetadataCenterRustSnapshot(target).runtimeControl as any)?.stopMessageState).toBeUndefined();
   });
 
   it('keeps runtime control isolated by request-local target and explicit request/session scope', () => {

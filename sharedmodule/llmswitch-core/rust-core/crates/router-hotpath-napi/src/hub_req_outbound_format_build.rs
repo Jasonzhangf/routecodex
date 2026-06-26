@@ -379,7 +379,10 @@ fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, St
         .map_err(|error| error.to_string())?;
         let mut anthropic_value: Value =
             serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
-        apply_anthropic_system_from_instructions(&mut anthropic_value, source_instructions.as_deref());
+        apply_anthropic_system_from_instructions(
+            &mut anthropic_value,
+            source_instructions.as_deref(),
+        );
         return Ok(strip_private_fields(&anthropic_value));
     }
     if source_format != "anthropic-messages" && payload.get("messages").is_some() {
@@ -390,14 +393,20 @@ fn build_anthropic_messages_request(format_envelope: &Value) -> Result<Value, St
         .map_err(|error| error.to_string())?;
         let mut anthropic_value: Value =
             serde_json::from_str(&anthropic).map_err(|error| error.to_string())?;
-        apply_anthropic_system_from_instructions(&mut anthropic_value, source_instructions.as_deref());
+        apply_anthropic_system_from_instructions(
+            &mut anthropic_value,
+            source_instructions.as_deref(),
+        );
         return Ok(strip_private_fields(&anthropic_value));
     }
     Ok(strip_private_fields(&payload))
 }
 
 fn apply_anthropic_system_from_instructions(payload: &mut Value, instructions: Option<&str>) {
-    let Some(instructions) = instructions.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(instructions) = instructions
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return;
     };
     let Some(obj) = payload.as_object_mut() else {
@@ -412,7 +421,10 @@ fn apply_anthropic_system_from_instructions(payload: &mut Value, instructions: O
     {
         return;
     }
-    obj.insert("system".to_string(), Value::String(instructions.to_string()));
+    obj.insert(
+        "system".to_string(),
+        Value::String(instructions.to_string()),
+    );
 }
 
 fn build_gemini_chat_request(format_envelope: &Value) -> Result<Value, String> {
@@ -985,6 +997,124 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("[Image omitted]"));
+    }
+
+    #[test]
+    fn test_build_anthropic_messages_keeps_html_exec_tool_result_before_later_stopless_turns() {
+        let html_tool_output = concat!(
+            "Total output lines: 170\n\n",
+            "<!DOCTYPE html><html><head><title>Static Residential Proxies</title></head><body>",
+            "<img src=\"data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%3e\" />",
+            "<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB\" />",
+            "<p>gateway.iproyal.com:19123</p>",
+            "</body></html>"
+        );
+        let stopless_output = "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续做下一步；先把手头能确认的结果拿回来。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}";
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "MiniMax-M3",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "我其实想知道，我如何配置和它的连接IPRoyal 的静态 IP"}]
+                        },
+                        {
+                            "type": "reasoning",
+                            "summary": [{"type": "summary_text", "text": "**Thinking** search static proxy details"}]
+                        },
+                        {
+                            "type": "function_call",
+                            "call_id": "call_html_exec_1",
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"curl -s 'https://iproyal.com/static-residential-proxies/' 2>/dev/null | head -200\",\"yield_time_ms\":10000}"
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_html_exec_1",
+                            "output": html_tool_output
+                        },
+                        {
+                            "type": "reasoning",
+                            "summary": [{"type": "summary_text", "text": "**Thinking** summarize proxy setup"}]
+                        },
+                        {
+                            "type": "function_call",
+                            "call_id": "call_stopless_1",
+                            "name": "reasoningStop",
+                            "arguments": "{\"stopreason\":2,\"reason\":\"continue_needed\"}"
+                        },
+                        {
+                            "type": "function_call_output",
+                            "call_id": "call_stopless_1",
+                            "output": stopless_output
+                        },
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "它是用一个特殊的协议做单次请求，请求本身包括鉴权和内容？无状态请求？"}]
+                        }
+                    ],
+                    "tools": [{
+                        "type": "function",
+                        "name": "exec_command",
+                        "description": "run command",
+                        "parameters": {"type": "object"}
+                    }]
+                }
+            }),
+            protocol: "anthropic-messages".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let messages = result.payload["messages"].as_array().unwrap();
+        let tool_use_index = messages
+            .iter()
+            .position(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            && part["id"].as_str() == Some("call_html_exec_1")
+                    })
+                })
+            })
+            .expect("assistant exec_command tool_use message");
+        let result_message = messages
+            .get(tool_use_index + 1)
+            .expect("tool_result must immediately follow HTML exec tool_use");
+        assert_eq!(result_message["role"].as_str(), Some("user"));
+        assert_eq!(
+            result_message["content"][0]["type"].as_str(),
+            Some("tool_result")
+        );
+        assert_eq!(
+            result_message["content"][0]["tool_use_id"].as_str(),
+            Some("call_html_exec_1")
+        );
+        assert!(
+            result_message["content"][0]["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("[Image omitted]"),
+            "HTML/data-uri output may be placeholder-normalized, but must stay a tool_result"
+        );
+
+        let next_message = messages
+            .get(tool_use_index + 2)
+            .expect("later turn after exec tool_result");
+        let is_placeholder_only_user_turn = next_message["role"].as_str() == Some("user")
+            && next_message["content"].as_array().is_some_and(|content| {
+                content.len() == 1
+                    && content[0]["type"].as_str() == Some("text")
+                    && content[0]["text"].as_str() == Some("[Image omitted]")
+            });
+        assert!(
+            !is_placeholder_only_user_turn,
+            "tool_result must not be rewritten into a standalone user placeholder turn"
+        );
     }
 
     #[test]

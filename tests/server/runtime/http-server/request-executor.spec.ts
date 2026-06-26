@@ -1179,6 +1179,68 @@ describe('HubRequestExecutor failover', () => {
       }
     })).resolves.toBe(true);
 
+    expect(__requestExecutorTestables.isToolResultFollowupTurn({
+      messages: [
+        {
+          role: 'system',
+          content: 'system guidance'
+        },
+        {
+          role: 'user',
+          content: 'investigate current rustification state'
+        },
+        {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 'call_prev_1',
+              type: 'function',
+              function: {
+                name: 'list_directory',
+                arguments: '{"path":"sharedmodule/llmswitch-core/src/servertool"}'
+              }
+            },
+            {
+              id: 'call_prev_2',
+              type: 'function',
+              function: {
+                name: 'list_directory',
+                arguments: '{"path":"sharedmodule/llmswitch-core/rust-core/crates"}'
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_prev_1',
+          content: 'stop-message-auto.ts\\nengine.ts'
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_prev_2',
+          content: 'servertool-core\\nservertool-cli'
+        },
+        {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 'call_curr_1',
+              type: 'function',
+              function: {
+                name: 'read_file',
+                arguments: '{"path":"sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs"}'
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_curr_1',
+          content: 'pub mod orchestration;'
+        }
+      ]
+    })).resolves.toBe(true);
+
     await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
       choices: [
         {
@@ -3149,8 +3211,9 @@ describe('HubRequestExecutor failover', () => {
     const routeHints: Array<string | undefined> = [];
     const pipeline = {
       execute: jest.fn(async (input: any) => {
-        routeHints.push(typeof input.metadata?.routeHint === 'string' ? input.metadata.routeHint : undefined);
-        const useLongcontext = input.metadata?.routeHint === 'longcontext';
+        const runtimeControl = MetadataCenter.read(input.metadata)?.readRuntimeControl() ?? {};
+        routeHints.push(typeof runtimeControl.routeHint === 'string' ? runtimeControl.routeHint : undefined);
+        const useLongcontext = runtimeControl.routeHint === 'longcontext';
         const providerKey = useLongcontext ? secondProviderKey : firstProviderKey;
         return {
           requestId: input.id,

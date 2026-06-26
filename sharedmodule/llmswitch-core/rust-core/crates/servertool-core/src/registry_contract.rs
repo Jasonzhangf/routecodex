@@ -328,7 +328,10 @@ mod tests {
             builtin_entry_present: true,
             ad_hoc_entry_present: true,
         });
-        assert_eq!(builtin.action, ServertoolRegistryLookupAction::ReturnBuiltin);
+        assert_eq!(
+            builtin.action,
+            ServertoolRegistryLookupAction::ReturnBuiltin
+        );
 
         let adhoc = plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
             name: "custom_tool".to_string(),
@@ -425,10 +428,7 @@ mod tests {
                     source_index: 2,
                 },
             ],
-            auto_handler_names: vec![
-                "vision_auto".to_string(),
-                " stop_message_auto ".to_string(),
-            ],
+            auto_handler_names: vec!["vision_auto".to_string(), " stop_message_auto ".to_string()],
         })
         .expect("registry projection plan");
         assert_eq!(
@@ -460,14 +460,12 @@ mod tests {
             vec!["vision_auto".to_string(), "stop_message_auto".to_string()]
         );
 
-        let duplicate_auto = plan_servertool_registry_projection(ServertoolRegistryProjectionInput {
-            registered_names: vec![],
-            registered_records: vec![],
-            auto_handler_names: vec![
-                "vision_auto".to_string(),
-                " vision_auto ".to_string(),
-            ],
-        });
+        let duplicate_auto =
+            plan_servertool_registry_projection(ServertoolRegistryProjectionInput {
+                registered_names: vec![],
+                registered_records: vec![],
+                auto_handler_names: vec!["vision_auto".to_string(), " vision_auto ".to_string()],
+            });
         assert_eq!(
             duplicate_auto.expect_err("duplicate auto handler must fail"),
             "duplicate auto handler name: vision_auto"

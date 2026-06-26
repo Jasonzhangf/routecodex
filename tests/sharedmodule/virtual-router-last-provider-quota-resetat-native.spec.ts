@@ -1,8 +1,13 @@
 import { describe, expect, test } from '@jest/globals';
 
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
-import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
+function buildRouteMetadata(requestId: string): any {
+  return {
+    requestId,
+    metadataCenterSnapshot: {}
+  };
+}
 const FUTURE_RESET_AT = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
 function buildSingleProviderConfig(providerKey = 'quota.key1.gpt-test'): any {
@@ -39,7 +44,7 @@ function buildSingleProviderConfig(providerKey = 'quota.key1.gpt-test'): any {
 }
 
 describe('virtual router singleton quota resetAt rust guard', () => {
-  test('single-provider QUOTA_DEPLETED should degrade to short recoverable cooldown instead of full resetAt lockout', () => {
+  test('single-provider QUOTA_DEPLETED no longer removes the last provider from routing availability', () => {
     const providerKey = 'quota.key1.gpt-test';
     const engine = new VirtualRouterEngine({} as any);
     engine.initialize(buildSingleProviderConfig(providerKey));
@@ -61,25 +66,12 @@ describe('virtual router singleton quota resetAt rust guard', () => {
       details: {}
     } as any);
 
-    try {
-      engine.route(
-        { messages: [{ role: 'user', content: 'hello' }] } as any,
-        { requestId: 'req-singleton-quota-resetat' } as any
-      );
-      throw new Error('expected route to fail');
-    } catch (error) {
-      expect(error).toBeInstanceOf(VirtualRouterError);
-      const err = error as VirtualRouterError & { details?: Record<string, unknown> };
-      expect(err.code).toBe('PROVIDER_NOT_AVAILABLE');
-      expect(typeof err.details?.minRecoverableCooldownMs).toBe('number');
-      const waitMs = err.details?.minRecoverableCooldownMs as number;
-      expect(waitMs).toBeGreaterThan(0);
-      expect(waitMs).toBeLessThanOrEqual(10_000);
-      expect(Array.isArray(err.details?.recoverableCooldownHints)).toBe(true);
-      expect((err.details?.recoverableCooldownHints as Array<Record<string, unknown>>)[0]).toMatchObject({
-        providerKey,
-        source: 'rust.quota'
-      });
-    }
+    const decision = engine.route(
+      { messages: [{ role: 'user', content: 'hello' }] } as any,
+      buildRouteMetadata('req-singleton-quota-resetat')
+    );
+
+    expect(decision.target.providerKey).toBe(providerKey);
+    expect(decision.decision.routeName).toBe('default');
   });
 });

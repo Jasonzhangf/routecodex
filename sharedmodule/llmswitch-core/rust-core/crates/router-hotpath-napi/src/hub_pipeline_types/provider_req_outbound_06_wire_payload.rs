@@ -134,7 +134,7 @@ mod tests {
     use crate::hub_pipeline_types::{
         build_hub_req_chatprocess_03_from_hub_req_inbound_02,
         build_hub_req_inbound_02_from_payload,
-        build_hub_req_outbound_05_from_hub_req_chatprocess_03,
+        build_hub_req_outbound_05_from_vr_route_04_selected_target,
         build_vr_route_04_from_hub_req_chatprocess_03,
     };
     use serde_json::json;
@@ -150,9 +150,12 @@ mod tests {
             json!({"providerKey":"p.key","model":"m"}),
         )
         .unwrap();
-        let semantic =
-            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload.clone())
-                .unwrap();
+        let semantic = build_hub_req_outbound_05_from_vr_route_04_selected_target(
+            governed,
+            &selected,
+            payload.clone(),
+        )
+        .unwrap();
         let wire =
             build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic).unwrap();
         assert_eq!(wire.payload().get("model"), Some(&json!("m")));
@@ -170,8 +173,10 @@ mod tests {
             json!({"providerKey":"p.key","model":"m"}),
         )
         .unwrap();
-        let semantic =
-            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload).unwrap();
+        let semantic = build_hub_req_outbound_05_from_vr_route_04_selected_target(
+            governed, &selected, payload,
+        )
+        .unwrap();
         let err = build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic)
             .unwrap_err();
         assert!(err.contains("provider SDK options"));
@@ -189,8 +194,10 @@ mod tests {
             json!({"providerKey":"p.key","model":"m"}),
         )
         .unwrap();
-        let semantic =
-            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload).unwrap();
+        let semantic = build_hub_req_outbound_05_from_vr_route_04_selected_target(
+            governed, &selected, payload,
+        )
+        .unwrap();
         let err = build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic)
             .unwrap_err();
         assert!(err.contains("request context field toolsRaw"));
@@ -211,8 +218,10 @@ mod tests {
             json!({"providerKey":"p.key","model":"m"}),
         )
         .unwrap();
-        let semantic =
-            build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, payload).unwrap();
+        let semantic = build_hub_req_outbound_05_from_vr_route_04_selected_target(
+            governed, &selected, payload,
+        )
+        .unwrap();
         let err = build_provider_req_outbound_06_from_hub_req_outbound_05(&selected, semantic)
             .unwrap_err();
         assert!(err.contains("namespace tool aggregate"));

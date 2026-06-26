@@ -158,4 +158,28 @@ describe('hub pipeline router metadata builder', () => {
 
     expect(output.retryProviderKey).toBeUndefined();
   });
+
+  it('prefers metadataCenterSnapshot runtimeControl.routeHint over flat routeHint and resume residue', () => {
+    const output = buildRouterMetadataInputWithNative({
+      requestId: 'req-snapshot-route-hint',
+      entryEndpoint: '/v1/responses',
+      processMode: 'chat',
+      stream: false,
+      direction: 'request',
+      providerProtocol: 'openai-responses',
+      routeHint: 'payload-search',
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          routeHint: 'snapshot-search'
+        }
+      },
+      metadata: {
+        responsesResume: {
+          routeHint: 'resume-search'
+        }
+      }
+    });
+
+    expect(output.routeHint).toBe('snapshot-search');
+  });
 });

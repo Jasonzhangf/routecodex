@@ -161,8 +161,7 @@ fn normalize_reason(value: Option<&str>, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_auto_hook_execution_decision, AutoHookExecutionAction,
-        AutoHookExecutionDecisionInput,
+        plan_auto_hook_execution_decision, AutoHookExecutionAction, AutoHookExecutionDecisionInput,
     };
 
     #[test]

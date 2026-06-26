@@ -60,7 +60,7 @@ type RequestExecutorProviderSendFailureArgs = {
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
-    switchAction: 'exclude_and_reroute' | 'retry_same_provider_once';
+    switchAction: 'exclude_and_reroute';
     backoffScope?: 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
     retryExecutionPolicyReason?: string;
@@ -382,39 +382,12 @@ export async function processProviderSendFailure(
     logNonBlockingError: args.logNonBlockingError
   });
   const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;
-  if (!retryExecutionPlan.shouldRetry || !retryExecutionPlan.retrySwitchPlan || !retryExecutionPlan.backoffScope) {
+  if (!retryExecutionPlan.shouldRetry || !retryExecutionPlan.retrySwitchPlan) {
     throw args.error;
   }
   if (!providerFailurePlan.retryTelemetryPlan) {
     throw args.error;
   }
-  if (
-    !retryExecutionPlan.requestLocalTransient
-    && args.providerTransportBackoffKey
-    && shouldApplyProviderTransportBackoff({
-      error: args.error,
-      retryError,
-      stage: 'provider.send'
-    })
-  ) {
-    const providerBackoffMs = args.consumeProviderTransportBackoffMs(args.providerTransportBackoffKey, {
-      error: args.error,
-      statusCode: status
-    });
-    args.logStage('provider.transport_backoff.recorded', args.requestId, {
-      providerKey: args.providerKey,
-      runtimeKey: args.runtimeKey,
-      backoffKey: args.providerTransportBackoffKey,
-      backoffMs: providerBackoffMs,
-      consecutive: peekProviderTransportBackoffConsecutiveForTests(args.providerTransportBackoffKey),
-      reason: retryError.reason,
-      errorCode: retryError.errorCode,
-      upstreamCode: retryError.upstreamCode,
-      statusCode: status,
-      attempt: args.attempt
-    });
-  }
-
   const blockingRecoverableRouteHoldState =
     retryExecutionPlan.blockingRecoverable
       ? {
@@ -423,7 +396,6 @@ export async function processProviderSendFailure(
         retryError,
         holdOnLastAvailable429: retryExecutionPlan.holdOnLastAvailable429,
         explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
-        preserveSameProviderRetry: retryExecutionPlan.retrySwitchPlan.switchAction === 'retry_same_provider_once',
         routePoolForSameProviderRetry: undefined
       }
       : null;

@@ -1,5 +1,5 @@
-use serde_json::Value;
 use super::features::RoutingFeatures;
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ClassificationResult {

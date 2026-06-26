@@ -224,6 +224,40 @@ const mockNativeExportsModule = () => ({
     input: Array.isArray(args?.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args?.rawRequest?.tools) ? args.rawRequest.tools : undefined
   })),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: any) => {
+    const adapterContext = input?.adapterContext && typeof input.adapterContext === 'object' && !Array.isArray(input.adapterContext)
+      ? input.adapterContext
+      : undefined;
+    const rawRequestBody =
+      adapterContext?.__raw_request_body && typeof adapterContext.__raw_request_body === 'object' && !Array.isArray(adapterContext.__raw_request_body)
+        ? adapterContext.__raw_request_body
+        : undefined;
+    if (!rawRequestBody) {
+      return undefined;
+    }
+    const readRouteHint = (value: unknown) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return undefined;
+      }
+      const record = value as Record<string, unknown>;
+      return typeof record.routeHint === 'string' && record.routeHint.trim()
+        ? record.routeHint.trim()
+        : undefined;
+    };
+    for (const item of Array.isArray((rawRequestBody as Record<string, unknown>).tool_outputs)
+      ? (rawRequestBody as Record<string, unknown>).tool_outputs as unknown[]
+      : []) {
+      const routeHint = readRouteHint(item);
+      if (routeHint) return routeHint;
+    }
+    for (const item of Array.isArray((rawRequestBody as Record<string, unknown>).input)
+      ? (rawRequestBody as Record<string, unknown>).input as unknown[]
+      : []) {
+      const routeHint = readRouteHint(item);
+      if (routeHint) return routeHint;
+    }
+    return undefined;
+  }),
   resolveProviderRetryExecutionPolicyNative: jest.fn((input: any) => ({
     excludeCurrentProvider: Boolean(input?.existingExclusion),
     reason: input?.existingExclusion ? 'existing_exclusion' : 'test_no_retry'
@@ -315,6 +349,12 @@ const mockBridgeModule = () => ({
     sanitizedPayload: args?.responsesPayload,
     streamIntent: 'stream'
   })),
+  createChatJsonToSseConverterForHttp: jest.fn(async () => ({
+    convertResponseToJsonToSse: async (payload: any) => Readable.from([
+      'event: response.completed\n',
+      `data: ${JSON.stringify(payload)}\n\n`
+    ])
+  })),
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async (payload: any) => Readable.from([
       'event: response.completed\n',
@@ -381,6 +421,12 @@ jest.unstable_mockModule('../../../src/server/runtime/http-server/servertool-adm
 
 const buildResponsesSseBridgeDirectMockModule = () => {
   return {
+    createChatJsonToSseConverterForHttp: jest.fn(async () => ({
+      convertResponseToJsonToSse: async (payload: any) => Readable.from([
+        'event: response.completed\n',
+        `data: ${JSON.stringify(payload)}\n\n`
+      ])
+    })),
     createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
       convertResponseToJsonToSse: async (payload: any) => Readable.from([
         'event: response.completed\n',
@@ -398,13 +444,11 @@ const buildResponsesSseBridgeDirectMockModule = () => {
     normalizeResponsesSseFrameForClientForHttp: jest.fn((args: any) => args?.frame ?? ''),
     projectResponsesSseFrameForClientForHttp: jest.fn((args: any) => args?.frame ?? ''),
     projectResponsesClientPayloadForClientForHttp: jest.fn((payload: any) => payload),
+    sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
     shouldDispatchResponsesSseToClientForHttp: jest.fn((args: any) => args?.forceSSE === true),
     shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),
     shouldDropClientSseFrameForHttp: jest.fn(() => false),
-    shouldPersistResponsesConversationStateForHttp: jest.fn(() => false),
-    shouldPersistResponsesContinuationOnProbeUpdateForHttp: jest.fn(() => false),
     shouldReprojectRelayResponsesSseForHttp: jest.fn(() => false),
-    shouldRepairResponsesContinuationTerminalForHttp: jest.fn(() => false),
     isDirectPassthroughTransportKeepaliveFrameForHttp: jest.fn(() => false),
     isToolCallContinuationResponseForHttp: jest.fn(() => false),
     assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
@@ -438,8 +482,6 @@ const buildResponsesSseBridgeDirectMockModule = () => {
       streamIntent: args?.forceStream === true || args?.acceptsSse ? 'stream' : 'non_stream'
     })),
     clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
-    finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
-    persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
     resolveResponsesConversationClearReasonForHttp: jest.fn(() => undefined),
     shouldClearResponsesConversationOnClientCloseForHttp: jest.fn(() => false),
     shouldClearResponsesConversationOnFailureForHttp: jest.fn(() => false)
@@ -1531,7 +1573,6 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         routeHint: 'thinking'
       });
       expect(pipelineInput.metadata?.entryEndpoint).toBe('/v1/responses');
-      expect(pipelineInput.metadata?.routeHint).toBe('thinking');
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_1');
       expect(pipelineInput.payload?.tool_outputs).toEqual([{ tool_call_id: 'call_submit_1', output: 'ok' }]);
       expect(readResponsesRequestContext(pipelineInput.metadata)?.payload).toMatchObject({
@@ -1668,24 +1709,19 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineExecute).toHaveBeenCalledTimes(1);
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.endpoint).toBe('/v1/responses');
-      expect(readRequestTruth(pipelineInput.metadata)).toMatchObject({
-        sessionId: 'sess-submit-truth-1',
-        conversationId: 'conv-submit-truth-1'
-      });
+      expect(readRequestTruth(pipelineInput.metadata)).toEqual({});
       expect(readResponsesResume(pipelineInput.metadata)).toMatchObject({
         previousRequestId: 'req_chain_submit_truth_1',
         restoredFromResponseId: 'resp_submit_truth_1',
         routeHint: 'search/gateway-priority-5555-priority-search',
         providerKey: 'minimonth.key1.MiniMax-M2.7',
-        sessionId: 'sess-submit-truth-1',
-        conversationId: 'conv-submit-truth-1',
         continuationOwner: 'relay'
       });
       expect(readRuntimeControl(pipelineInput.metadata)).toMatchObject({
         streamIntent: 'non_stream',
-        routeHint: 'search/gateway-priority-5555-priority-search'
+        routeHint: 'search/gateway-priority-5555-priority-search',
+        retryProviderKey: 'minimonth.key1.MiniMax-M2.7'
       });
-      expect(readRuntimeControl(pipelineInput.metadata).retryProviderKey).toBeUndefined();
     } finally {
       await closeServer(server);
     }
@@ -2161,7 +2197,9 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       ]);
       expect(readResponsesResume(pipelineInput.metadata)).toBeUndefined();
       expect(readResponsesRequestContext(pipelineInput.metadata)?.payload?.input).toHaveLength(3);
-      expect(pipelineInput.metadata?.session_id).toBe('sess-1');
+      expect(readRequestTruth(pipelineInput.metadata)).toMatchObject({
+        sessionId: 'sess-1'
+      });
       expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBeUndefined();
     } finally {
       await closeServer(server);

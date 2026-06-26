@@ -122,7 +122,7 @@ function buildStopMessageHandlerInput(
           }
         : undefined;
     })()
-    ?? { continuationPrompt: '', repeatCount: 1, maxRepeats: 3, active: true };
+    ?? { continuationPrompt: '', repeatCount: 0, maxRepeats: 3, active: true };
 
   const decisionSignals = planStoplessDecisionContextSignals({
     adapterContext: ctx.adapterContext,

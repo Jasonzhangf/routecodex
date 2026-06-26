@@ -2,9 +2,9 @@
 //! This module does NOT expose NAPI directly. The NAPI entry point is in `lib.rs`.
 
 use stop_message_core::{
-    decide, evaluate_goal_active_stop_loop, evaluate_stop_schema_gate, GoalActiveStopLoopDecision,
-    GoalActiveStopLoopInput, StopMessageDecision, StopMessageDecisionContext,
-    StopSchemaGateDecision,
+    decide, evaluate_stopless_loop_guard, evaluate_stop_schema_gate, StopMessageDecision,
+    StopMessageDecisionContext, StopSchemaGateDecision, StoplessLoopGuardDecision,
+    StoplessLoopGuardInput,
 };
 
 pub fn decide_stop_message_action(ctx: &StopMessageDecisionContext) -> StopMessageDecision {
@@ -13,16 +13,24 @@ pub fn decide_stop_message_action(ctx: &StopMessageDecisionContext) -> StopMessa
 
 pub fn evaluate_stop_schema(
     assistant_text: &str,
+    reasoning_stop_arguments: Option<&str>,
     used: u32,
     max_repeats: u32,
     prev_observation_hash: &str,
     prev_no_change_count: u32,
 ) -> StopSchemaGateDecision {
-    evaluate_stop_schema_gate(assistant_text, used, max_repeats, prev_observation_hash, prev_no_change_count)
+    stop_message_core::evaluate_stop_schema_gate_with_reasoning_stop_arguments(
+        assistant_text,
+        reasoning_stop_arguments,
+        used,
+        max_repeats,
+        prev_observation_hash,
+        prev_no_change_count,
+    )
 }
 
-pub fn evaluate_goal_active_stop_loop_guard(
-    input: &GoalActiveStopLoopInput,
-) -> GoalActiveStopLoopDecision {
-    evaluate_goal_active_stop_loop(input)
+pub fn evaluate_stopless_loop_guard_wrapper(
+    input: &StoplessLoopGuardInput,
+) -> StoplessLoopGuardDecision {
+    evaluate_stopless_loop_guard(input)
 }

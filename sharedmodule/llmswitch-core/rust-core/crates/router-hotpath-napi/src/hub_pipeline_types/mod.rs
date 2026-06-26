@@ -24,7 +24,7 @@ pub(crate) use hub_req_inbound_02_standardized::{
     build_hub_req_inbound_02_from_payload, HubReqInbound02Standardized,
 };
 pub(crate) use hub_req_outbound_05_provider_semantic::{
-    build_hub_req_outbound_05_from_hub_req_chatprocess_03, HubReqOutbound05ProviderSemantic,
+    build_hub_req_outbound_05_from_vr_route_04_selected_target, HubReqOutbound05ProviderSemantic,
 };
 pub(crate) use hub_resp_chatprocess_03_governed::{
     build_hub_resp_chatprocess_03_from_hub_resp_inbound_02, HubRespChatProcess03Governed,

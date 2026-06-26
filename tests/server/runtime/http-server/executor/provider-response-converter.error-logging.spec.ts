@@ -9,6 +9,10 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () =>
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
+  createChatJsonToSseConverterForHttp: async () => ({
+    convertResponseToJsonToSse: async () => ({ pipe: () => undefined })
+  }),
+  reprojectDirectChatToolCallStreamForHttp: async () => ({ pipe: () => undefined }),
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
   deriveFinishReasonNative: () => undefined,
   updateResponsesContractProbeFromSseChunkNative: () => ({}),

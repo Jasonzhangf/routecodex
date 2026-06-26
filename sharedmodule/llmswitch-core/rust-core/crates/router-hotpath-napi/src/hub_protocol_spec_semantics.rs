@@ -1022,7 +1022,10 @@ mod tests {
             .and_then(Value::as_array)
             .unwrap();
         assert_eq!(content[1]["type"], serde_json::json!("input_image"));
-        assert_eq!(content[1]["image_url"], serde_json::json!("data:image/png;base64,AAA"));
+        assert_eq!(
+            content[1]["image_url"],
+            serde_json::json!("data:image/png;base64,AAA")
+        );
     }
 
     #[test]

@@ -5,6 +5,11 @@ export interface NativeHubPipelineOrchestrationInput {
   providerProtocol: string;
   payload: Record<string, unknown>;
   metadata: Record<string, unknown>;
+  metadataCenterSnapshot?: {
+    requestTruth?: Record<string, unknown>;
+    continuationContext?: Record<string, unknown>;
+    runtimeControl?: Record<string, unknown>;
+  };
   stream: boolean;
   processMode: 'chat';
   direction: 'request' | 'response';
@@ -50,6 +55,11 @@ export interface NativeRouterMetadataInputBuildInput {
   sessionId?: string;
   conversationId?: string;
   metadata?: Record<string, unknown>;
+  metadataCenterSnapshot?: {
+    requestTruth?: Record<string, unknown>;
+    continuationContext?: Record<string, unknown>;
+    runtimeControl?: Record<string, unknown>;
+  };
 }
 
 export interface NativeCoerceStandardizedRequestInput {

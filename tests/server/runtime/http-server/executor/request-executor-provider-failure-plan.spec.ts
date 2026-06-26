@@ -72,7 +72,7 @@ describe('request-executor-provider-failure-plan', () => {
     expect(excludedProviderKeys.size).toBe(0);
   });
 
-  test('RED: provider business error 2013 traffic saturation must enter retry/cooldown plan, not direct return to client', async () => {
+  test('provider business error 2013 traffic saturation immediately excludes current provider and reroutes', async () => {
     const excludedProviderKeys = new Set<string>();
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(new Error('Token Plan 当前请求量较高，请稍后重试'), {
@@ -113,7 +113,9 @@ describe('request-executor-provider-failure-plan', () => {
 
     expect(plan.reportPlan.stageHint).toBe('provider.send');
     expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
-    expect(plan.retryExecutionPlan.backoffScope).toBe('provider');
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
+    expect(plan.retryExecutionPlan.retryBackoffMs).toBe(0);
+    expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
   });
 
   test('RED: defaultTierAvailable true must flow into ErrorErr05 and block client projection when route pool is exhausted', async () => {
@@ -220,7 +222,7 @@ describe('request-executor-provider-failure-plan', () => {
     expect(excludedProviderKeys.has('XLC.key2.deepseek-v4-pro')).toBe(true);
   });
 
-  test('retry_same_provider_once should request api key rotation for next same-provider attempt', async () => {
+  test('single-provider retry path does not synthesize same-provider retry state', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const plan = await resolveRequestExecutorProviderFailurePlan({
@@ -253,8 +255,7 @@ describe('request-executor-provider-failure-plan', () => {
       logNonBlockingError: () => undefined
     });
 
-    expect(plan.requestLocalProviderRetryState?.switchAction).toBe('retry_same_provider_once');
-    expect(plan.requestLocalProviderRetryState?.retryProviderKey).toBe('asxs.gpt-5.4');
-    expect(plan.requestLocalProviderRetryState?.rotateApiKey).toBe(true);
+    expect(plan.requestLocalProviderRetryState).toBeUndefined();
+    expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
   });
 });

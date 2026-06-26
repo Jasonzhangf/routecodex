@@ -18,6 +18,8 @@ export interface ChatEventGeneratorConfig {
 export interface ChatEventGeneratorContext {
   model: string;
   requestId: string;
+  responseId?: string;
+  created?: number;
   choiceIndex: number;
   toolCallIndexCounter: number;
   contentIndexCounter: Map<string, number>;
@@ -75,10 +77,17 @@ function normalizeChatUsage(usage: unknown): ChatUsage | undefined {
 /**
  * 创建默认上下文
  */
-export function createDefaultContext(model: string, requestId: string): ChatEventGeneratorContext {
+export function createDefaultContext(
+  model: string,
+  requestId: string,
+  responseId?: string,
+  created?: number
+): ChatEventGeneratorContext {
   return {
     model,
     requestId,
+    ...(typeof responseId === 'string' && responseId.trim() ? { responseId: responseId.trim() } : {}),
+    ...(typeof created === 'number' && Number.isFinite(created) ? { created: Math.floor(created) } : {}),
     choiceIndex: 0,
     toolCallIndexCounter: 0,
     contentIndexCounter: new Map()
@@ -98,9 +107,9 @@ function createBaseChunk(
   model: string;
 } {
   return {
-    id: config.enableIdGeneration ? IdUtils.generateRequestId() : context.requestId,
+    id: context.responseId ?? context.requestId,
     object: 'chat.completion.chunk',
-    created: config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0,
+    created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0),
     model: context.model
   };
 }
@@ -219,7 +228,8 @@ export function buildToolCallStart(
           id: toolCall.id,
           type: toolCall.type || 'function',
           function: {
-            name: toolCall.function.name
+            name: toolCall.function.name,
+            arguments: ''
           }
         }]
       },

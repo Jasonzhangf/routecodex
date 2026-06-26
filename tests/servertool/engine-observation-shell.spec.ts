@@ -1,5 +1,32 @@
 import * as fs from 'node:fs';
 import { describe, expect, test, jest } from '@jest/globals';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function bindProviderProtocol(adapterContext: Record<string, unknown>, providerProtocol = 'openai-responses'): void {
+  const center = MetadataCenter.attach(adapterContext);
+  if (!center.readRuntimeControl().providerProtocol) {
+    center.writeRuntimeControl(
+      'providerProtocol',
+      providerProtocol,
+      {
+        module: 'tests/servertool/engine-observation-shell.spec.ts',
+        symbol: 'bindProviderProtocol',
+        stage: 'test'
+      }
+    );
+  }
+}
+
+const createServertoolProgressLoggerMock = jest.fn(() => ({
+  logStopEntry: jest.fn(),
+  logProgress: jest.fn(),
+  logAutoHookTrace: jest.fn(),
+  logStopCompare: jest.fn()
+}));
+
+jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js', () => ({
+  createServertoolProgressLogger: createServertoolProgressLoggerMock
+}));
 
 describe('engine-observation-shell', () => {
   test('engine.ts delegates orchestration into engine-orchestration-shell', () => {
@@ -39,6 +66,35 @@ describe('engine-observation-shell', () => {
     progressSpy.mockRestore();
   });
 
+  test('createServertoolObservation prefers bound metadata center providerProtocol over explicit argument', async () => {
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
+    const adapterContext: Record<string, unknown> = {};
+    bindProviderProtocol(adapterContext, 'anthropic-messages');
+
+    const observation = mod.createServertoolObservation({
+      requestId: 'req-obs-center-protocol',
+      entryEndpoint: '/v1/messages',
+      providerProtocol: 'openai-chat',
+      adapterContext: adapterContext as any
+    });
+
+    expect(createServertoolProgressLoggerMock).toHaveBeenCalledWith(expect.objectContaining({
+      providerProtocol: 'anthropic-messages'
+    }));
+    expect(observation.logProgress).toBeDefined();
+  });
+
+  test('createServertoolObservation fails fast when metadata center runtimeControl.providerProtocol is absent', async () => {
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
+
+    expect(() => mod.createServertoolObservation({
+      requestId: 'req-obs-missing-protocol',
+      entryEndpoint: '/v1/messages',
+      providerProtocol: 'openai-chat',
+      adapterContext: {} as any
+    })).toThrow('Servertool observation requires metadata center runtime_control.providerProtocol');
+  });
+
   test('engine-orchestration-shell owns the engine mainline body', () => {
     const source = fs.readFileSync(
       'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
@@ -48,10 +104,10 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('export async function runServerToolOrchestrationShell(');
     expect(source).toContain('createServertoolObservation({');
     expect(source).toContain('runEnginePreflight({');
-    expect(source).toContain('planServertoolEngineSkipWithNative({');
+    expect(source).toContain('planServertoolEngineSkipWithNativeLocal({');
     expect(source).toContain('recordServertoolEngineMatchSkipped({');
     expect(source).toContain('recordServertoolEngineMatchHit({');
-    expect(source).toContain('planStoplessOrchestrationActionShell({');
+    expect(source).toContain('planStoplessOrchestrationActionWithNativeLocal({');
     expect(source).toContain('runServertoolEnginePostflight({');
   });
 });

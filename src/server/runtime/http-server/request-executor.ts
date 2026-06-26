@@ -28,6 +28,7 @@ import {
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
 } from './executor/provider-response-converter.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
+import { MetadataCenter } from './metadata-center/metadata-center.js';
 import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
 
 // Import from new executor submodules
@@ -114,6 +115,31 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+const REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER = {
+  module: 'src/server/runtime/http-server/request-executor.ts',
+  symbol: 'resolveProviderRequestContext',
+  stage: 'HubReqOutbound05ProviderSemantic'
+} as const;
+
+export function writeProviderProtocolRuntimeControl(
+  metadata: Record<string, unknown>,
+  providerProtocol: string | undefined
+): void {
+  if (!providerProtocol) {
+    return;
+  }
+  const center = MetadataCenter.read(metadata);
+  if (!center || center.readRuntimeControl().providerProtocol) {
+    return;
+  }
+  center.writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER,
+    'request provider protocol'
+  );
 }
 
 function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>): string | undefined {
@@ -234,7 +260,6 @@ import {
   setRetrySnapshotLogger
 } from './executor/retry-payload-snapshot.js';
 import {
-  isServerToolFollowupRequest,
   logProviderRetrySwitchCompact,
   releaseProviderTrafficPermit,
   resolveStoplessLogState,
@@ -805,6 +830,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerPayload,
             mergedMetadata
           });
+          writeProviderProtocolRuntimeControl(metadataForAttempt, providerContext.providerProtocol);
         } catch (error) {
           const resolveFailure = await processProviderResolveFailure({
             error,
@@ -1041,7 +1067,7 @@ export class HubRequestExecutor implements RequestExecutor {
           providerKey: target.providerKey,
           runtimeKey
         });
-        const bypassTrafficGovernor = isServerToolFollowupRequest(metadataForAttempt);
+        const bypassTrafficGovernor = false;
         let retryAfterProviderFailure = false;
         let providerFailurePhase: 'provider_send' | 'provider_response_processing' = 'provider_send';
         try {
@@ -1643,6 +1669,7 @@ export const __requestExecutorTestables = {
   resolveProviderRetryExecutionPlan,
   resolveRequestExecutorPipelineAttempt,
   buildProviderRetryTelemetryPlan,
+  writeProviderProtocolRuntimeControl,
   resetRequestExecutorInternalStateForTests
 };
 

@@ -3,10 +3,6 @@ import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../h
 import type { ProviderHandle } from '../types.js';
 import { asRecord } from '../provider-utils.js';
 import {
-  isImagePathLike,
-  containsBroadKillCommand
-} from './provider-response-tool-validation-blocks.js';
-import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
   resolveRelayResponsesClientSseStreamForHttp,
@@ -31,29 +27,20 @@ import {
   buildServerToolAdapterContext
 } from './servertool-adapter-context.js';
 import {
-  readRuntimeControlProjection
+  readRuntimeControlProjection,
+  readRuntimeDebugSnapshotProjection,
 } from '../metadata-center/request-truth-readers.js';
-import {
-  compactFollowupLogReason,
-  extractServerToolFollowupErrorLogDetails,
-  finalizeServerToolBridgeConvertError
-} from './servertool-followup-error.js';
-import { importCoreDist } from '../../../../modules/llmswitch/bridge.js';
 
 import {
   asFlatRecord,
-  hasStoplessDirectiveInRequestPayload,
   findNestedRawString,
   findNestedErrorMarker,
-  normalizeRecoveredToolCalls,
-  stringifyToolCallArgumentsForValidation,
   isGenericBridgeResponseContractError,
   isContextLengthExceededError,
   isRetryableNetworkSseWrapperError,
   extractBridgeProviderResponsePayload,
   TRUTHY_VALUES,
   FATAL_CONVERSION_ERROR_CODES,
-  STOPLESS_DIRECTIVE_PATTERN,
   shouldAllowDirectResponsesPrebuiltSsePassthrough
 } from './provider-response-shared-pure-blocks.js';
 
@@ -117,8 +104,11 @@ const PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER = {
   stage: 'provider_response_runtime_control'
 } as const;
 
-type NativeRespSemanticsModule = {
-};
+const PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER = {
+  module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
+  symbol: 'syncAdapterContextRuntimeBackToPipelineMetadata',
+  stage: 'provider_response_debug_snapshot'
+} as const;
 
 function attachTimingBreakdown(response: PipelineExecutionResult): PipelineExecutionResult {
   const clientInjectWaitMsRaw = response.usageLogInfo?.clientInjectWaitMs;
@@ -138,103 +128,6 @@ function attachTimingBreakdown(response: PipelineExecutionResult): PipelineExecu
     }
   };
 }
-
-function readNonEmptyString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function readFiniteNonNegativeNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
-}
-
-function normalizeGoalCounter(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-}
-
-async function readStreamTextForDirectChatReprojection(stream: unknown): Promise<string | undefined> {
-  if (!stream || typeof (stream as AsyncIterable<unknown>)[Symbol.asyncIterator] !== 'function') {
-    return undefined;
-  }
-  const chunks: string[] = [];
-  for await (const chunk of stream as AsyncIterable<unknown>) {
-    if (typeof chunk === 'string') {
-      chunks.push(chunk);
-      continue;
-    }
-    if (Buffer.isBuffer(chunk)) {
-      chunks.push(chunk.toString('utf8'));
-      continue;
-    }
-    if (chunk instanceof Uint8Array) {
-      chunks.push(Buffer.from(chunk).toString('utf8'));
-    }
-  }
-  return chunks.length > 0 ? chunks.join('') : undefined;
-}
-
-function recoverVisibleAssistantContentFromChatSseText(text: string | undefined): string | undefined {
-  if (!text) {
-    return undefined;
-  }
-  const parts = text.split(/\r?\n\r?\n/);
-  const visible: string[] = [];
-  for (const part of parts) {
-    for (const line of part.split(/\r?\n/)) {
-      if (!line.startsWith('data:')) {
-        continue;
-      }
-      const payload = line.slice('data:'.length).trim();
-      if (!payload || payload === '[DONE]') {
-        continue;
-      }
-      try {
-        const parsed = JSON.parse(payload) as Record<string, unknown>;
-        const choices = Array.isArray(parsed.choices) ? parsed.choices as Array<Record<string, unknown>> : [];
-        for (const choice of choices) {
-          const delta =
-            choice && typeof choice === 'object' && choice.delta && typeof choice.delta === 'object' && !Array.isArray(choice.delta)
-              ? choice.delta as Record<string, unknown>
-              : undefined;
-          const content = typeof delta?.content === 'string' ? delta.content : undefined;
-          if (content) {
-            visible.push(content);
-          }
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
-  const joined = visible.join('');
-  return joined.trim() ? joined : undefined;
-}
-
-async function restoreDirectChatVisibleContentFromSse(args: {
-  body: Record<string, unknown>;
-  sseStream: unknown;
-}): Promise<{ body: Record<string, unknown>; consumedText?: string }> {
-  const text = await readStreamTextForDirectChatReprojection(args.sseStream);
-  const recoveredContent = recoverVisibleAssistantContentFromChatSseText(text);
-  if (!recoveredContent) {
-    return { body: args.body, consumedText: text };
-  }
-  const cloned = JSON.parse(JSON.stringify(args.body)) as Record<string, unknown>;
-  const choices = Array.isArray(cloned.choices) ? cloned.choices as Array<Record<string, unknown>> : [];
-  const firstChoice = choices[0];
-  const message =
-    firstChoice && typeof firstChoice === 'object' && firstChoice.message && typeof firstChoice.message === 'object' && !Array.isArray(firstChoice.message)
-      ? firstChoice.message as Record<string, unknown>
-      : undefined;
-  if (message && (message.content === null || message.content === undefined || message.content === '')) {
-    message.content = recoveredContent;
-  }
-  return { body: cloned, consumedText: text };
-}
-
 
 function logProviderResponseConverterNonBlockingError(
   stage: string,
@@ -292,26 +185,23 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
         'provider response stop-message compare pipeline sync'
       );
     }
+    const debugSnapshot = adapterCenter.readDebugSnapshot();
+    if (Array.isArray(debugSnapshot.hubStageTop) && debugSnapshot.hubStageTop.length > 0) {
+      pipelineCenter.writeDebugSnapshot(
+        'hubStageTop',
+        debugSnapshot.hubStageTop,
+        PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER,
+        'provider response hub-stage-top debug snapshot sync'
+      );
+    }
   }
-  const adapterRt = asRecord((options.adapterContext as Record<string, unknown>).__rt);
-  if (!adapterRt) {
-    return;
-  }
-  const metadataRt = asRecord((pipelineMetadata as Record<string, unknown>).__rt) ?? {};
-  (pipelineMetadata as Record<string, unknown>).__rt = {
-    ...metadataRt,
-    ...(Array.isArray(adapterRt?.hubStageTop) && adapterRt.hubStageTop.length > 0
-      ? { hubStageTop: adapterRt.hubStageTop }
-      : {})
-  };
 }
 
 function readRuntimeControlForProviderResponseConverter(
   metadata?: Record<string, unknown>
-): { serverToolFollowup?: boolean; providerProtocol?: string } {
+): { providerProtocol?: string } {
   const runtimeControl = readRuntimeControlProjection(metadata);
   return {
-    serverToolFollowup: runtimeControl.serverToolFollowup === true,
     providerProtocol: runtimeControl.providerProtocol
   };
 }
@@ -320,13 +210,11 @@ function readProviderProtocolForProviderResponseConverter(args: {
   metadata?: Record<string, unknown>;
   adapterContext?: Record<string, unknown>;
 }): string {
-  const adapterContextProviderProtocol = readRuntimeControlForProviderResponseConverter(args.adapterContext).providerProtocol;
-  if (adapterContextProviderProtocol) {
-    return adapterContextProviderProtocol;
-  }
-  const metadataProviderProtocol = readRuntimeControlForProviderResponseConverter(args.metadata).providerProtocol;
-  if (metadataProviderProtocol) {
-    return metadataProviderProtocol;
+  const providerProtocol = readRuntimeControlForProviderResponseConverter(
+    args.metadata ?? args.adapterContext
+  ).providerProtocol;
+  if (providerProtocol) {
+    return providerProtocol;
   }
   throw new Error('Provider response converter requires metadata center runtime_control.providerProtocol');
 }
@@ -566,32 +454,13 @@ export async function convertProviderResponseIfNeeded(
       ?? bridgeProviderResponseSeed;
     bridgePayloadForError = bridgeProviderResponse;
     bridgeProviderProtocolForError = bridgeProviderProtocol;
-    const effectiveRequestSemantics = (() => {
-      const existing = asFlatRecord(options.requestSemantics);
-      const existingTools = asFlatRecord(existing?.tools);
-      const existingClientToolsRaw = Array.isArray(existingTools?.clientToolsRaw)
-        ? existingTools.clientToolsRaw
-        : Array.isArray(existing?.tools)
-          ? existing.tools
-          : undefined;
-      if (existingClientToolsRaw?.length || !Array.isArray(options.entryOriginRequest?.tools) || options.entryOriginRequest.tools.length === 0) {
-        return options.requestSemantics;
-      }
-      return {
-        ...(existing ?? {}),
-        tools: {
-          ...(existingTools ?? {}),
-          clientToolsRaw: options.entryOriginRequest.tools
-        }
-      };
-    })();
     const converted = await bridgeConvertProviderResponse({
       providerProtocol: bridgeProviderProtocol,
       providerResponse: bridgeProviderResponse,
       context: adapterContext,
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
-      requestSemantics: effectiveRequestSemantics,
+      requestSemantics: options.requestSemantics,
       stageRecorder
     });
     syncAdapterContextRuntimeBackToPipelineMetadata({
@@ -616,17 +485,13 @@ export async function convertProviderResponseIfNeeded(
         && deriveFinishReason(converted.body) === 'tool_calls'
       );
       if (directChatToolCallStreamNeedsReprojection) {
-        const restoredDirectChat = await restoreDirectChatVisibleContentFromSse({
-          body: converted.body as Record<string, unknown>,
-          sseStream: converted.sseStream,
-        });
         const reprojectedChatSseStream = await reprojectDirectChatToolCallStreamForHttp({
-          body: restoredDirectChat.body,
+          body: converted.body as Record<string, unknown>,
           requestId: options.requestId,
         });
         return attachTimingBreakdown({
           ...options.response,
-          body: restoredDirectChat.body,
+          body: converted.body,
           sseStream: reprojectedChatSseStream,
         });
       }
@@ -748,51 +613,28 @@ export async function convertProviderResponseIfNeeded(
       errRecord.requestExecutorProviderErrorStage = 'host.response_contract';
     }
 
-    const convertErrorPlan = finalizeServerToolBridgeConvertError({
-      error,
-      requestId: options.requestId,
-      defaultFollowupStatus: 502,
-      message,
-      isSseDecodeError,
-      isContextLengthExceeded,
-      code: errCode,
-      upstreamCode,
-      detailUpstreamCode,
-      detailReason
-    });
     const effectiveErrorStage =
       typeof errRecord.requestExecutorProviderErrorStage === 'string'
         ? errRecord.requestExecutorProviderErrorStage
         : typeof detailRecord?.requestExecutorProviderErrorStage === 'string'
           ? detailRecord.requestExecutorProviderErrorStage
           : requestExecutorProviderErrorStage;
-    const isServerToolFollowupRequest =
-      readRuntimeControlForProviderResponseConverter(options.pipelineMetadata).serverToolFollowup === true;
-    const isServerToolFollowupFailure =
-      effectiveErrorStage === 'provider.followup' || isServerToolFollowupRequest;
-    const followupLogDetails = isServerToolFollowupFailure
-      ? extractServerToolFollowupErrorLogDetails(error)
-      : undefined;
-
-    if (convertErrorPlan.handled) {
-      if (isSseDecodeError || isContextLengthExceeded) {
-        remapBridgeSseErrorToHttp(errRecord, message);
+    if (isSseDecodeError || isContextLengthExceeded) {
+      if (isSseDecodeError && errRecord) {
+        errRecord.requestExecutorProviderErrorStage = 'provider.sse_decode';
       }
-      const nonFollowupStageDetails = {
-        ...(convertErrorPlan.stageDetails ?? {}),
-        code: followupLogDetails?.code || (typeof errRecord.code === 'string' ? errRecord.code : errCode),
-        upstreamCode: followupLogDetails?.upstreamCode
-          || (typeof errRecord.upstreamCode === 'string' ? errRecord.upstreamCode : upstreamCode || detailUpstreamCode),
-        reason: followupLogDetails?.reason || compactFollowupLogReason(detailReason),
-        message
-      };
+      remapBridgeSseErrorToHttp(errRecord, message);
       const bridgeErrorStage = isRecoverableSseDecodeBridgeError(errRecord)
         ? 'convert.bridge.recoverable'
         : 'convert.bridge.error';
       logPipelineStage(bridgeErrorStage, options.requestId, {
-        ...(isServerToolFollowupFailure
-          ? (convertErrorPlan.stageDetails ?? {})
-          : nonFollowupStageDetails)
+        code: typeof errRecord.code === 'string' ? errRecord.code : errCode,
+        upstreamCode:
+          typeof errRecord.upstreamCode === 'string'
+            ? errRecord.upstreamCode
+            : upstreamCode || detailUpstreamCode,
+        reason: detailReason,
+        message
       });
       if (isVerboseErrorLoggingEnabled()) {
         console.error(

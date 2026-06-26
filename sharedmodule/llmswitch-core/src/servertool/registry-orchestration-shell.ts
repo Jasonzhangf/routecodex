@@ -95,7 +95,7 @@ export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHa
       name: entry.name,
       trigger: entry.registration.trigger,
       registration: entry.registration,
-      handler: entry.handler
+      handler: undefined
     })),
     ...listAdHocHandlerRecords().map((entry) => ({
       name: entry.registration.name,

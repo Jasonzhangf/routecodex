@@ -12,6 +12,7 @@ import {
 } from './execution-dispatch-outcome-shell.js';
 import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
 import { patchToolCallArgumentsById } from './orchestration-blocks.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
 
 export function prepareServertoolDispatchStage(args: {
   options: ServerSideToolEngineOptions;
@@ -23,13 +24,18 @@ export function prepareServertoolDispatchStage(args: {
 }): {
   dispatchPlan: ReturnType<typeof planServertoolToolCallDispatchWithNative>;
 } {
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(args.options.adapterContext as Record<string, unknown>);
+  if (!providerProtocol) {
+    throw new Error('Servertool dispatch preparation requires metadata center runtime_control.providerProtocol');
+  }
   const runtimeMetadata = readRuntimeMetadata(args.options.adapterContext as unknown as Record<string, unknown>);
   const runtimePreCommandState = resolveServertoolRuntimePreCommandState({
     adapterContext: args.options.adapterContext,
     runtimeMetadata,
     requestId: args.options.requestId,
     entryEndpoint: args.options.entryEndpoint,
-    providerProtocol: args.options.providerProtocol
+    providerProtocol
   });
 
   applyPreCommandHooksToToolCalls({

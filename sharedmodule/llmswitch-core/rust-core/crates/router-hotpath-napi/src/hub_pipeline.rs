@@ -18,6 +18,8 @@ pub struct HubPipelineInput {
     pub payload: Value,
     pub metadata: Value,
     #[serde(default)]
+    pub metadata_center_snapshot: Value,
+    #[serde(default)]
     pub stream: bool,
     #[serde(default)]
     pub process_mode: String,
@@ -52,6 +54,9 @@ pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, St
     let request_id = input.request_id.clone();
     let endpoint = normalize_endpoint(&input.endpoint);
     let entry_endpoint = normalize_endpoint(&input.entry_endpoint);
+    if input.provider_protocol.trim().is_empty() {
+        return Err("providerProtocol is required".to_string());
+    }
     let provider_protocol = resolve_provider_protocol(&input.provider_protocol)
         .map_err(|e| format!("Protocol resolution failed: {}", e))?;
     if !input.payload.is_object() && !input.payload.is_array() {

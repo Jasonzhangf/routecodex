@@ -120,12 +120,7 @@ pub fn calculate_budget(
 pub fn plan_budget_state_update(input: BudgetStateUpdateInput) -> BudgetStateUpdatePlan {
     if !input.stop_signal.observed {
         let snapshot = input.snapshot.as_ref();
-        let decision = calculate_budget(
-            false,
-            false,
-            snapshot,
-            input.default_config.as_ref(),
-        );
+        let decision = calculate_budget(false, false, snapshot, input.default_config.as_ref());
         let existing_state = input.existing_state.clone();
         let has_existing_budget_state = existing_state
             .as_ref()
@@ -147,7 +142,8 @@ pub fn plan_budget_state_update(input: BudgetStateUpdateInput) -> BudgetStateUpd
             };
         }
 
-        let (text, source) = resolve_budget_text_and_source(snapshot, input.default_config.as_ref());
+        let (text, source) =
+            resolve_budget_text_and_source(snapshot, input.default_config.as_ref());
         let mut state = existing_state
             .and_then(|value| value.as_object().cloned())
             .unwrap_or_default();
@@ -171,7 +167,9 @@ pub fn plan_budget_state_update(input: BudgetStateUpdateInput) -> BudgetStateUpd
                 "stopMessageStageMode".to_string(),
                 Value::String(
                     snapshot
-                        .and_then(|snapshot| normalize_mode(&snapshot.stage_mode, &["on", "off", "auto"]))
+                        .and_then(|snapshot| {
+                            normalize_mode(&snapshot.stage_mode, &["on", "off", "auto"])
+                        })
                         .unwrap_or_else(|| "on".to_string()),
                 ),
             );

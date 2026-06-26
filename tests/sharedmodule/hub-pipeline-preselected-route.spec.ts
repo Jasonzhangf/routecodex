@@ -1,4 +1,5 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockRunHubPipelineLibWithNative = jest.fn();
 
@@ -27,6 +28,21 @@ const preselectedRoute = {
   },
   diagnostics: {},
 };
+
+const TEST_WRITER = {
+  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
+  symbol: 'bindMetadataCenter',
+  stage: 'test_runtime_control_owner',
+} as const;
+
+function withMetadataCenter<T extends Record<string, unknown>>(
+  metadata: T,
+  setup?: (center: MetadataCenter) => void,
+): T {
+  const center = MetadataCenter.attach(metadata);
+  setup?.(center);
+  return metadata;
+}
 
 function createNormalized(overrides: Record<string, unknown> = {}) {
   return {
@@ -120,36 +136,12 @@ describe('HubPipeline preselected route ownership', () => {
 
     await executeRequestStagePipeline({
       normalized: createNormalized({
-        metadata: {
+        metadata: withMetadataCenter({
           requestId: 'req_preselected_route',
-          __metadataCenter: {
-            version: 1,
-            requestTruth: {},
-            providerObservation: {},
-            runtimeControl: {
-              preselectedRoute: {
-                value: preselectedRoute,
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'projects MetadataCenter runtime stop-message control into native request metadata',
-                  stage: 'test'
-                },
-                reason: 'test route pin'
-              },
-              stopMessageEnabled: {
-                value: true,
-                status: 'active',
-                writer: {
-                  module: 'src/server/runtime/http-server/index.ts',
-                  symbol: 'HttpServerV2.executePipelineForPort',
-                  stage: 'ServerReqInbound01ClientRaw'
-                },
-                reason: 'port stop-message enablement'
-              }
-            }
-          },
-        },
+        }, (center) => {
+          center.writeRuntimeControl('preselectedRoute', preselectedRoute, TEST_WRITER, 'test route pin');
+          center.writeRuntimeControl('stopMessageEnabled', true, TEST_WRITER, 'port stop-message enablement');
+        }),
       }),
       routerEngine: routerEngine as never,
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
@@ -172,59 +164,25 @@ describe('HubPipeline preselected route ownership', () => {
 
     await executeRequestStagePipeline({
       normalized: createNormalized({
-        metadata: {
+        metadata: withMetadataCenter({
           requestId: 'req_preselected_route',
           routeHint: 'flat-route-should-not-enter-snapshot',
-          __rt: {
-            retryProviderKey: 'legacy.retry.should-not-enter-snapshot',
-          },
           runtime_control: {
             retryProviderKey: 'payload.retry.should-not-enter-snapshot',
           },
-          __metadataCenter: {
-            version: 1,
-            requestTruth: {
-              sessionId: {
-                value: 'sess-center-1',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch',
-                  stage: 'test',
-                },
-                reason: 'request truth from center',
-              },
+        }, (center) => {
+          center.writeRequestTruth('sessionId', 'sess-center-1', TEST_WRITER, 'request truth from center');
+          center.writeContinuationContext(
+            'responsesResume',
+            {
+              providerKey: 'resume.provider.key',
+              routeHint: 'resume-hint',
             },
-            continuationContext: {
-              responsesResume: {
-                value: {
-                  providerKey: 'resume.provider.key',
-                  routeHint: 'resume-hint',
-                },
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch',
-                  stage: 'test',
-                },
-                reason: 'continuation context from center',
-              },
-            },
-            providerObservation: {},
-            runtimeControl: {
-              retryProviderKey: {
-                value: 'center.retry.provider',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch',
-                  stage: 'test',
-                },
-                reason: 'runtime control from center',
-              },
-            },
-          },
-        },
+            TEST_WRITER,
+            'continuation context from center',
+          );
+          center.writeRuntimeControl('retryProviderKey', 'center.retry.provider', TEST_WRITER, 'runtime control from center');
+        }),
       }),
       routerEngine: routerEngine as never,
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
@@ -261,7 +219,7 @@ describe('HubPipeline preselected route ownership', () => {
 
     await executeRequestStagePipeline({
       normalized: createNormalized({
-        metadata: {
+        metadata: withMetadataCenter({
           requestId: 'req_preselected_route',
           __routecodexPreselectedRoute: {
             target: {
@@ -277,24 +235,9 @@ describe('HubPipeline preselected route ownership', () => {
             },
             diagnostics: {},
           },
-          __metadataCenter: {
-            version: 1,
-            requestTruth: {},
-            providerObservation: {},
-            runtimeControl: {
-              preselectedRoute: {
-                value: preselectedRoute,
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'reuses MetadataCenter runtime preselectedRoute without reading flat routecodex residue',
-                  stage: 'test'
-                },
-                reason: 'test route pin'
-              }
-            }
-          },
-        },
+        }, (center) => {
+          center.writeRuntimeControl('preselectedRoute', preselectedRoute, TEST_WRITER, 'test route pin');
+        }),
       }),
       routerEngine: routerEngine as never,
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
@@ -320,48 +263,29 @@ describe('HubPipeline preselected route ownership', () => {
 
     await executeRequestStagePipeline({
       normalized: createNormalized({
-        metadata: {
+        metadata: withMetadataCenter({
           requestId: 'req_preselected_route',
-          __metadataCenter: {
-            version: 1,
-            requestTruth: {},
-            providerObservation: {},
-            runtimeControl: {
-              preselectedRoute: {
-                value: preselectedRoute,
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'projects stopless runtime control into native top-level metadata for relay request owners',
-                  stage: 'test'
-                },
-                reason: 'test route pin'
+        }, (center) => {
+          center.writeRuntimeControl('preselectedRoute', preselectedRoute, TEST_WRITER, 'test route pin');
+          center.writeRuntimeControl(
+            'stopless',
+            {
+              sessionId: 'sess-stopless-1',
+              flowId: 'stop_message_flow',
+              repeatCount: 2,
+              maxRepeats: 3,
+              triggerHint: 'no_schema',
+              continuationPrompt: '继续做下一步',
+              schemaFeedback: {
+                reasonCode: 'stop_schema_missing',
+                missingFields: ['stopreason', 'reason']
               },
-              stopless: {
-                value: {
-                  sessionId: 'sess-stopless-1',
-                  flowId: 'stop_message_flow',
-                  repeatCount: 2,
-                  maxRepeats: 3,
-                  triggerHint: 'no_schema',
-                  continuationPrompt: '继续做下一步',
-                  schemaFeedback: {
-                    reasonCode: 'stop_schema_missing',
-                    missingFields: ['stopreason', 'reason']
-                  },
-                  active: true
-                },
-                status: 'active',
-                writer: {
-                  module: 'src/servertool/handlers/stop-message-auto.ts',
-                  symbol: 'writeStoplessRuntimeControlToBoundMetadataCenter',
-                  stage: 'stop_message_auto_runtime_control_writer'
-                },
-                reason: 'stopless-runtime-state'
-              }
-            }
-          },
-        },
+              active: true
+            },
+            TEST_WRITER,
+            'stopless-runtime-state',
+          );
+        }),
       }),
       routerEngine: routerEngine as never,
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
@@ -395,71 +319,26 @@ describe('HubPipeline preselected route ownership', () => {
 
     await executeRequestStagePipeline({
       normalized: createNormalized({
-        metadata: {
+        metadata: withMetadataCenter({
           requestId: 'req_preselected_route',
-          __metadataCenter: {
-            version: 1,
-            requestTruth: {
-              sessionId: {
-                value: 'sess-resume-1',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
-                  stage: 'test'
-                }
-              },
-              conversationId: {
-                value: 'conv-resume-1',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
-                  stage: 'test'
-                }
-              }
+        }, (center) => {
+          center.writeRequestTruth('sessionId', 'sess-resume-1', TEST_WRITER);
+          center.writeRequestTruth('conversationId', 'conv-resume-1', TEST_WRITER);
+          center.writeContinuationContext(
+            'responsesResume',
+            {
+              responseId: 'resp-resume-1',
+              routeHint: 'search/gateway-priority-5555-priority-search',
+              providerKey: 'minimonth.key1.MiniMax-M2.7',
+              sessionId: 'sess-resume-1',
+              conversationId: 'conv-resume-1',
+              continuationOwner: 'relay'
             },
-            continuationContext: {
-              responsesResume: {
-                value: {
-                  responseId: 'resp-resume-1',
-                  routeHint: 'search/gateway-priority-5555-priority-search',
-                  providerKey: 'minimonth.key1.MiniMax-M2.7',
-                  sessionId: 'sess-resume-1',
-                  conversationId: 'conv-resume-1',
-                  continuationOwner: 'relay'
-                },
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
-                  stage: 'test'
-                }
-              }
-            },
-            providerObservation: {},
-            runtimeControl: {
-              preselectedRoute: {
-                value: preselectedRoute,
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
-                  stage: 'test'
-                }
-              },
-              routeHint: {
-                value: 'search/gateway-priority-5555-priority-search',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'projects resumed continuation session scope and provider pin from MetadataCenter into native request metadata',
-                  stage: 'test'
-                }
-              }
-            }
-          },
-        },
+            TEST_WRITER,
+          );
+          center.writeRuntimeControl('preselectedRoute', preselectedRoute, TEST_WRITER);
+          center.writeRuntimeControl('routeHint', 'search/gateway-priority-5555-priority-search', TEST_WRITER);
+        }),
       }),
       routerEngine: routerEngine as never,
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
@@ -524,7 +403,7 @@ describe('HubPipeline preselected route ownership', () => {
       .toEqual(preselectedRoute);
   });
 
-  it('whitelists only stopless followup legacy __rt fields into native request metadata', async () => {
+  it('does not project legacy __rt fields back into native request metadata', async () => {
     const routerEngine = { route: jest.fn(() => preselectedRoute) };
 
     await executeRequestStagePipeline({
@@ -551,14 +430,11 @@ describe('HubPipeline preselected route ownership', () => {
     });
 
     expect(routerEngine.route).toHaveBeenCalledTimes(1);
-    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.__rt).toEqual({
-      serverToolFollowup: true,
-      serverToolFollowupSource: 'servertool.stop_message_flow',
-      stopless: {
-        flowId: 'stopless-flow-1',
-        repeatCount: 2,
-      },
-    });
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.__rt).toBeUndefined();
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.serverToolFollowup)
+      .toBeUndefined();
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.stopless)
+      .toBeUndefined();
   });
 
   it('hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata', async () => {
@@ -574,72 +450,26 @@ describe('HubPipeline preselected route ownership', () => {
 
     await executeRequestStagePipeline({
       normalized: createNormalized({
-        metadata: {
+        metadata: withMetadataCenter({
           requestId: 'req_preselected_route',
-          __metadataCenter: {
-            version: 1,
-            requestTruth: {
-              sessionId: {
-                value: 'sess-route-1',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
-                  stage: 'test'
-                }
-              },
-              conversationId: {
-                value: 'conv-route-1',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
-                  stage: 'test'
-                }
-              }
+        }, (center) => {
+          center.writeRequestTruth('sessionId', 'sess-route-1', TEST_WRITER);
+          center.writeRequestTruth('conversationId', 'conv-route-1', TEST_WRITER);
+          center.writeContinuationContext(
+            'responsesResume',
+            {
+              responseId: 'resp-route-1',
+              routeHint: 'search/gateway-priority-5555-priority-search',
+              providerKey: 'minimonth.key1.MiniMax-M2.7',
+              sessionId: 'sess-route-1',
+              conversationId: 'conv-route-1',
+              continuationOwner: 'relay'
             },
-            continuationContext: {
-              responsesResume: {
-                value: {
-                  responseId: 'resp-route-1',
-                  routeHint: 'search/gateway-priority-5555-priority-search',
-                  providerKey: 'minimonth.key1.MiniMax-M2.7',
-                  sessionId: 'sess-route-1',
-                  conversationId: 'conv-route-1',
-                  continuationOwner: 'relay'
-                },
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
-                  stage: 'test'
-                }
-              }
-            },
-            providerObservation: {},
-            runtimeControl: {
-              routeHint: {
-                value: 'search/gateway-priority-5555-priority-search',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
-                  stage: 'test'
-                }
-              },
-              retryProviderKey: {
-                value: 'minimonth.key1.MiniMax-M2.7',
-                status: 'active',
-                writer: {
-                  module: 'tests/sharedmodule/hub-pipeline-preselected-route.spec.ts',
-                  symbol: 'hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata',
-                  stage: 'test'
-                }
-              }
-            }
-          },
-          __rt: {},
-        },
+            TEST_WRITER,
+          );
+          center.writeRuntimeControl('routeHint', 'search/gateway-priority-5555-priority-search', TEST_WRITER);
+          center.writeRuntimeControl('retryProviderKey', 'minimonth.key1.MiniMax-M2.7', TEST_WRITER);
+        }),
       }),
       routerEngine: routerEngine as never,
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,

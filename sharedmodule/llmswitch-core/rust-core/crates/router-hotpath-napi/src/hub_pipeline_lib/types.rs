@@ -30,6 +30,8 @@ pub struct HubPipelineRequest {
     #[serde(default)]
     pub metadata: Value,
     #[serde(default)]
+    pub metadata_center_snapshot: Value,
+    #[serde(default)]
     pub stream: bool,
     #[serde(default)]
     pub process_mode: String,

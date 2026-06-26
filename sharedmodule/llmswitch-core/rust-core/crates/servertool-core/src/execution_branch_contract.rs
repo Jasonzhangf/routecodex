@@ -90,7 +90,10 @@ mod tests {
             }],
             executed_tool_calls_len: 1,
         });
-        assert_eq!(plan.action, ServertoolExecutionBranchAction::ClientExecCliProjection);
+        assert_eq!(
+            plan.action,
+            ServertoolExecutionBranchAction::ClientExecCliProjection
+        );
         assert_eq!(plan.projected_tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(plan.projected_tool_call_index, Some(0));
     }
@@ -101,7 +104,10 @@ mod tests {
             executable_tool_calls: vec![],
             executed_tool_calls_len: 2,
         });
-        assert_eq!(plan.action, ServertoolExecutionBranchAction::ResolveExecutionOutcome);
+        assert_eq!(
+            plan.action,
+            ServertoolExecutionBranchAction::ResolveExecutionOutcome
+        );
         assert_eq!(plan.projected_tool_call_id, None);
         assert_eq!(plan.projected_tool_call_index, None);
     }
@@ -116,6 +122,9 @@ mod tests {
             }],
             executed_tool_calls_len: 0,
         });
-        assert_eq!(plan.action, ServertoolExecutionBranchAction::ContinueResponseStage);
+        assert_eq!(
+            plan.action,
+            ServertoolExecutionBranchAction::ContinueResponseStage
+        );
     }
 }

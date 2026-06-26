@@ -61,20 +61,18 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   let forceFatalRateLimit = false;
 
   if (isRateLimit) {
-    // 对 429 进行细分处理：
-    // - 人为构造的 RateLimitCooldownError：表示 Provider 层已经根据冷却窗口主动拦截请求，
-    //   这类错误只用于触发虚拟路由重选，不应该进入「多次 429 → 熔断」逻辑。
-    // - 日额度耗尽类 429（detectDailyLimit=true）：属于硬性限流，直接标记为不可恢复并影响健康。
-    // - 其他短期 429：始终视为可恢复错误，允许 Virtual Router 根据健康状态与冷却信息做降级与重试。
+    // 当前收口模型里，429 不再分裂成 synthetic/daily/special cooldown 语义。
+    // 只保留：
+    // - 日额度类 429：记为不可恢复 provider 错误
+    // - 其他 429：记为可恢复 provider 错误
     if (isSyntheticCooldown) {
-      rateLimitKind = 'synthetic_cooldown';
+      rateLimitKind = 'short_lived';
       forceFatalRateLimit = false;
     } else if (isDailyLimit429) {
       options.forceRateLimitFailure(options.context.providerKey, options.context.model);
-      rateLimitKind = 'daily_limit';
+      rateLimitKind = undefined;
       forceFatalRateLimit = true;
     } else {
-      // 短期 429：记账但不再毒化 provider health；实际 backoff/reroute 由统一 failure policy 决定。
       options.registerRateLimitFailure(options.context.providerKey, options.context.model);
       rateLimitKind = 'short_lived';
       forceFatalRateLimit = false;
@@ -87,6 +85,7 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
     errorCode: typeof err.code === 'string' ? err.code : undefined,
     upstreamCode: typeof upstreamCode === 'string' ? upstreamCode : undefined,
     reason: message,
+    classification: isDailyLimit429 ? 'unrecoverable' : undefined,
     rateLimitKind
   });
   return {

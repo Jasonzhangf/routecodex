@@ -3,6 +3,8 @@ export type MetadataCenterFamily =
   | 'continuation_context'
   | 'runtime_control'
   | 'provider_observation'
+  | 'response_observation'
+  | 'closeout_status'
   | 'client_attachment_scope'
   | 'debug_snapshot';
 
@@ -14,8 +16,9 @@ export type MetadataCenterStatus =
 
 export type MetadataCenterWritePolicy =
   | 'write_once'
-  | 'replaceable'
-  | 'append_only';
+  | 'replaceable_by_owner_only'
+  | 'append_only'
+  | 'finalize_only';
 
 export type MetadataCenterWriter = {
   module: string;
@@ -111,8 +114,7 @@ export type MetadataCenterRuntimeControl = {
   providerProtocol?: string;
   retryProviderKey?: string;
   preselectedRoute?: Record<string, unknown>;
-  serverToolFollowup?: boolean;
-  serverToolFollowupSource?: string;
+  responsesContinuationSavedAtChatProcessExit?: boolean;
   stopless?: MetadataCenterStoplessRuntimeControl;
   stopMessageCompareContext?: MetadataCenterStopMessageCompareContext;
   stopMessageEnabled?: boolean;
@@ -133,6 +135,21 @@ export type MetadataCenterProviderObservation = {
   finishReason?: string;
 };
 
+export type MetadataCenterResponseObservation = {
+  responseId?: string;
+  status?: string;
+  finishReason?: string;
+  protocolKind?: string;
+};
+
+export type MetadataCenterCloseoutStatus = {
+  finalized?: boolean;
+  released?: boolean;
+  releasedAt?: number;
+  releaseReason?: string;
+  releasedByStage?: string;
+};
+
 export type MetadataCenterClientAttachmentScope = {
   daemonId?: string;
   tmuxSessionId?: string;
@@ -144,6 +161,13 @@ export type MetadataCenterDebugSnapshot = {
   snapshotId?: string;
   bridgeHistory?: unknown[];
   traceMarkers?: unknown[];
+  hubStageTop?: Array<{
+    stage: string;
+    totalMs: number;
+    count?: number;
+    avgMs?: number;
+    maxMs?: number;
+  }>;
 };
 
 export type MetadataCenterState = {
@@ -151,6 +175,8 @@ export type MetadataCenterState = {
   continuationContext: Partial<Record<keyof MetadataCenterContinuationContext, MetadataCenterSlot>>;
   runtimeControl: Partial<Record<keyof MetadataCenterRuntimeControl, MetadataCenterSlot>>;
   providerObservation: Partial<Record<keyof MetadataCenterProviderObservation, MetadataCenterSlot>>;
+  responseObservation: Partial<Record<keyof MetadataCenterResponseObservation, MetadataCenterSlot>>;
+  closeoutStatus: Partial<Record<keyof MetadataCenterCloseoutStatus, MetadataCenterSlot>>;
   clientAttachmentScope: Partial<Record<keyof MetadataCenterClientAttachmentScope, MetadataCenterSlot>>;
   debugSnapshot: Partial<Record<keyof MetadataCenterDebugSnapshot, MetadataCenterSlot>>;
 };

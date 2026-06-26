@@ -4,6 +4,7 @@ import type {
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
 
 export function resolveServertoolEntryContext(args: {
   options: ServerSideToolEngineOptions;
@@ -23,6 +24,11 @@ export function resolveServertoolEntryContext(args: {
   if (!args.base) {
     return { action: 'return_non_object_base' };
   }
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(args.options.adapterContext as Record<string, unknown>);
+  if (!providerProtocol) {
+    throw new Error('Servertool entry context requires metadata center runtime_control.providerProtocol');
+  }
 
   return {
     action: 'continue',
@@ -33,7 +39,7 @@ export function resolveServertoolEntryContext(args: {
       adapterContext: args.options.adapterContext,
       requestId: args.options.requestId,
       entryEndpoint: args.options.entryEndpoint,
-      providerProtocol: args.options.providerProtocol
+      providerProtocol
     },
     includeToolCallNames: normalizeFilterTokenSet(args.options.includeToolCallHandlerNames),
     excludeToolCallNames: normalizeFilterTokenSet(args.options.excludeToolCallHandlerNames),

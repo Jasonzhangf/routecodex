@@ -21,9 +21,6 @@ type ProviderErrorEventExtended = ProviderErrorEvent & {
   affectsHealth?: boolean;
   fatal?: boolean;
   cooldownOverrideMs?: number;
-  quotaScope?: string;
-  quotaReason?: string;
-  resetAt?: string;
   errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
   routePool?: string[];
   excludedProviderKeys?: string[];
@@ -36,8 +33,6 @@ type ErrorWithMetadata = Error & {
   retryable?: boolean;
   rateLimitKind?: string;
   cooldownOverrideMs?: number;
-  quotaScope?: string;
-  quotaReason?: string;
   /**
    * 粗粒度错误类别：EXTERNAL_ERROR / TOOL_ERROR / INTERNAL_ERROR。
    * 当错误来自 llmswitch-core 的 ProviderProtocolError 时会自动携带。
@@ -119,30 +114,11 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
       cooldownOverrideMs: err.cooldownOverrideMs
     };
   }
-  if (typeof err.quotaScope === 'string' && err.quotaScope.trim().length) {
-    mergedDetails = {
-      ...(mergedDetails ?? {}),
-      quotaScope: err.quotaScope.trim()
-    };
-  }
-  if (typeof err.quotaReason === 'string' && err.quotaReason.trim().length) {
-    mergedDetails = {
-      ...(mergedDetails ?? {}),
-      quotaReason: err.quotaReason.trim()
-    };
-  }
   
   if (status !== undefined) {
     mergedDetails = { ...(mergedDetails ?? {}), statusCode: status };
   }
 
-  const resetAt = (() => {
-    if (typeof (mergedDetails as Record<string, unknown> | undefined)?.resetAt === 'string') {
-      const value = String((mergedDetails as Record<string, unknown>).resetAt).trim();
-      if (value) return value;
-    }
-    return undefined;
-  })();
   const errorClassification = (() => {
     const raw = typeof (mergedDetails as Record<string, unknown> | undefined)?.errorClassification === 'string'
       ? String((mergedDetails as Record<string, unknown>).errorClassification).trim()
@@ -152,8 +128,6 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
   const cooldownOverrideMs = typeof err.cooldownOverrideMs === 'number' && Number.isFinite(err.cooldownOverrideMs) && err.cooldownOverrideMs > 0
     ? err.cooldownOverrideMs
     : undefined;
-  const quotaScope = typeof err.quotaScope === 'string' && err.quotaScope.trim().length ? err.quotaScope.trim() : undefined;
-  const quotaReason = typeof err.quotaReason === 'string' && err.quotaReason.trim().length ? err.quotaReason.trim() : undefined;
 
   const event: ProviderErrorEventExtended = {
     code,
@@ -163,9 +137,6 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
     recoverable,
     fatal: recoverable ? false : true,
     cooldownOverrideMs,
-    quotaScope,
-    quotaReason,
-    resetAt,
     errorClassification,
     runtime: options.runtime,
     timestamp: Date.now(),

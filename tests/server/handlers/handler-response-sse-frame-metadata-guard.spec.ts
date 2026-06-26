@@ -5,6 +5,7 @@ import { Readable } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 
 import { sendPipelineResponse } from '../../../src/server/handlers/handler-response-utils.js';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 function sseStreamFrame(data: Record<string, unknown>, event = 'message'): Readable {
   return Readable.from([`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`]);
@@ -12,6 +13,16 @@ function sseStreamFrame(data: Record<string, unknown>, event = 'message'): Reada
 
 function sseStreamChunks(chunks: string[]): Readable {
   return Readable.from(chunks);
+}
+
+function delayedSseStreamChunks(chunks: string[]): Readable {
+  async function* delayedChunks() {
+    for (const chunk of chunks) {
+      await new Promise((resolve) => setImmediate(resolve));
+      yield chunk;
+    }
+  }
+  return Readable.from(delayedChunks());
 }
 
 function directResponsesTerminalFrames(responseId: string, lineBreak = '\n'): string[] {
@@ -33,11 +44,17 @@ async function requestSse(
     metadata?: Record<string, unknown>;
     continuationOwner?: 'direct' | 'relay';
     chunks?: string[];
+    delayChunks?: boolean;
+    entryEndpoint?: string;
   }
 ): Promise<{ status: number; text: string }> {
   const app = express();
   app.get('/sse', (_req, res) => {
-    const stream = options?.chunks ? sseStreamChunks(options.chunks) : sseStreamFrame(body);
+    const stream = options?.chunks
+      ? options.delayChunks
+        ? delayedSseStreamChunks(options.chunks)
+        : sseStreamChunks(options.chunks)
+      : sseStreamFrame(body);
     void sendPipelineResponse(
       res as any,
       {
@@ -55,7 +72,7 @@ async function requestSse(
         continuationOwner: options?.continuationOwner,
       } as any,
       'req_sse_metadata_guard',
-      { entryEndpoint: '/v1/responses' }
+      { entryEndpoint: options?.entryEndpoint ?? '/v1/responses' }
     );
   });
 
@@ -96,6 +113,203 @@ describe('handler-response-utils SSE metadata guard (Phase Server-C)', () => {
 
     expect(response.status).toBe(200);
     expect(response.text).toContain('"content":"hi"');
+    expect(response.text).not.toContain('sse_stream_error');
+  });
+
+  it('normalizes chat completion SSE tail metadata without changing tool_call semantics', async () => {
+    const response = await requestSse(
+      {},
+      {
+        entryEndpoint: '/v1/chat/completions',
+        delayChunks: true,
+        chunks: [
+          `data: ${JSON.stringify({
+            id: 'chatcmpl_tool_tail_stable',
+            object: 'chat.completion.chunk',
+            created: 1782386212,
+            model: 'MiniMax-M3',
+            choices: [{
+              index: 0,
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  id: 'call_tail_1',
+                  type: 'function',
+                  function: { name: 'search_content', arguments: '' }
+                }]
+              },
+              finish_reason: null
+            }]
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: 'chatcmpl_tool_tail_stable',
+            object: 'chat.completion.chunk',
+            created: 1782386212,
+            model: 'MiniMax-M3',
+            choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+            usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 }
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: '',
+            object: '',
+            created: 0,
+            model: 'MiniMax-M3',
+            choices: [],
+            usage: null
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: '',
+            object: 'chat.completion.chunk',
+            created: 0,
+            model: '',
+            choices: [],
+            usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 }
+          })}\n\n`,
+          'data: [DONE]\n\n',
+        ]
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('"finish_reason":"tool_calls"');
+    expect(response.text).toContain('"name":"search_content"');
+    expect(response.text).not.toContain('"id":""');
+    expect(response.text).not.toContain('"object":""');
+    expect(response.text).not.toContain('"created":0');
+    expect(response.text).toContain('"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}');
+    expect(response.text).toContain('data: [DONE]');
+    expect(response.text).not.toContain('sse_stream_error');
+  });
+
+  it('RED: direct chat completion tool_calls stream restores client model while preserving tool_call semantics', async () => {
+    const response = await requestSse(
+      {},
+      {
+        continuationOwner: 'direct',
+        entryEndpoint: '/v1/chat/completions',
+        metadata: {
+          clientModelId: 'gpt-5.4',
+          originalModelId: 'gpt-5.4',
+        },
+        delayChunks: true,
+        chunks: [
+          `data: ${JSON.stringify({
+            id: 'chatcmpl_direct_restore_1',
+            object: 'chat.completion.chunk',
+            created: 1782386212,
+            model: 'MiniMax-M3',
+            choices: [{
+              index: 0,
+              delta: { role: 'assistant' },
+              finish_reason: null
+            }]
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: 'chatcmpl_direct_restore_1',
+            object: 'chat.completion.chunk',
+            created: 1782386212,
+            model: 'MiniMax-M3',
+            choices: [{
+              index: 0,
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  id: 'call_direct_restore_1',
+                  type: 'function',
+                  function: { name: 'read_file', arguments: '' }
+                }]
+              },
+              finish_reason: null
+            }]
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: 'chatcmpl_direct_restore_1',
+            object: 'chat.completion.chunk',
+            created: 1782386212,
+            model: 'MiniMax-M3',
+            choices: [{
+              index: 0,
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  function: {
+                    arguments: '{"path":"src/main.rs"}'
+                  }
+                }]
+              },
+              finish_reason: null
+            }]
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: 'chatcmpl_direct_restore_1',
+            object: 'chat.completion.chunk',
+            created: 1782386212,
+            model: 'MiniMax-M3',
+            choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
+          })}\n\n`,
+          'data: [DONE]\n\n',
+        ]
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('"model":"gpt-5.4"');
+    expect(response.text).not.toContain('"model":"MiniMax-M3"');
+    expect(response.text).toContain('"name":"read_file"');
+    expect(response.text).toContain('"finish_reason":"tool_calls"');
+    expect(response.text).toContain('"arguments":"{\\"path\\":\\"src/main.rs\\"}"');
+    expect(response.text).toContain('data: [DONE]');
+    expect(response.text).not.toContain('sse_stream_error');
+  });
+
+  it('restores direct chat completion client model from metadata center after metadata copy', async () => {
+    const metadataCarrier: Record<string, unknown> = {};
+    MetadataCenter.attach(metadataCarrier).writeProviderObservation(
+      'clientModelId',
+      'gpt-5.5',
+      {
+        module: 'tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts',
+        symbol: 'metadata-center-direct-chat-model-restore',
+        stage: 'HubRespOutbound04ClientSemantic',
+      },
+      'test: client model restore should survive metadata projection copy'
+    );
+
+    const response = await requestSse(
+      {},
+      {
+        continuationOwner: 'direct',
+        entryEndpoint: '/v1/chat/completions',
+        metadata: metadataCarrier,
+        delayChunks: true,
+        chunks: [
+          `data: ${JSON.stringify({
+            id: 'chatcmpl_direct_center_restore',
+            object: 'chat.completion.chunk',
+            created: 1782386212,
+            model: 'glm-5.2',
+            choices: [{
+              index: 0,
+              delta: { content: 'hello' },
+              finish_reason: null
+            }]
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            id: 'chatcmpl_direct_center_restore',
+            object: 'chat.completion.chunk',
+            created: 1782386212,
+            model: 'glm-5.2',
+            choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
+          })}\n\n`,
+          'data: [DONE]\n\n',
+        ]
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('"model":"gpt-5.5"');
+    expect(response.text).not.toContain('"model":"glm-5.2"');
+    expect(response.text).toContain('"finish_reason":"tool_calls"');
     expect(response.text).not.toContain('sse_stream_error');
   });
 

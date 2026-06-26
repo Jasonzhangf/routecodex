@@ -83,6 +83,22 @@ export type ServertoolDispatchPlanPayload = {
   skippedToolCalls: ServertoolDispatchSkippedPayload[];
 };
 
+export type ServertoolDispatchPlanInputHandlerPayload = {
+  name: string;
+  trigger: string;
+  executionMode: string;
+  stripAfterExecute: boolean;
+};
+
+export type ServertoolDispatchPlanInputPayload = {
+  toolCalls: ServertoolResponseStageToolCallPayload[];
+  disableToolCallHandlers: boolean;
+  includeToolCallHandlerNames?: string[] | null;
+  excludeToolCallHandlerNames?: string[] | null;
+  registeredToolCallHandlers: ServertoolDispatchPlanInputHandlerPayload[];
+  runtimeMetadata?: Record<string, unknown>;
+};
+
 export type ServertoolOutcomePlanPayload = {
   outcomeMode: string;
   remainingToolCallIds: string[];
@@ -96,6 +112,47 @@ export type ServertoolOutcomePlanPayload = {
   followupStrategy: string;
   requiresPendingInjection: boolean;
   primaryExecutionMode?: string | null;
+  resolvedFollowup?: unknown;
+};
+
+export type ServertoolHandlerContractPlanPayload = {
+  action: string;
+};
+
+export type ServertoolBackendExecutionPlanPayload = {
+  action: string;
+  backendKind?: string;
+};
+
+export type ServertoolOutcomePlanInputExecutedToolCallPayload = {
+  id: string;
+  name: string;
+  arguments: string;
+  executionMode: string;
+  stripAfterExecute: boolean;
+};
+
+export type ServertoolOutcomePlanInputPayload = {
+  toolCalls: ServertoolResponseStageToolCallPayload[];
+  executedToolCalls: ServertoolOutcomePlanInputExecutedToolCallPayload[];
+  executedFlowIds: string[];
+  lastExecutionFlowId?: string | null;
+  hasLastExecutionFollowup: boolean;
+  sessionId?: string | null;
+  conversationId?: string | null;
+  toolOutputs?: unknown[] | null;
+  pendingInjectionMessageKinds?: string[] | null;
+};
+
+export type ServertoolResponseStageGatePayload = {
+  shouldBypass: boolean;
+  nextAction: 'bypass' | 'run_auto_hooks' | 'continue_to_execution';
+  responseHookMatched: boolean;
+  responseHookRequired: boolean;
+  responseHookName?: string;
+  interceptKind?: string;
+  schemaSource?: string;
+  skipReason?: string;
 };
 
 export type ServertoolAutoHookPlanEntryPayload = {
@@ -367,6 +424,69 @@ export function parseServertoolDispatchPlanPayload(raw: string): ServertoolDispa
   };
 }
 
+export function parseServertoolDispatchPlanInputPayload(raw: string): ServertoolDispatchPlanInputPayload | null {
+  const parsed = parseJson('parseServertoolDispatchPlanInputPayload', raw) as
+    | {
+      toolCalls?: unknown;
+      disableToolCallHandlers?: unknown;
+      includeToolCallHandlerNames?: unknown;
+      excludeToolCallHandlerNames?: unknown;
+      registeredToolCallHandlers?: unknown;
+      runtimeMetadata?: Record<string, unknown> | null;
+    }
+    | typeof JSON_PARSE_FAILED;
+  if (
+    parsed === JSON_PARSE_FAILED ||
+    !parsed ||
+    !Array.isArray(parsed.toolCalls) ||
+    typeof parsed.disableToolCallHandlers !== 'boolean' ||
+    !Array.isArray(parsed.registeredToolCallHandlers)
+  ) {
+    return null;
+  }
+  const toolCalls = parsed.toolCalls
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)))
+    .map((entry) => ({
+      id: typeof entry.id === 'string' ? entry.id : '',
+      name: typeof entry.name === 'string' ? entry.name : '',
+      arguments: typeof entry.arguments === 'string' ? entry.arguments : ''
+    }))
+    .filter((entry) => entry.id && entry.name);
+  const registeredToolCallHandlers = parsed.registeredToolCallHandlers
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)))
+    .map((entry) => ({
+      name: typeof entry.name === 'string' ? entry.name : '',
+      trigger: typeof entry.trigger === 'string' ? entry.trigger : '',
+      executionMode: typeof entry.executionMode === 'string' ? entry.executionMode : '',
+      stripAfterExecute: entry.stripAfterExecute !== false
+    }))
+    .filter((entry) => entry.name && entry.trigger && entry.executionMode);
+  const includeToolCallHandlerNames = Array.isArray(parsed.includeToolCallHandlerNames)
+    ? parsed.includeToolCallHandlerNames
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .map((entry) => entry.trim())
+    : parsed.includeToolCallHandlerNames === null
+      ? null
+      : undefined;
+  const excludeToolCallHandlerNames = Array.isArray(parsed.excludeToolCallHandlerNames)
+    ? parsed.excludeToolCallHandlerNames
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .map((entry) => entry.trim())
+    : parsed.excludeToolCallHandlerNames === null
+      ? null
+      : undefined;
+  return {
+    toolCalls,
+    disableToolCallHandlers: parsed.disableToolCallHandlers,
+    ...(includeToolCallHandlerNames !== undefined ? { includeToolCallHandlerNames } : {}),
+    ...(excludeToolCallHandlerNames !== undefined ? { excludeToolCallHandlerNames } : {}),
+    registeredToolCallHandlers,
+    ...(parsed.runtimeMetadata && typeof parsed.runtimeMetadata === 'object' && !Array.isArray(parsed.runtimeMetadata)
+      ? { runtimeMetadata: parsed.runtimeMetadata }
+      : {})
+  };
+}
+
 export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcomePlanPayload | null {
   const parsed = parseJson('parseServertoolOutcomePlanPayload', raw) as
     | {
@@ -382,6 +502,7 @@ export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcom
       followupStrategy?: unknown;
       requiresPendingInjection?: unknown;
       primaryExecutionMode?: unknown;
+      resolvedFollowup?: unknown;
     }
     | typeof JSON_PARSE_FAILED;
   if (
@@ -425,11 +546,174 @@ export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcom
     useGenericFollowup: parsed.useGenericFollowup,
     followupStrategy: parsed.followupStrategy,
     requiresPendingInjection: parsed.requiresPendingInjection,
+    ...(parsed.resolvedFollowup !== undefined ? { resolvedFollowup: parsed.resolvedFollowup } : {}),
     ...(typeof parsed.primaryExecutionMode === 'string' && parsed.primaryExecutionMode.trim()
       ? { primaryExecutionMode: parsed.primaryExecutionMode.trim() }
       : parsed.primaryExecutionMode === null
         ? { primaryExecutionMode: null }
         : {})
+  };
+}
+
+export function parseServertoolOutcomePlanInputPayload(raw: string): ServertoolOutcomePlanInputPayload | null {
+  const parsed = parseJson('parseServertoolOutcomePlanInputPayload', raw) as
+    | {
+      toolCalls?: unknown;
+      executedToolCalls?: unknown;
+      executedFlowIds?: unknown;
+      lastExecutionFlowId?: unknown;
+      hasLastExecutionFollowup?: unknown;
+      sessionId?: unknown;
+      conversationId?: unknown;
+      toolOutputs?: unknown;
+      pendingInjectionMessageKinds?: unknown;
+    }
+    | typeof JSON_PARSE_FAILED;
+  if (
+    parsed === JSON_PARSE_FAILED ||
+    !parsed ||
+    !Array.isArray(parsed.toolCalls) ||
+    !Array.isArray(parsed.executedToolCalls) ||
+    !Array.isArray(parsed.executedFlowIds) ||
+    typeof parsed.hasLastExecutionFollowup !== 'boolean'
+  ) {
+    return null;
+  }
+  const toolCalls = parsed.toolCalls
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)))
+    .map((entry) => ({
+      id: typeof entry.id === 'string' ? entry.id : '',
+      name: typeof entry.name === 'string' ? entry.name : '',
+      arguments: typeof entry.arguments === 'string' ? entry.arguments : ''
+    }))
+    .filter((entry) => entry.id && entry.name);
+  const executedToolCalls = parsed.executedToolCalls
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)))
+    .map((entry) => ({
+      id: typeof entry.id === 'string' ? entry.id : '',
+      name: typeof entry.name === 'string' ? entry.name : '',
+      arguments: typeof entry.arguments === 'string' ? entry.arguments : '',
+      executionMode: typeof entry.executionMode === 'string' ? entry.executionMode : '',
+      stripAfterExecute: entry.stripAfterExecute !== false
+    }))
+    .filter((entry) => entry.id && entry.name && entry.executionMode);
+  const executedFlowIds = parsed.executedFlowIds
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+  const pendingInjectionMessageKinds = Array.isArray(parsed.pendingInjectionMessageKinds)
+    ? parsed.pendingInjectionMessageKinds
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .map((entry) => entry.trim())
+    : parsed.pendingInjectionMessageKinds === null
+      ? null
+      : undefined;
+  const toolOutputs = Array.isArray(parsed.toolOutputs)
+    ? parsed.toolOutputs
+    : parsed.toolOutputs === null
+      ? null
+      : undefined;
+  return {
+    toolCalls,
+    executedToolCalls,
+    executedFlowIds,
+    hasLastExecutionFollowup: parsed.hasLastExecutionFollowup,
+    ...(typeof parsed.lastExecutionFlowId === 'string' && parsed.lastExecutionFlowId.trim()
+      ? { lastExecutionFlowId: parsed.lastExecutionFlowId.trim() }
+      : parsed.lastExecutionFlowId === null
+        ? { lastExecutionFlowId: null }
+        : {}),
+    ...(typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
+      ? { sessionId: parsed.sessionId.trim() }
+      : parsed.sessionId === null
+        ? { sessionId: null }
+        : {}),
+    ...(typeof parsed.conversationId === 'string' && parsed.conversationId.trim()
+      ? { conversationId: parsed.conversationId.trim() }
+      : parsed.conversationId === null
+        ? { conversationId: null }
+        : {}),
+    ...(toolOutputs !== undefined ? { toolOutputs } : {}),
+    ...(pendingInjectionMessageKinds !== undefined ? { pendingInjectionMessageKinds } : {})
+  };
+}
+
+export function parseServertoolHandlerContractPlanPayload(raw: string): ServertoolHandlerContractPlanPayload | null {
+  const parsed = parseJson('parseServertoolHandlerContractPlanPayload', raw) as
+    | {
+      action?: unknown;
+    }
+    | typeof JSON_PARSE_FAILED;
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed.action !== 'string') {
+    return null;
+  }
+  const action = parsed.action.trim();
+  if (!action) {
+    return null;
+  }
+  return { action };
+}
+
+export function parseServertoolBackendExecutionPlanPayload(raw: string): ServertoolBackendExecutionPlanPayload | null {
+  const parsed = parseJson('parseServertoolBackendExecutionPlanPayload', raw) as
+    | {
+      action?: unknown;
+      backendKind?: unknown;
+    }
+    | typeof JSON_PARSE_FAILED;
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed.action !== 'string') {
+    return null;
+  }
+  const action = parsed.action.trim();
+  if (!action) {
+    return null;
+  }
+  return {
+    action,
+    ...(typeof parsed.backendKind === 'string' ? { backendKind: parsed.backendKind } : {})
+  };
+}
+
+export function parseServertoolResponseStageGatePayload(raw: string): ServertoolResponseStageGatePayload | null {
+  const parsed = parseJson('parseServertoolResponseStageGatePayload', raw) as
+    | {
+      shouldBypass?: unknown;
+      nextAction?: unknown;
+      responseHookMatched?: unknown;
+      responseHookRequired?: unknown;
+      responseHookName?: unknown;
+      interceptKind?: unknown;
+      schemaSource?: unknown;
+      skipReason?: unknown;
+    }
+    | typeof JSON_PARSE_FAILED;
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed.shouldBypass !== 'boolean') {
+    return null;
+  }
+  const nextAction =
+    parsed.nextAction === 'bypass' ||
+    parsed.nextAction === 'run_auto_hooks' ||
+    parsed.nextAction === 'continue_to_execution'
+      ? parsed.nextAction
+      : parsed.shouldBypass
+        ? 'bypass'
+        : 'continue_to_execution';
+  return {
+    shouldBypass: parsed.shouldBypass,
+    nextAction,
+    responseHookMatched: parsed.responseHookMatched === true,
+    responseHookRequired: parsed.responseHookRequired === true,
+    ...(typeof parsed.responseHookName === 'string' && parsed.responseHookName.trim()
+      ? { responseHookName: parsed.responseHookName.trim() }
+      : {}),
+    ...(typeof parsed.interceptKind === 'string' && parsed.interceptKind.trim()
+      ? { interceptKind: parsed.interceptKind.trim() }
+      : {}),
+    ...(typeof parsed.schemaSource === 'string' && parsed.schemaSource.trim()
+      ? { schemaSource: parsed.schemaSource.trim() }
+      : {}),
+    ...(typeof parsed.skipReason === 'string' && parsed.skipReason.trim()
+      ? { skipReason: parsed.skipReason.trim() }
+      : {})
   };
 }
 

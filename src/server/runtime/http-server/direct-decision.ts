@@ -126,7 +126,6 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     || !retryExecutionPlan.retrySwitchPlan
     || (
       retryExecutionPlan.retrySwitchPlan.switchAction !== 'exclude_and_reroute'
-      && retryExecutionPlan.retrySwitchPlan.switchAction !== 'retry_same_provider_once'
     )
   ) {
     return rethrowDecision(error, excludedProviderKeys);

@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use crate::orchestration_policy_contract::{
     plan_servertool_state_load_failed_error, ServertoolErrorPlan,
     ServertoolStateLoadFailedErrorInput,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 // feature_id: hub.servertool_pre_command_hooks
 const DEFAULT_TIMEOUT_MS: i64 = 2000;
@@ -266,22 +266,30 @@ pub fn plan_runtime_pre_command_state_selection(
 pub fn plan_runtime_pre_command_state_runtime_action(
     input: &RuntimePreCommandStateRuntimeActionInput,
 ) -> Result<RuntimePreCommandStateRuntimeActionPlan, String> {
-    let selection = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
-        direct_runtime_pre_command_state: input.direct_runtime_pre_command_state.clone(),
-        runtime_metadata_pre_command_state: input.runtime_metadata_pre_command_state.clone(),
-        has_persistent_scope_key: input.has_persistent_scope_key,
-        persisted_state: input.persisted_state.clone(),
-        persisted_load_attempted: input.persisted_load_attempted,
-    });
+    let selection =
+        plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+            direct_runtime_pre_command_state: input.direct_runtime_pre_command_state.clone(),
+            runtime_metadata_pre_command_state: input.runtime_metadata_pre_command_state.clone(),
+            has_persistent_scope_key: input.has_persistent_scope_key,
+            persisted_state: input.persisted_state.clone(),
+            persisted_load_attempted: input.persisted_load_attempted,
+        });
 
     if let Some(error) = normalize_optional_text(input.persisted_load_error.as_deref()) {
-        let error_plan = plan_servertool_state_load_failed_error(&ServertoolStateLoadFailedErrorInput {
-            request_id: require_trimmed_text(input.request_id.as_deref(), "requestId")?,
-            sticky_key: require_trimmed_text(input.sticky_key.as_deref(), "stickyKey")?,
-            entry_endpoint: require_trimmed_text(input.entry_endpoint.as_deref(), "entryEndpoint")?,
-            provider_protocol: require_trimmed_text(input.provider_protocol.as_deref(), "providerProtocol")?,
-            error,
-        })?;
+        let error_plan =
+            plan_servertool_state_load_failed_error(&ServertoolStateLoadFailedErrorInput {
+                request_id: require_trimmed_text(input.request_id.as_deref(), "requestId")?,
+                sticky_key: require_trimmed_text(input.sticky_key.as_deref(), "stickyKey")?,
+                entry_endpoint: require_trimmed_text(
+                    input.entry_endpoint.as_deref(),
+                    "entryEndpoint",
+                )?,
+                provider_protocol: require_trimmed_text(
+                    input.provider_protocol.as_deref(),
+                    "providerProtocol",
+                )?,
+                error,
+            })?;
         return Ok(RuntimePreCommandStateRuntimeActionPlan {
             action: RuntimePreCommandStateRuntimeAction::ThrowStateLoadFailed,
             source: RuntimePreCommandStateSource::None,
@@ -291,8 +299,12 @@ pub fn plan_runtime_pre_command_state_runtime_action(
     }
 
     let action = match selection.action {
-        RuntimePreCommandStateSelectionAction::UseSelected => RuntimePreCommandStateRuntimeAction::UseSelected,
-        RuntimePreCommandStateSelectionAction::LoadPersisted => RuntimePreCommandStateRuntimeAction::LoadPersisted,
+        RuntimePreCommandStateSelectionAction::UseSelected => {
+            RuntimePreCommandStateRuntimeAction::UseSelected
+        }
+        RuntimePreCommandStateSelectionAction::LoadPersisted => {
+            RuntimePreCommandStateRuntimeAction::LoadPersisted
+        }
     };
     Ok(RuntimePreCommandStateRuntimeActionPlan {
         action,
@@ -518,10 +530,10 @@ mod tests {
     use super::{
         plan_pre_command_hooks_config, plan_runtime_pre_command_rule,
         plan_runtime_pre_command_state_runtime_action, plan_runtime_pre_command_state_selection,
-        PreCommandHooksConfigPlanInput, RuntimePreCommandStateRuntimeAction,
-        RuntimePreCommandStateRuntimeActionInput,
-        RuntimePreCommandRulePlanInput, RuntimePreCommandStateSelectionAction,
-        RuntimePreCommandStateSelectionInput, RuntimePreCommandStateSource,
+        PreCommandHooksConfigPlanInput, RuntimePreCommandRulePlanInput,
+        RuntimePreCommandStateRuntimeAction, RuntimePreCommandStateRuntimeActionInput,
+        RuntimePreCommandStateSelectionAction, RuntimePreCommandStateSelectionInput,
+        RuntimePreCommandStateSource,
     };
     use serde_json::json;
 
@@ -601,39 +613,58 @@ mod tests {
 
     #[test]
     fn runtime_pre_command_state_selection_prefers_direct_then_runtime_then_persisted() {
-        let direct = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
-            direct_runtime_pre_command_state: Some(json!({})),
-            runtime_metadata_pre_command_state: Some(json!({ "preCommandScriptPath": "/tmp/runtime.sh" })),
-            has_persistent_scope_key: true,
-            persisted_state: None,
-            persisted_load_attempted: false,
-        });
-        assert_eq!(direct.action, RuntimePreCommandStateSelectionAction::UseSelected);
+        let direct =
+            plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+                direct_runtime_pre_command_state: Some(json!({})),
+                runtime_metadata_pre_command_state: Some(
+                    json!({ "preCommandScriptPath": "/tmp/runtime.sh" }),
+                ),
+                has_persistent_scope_key: true,
+                persisted_state: None,
+                persisted_load_attempted: false,
+            });
+        assert_eq!(
+            direct.action,
+            RuntimePreCommandStateSelectionAction::UseSelected
+        );
         assert_eq!(direct.source, RuntimePreCommandStateSource::DirectRuntime);
         assert_eq!(direct.state, Some(json!({})));
 
-        let runtime = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
-            direct_runtime_pre_command_state: Some(json!("not-an-object")),
-            runtime_metadata_pre_command_state: Some(json!({ "preCommandScriptPath": "/tmp/runtime.sh" })),
-            has_persistent_scope_key: true,
-            persisted_state: None,
-            persisted_load_attempted: false,
-        });
-        assert_eq!(runtime.action, RuntimePreCommandStateSelectionAction::UseSelected);
-        assert_eq!(runtime.source, RuntimePreCommandStateSource::RuntimeMetadata);
+        let runtime =
+            plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+                direct_runtime_pre_command_state: Some(json!("not-an-object")),
+                runtime_metadata_pre_command_state: Some(
+                    json!({ "preCommandScriptPath": "/tmp/runtime.sh" }),
+                ),
+                has_persistent_scope_key: true,
+                persisted_state: None,
+                persisted_load_attempted: false,
+            });
+        assert_eq!(
+            runtime.action,
+            RuntimePreCommandStateSelectionAction::UseSelected
+        );
+        assert_eq!(
+            runtime.source,
+            RuntimePreCommandStateSource::RuntimeMetadata
+        );
         assert_eq!(
             runtime.state,
             Some(json!({ "preCommandScriptPath": "/tmp/runtime.sh" }))
         );
 
-        let persisted = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
-            direct_runtime_pre_command_state: None,
-            runtime_metadata_pre_command_state: None,
-            has_persistent_scope_key: true,
-            persisted_state: Some(json!({ "preCommandScriptPath": "/tmp/persisted.sh" })),
-            persisted_load_attempted: true,
-        });
-        assert_eq!(persisted.action, RuntimePreCommandStateSelectionAction::UseSelected);
+        let persisted =
+            plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+                direct_runtime_pre_command_state: None,
+                runtime_metadata_pre_command_state: None,
+                has_persistent_scope_key: true,
+                persisted_state: Some(json!({ "preCommandScriptPath": "/tmp/persisted.sh" })),
+                persisted_load_attempted: true,
+            });
+        assert_eq!(
+            persisted.action,
+            RuntimePreCommandStateSelectionAction::UseSelected
+        );
         assert_eq!(persisted.source, RuntimePreCommandStateSource::Persisted);
         assert_eq!(
             persisted.state,
@@ -643,24 +674,29 @@ mod tests {
 
     #[test]
     fn runtime_pre_command_state_selection_requests_persisted_load_only_when_needed() {
-        let plan = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
-            direct_runtime_pre_command_state: None,
-            runtime_metadata_pre_command_state: Some(json!(["ignored"])),
-            has_persistent_scope_key: true,
-            persisted_state: None,
-            persisted_load_attempted: false,
-        });
-        assert_eq!(plan.action, RuntimePreCommandStateSelectionAction::LoadPersisted);
+        let plan =
+            plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+                direct_runtime_pre_command_state: None,
+                runtime_metadata_pre_command_state: Some(json!(["ignored"])),
+                has_persistent_scope_key: true,
+                persisted_state: None,
+                persisted_load_attempted: false,
+            });
+        assert_eq!(
+            plan.action,
+            RuntimePreCommandStateSelectionAction::LoadPersisted
+        );
         assert_eq!(plan.source, RuntimePreCommandStateSource::None);
         assert_eq!(plan.state, None);
 
-        let after_load = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
-            direct_runtime_pre_command_state: None,
-            runtime_metadata_pre_command_state: None,
-            has_persistent_scope_key: true,
-            persisted_state: Some(json!("still-invalid")),
-            persisted_load_attempted: true,
-        });
+        let after_load =
+            plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+                direct_runtime_pre_command_state: None,
+                runtime_metadata_pre_command_state: None,
+                has_persistent_scope_key: true,
+                persisted_state: Some(json!("still-invalid")),
+                persisted_load_attempted: true,
+            });
         assert_eq!(
             after_load.action,
             RuntimePreCommandStateSelectionAction::UseSelected
@@ -668,13 +704,14 @@ mod tests {
         assert_eq!(after_load.source, RuntimePreCommandStateSource::None);
         assert_eq!(after_load.state, None);
 
-        let without_scope_key = plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
-            direct_runtime_pre_command_state: None,
-            runtime_metadata_pre_command_state: None,
-            has_persistent_scope_key: false,
-            persisted_state: None,
-            persisted_load_attempted: false,
-        });
+        let without_scope_key =
+            plan_runtime_pre_command_state_selection(&RuntimePreCommandStateSelectionInput {
+                direct_runtime_pre_command_state: None,
+                runtime_metadata_pre_command_state: None,
+                has_persistent_scope_key: false,
+                persisted_state: None,
+                persisted_load_attempted: false,
+            });
         assert_eq!(
             without_scope_key.action,
             RuntimePreCommandStateSelectionAction::UseSelected
@@ -685,22 +722,27 @@ mod tests {
 
     #[test]
     fn runtime_pre_command_state_runtime_action_delegates_to_selection() {
-        let plan = plan_runtime_pre_command_state_runtime_action(&RuntimePreCommandStateRuntimeActionInput {
-            direct_runtime_pre_command_state: None,
-            runtime_metadata_pre_command_state: Some(json!({
-                "preCommandScriptPath": "/tmp/runtime-pre-command.sh"
-            })),
-            has_persistent_scope_key: false,
-            persisted_state: None,
-            persisted_load_attempted: false,
-            persisted_load_error: None,
-            request_id: None,
-            sticky_key: None,
-            entry_endpoint: None,
-            provider_protocol: None,
-        })
+        let plan = plan_runtime_pre_command_state_runtime_action(
+            &RuntimePreCommandStateRuntimeActionInput {
+                direct_runtime_pre_command_state: None,
+                runtime_metadata_pre_command_state: Some(json!({
+                    "preCommandScriptPath": "/tmp/runtime-pre-command.sh"
+                })),
+                has_persistent_scope_key: false,
+                persisted_state: None,
+                persisted_load_attempted: false,
+                persisted_load_error: None,
+                request_id: None,
+                sticky_key: None,
+                entry_endpoint: None,
+                provider_protocol: None,
+            },
+        )
         .expect("runtime action plan");
-        assert_eq!(plan.action, RuntimePreCommandStateRuntimeAction::UseSelected);
+        assert_eq!(
+            plan.action,
+            RuntimePreCommandStateRuntimeAction::UseSelected
+        );
         assert_eq!(plan.source, RuntimePreCommandStateSource::RuntimeMetadata);
         assert_eq!(
             plan.state,
@@ -713,18 +755,20 @@ mod tests {
 
     #[test]
     fn runtime_pre_command_state_runtime_action_projects_persisted_load_error() {
-        let plan = plan_runtime_pre_command_state_runtime_action(&RuntimePreCommandStateRuntimeActionInput {
-            direct_runtime_pre_command_state: None,
-            runtime_metadata_pre_command_state: None,
-            has_persistent_scope_key: true,
-            persisted_state: None,
-            persisted_load_attempted: true,
-            persisted_load_error: Some("ENOENT no state".to_string()),
-            request_id: Some("req-1".to_string()),
-            sticky_key: Some("session:abc".to_string()),
-            entry_endpoint: Some("/v1/responses".to_string()),
-            provider_protocol: Some("openai-responses".to_string()),
-        })
+        let plan = plan_runtime_pre_command_state_runtime_action(
+            &RuntimePreCommandStateRuntimeActionInput {
+                direct_runtime_pre_command_state: None,
+                runtime_metadata_pre_command_state: None,
+                has_persistent_scope_key: true,
+                persisted_state: None,
+                persisted_load_attempted: true,
+                persisted_load_error: Some("ENOENT no state".to_string()),
+                request_id: Some("req-1".to_string()),
+                sticky_key: Some("session:abc".to_string()),
+                entry_endpoint: Some("/v1/responses".to_string()),
+                provider_protocol: Some("openai-responses".to_string()),
+            },
+        )
         .expect("runtime action error plan");
         assert_eq!(
             plan.action,

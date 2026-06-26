@@ -53,7 +53,7 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
     });
   });
 
-  it('projects stopMessage runtime control into canonical handler top-level metadata only', () => {
+  it('keeps stopMessage runtime control only inside MetadataCenter at handler boundary', () => {
     const internalMetadata = { providerProtocol: 'openai-responses' } as Record<string, unknown>;
     const center = MetadataCenter.attach(internalMetadata);
     center.writeRuntimeControl(
@@ -71,10 +71,11 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
 
     expect(merged).toMatchObject({
       providerProtocol: 'openai-responses',
-      stopMessageEnabled: true
     });
+    expect(merged.stopMessageEnabled).toBeUndefined();
     expect(merged.routecodexPortStopMessageEnabled).toBeUndefined();
     expect(MetadataCenter.read(merged)).toBe(center);
+    expect(MetadataCenter.read(merged)?.readRuntimeControl().stopMessageEnabled).toBe(true);
   });
 
   it('throws on client __rt metadata (no merge with internal __rt, no silent drop)', () => {

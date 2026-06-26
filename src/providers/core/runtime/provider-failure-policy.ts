@@ -13,7 +13,6 @@ export {
   resolveProviderFailureRetryEligibility,
   resolveProviderFailureExclusionDecision,
   shouldKeepProviderExcludedForNextAttempt,
-  shouldRerouteTerminalPeriodicRecovery,
   shouldRerouteTerminalUnrecoverableProviderFailure,
   shouldDirectReturnUnrecoverableWithoutForcedExclusion,
   shouldCancelUnrecoverableRerouteWithoutAlternative,
@@ -26,12 +25,9 @@ export {
 export type ProviderFailureClassification =
   | 'unrecoverable'
   | 'recoverable'
-  | 'special_400'
-  | 'periodic_recovery';
+  | 'special_400';
 
 export type ProviderFailureRateLimitKind =
-  | 'synthetic_cooldown'
-  | 'daily_limit'
   | 'short_lived';
 
 export type ProviderFailureRetryAction =

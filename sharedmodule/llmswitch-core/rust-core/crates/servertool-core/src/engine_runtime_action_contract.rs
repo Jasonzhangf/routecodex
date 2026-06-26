@@ -20,7 +20,6 @@ pub enum ServertoolEngineRuntimeAction {
     ReturnServertoolCliProjectionFinal,
     ReturnStopMessageTerminalFinal,
     BuildStopMessageCliProjection,
-    ContinueFollowupMainline,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -31,7 +30,7 @@ pub struct ServertoolEngineRuntimeActionPlan {
 
 pub fn plan_servertool_engine_runtime_action(
     input: ServertoolEngineRuntimeActionInput,
-) -> ServertoolEngineRuntimeActionPlan {
+) -> Result<ServertoolEngineRuntimeActionPlan, String> {
     let has_servertool_cli_projection_context = match input.execution_context.as_ref() {
         Some(Value::Object(context)) => context
             .get("servertoolCliProjection")
@@ -41,28 +40,32 @@ pub fn plan_servertool_engine_runtime_action(
     };
 
     if input.has_pending_injection {
-        return ServertoolEngineRuntimeActionPlan {
+        return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::PersistPendingInjectionAndReturn,
-        };
+        });
     }
     if !input.is_stop_message_flow && has_servertool_cli_projection_context {
-        return ServertoolEngineRuntimeActionPlan {
+        return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal,
-        };
+        });
     }
     if input.stopless_action.trim() == "terminal_final" {
-        return ServertoolEngineRuntimeActionPlan {
+        return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::ReturnStopMessageTerminalFinal,
-        };
+        });
     }
     if input.is_stop_message_flow && input.stopless_action.trim() == "cli_projection" {
-        return ServertoolEngineRuntimeActionPlan {
+        return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::BuildStopMessageCliProjection,
-        };
+        });
     }
-    ServertoolEngineRuntimeActionPlan {
-        action: ServertoolEngineRuntimeAction::ContinueFollowupMainline,
-    }
+    Err(format!(
+        "servertool runtime action has no reenter mainline: isStopMessageFlow={} stoplessAction={} hasPendingInjection={} hasServertoolCliProjectionContext={}",
+        input.is_stop_message_flow,
+        input.stopless_action.trim(),
+        input.has_pending_injection,
+        has_servertool_cli_projection_context
+    ))
 }
 
 #[cfg(test)]
@@ -77,7 +80,8 @@ mod tests {
             execution_context: None,
             has_servertool_cli_projection_context: true,
             stopless_action: "terminal_final".to_string(),
-        });
+        })
+        .expect("pending plan");
         assert_eq!(
             plan.action,
             ServertoolEngineRuntimeAction::PersistPendingInjectionAndReturn
@@ -92,7 +96,8 @@ mod tests {
             execution_context: None,
             has_servertool_cli_projection_context: true,
             stopless_action: "cli_projection".to_string(),
-        });
+        })
+        .expect("cli projection plan");
         assert_eq!(
             plan.action,
             ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal
@@ -107,7 +112,8 @@ mod tests {
             execution_context: None,
             has_servertool_cli_projection_context: false,
             stopless_action: "terminal_final".to_string(),
-        });
+        })
+        .expect("terminal plan");
         assert_eq!(
             plan.action,
             ServertoolEngineRuntimeAction::ReturnStopMessageTerminalFinal
@@ -122,7 +128,8 @@ mod tests {
             execution_context: None,
             has_servertool_cli_projection_context: false,
             stopless_action: "cli_projection".to_string(),
-        });
+        })
+        .expect("stopless cli plan");
         assert_eq!(
             plan.action,
             ServertoolEngineRuntimeAction::BuildStopMessageCliProjection
@@ -130,18 +137,16 @@ mod tests {
     }
 
     #[test]
-    fn falls_through_to_followup_mainline() {
-        let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
+    fn fails_fast_when_residual_reenter_mainline_is_requested() {
+        let err = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             has_pending_injection: false,
             is_stop_message_flow: false,
             execution_context: None,
             has_servertool_cli_projection_context: false,
             stopless_action: "continue".to_string(),
-        });
-        assert_eq!(
-            plan.action,
-            ServertoolEngineRuntimeAction::ContinueFollowupMainline
-        );
+        })
+        .expect_err("residual reenter mainline must fail");
+        assert!(err.contains("no reenter mainline"));
     }
 
     #[test]
@@ -156,7 +161,8 @@ mod tests {
             })),
             has_servertool_cli_projection_context: false,
             stopless_action: "continue".to_string(),
-        });
+        })
+        .expect("derived cli projection plan");
         assert_eq!(
             plan.action,
             ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal

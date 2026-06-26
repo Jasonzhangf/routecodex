@@ -2424,6 +2424,59 @@ fn build_responses_payload_from_chat_preserves_deepseek_reasoning_before_tool_ca
 }
 
 #[test]
+fn build_responses_payload_from_chat_drops_visible_text_when_tool_calls_are_pending() {
+    let payload = serde_json::json!({
+        "id": "resp_pending_tool_text",
+        "model": "MiniMax-M3",
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": "关键测试已经看到了。现在我有了完整证据链。先把这些结论直接记到 note.md，再给你出只读审计报告。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "search_content",
+                                "arguments": "{\"context\":3,\"path\":\"note.md\",\"pattern\":\"2026-06-24|2026-06-25\"}"
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    });
+
+    let output = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_pending_tool_text"),
+        &serde_json::json!({ "toolsRaw": [] }),
+    )
+    .expect("build responses payload");
+
+    let output_items = output["output"].as_array().expect("output array");
+    let message_items = output_items
+        .iter()
+        .filter(|item| item["type"] == Value::String("message".to_string()))
+        .collect::<Vec<_>>();
+    assert!(
+        message_items.is_empty(),
+        "pending tool-call response must not retain visible assistant text item"
+    );
+    let function_calls = output_items
+        .iter()
+        .filter(|item| item["type"] == Value::String("function_call".to_string()))
+        .collect::<Vec<_>>();
+    assert_eq!(function_calls.len(), 1);
+    assert_eq!(
+        function_calls[0]["name"],
+        Value::String("search_content".to_string())
+    );
+}
+
+#[test]
 fn build_responses_payload_from_chat_backfills_reasoning_summary_from_content() {
     let payload = serde_json::json!({
         "id": "resp_reasoning_backfill",

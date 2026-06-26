@@ -579,10 +579,6 @@ fn decide_from_context(ctx: &Value) -> StopMessageDecision {
         })
         .to_string();
 
-    if rt_used == 0 {
-        return skip("skip_no_stopmessage_snapshot");
-    }
-
     if rt_used >= rt_max {
         return skip("skip_reached_max_repeats");
     }
@@ -1552,7 +1548,7 @@ mod tests {
     }
 
     #[test]
-    fn no_schema_with_no_runtime_returns_null() {
+    fn no_schema_with_no_runtime_initializes_stopless_and_returns_handler_plan() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             adapter_context: json!({
                 "metadata": { "stopMessageEnabled": true }
@@ -1584,9 +1580,15 @@ mod tests {
             effective_runtime_loop_state: None,
             provider_key: None,
         });
-        // No runtime snapshot → no repeatCount → decision skips → null
-        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnNull);
-        assert_eq!(plan.compare_context.reason, "skip_no_stopmessage_snapshot");
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
+        let persist_plan = plan.persist_plan.as_ref().expect("persist plan");
+        assert_eq!(persist_plan.next_used, 1);
+        assert_eq!(persist_plan.next_max_repeats, 3);
+        assert_eq!(
+            plan.stopless_trigger_hint.as_deref(),
+            Some("stop_schema_missing")
+        );
+        assert_eq!(plan.compare_context.reason, "stop_schema_missing");
     }
 
     #[test]

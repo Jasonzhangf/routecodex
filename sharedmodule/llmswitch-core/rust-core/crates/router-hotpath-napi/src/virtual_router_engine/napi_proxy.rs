@@ -158,54 +158,6 @@ impl VirtualRouterEngineProxy {
     }
 
     #[napi]
-    pub fn reset_provider_quota(&self, provider_key: String) -> NapiResult<()> {
-        let mut core = self.core.write().expect("core write lock");
-        core.quota_manager.reset_provider(&provider_key);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn recover_provider_quota(&self, provider_key: String) -> NapiResult<()> {
-        let mut core = self.core.write().expect("core write lock");
-        core.quota_manager.recover_provider(&provider_key);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn disable_provider_quota(
-        &self,
-        provider_key: String,
-        mode: String,
-        duration_ms: Option<i64>,
-    ) -> NapiResult<()> {
-        let mut core = self.core.write().expect("core write lock");
-        core.quota_manager.disable_provider(
-            &provider_key,
-            &mode,
-            duration_ms.unwrap_or(0),
-            super::time_utils::now_ms(),
-        );
-        Ok(())
-    }
-
-    #[napi]
-    pub fn apply_keep_pool_cooldown_quota(
-        &self,
-        provider_key: String,
-        cooldown_until_ms: i64,
-        last_error_code: Option<String>,
-    ) -> NapiResult<()> {
-        let mut core = self.core.write().expect("core write lock");
-        core.quota_manager.apply_http_402_resetat_cooldown(
-            &provider_key,
-            super::time_utils::now_ms(),
-            cooldown_until_ms,
-            last_error_code.as_deref().unwrap_or("HTTP_402"),
-        );
-        Ok(())
-    }
-
-    #[napi]
     pub fn mark_provider_cooldown(
         &self,
         provider_key: String,
@@ -256,17 +208,37 @@ impl VirtualRouterEngineProxy {
 }
 
 fn resolve_runtime_path_overrides(metadata: &Value) -> RuntimePathOverrides {
+    let snapshot_runtime_control = metadata
+        .get("metadataCenterSnapshot")
+        .and_then(|snapshot| snapshot.as_object())
+        .and_then(|snapshot| snapshot.get("runtimeControl"))
+        .and_then(|runtime_control| runtime_control.as_object());
     RuntimePathOverrides {
-        rcc_user_dir: read_runtime_string(metadata, &["rccUserDir", "rcc_user_dir"]),
-        session_dir: read_runtime_string(metadata, &["sessionDir", "session_dir"]),
+        rcc_user_dir: snapshot_runtime_control.and_then(|runtime_control| {
+            runtime_control
+                .get("rccUserDir")
+                .or_else(|| runtime_control.get("rcc_user_dir"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        }),
+        session_dir: snapshot_runtime_control.and_then(|runtime_control| {
+            runtime_control
+                .get("sessionDir")
+                .or_else(|| runtime_control.get("session_dir"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        }),
     }
 }
 
 fn read_runtime_string(metadata: &Value, keys: &[&str]) -> Option<String> {
-    let rt = metadata.get("__rt");
     for key in keys {
-        if let Some(value) = rt
-            .and_then(|entry| entry.get(*key))
+        if let Some(value) = metadata
+            .get(*key)
             .and_then(|entry| entry.as_str())
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -288,18 +260,18 @@ impl VirtualRouterEngineProxy {}
 
 #[cfg(test)]
 mod tests {
-    use super::{read_runtime_string, resolve_runtime_path_overrides};
+    use super::resolve_runtime_path_overrides;
     use serde_json::json;
 
     #[test]
-    fn runtime_path_overrides_read_only_from_rt_namespace() {
+    fn runtime_path_overrides_read_only_from_metadata_center_snapshot_runtime_control() {
         let metadata = json!({
-            "__rt": {
-                "sessionDir": "/tmp/rt-session",
-                "rccUserDir": "/tmp/rt-rcc"
-            },
-            "sessionDir": "/tmp/top-level-session",
-            "rccUserDir": "/tmp/top-level-rcc"
+            "metadataCenterSnapshot": {
+                "runtimeControl": {
+                    "sessionDir": "/tmp/rt-session",
+                    "rccUserDir": "/tmp/rt-rcc"
+                }
+            }
         });
         let overrides = resolve_runtime_path_overrides(&metadata);
         assert_eq!(overrides.session_dir.as_deref(), Some("/tmp/rt-session"));
@@ -307,14 +279,23 @@ mod tests {
     }
 
     #[test]
-    fn runtime_path_overrides_do_not_fallback_to_top_level_metadata() {
+    fn runtime_path_overrides_do_not_fallback_to_top_level_metadata_or_rt_namespace() {
         let metadata = json!({
             "sessionDir": "/tmp/top-level-session",
-            "rccUserDir": "/tmp/top-level-rcc"
+            "rccUserDir": "/tmp/top-level-rcc",
+            "__rt": {
+                "sessionDir": "/tmp/rt-session",
+                "rccUserDir": "/tmp/rt-rcc"
+            }
         });
         let overrides = resolve_runtime_path_overrides(&metadata);
         assert_eq!(overrides.session_dir, None);
         assert_eq!(overrides.rcc_user_dir, None);
-        assert_eq!(read_runtime_string(&metadata, &["sessionDir", "session_dir"]), None);
+        let snapshot_runtime_control = metadata
+            .get("metadataCenterSnapshot")
+            .and_then(|snapshot| snapshot.as_object())
+            .and_then(|snapshot| snapshot.get("runtimeControl"))
+            .and_then(|runtime_control| runtime_control.as_object());
+        assert!(snapshot_runtime_control.is_none());
     }
 }

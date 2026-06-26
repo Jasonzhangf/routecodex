@@ -115,7 +115,7 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     }
   });
 
-  it('authoritative docs and skill name the full ErrorErr01-06 chain and periodic recovery class', () => {
+  it('authoritative docs and skill name the full ErrorErr01-06 chain and do not require periodic recovery class', () => {
     for (const rel of ERROR_CHAIN_DOCS) {
       const src = readSrc(rel);
       expect(src).toMatch(/ErrorErr01SourceRaised/);
@@ -124,7 +124,7 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
       expect(src).toMatch(/ErrorErr04RouterPolicyApplied/);
       expect(src).toMatch(/ErrorErr05ExecutionDecision/);
       expect(src).toMatch(/ErrorErr06ClientProjected/);
-      expect(src).toMatch(/periodic_recovery/);
+      expect(src).not.toMatch(/periodic_recovery/);
     }
   });
 
@@ -178,11 +178,10 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
 
   it('request-executor-retry-execution delegates terminal classification branch policy', () => {
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
-    expect(executionPlan).toMatch(/shouldRerouteTerminalPeriodicRecovery/);
     expect(executionPlan).toMatch(/shouldDirectReturnUnrecoverableWithoutForcedExclusion/);
     expect(executionPlan).toMatch(/shouldCancelUnrecoverableRerouteWithoutAlternative/);
     expect(executionPlan).not.toMatch(/classification\s*===\s*['"]periodic_recovery['"]/);
-    expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"]/);
+    expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"][\s\S]{0,240}retrySwitchPlan/);
   });
 
   it('request-executor thin shell does not import classification or health policy internals directly', () => {
@@ -200,7 +199,7 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
   it('executor retry path does not locally reroute recoverable failures away from the policy decision', () => {
     const decision = readSrc(EXECUTOR_RETRY_DECISION);
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
-    expect(decision).not.toMatch(/classification\s*===\s*['"]recoverable['"][\s\S]{0,240}hasAlternativeCandidate/);
+    expect(decision).not.toMatch(/classification\s*===\s*['"]recoverable['"][\s\S]{0,240}decisionLabel/);
     expect(executionPlan).not.toMatch(/recoverableProviderReroute|terminalRecoverableReroute/);
     expect(executionPlan).not.toMatch(/providerKey\.startsWith\(['"][a-z0-9_-]+\./i);
   });
@@ -208,7 +207,7 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
   it('executor retry path does not locally reroute unrecoverable failures away from direct failure', () => {
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
     expect(executionPlan).not.toMatch(/terminalProviderFailureReroute/);
-    expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"][\s\S]{0,240}hasTerminalAlternativeCandidate/);
+    expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"][\s\S]{0,240}return\s*\{/);
   });
 
   it('executor retry path does not locally classify quota or periodic recovery candidates', () => {

@@ -259,6 +259,20 @@ fn message_has_image_content(content: &Value) -> bool {
     })
 }
 
+fn message_has_tool_result_content(content: &Value) -> bool {
+    let Some(parts) = content.as_array() else {
+        return false;
+    };
+    parts.iter().any(|part| {
+        part.as_object()
+            .and_then(|record| record.get("type"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .map(|value| value.eq_ignore_ascii_case("tool_result"))
+            .unwrap_or(false)
+    })
+}
+
 fn collect_text_candidates(content: &Value) -> Vec<String> {
     match content {
         Value::String(text) if !text.trim().is_empty() => vec![text.clone()],
@@ -333,6 +347,9 @@ pub(crate) fn append_local_image_block_on_latest_user_input(
         .get("content")
         .cloned()
         .unwrap_or(Value::Null);
+    if message_has_tool_result_content(&original_content) {
+        return AppendLocalImageBlockOnLatestUserInputOutput { messages };
+    }
     if message_has_image_content(&original_content) {
         return AppendLocalImageBlockOnLatestUserInputOutput { messages };
     }

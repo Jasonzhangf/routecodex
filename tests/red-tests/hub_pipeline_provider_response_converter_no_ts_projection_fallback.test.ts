@@ -12,7 +12,7 @@ describe('provider response converter Rust-only projection boundary', () => {
   it('does not keep provider-specific response bridge branches', () => {
     const source = readFileSync(converterPath, 'utf8');
 
-    expect(source).not.toMatch(/providerFamily\s*===/);
+    expect(source).not.toMatch(/providerFamily\s*===\s*['"](?!string['"])[a-z0-9_-]+['"]/i);
     expect(source).not.toMatch(/convert\.bridge\.[a-z0-9_-]+_native_[a-z0-9_-]+_direct/i);
   });
 
@@ -25,5 +25,12 @@ describe('provider response converter Rust-only projection boundary', () => {
     expect(source).not.toContain('hasResponsesFunctionCalls(');
     expect(source).not.toContain('buildResponsesPayloadFromChatWithNative');
     expect(source).not.toMatch(/!\s*hasResponsesFunctionCalls/);
+  });
+
+  it('does not read providerProtocol truth from adapterContext ahead of pipeline metadata', () => {
+    const source = readFileSync(converterPath, 'utf8');
+
+    expect(source).not.toContain('const adapterContextProviderProtocol =');
+    expect(source).not.toContain('readRuntimeControlForProviderResponseConverter(args.adapterContext)');
   });
 });

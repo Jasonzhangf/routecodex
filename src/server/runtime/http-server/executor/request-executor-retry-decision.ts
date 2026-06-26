@@ -257,18 +257,16 @@ export function buildProviderRetrySwitchPlan(args: {
   retryError?: RetryErrorSnapshot;
   backoffScope: ProviderRetryExecutionPlan['backoffScope'];
 }): ProviderRetrySwitchPlan {
-  const switchAction: ProviderRetrySwitchAction = args.excludedCurrentProvider
-    ? 'exclude_and_reroute'
-    : 'retry_same_provider_once';
+  const switchAction: ProviderRetrySwitchAction = 'exclude_and_reroute';
   const runtimeScopeExcluded: string[] = [];
   return {
     switchAction,
-    decisionLabel: switchAction === 'retry_same_provider_once'
-      ? 'recoverable_backoff_same_provider'
-      : describeProviderFailureDecision({
+    decisionLabel: args.backoffScope
+      ? describeProviderFailureDecision({
           action: 'reroute_explicit_alternative',
-          backoffScope: args.backoffScope ?? 'attempt'
-        }),
+          backoffScope: args.backoffScope
+        })
+      : 'exclude_and_reroute',
     runtimeScopeExcluded,
     runtimeScopeExcludedCount: runtimeScopeExcluded.length
   };

@@ -17,6 +17,11 @@ type RouterMetadataInputBuildInput = {
   sessionId?: string;
   conversationId?: string;
   metadata?: Record<string, unknown>;
+  metadataCenterSnapshot?: {
+    requestTruth?: Record<string, unknown>;
+    continuationContext?: Record<string, unknown>;
+    runtimeControl?: Record<string, unknown>;
+  };
 };
 
 type CoerceStandardizedRequestInput = {

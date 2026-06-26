@@ -45,8 +45,8 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
             messages
         } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
-            let normalized_input_items = normalize_responses_input_items(payload)
-                .unwrap_or_else(|| input_items.clone());
+            let normalized_input_items =
+                normalize_responses_input_items(payload).unwrap_or_else(|| input_items.clone());
             let allow_output_only_resume_tool_result =
                 is_output_only_resume_tool_result(payload, normalized_input_items.as_slice());
             convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
@@ -334,7 +334,9 @@ fn dedupe_identical_responses_tool_history_entries(input_items: Vec<Value>) -> V
         let Some(signature) = responses_function_call_semantic_signature(entry) else {
             continue;
         };
-        let count = semantic_call_signature_counts.entry(signature.clone()).or_insert(0);
+        let count = semantic_call_signature_counts
+            .entry(signature.clone())
+            .or_insert(0);
         *count += 1;
         if *count > 1 {
             if let Some((call_id, _)) = signature.split_once('\u{1f}') {
@@ -363,8 +365,7 @@ fn dedupe_identical_responses_tool_history_entries(input_items: Vec<Value>) -> V
             {
                 continue;
             }
-            let signature = serde_json::to_string(&entry)
-                .unwrap_or_else(|_| format!("{entry:?}"));
+            let signature = serde_json::to_string(&entry).unwrap_or_else(|_| format!("{entry:?}"));
             if !seen_output_signatures.insert(signature) {
                 continue;
             }
@@ -634,7 +635,8 @@ mod tests {
     }
 
     #[test]
-    fn responses_standardization_dedupes_duplicate_tool_history_block_with_different_chunk_headers() {
+    fn responses_standardization_dedupes_duplicate_tool_history_block_with_different_chunk_headers()
+    {
         let input = json!({
             "payload": {
                 "model": "gpt-test",

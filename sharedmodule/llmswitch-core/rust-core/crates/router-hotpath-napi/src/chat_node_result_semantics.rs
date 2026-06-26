@@ -855,7 +855,9 @@ pub fn is_provider_native_resume_continuation_json(
 ) -> NapiResult<bool> {
     let request_semantics: Value = serde_json::from_str(&request_semantics_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(is_provider_native_resume_continuation_value(&request_semantics))
+    Ok(is_provider_native_resume_continuation_value(
+        &request_semantics,
+    ))
 }
 
 pub fn detect_retryable_empty_assistant_response_json(

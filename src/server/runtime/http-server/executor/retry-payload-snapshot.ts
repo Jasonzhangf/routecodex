@@ -10,6 +10,7 @@ import { readString } from './request-executor-error-shared.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import { extractStatusCodeFromError, firstFiniteNumber } from './utils.js';
 import { estimateRetryPayloadBytes } from './retry-payload-bytes-estimator.js';
+import { readRuntimeDebugSnapshotProjection } from '../metadata-center/request-truth-readers.js';
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 let _logNB: LogNonBlockingError | undefined;
@@ -263,11 +264,7 @@ export function readHubStageTop(metadata: Record<string, unknown> | undefined): 
   if (!metadata || typeof metadata !== 'object') {
     return undefined;
   }
-  const rt =
-    metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-      ? (metadata.__rt as Record<string, unknown>)
-      : undefined;
-  const raw = rt?.hubStageTop;
+  const raw = readRuntimeDebugSnapshotProjection(metadata).hubStageTop;
   if (!Array.isArray(raw) || raw.length === 0) {
     return undefined;
   }

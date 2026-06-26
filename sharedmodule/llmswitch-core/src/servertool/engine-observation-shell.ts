@@ -3,6 +3,7 @@ import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { createServertoolProgressLogger } from './progress-log-block.js';
 import { recordServertoolMatchHit, recordServertoolMatchSkipped } from './match-log-block.js';
 import type { ServerToolExecution } from './types.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
 
 type ServertoolProgressLogger = ReturnType<typeof createServertoolProgressLogger>;
 
@@ -39,10 +40,15 @@ export function createServertoolObservation(args: {
   const YELLOW = '\x1b[38;5;214m';
   const GOLD = '\x1b[38;5;220m';
   const RESET = '\x1b[0m';
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>);
+  if (!providerProtocol) {
+    throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol');
+  }
   const logger = createServertoolProgressLogger({
     requestId: args.requestId,
     entryEndpoint: args.entryEndpoint,
-    providerProtocol: args.providerProtocol,
+    providerProtocol,
     adapterContext: args.adapterContext,
     stageRecorder: args.stageRecorder,
     blue: BLUE,
@@ -63,9 +69,16 @@ export function recordServertoolEngineMatchSkipped(args: {
   providerProtocol: string;
   engineMode: 'passthrough' | 'tool_flow';
   stageRecorder?: StageRecorder;
+  adapterContext?: AdapterContext;
 }): void {
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown> | undefined);
+  if (!providerProtocol) {
+    throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol');
+  }
   recordServertoolMatchSkipped({
     ...args,
+    providerProtocol,
     logNonBlocking: logServertoolNonBlocking
   });
 }

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 // feature_id: manager.health_runtime
-// canonical_builders: record_failure, cooldown_provider, cooldown_provider_until_midnight_persisted, trip_provider, is_available
+// canonical_builders: record_failure, cooldown_provider, trip_provider, is_available
 import path from 'node:path';
 import type { ManagerContext, ManagerModule } from '../../types.js';
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';

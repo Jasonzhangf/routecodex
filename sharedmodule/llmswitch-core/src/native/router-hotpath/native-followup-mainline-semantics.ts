@@ -209,5 +209,5 @@ export interface ServerToolHandlerRegistrationSpec {
 
 export interface ServerToolRegisteredHandlerRecord {
   registration: ServerToolHandlerRegistrationSpec;
-  handler: (...args: unknown[]) => unknown;
+  handler?: (...args: unknown[]) => unknown;
 }

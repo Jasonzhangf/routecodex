@@ -25,6 +25,13 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                     "trigger": { "type": "auto", "canonicalName": "stop_message_auto", "phase": "default", "priority": 40 },
                     "execution": { "mode": "auto_hook", "stripAfterExecute": true }
                 },
+                "reasoningstop": {
+                    "name": "reasoningStop",
+                    "enabled": true,
+                    "kind": "internal",
+                    "trigger": { "type": "tool_call", "canonicalName": "reasoningStop" },
+                    "execution": { "mode": "guarded", "stripAfterExecute": true }
+                },
                 "web_search": {
                     "name": "web_search",
                     "enabled": true,
@@ -478,8 +485,8 @@ pub fn build_servertool_dispatch_plan_input_json(input_json: String) -> NapiResu
             continue;
         };
         let execution = spec.get("execution").unwrap_or(&Value::Null);
-        let execution_mode = read_trimmed_string(execution.get("mode"))
-            .unwrap_or_else(|| "guarded".to_string());
+        let execution_mode =
+            read_trimmed_string(execution.get("mode")).unwrap_or_else(|| "guarded".to_string());
         let strip_after_execute =
             execution.get("stripAfterExecute").and_then(Value::as_bool) != Some(false);
         registered.push(json!({
@@ -594,26 +601,13 @@ pub fn build_servertool_outcome_plan_input_json(input_json: String) -> NapiResul
 pub fn plan_servertool_handler_contract_json(input_json: String) -> NapiResult<String> {
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let has_finalize = input
-        .get("hasFinalizeFunction")
-        .and_then(Value::as_bool)
-        == Some(true);
-    let has_chat_response = input
-        .get("hasChatResponseObject")
-        .and_then(Value::as_bool)
-        == Some(true);
-    let has_execution = input
-        .get("hasExecutionObject")
-        .and_then(Value::as_bool)
-        == Some(true);
-    let has_execution_flow_id = input
-        .get("hasExecutionFlowId")
-        .and_then(Value::as_bool)
-        == Some(true);
-    let has_plan_markers = input
-        .get("hasPlanMarkers")
-        .and_then(Value::as_bool)
-        == Some(true);
+    let has_finalize = input.get("hasFinalizeFunction").and_then(Value::as_bool) == Some(true);
+    let has_chat_response =
+        input.get("hasChatResponseObject").and_then(Value::as_bool) == Some(true);
+    let has_execution = input.get("hasExecutionObject").and_then(Value::as_bool) == Some(true);
+    let has_execution_flow_id =
+        input.get("hasExecutionFlowId").and_then(Value::as_bool) == Some(true);
+    let has_plan_markers = input.get("hasPlanMarkers").and_then(Value::as_bool) == Some(true);
     let action = if has_finalize {
         "handler_plan"
     } else if has_chat_response && has_execution && has_execution_flow_id {
@@ -800,11 +794,10 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
 #[cfg(test)]
 mod tests {
     use super::{
-        build_servertool_dispatch_plan_input_json,
-        build_servertool_outcome_plan_input_json,
+        build_servertool_dispatch_plan_input_json, build_servertool_outcome_plan_input_json,
         get_default_servertool_skeleton_document_json, normalize_servertool_registration_spec_json,
-        plan_servertool_backend_execution_json, plan_servertool_handler_contract_json,
-        plan_servertool_followup_runtime_json, plan_servertool_skeleton_derived_config_json,
+        plan_servertool_backend_execution_json, plan_servertool_followup_runtime_json,
+        plan_servertool_handler_contract_json, plan_servertool_skeleton_derived_config_json,
         resolve_servertool_followup_flow_profile, resolve_servertool_progress_tool_name_json,
         resolve_servertool_tool_spec_json, should_use_servertool_gold_progress_highlight_json,
     };
@@ -830,11 +823,15 @@ mod tests {
 
     #[test]
     fn builds_dispatch_plan_input_from_rust_skeleton_config() {
-        let raw = build_servertool_dispatch_plan_input_json(json!({
-            "toolCalls": [{ "id": "call_1", "name": "web_search", "arguments": "{}" }],
-            "disableToolCallHandlers": false,
-            "adHocRegisteredToolCallHandlers": []
-        }).to_string()).expect("dispatch plan input json");
+        let raw = build_servertool_dispatch_plan_input_json(
+            json!({
+                "toolCalls": [{ "id": "call_1", "name": "web_search", "arguments": "{}" }],
+                "disableToolCallHandlers": false,
+                "adHocRegisteredToolCallHandlers": []
+            })
+            .to_string(),
+        )
+        .expect("dispatch plan input json");
         let parsed: Value = serde_json::from_str(&raw).expect("parse dispatch plan input");
         assert_eq!(
             parsed
@@ -842,8 +839,10 @@ mod tests {
                 .and_then(Value::as_array)
                 .unwrap()
                 .iter()
-                .any(|entry| entry.get("name").and_then(Value::as_str) == Some("web_search")
-                    && entry.get("executionMode").and_then(Value::as_str) == Some("backend")),
+                .any(
+                    |entry| entry.get("name").and_then(Value::as_str) == Some("web_search")
+                        && entry.get("executionMode").and_then(Value::as_str) == Some("backend")
+                ),
             true
         );
     }
@@ -876,24 +875,28 @@ mod tests {
 
     #[test]
     fn builds_outcome_plan_input_from_adapter_context_and_base_for_execution() {
-        let raw = build_servertool_outcome_plan_input_json(json!({
-            "toolCalls": [{ "id": "call_1", "name": "web_search", "arguments": "{}" }],
-            "executionState": {
-                "executedToolCalls": [],
-                "executedFlowIds": []
-            },
-            "adapterContext": {
-                "sessionId": "sess_outcome_1",
-                "conversationId": "conv_outcome_1"
-            },
-            "baseForExecution": {
-                "tool_outputs": [{
-                    "tool_call_id": "call_1",
-                    "name": "web_search",
-                    "content": "ok"
-                }]
-            }
-        }).to_string()).expect("outcome input json");
+        let raw = build_servertool_outcome_plan_input_json(
+            json!({
+                "toolCalls": [{ "id": "call_1", "name": "web_search", "arguments": "{}" }],
+                "executionState": {
+                    "executedToolCalls": [],
+                    "executedFlowIds": []
+                },
+                "adapterContext": {
+                    "sessionId": "sess_outcome_1",
+                    "conversationId": "conv_outcome_1"
+                },
+                "baseForExecution": {
+                    "tool_outputs": [{
+                        "tool_call_id": "call_1",
+                        "name": "web_search",
+                        "content": "ok"
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .expect("outcome input json");
         let parsed: Value = serde_json::from_str(&raw).expect("parse outcome input");
         assert_eq!(parsed["sessionId"], json!("sess_outcome_1"));
         assert_eq!(parsed["conversationId"], json!("conv_outcome_1"));
@@ -902,19 +905,27 @@ mod tests {
 
     #[test]
     fn plans_handler_and_backend_contracts() {
-        let handler = plan_servertool_handler_contract_json(json!({
-            "hasFinalizeFunction": false,
-            "hasChatResponseObject": false,
-            "hasExecutionObject": false,
-            "hasExecutionFlowId": false,
-            "hasPlanMarkers": true
-        }).to_string()).expect("handler contract");
+        let handler = plan_servertool_handler_contract_json(
+            json!({
+                "hasFinalizeFunction": false,
+                "hasChatResponseObject": false,
+                "hasExecutionObject": false,
+                "hasExecutionFlowId": false,
+                "hasPlanMarkers": true
+            })
+            .to_string(),
+        )
+        .expect("handler contract");
         let parsed: Value = serde_json::from_str(&handler).expect("parse handler contract");
         assert_eq!(parsed["action"], json!("invalid_plan_missing_finalize"));
 
-        let backend = plan_servertool_backend_execution_json(json!({
-            "kind": "web_search"
-        }).to_string()).expect("backend execution contract");
+        let backend = plan_servertool_backend_execution_json(
+            json!({
+                "kind": "web_search"
+            })
+            .to_string(),
+        )
+        .expect("backend execution contract");
         let parsed: Value = serde_json::from_str(&backend).expect("parse backend contract");
         assert_eq!(parsed["action"], json!("web_search"));
     }
@@ -1073,10 +1084,13 @@ mod tests {
         assert_eq!(parsed["name"], "web_search");
         assert_eq!(parsed["execution"]["mode"], "backend");
 
-        let missing =
+        let reasoning_stop =
             resolve_servertool_tool_spec_json(json!({ "name": "reasoningStop" }).to_string())
-                .expect("missing tool spec");
-        assert_eq!(missing, "null");
+                .expect("reasoningStop tool spec");
+        let reasoning_stop_parsed: Value =
+            serde_json::from_str(&reasoning_stop).expect("parse reasoningStop tool spec");
+        assert_eq!(reasoning_stop_parsed["name"], "reasoningStop");
+        assert_eq!(reasoning_stop_parsed["execution"]["mode"], "guarded");
     }
 
     #[test]

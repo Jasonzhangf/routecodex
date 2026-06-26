@@ -65,11 +65,7 @@ export {
   shouldClearResponsesConversationOnFailureForHttp,
   planResponsesContinuationCloseActionForHttp,
   normalizeResponsesClientPayloadForHttp,
-  captureResponsesRequestContextForHttpProjection,
   rebindResponsesConversationRequestIdForHttp,
-  clearResponsesConversationByRequestIdForHttpProjection,
-  recordResponsesResponseForHttpProjection,
-  finalizeResponsesConversationRequestRetentionForHttp,
 } from './responses-response-bridge.js';
 export {
   writeSnapshotViaHooks,

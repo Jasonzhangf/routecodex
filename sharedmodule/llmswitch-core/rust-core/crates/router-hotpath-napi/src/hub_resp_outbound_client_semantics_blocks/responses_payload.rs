@@ -17,6 +17,7 @@ use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::strip_tool_markup_for_display_text;
 use crate::shared_json_utils::read_object_trimmed_string;
+use servertool_core::stop_visible_text::strip_stop_schema_control_payload;
 
 // feature_id: hub.response_post_servertool_client_projection
 
@@ -590,6 +591,7 @@ fn finalize_client_responses_payload(
         .unwrap_or_else(|| Value::Array(Vec::new()));
     let mut normalized =
         normalize_responses_tool_call_arguments_for_client(&Value::Object(out), &tools_raw);
+    strip_stop_schema_control_payload(&mut normalized);
     normalized
 }
 
@@ -613,9 +615,11 @@ pub(crate) fn build_responses_payload_from_chat_core(
             .and_then(|v| v.as_array())
             .is_some()
     {
-        return Ok(sanitize_responses_client_payload_for_replay_safety(
-            &Value::Object(response_row.clone()),
+        let mut sanitized = sanitize_responses_client_payload_for_replay_safety(&Value::Object(
+            response_row.clone(),
         ));
+        strip_stop_schema_control_payload(&mut sanitized);
+        return Ok(sanitized);
     }
 
     if response_row
@@ -667,10 +671,11 @@ pub(crate) fn build_responses_payload_from_chat_core(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    let has_tool_calls = !tool_calls.is_empty();
     if !tool_calls.is_empty() {
         content_parts = strip_tool_markup_from_output_text_parts(content_parts.as_slice());
     }
-    let should_emit_message = !content_parts.is_empty();
+    let should_emit_message = !has_tool_calls && !content_parts.is_empty();
 
     let response_id = allocate_responses_id(response_row);
     let request_id_value = read_request_id(response_row, request_id_hint);
@@ -997,6 +1002,90 @@ pub(crate) fn build_responses_payload_from_chat_core(
         response_row,
         context,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn build_responses_payload_from_chat_core_strips_rcc_stop_schema_from_reasoning_summary() {
+        let payload = json!({
+            "id": "chatcmpl_stop_schema_reasoning",
+            "object": "chat.completion",
+            "model": "gpt-test",
+            "created": 1700000000,
+            "choices": [{
+                "index": 0,
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": "继续推进当前任务。",
+                    "reasoning": {
+                        "summary": [{
+                            "type": "summary_text",
+                            "text": "**Thinking** 继续推进当前任务。\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
+                        }]
+                    },
+                    "tool_calls": [{
+                        "id": "call_exec",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"pwd\"}"
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let result = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_stop_schema_reasoning"),
+            &json!({}),
+        )
+        .expect("responses payload");
+
+        assert!(!result.to_string().contains("<rcc_stop_schema>"));
+        assert_eq!(
+            result["output"][0]["summary"][0]["text"],
+            "**Thinking** 继续推进当前任务。"
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_from_response_object_strips_rcc_stop_schema_from_reasoning_summary()
+    {
+        let payload = json!({
+            "id": "resp_stop_schema_passthrough",
+            "object": "response",
+            "model": "gpt-test",
+            "status": "requires_action",
+            "output": [{
+                "id": "reasoning_1",
+                "type": "reasoning",
+                "status": "completed",
+                "summary": [{
+                    "type": "summary_text",
+                    "text": "**Thinking** 继续推进当前任务。\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
+                }]
+            }]
+        });
+
+        let result = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_stop_schema_passthrough"),
+            &json!({}),
+        )
+        .expect("responses payload");
+
+        assert!(!result.to_string().contains("<rcc_stop_schema>"));
+        assert_eq!(
+            result["output"][0]["summary"][0]["text"],
+            "**Thinking** 继续推进当前任务。"
+        );
+    }
 }
 
 pub(crate) fn project_post_servertool_hub_resp_outbound_04_client_semantic(

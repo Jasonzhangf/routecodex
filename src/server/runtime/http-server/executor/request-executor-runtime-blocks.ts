@@ -178,7 +178,11 @@ export function shouldBypassProviderResponseConversion(
     return true;
   }
   const entry = typeof options?.entryEndpoint === 'string' ? options.entryEndpoint.toLowerCase() : '';
-  const protocol = typeof options?.providerProtocol === 'string' ? options.providerProtocol.trim().toLowerCase() : '';
+  const runtimeControlProtocol = readRuntimeControlProjection(options?.metadata)?.providerProtocol;
+  const protocol =
+    typeof runtimeControlProtocol === 'string' && runtimeControlProtocol.trim()
+      ? runtimeControlProtocol.trim().toLowerCase()
+      : '';
   if (entry.includes('/v1/responses') && protocol === 'openai-responses') {
     const body = normalized.body;
     if (body && typeof body === 'object' && !Array.isArray(body)) {
@@ -232,13 +236,6 @@ export function resolveStoplessLogState(metadata: Record<string, unknown>): Stop
   }
   const armed = directArmed ?? true;
   return { mode: directMode, armed };
-}
-
-export function isServerToolFollowupRequest(metadata: Record<string, unknown> | undefined): boolean {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-    return false;
-  }
-  return readRuntimeControlProjection(metadata).serverToolFollowup === true;
 }
 
 export function logProviderRetrySwitchCompact(args: {

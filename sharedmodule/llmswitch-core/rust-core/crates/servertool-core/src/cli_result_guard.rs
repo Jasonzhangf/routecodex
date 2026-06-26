@@ -28,6 +28,18 @@ pub fn extract_servertool_cli_result_route_hint_from_request(payload: &Value) ->
     None
 }
 
+pub fn extract_stop_message_auto_cli_result_snapshot_from_request(
+    payload: &Value,
+) -> Option<Value> {
+    let mut seen = 0usize;
+    for root in collect_scan_roots(payload) {
+        if let Some(snapshot) = scan_value_for_stopless_snapshot(root, 0, &mut seen) {
+            return Some(snapshot);
+        }
+    }
+    None
+}
+
 fn collect_scan_roots(payload: &Value) -> Vec<&Value> {
     let adapter = payload.get("adapterContext").and_then(Value::as_object);
     let runtime = payload.get("runtimeMetadata").and_then(Value::as_object);
@@ -99,6 +111,40 @@ fn scan_value_for_route_hint(value: &Value, depth: usize, seen: &mut usize) -> O
     for item in record.values() {
         if let Some(route_hint) = scan_value_for_route_hint(item, depth + 1, seen) {
             return Some(route_hint);
+        }
+    }
+    None
+}
+
+fn scan_value_for_stopless_snapshot(
+    value: &Value,
+    depth: usize,
+    seen: &mut usize,
+) -> Option<Value> {
+    if depth > MAX_SCAN_DEPTH {
+        return None;
+    }
+    *seen += 1;
+    if *seen > MAX_SCAN_NODES {
+        return None;
+    }
+    if let Some(snapshot) = extract_stopless_snapshot_from_value(value) {
+        return Some(snapshot);
+    }
+    if let Some(items) = value.as_array() {
+        for item in items {
+            if let Some(snapshot) = scan_value_for_stopless_snapshot(item, depth + 1, seen) {
+                return Some(snapshot);
+            }
+        }
+        return None;
+    }
+    let Some(record) = value.as_object() else {
+        return None;
+    };
+    for item in record.values() {
+        if let Some(snapshot) = scan_value_for_stopless_snapshot(item, depth + 1, seen) {
+            return Some(snapshot);
         }
     }
     None
@@ -182,6 +228,18 @@ fn text_contains_stop_message_auto_cli_result(text: &str) -> bool {
         return true;
     }
     for candidate in parse_json_object_candidates(trimmed) {
+        let Some(record) = candidate.as_object() else {
+            continue;
+        };
+        let tool_name = record
+            .get("toolName")
+            .or_else(|| record.get("tool"))
+            .or_else(|| record.get("tool_name"))
+            .and_then(Value::as_str)
+            .map(str::trim);
+        if tool_name != Some("stop_message_auto") {
+            continue;
+        }
         if cli_contract::validate_client_exec_command_result(&candidate.to_string()).is_ok() {
             return true;
         }
@@ -211,6 +269,71 @@ fn extract_route_hint_from_value(value: &Value) -> Option<String> {
         if let Some(route_hint) = read_route_hint_like(candidate_record.get("route_hint")) {
             return Some(route_hint);
         }
+    }
+    None
+}
+
+fn extract_stopless_snapshot_from_value(value: &Value) -> Option<Value> {
+    let record = value.as_object()?;
+    let text = read_result_text(record);
+    if text.trim().is_empty() {
+        return None;
+    }
+    for candidate in parse_json_object_candidates(&text) {
+        let Some(candidate_record) = candidate.as_object() else {
+            continue;
+        };
+        let tool_name = candidate_record
+            .get("toolName")
+            .or_else(|| candidate_record.get("tool"))
+            .or_else(|| candidate_record.get("tool_name"))
+            .and_then(Value::as_str)
+            .map(str::trim);
+        if tool_name != Some("stop_message_auto") {
+            continue;
+        }
+        if cli_contract::validate_client_exec_command_result(&candidate.to_string()).is_err() {
+            continue;
+        }
+        let repeat_count = candidate_record
+            .get("repeatCount")
+            .or_else(|| candidate_record.get("repeat_count"))
+            .and_then(Value::as_u64)?;
+        let max_repeats = candidate_record
+            .get("maxRepeats")
+            .or_else(|| candidate_record.get("max_repeats"))
+            .and_then(Value::as_u64)
+            .unwrap_or(3);
+        let mut snapshot = Map::<String, Value>::new();
+        snapshot.insert(
+            "flowId".to_string(),
+            Value::String("stop_message_flow".to_string()),
+        );
+        snapshot.insert(
+            "repeatCount".to_string(),
+            Value::Number(repeat_count.into()),
+        );
+        snapshot.insert("maxRepeats".to_string(), Value::Number(max_repeats.into()));
+        if let Some(trigger_hint) = candidate_record
+            .get("triggerHint")
+            .or_else(|| candidate_record.get("trigger_hint"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            snapshot.insert(
+                "triggerHint".to_string(),
+                Value::String(trigger_hint.to_string()),
+            );
+        }
+        if let Some(feedback) = candidate_record
+            .get("schemaFeedback")
+            .or_else(|| candidate_record.get("schema_feedback"))
+            .filter(|value| value.is_object())
+        {
+            snapshot.insert("schemaFeedback".to_string(), feedback.clone());
+        }
+        return Some(Value::Object(snapshot));
     }
     None
 }

@@ -142,14 +142,12 @@ fn read_trimmed_reasoning_string(value: Option<&Value>) -> Option<String> {
 }
 
 fn strip_reasoning_transport_noise(raw: &str) -> String {
+    // Transport-only cleanup: SSE framing lines and over-spacing.
+    // Reasoning / chat-process semantic normalization lives elsewhere.
+    // Does NOT strip "[recovered]", "null>", or any upstream content markers.
     let line_re = cached_regex(r"(?im)^\[(?:Time/Date)\]:.*$");
-    let open_re = cached_regex(r"(?i)^\s*\[(?:思考|thinking)\]\s*");
-    let close_re = cached_regex(r"(?i)\s*\[/(?:思考|thinking)\]\s*$");
     let multi_newline_re = cached_regex(r"\n{3,}");
-
     let stripped = line_re.replace_all(raw, "").to_string();
-    let stripped = open_re.replace(&stripped, "").to_string();
-    let stripped = close_re.replace(&stripped, "").to_string();
     multi_newline_re
         .replace_all(&stripped, "\n\n")
         .trim()
@@ -461,10 +459,12 @@ fn strip_reasoning_tags(text: &str) -> String {
     let think_pattern = cached_regex(r"(?i)</?think[^>]*>");
     let reflection_pattern = cached_regex(r"(?i)</?reflection[^>]*>");
     let cn_think_tag = cached_regex(r"(?is)\[/?\s*思考\s*\]");
+    let recovered_pattern = cached_regex(r"(?i)\[recovered\]");
     let without_think = think_pattern.replace_all(text, "");
     let without_reflection = reflection_pattern.replace_all(&without_think, "");
     let without_cn_think = cn_think_tag.replace_all(&without_reflection, "");
-    without_cn_think.trim().to_string()
+    let without_recovered = recovered_pattern.replace_all(&without_cn_think, "");
+    without_recovered.trim().to_string()
 }
 
 pub(crate) fn sanitize_reasoning_tagged_text(text: &str) -> String {
@@ -2818,7 +2818,10 @@ pub(crate) fn normalize_message_reasoning_tools_record(
         return (0, None);
     }
 
-    let sanitized = strip_reasoning_tags(combined.as_str());
+    // Transport-only SSE framing pass; semantic tag stripping + tool-call harvest
+    // is handled by chat-process / outbound projection, never here at SSE framing.
+    let transport_cleaned = strip_reasoning_transport_noise(combined.as_str());
+    let sanitized = strip_reasoning_tags(transport_cleaned.as_str());
     if sanitized.is_empty() {
         write_reasoning_content(message_obj, "");
         return (0, None);
@@ -3410,31 +3413,6 @@ mod tests {
                 .and_then(|msg| msg.get("content"))
                 .and_then(Value::as_str),
             None
-        );
-    }
-
-    #[test]
-    fn normalize_message_does_not_materialize_reasoning_only_sample_into_content() {
-        let mut message = json!({
-            "role": "assistant",
-            "content": "",
-            "reasoning_content": "null>\n\n[recovered]",
-            "reasoning": {
-                "content": [
-                    {
-                        "type": "reasoning_text",
-                        "text": "null>\n\n[recovered]"
-                    }
-                ]
-            }
-        });
-        let row = message.as_object_mut().unwrap();
-        let (_added, cleaned) = normalize_message_reasoning_tools_record(row, "chat_seq_reasoning_1");
-        assert_eq!(cleaned.unwrap_or_default(), "null>\n\n[recovered]");
-        assert_eq!(row.get("content").and_then(Value::as_str), Some(""));
-        assert_eq!(
-            row["reasoning"]["content"][0]["text"],
-            Value::String("null>\n\n[recovered]".to_string())
         );
     }
 

@@ -113,7 +113,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(plan.excludedCurrentProvider).toBe(true);
     expect(plan.requestLocalTransient).toBe(false);
     expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(plan.retrySwitchPlan?.decisionLabel).toBe('provider_backoff_then_reroute');
+    expect(plan.retrySwitchPlan?.decisionLabel).toBe('exclude_and_reroute');
     expect(Array.from(excludedProviderKeys)).toEqual(['mini27.key1.MiniMax-M2.7']);
   });
 
@@ -237,7 +237,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(plan.shouldRetry).toBe(true);
     expect(plan.retrySwitchPlan).toEqual(expect.objectContaining({
       switchAction: 'exclude_and_reroute',
-      decisionLabel: 'provider_backoff_then_reroute'
+      decisionLabel: 'exclude_and_reroute'
     }));
     expect(plan.excludedCurrentProvider).toBe(true);
     expect(plan.retryBackoffMs).toBe(0);
@@ -245,7 +245,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['relay.key1.gpt-5.5']);
   });
 
-  it('does not retry the same provider for streaming recoverable pre-response failures', async () => {
+  it('does not synthesize same-provider retry for streaming recoverable pre-response failures', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
@@ -286,7 +286,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['asxs.crsa.gpt-5.5']);
   });
 
-  it('keeps the existing single same-provider retry for non-stream recoverable pre-response failures', async () => {
+  it('keeps current provider when non-stream recoverable pre-response failure is already the last provider', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
@@ -320,8 +320,9 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.requestLocalTransient).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('retry_same_provider_once');
+    expect(plan.requestLocalTransient).toBe(false);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retrySwitchPlan?.decisionLabel).toBe('exclude_and_reroute');
     expect(plan.excludedCurrentProvider).toBe(false);
     expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
@@ -449,7 +450,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
     expect(plan.shouldRetry).toBe(true);
     expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(plan.retrySwitchPlan?.decisionLabel).toBe('provider_backoff_then_reroute');
+    expect(plan.retrySwitchPlan?.decisionLabel).toBe('exclude_and_reroute');
     expect(plan.excludedCurrentProvider).toBe(true);
     expect(Array.from(excludedProviderKeys)).toEqual(['cc.key1.gpt-5.5', 'sdfv.key1.gpt-5.5']);
   });

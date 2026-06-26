@@ -28,9 +28,7 @@ pub struct ServertoolResponseStageRuntimeActionPlan {
     pub action: ServertoolResponseStageRuntimeAction,
 }
 
-fn resolve_response_stage_next_action(
-    input: &ServertoolResponseStageRuntimeActionInput,
-) -> &str {
+fn resolve_response_stage_next_action(input: &ServertoolResponseStageRuntimeActionInput) -> &str {
     if let Some(Value::Object(plan)) = input.response_stage_gate_plan.as_ref() {
         if let Some(Value::String(next_action)) = plan.get("nextAction") {
             return next_action.trim();

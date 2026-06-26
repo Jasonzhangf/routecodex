@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import {
   readRuntimeControlProjection,
+  readRuntimeDebugSnapshotProjection,
   readRuntimeProviderObservationProjection,
   readRuntimeRequestTruthIdentifiers,
   readRuntimeServerToolProjection,
@@ -92,6 +93,9 @@ describe('request-truth-readers', () => {
     expect(center.readDebugSnapshot()).toEqual({
       traceMarkers: ['debug-only']
     });
+    expect(readRuntimeDebugSnapshotProjection(metadata)).toEqual({
+      traceMarkers: ['debug-only']
+    });
 
     center.markReleased(
       {
@@ -103,6 +107,40 @@ describe('request-truth-readers', () => {
     );
 
     expect(center.snapshot().debugSnapshot.traceMarkers?.status).toBe('released');
+  });
+
+  it('reads normalized hubStageTop from MetadataCenter debug snapshot', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeDebugSnapshot(
+      'hubStageTop',
+      [
+        { stage: 'resp_inbound.stage1_codec_decode', totalMs: 118.6, count: 1, avgMs: 118.6, maxMs: 118.6 },
+        { stage: 'resp_outbound.stage2_client_projection', totalMs: 19.2 },
+        { stage: ' ', totalMs: 30 },
+      ],
+      {
+        module: 'tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts',
+        symbol: 'reads normalized hubStageTop from MetadataCenter debug snapshot',
+        stage: 'test'
+      }
+    );
+
+    expect(readRuntimeDebugSnapshotProjection(metadata)).toEqual({
+      hubStageTop: [
+        {
+          stage: 'resp_inbound.stage1_codec_decode',
+          totalMs: 119,
+          count: 1,
+          avgMs: 119,
+          maxMs: 119
+        },
+        {
+          stage: 'resp_outbound.stage2_client_projection',
+          totalMs: 19
+        }
+      ]
+    });
   });
 
   it('reads normalized provider observation fields from MetadataCenter', () => {
@@ -183,15 +221,6 @@ describe('request-truth-readers', () => {
       }
     );
     center.writeRuntimeControl(
-      'serverToolFollowup',
-      true,
-      {
-        module: 'tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts',
-        symbol: 'reads normalized runtime control fields from MetadataCenter',
-        stage: 'test'
-      }
-    );
-    center.writeRuntimeControl(
       'stopMessageExcludeDirect',
       false,
       {
@@ -208,7 +237,6 @@ describe('request-truth-readers', () => {
         routeName: 'tools',
         providerKey: 'provider.key.model'
       },
-      serverToolFollowup: true,
       stopMessageExcludeDirect: false,
     });
   });
@@ -227,29 +255,6 @@ describe('request-truth-readers', () => {
       {
         module: 'tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts',
         symbol: 'does not project dead servertoolResponseOrchestration runtime control residue',
-        stage: 'test'
-      },
-      'legacy dead slot injection'
-    );
-
-    expect(center.readRuntimeControl()).toEqual({});
-    expect(readRuntimeControlProjection(metadata)).toEqual({});
-  });
-
-  it('does not project dead serverToolFollowupMode runtime control residue', () => {
-    const metadata: Record<string, unknown> = {};
-    const center = MetadataCenter.attach(metadata);
-    (center.writeRuntimeControl as (
-      key: string,
-      value: unknown,
-      writtenBy: { module: string; symbol: string; stage: string },
-      reason?: string
-    ) => void)(
-      'serverToolFollowupMode',
-      'router',
-      {
-        module: 'tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts',
-        symbol: 'does not project dead serverToolFollowupMode runtime control residue',
         stage: 'test'
       },
       'legacy dead slot injection'

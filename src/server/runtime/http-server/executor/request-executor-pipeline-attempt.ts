@@ -131,15 +131,9 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     providerTransportBackoffKey
       ? peekProviderTransportBackoffWaitMs(providerTransportBackoffKey)
       : 0;
-  const preserveSameProviderRetry =
-    args.blockingRecoverableRouteHoldState?.preserveSameProviderRetry === true
-    && (
-      (args.blockingRecoverableRouteHoldState.providerKey && args.blockingRecoverableRouteHoldState.providerKey === target?.providerKey)
-      || (args.blockingRecoverableRouteHoldState.runtimeKey && args.blockingRecoverableRouteHoldState.runtimeKey === targetRuntimeKey)
-    );
   if (pendingTransportBackoffMs > 0 && target?.providerKey) {
     const targetAlreadyExcluded = args.excludedProviderKeys.has(target.providerKey);
-    if (targetAlreadyExcluded && !preserveSameProviderRetry) {
+    if (targetAlreadyExcluded) {
       applyRetryExclusionForCurrentProvider({
         providerKey: target.providerKey,
         excludedProviderKeys: args.excludedProviderKeys

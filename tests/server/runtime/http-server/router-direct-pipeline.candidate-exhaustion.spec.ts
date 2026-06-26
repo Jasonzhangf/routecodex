@@ -59,11 +59,9 @@ describe('router-direct.candidate-exhaustion', () => {
     expect(decision.mutatedExcluded).toEqual(new Set(['p1']));
   });
 
-  it('[forward] retry_same_provider_once with remaining attempts → request reroute (same provider)', () => {
+  it('[forward] exclude_and_reroute with remaining attempts → request reroute', () => {
     const decision = decideDirectRouterRetry({
-      retryExecutionPlan: plan({
-        retrySwitchPlan: { switchAction: 'retry_same_provider_once' } as Plan['retrySwitchPlan'],
-      }),
+      retryExecutionPlan: plan(),
       excludedProviderKeys: new Set(),
       directAttempt: 1,
       maxAttempts: 3,

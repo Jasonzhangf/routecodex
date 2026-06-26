@@ -7,9 +7,9 @@ use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_reques
 use crate::hub_pipeline_types::{
     run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
     run_hub_req_outbound_05_provider_semantic_entrypoint,
-    run_vr_route_04_selected_target_entrypoint,
     run_hub_resp_chatprocess_03_governed_entrypoint, run_hub_resp_inbound_02_parsed_entrypoint,
     run_hub_resp_outbound_04_client_semantic_entrypoint,
+    run_vr_route_04_selected_target_entrypoint,
 };
 use crate::hub_req_chatprocess_03_governance_boundary::apply_hub_req_chatprocess_03_tool_governance;
 use crate::hub_req_inbound_context_capture::{
@@ -27,9 +27,7 @@ use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatproc
 use crate::hub_resp_inbound_format_parse::{parse_resp_format_envelope, RespFormatParseInput};
 use crate::hub_resp_outbound_04_client_payload_boundary::build_hub_resp_outbound_04_client_payload_for_protocol;
 use crate::hub_resp_outbound_04_finalize_boundary::finalize_hub_resp_outbound_04_client_semantic;
-use crate::hub_resp_outbound_client_semantics::{
-    build_openai_chat_response_from_anthropic_message, build_responses_payload_from_chat_core,
-};
+use crate::hub_resp_outbound_client_semantics::build_responses_payload_from_chat_core;
 use crate::hub_resp_outbound_sse_stream::{process_sse_stream, SseStreamInput};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -46,6 +44,28 @@ use super::effect_plan::{HubPipelineEffect, HubPipelineEffectKind, HubPipelineEf
 use super::errors::{HubPipelineError, HubPipelineResult};
 use super::stage_catalog::HubPipelineStageId;
 use super::types::{HubPipelineConfig, HubPipelineExecutionOutput, HubPipelineRequest};
+
+fn read_entry_provider_protocol(
+    normalized_metadata: &Value,
+    metadata_center_snapshot: &Value,
+) -> Option<String> {
+    metadata_center_snapshot
+        .get("runtimeControl")
+        .and_then(|v| v.as_object())
+        .and_then(|rt| rt.get("providerProtocol"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            normalized_metadata
+                .get("providerProtocol")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct HubPipelineEngine {
@@ -78,7 +98,12 @@ impl HubPipelineEngine {
         Ok(())
     }
 
-    fn select_route(&self, request: &Value, metadata: &Value) -> HubPipelineResult<Value> {
+    fn select_route(
+        &self,
+        request: &Value,
+        metadata: &Value,
+        metadata_center_snapshot: &Value,
+    ) -> HubPipelineResult<Value> {
         if let Some(target) = self.config.virtual_router.get("target").cloned() {
             return Ok(serde_json::json!({
                 "target": target,
@@ -93,7 +118,7 @@ impl HubPipelineEngine {
                 "diagnostics": {}
             }));
         }
-        read_preselected_route(metadata).ok_or_else(|| {
+        read_preselected_route(metadata_center_snapshot, metadata).ok_or_else(|| {
             HubPipelineError::new(
                 "hub_pipeline_missing_preselected_route",
                 "Rust HubPipeline req route stage requires metadata.runtime_control.preselectedRoute for bootstrapped virtual router config",
@@ -112,6 +137,7 @@ impl HubPipelineEngine {
         };
         let entry_endpoint = request.entry_endpoint.clone();
         let direction = request.direction.clone();
+        let metadata_center_snapshot = request.metadata_center_snapshot.clone();
         let mut diagnostics = vec![diagnostic(
             HubPipelineStageId::NormalizeRequest,
             HubPipelineDiagnosticStatus::Started,
@@ -124,6 +150,7 @@ impl HubPipelineEngine {
             provider_protocol: request.provider_protocol,
             payload: request.payload,
             metadata: request.metadata,
+            metadata_center_snapshot: metadata_center_snapshot.clone(),
             stream: request.stream,
             process_mode: request.process_mode,
             direction: request.direction,
@@ -142,18 +169,16 @@ impl HubPipelineEngine {
             )
         })?;
         let normalized_metadata = output.metadata.clone().unwrap_or(Value::Null);
-        let entry_provider_protocol = normalized_metadata
-            .get("providerProtocol")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
+        let entry_provider_protocol = read_entry_provider_protocol(
+            &normalized_metadata,
+            &metadata_center_snapshot,
+        )
             .ok_or_else(|| {
                 HubPipelineError::new(
                     "hub_pipeline_missing_provider_protocol",
-                    "Rust HubPipeline requires metadata.providerProtocol",
+                    "Rust HubPipeline requires providerProtocol in metadataCenterSnapshot.runtimeControl or metadata.providerProtocol",
                 )
-            })?
-            .to_string();
+            })?;
         if direction == "response" {
             return self.execute_response_path(
                 output,
@@ -249,7 +274,7 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "protocol": entry_provider_protocol })),
         ));
-        let context_snapshot = capture_context_snapshot(
+        let inbound_context_snapshot = capture_context_snapshot(
             &entry_provider_protocol,
             &normalized_payload,
             &normalized_metadata,
@@ -259,7 +284,7 @@ impl HubPipelineEngine {
             HubPipelineStageId::ReqInboundContextCapture,
             HubPipelineDiagnosticStatus::Completed,
             Some(serde_json::json!({
-                "hasContextSnapshot": context_snapshot.is_some(),
+                "hasContextSnapshot": inbound_context_snapshot.is_some(),
             })),
         ));
         diagnostics.push(diagnostic(
@@ -274,6 +299,7 @@ impl HubPipelineEngine {
             entry_endpoint: entry_endpoint.clone(),
             request_id: output.request_id.clone(),
             has_active_stop_message_for_continue_execution: Some(true),
+            metadata_center_snapshot: metadata_center_snapshot.clone(),
         })
         .map_err(|message| HubPipelineError::new("hub_pipeline_tool_governance_failed", message))?;
         diagnostics.push(diagnostic(
@@ -290,7 +316,11 @@ impl HubPipelineEngine {
         .map_err(|message| {
             HubPipelineError::new("hub_pipeline_req_chatprocess_03_failed", message)
         })?;
-        let route_output = self.select_route(&governed.processed_request, &normalized_metadata)?;
+        let route_output = self.select_route(
+            &governed.processed_request,
+            &normalized_metadata,
+            &metadata_center_snapshot,
+        )?;
         let target = route_output.get("target").cloned().ok_or_else(|| {
             HubPipelineError::new(
                 "hub_pipeline_missing_route_target",
@@ -320,6 +350,7 @@ impl HubPipelineEngine {
         .map_err(|message| {
             HubPipelineError::new("hub_pipeline_vr_route_04_selected_target_failed", message)
         })?;
+        let governed_processed_request = governed.processed_request.clone();
         let mut routed = apply_vr_route_04_selection(RouteSelectionApplyInput {
             request: governed.processed_request,
             normalized_metadata,
@@ -334,14 +365,24 @@ impl HubPipelineEngine {
         })
         .map_err(HubPipelineError::from)?;
         let provider_protocol = resolve_outbound_provider_protocol(&routed.normalized_metadata)
-            .unwrap_or(entry_provider_protocol);
-        attach_context_snapshot_to_metadata(&mut routed.normalized_metadata, context_snapshot)?;
+            .unwrap_or(entry_provider_protocol.clone());
+        let outbound_context_snapshot = capture_context_snapshot(
+            &entry_provider_protocol,
+            &governed_processed_request,
+            &routed.normalized_metadata,
+            &request_id,
+        )?;
+        attach_context_snapshot_to_metadata(
+            &mut routed.normalized_metadata,
+            outbound_context_snapshot.or(inbound_context_snapshot),
+        )?;
+        let routing_decision = vr_route_04.clone().into_decision();
         if let Some(metadata) = routed.normalized_metadata.as_object_mut() {
             metadata.insert(
                 "capturedEntryRequest".to_string(),
                 entry_origin_request.clone(),
             );
-            metadata.insert("routingDecision".to_string(), vr_route_04.into_decision());
+            metadata.insert("routingDecision".to_string(), routing_decision);
             if let Some(diagnostics_value) = route_output.get("diagnostics").cloned() {
                 metadata.insert("routingDiagnostics".to_string(), diagnostics_value);
             }
@@ -355,6 +396,7 @@ impl HubPipelineEngine {
         ));
         let req_outbound_05 = run_hub_req_outbound_05_provider_semantic_entrypoint(
             req_chatprocess_03,
+            &vr_route_04,
             project_normal_request_payload(&routed.request),
         )
         .map_err(|message| HubPipelineError::new("hub_pipeline_req_outbound_05_failed", message))?;
@@ -475,15 +517,10 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Started,
             Some(serde_json::json!({ "protocol": parsed.envelope.format })),
         ));
-        let provider_format = parsed.envelope.format.clone();
-        let canonical_payload = canonicalize_provider_response_for_client(
+        let canonical_payload = move_provider_response_metadata_to_carrier(
             parsed.envelope.payload,
-            provider_format.as_str(),
-            &normalized_metadata,
-            output.request_id.as_str(),
-        )?;
-        let canonical_payload =
-            move_provider_response_metadata_to_carrier(canonical_payload, &mut normalized_metadata);
+            &mut normalized_metadata,
+        );
         let resp_inbound_02 = run_hub_resp_inbound_02_parsed_entrypoint(canonical_payload.clone())
             .map_err(|message| {
                 HubPipelineError::new("hub_pipeline_resp_inbound_02_failed", message)
@@ -848,6 +885,21 @@ fn capture_context_snapshot(
         tool_call_id_style,
     })
     .map_err(|message| HubPipelineError::new("hub_pipeline_context_capture_failed", message))?;
+    let mut snapshot = snapshot;
+    let governed_instructions = normalized_payload
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(instructions) = governed_instructions {
+        if let Some(snapshot_obj) = snapshot.as_object_mut() {
+            snapshot_obj.insert(
+                "systemInstruction".to_string(),
+                Value::String(instructions),
+            );
+        }
+    }
     Ok(Some(snapshot))
 }
 
@@ -903,13 +955,22 @@ fn apply_context_snapshot_to_format_envelope(
         *metadata_value = Value::Object(serde_json::Map::new());
     }
     if let Some(metadata_obj) = metadata_value.as_object_mut() {
+        metadata_obj.insert(
+            "contextMetadataKey".to_string(),
+            Value::String("responsesContext".to_string()),
+        );
+        metadata_obj.insert("responsesContext".to_string(), snapshot.clone());
+        metadata_obj.insert("contextSnapshot".to_string(), snapshot.clone());
         metadata_obj.insert("context".to_string(), snapshot.clone());
     }
-    if let Some(tool_outputs) = patch.tool_outputs {
-        payload_obj.insert(
-            "toolOutputs".to_string(),
-            serde_json::to_value(tool_outputs)?,
-        );
+    let payload_has_responses_input = payload_obj.get("input").is_some();
+    if !payload_has_responses_input {
+        if let Some(tool_outputs) = patch.tool_outputs {
+            payload_obj.insert(
+                "toolOutputs".to_string(),
+                serde_json::to_value(tool_outputs)?,
+            );
+        }
     }
     let has_existing_tools = payload_obj
         .get("tools")
@@ -923,32 +984,6 @@ fn apply_context_snapshot_to_format_envelope(
         }
     }
     Ok(())
-}
-
-fn canonicalize_provider_response_for_client(
-    payload: Value,
-    provider_format: &str,
-    metadata: &Value,
-    request_id: &str,
-) -> HubPipelineResult<Value> {
-    let client_protocol = metadata
-        .get("clientProtocol")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if provider_format == "anthropic-messages"
-        && matches!(client_protocol, "openai-chat" | "openai-responses")
-    {
-        return build_openai_chat_response_from_anthropic_message(&payload, request_id).map_err(
-            |message| {
-                HubPipelineError::new(
-                    "hub_pipeline_resp_anthropic_chat_canonicalize_failed",
-                    message,
-                )
-            },
-        );
-    }
-    Ok(payload)
 }
 
 fn move_provider_response_metadata_to_carrier(payload: Value, metadata: &mut Value) -> Value {
@@ -1084,6 +1119,54 @@ mod tests {
     }
 
     #[test]
+    fn read_preselected_route_prefers_snapshot_route_pin() {
+        let snapshot = json!({
+            "runtimeControl": {
+                "preselectedRoute": {
+                    "target": {
+                        "providerKey": "snapshot.provider.gpt-5.5"
+                    },
+                    "decision": {
+                        "routeName": "snapshot-thinking"
+                    },
+                    "diagnostics": {
+                        "source": "metadataCenterSnapshot"
+                    }
+                }
+            }
+        });
+        let metadata = json!({
+            "runtime_control": {
+                "preselectedRoute": {
+                    "target": {
+                        "providerKey": "runtime.provider.gpt-5.5"
+                    },
+                    "decision": {
+                        "routeName": "thinking"
+                    },
+                    "diagnostics": {
+                        "source": "runtime_control"
+                    }
+                }
+            }
+        });
+
+        let route = read_preselected_route(&snapshot, &metadata).expect("snapshot route pin");
+        assert_eq!(
+            route
+                .pointer("/target/providerKey")
+                .and_then(|value| value.as_str()),
+            Some("snapshot.provider.gpt-5.5")
+        );
+        assert_eq!(
+            route
+                .pointer("/diagnostics/source")
+                .and_then(|value| value.as_str()),
+            Some("metadataCenterSnapshot")
+        );
+    }
+
+    #[test]
     fn read_preselected_route_uses_runtime_control_route_pin() {
         let metadata = json!({
             "runtime_control": {
@@ -1114,13 +1197,18 @@ mod tests {
             }
         });
 
-        let route = read_preselected_route(&metadata).expect("runtime control route pin");
+        let route =
+            read_preselected_route(&json!(null), &metadata).expect("runtime control route pin");
         assert_eq!(
-            route.pointer("/target/providerKey").and_then(|value| value.as_str()),
+            route
+                .pointer("/target/providerKey")
+                .and_then(|value| value.as_str()),
             Some("runtime.provider.gpt-5.5")
         );
         assert_eq!(
-            route.pointer("/diagnostics/source").and_then(|value| value.as_str()),
+            route
+                .pointer("/diagnostics/source")
+                .and_then(|value| value.as_str()),
             Some("runtime_control")
         );
     }
@@ -1140,15 +1228,19 @@ mod tests {
             }
         });
 
-        assert!(read_preselected_route(&metadata).is_none());
+        assert!(read_preselected_route(&json!(null), &metadata).is_none());
     }
 }
 
-fn read_preselected_route(metadata: &Value) -> Option<Value> {
-    let route = metadata
-        .get("runtime_control")
+fn read_preselected_route(metadata_center_snapshot: &Value, metadata: &Value) -> Option<Value> {
+    let route = metadata_center_snapshot
+        .get("runtimeControl")
         .and_then(|runtime| runtime.get("preselectedRoute"))
-        ?;
+        .or_else(|| {
+            metadata
+                .get("runtime_control")
+                .and_then(|runtime| runtime.get("preselectedRoute"))
+        })?;
     let target = route.get("target")?;
     let decision = route.get("decision")?;
     if !target.is_object() || !decision.is_object() {

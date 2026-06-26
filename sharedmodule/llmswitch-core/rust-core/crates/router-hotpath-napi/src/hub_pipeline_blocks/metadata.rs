@@ -2,6 +2,25 @@ use serde_json::{Map, Value};
 
 use crate::shared_json_utils::read_first_object_trimmed_string;
 
+fn read_stop_message_client_inject_scope(
+    metadata_obj: &Map<String, Value>,
+    key: &str,
+    nested_key: &str,
+) -> Option<String> {
+    let _ = key;
+    metadata_obj
+        .get("runtime_control")
+        .and_then(|value| value.as_object())
+        .and_then(|runtime_control| {
+            runtime_control
+                .get("stopMessageClientInject")
+                .and_then(|value| value.as_object())
+                .and_then(|stop_message_client_inject| {
+                    read_first_object_trimmed_string(stop_message_client_inject, &[nested_key])
+                })
+        })
+}
+
 pub(crate) fn resolve_stop_message_router_metadata(metadata: &Value) -> Value {
     let mut out = Map::<String, Value>::new();
     let metadata_obj = match metadata.as_object() {
@@ -9,16 +28,18 @@ pub(crate) fn resolve_stop_message_router_metadata(metadata: &Value) -> Value {
         None => return Value::Object(out),
     };
 
-    if let Some(scope) =
-        read_first_object_trimmed_string(metadata_obj, &["stopMessageClientInjectSessionScope"])
-    {
+    if let Some(scope) = read_stop_message_client_inject_scope(
+        metadata_obj,
+        "stopMessageClientInjectSessionScope",
+        "sessionScope",
+    ) {
         out.insert(
             "stopMessageClientInjectSessionScope".to_string(),
             Value::String(scope),
         );
     }
     if let Some(scope) =
-        read_first_object_trimmed_string(metadata_obj, &["stopMessageClientInjectScope"])
+        read_stop_message_client_inject_scope(metadata_obj, "stopMessageClientInjectScope", "scope")
     {
         out.insert(
             "stopMessageClientInjectScope".to_string(),

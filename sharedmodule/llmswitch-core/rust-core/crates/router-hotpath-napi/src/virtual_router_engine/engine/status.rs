@@ -1,7 +1,6 @@
 use serde_json::{json, Value};
 
 use super::VirtualRouterEngineCore;
-use crate::virtual_router_engine::engine::selection::quota_state_blocks_provider;
 use crate::virtual_router_engine::time_utils::now_ms;
 
 impl VirtualRouterEngineCore {
@@ -20,8 +19,6 @@ impl VirtualRouterEngineCore {
         json!({
             "routes": routes,
             "health": self.health_manager.snapshot(),
-            "quota": self.quota_manager.snapshot(),
-            "quotaHostSnapshot": self.quota_manager.host_snapshot(),
             "forwarders": self.forwarder_status_snapshot(now),
         })
     }
@@ -62,11 +59,6 @@ impl VirtualRouterEngineCore {
         let runtime_key = profile.and_then(|item| item.runtime_key.clone());
         let concurrency_busy_remaining_ms =
             self.concurrency_busy_remaining_for_provider(&target.provider_key, now);
-        let quota_blocker = self.quota_manager.active_blocker(&target.provider_key, now);
-        let quota_blocks = quota_blocker
-            .as_ref()
-            .map(|state| quota_state_blocks_provider(state, now))
-            .unwrap_or(false);
         let health_cooldown_remaining_ms = self
             .health_manager
             .cooldown_remaining_ms(&target.provider_key, now);
@@ -80,7 +72,6 @@ impl VirtualRouterEngineCore {
         let available = !target.disabled
             && provider_enabled
             && concurrency_busy_remaining_ms.is_none()
-            && !quota_blocks
             && health_available;
         json!({
             "providerKey": target.provider_key,
@@ -89,8 +80,6 @@ impl VirtualRouterEngineCore {
             "providerEnabled": provider_enabled,
             "runtimeKey": runtime_key,
             "concurrencyBusyRemainingMs": concurrency_busy_remaining_ms,
-            "quotaBlocker": quota_blocker,
-            "quotaBlocks": quota_blocks,
             "healthState": health_state,
             "healthCooldownRemainingMs": health_cooldown_remaining_ms,
             "available": available,
@@ -185,7 +174,6 @@ mod tests {
         assert_eq!(sdfv["providerRegistered"].as_bool(), Some(true));
         assert_eq!(sdfv["providerEnabled"].as_bool(), Some(true));
         assert_eq!(sdfv["runtimeKey"].as_str(), Some("sdfv.key1"));
-        assert_eq!(sdfv["quotaBlocks"].as_bool(), Some(false));
         assert_eq!(sdfv["available"].as_bool(), Some(true));
     }
 

@@ -115,8 +115,7 @@ fn apply_target_metadata(
                 Value::String("config".to_string()),
             );
             configured.to_string()
-        } else if let Some(original) = original_reasoning_effort.filter(|v| !v.trim().is_empty())
-        {
+        } else if let Some(original) = original_reasoning_effort.filter(|v| !v.trim().is_empty()) {
             normalized_metadata.insert(
                 "__thinking_source".to_string(),
                 Value::String("request".to_string()),
@@ -393,7 +392,10 @@ pub fn apply_route_selection(
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
     {
-        request_map.insert("reasoning_effort".to_string(), Value::String(effort.clone()));
+        request_map.insert(
+            "reasoning_effort".to_string(),
+            Value::String(effort.clone()),
+        );
         write_reasoning_effort_object(request_map, &effort);
     }
     apply_target_to_subject(request_map, target_map, input.original_model);

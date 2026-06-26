@@ -223,6 +223,12 @@ export async function writeProviderSnapshot(options: ProviderSnapshotWriteOption
   }
   const snapshot = buildProviderSnapshotPersistInput(options);
 
+  // Fail-fast: provider-* stage without entryPort must not enter the queue.
+  if (String(snapshot.stage || '').trim().toLowerCase().startsWith('provider-') && snapshot.entryPort === undefined) {
+    logSnapshotNonBlockingError(`writeProviderSnapshot:${snapshot.stage}`, new Error("entryPort missing"));
+    return;
+  }
+
   if (!runtimeFlags.snapshotsEnabled) {
     if (options.forceLocalDiskWriteWhenDisabled) {
       try {

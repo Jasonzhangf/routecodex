@@ -11,6 +11,7 @@ import { extractUsageFromResult, mergeUsageMetrics } from './usage-aggregator.js
 import { extractStatusCodeFromError } from './utils.js';
 import { resolveSessionLogColorKey } from '../../../../utils/session-log-color.js';
 import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
+import { deriveFinishReason } from '../../../utils/finish-reason.js';
 
 export type HubStageTopEntry = {
   stage: string;
@@ -80,6 +81,7 @@ export function buildProviderExecutionSuccessResult(args: {
     decodeStats && typeof decodeStats.lastContentAtMs === 'number'
       ? decodeStats.lastContentAtMs
       : undefined;
+  const finishReason = args.finishReason ?? deriveFinishReason(args.converted.body);
   return {
     ...args.converted,
     metadata: {
@@ -99,7 +101,7 @@ export function buildProviderExecutionSuccessResult(args: {
       routeName: args.routeName,
       poolId: args.routingPoolId,
       entryPort: typeof args.entryPort === 'number' ? args.entryPort : undefined,
-      finishReason: args.finishReason,
+      finishReason,
       stoplessMode: args.stoplessMode,
       stoplessArmed: args.stoplessArmed,
       usage: args.aggregatedUsage,

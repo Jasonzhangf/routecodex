@@ -14,9 +14,19 @@ import {
   shouldSkipHubStageTimingLog,
   type HubStageTimingPhase,
 } from "./hub-stage-timing-log-blocks.js";
-import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 
 // feature_id: hub.stage_timing_observation
+
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+type MetadataCenterLike = {
+  writeDebugSnapshot?: (
+    key: string,
+    value: unknown,
+    writer: { module: string; symbol: string; stage: string },
+    reason?: string,
+  ) => void;
+};
 
 export { isHubStageTimingDetailEnabled, type HubStageTopSummaryEntry } from "./hub-stage-timing-blocks.js";
 
@@ -40,8 +50,20 @@ export function attachHubStageTopSummary(args: {
 }): void {
   const hubStageTop = peekHubStageTopSummary(args.requestId);
   if (!hubStageTop.length) return;
-  const rt = ensureRuntimeMetadata(args.metadata);
-  (rt as Record<string, unknown>).hubStageTop = hubStageTop as unknown;
+  const center = Reflect.get(args.metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  if (!center || typeof center.writeDebugSnapshot !== 'function') {
+    return;
+  }
+  center.writeDebugSnapshot(
+    'hubStageTop',
+    hubStageTop,
+    {
+      module: 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts',
+      symbol: 'attachHubStageTopSummary',
+      stage: 'hub_stage_timing_summary'
+    },
+    'hub stage timing top summary'
+  );
 }
 
 export function logHubStageTiming(

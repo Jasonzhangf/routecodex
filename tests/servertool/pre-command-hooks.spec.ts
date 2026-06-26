@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
 import { resetPreCommandHooksCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
@@ -8,6 +9,21 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 import type { ServerToolAutoHookTraceEvent } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 
 const HOOK_DIR = path.join(process.cwd(), 'tmp', 'jest-pre-command-hooks');
+
+function bindProviderProtocol(adapterContext: Record<string, unknown>, providerProtocol = 'openai-responses'): void {
+  const center = MetadataCenter.attach(adapterContext);
+  if (!center.readRuntimeControl().providerProtocol) {
+    center.writeRuntimeControl(
+      'providerProtocol',
+      providerProtocol,
+      {
+        module: 'tests/servertool/pre-command-hooks.spec.ts',
+        symbol: 'bindProviderProtocol',
+        stage: 'test'
+      }
+    );
+  }
+}
 
 function hasJqBinary(): boolean {
   const probe = spawnSync('jq', ['--version'], { encoding: 'utf8' });
@@ -118,6 +134,7 @@ describe('servertool pre-command hooks', () => {
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
     } as any;
+    bindProviderProtocol(adapterContext as unknown as Record<string, unknown>, 'openai-responses');
 
     const result = await runServerSideToolEngine({
       chatResponse: buildToolCallResponse('npm test'),
@@ -190,6 +207,7 @@ describe('servertool pre-command hooks', () => {
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
     } as any;
+    bindProviderProtocol(adapterContext as unknown as Record<string, unknown>, 'openai-responses');
 
     const result = await runServerSideToolEngine({
       chatResponse: buildToolCallResponse('echo base'),
@@ -241,6 +259,7 @@ describe('servertool pre-command hooks', () => {
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
     } as any;
+    bindProviderProtocol(adapterContext as unknown as Record<string, unknown>, 'openai-responses');
 
     const result = await runServerSideToolEngine({
       chatResponse: buildToolCallResponse('echo still-original'),
@@ -310,6 +329,7 @@ describe('servertool pre-command hooks', () => {
         }
       }
     } as any;
+    bindProviderProtocol(adapterContext as unknown as Record<string, unknown>, 'openai-responses');
 
     const result = await runServerSideToolEngine({
       chatResponse: buildToolCallResponse('echo from-runtime'),

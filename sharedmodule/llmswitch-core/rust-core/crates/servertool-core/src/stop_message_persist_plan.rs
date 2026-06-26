@@ -74,7 +74,13 @@ pub fn plan_stop_message_persist_snapshot(
         schema_budget_max_repeats.max(decision_max_repeats)
     };
     let state_used = state_update.and_then(|row| read_non_negative_floor(row.get("used")));
-    let no_change_count = read_non_negative_floor(input.schema_gate.get("no_change_count").or_else(|| input.schema_gate.get("noChangeCount"))).unwrap_or(0);
+    let no_change_count = read_non_negative_floor(
+        input
+            .schema_gate
+            .get("no_change_count")
+            .or_else(|| input.schema_gate.get("noChangeCount")),
+    )
+    .unwrap_or(0);
     let next_used = if should_count_budget {
         no_change_count.max(state_used.unwrap_or(schema_used_before_count + 1))
     } else if explicit_schema_used_before_count.is_some() {
@@ -123,9 +129,9 @@ pub fn plan_stop_message_persist_snapshot(
             .unwrap_or(default_text)
     } else {
         state_update
-        .and_then(|row| row.get("text"))
-        .map(value_to_string)
-        .unwrap_or(default_text)
+            .and_then(|row| row.get("text"))
+            .map(value_to_string)
+            .unwrap_or(default_text)
     };
     let provider_key = state_update
         .and_then(|row| row.get("providerKey").or_else(|| row.get("provider_key")))

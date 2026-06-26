@@ -42,8 +42,6 @@ export type RuntimeControlProjection = {
   providerProtocol?: string;
   retryProviderKey?: string;
   preselectedRoute?: Record<string, unknown>;
-  serverToolFollowup?: boolean;
-  serverToolFollowupSource?: string;
   stopless?: {
     flowId?: string;
     repeatCount?: number;
@@ -93,6 +91,19 @@ export type RuntimeServerToolProjection = RuntimeRequestTruthIdentifiers & {
   stopless?: RuntimeControlProjection['stopless'];
 };
 
+export type RuntimeDebugSnapshotProjection = {
+  snapshotId?: string;
+  bridgeHistory?: unknown[];
+  traceMarkers?: unknown[];
+  hubStageTop?: Array<{
+    stage: string;
+    totalMs: number;
+    count?: number;
+    avgMs?: number;
+    maxMs?: number;
+  }>;
+};
+
 export function writeStoplessRuntimeControl(args: {
   metadata: Record<string, unknown>;
   value: NonNullable<RuntimeControlProjection['stopless']>;
@@ -122,6 +133,42 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
 
 function readBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
+}
+
+function normalizeHubStageTopEntry(
+  entry: unknown
+): { stage: string; totalMs: number; count?: number; avgMs?: number; maxMs?: number } | undefined {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return undefined;
+  }
+  const record = entry as Record<string, unknown>;
+  const stage = readTrimmedString(record.stage);
+  const totalMs =
+    typeof record.totalMs === 'number' && Number.isFinite(record.totalMs)
+      ? Math.max(0, Math.round(record.totalMs))
+      : undefined;
+  if (!stage || totalMs === undefined) {
+    return undefined;
+  }
+  const count =
+    typeof record.count === 'number' && Number.isFinite(record.count)
+      ? Math.max(0, Math.floor(record.count))
+      : undefined;
+  const avgMs =
+    typeof record.avgMs === 'number' && Number.isFinite(record.avgMs)
+      ? Math.max(0, Math.round(record.avgMs))
+      : undefined;
+  const maxMs =
+    typeof record.maxMs === 'number' && Number.isFinite(record.maxMs)
+      ? Math.max(0, Math.round(record.maxMs))
+      : undefined;
+  return {
+    stage,
+    totalMs,
+    ...(count !== undefined ? { count } : {}),
+    ...(avgMs !== undefined ? { avgMs } : {}),
+    ...(maxMs !== undefined ? { maxMs } : {}),
+  };
 }
 
 export function readRuntimeRequestTruthIdentifiers(
@@ -167,6 +214,33 @@ export function readRuntimeProviderObservationProjection(
   };
 }
 
+export function readRuntimeDebugSnapshotProjection(
+  metadata: Record<string, unknown> | undefined
+): RuntimeDebugSnapshotProjection {
+  if (!metadata) {
+    return {};
+  }
+  const debugSnapshot = MetadataCenter.read(metadata)?.readDebugSnapshot();
+  const snapshotId = readTrimmedString(debugSnapshot?.snapshotId);
+  const bridgeHistory = Array.isArray(debugSnapshot?.bridgeHistory)
+    ? debugSnapshot.bridgeHistory
+    : undefined;
+  const traceMarkers = Array.isArray(debugSnapshot?.traceMarkers)
+    ? debugSnapshot.traceMarkers
+    : undefined;
+  const hubStageTop = Array.isArray(debugSnapshot?.hubStageTop)
+    ? debugSnapshot.hubStageTop
+      .map(normalizeHubStageTopEntry)
+      .filter((entry): entry is NonNullable<RuntimeDebugSnapshotProjection['hubStageTop']>[number] => Boolean(entry))
+    : undefined;
+  return {
+    ...(snapshotId ? { snapshotId } : {}),
+    ...(bridgeHistory ? { bridgeHistory } : {}),
+    ...(traceMarkers ? { traceMarkers } : {}),
+    ...(hubStageTop && hubStageTop.length > 0 ? { hubStageTop } : {}),
+  };
+}
+
 export function readRuntimeControlProjection(
   metadata: Record<string, unknown> | undefined
 ): RuntimeControlProjection {
@@ -180,8 +254,6 @@ export function readRuntimeControlProjection(
   const providerProtocol = readTrimmedString(runtimeControl?.providerProtocol);
   const retryProviderKey = readTrimmedString(runtimeControl?.retryProviderKey);
   const preselectedRoute = asFlatRecord(runtimeControl?.preselectedRoute);
-  const serverToolFollowup = readBoolean(runtimeControl?.serverToolFollowup);
-  const serverToolFollowupSource = readTrimmedString(runtimeControl?.serverToolFollowupSource);
   const stopless = asFlatRecord(runtimeControl?.stopless);
   const stopMessageCompareContext = asFlatRecord(runtimeControl?.stopMessageCompareContext);
   const stopMessageEnabled = readBoolean(runtimeControl?.stopMessageEnabled);
@@ -196,8 +268,6 @@ export function readRuntimeControlProjection(
     ...(providerProtocol ? { providerProtocol } : {}),
     ...(retryProviderKey ? { retryProviderKey } : {}),
     ...(preselectedRoute ? { preselectedRoute } : {}),
-    ...(serverToolFollowup !== undefined ? { serverToolFollowup } : {}),
-    ...(serverToolFollowupSource ? { serverToolFollowupSource } : {}),
     ...(stopless
       ? {
           stopless: {

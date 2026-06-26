@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::{
     build_hub_req_chatprocess_03_from_hub_req_inbound_02, build_hub_req_inbound_02_from_payload,
-    build_hub_req_outbound_05_from_hub_req_chatprocess_03,
+    build_hub_req_outbound_05_from_vr_route_04_selected_target,
     build_vr_route_04_from_hub_req_chatprocess_03, HubReqChatProcess03Governed,
     HubReqInbound02Standardized, HubReqOutbound05ProviderSemantic, VrRoute04SelectedTarget,
 };
@@ -29,9 +29,14 @@ pub(crate) fn run_vr_route_04_selected_target_entrypoint(
 
 pub(crate) fn run_hub_req_outbound_05_provider_semantic_entrypoint(
     governed: HubReqChatProcess03Governed,
+    selected_target: &VrRoute04SelectedTarget,
     outbound_payload: Value,
 ) -> Result<HubReqOutbound05ProviderSemantic, String> {
-    build_hub_req_outbound_05_from_hub_req_chatprocess_03(governed, outbound_payload)
+    build_hub_req_outbound_05_from_vr_route_04_selected_target(
+        governed,
+        selected_target,
+        outbound_payload,
+    )
 }
 
 #[cfg(test)]
@@ -50,10 +55,16 @@ mod tests {
             json!({"providerKey":"p.key","modelId":"m2","routeName":"default"}),
         )
         .unwrap();
-        let outbound =
-            run_hub_req_outbound_05_provider_semantic_entrypoint(governed, payload.clone())
-                .unwrap();
-        assert_eq!(selected.decision().get("providerKey"), Some(&json!("p.key")));
+        let outbound = run_hub_req_outbound_05_provider_semantic_entrypoint(
+            governed,
+            &selected,
+            payload.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            selected.decision().get("providerKey"),
+            Some(&json!("p.key"))
+        );
         assert_eq!(outbound.into_payload(), payload);
     }
 

@@ -2,6 +2,8 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::hub_resp_outbound_client_semantics::build_openai_chat_response_from_anthropic_message;
+
 // feature_id: hub.response_provider_sse_materialization
 
 const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
@@ -380,7 +382,9 @@ fn normalize_openai_chat_message_tool_calls_arrays(value: &mut Value) {
             if let Some(choices) = object.get_mut("choices").and_then(Value::as_array_mut) {
                 for choice in choices {
                     if let Some(choice_row) = choice.as_object_mut() {
-                        if let Some(message) = choice_row.get_mut("message").and_then(Value::as_object_mut) {
+                        if let Some(message) =
+                            choice_row.get_mut("message").and_then(Value::as_object_mut)
+                        {
                             if let Some(tool_calls) = message.get_mut("tool_calls") {
                                 if !tool_calls.is_array() {
                                     let normalized = match std::mem::take(tool_calls) {
@@ -869,20 +873,22 @@ fn unsupported_protocol_error(protocol: &str) -> String {
 }
 
 fn parse_anthropic_messages_response(payload: &Value) -> Result<FormatEnvelope, String> {
-    validate_payload_size(payload)?;
+    let materialized = build_openai_chat_response_from_anthropic_message(payload, "resp_inbound")?;
+    validate_payload_size(&materialized)?;
 
-    let model = payload
+    let model = materialized
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
 
     Ok(FormatEnvelope {
-        format: "anthropic-messages".to_string(),
+        format: "openai-chat".to_string(),
         version: "v1".to_string(),
-        payload: payload.clone(),
+        payload: materialized,
         metadata: Some(serde_json::json!({
             "model": model,
+            "provider_format": "anthropic-messages",
             "extracted_at": "resp_format_parse"
         })),
     })
@@ -1201,7 +1207,10 @@ mod tests {
             result.envelope.metadata.as_ref().unwrap()["model"],
             "deepseek-ai/deepseek-v4-pro"
         );
-        assert_eq!(result.envelope.payload["choices"][0]["message"]["content"], "wrapped hello");
+        assert_eq!(
+            result.envelope.payload["choices"][0]["message"]["content"],
+            "wrapped hello"
+        );
     }
 
     #[test]
@@ -1325,11 +1334,70 @@ mod tests {
         };
 
         let result = parse_resp_format_envelope(input).unwrap();
-        assert_eq!(result.envelope.format, "anthropic-messages");
+        assert_eq!(result.envelope.format, "openai-chat");
         assert_eq!(
             result.envelope.metadata.as_ref().unwrap()["model"],
             "claude-3-opus"
         );
+        assert_eq!(result.envelope.payload["object"], "chat.completion");
+        assert_eq!(
+            result.envelope.payload["choices"][0]["finish_reason"],
+            "stop"
+        );
+        assert_eq!(
+            result.envelope.payload["choices"][0]["message"]["content"],
+            "hello"
+        );
+        assert!(result.envelope.payload.get("stop_reason").is_none());
+        assert!(result.envelope.payload.get("content").is_none());
+    }
+
+    #[test]
+    fn test_parse_anthropic_reasoning_stop_tool_use_to_openai_chat_tool_calls() {
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "id": "msg_reasoning_stop",
+                "model": "MiniMax-M3",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "call_reasoning_stop",
+                    "name": "reasoningStop",
+                    "input": {
+                        "stopreason": 0,
+                        "reason": "done",
+                        "has_evidence": 1,
+                        "evidence": "ok",
+                        "issue_cause": "none",
+                        "excluded_factors": "none",
+                        "diagnostic_order": "1",
+                        "done_steps": "done",
+                        "next_step": "",
+                        "next_suggested_path": "",
+                        "needs_user_input": false,
+                        "learned": "ok"
+                    }
+                }],
+                "stop_reason": "tool_use"
+            }),
+            protocol: "anthropic-messages".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        assert_eq!(result.envelope.format, "openai-chat");
+        assert_eq!(result.envelope.payload["object"], "chat.completion");
+        assert_eq!(
+            result.envelope.payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+        let tool_call = &result.envelope.payload["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(tool_call["id"], "call_reasoning_stop");
+        assert_eq!(tool_call["function"]["name"], "reasoningStop");
+        assert!(tool_call["function"]["arguments"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("\"stopreason\":0"));
+        assert!(result.envelope.payload.get("stop_reason").is_none());
+        assert!(result.envelope.payload.get("content").is_none());
     }
 
     #[test]

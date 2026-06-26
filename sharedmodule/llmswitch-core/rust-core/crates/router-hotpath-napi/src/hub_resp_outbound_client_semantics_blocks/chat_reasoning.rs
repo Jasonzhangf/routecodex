@@ -148,7 +148,11 @@ pub(crate) fn build_openai_chat_completion_from_responses_payload(
     let has_tool_calls = !tool_calls.is_empty();
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String(role));
-    message.insert("content".to_string(), Value::String(content));
+    if has_tool_calls {
+        message.insert("content".to_string(), Value::Null);
+    } else {
+        message.insert("content".to_string(), Value::String(content));
+    }
     if has_tool_calls {
         message.insert("tool_calls".to_string(), Value::Array(tool_calls));
     }

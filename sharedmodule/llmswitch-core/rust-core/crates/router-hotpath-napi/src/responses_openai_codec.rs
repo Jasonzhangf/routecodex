@@ -42,6 +42,15 @@ fn extract_tool_call_id_style(payload: &Map<String, Value>) -> Option<Value> {
     })
 }
 
+fn resolve_embedded_responses_context(payload: &Map<String, Value>) -> Option<Value> {
+    let metadata = payload.get("metadata")?.as_object()?;
+    metadata
+        .get("responsesContext")
+        .or_else(|| metadata.get("contextSnapshot"))
+        .filter(|value| value.is_object())
+        .cloned()
+}
+
 fn append_local_images(messages: Vec<Value>) -> NapiResult<Vec<Value>> {
     let raw = crate::hub_bridge_actions::append_local_image_block_on_latest_user_input_json(
         serde_json::json!({ "messages": messages }).to_string(),
@@ -136,6 +145,17 @@ fn build_request_from_responses_payload(
         request.insert("model".to_string(), model.clone());
     }
     request.insert("messages".to_string(), Value::Array(messages));
+    if let Some(system_instruction) = context_row
+        .get("systemInstruction")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        request.insert(
+            "instructions".to_string(),
+            Value::String(system_instruction.to_string()),
+        );
+    }
 
     for key in [
         "top_p",
@@ -174,15 +194,19 @@ pub fn run_responses_openai_request_codec_json(
         napi::Error::from_reason("responses-openai request payload must be an object".to_string())
     })?;
 
-    let capture_input = serde_json::json!({
-        "rawRequest": Value::Object(payload_row.clone()),
-        "requestId": options.request_id,
-        "toolCallIdStyle": extract_tool_call_id_style(&payload_row),
-    });
-    let context_raw = crate::hub_req_inbound_context_capture::capture_req_inbound_responses_context_snapshot_json(
-        capture_input.to_string(),
-    )?;
-    let context = parse_value(&context_raw)?;
+    let context = if let Some(existing) = resolve_embedded_responses_context(&payload_row) {
+        existing
+    } else {
+        let capture_input = serde_json::json!({
+            "rawRequest": Value::Object(payload_row.clone()),
+            "requestId": options.request_id,
+            "toolCallIdStyle": extract_tool_call_id_style(&payload_row),
+        });
+        let context_raw = crate::hub_req_inbound_context_capture::capture_req_inbound_responses_context_snapshot_json(
+            capture_input.to_string(),
+        )?;
+        parse_value(&context_raw)?
+    };
     let request = build_request_from_responses_payload(&payload_row, &context)
         .map_err(napi::Error::from_reason)?;
 
@@ -293,6 +317,42 @@ mod tests {
         assert_eq!(
             context["toolsNormalized"][0]["name"],
             Value::String("exec_command".to_string())
+        );
+    }
+
+    #[test]
+    fn request_codec_restores_context_system_instruction_into_chat_instructions() {
+        let payload_row = json!({
+            "model": "gpt-4.1",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "keep going" }
+                    ]
+                }
+            ]
+        });
+        let context = json!({
+            "input": payload_row["input"],
+            "chatMessages": [
+                {
+                    "role": "user",
+                    "content": "keep going"
+                }
+            ],
+            "systemInstruction": "stopreason 取值：0=finished，1=blocked，2=continue_needed"
+        });
+        let request = build_request_from_responses_payload(
+            payload_row.as_object().expect("payload row"),
+            &context
+        )
+        .expect("request");
+
+        assert_eq!(
+            request.get("instructions").and_then(Value::as_str),
+            Some("stopreason 取值：0=finished，1=blocked，2=continue_needed")
         );
     }
 
@@ -450,7 +510,89 @@ mod tests {
     }
 
     #[test]
-    fn request_codec_does_not_drop_live_stopless_tool_continuation_when_chat_messages_shortcut_exists() {
+    fn request_codec_then_anthropic_codec_preserves_public_tool_pair_before_stopless_pair() {
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "router-gpt-5.5",
+                "previous_response_id": "resp_prev_1",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_call_public",
+                        "call_id": "call_public",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"curl /api/catalog\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_call_public",
+                        "call_id": "call_public",
+                        "output": "{\"owner\":\"backend\"}"
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_stopless",
+                        "call_id": "call_stopless",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_stopless",
+                        "call_id": "call_stopless",
+                        "output": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\"}"
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_to_anthropic_public_then_stopless" }).to_string()),
+        )
+        .unwrap();
+
+        let openai_chat: Value = serde_json::from_str(&raw).unwrap();
+        let anthropic_raw =
+            build_anthropic_from_openai_chat_json(openai_chat["request"].to_string(), None)
+                .expect("anthropic build success");
+        let anthropic: Value = serde_json::from_str(&anthropic_raw).unwrap();
+        let messages = anthropic["messages"]
+            .as_array()
+            .expect("anthropic messages");
+        let tool_use_index = messages
+            .iter()
+            .position(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            && part["id"].as_str() == Some("call_public")
+                    })
+                })
+            })
+            .expect("public tool_use");
+        let result_message = messages
+            .get(tool_use_index + 1)
+            .expect("public tool_result");
+        assert_eq!(result_message["role"], json!("user"));
+        assert_eq!(result_message["content"][0]["type"], json!("tool_result"));
+        assert_eq!(
+            result_message["content"][0]["tool_use_id"],
+            json!("call_public")
+        );
+        assert_eq!(
+            result_message["content"][0]["content"],
+            json!("{\"owner\":\"backend\"}")
+        );
+    }
+
+    #[test]
+    fn request_codec_restores_stopless_cli_result_as_reasoning_stop_pair_and_guidance() {
         let raw = run_responses_openai_request_codec_json(
             json!({
                 "model": "gpt-5.5",
@@ -476,21 +618,14 @@ mod tests {
                         "id": "fc_stopless_1",
                         "call_id": "call_stopless_1",
                         "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop\"}"
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
                     },
                     {
                         "type": "function_call_output",
                         "id": "fc_stopless_1",
                         "call_id": "call_stopless_1",
-                        "output": "{\"repeatCount\":2,\"summary\":\"stopless continuation ready\"}"
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续往下做；如果能收尾就直接说做完。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
                     },
-                    {
-                        "type": "message",
-                        "role": "user",
-                        "content": [
-                            { "type": "input_text", "text": "继续往下做；如果能收尾就直接说做完。" }
-                        ]
-                    }
                 ],
                 "tools": [
                     {
@@ -514,18 +649,214 @@ mod tests {
         assert_eq!(messages[0]["role"], json!("user"));
         assert_eq!(messages[1]["role"], json!("assistant"));
         assert_eq!(messages[1]["tool_calls"][0]["id"], json!("call_stopless_1"));
-        assert_eq!(messages[1]["tool_calls"][0]["function"]["name"], json!("exec_command"));
+        assert_eq!(
+            messages[1]["tool_calls"][0]["function"]["name"],
+            json!("reasoningStop")
+        );
         assert_eq!(messages[2]["role"], json!("tool"));
         assert_eq!(messages[2]["tool_call_id"], json!("call_stopless_1"));
+        let restored_output: Value = serde_json::from_str(
+            messages[2]["content"]
+                .as_str()
+                .expect("reasoningStop tool result content"),
+        )
+        .expect("reasoningStop tool result json");
+        assert_eq!(restored_output["flowId"], json!("stop_message_flow"));
         assert_eq!(
-            messages[2]["content"],
-            json!("{\"repeatCount\":2,\"summary\":\"stopless continuation ready\"}")
+            restored_output["summary"],
+            json!("stopless continuation ready")
         );
-        assert_eq!(messages[3]["role"], json!("user"));
+        assert_eq!(restored_output["repeatCount"], json!(2));
+        assert_eq!(restored_output["maxRepeats"], json!(3));
         assert_eq!(
-            messages[3]["content"],
+            restored_output["continuationPrompt"],
             json!("继续往下做；如果能收尾就直接说做完。")
         );
+        assert_eq!(
+            restored_output["schemaFeedback"]["reasonCode"],
+            json!("stop_schema_missing")
+        );
+        assert_eq!(
+            restored_output["schemaFeedback"]["missingFields"],
+            json!(["stopreason", "reason", "next_step"])
+        );
+        assert_eq!(
+            restored_output["schemaGuidance"]["requiredFields"],
+            json!(["stopreason", "reason", "next_step"])
+        );
+        assert_eq!(
+            restored_output["schemaGuidance"]["stopreasonValues"],
+            json!({
+                "finished": 0,
+                "blocked": 1,
+                "continueNeeded": 2
+            })
+        );
+        assert_eq!(
+            restored_output["schemaGuidance"]["triggerHint"],
+            json!("no_schema")
+        );
+        assert_eq!(messages[3]["role"], json!("user"));
+        let guidance = messages[3]["content"].as_str().expect("guidance text");
+        assert!(guidance.contains("上一轮执行结果：repeatCount=2/3"));
+        assert!(guidance.contains("继续往下做；如果能收尾就直接说做完。"));
+        assert!(guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+        assert!(!guidance.contains("stop_message_auto"));
+    }
+
+    #[test]
+    fn request_codec_prefers_embedded_responses_context_for_live_stopless_tool_message_shape() {
+        let live_input = json!([
+            {
+                "content": [],
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"invalid_schema\\\"}'\"}",
+                            "name": "exec_command"
+                        },
+                        "id": "call_servertool_cli_live_verify_1",
+                        "type": "function"
+                    }
+                ],
+                "type": "message"
+            },
+            {
+                "content": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"invalid_schema\"}}",
+                "name": "reasoningStop",
+                "role": "tool",
+                "tool_call_id": "call_servertool_cli_live_verify_1"
+            },
+            {
+                "content": [
+                    {
+                        "text": "继续修正 stop schema 并继续执行",
+                        "type": "input_text"
+                    }
+                ],
+                "role": "user",
+                "type": "message"
+            }
+        ]);
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "gpt-5.4",
+                "stream": false,
+                "input": live_input,
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "description": "Runs a shell command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "cmd": { "type": "string" } },
+                            "required": ["cmd"]
+                        }
+                    }
+                ],
+                "metadata": {
+                    "responsesContext": {
+                        "requestId": "req_1782483890571_cd0de3c5",
+                        "input": [
+                            {
+                                "type": "function_call",
+                                "id": "fc_stopless_live_1",
+                                "call_id": "call_servertool_cli_live_verify_1",
+                                "name": "reasoningStop",
+                                "arguments": "{}"
+                            },
+                            {
+                                "type": "function_call_output",
+                                "id": "fc_stopless_live_1",
+                                "call_id": "call_servertool_cli_live_verify_1",
+                                "output": "{\"ok\":true,\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]}}"
+                            },
+                            {
+                                "type": "message",
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "input_text",
+                                        "text": "继续修正 stop schema 并继续执行"
+                                    }
+                                ]
+                            }
+                        ],
+                        "chatMessages": [
+                            {
+                                "role": "assistant",
+                                "tool_calls": [
+                                    {
+                                        "id": "call_servertool_cli_live_verify_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "reasoningStop",
+                                            "arguments": "{}"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "role": "tool",
+                                "tool_call_id": "call_servertool_cli_live_verify_1",
+                                "content": "{\"ok\":true,\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]}}"
+                            },
+                            {
+                                "role": "user",
+                                "content": "上一轮执行结果：repeatCount=1/3。刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。继续修正 stop schema 并继续执行"
+                            }
+                        ],
+                        "toolsNormalized": [
+                            {
+                                "type": "function",
+                                "name": "exec_command",
+                                "description": "Runs a shell command",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": { "cmd": { "type": "string" } },
+                                    "required": ["cmd"]
+                                }
+                            },
+                            {
+                                "type": "function",
+                                "name": "reasoningStop",
+                                "description": "stopless schema tool",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "stopreason": { "type": "integer" }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_1782483890571_cd0de3c5" }).to_string()),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let messages = value["request"]["messages"].as_array().expect("messages");
+        assert_eq!(messages[0]["role"], json!("assistant"));
+        assert_eq!(
+            messages[0]["tool_calls"][0]["function"]["name"],
+            json!("reasoningStop")
+        );
+        assert_eq!(messages[1]["role"], json!("tool"));
+        assert_eq!(
+            messages[1]["tool_call_id"],
+            json!("call_servertool_cli_live_verify_1")
+        );
+        let tool_output = messages[1]["content"].as_str().expect("tool content");
+        assert!(!tool_output.contains("stop_message_auto"));
+        assert_eq!(messages[2]["role"], json!("user"));
+        let guidance = messages[2]["content"].as_str().expect("guidance");
+        assert!(guidance.contains("继续修正 stop schema 并继续执行"));
+        assert_eq!(value["request"]["tools"][1]["name"], json!("reasoningStop"));
     }
 
     #[test]
@@ -865,5 +1196,140 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("<parameter name=\"input\">pwd"));
+    }
+
+    #[test]
+    fn request_codec_then_anthropic_codec_keeps_html_exec_tool_result_before_later_stopless_turns()
+    {
+        let html_tool_output = concat!(
+            "Total output lines: 170\n\n",
+            "<!DOCTYPE html><html><head><title>Static Residential Proxies</title></head><body>",
+            "<img src=\"data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%3e\" />",
+            "<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB\" />",
+            "<p>gateway.iproyal.com:19123</p>",
+            "</body></html>"
+        );
+        let stopless_output = "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续做下一步；先把手头能确认的结果拿回来。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}";
+        let stopless_chunk_user_text = concat!(
+            "Chunk ID: 8dc4a6\n",
+            "Wall time: 0.1388 seconds\n",
+            "Process exited with code 0\n",
+            "Original token count: 1229\n",
+            "Output:\n",
+            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
+        );
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "gpt-5.5",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "我其实想知道，我如何配置和它的连接IPRoyal 的静态 IP" }
+                        ]
+                    },
+                    {
+                        "type": "reasoning",
+                        "summary": [{ "type": "summary_text", "text": "**Thinking** search static proxy details" }]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_html_exec_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"curl -s 'https://iproyal.com/static-residential-proxies/' 2>/dev/null | head -200\",\"yield_time_ms\":10000}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_html_exec_1",
+                        "output": html_tool_output
+                    },
+                    {
+                        "type": "reasoning",
+                        "summary": [{ "type": "summary_text", "text": "**Thinking** summarize proxy setup" }]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_stopless_1",
+                        "name": "reasoningStop",
+                        "arguments": "{\"stopreason\":2,\"reason\":\"continue_needed\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_stopless_1",
+                        "output": stopless_output
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": stopless_chunk_user_text }
+                        ]
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            { "type": "output_text", "text": "## 需要确认\nJason 从 dashboard 取真实 endpoint 后 curl 验证，再告知接入目标（sing-box / PassWall2 / 本机代理）" }
+                        ]
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "它是用一个特殊的协议做单次请求，请求本身包括鉴权和内容？无状态请求？" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": { "type": "object", "properties": {} }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_html_exec_tool_result_history" }).to_string()),
+        )
+        .unwrap();
+
+        let openai_chat: Value = serde_json::from_str(&raw).unwrap();
+        let anthropic_raw =
+            build_anthropic_from_openai_chat_json(openai_chat["request"].to_string(), None)
+                .expect("anthropic build success");
+        let anthropic: Value = serde_json::from_str(&anthropic_raw).unwrap();
+        let messages = anthropic["messages"]
+            .as_array()
+            .expect("anthropic messages");
+
+        let tool_use_index = messages
+            .iter()
+            .position(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            && part["id"].as_str() == Some("call_html_exec_1")
+                    })
+                })
+            })
+            .expect("exec tool_use exists");
+        let tool_result_message = messages
+            .get(tool_use_index + 1)
+            .expect("tool_result follows HTML exec tool_use");
+        assert_eq!(tool_result_message["role"], json!("user"));
+        assert_eq!(
+            tool_result_message["content"][0]["type"],
+            json!("tool_result")
+        );
+        assert_eq!(
+            tool_result_message["content"][0]["tool_use_id"],
+            json!("call_html_exec_1")
+        );
+        assert!(tool_result_message["content"][0]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("[Image omitted]"));
     }
 }

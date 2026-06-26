@@ -40,6 +40,7 @@ fn test_basic_pipeline_success() {
         provider_protocol: "openai-chat".to_string(),
         payload: json!({"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]}),
         metadata: json!({"source": "test"}),
+        metadata_center_snapshot: json!(null),
         stream: false,
         process_mode: "chat".to_string(),
         direction: "request".to_string(),
@@ -71,6 +72,7 @@ fn test_run_hub_pipeline_sets_orchestration_metadata_fields() {
         metadata: json!({
             "routeHint": "  tools  "
         }),
+        metadata_center_snapshot: json!(null),
         stream: false,
         process_mode: "chat".to_string(),
         direction: "request".to_string(),
@@ -111,6 +113,29 @@ fn test_run_hub_pipeline_sets_orchestration_metadata_fields() {
 }
 
 #[test]
+fn test_run_hub_pipeline_fails_fast_on_empty_provider_protocol() {
+    let input = HubPipelineInput {
+        request_id: "req_empty_provider_protocol".to_string(),
+        endpoint: "/v1/chat/completions".to_string(),
+        entry_endpoint: "/v1/chat/completions".to_string(),
+        provider_protocol: "   ".to_string(),
+        payload: json!({
+            "model": "gpt-4",
+            "messages": [{ "role": "user", "content": "hi" }]
+        }),
+        metadata: json!({}),
+        metadata_center_snapshot: json!(null),
+        stream: false,
+        process_mode: "chat".to_string(),
+        direction: "request".to_string(),
+        stage: "inbound".to_string(),
+    };
+
+    let result = run_hub_pipeline(input);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_run_hub_pipeline_extracts_apply_patch_mode_from_tools() {
     let input = HubPipelineInput {
         request_id: "req_apply_patch".to_string(),
@@ -129,6 +154,7 @@ fn test_run_hub_pipeline_extracts_apply_patch_mode_from_tools() {
             }]
         }),
         metadata: json!({}),
+        metadata_center_snapshot: json!(null),
         stream: false,
         process_mode: "chat".to_string(),
         direction: "request".to_string(),
@@ -167,6 +193,7 @@ fn test_run_hub_pipeline_does_not_extract_hashline_mode_when_filepath_declared()
             }]
         }),
         metadata: json!({}),
+        metadata_center_snapshot: json!(null),
         stream: false,
         process_mode: "chat".to_string(),
         direction: "request".to_string(),
@@ -194,6 +221,7 @@ fn test_run_hub_pipeline_merges_stop_message_tmux_aliases() {
         metadata: json!({
             "client_tmux_session_id": "tmux-session-123"
         }),
+        metadata_center_snapshot: json!(null),
         stream: false,
         process_mode: "chat".to_string(),
         direction: "request".to_string(),
@@ -242,7 +270,7 @@ fn test_invalid_protocol_error() {
 fn test_empty_provider_protocol_fails_fast() {
     let result = resolve_provider_protocol("   ");
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("requires providerProtocol"));
+    assert!(result.unwrap_err().contains("providerProtocol is required"));
 }
 
 #[test]
@@ -540,8 +568,14 @@ fn test_execute_hub_pipeline_preserves_responses_tool_continuation_for_anthropic
                 && message["content"][0]["type"] == json!("tool_use")
         })
         .expect("assistant tool_use message");
-    assert_eq!(assistant_tool_use["content"][0]["id"], json!("call_probe_1"));
-    assert_eq!(assistant_tool_use["content"][0]["name"], json!("probe_tool"));
+    assert_eq!(
+        assistant_tool_use["content"][0]["id"],
+        json!("call_probe_1")
+    );
+    assert_eq!(
+        assistant_tool_use["content"][0]["name"],
+        json!("probe_tool")
+    );
     let user_tool_result = messages
         .iter()
         .find(|message| {
@@ -560,7 +594,8 @@ fn test_execute_hub_pipeline_preserves_responses_tool_continuation_for_anthropic
 }
 
 #[test]
-fn test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_declared_tools() {
+fn test_execute_hub_pipeline_restores_stopless_resume_as_reasoning_stop_pair_without_declared_tools(
+) {
     let input_json = json!({
         "config": {
             "virtualRouter": {
@@ -613,7 +648,7 @@ fn test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_decl
                         "type": "function_call_output",
                         "id": "fc_stopless_1",
                         "call_id": "call_stopless_1",
-                        "output": "{\"repeatCount\":2,\"summary\":\"stopless continuation ready\"}"
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续往下做；如果能收尾就直接说做完。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"}}"
                     }
                 ]
             },
@@ -631,15 +666,50 @@ fn test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_decl
     let messages = output["payload"]["messages"]
         .as_array()
         .expect("provider messages");
-    assert_eq!(messages.len(), 3);
+    assert_eq!(messages.len(), 4);
     assert_eq!(messages[0]["role"], json!("user"));
     assert_eq!(messages[1]["role"], json!("assistant"));
     assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
     assert_eq!(messages[1]["content"][0]["id"], json!("call_stopless_1"));
-    assert_eq!(messages[1]["content"][0]["name"], json!("exec_command"));
+    assert_eq!(messages[1]["content"][0]["name"], json!("reasoningStop"));
     assert_eq!(messages[2]["role"], json!("user"));
     assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
-    assert_eq!(messages[2]["content"][0]["tool_use_id"], json!("call_stopless_1"));
+    assert_eq!(
+        messages[2]["content"][0]["tool_use_id"],
+        json!("call_stopless_1")
+    );
+    assert!(
+        !serde_json::to_string(&messages[2]["content"][0])
+            .unwrap_or_default()
+            .contains("stop_message_auto"),
+        "restored provider-facing tool result must not leak raw stop_message_auto identity: {}",
+        output["payload"]
+    );
+    assert_eq!(messages[3]["role"], json!("user"));
+    assert_eq!(messages[3]["content"][0]["type"], json!("text"));
+    let guidance = messages[3]["content"][0]["text"]
+        .as_str()
+        .expect("stopless guidance text");
+    assert!(
+        guidance.contains("上一轮执行结果：repeatCount=2/3"),
+        "provider payload must include stopless repeat-count feedback: {}",
+        output["payload"]
+    );
+    assert!(
+        guidance.contains("继续往下做；如果能收尾就直接说做完。"),
+        "provider payload must carry the continuation guidance back to the model: {}",
+        output["payload"]
+    );
+    assert!(
+        guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"),
+        "provider payload must carry the stop schema contract as plain guidance: {}",
+        output["payload"]
+    );
+    assert!(
+        guidance.contains("如果任务已经完成，就按下面 schema 补齐"),
+        "provider payload must include the natural-language repair contract: {}",
+        output["payload"]
+    );
     assert_eq!(
         output["payload"]["system"][0]["text"],
         json!("You are Claude Code, Anthropic's official CLI for Claude.")
@@ -647,7 +717,8 @@ fn test_execute_hub_pipeline_preserves_stopless_resume_tool_history_without_decl
 }
 
 #[test]
-fn test_execute_hub_pipeline_live_slice_keeps_public_catalog_tool_result_before_stopless_followup() {
+fn test_execute_hub_pipeline_live_slice_keeps_public_catalog_tool_result_before_stopless_followup()
+{
     let input_json = json!({
         "config": {
             "virtualRouter": {
@@ -826,6 +897,80 @@ fn test_resolve_stop_message_router_metadata_prefers_client_tmux_and_sets_aliase
     assert_eq!(
         row.get("tmux_session_id").and_then(|v| v.as_str()),
         Some("client-tmux-1")
+    );
+}
+
+#[test]
+fn test_resolve_stop_message_router_metadata_reads_nested_runtime_control_scopes() {
+    let metadata = json!({
+        "runtime_control": {
+            "stopMessageClientInject": {
+                "sessionScope": "  scope-nested  ",
+                "scope": " tmux:nested "
+            }
+        }
+    });
+    let output = resolve_stop_message_router_metadata(&metadata);
+    let row = output.as_object().expect("object output");
+    assert_eq!(
+        row.get("stopMessageClientInjectSessionScope")
+            .and_then(|v| v.as_str()),
+        Some("scope-nested")
+    );
+    assert_eq!(
+        row.get("stopMessageClientInjectScope")
+            .and_then(|v| v.as_str()),
+        Some("tmux:nested")
+    );
+}
+
+#[test]
+fn test_resolve_stop_message_router_metadata_reads_nested_runtime_control_stop_message_inject() {
+    let metadata = json!({
+        "runtime_control": {
+            "stopMessageClientInject": {
+                "sessionScope": "  scope-nested-2  ",
+                "scope": " tmux:nested-2 "
+            }
+        }
+    });
+    let output = resolve_stop_message_router_metadata(&metadata);
+    let row = output.as_object().expect("object output");
+    assert_eq!(
+        row.get("stopMessageClientInjectSessionScope")
+            .and_then(|v| v.as_str()),
+        Some("scope-nested-2")
+    );
+    assert_eq!(
+        row.get("stopMessageClientInjectScope")
+            .and_then(|v| v.as_str()),
+        Some("tmux:nested-2")
+    );
+}
+
+#[test]
+fn test_resolve_stop_message_router_metadata_ignores_legacy_flat_scope_fields_when_nested_present() {
+    let metadata = json!({
+        "stopMessageClientInjectSessionScope": " legacy-session ",
+        "stopMessageClientInjectScope": " legacy-scope ",
+        "runtime_control": {
+            "stopMessageClientInject": {
+                "sessionScope": "scope-nested-3",
+                "scope": "tmux:nested-3"
+            }
+        }
+    });
+    let output = resolve_stop_message_router_metadata(&metadata);
+    let row = output.as_object().expect("object output");
+    assert_eq!(
+        row.get("stopMessageClientInjectSessionScope")
+            .and_then(|v| v.as_str()),
+        Some("scope-nested-3")
+    );
+    assert_eq!(
+        row.get("stopMessageClientInjectScope")
+            .and_then(|v| v.as_str()),
+        Some("tmux:nested-3")
     );
 }
 
@@ -1010,6 +1155,32 @@ fn test_build_router_metadata_input_preserves_forced_provider_and_disabled_alias
 }
 
 #[test]
+fn test_build_router_metadata_input_prefers_snapshot_retry_provider_key() {
+    let input = json!({
+        "requestId": "req-snapshot-retry-provider-key",
+        "metadataCenterSnapshot": {
+            "runtimeControl": {
+                "retryProviderKey": " snapshot.provider.gpt-5.5 "
+            }
+        },
+        "metadata": {
+            "runtime_control": {
+                "retryProviderKey": " payload.provider.gpt-5.5 "
+            },
+            "__rt": {
+                "retryProviderKey": " legacy.provider.gpt-5.5 "
+            }
+        }
+    });
+    let output = build_router_metadata_input(&input).expect("router metadata input");
+    let row = output.as_object().expect("output object");
+    assert_eq!(
+        row.get("retryProviderKey").and_then(|v| v.as_str()),
+        Some("snapshot.provider.gpt-5.5")
+    );
+}
+
+#[test]
 fn test_build_router_metadata_input_prefers_runtime_control_retry_provider_key() {
     let input = json!({
         "requestId": "req-runtime-control-retry",
@@ -1028,6 +1199,21 @@ fn test_build_router_metadata_input_prefers_runtime_control_retry_provider_key()
         row.get("retryProviderKey").and_then(|v| v.as_str()),
         Some("runtime.provider.gpt-5.5")
     );
+}
+
+#[test]
+fn test_build_router_metadata_input_ignores_legacy_rt_retry_provider_key_without_runtime_control() {
+    let input = json!({
+        "requestId": "req-legacy-rt-retry-provider-key",
+        "metadata": {
+            "__rt": {
+                "retryProviderKey": " legacy.provider.gpt-5.5 "
+            }
+        }
+    });
+    let output = build_router_metadata_input(&input).expect("router metadata input");
+    let row = output.as_object().expect("output object");
+    assert_eq!(row.get("retryProviderKey"), None);
 }
 
 #[test]
@@ -1050,6 +1236,49 @@ fn test_build_router_metadata_input_uses_responses_resume_provider_key_as_retry_
 }
 
 #[test]
+fn test_build_router_metadata_input_prefers_snapshot_route_hint() {
+    let input = json!({
+        "requestId": "req-snapshot-route-hint",
+        "metadataCenterSnapshot": {
+            "runtimeControl": {
+                "routeHint": " search.snapshot "
+            }
+        },
+        "routeHint": " search.payload ",
+        "metadata": {
+            "responsesResume": {
+                "routeHint": " search.resume "
+            }
+        }
+    });
+    let output = build_router_metadata_input(&input).expect("router metadata input");
+    let row = output.as_object().expect("output object");
+    assert_eq!(
+        row.get("routeHint").and_then(|v| v.as_str()),
+        Some("search.snapshot")
+    );
+}
+
+#[test]
+fn test_build_router_metadata_input_prefers_snapshot_provider_protocol() {
+    let input = json!({
+        "requestId": "req-snapshot-provider-protocol",
+        "providerProtocol": "openai-chat",
+        "metadataCenterSnapshot": {
+            "runtimeControl": {
+                "providerProtocol": " openai-responses "
+            }
+        }
+    });
+    let output = build_router_metadata_input(&input).expect("router metadata input");
+    let row = output.as_object().expect("output object");
+    assert_eq!(
+        row.get("providerProtocol").and_then(|v| v.as_str()),
+        Some("openai-responses")
+    );
+}
+
+#[test]
 fn test_build_router_metadata_input_uses_metadata_responses_resume_for_route_scope_and_retry_pin() {
     let input = json!({
         "requestId": "req-responses-resume-metadata-route-scope",
@@ -1068,7 +1297,10 @@ fn test_build_router_metadata_input_uses_metadata_responses_resume_for_route_sco
         row.get("retryProviderKey").and_then(|v| v.as_str()),
         Some("minimonth.key1.MiniMax-M2.7")
     );
-    assert_eq!(row.get("routeHint").and_then(|v| v.as_str()), Some("search"));
+    assert_eq!(
+        row.get("routeHint").and_then(|v| v.as_str()),
+        Some("search")
+    );
     assert_eq!(
         row.get("sessionId").and_then(|v| v.as_str()),
         Some("stopless-live-123")
@@ -1108,7 +1340,10 @@ fn test_build_router_metadata_input_keeps_relay_continuation_scope_without_retry
     let output = build_router_metadata_input(&input).expect("router metadata input");
     let row = output.as_object().expect("output object");
     assert!(row.get("retryProviderKey").is_none());
-    assert_eq!(row.get("routeHint").and_then(|v| v.as_str()), Some("search"));
+    assert_eq!(
+        row.get("routeHint").and_then(|v| v.as_str()),
+        Some("search")
+    );
     assert_eq!(
         row.get("sessionId").and_then(|v| v.as_str()),
         Some("stopless-live-123")
@@ -2684,7 +2919,10 @@ fn test_lift_responses_resume_into_semantics_preserves_resume_scope_fields_from_
         resume.get("providerKey").and_then(|v| v.as_str()),
         Some(" minimonth.key1.MiniMax-M2.7 ")
     );
-    assert_eq!(resume.get("routeHint").and_then(|v| v.as_str()), Some("search"));
+    assert_eq!(
+        resume.get("routeHint").and_then(|v| v.as_str()),
+        Some("search")
+    );
     assert_eq!(
         resume.get("sessionId").and_then(|v| v.as_str()),
         Some(" stopless-live-123 ")
@@ -3211,6 +3449,7 @@ fn test_run_hub_pipeline_json_matches_core_shape() {
         provider_protocol: "responses".to_string(),
         payload: json!({"model":"gpt-test","input":[{"role":"user","content":"hi"}],"stream":true}),
         metadata: json!({"routeHint":" tools "}),
+        metadata_center_snapshot: json!(null),
         stream: false,
         process_mode: "chat".to_string(),
         direction: "request".to_string(),

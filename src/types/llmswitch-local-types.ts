@@ -21,9 +21,6 @@ export interface ProviderErrorEvent {
   affectsHealth?: boolean;
   fatal?: boolean;
   cooldownOverrideMs?: number;
-  quotaScope?: string;
-  quotaReason?: string;
-  resetAt?: string;
   errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
   runtime: ProviderErrorRuntimeMetadata;
   timestamp: number;

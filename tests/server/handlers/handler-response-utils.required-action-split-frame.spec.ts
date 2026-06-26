@@ -45,7 +45,6 @@ const mockBridgeModule = async () => ({
     },
   })),
   buildResponsesStructuredSseErrorPayloadForHttp: jest.fn(() => null),
-  attachResponsesConversationLifecycleStreamForHttp: jest.fn(({ stream }: { stream: unknown }) => stream),
   buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn((probe: Record<string, unknown> | undefined) => {
     if (!probe?.required_action) return [];
     const response = { ...probe, status: 'requires_action' };
@@ -55,7 +54,6 @@ const mockBridgeModule = async () => ({
       `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
     ];
   }),
-  clearResponsesConversationByRequestIdForHttpProjection: jest.fn(async () => undefined),
   clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async () => Readable.from([])
@@ -65,7 +63,6 @@ const mockBridgeModule = async () => ({
   })),
   sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
   deriveResponsesConversationProviderKeyForHttp: jest.fn(() => undefined),
-  finalizeResponsesConversationRequestRetentionForHttp: jest.fn(async () => undefined),
   resolveResponsesRequestContextForHttp: jest.fn((args: {
     metadata?: unknown;
     fallback?: Record<string, unknown>;
@@ -258,7 +255,6 @@ const mockBridgeModule = async () => ({
         ? 'tool_calls'
         : undefined,
   })),
-  persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
   resolveResponsesConversationClearReasonForHttp: jest.fn((phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json') => {
     switch (phase) {
@@ -327,37 +323,6 @@ const mockBridgeModule = async () => ({
     }
     return args.status >= 400;
   }),
-  shouldPersistResponsesConversationStateForHttp: jest.fn((args: {
-    entryEndpoint?: string;
-    probe: unknown;
-  }) => (
-    Boolean(args.probe)
-    && (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
-  )),
-  shouldPersistResponsesContinuationOnProbeUpdateForHttp: jest.fn((args: {
-    entryEndpoint?: string;
-    probe: unknown;
-  }) => (
-    (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && Boolean(
-      args.probe
-      && typeof args.probe === 'object'
-      && !Array.isArray(args.probe)
-      && (args.probe as Record<string, unknown>).required_action
-    )
-  )),
-  shouldRepairResponsesContinuationTerminalForHttp: jest.fn((args: {
-    entryEndpoint?: string;
-    probe: unknown;
-  }) => (
-    (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && Boolean(
-      args.probe
-      && typeof args.probe === 'object'
-      && !Array.isArray(args.probe)
-      && (args.probe as Record<string, unknown>).required_action
-    )
-  )),
   shouldRequireResponsesTerminalEventForHttp: jest.fn((args: {
     entryEndpoint?: string;
     probe: unknown;

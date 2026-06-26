@@ -6,6 +6,7 @@
 
 import type { UsageMetrics } from '../stats-manager.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
+import { readRuntimeControlProjection } from '../metadata-center/request-truth-readers.js';
 
 export { type UsageMetrics };
 
@@ -87,9 +88,12 @@ export function extractUsageFromResult(
   result: { body?: unknown; status?: number; headers?: Record<string, string>; metadata?: Record<string, unknown> },
   metadata?: Record<string, unknown>
 ): UsageMetrics | undefined {
+  const runtimeControl = readRuntimeControlProjection(metadata);
   const sourceProtocol =
-    typeof metadata?.providerProtocol === 'string'
-      ? String(metadata.providerProtocol).trim().toLowerCase()
+    typeof runtimeControl.providerProtocol === 'string'
+      ? runtimeControl.providerProtocol.trim().toLowerCase()
+      : typeof metadata?.providerProtocol === 'string'
+        ? String(metadata.providerProtocol).trim().toLowerCase()
       : undefined;
   const candidates: unknown[] = [];
 

@@ -208,7 +208,9 @@ mod tests {
             trigger: StoplessContinuationTrigger::NoSchema,
         })
         .expect("prompt");
-        assert!(prompt.client_visible_text.starts_with("这次不要再泛泛地说了"));
+        assert!(prompt
+            .client_visible_text
+            .starts_with("这次不要再泛泛地说了"));
         assert!(prompt.client_visible_text.contains("文件、日志、命令"));
         assert!(prompt.client_visible_text.contains("卡点"));
         assert!(prompt.client_visible_text.contains("已经排除的路"));

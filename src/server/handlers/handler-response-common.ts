@@ -39,8 +39,6 @@ const INTERNAL_METADATA_KEYS: ReadonlySet<string> = new Set([
   'providerKey',
   'runtimeKey',
   'poolId',
-  'serverToolFollowup',
-  'serverToolFollowupMode',
   'stopMessageEnabled',
   'clientAbortSignal',
   'clientConnectionState',

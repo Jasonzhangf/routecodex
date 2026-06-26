@@ -34,7 +34,8 @@ pub struct ServertoolExecutionLoopRuntimeActionPlan {
 pub fn plan_servertool_execution_loop_runtime_action(
     input: ServertoolExecutionLoopRuntimeActionInput,
 ) -> ServertoolExecutionLoopRuntimeActionPlan {
-    if !input.has_handler_entry || input.trigger_mode.as_deref().unwrap_or_default().trim() != "tool_call"
+    if !input.has_handler_entry
+        || input.trigger_mode.as_deref().unwrap_or_default().trim() != "tool_call"
     {
         return ServertoolExecutionLoopRuntimeActionPlan {
             action: ServertoolExecutionLoopRuntimeAction::SkipNonToolCallHandler,
@@ -45,7 +46,11 @@ pub fn plan_servertool_execution_loop_runtime_action(
         .as_deref()
         .unwrap_or_default()
         .trim();
-    let ts_execution_mode = input.ts_execution_mode.as_deref().unwrap_or_default().trim();
+    let ts_execution_mode = input
+        .ts_execution_mode
+        .as_deref()
+        .unwrap_or_default()
+        .trim();
     if !native_execution_mode.is_empty()
         && !ts_execution_mode.is_empty()
         && native_execution_mode != ts_execution_mode

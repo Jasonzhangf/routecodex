@@ -39,7 +39,7 @@ describe('Provider error classifier - 429 handling', () => {
     expect(classification.affectsHealth).toBe(true);
   });
 
-  it('marks daily-limit 429 as periodic recovery and fatal', () => {
+  it('marks daily-limit 429 as unrecoverable and fatal', () => {
     let forceCalled = false;
     const classification = classifyProviderError({
       error: Object.assign(new Error('HTTP 429: quota has been exhausted'), {
@@ -60,13 +60,13 @@ describe('Provider error classifier - 429 handling', () => {
     expect(forceCalled).toBe(true);
     expect(classification.isRateLimit).toBe(true);
     expect(classification.isDailyLimitRateLimit).toBe(true);
-    expect(classification.classification).toBe('periodic_recovery');
+    expect(classification.classification).toBe('unrecoverable');
     expect(classification.recoverable).toBe(false);
     expect(classification.forceFatalRateLimit).toBe(true);
     expect(classification.affectsHealth).toBe(true);
   });
 
-  it('does not escalate synthetic RateLimitCooldownError via register/force hooks', () => {
+  it('treats synthetic RateLimitCooldownError as ordinary short-lived recoverable 429', () => {
     let registerCalled = false;
     let forceCalled = false;
     const error = new RateLimitCooldownError('provider cooling down after 429');
@@ -89,8 +89,8 @@ describe('Provider error classifier - 429 handling', () => {
     expect(forceCalled).toBe(false);
     expect(classification.isRateLimit).toBe(true);
     expect(classification.isDailyLimitRateLimit).toBe(false);
-    expect(classification.classification).toBe('periodic_recovery');
-    expect(classification.recoverable).toBe(false);
+    expect(classification.classification).toBe('recoverable');
+    expect(classification.recoverable).toBe(true);
     expect(classification.forceFatalRateLimit).toBe(false);
     expect(classification.affectsHealth).toBe(true);
   });

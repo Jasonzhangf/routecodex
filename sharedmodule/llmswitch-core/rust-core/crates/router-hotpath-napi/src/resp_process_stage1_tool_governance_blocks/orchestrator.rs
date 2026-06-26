@@ -1,6 +1,10 @@
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use servertool_core::stop_visible_text::{
+    build_stop_message_terminal_visible_payload,
+    extract_current_assistant_reasoning_stop_arguments, StopMessageTerminalVisiblePayloadInput,
+};
 
 use crate::resp_process_stage1_tool_governance_blocks::canonical_chat_completion::coerce_to_canonical_chat_completion;
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::{
@@ -22,8 +26,10 @@ use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::ensure_p
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_governance::{
     count_normalized_tool_calls, drop_disallowed_tool_calls_from_payload,
     maybe_harvest_empty_tool_calls_from_json_content, normalize_apply_patch_tool_calls,
-    remap_tool_calls_for_client_protocol,
+    remap_tool_calls_for_client_protocol, strip_visible_content_from_tool_call_rounds,
 };
+use crate::stop_message_auto_blocks;
+use stop_message_core::StopSchemaGateAction;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolGovernanceInput {
@@ -136,9 +142,12 @@ fn govern_prepared_payload(
 ) -> Result<ToolGovernanceOutput, String> {
     let provider_sentinel_sanitized = sanitize_provider_sentinel_text_values(&mut payload);
     let tool_call_ids_assigned = ensure_payload_tool_call_ids(&mut payload, request_id)?;
+    let terminal_stop_normalized = normalize_terminal_reasoning_stop_payload(&mut payload);
 
     let apply_patch_repaired = normalize_apply_patch_tool_calls(&mut payload);
     let disallowed_tool_calls_dropped = drop_disallowed_tool_calls_from_payload(&mut payload);
+    let stripped_visible_tool_call_content =
+        strip_visible_content_from_tool_call_rounds(&mut payload);
     if let Some(reason) = detect_unharvested_text_tool_markup(&payload) {
         return Err(format!(
             "unharvested_text_tool_markup: explicit tool payload/tool wrapper was emitted but no valid tool_calls were recovered ({})",
@@ -155,9 +164,11 @@ fn govern_prepared_payload(
     let applied = prepared_applied
         || tool_call_ids_assigned > 0
         || provider_sentinel_sanitized > 0
+        || terminal_stop_normalized
         || tool_calls_normalized > 0
         || apply_patch_repaired > 0
         || disallowed_tool_calls_dropped > 0;
+    let applied = applied || stripped_visible_tool_call_content > 0;
 
     Ok(ToolGovernanceOutput {
         governed_payload: payload,
@@ -168,6 +179,56 @@ fn govern_prepared_payload(
             disallowed_tool_calls_dropped,
         },
     })
+}
+
+fn normalize_terminal_reasoning_stop_payload(payload: &mut Value) -> bool {
+    let Some(arguments) = extract_current_assistant_reasoning_stop_arguments(payload) else {
+        return false;
+    };
+    let gate =
+        stop_message_auto_blocks::evaluate_stop_schema("", Some(arguments.as_str()), 0, 3, "", 0);
+    if gate.action != StopSchemaGateAction::AllowStop {
+        return false;
+    }
+    let prefix = if payload_has_visible_assistant_text(payload) {
+        None
+    } else {
+        gate.summary_prefix
+    };
+    let visible =
+        build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+            payload: std::mem::take(payload),
+            mode: Some("replace".to_string()),
+            prefix,
+        });
+    *payload = visible.payload;
+    visible.changed
+}
+
+fn payload_has_visible_assistant_text(payload: &Value) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|choice| {
+            choice
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .is_some_and(value_has_visible_text)
+        })
+}
+
+fn value_has_visible_text(value: &Value) -> bool {
+    match value {
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(items) => items.iter().any(value_has_visible_text),
+        Value::Object(row) => row
+            .get("text")
+            .or_else(|| row.get("content"))
+            .is_some_and(value_has_visible_text),
+        _ => false,
+    }
 }
 
 pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutput, String> {

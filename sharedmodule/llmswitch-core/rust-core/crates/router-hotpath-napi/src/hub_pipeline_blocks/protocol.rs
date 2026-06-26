@@ -15,7 +15,7 @@ pub(crate) fn normalize_endpoint(endpoint: &str) -> String {
 
 pub(crate) fn resolve_provider_protocol(value: &str) -> Result<String, String> {
     if value.trim().is_empty() {
-        return Ok("openai-chat".to_string());
+        return Err("providerProtocol is required".to_string());
     }
     let normalized = value.trim().to_lowercase();
     match normalized.as_str() {

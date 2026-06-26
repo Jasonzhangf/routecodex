@@ -560,9 +560,46 @@ export function writeCacheEntry(options: CacheWriteOptions): CacheWriteResult {
   }
 }
 
+/**
+ * @deprecated Use the Rust-native `writeStoplessLearnedNoteJson` NAPI function
+ * directly. This stub is kept for legacy callers and routes through the
+ * Rust implementation. Will be removed in a future release.
+ */
 export function writeStoplessLearnedNoteEntry(
   options: StoplessLearnedNoteWriteOptions
 ): StoplessLearnedNoteWriteResult {
+  // Route to the Rust-native NAPI implementation.
+  // Lazy-require to keep this stub file from being a hard dependency on the native bridge.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const native = require('../../../native/router-hotpath/native-shared-conversion-semantics-core.js');
+    const fn = native?.readNativeFunction?.('writeStoplessLearnedNoteJson');
+    if (typeof fn === 'function') {
+      const result = fn(
+        JSON.stringify({
+          adapterContext: { workdir: options.workingDirectory },
+          requestId: options.requestId,
+          sessionId: options.sessionId,
+          timestampMs: options.timestampMs,
+          parsed: {
+            learned: options.learned,
+            reason: options.reason,
+            evidence: options.evidence
+          }
+        })
+      );
+      if (typeof result === 'string') {
+        const parsed = JSON.parse(result) as StoplessLearnedNoteWriteResult;
+        if (parsed?.ok === true) {
+          return { ok: true, path: parsed.path ?? path.join(options.workingDirectory ?? '', 'note.md') };
+        }
+        return { ok: false, reason: parsed?.reason ?? 'rust_write_failed' };
+      }
+    }
+  } catch {
+    // fall through to legacy implementation below
+  }
+
   const learned = options.learned.trim();
   if (!learned) {
     return { ok: false, reason: 'empty_learned' };

@@ -428,26 +428,6 @@ const mockBridgeModule = async () => ({
     }
     return args.status >= 400;
   }),
-  shouldPersistResponsesConversationStateForHttp: jest.fn((args: {
-    entryEndpoint?: string;
-    probe: unknown;
-  }) => (
-    Boolean(args.probe)
-    && (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
-  )),
-  shouldPersistResponsesContinuationOnProbeUpdateForHttp: jest.fn((args: {
-    entryEndpoint?: string;
-    probe: unknown;
-  }) => (
-    (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && Boolean(
-      args.probe
-      && typeof args.probe === 'object'
-      && !Array.isArray(args.probe)
-      && Array.isArray((args.probe as Record<string, unknown>).output)
-      && ((args.probe as Record<string, unknown>).output as unknown[]).some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
-    )
-  )),
   shouldRequireResponsesTerminalEventForHttp: jest.fn((args: {
     entryEndpoint?: string;
     probe: unknown;
@@ -554,11 +534,7 @@ const mockBridgeModule = async () => ({
       ? 'stop'
       : undefined;
   }),
-  resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'),
-  shouldRepairResponsesContinuationTerminalForHttp: jest.fn((args: {
-    entryEndpoint?: string;
-    probe: unknown;
-  }) => (
+  resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'), => (
     (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
     && Boolean(
       args.probe

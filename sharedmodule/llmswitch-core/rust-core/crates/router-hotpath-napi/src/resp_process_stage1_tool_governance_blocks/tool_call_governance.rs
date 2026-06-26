@@ -91,7 +91,9 @@ pub(crate) fn drop_disallowed_tool_calls_from_payload(payload: &mut Value) -> i6
         let before = tool_calls.len();
         tool_calls.retain(|entry| {
             read_tool_call_name_key(entry)
-                .map(|key| requested_tool_name_keys.contains(key.as_str()))
+                .map(|key| {
+                    key == "reasoningstop" || requested_tool_name_keys.contains(key.as_str())
+                })
                 .unwrap_or(false)
         });
         dropped += (before.saturating_sub(tool_calls.len())) as i64;
@@ -109,6 +111,52 @@ pub(crate) fn drop_disallowed_tool_calls_from_payload(payload: &mut Value) -> i6
     }
 
     dropped
+}
+
+pub(crate) fn strip_visible_content_from_tool_call_rounds(payload: &mut Value) -> i64 {
+    let mut changed = 0i64;
+    let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
+        return changed;
+    };
+
+    for choice in choices {
+        let Some(choice_row) = choice.as_object_mut() else {
+            continue;
+        };
+        let finish_reason = read_trimmed_string(choice_row.get("finish_reason"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if finish_reason != "tool_calls" {
+            continue;
+        }
+        let Some(message) = choice_row.get_mut("message").and_then(|v| v.as_object_mut()) else {
+            continue;
+        };
+        let has_tool_calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false);
+        if !has_tool_calls {
+            continue;
+        }
+
+        let should_strip = match message.get("content") {
+            Some(Value::String(text)) => !text.trim().is_empty(),
+            Some(Value::Array(items)) => !items.is_empty(),
+            Some(Value::Object(_)) => true,
+            Some(Value::Null) | None => false,
+            Some(_) => true,
+        };
+        if !should_strip {
+            continue;
+        }
+
+        message.insert("content".to_string(), Value::Null);
+        changed += 1;
+    }
+
+    changed
 }
 
 fn read_message_content_text(message: &Map<String, Value>) -> String {
@@ -442,8 +490,7 @@ pub(crate) fn remap_tool_calls_for_client_protocol(payload: &mut Value, client_p
                 function,
                 &requested_tool_name_keys,
             );
-            let _ =
-                maybe_repair_malformed_exec_command_name(function, &requested_tool_name_keys);
+            let _ = maybe_repair_malformed_exec_command_name(function, &requested_tool_name_keys);
             let Some(name) = read_trimmed_string(function.get("name")) else {
                 continue;
             };

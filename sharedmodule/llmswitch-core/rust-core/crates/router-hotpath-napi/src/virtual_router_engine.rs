@@ -16,15 +16,14 @@ mod profile_utils;
 pub(crate) mod provider_bootstrap;
 mod provider_registry;
 pub(crate) mod provider_runtime_ingress;
-mod quota;
 pub(crate) mod rcc_fence;
 pub(crate) mod routing;
 pub(crate) mod routing_state_store;
 mod time_utils;
 
-#[allow(unused_imports)]
-pub use napi_proxy::VirtualRouterEngineProxy;
 pub(crate) use engine::{
     evaluate_singleton_route_pool_exhaustion, SingletonRoutePoolExhaustionDecision,
     SingletonRoutePoolExhaustionInput,
 };
+#[allow(unused_imports)]
+pub use napi_proxy::VirtualRouterEngineProxy;

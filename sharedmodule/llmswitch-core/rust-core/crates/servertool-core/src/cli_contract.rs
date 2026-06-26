@@ -375,10 +375,12 @@ fn build_stop_message_auto_run_output(
         .repeat_count
         .or_else(|| read_u32(&input.input, "repeatCount"))
         .unwrap_or(1);
+    let current_repeat_count = current_repeat_count.max(1);
     let current_max_repeats = input
         .max_repeats
         .or_else(|| read_u32(&input.input, "maxRepeats"))
-        .unwrap_or(3);
+        .unwrap_or(3)
+        .max(1);
     let derived_schema_feedback = if invoked_public_reasoning_stop {
         derive_stopless_feedback_from_raw_reasoning_stop_input(
             &input.input,
@@ -430,18 +432,15 @@ fn build_stop_message_auto_run_output(
     let schema_feedback = derived_schema_feedback
         .and_then(|(_, feedback)| feedback)
         .or_else(|| read_stopless_schema_feedback(&input.input));
-    let next_repeat_count = current_repeat_count
-        .saturating_add(1)
-        .min(current_max_repeats);
     let canonical_input = serde_json::json!({
         "flowId": flow_id,
-        "repeatCount": next_repeat_count,
+        "repeatCount": current_repeat_count,
         "maxRepeats": current_max_repeats,
         "triggerHint": stopless_trigger_hint(trigger)
     });
     let continuation_prompt =
         resolve_stopless_cli_continuation_prompt(trigger, used_for_prompt, current_max_repeats)?;
-    let model_guidance = build_stopless_cli_model_guidance(
+    let _model_guidance = build_stopless_cli_model_guidance(
         &continuation_prompt,
         schema_feedback.as_ref(),
         current_repeat_count,
@@ -451,20 +450,16 @@ fn build_stop_message_auto_run_output(
         kind: "stop_message_auto".to_string(),
         tool: "stop_message_auto".to_string(),
         summary: "stopless continuation ready".to_string(),
-        model_guidance,
+        model_guidance: String::new(),
         tool_name: input.tool_name,
         flow_id,
         route_hint: Some("thinking".to_string()),
         continuation_prompt,
-        repeat_count: next_repeat_count,
+        repeat_count: current_repeat_count,
         max_repeats: current_max_repeats,
         session_id,
         request_id,
-        schema_guidance: Some(stopless_schema_guidance_with_trigger(
-            trigger,
-            used_for_prompt,
-            current_max_repeats,
-        )),
+        schema_guidance: None,
         schema_feedback,
         injected_prompt_preview: None,
         input: canonical_input,
@@ -490,6 +485,10 @@ fn build_stopless_cli_model_guidance(
     schema_feedback: Option<&StoplessSchemaFeedback>,
     current_repeat_count: u32,
 ) -> String {
+    if current_repeat_count <= 1 {
+        return "继续执行，完成既定目标。".to_string();
+    }
+
     let mut parts = Vec::<String>::new();
     parts.push("这是什么：stop schema 是模型在准备结束、暂停或继续时返回的收尾报告。".to_string());
     parts.push(
@@ -524,6 +523,11 @@ fn build_stopless_cli_model_guidance(
                 feedback.reason_code,
                 feedback.missing_fields.join(", ")
             ));
+        }
+        let repair_lines = build_stopless_missing_field_repair_lines(feedback);
+        if !repair_lines.is_empty() {
+            parts.push("这些字段必须补齐，按下面方式填写：".to_string());
+            parts.extend(repair_lines);
         }
     }
     let prompt = continuation_prompt.trim();
@@ -560,6 +564,71 @@ fn build_stopless_cli_model_guidance(
         }
     }
     parts.join("\n")
+}
+
+fn build_stopless_missing_field_repair_lines(feedback: &StoplessSchemaFeedback) -> Vec<String> {
+    let mut lines = Vec::new();
+    if feedback.reason_code == "stop_schema_terminal_missing_fields" {
+        lines.push(
+            "终态 stop schema 要求更严格：当 stopreason=0/1 时，has_evidence 必须是 1，且 evidence、issue_cause、excluded_factors、diagnostic_order、done_steps 都必须给出具体内容。".to_string(),
+        );
+    }
+    for field in &feedback.missing_fields {
+        if let Some(instruction) = stopless_field_repair_instruction(field) {
+            lines.push(format!("- {}", instruction));
+        } else {
+            lines.push(format!(
+                "- {}：这是 stop schema 必填字段，必须补具体内容，不能留空。",
+                field
+            ));
+        }
+    }
+    lines
+}
+
+fn stopless_field_repair_instruction(field: &str) -> Option<&'static str> {
+    match field {
+        "stopreason" => Some(
+            "stopreason：必填数字；0=finished，1=blocked，2=continue_needed。只有真的完成且没有剩余 next_step 时才能填 0。",
+        ),
+        "reason" => Some(
+            "reason：用一句具体的话写清当前状态，说明为什么结束、为什么阻塞，或为什么还要继续。",
+        ),
+        "has_evidence" => Some(
+            "has_evidence：只能填 0 或 1；已有文件、日志、命令输出或测试证据就填 1，没有证据才填 0。",
+        ),
+        "evidence" => Some(
+            "evidence：写真正支撑结论的证据，例如文件路径、日志片段、命令结果或测试结论；终态 stopreason=0/1 时不能留空。",
+        ),
+        "issue_cause" => Some(
+            "issue_cause：写根因或当前卡点；如果已经完成，也要说明本轮最终确认的问题原因是什么。",
+        ),
+        "excluded_factors" => Some(
+            "excluded_factors：写已经排除掉的错误方向，避免只给结论不说明排除过程。",
+        ),
+        "diagnostic_order" => Some(
+            "diagnostic_order：按顺序写本轮排查路径，例如先看入口，再看链路，再看验证结果。",
+        ),
+        "done_steps" => Some(
+            "done_steps：列出已经实际完成的动作，不要写空话；至少说明改了什么、跑了什么验证。",
+        ),
+        "next_step" => Some(
+            "next_step：如果 stopreason=2，必须写下一步要执行的具体动作；如果 stopreason=0/1，通常留空字符串即可。",
+        ),
+        "next_suggested_path" => Some(
+            "next_suggested_path：写下一轮最合适的继续路径，告诉系统后面应该沿哪条线推进。",
+        ),
+        "needs_user_input" => Some(
+            "needs_user_input：只能填 true 或 false；只有真的需要向用户提问时才填 true，而且 next_step 必须直接写出要问的问题。",
+        ),
+        "learned" => Some(
+            "learned：写这轮真正学到的可复用结论；如果暂时没有，也要明确填一个具体结论而不是留空。",
+        ),
+        "forcestop" => Some(
+            "forcestop：只有必须强制停止时才填 1，并且必须同时给非空 reason 说明为什么必须停。",
+        ),
+        _ => None,
+    }
 }
 
 fn build_servertool_fixture_run_output(
@@ -1470,7 +1539,7 @@ mod tests {
         .expect("stop_message_auto output");
         assert_eq!(output.tool_name, "stop_message_auto");
         assert_eq!(output.flow_id, "stop_message_flow");
-        assert_eq!(output.repeat_count, 2);
+        assert_eq!(output.repeat_count, 1);
         assert!(!output.continuation_prompt.is_empty());
         for forbidden in [
             "schema",
@@ -1492,31 +1561,17 @@ mod tests {
                 output.continuation_prompt
             );
         }
-        let schema_guidance = output
-            .schema_guidance
-            .expect("NoSchema stopless CLI output must carry schema guidance");
-        assert!(schema_guidance
-            .required_fields
-            .contains(&"stopreason".to_string()));
-        assert!(schema_guidance
-            .required_fields
-            .contains(&"next_step".to_string()));
-        assert_eq!(schema_guidance.stopreason_values.finished, 0);
-        assert_eq!(schema_guidance.stopreason_values.blocked, 1);
-        assert_eq!(schema_guidance.stopreason_values.continue_needed, 2);
+        assert!(output.schema_guidance.is_none());
+        assert!(output.model_guidance.is_empty());
         assert!(output.injected_prompt_preview.is_none());
         assert_eq!(
             output.input,
             json!({
                 "flowId": "stop_message_flow",
-                "repeatCount": 2,
+                "repeatCount": 1,
                 "maxRepeats": 3,
                 "triggerHint": "no_schema"
             })
-        );
-        assert_eq!(
-            schema_guidance.trigger_hint, "no_schema",
-            "NoSchema default must produce no_schema trigger_hint"
         );
         assert_eq!(output.ok, true);
         assert_eq!(output.kind, "stop_message_auto");
@@ -1544,7 +1599,7 @@ mod tests {
         .expect("status-only stopless CLI must not require prompt");
         assert_eq!(output.tool_name, "stop_message_auto");
         assert_eq!(output.flow_id, "stop_message_flow");
-        assert_eq!(output.repeat_count, 2);
+        assert_eq!(output.repeat_count, 1);
         assert_eq!(output.max_repeats, 3);
         assert!(!output.continuation_prompt.is_empty());
         for forbidden in [
@@ -1567,28 +1622,17 @@ mod tests {
                 output.continuation_prompt
             );
         }
-        let schema_guidance = output
-            .schema_guidance
-            .expect("status-only stopless CLI output must carry schema guidance");
-        assert!(schema_guidance
-            .required_fields
-            .contains(&"reason".to_string()));
-        assert!(schema_guidance
-            .required_fields
-            .contains(&"learned".to_string()));
+        assert!(output.schema_guidance.is_none());
+        assert!(output.model_guidance.is_empty());
         assert!(output.injected_prompt_preview.is_none());
         assert_eq!(
             output.input,
             json!({
                 "flowId": "stop_message_flow",
-                "repeatCount": 2,
+                "repeatCount": 1,
                 "maxRepeats": 3,
                 "triggerHint": "no_schema"
             })
-        );
-        assert_eq!(
-            schema_guidance.trigger_hint, "no_schema",
-            "NoSchema default must produce no_schema trigger_hint"
         );
     }
 
@@ -2465,6 +2509,81 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stopless_cli_model_guidance_expands_each_missing_field_with_repair_instructions() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "reasoningStop".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "stopreason": 0,
+                    "reason": "准备结束",
+                    "has_evidence": 0,
+                    "evidence": "",
+                    "issue_cause": "",
+                    "excluded_factors": "",
+                    "diagnostic_order": "",
+                    "done_steps": "",
+                    "next_step": ""
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+                session_id: Some("session-guidance-missing-fields".to_string()),
+                request_id: Some("req-guidance-missing-fields".to_string()),
+            },
+        )
+        .expect("reasoningStop missing fields output");
+
+        let feedback = output.schema_feedback.expect("schema feedback");
+        assert_eq!(feedback.reason_code, "stop_schema_terminal_missing_fields");
+        assert!(feedback
+            .missing_fields
+            .contains(&"has_evidence".to_string()));
+        assert!(feedback.missing_fields.contains(&"evidence".to_string()));
+        assert!(feedback.missing_fields.contains(&"done_steps".to_string()));
+
+        assert!(
+            output.model_guidance.is_empty(),
+            "CLI stdout must stay status-only; request restore renders semantic guidance"
+        );
+    }
+
+    #[test]
+    fn stopless_cli_model_guidance_explains_missing_stopreason_and_next_step() {
+        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+            ServertoolCliRunInput {
+                tool_name: "reasoningStop".to_string(),
+                input: json!({
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 2,
+                    "maxRepeats": 3,
+                    "reason": "还要继续推进",
+                    "has_evidence": 0,
+                    "evidence": "",
+                    "issue_cause": "",
+                    "excluded_factors": "",
+                    "diagnostic_order": "",
+                    "done_steps": "",
+                    "next_step": ""
+                }),
+                flow_id: None,
+                repeat_count: None,
+                max_repeats: None,
+                session_id: Some("session-guidance-next-step".to_string()),
+                request_id: Some("req-guidance-next-step".to_string()),
+            },
+        )
+        .expect("reasoningStop missing stopreason output");
+
+        assert!(
+            output.model_guidance.is_empty(),
+            "CLI stdout must stay status-only; request restore renders semantic guidance"
+        );
+    }
+
     // ── trigger hint branch tests ──────────────────────────────────────────
 
     #[test]
@@ -2487,11 +2606,7 @@ mod tests {
             },
         )
         .expect("stop_message_auto output");
-        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
-        assert_eq!(
-            schema_guidance.trigger_hint, "invalid_schema",
-            "explicit invalid_schema triggerHint must map to invalid_schema"
-        );
+        assert!(output.schema_guidance.is_none());
         // output.input must also carry triggerHint
         let inp = output.input;
         assert_eq!(inp["triggerHint"], "invalid_schema");
@@ -2520,8 +2635,7 @@ mod tests {
             },
         )
         .expect("stop_message_auto output");
-        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
-        assert_eq!(schema_guidance.trigger_hint, "invalid_schema");
+        assert!(output.schema_guidance.is_none());
         let inp = output.input;
         assert_eq!(inp["triggerHint"], "invalid_schema");
         assert!(inp.get("schemaFeedback").is_none());
@@ -2547,11 +2661,7 @@ mod tests {
             },
         )
         .expect("stop_message_auto output");
-        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
-        assert_eq!(
-            schema_guidance.trigger_hint, "non_terminal_schema",
-            "explicit non_terminal_schema triggerHint must map to non_terminal_schema"
-        );
+        assert!(output.schema_guidance.is_none());
         let inp = output.input;
         assert_eq!(inp["triggerHint"], "non_terminal_schema");
     }
@@ -2604,11 +2714,7 @@ mod tests {
             },
         )
         .expect("stop_message_auto output");
-        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
-        assert_eq!(
-            schema_guidance.trigger_hint, "schema_pass",
-            "explicit schema_pass triggerHint must map to schema_pass"
-        );
+        assert!(output.schema_guidance.is_none());
         let inp = output.input;
         assert_eq!(inp["triggerHint"], "schema_pass");
     }
@@ -2690,17 +2796,10 @@ mod tests {
         )
         .expect("reasoningStop output");
         assert_eq!(output.flow_id, "stop_message_flow");
-        assert_eq!(output.input["repeatCount"], 2);
+        assert_eq!(output.input["repeatCount"], 1);
         assert_eq!(output.input["maxRepeats"], 3);
         assert_eq!(output.input["triggerHint"], "invalid_schema");
-        assert_eq!(
-            output
-                .schema_guidance
-                .as_ref()
-                .expect("schema guidance")
-                .trigger_hint,
-            "invalid_schema"
-        );
+        assert!(output.schema_guidance.is_none());
         assert_eq!(
             output
                 .schema_feedback

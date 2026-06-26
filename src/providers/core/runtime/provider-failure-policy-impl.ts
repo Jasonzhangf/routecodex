@@ -304,9 +304,6 @@ export function resolveProviderFailureClassification(args: {
     }
     return undefined;
   }
-  if (args.rateLimitKind === 'daily_limit' || args.rateLimitKind === 'synthetic_cooldown') {
-    return 'periodic_recovery';
-  }
   if (isProviderFailureClientDisconnect(args.error)) {
     return 'unrecoverable';
   }
@@ -615,7 +612,6 @@ export function resolveProviderFailureClassification(args: {
         nativeResult === 'unrecoverable'
         || nativeResult === 'recoverable'
         || nativeResult === 'special_400'
-        || nativeResult === 'periodic_recovery'
       ) {
         return nativeResult;
       }
@@ -682,12 +678,7 @@ export function classify_error_err_03_runtime_from_error_err_02_host(
       captured.errorClassification === 'recoverable'
         || captured.errorClassification === 'unrecoverable'
         || captured.errorClassification === 'special_400'
-        || captured.errorClassification === 'periodic_recovery'
         ? captured.errorClassification
-        : undefined,
-    rateLimitKind:
-      captured.quotaScope === 'daily' || captured.quotaReason === 'daily_limit'
-        ? 'daily_limit'
         : undefined,
   });
 }
@@ -1037,14 +1028,6 @@ export function shouldKeepProviderExcludedForNextAttempt(args: {
   hasAlternativeCandidate: boolean;
 }): boolean {
   return args.classification === 'unrecoverable' || args.hasAlternativeCandidate;
-}
-
-export function shouldRerouteTerminalPeriodicRecovery(args: {
-  classification?: ProviderFailureClassification;
-  shouldRetry: boolean;
-  hasTerminalAlternativeCandidate: boolean;
-}): boolean {
-  return !args.shouldRetry && args.hasTerminalAlternativeCandidate && args.classification === 'periodic_recovery';
 }
 
 export function shouldRerouteTerminalUnrecoverableProviderFailure(args: {

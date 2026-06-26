@@ -5,56 +5,33 @@ import type {
   ServerSideToolEngineResult
 } from './types.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
-import { buildServertoolCliProjectionForAutoFlow } from './cli-projection.js';
-import { planStoplessCliProjectionContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 
 type EnginePostflightAction = {
   action: string;
 };
 
-function resolveStoplessCliProjectionContext(args: {
-  engineResult: ServerSideToolEngineResult;
-  adapterContext: AdapterContext;
-}): {
-  reasoningText: string;
-  repeatCount: number;
-  maxRepeats: number;
-  triggerHint?: string;
-  schemaFeedback?: JsonObject;
-  sessionId?: string;
-  requestId?: string;
-} {
+function readSessionAndRequestId(
+  engineResult: ServerSideToolEngineResult,
+  adapterContext: AdapterContext,
+): { sessionId?: string; requestId?: string } {
   const executionContext =
-    args.engineResult.execution?.context && typeof args.engineResult.execution.context === 'object' && !Array.isArray(args.engineResult.execution.context)
-      ? args.engineResult.execution.context as Record<string, unknown>
+    engineResult.execution?.context && typeof engineResult.execution.context === 'object' && !Array.isArray(engineResult.execution.context)
+      ? engineResult.execution.context as Record<string, unknown>
       : undefined;
-  const stoplessControl =
-    executionContext?.stopless && typeof executionContext.stopless === 'object' && !Array.isArray(executionContext.stopless)
-      ? executionContext.stopless
-      : undefined;
-  const runtimeSnapshot = stoplessControl && typeof stoplessControl.repeatCount === 'number' && typeof stoplessControl.maxRepeats === 'number'
-    ? {
-        used: stoplessControl.repeatCount,
-        maxRepeats: stoplessControl.maxRepeats
-      }
-    : undefined;
-  const chatStopText =
-    typeof executionContext?.assistantStopText === 'string' && executionContext.assistantStopText.trim()
-      ? executionContext.assistantStopText.trim()
-      : undefined;
-  return planStoplessCliProjectionContextWithNative({
-    executionContext,
-    stoplessControl,
-    runtimeSnapshot,
-    chatStopText,
-    adapterStopText: chatStopText,
-    sessionId: typeof (args.adapterContext as Record<string, unknown>).sessionId === 'string'
-      ? String((args.adapterContext as Record<string, unknown>).sessionId)
-      : undefined,
-    requestId: typeof (args.adapterContext as Record<string, unknown>).requestId === 'string'
-      ? String((args.adapterContext as Record<string, unknown>).requestId)
-      : undefined
-  });
+  const sessionId =
+    typeof executionContext?.sessionId === 'string'
+      ? String(executionContext.sessionId)
+      : typeof (adapterContext as Record<string, unknown>).sessionId === 'string'
+        ? String((adapterContext as Record<string, unknown>).sessionId)
+        : undefined;
+  const requestId =
+    typeof executionContext?.requestId === 'string'
+      ? String(executionContext.requestId)
+      : typeof (adapterContext as Record<string, unknown>).requestId === 'string'
+        ? String((adapterContext as Record<string, unknown>).requestId)
+        : undefined;
+  return { sessionId, requestId };
 }
 
 export async function runServertoolEnginePostflight(args: {
@@ -184,29 +161,47 @@ export async function runServertoolEnginePostflight(args: {
   }
 
   if (runtimeAction.action === 'build_stop_message_cli_projection') {
-    const projectionContext = resolveStoplessCliProjectionContext({
-      engineResult,
-      adapterContext: options.adapterContext
-    });
-    const projection = buildServertoolCliProjectionForAutoFlow({
-      options: {
-        requestId: options.requestId,
-        adapterContext: options.adapterContext
-      },
-      flowId,
-      reasoningText: projectionContext.reasoningText,
-      ...(projectionContext.sessionId ? { sessionId: projectionContext.sessionId } : {}),
-      input: {
-        flowId,
-        repeatCount: projectionContext.repeatCount,
-        maxRepeats: projectionContext.maxRepeats,
-        ...(projectionContext.triggerHint ? { triggerHint: projectionContext.triggerHint } : {}),
-        ...(projectionContext.schemaFeedback ? { schemaFeedback: projectionContext.schemaFeedback } : {})
-      }
-    });
+    const executionContext =
+      engineResult.execution?.context && typeof engineResult.execution.context === 'object' && !Array.isArray(engineResult.execution.context)
+        ? engineResult.execution.context as Record<string, unknown>
+        : undefined;
+    const stoplessControl =
+      executionContext?.stopless && typeof executionContext.stopless === 'object' && !Array.isArray(executionContext.stopless)
+        ? executionContext.stopless as Record<string, unknown>
+        : undefined;
+    const { sessionId, requestId } = readSessionAndRequestId(engineResult, options.adapterContext);
+    const chatStopText =
+      typeof executionContext?.assistantStopText === 'string' && executionContext.assistantStopText.trim()
+        ? executionContext.assistantStopText.trim()
+        : undefined;
+
+    // Call Rust-native build_stopless_auto_cli_projection_json (single NAPI call).
+    // Replaces the previous three-call TS sequence:
+    //   1. planStoplessCliProjectionContextWithNative
+    //   2. buildClientExecCliProjectionOutputWithNative
+    //   3. buildClientVisibleProjectionShellWithNative
+    const fn = readNativeFunction('buildStoplessAutoCliProjectionJson');
+    let projectionChatResponse: JsonObject;
+    if (fn) {
+      const inputJson = JSON.stringify({
+        adapterContext: options.adapterContext as Record<string, unknown>,
+        executionContext: executionContext ?? null,
+        stoplessControl: stoplessControl ?? null,
+        runtimeSnapshot: null,
+        chatStopText: chatStopText ?? null,
+        sessionId: sessionId ?? null,
+        requestId: options.requestId ?? null
+      });
+      const raw = fn(inputJson);
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      projectionChatResponse = parsed.chatResponse as JsonObject;
+    } else {
+      // Last-resort fallback: keep the original finalChatResponse so the request doesn't crash.
+      projectionChatResponse = engineResult.finalChatResponse as JsonObject;
+    }
     args.logProgress(5, totalSteps, 'completed (stop_message cli projection; no reenter)', { flowId });
     return {
-      chat: projection.chatResponse,
+      chat: projectionChatResponse,
       executed: true,
       flowId
     };

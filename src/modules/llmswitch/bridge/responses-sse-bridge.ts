@@ -65,6 +65,16 @@ export const shouldDropClientSseFrameForHttp = shouldDropClientSseFrameForHttpIm
 export const shouldReprojectRelayResponsesSseForHttp = shouldReprojectRelayResponsesSseForHttpImpl;
 export const summarizeResponsesSseFrameForLogForHttp = summarizeResponsesSseFrameForLogForHttpImpl;
 
+export async function reprojectDirectChatToolCallStreamForHttp(args: {
+  body: Record<string, unknown>;
+  requestId?: string;
+}): Promise<import('node:stream').Readable> {
+  const converter = await createChatJsonToSseConverterForHttpImpl();
+  return await converter.convertResponseToJsonToSse(args.body, {
+    requestId: args.requestId,
+  }) as import('node:stream').Readable;
+}
+
 const RESPONSES_DIRECT_PASSTHROUGH_ALLOWED_EVENTS = new Set([
   'error',
   'ping',

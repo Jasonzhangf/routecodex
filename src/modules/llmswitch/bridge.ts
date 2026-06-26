@@ -63,6 +63,7 @@ export {
   buildResponsesSseErrorPayloadForHttp,
   buildResponsesStructuredSseErrorPayloadForHttp,
   createResponsesJsonToSseConverterForHttp,
+  reprojectDirectChatToolCallStreamForHttp,
   importResponsesHandlerCoreDist,
   isDirectPassthroughTransportKeepaliveFrameForHttp,
   normalizeChatUsagePayloadForHttp,
@@ -87,11 +88,7 @@ export {
   shouldClearResponsesConversationOnFailureForHttp,
   planResponsesContinuationCloseActionForHttp,
   normalizeResponsesClientPayloadForHttp,
-  captureResponsesRequestContextForHttpProjection,
   rebindResponsesConversationRequestIdForHttp,
-  clearResponsesConversationByRequestIdForHttpProjection,
-  recordResponsesResponseForHttpProjection,
-  finalizeResponsesConversationRequestRetentionForHttp,
 } from './bridge/responses-response-bridge.js';
 
 // Newly factored bridge modules.

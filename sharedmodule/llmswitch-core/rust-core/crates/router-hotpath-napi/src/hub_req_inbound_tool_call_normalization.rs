@@ -11,10 +11,11 @@ fn normalize_shell_like_output_text(raw: &str) -> String {
     raw.to_string()
 }
 
-const AUTO_STOP_HOOK_CALL_ID_PREFIX: &str = "call_servertool_cli_";
 const STOP_HOOK_COMMAND_MARKERS: &[&str] = &[
     "routecodex hook run stop_message_auto",
     "routecodex servertool run stop_message_auto",
+    "routecodex hook run reasoningStop",
+    "routecodex servertool run reasoningStop",
     "routecodex hook run reasoning_stop",
     "routecodex servertool run reasoning_stop",
 ];
@@ -331,10 +332,6 @@ fn is_auto_injected_stop_hook_function_call(row: &Map<String, Value>) -> bool {
     if item_type != "function_call" && item_type != "tool_call" {
         return false;
     }
-    let call_id = read_function_call_id(row).unwrap_or_default();
-    if !call_id.starts_with(AUTO_STOP_HOOK_CALL_ID_PREFIX) {
-        return false;
-    }
     let name = read_trimmed_string(row.get("name")).unwrap_or_default();
     if !is_shell_like_tool_name(name.as_str()) {
         return false;
@@ -342,7 +339,58 @@ fn is_auto_injected_stop_hook_function_call(row: &Map<String, Value>) -> bool {
     let Some(cmd) = read_exec_command_cmd(row.get("arguments")) else {
         return false;
     };
-    STOP_HOOK_COMMAND_MARKERS.iter().any(|marker| cmd.contains(marker))
+    STOP_HOOK_COMMAND_MARKERS
+        .iter()
+        .any(|marker| cmd.contains(marker))
+}
+
+fn build_stop_hook_reasoning_stop_arguments_from_output(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Ok(Value::Object(row)) = serde_json::from_str::<Value>(trimmed) else {
+        return "{\"stopreason\":2,\"reason\":\"continue_needed\"}".to_string();
+    };
+    let summary =
+        read_trimmed_string(row.get("summary")).unwrap_or_else(|| "continue_needed".to_string());
+    let reason_code = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))
+        .and_then(Value::as_object)
+        .and_then(|feedback| {
+            feedback
+                .get("reasonCode")
+                .or_else(|| feedback.get("reason_code"))
+        })
+        .and_then(Value::as_str)
+        .unwrap_or("stop_schema_missing");
+    serde_json::json!({
+        "stopreason": 2,
+        "reason": summary,
+        "next_step": reason_code
+    })
+    .to_string()
+}
+
+fn build_stop_hook_reasoning_stop_output_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Ok(Value::Object(mut row)) = serde_json::from_str::<Value>(trimmed) else {
+        return trimmed.to_string();
+    };
+    row.remove("ok");
+    row.remove("kind");
+    row.remove("tool");
+    row.remove("toolName");
+    row.remove("tool_name");
+    Value::Object(row).to_string()
+}
+
+fn build_responses_reasoning_stop_function_call_item(call_id: &str, raw_output: &str) -> Value {
+    serde_json::json!({
+        "type": "function_call",
+        "id": call_id,
+        "call_id": call_id,
+        "name": "reasoningStop",
+        "arguments": build_stop_hook_reasoning_stop_arguments_from_output(raw_output)
+    })
 }
 
 fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
@@ -370,6 +418,7 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
             {
                 parts.push(prompt);
             }
+            let mut rendered_schema_guidance = false;
             if let Some(schema_guidance) = row
                 .get("schemaGuidance")
                 .or_else(|| row.get("schema_guidance"))
@@ -390,6 +439,27 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
                 let used = repeat_count.map(|n| n.saturating_sub(1)).unwrap_or(0);
                 parts.push(render_stopless_schema_guidance_text(
                     &schema_guidance,
+                    trigger_hint,
+                    used,
+                    max_repeats,
+                ));
+                rendered_schema_guidance = true;
+            }
+            if !rendered_schema_guidance {
+                let trigger_hint = row
+                    .get("triggerHint")
+                    .or_else(|| row.get("trigger_hint"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("no_schema");
+                let max_repeats = row
+                    .get("maxRepeats")
+                    .or_else(|| row.get("max_repeats"))
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|n| n as u32)
+                    .unwrap_or(3);
+                let used = repeat_count.map(|n| n.saturating_sub(1)).unwrap_or(0);
+                parts.push(render_stopless_schema_guidance_text(
+                    &serde_json::json!({}),
                     trigger_hint,
                     used,
                     max_repeats,
@@ -583,7 +653,10 @@ fn render_stopless_schema_guidance_text(
     sections.join("\n")
 }
 
-fn read_stopless_schema_feedback_text(row: &Map<String, Value>, repeat_count: u32) -> Option<String> {
+fn read_stopless_schema_feedback_text(
+    row: &Map<String, Value>,
+    repeat_count: u32,
+) -> Option<String> {
     let feedback = row
         .get("schemaFeedback")
         .or_else(|| row.get("schema_feedback"))?
@@ -967,6 +1040,8 @@ fn normalize_message_tool_calls(
 
     let mut shell_tool_call_ids = HashSet::<String>::new();
     let mut apply_patch_tool_call_ids = HashSet::<String>::new();
+    let mut auto_stop_hook_call_ids = HashSet::<String>::new();
+    let mut guidance_insertions = Vec::<(usize, Value)>::new();
 
     for message in messages.iter_mut() {
         let Some(message_row) = message.as_object_mut() else {
@@ -976,7 +1051,8 @@ fn normalize_message_tool_calls(
             .unwrap_or_default()
             .to_ascii_lowercase();
         if role == "tool" {
-            let tool_call_id = read_trimmed_string(message_row.get("tool_call_id"));
+            let tool_call_id = read_trimmed_string(message_row.get("tool_call_id"))
+                .or_else(|| read_trimmed_string(message_row.get("call_id")));
             let tool_name = read_trimmed_string(message_row.get("name"));
             let should_normalize_shell = tool_call_id
                 .as_ref()
@@ -1033,6 +1109,23 @@ fn normalize_message_tool_calls(
             let Some(raw_name) = read_trimmed_string(fn_row.get("name")) else {
                 continue;
             };
+            let auto_stop_candidate = serde_json::json!({
+                "type": "function_call",
+                "name": raw_name,
+                "arguments": fn_row.get("arguments").cloned().unwrap_or(Value::Null),
+            });
+            if auto_stop_candidate
+                .as_object()
+                .is_some_and(is_auto_injected_stop_hook_function_call)
+            {
+                if let Some(call_id) = call_id_hint.as_ref() {
+                    auto_stop_hook_call_ids.insert(call_id.clone());
+                }
+                fn_row.insert(
+                    "name".to_string(),
+                    Value::String("reasoningStop".to_string()),
+                );
+            }
             if is_apply_patch_tool_name(raw_name.as_str()) {
                 if let Some(call_id) = call_id_hint.as_ref() {
                     apply_patch_tool_call_ids.insert(call_id.clone());
@@ -1067,6 +1160,64 @@ fn normalize_message_tool_calls(
                 fn_row.insert("arguments".to_string(), Value::String(arguments));
             }
         }
+    }
+
+    for (message_index, message) in messages.iter_mut().enumerate() {
+        let Some(message_row) = message.as_object_mut() else {
+            continue;
+        };
+        let role = read_trimmed_string(message_row.get("role"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if role != "tool" {
+            continue;
+        }
+        let call_id = read_trimmed_string(message_row.get("tool_call_id"))
+            .or_else(|| read_trimmed_string(message_row.get("call_id")));
+        let Some(call_id) = call_id else {
+            continue;
+        };
+        if !auto_stop_hook_call_ids.contains(call_id.as_str()) {
+            continue;
+        }
+        let Some(content) = message_row
+            .get("content")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let normalized_output = build_stop_hook_reasoning_stop_output_text(content.as_str());
+        let guidance = build_stop_hook_guidance_text_from_output(content.as_str())
+            .trim()
+            .to_string();
+        message_row.insert(
+            "name".to_string(),
+            Value::String("reasoningStop".to_string()),
+        );
+        message_row.insert("content".to_string(), Value::String(normalized_output));
+        if !guidance.is_empty() && !is_terminal_budget_exhausted_stop_hook_output(content.as_str())
+        {
+            guidance_insertions.push((
+                message_index,
+                build_responses_text_guidance_input_item(guidance),
+            ));
+        }
+    }
+
+    if !guidance_insertions.is_empty() {
+        let mut insertions_by_index = std::collections::HashMap::<usize, Vec<Value>>::new();
+        for (index, guidance) in guidance_insertions {
+            insertions_by_index.entry(index).or_default().push(guidance);
+        }
+        let mut expanded_messages = Vec::<Value>::with_capacity(messages.len() * 2);
+        for (index, message) in std::mem::take(messages).into_iter().enumerate() {
+            expanded_messages.push(message);
+            if let Some(extra) = insertions_by_index.remove(&index) {
+                expanded_messages.extend(extra);
+            }
+        }
+        *messages = expanded_messages;
     }
 
     prune_message_tool_history(messages);
@@ -1165,9 +1316,25 @@ fn normalize_responses_input_function_calls(
                 if let Some(call_id) = call_id {
                     if auto_stop_hook_call_ids.contains(call_id.as_str()) {
                         if let Some(raw_output) = item_row.get("output").and_then(Value::as_str) {
-                            if !is_terminal_budget_exhausted_stop_hook_output(raw_output) {
+                            let raw_output_owned = raw_output.to_string();
+                            normalized_items.push(
+                                build_responses_reasoning_stop_function_call_item(
+                                    call_id.as_str(),
+                                    raw_output_owned.as_str(),
+                                ),
+                            );
+                            normalized_items.push(serde_json::json!({
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": build_stop_hook_reasoning_stop_output_text(raw_output_owned.as_str())
+                            }));
+                            if !is_terminal_budget_exhausted_stop_hook_output(
+                                raw_output_owned.as_str(),
+                            ) {
                                 normalized_items.push(build_responses_text_guidance_input_item(
-                                    build_stop_hook_guidance_text_from_output(raw_output),
+                                    build_stop_hook_guidance_text_from_output(
+                                        raw_output_owned.as_str(),
+                                    ),
                                 ));
                             }
                         }
@@ -1223,11 +1390,11 @@ pub fn normalize_shell_like_tool_calls_before_governance_json(
 
 #[cfg(test)]
 mod tests {
+    use super::normalize_responses_input_function_calls;
     use super::{
         build_stop_hook_guidance_text_from_output, normalize_apply_patch_output_text,
         normalize_shell_like_tool_calls_before_governance,
     };
-    use super::normalize_responses_input_function_calls;
     use crate::hashline::compute_line_hash;
     use serde_json::{json, Value};
     use std::fs;
@@ -1316,6 +1483,46 @@ mod tests {
         assert_eq!(args["cmd"], "npm test");
         assert!(args.get("command").is_none());
         assert_eq!(args["workdir"], "/workspace");
+    }
+
+    #[test]
+    fn preserves_public_function_call_output_before_stopless_cli_pair() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_public",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"curl /api/catalog\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_public",
+              "output": "{\"owner\":\"backend\"}"
+            },
+            {
+              "type": "function_call",
+              "call_id": "call_servertool_cli",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_servertool_cli",
+              "output": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\"}"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let items = payload["input"].as_array().expect("input items");
+        let public_output = items
+            .iter()
+            .find(|item| item["call_id"] == "call_public" && item["type"] == "function_call_output")
+            .expect("public output");
+        assert_eq!(public_output["type"], "function_call_output");
+        assert_eq!(public_output["output"], "{\"owner\":\"backend\"}");
     }
 
     #[test]
@@ -1782,19 +1989,19 @@ mod tests {
     }
 
     #[test]
-    fn rewrites_auto_injected_stop_hook_pair_into_text_input_for_next_turn() {
+    fn rewrites_stop_hook_pair_into_reasoning_stop_pair_and_guidance_for_next_turn() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
           "input": [
             {
               "type": "function_call",
-              "call_id": "call_servertool_cli_stop_1",
+              "call_id": "call_stop_cli_stop_1",
               "name": "exec_command",
-              "arguments": "{\"cmd\":\"routecodex hook run stop_message_auto --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
+              "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
             },
             {
               "type": "function_call_output",
-              "call_id": "call_servertool_cli_stop_1",
+              "call_id": "call_stop_cli_stop_1",
               "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；拿不到证据就再试一次；想停的时候直接告诉我一句'做完了'或'卡住了，需要你拍板'。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_terminal_missing_fields\",\"missingFields\":[\"evidence\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"decisionRules\":[\"Only use stopreason=0 when the task is actually finished and there is no remaining next_step to execute.\",\"If there is still a concrete next_step, unfinished gate, pending verification, or more implementation work, use stopreason=2 instead of 0.\"],\"invalidExamples\":[\"Invalid: stopreason=0 with next_step saying continue writing remaining gates/manifests/package wiring.\"]}}"
             }
           ]
@@ -1802,9 +2009,17 @@ mod tests {
 
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let input = payload["input"].as_array().expect("input");
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["role"], "user");
-        let text = input[0]["content"][0]["text"].as_str().expect("text");
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["type"], "function_call");
+        assert_eq!(input[0]["name"], "reasoningStop");
+        assert_eq!(input[0]["call_id"], "call_stop_cli_stop_1");
+        assert_eq!(input[1]["type"], "function_call_output");
+        assert_eq!(input[1]["call_id"], "call_stop_cli_stop_1");
+        let restored_output = input[1]["output"].as_str().expect("restored output");
+        assert!(!restored_output.contains("stop_message_auto"));
+        assert!(restored_output.contains("stop_schema_terminal_missing_fields"));
+        assert_eq!(input[2]["role"], "user");
+        let text = input[2]["content"][0]["text"].as_str().expect("text");
         assert!(text.contains("继续做下一步"));
         assert!(text.contains("结尾补齐这些字段"));
         assert!(text.contains("你已经表达 finished/blocked，但还没收齐收尾信息"));
@@ -1819,12 +2034,10 @@ mod tests {
         assert!(!text.contains("停止 JSON"));
         assert!(!text.contains("格式不对"));
         assert!(!text.contains("重试机会"));
-        assert!(!payload.to_string().contains("call_servertool_cli_stop_1"));
-        assert!(!payload.to_string().contains("\"type\":\"function_call_output\""));
     }
 
     #[test]
-    fn rewrites_auto_injected_stop_hook_pair_for_responses_previous_response_resume() {
+    fn rewrites_stop_hook_pair_for_responses_previous_response_resume_into_reasoning_stop_pair() {
         let mut payload = json!({
           "previous_response_id": "resp_prev_stopless_live",
           "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
@@ -1841,13 +2054,13 @@ mod tests {
             },
             {
               "type": "function_call",
-              "call_id": "call_servertool_cli_stop_resume_1",
+              "call_id": "call_stop_cli_stop_resume_1",
               "name": "exec_command",
-              "arguments": "{\"cmd\":\"routecodex hook run reasoning_stop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
+              "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
             },
             {
               "type": "function_call_output",
-              "call_id": "call_servertool_cli_stop_resume_1",
+              "call_id": "call_stop_cli_stop_resume_1",
               "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。\",\"repeatCount\":2,\"maxRepeats\":3}"
             }
           ]
@@ -1855,30 +2068,84 @@ mod tests {
 
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let input = payload["input"].as_array().expect("input");
-        assert_eq!(input.len(), 3);
+        assert_eq!(input.len(), 5);
         assert_eq!(input[0]["role"], "user");
         assert_eq!(input[1]["type"], "reasoning");
-        assert_eq!(input[2]["role"], "user");
-        let text = input[2]["content"][0]["text"].as_str().expect("text");
+        assert_eq!(input[2]["type"], "function_call");
+        assert_eq!(input[2]["name"], "reasoningStop");
+        assert_eq!(input[2]["call_id"], "call_stop_cli_stop_resume_1");
+        assert_eq!(input[3]["type"], "function_call_output");
+        assert_eq!(input[3]["call_id"], "call_stop_cli_stop_resume_1");
+        assert!(!input[3]["output"]
+            .as_str()
+            .expect("output")
+            .contains("stop_message_auto"));
+        assert_eq!(input[4]["role"], "user");
+        let text = input[4]["content"][0]["text"].as_str().expect("text");
         assert!(text.contains("继续往下做"));
-        assert!(!payload.to_string().contains("call_servertool_cli_stop_resume_1"));
-        assert!(!payload.to_string().contains("\"type\":\"function_call_output\""));
     }
 
     #[test]
-    fn rewrites_auto_injected_stop_hook_pair_with_session_dir_env_prefix() {
+    fn rewrites_stop_hook_tool_message_shape_into_reasoning_stop_pair_and_guidance() {
+        let mut payload = json!({
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_servertool_cli_live_1",
+                  "type": "function",
+                  "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"invalid_schema\\\"}'\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_servertool_cli_live_1",
+              "name": "reasoningStop",
+              "content": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"invalid_schema\"}}"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
+        let messages = payload["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], "assistant");
+        assert_eq!(
+            messages[0]["tool_calls"][0]["function"]["name"],
+            "reasoningStop"
+        );
+        assert_eq!(messages[1]["role"], "tool");
+        assert_eq!(messages[1]["name"], "reasoningStop");
+        let restored_output = messages[1]["content"].as_str().expect("tool output");
+        assert!(!restored_output.contains("stop_message_auto"));
+        assert!(restored_output.contains("invalid_schema"));
+        assert_eq!(messages[2]["role"], "user");
+        let guidance = messages[2]["content"][0]["text"].as_str().expect("guidance");
+        assert!(guidance.contains("上一轮执行结果：repeatCount=1/3"));
+        assert!(guidance.contains("刚才那段我没看明白"));
+        assert!(guidance.contains("stopreason"));
+        assert!(!guidance.contains("stop_message_auto"));
+    }
+
+    #[test]
+    fn rewrites_stop_hook_pair_with_session_dir_env_prefix_into_reasoning_stop_pair() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
           "input": [
             {
               "type": "function_call",
-              "call_id": "call_servertool_cli_stop_env_1",
+              "call_id": "call_stop_cli_stop_env_1",
               "name": "exec_command",
-              "arguments": "{\"cmd\":\"ROUTECODEX_SESSION_DIR='/Users/fanzhang/.rcc/sessions/127.0.0.1:5555/ports/gateway_priority_5555' routecodex hook run stop_message_auto --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}' --session-id 'session-a' --request-id 'req-a'\"}"
+              "arguments": "{\"cmd\":\"ROUTECODEX_SESSION_DIR='/Users/fanzhang/.rcc/sessions/127.0.0.1:5555/ports/gateway_priority_5555' routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}' --session-id 'session-a' --request-id 'req-a'\"}"
             },
             {
               "type": "function_call_output",
-              "call_id": "call_servertool_cli_stop_env_1",
+              "call_id": "call_stop_cli_stop_env_1",
               "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；拿不到证据就继续推进。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"triggerHint\":\"no_schema\",\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
             }
           ]
@@ -1886,13 +2153,18 @@ mod tests {
 
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let input = payload["input"].as_array().expect("input");
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["role"], "user");
-        let text = input[0]["content"][0]["text"].as_str().expect("text");
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["type"], "function_call");
+        assert_eq!(input[0]["name"], "reasoningStop");
+        assert_eq!(input[1]["type"], "function_call_output");
+        assert!(!input[1]["output"]
+            .as_str()
+            .expect("output")
+            .contains("stop_message_auto"));
+        assert_eq!(input[2]["role"], "user");
+        let text = input[2]["content"][0]["text"].as_str().expect("text");
         assert!(text.contains("继续做下一步"));
         assert!(text.contains("stopreason"));
-        assert!(!payload.to_string().contains("call_servertool_cli_stop_env_1"));
-        assert!(!payload.to_string().contains("\"type\":\"function_call_output\""));
     }
 
     #[test]
@@ -2616,7 +2888,9 @@ mod tests {
             .to_string(),
         );
         assert!(text.contains("如果当前任务已经完成，就按下面 schema 补齐收尾字段"));
-        assert!(text.contains("如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"));
+        assert!(text.contains(
+            "如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"
+        ));
         assert!(text.contains("如果任务还没完成，不要停，继续执行当前任务"));
     }
 

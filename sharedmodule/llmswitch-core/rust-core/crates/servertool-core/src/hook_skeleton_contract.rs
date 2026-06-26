@@ -172,7 +172,8 @@ pub fn validate_servertool_hook_spec(
 pub fn plan_servertool_hook_schedule(
     input: ServertoolHookSchedulerInput,
 ) -> Result<ServertoolHookEffectPlan, ServertoolHookSkeletonError> {
-    let expected_phase = resolve_requested_phase(&input.direction, &input.req_phase, &input.resp_phase)?;
+    let expected_phase =
+        resolve_requested_phase(&input.direction, &input.req_phase, &input.resp_phase)?;
     let mut matched: Vec<ServertoolHookSpec> = input
         .hooks
         .into_iter()
@@ -204,9 +205,14 @@ pub fn plan_servertool_hook_schedule(
     for hook in matched {
         let projection = validate_servertool_hook_spec(&hook)?;
         if projection.phase != expected_phase {
-            return Err(ServertoolHookSkeletonError::UnsupportedPhase("phase mismatch"));
+            return Err(ServertoolHookSkeletonError::UnsupportedPhase(
+                "phase mismatch",
+            ));
         }
-        if events.iter().any(|event: &ServertoolHookEvent| event.hook_id == hook.id) {
+        if events
+            .iter()
+            .any(|event: &ServertoolHookEvent| event.hook_id == hook.id)
+        {
             return Err(ServertoolHookSkeletonError::DuplicateHookId(hook.id));
         }
         if hook.requiredness == ServertoolHookRequiredness::Required {
@@ -225,8 +231,13 @@ pub fn plan_servertool_hook_schedule(
             });
             continue;
         }
-        if active_effect_kinds.iter().any(|kind| kind == &hook.effect_kind) {
-            return Err(ServertoolHookSkeletonError::HookConflict("duplicate effectKind"));
+        if active_effect_kinds
+            .iter()
+            .any(|kind| kind == &hook.effect_kind)
+        {
+            return Err(ServertoolHookSkeletonError::HookConflict(
+                "duplicate effectKind",
+            ));
         }
         match &expected_input_node {
             Some(value) if value != &projection.input_node => {
@@ -358,9 +369,7 @@ fn expected_nodes_for_phase(
     }
 }
 
-fn expected_nodes_for_req_phase(
-    phase: &ServertoolReqHookPhase,
-) -> (&'static str, &'static str) {
+fn expected_nodes_for_req_phase(phase: &ServertoolReqHookPhase) -> (&'static str, &'static str) {
     match phase {
         ServertoolReqHookPhase::ServertoolReqHook01ResultParsed => (
             "HubReqInbound02Standardized",
@@ -381,9 +390,7 @@ fn expected_nodes_for_req_phase(
     }
 }
 
-fn expected_nodes_for_resp_phase(
-    phase: &ServertoolRespHookPhase,
-) -> (&'static str, &'static str) {
+fn expected_nodes_for_resp_phase(phase: &ServertoolRespHookPhase) -> (&'static str, &'static str) {
     match phase {
         ServertoolRespHookPhase::ServertoolRespHook01Intercepted => (
             "HubRespChatProcess03Governed",

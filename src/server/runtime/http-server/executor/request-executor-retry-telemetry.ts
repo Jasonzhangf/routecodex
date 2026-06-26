@@ -37,8 +37,8 @@ export function buildProviderRetryTelemetryPlan(args: {
   contextOverflowRetries?: number;
   maxContextOverflowRetries?: number;
 }): ProviderRetryTelemetryPlan {
-  if (!args.retryExecutionPlan.retrySwitchPlan || !args.retryExecutionPlan.backoffScope) {
-    throw new Error('retry telemetry requires retrySwitchPlan/backoffScope');
+  if (!args.retryExecutionPlan.retrySwitchPlan) {
+    throw new Error('retry telemetry requires retrySwitchPlan');
   }
   const retrySwitchPlan = args.retryExecutionPlan.retrySwitchPlan;
   const nextAttempt = Math.max(args.attempt, Math.min(args.maxAttempts, args.attempt + 1));
@@ -55,7 +55,7 @@ export function buildProviderRetryTelemetryPlan(args: {
     upstreamCode: args.retryError.upstreamCode,
     upstreamStatus: args.retryError.upstreamStatus,
     switchAction: retrySwitchPlan.switchAction,
-    backoffScope: args.retryExecutionPlan.backoffScope,
+    ...(args.retryExecutionPlan.backoffScope ? { backoffScope: args.retryExecutionPlan.backoffScope } : {}),
     decisionLabel: retrySwitchPlan.decisionLabel,
     retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
     stage: args.stage,
@@ -75,7 +75,7 @@ export function buildProviderRetryTelemetryPlan(args: {
     ...(typeof args.retryError.upstreamStatus === 'number' ? { upstreamStatus: args.retryError.upstreamStatus } : {}),
     retryBackoffMs: args.retryExecutionPlan.retryBackoffMs,
     recoverableBackoffMs: args.retryExecutionPlan.recoverableBackoffMs,
-    backoffScope: args.retryExecutionPlan.backoffScope,
+    ...(args.retryExecutionPlan.backoffScope ? { backoffScope: args.retryExecutionPlan.backoffScope } : {}),
     decisionLabel: retrySwitchPlan.decisionLabel,
     retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
     ...(retrySwitchPlan.runtimeScopeExcludedCount > 0

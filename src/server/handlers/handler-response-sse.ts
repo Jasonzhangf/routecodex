@@ -211,34 +211,6 @@ function createSseClientResponseClosedError(): Error & { code: string; name: str
   });
 }
 
-function maybeUpdateUsageLogInfoFromSseFrame(
-  result: PipelineExecutionResult,
-  frame: string,
-  terminalState?: ReturnType<typeof inspectResponsesTerminalStateFromSseChunkForHttp>
-): ReturnType<typeof inspectResponsesTerminalStateFromSseChunkForHttp> | undefined {
-  const usageLogInfo = result.usageLogInfo;
-  if (!usageLogInfo || !frame) {
-    return terminalState;
-  }
-  const nextTerminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
-    chunk: frame,
-    probe: terminalState?.probe,
-    finishReason: terminalState?.finishReason ?? usageLogInfo.finishReason,
-    seenTerminalEvent: terminalState?.seenTerminalEvent,
-    sawTerminalChunk: terminalState?.sawTerminalChunk,
-    sawResponsesCompletedChunk: terminalState?.sawResponsesCompletedChunk,
-    sawResponsesDoneEvent: terminalState?.sawResponsesDoneEvent,
-    sawAssistantMessageDoneTerminal: terminalState?.sawAssistantMessageDoneTerminal,
-    requiresResponsesTerminalEvent: terminalState?.requiresResponsesTerminalEvent ?? true,
-    terminalSource: terminalState?.terminalSource,
-    pendingTerminalEvent: terminalState?.pendingTerminalEvent,
-  });
-  if (typeof nextTerminalState.finishReason === 'string' && nextTerminalState.finishReason.trim()) {
-    usageLogInfo.finishReason = nextTerminalState.finishReason.trim();
-  }
-  return nextTerminalState;
-}
-
 function createClientVisibleSseProjectionStream(stream: Readable, requestId: string): Readable {
   let pending = '';
   const transform = new Transform({
@@ -1342,13 +1314,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     if (trigger === 'close') {
       ended = true;
     }
-    if (trigger === 'finish') {
-      try {
-        await clientWriteQueue;
-      } catch (error) {
-        logResponseNonBlockingError(`response.sse.cleanup.flush_queue:${requestLabel}`, error);
-      }
-    }
     clearTimers();
     detachOutboundStream();
     const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
@@ -1392,6 +1357,13 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         mode: 'sse',
       },
     });
+    if (trigger === 'finish') {
+      try {
+        await clientWriteQueue;
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.cleanup.flush_queue:${requestLabel}`, error);
+      }
+    }
   };
 
   let ssePending = '';
@@ -1490,7 +1462,19 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     for (const part of parts) {
       if (!part.trim()) continue;
       const frame = `${part}\n\n`;
-      sseTerminalState = maybeUpdateUsageLogInfoFromSseFrame(result, frame, sseTerminalState) ?? sseTerminalState;
+      sseTerminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
+        chunk: frame,
+        probe: sseTerminalState?.probe,
+        finishReason: sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason,
+        seenTerminalEvent: sseTerminalState?.seenTerminalEvent,
+        sawTerminalChunk: sseTerminalState?.sawTerminalChunk,
+        sawResponsesCompletedChunk: sseTerminalState?.sawResponsesCompletedChunk,
+        sawResponsesDoneEvent: sseTerminalState?.sawResponsesDoneEvent,
+        sawAssistantMessageDoneTerminal: sseTerminalState?.sawAssistantMessageDoneTerminal,
+        requiresResponsesTerminalEvent: sseTerminalState?.requiresResponsesTerminalEvent ?? true,
+        terminalSource: sseTerminalState?.terminalSource,
+        pendingTerminalEvent: sseTerminalState?.pendingTerminalEvent,
+      }) ?? sseTerminalState;
       enqueueClientSseFrame(frame, 'response.sse.stream.write_frame');
     }
   });
@@ -1570,7 +1554,19 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     });
     if (ssePending.trim()) {
       const pendingFrame = `${ssePending}\n\n`;
-      sseTerminalState = maybeUpdateUsageLogInfoFromSseFrame(result, pendingFrame, sseTerminalState) ?? sseTerminalState;
+      sseTerminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
+        chunk: pendingFrame,
+        probe: sseTerminalState?.probe,
+        finishReason: sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason,
+        seenTerminalEvent: sseTerminalState?.seenTerminalEvent,
+        sawTerminalChunk: sseTerminalState?.sawTerminalChunk,
+        sawResponsesCompletedChunk: sseTerminalState?.sawResponsesCompletedChunk,
+        sawResponsesDoneEvent: sseTerminalState?.sawResponsesDoneEvent,
+        sawAssistantMessageDoneTerminal: sseTerminalState?.sawAssistantMessageDoneTerminal,
+        requiresResponsesTerminalEvent: sseTerminalState?.requiresResponsesTerminalEvent ?? true,
+        terminalSource: sseTerminalState?.terminalSource,
+        pendingTerminalEvent: sseTerminalState?.pendingTerminalEvent,
+      }) ?? sseTerminalState;
       enqueueClientSseFrame(pendingFrame, 'response.sse.stream.write_pending_frame');
       ssePending = '';
     }
@@ -1591,16 +1587,16 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   });
 
   res.on('close', () => {
-    abortSourceStreamForClientClose();
-    if (!streamEnded) {
+    if (!ended && !streamEnded) {
+      abortSourceStreamForClientClose();
       const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
       recordSseTransportClientClose(requestLabel, {
         finishReason: observedFinishReason,
         terminal: sseTerminalState?.seenTerminalEvent === true,
         closeBeforeStreamEnd: true
       });
+      void cleanup('close');
     }
-    void cleanup('close');
   });
   res.on('finish', () => {
     void cleanup('finish');

@@ -1,4 +1,5 @@
 use serde_json::Value;
+use servertool_core::stop_visible_text::strip_stop_schema_control_text;
 use std::collections::HashMap;
 
 pub(crate) fn is_missing_field(value: Option<&Value>) -> bool {
@@ -144,7 +145,8 @@ fn compact_reasoning_summary_body(raw: &str) -> String {
 }
 
 fn normalize_reasoning_summary_text_for_codex(text: &str, ensure_header: bool) -> Option<String> {
-    let trimmed = text.trim();
+    let stripped = strip_stop_schema_control_text(text);
+    let trimmed = stripped.trim();
     if trimmed.is_empty() {
         return None;
     }
@@ -299,4 +301,32 @@ pub(crate) fn merge_responses_output_items(base: &[Value], source: &[Value]) -> 
         merged.push(Value::Object(next));
     }
     merged
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn normalize_reasoning_summary_text_strips_stop_schema_fences() {
+        let normalized = normalize_reasoning_summary_text_for_codex(
+            "**Thinking** keep going\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>",
+            true,
+        )
+        .expect("normalized");
+        assert_eq!(normalized, "**Thinking** keep going");
+    }
+
+    #[test]
+    fn normalize_reasoning_summary_for_codex_display_strips_stop_schema_fences() {
+        let mut summary = json!([
+            {
+                "type": "summary_text",
+                "text": "**Thinking** keep going\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
+            }
+        ]);
+        normalize_reasoning_summary_for_codex_display(&mut summary);
+        assert_eq!(summary[0]["text"], json!("**Thinking** keep going"));
+    }
 }

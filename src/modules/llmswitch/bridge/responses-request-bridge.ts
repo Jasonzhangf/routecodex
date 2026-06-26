@@ -130,33 +130,6 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     ...(responsesResume ? { responsesResume } : {}),
   };
   const center = MetadataCenter.attach(metadata);
-  if (typeof args.requestContext.sessionId === 'string' && args.requestContext.sessionId.trim()) {
-    center.writeRequestTruth(
-      'sessionId',
-      args.requestContext.sessionId.trim(),
-      {
-        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-        symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'MetaReq02TruthMaterialized'
-      },
-      'responses handler request-context session truth'
-    );
-  }
-  if (
-    typeof args.requestContext.conversationId === 'string'
-    && args.requestContext.conversationId.trim()
-  ) {
-    center.writeRequestTruth(
-      'conversationId',
-      args.requestContext.conversationId.trim(),
-      {
-        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-        symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'MetaReq02TruthMaterialized'
-      },
-      'responses handler request-context conversation truth'
-    );
-  }
   center.writeContinuationContext(
     'responsesRequestContext',
     args.requestContext,

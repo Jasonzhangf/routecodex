@@ -383,9 +383,7 @@ describe('executor metadata session daemon extraction', () => {
     expect(center?.readRuntimeControl()).toMatchObject({
       stopMessageEnabled: true
     });
-    expect(metadata).toMatchObject({
-      stopMessageEnabled: true
-    });
+    expect(metadata.stopMessageEnabled).toBeUndefined();
     expect(metadata.routecodexPortStopMessageEnabled).toBeUndefined();
   });
 

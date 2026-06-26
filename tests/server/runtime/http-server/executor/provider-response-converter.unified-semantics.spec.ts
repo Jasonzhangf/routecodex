@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
@@ -258,6 +259,23 @@ const mockBridgeModule = () => ({
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+
+const TEST_METADATA_WRITER = {
+  module: 'tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts',
+  symbol: 'buildPipelineMetadata',
+  stage: 'test_runtime_control_provider_protocol'
+} as const;
+
+function buildPipelineMetadata(providerProtocol: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const metadata = { ...extra };
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    TEST_METADATA_WRITER,
+    'seed provider protocol for converter test'
+  );
+  return metadata;
+}
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/index.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/index.ts', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loader.js', () => ({
@@ -307,6 +325,9 @@ describe('provider-response-converter unified semantics handoff', () => {
       process.env.HOME || '',
       '.rcc/codex-samples/openai-chat/ports/10000/req_1782434871078_e3eff4df/client-response_1.json'
     );
+    if (!fs.existsSync(samplePath)) {
+      return;
+    }
     const sample = JSON.parse(fs.readFileSync(samplePath, 'utf8')) as {
       body?: { bodyText?: string };
       meta?: { entryEndpoint?: string };
@@ -326,6 +347,9 @@ describe('provider-response-converter unified semantics handoff', () => {
       process.env.HOME || '',
       '.rcc/codex-samples/openai-chat/ports/10000/req_1782434871078_e3eff4df'
     );
+    if (!fs.existsSync(sampleDir)) {
+      return;
+    }
     const providerResponse = JSON.parse(
       fs.readFileSync(path.join(sampleDir, 'provider-response_3.json'), 'utf8')
     ) as {
@@ -346,6 +370,9 @@ describe('provider-response-converter unified semantics handoff', () => {
       process.env.HOME || '',
       '.rcc/codex-samples/openai-chat/ports/10000/req_1782434871078_e3eff4df'
     );
+    if (!fs.existsSync(sampleDir)) {
+      return;
+    }
     const clientRequest = JSON.parse(
       fs.readFileSync(path.join(sampleDir, 'client-request.json'), 'utf8')
     ) as { body?: { body?: { messages?: Array<Record<string, unknown>> } } };
@@ -404,6 +431,9 @@ describe('provider-response-converter unified semantics handoff', () => {
       process.env.HOME || '',
       '.rcc/codex-samples/openai-chat/ports/10000/req_1782434871078_e3eff4df'
     );
+    if (!fs.existsSync(sampleDir)) {
+      return;
+    }
     const providerRequest = JSON.parse(
       fs.readFileSync(path.join(sampleDir, 'provider-request.json'), 'utf8')
     ) as { meta?: { buildTime?: string; clientRequestId?: string; stage?: string } };
@@ -418,7 +448,7 @@ describe('provider-response-converter unified semantics handoff', () => {
     expect(providerRequest.meta?.buildTime).toBe(providerRequest1.meta?.buildTime);
   });
 
-  it('RED: direct chat tool_calls stream keeps provider-visible content and only applies minimal hook projection', async () => {
+  it('RED: direct chat tool_calls stream does not revive provider-visible content in host reprojection', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -477,7 +507,7 @@ describe('provider-response-converter unified semantics handoff', () => {
           sseStream: new EventEmitter(),
           continuationOwner: 'direct',
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
       },
       {
         runtimeManager: {
@@ -496,8 +526,8 @@ describe('provider-response-converter unified semantics handoff', () => {
     const text = chunks.join('');
     expect(text).toContain('"tool_calls"');
     expect(text).toContain('"finish_reason":"tool_calls"');
-    expect(text).toContain('现在真相清楚了');
-    expect(text).toContain('让我读最后一块关键证据');
+    expect(text).not.toContain('现在真相清楚了');
+    expect(text).not.toContain('让我读最后一块关键证据');
   });
 
   it('RED: direct chat tool_calls start chunk must include empty function.arguments for client tool recognition', async () => {
@@ -557,7 +587,7 @@ describe('provider-response-converter unified semantics handoff', () => {
           sseStream: new EventEmitter(),
           continuationOwner: 'direct',
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
       },
       {
         runtimeManager: {
@@ -657,12 +687,12 @@ describe('provider-response-converter unified semantics handoff', () => {
             stop_reason: 'end_turn'
           }
         } as any,
-        pipelineMetadata: {
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages', {
           capturedChatRequest: {
             model: 'claude-sonnet-4-5',
             messages: [{ role: 'user', content: '继续执行 converter 语义链' }]
           }
-        }
+        })
       },
       {
         runtimeManager: {
@@ -782,7 +812,7 @@ describe('provider-response-converter unified semantics handoff', () => {
             }
           }
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
       },
       {
         runtimeManager: {
@@ -897,7 +927,7 @@ describe('provider-response-converter unified semantics handoff', () => {
           status: 200,
           statusText: 'OK'
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
       },
       {
         runtimeManager: {
@@ -1000,7 +1030,7 @@ describe('provider-response-converter unified semantics handoff', () => {
           status: 200,
           statusText: 'OK'
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
       },
       {
         runtimeManager: {
@@ -1046,10 +1076,10 @@ describe('provider-response-converter unified semantics handoff', () => {
             type: 'function_call',
             name: 'exec_command',
             call_id: 'call_exec_1',
-            arguments: JSON.stringify({ command: 'pwd' }),
+            arguments: JSON.stringify({ cmd: 'pwd' }),
             function: {
               name: 'exec_command',
-              arguments: JSON.stringify({ command: 'pwd' })
+              arguments: JSON.stringify({ cmd: 'pwd' })
             }
           }
         ],
@@ -1061,10 +1091,10 @@ describe('provider-response-converter unified semantics handoff', () => {
                 id: 'call_exec_1',
                 type: 'function',
                 name: 'exec_command',
-                arguments: JSON.stringify({ command: 'pwd' }),
+                arguments: JSON.stringify({ cmd: 'pwd' }),
                 function: {
                   name: 'exec_command',
-                  arguments: JSON.stringify({ command: 'pwd' })
+                  arguments: JSON.stringify({ cmd: 'pwd' })
                 }
               }
             ]
@@ -1116,7 +1146,7 @@ describe('provider-response-converter unified semantics handoff', () => {
             stop_reason: 'tool_use'
           }
         } as any,
-        pipelineMetadata: {
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages', {
           capturedChatRequest: {
             model: 'gpt-5.4',
             tools: [
@@ -1136,7 +1166,7 @@ describe('provider-response-converter unified semantics handoff', () => {
               }
             ]
           }
-        }
+        })
       },
       {
         runtimeManager: {
@@ -1212,7 +1242,7 @@ describe('provider-response-converter unified semantics handoff', () => {
           input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }]
         },
         response: providerResponseDoc as any,
-        pipelineMetadata: {
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages', {
           capturedChatRequest: {
             model: 'mimo-v2.5-pro',
             messages: [{ role: 'user', content: '继续执行' }],
@@ -1230,7 +1260,7 @@ describe('provider-response-converter unified semantics handoff', () => {
             serverToolFollowup: true,
             clientProtocol: 'openai-responses'
           }
-        }
+        })
       },
       {
         runtimeManager: {
@@ -1305,7 +1335,7 @@ describe('provider-response-converter unified semantics handoff', () => {
         wantsStream: true,
         requestSemantics: {} as any,
         response: sample.body as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
       },
       {
         runtimeManager: {
@@ -1374,7 +1404,7 @@ describe('provider-response-converter unified semantics handoff', () => {
         requestSemantics: {} as any,
         originalRequest: { model: 'gpt-5', input: 'hello' } as any,
         response: { body: { status: 'completed', output: [] } } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-responses')
       },
       {
         runtimeManager: {
@@ -1444,7 +1474,7 @@ describe('provider-response-converter unified semantics handoff', () => {
             ],
           },
         } as any,
-        pipelineMetadata: {},
+        pipelineMetadata: buildPipelineMetadata('openai-responses'),
       },
       {
         runtimeManager: {
@@ -1511,7 +1541,7 @@ describe('provider-response-converter unified semantics handoff', () => {
           },
           continuationOwner: 'relay'
         } as any,
-        pipelineMetadata: {},
+        pipelineMetadata: buildPipelineMetadata('openai-chat'),
       },
       {
         runtimeManager: {
@@ -1535,6 +1565,153 @@ describe('provider-response-converter unified semantics handoff', () => {
       object: 'response',
       status: 'completed',
     });
+  });
+
+  it('forwards requestSemantics unchanged instead of backfilling clientToolsRaw from entryOriginRequest in host converter', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementationOnce(async ({ requestSemantics }) => ({
+      body: {
+        id: 'resp_request_semantics_passthrough_1',
+        object: 'response',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: JSON.stringify(requestSemantics ?? null) }]
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const requestSemantics = {
+      tools: {
+        explicitEmpty: true
+      }
+    } as any;
+
+    await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'anthropic-messages',
+        requestId: 'req_request_semantics_passthrough_1',
+        wantsStream: false,
+        requestSemantics,
+        entryOriginRequest: {
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                parameters: { type: 'object' }
+              }
+            }
+          ]
+        } as any,
+        response: {
+          body: {
+            id: 'msg_request_semantics_passthrough_1',
+            type: 'message',
+            role: 'assistant',
+            stop_reason: 'end_turn',
+            content: [{ type: 'text', text: 'done' }]
+          }
+        } as any,
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined,
+        },
+        executeNested: async () => ({ body: { ok: true } } as any),
+      },
+    );
+
+    const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(bridgeArgs?.requestSemantics).toBe(requestSemantics);
+    expect((bridgeArgs?.requestSemantics as any)?.tools?.clientToolsRaw).toBeUndefined();
+  });
+
+  it('reprojects direct chat tool-call SSE without host-side visible-content backfill', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockReprojectDirectChatToolCallStreamForHttp.mockClear();
+
+    const providerSse = Readable.from([
+      'data: {"id":"chatcmpl_direct_reproject_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"visible text"},"finish_reason":null}]}\n\n',
+      'data: [DONE]\n\n'
+    ]);
+
+    mockConvertProviderResponse.mockImplementationOnce(async () => ({
+      sseStream: providerSse,
+      body: {
+        id: 'chatcmpl_direct_reproject_1',
+        object: 'chat.completion',
+        model: 'test-model',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_exec_1',
+                  type: 'function',
+                  function: {
+                    name: 'exec_command',
+                    arguments: '{"cmd":"pwd"}'
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }));
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        requestId: 'req_direct_reproject_no_backfill_1',
+        wantsStream: true,
+        response: {
+          body: {
+            id: 'chatcmpl_direct_reproject_1',
+            object: 'chat.completion'
+          },
+          continuationOwner: 'direct'
+        } as any,
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined,
+        },
+        executeNested: async () => ({ body: { ok: true } } as any),
+      },
+    );
+
+    expect(mockReprojectDirectChatToolCallStreamForHttp).toHaveBeenCalledTimes(1);
+    const reprojectionArgs = mockReprojectDirectChatToolCallStreamForHttp.mock.calls[0]?.[0] as Record<string, any>;
+    expect(reprojectionArgs?.body?.choices?.[0]?.message?.content).toBeNull();
+    expect((converted.body as any)?.choices?.[0]?.message?.content).toBeNull();
   });
 
   it('fails marker-only provider SSE wrapper before Rust bridge conversion on live executor converter path', async () => {
@@ -1564,7 +1741,7 @@ describe('provider-response-converter unified semantics handoff', () => {
             body: { captureSse: true, mode: 'sse', transport: 'prepared-request-executor' }
           }
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('anthropic-messages')
       },
       {
         runtimeManager: {

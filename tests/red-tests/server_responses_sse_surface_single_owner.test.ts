@@ -13,18 +13,17 @@ describe('server responses SSE surface single owner', () => {
     const joinedImports = importStatements.join('\n');
 
     expect(source).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
-    expect(source).not.toContain("from '../../modules/llmswitch/bridge/responses-response-bridge.js'");
     expect(joinedImports).not.toMatch(/buildResponsesSseErrorPayloadForHttp[\s\S]*responses-response-bridge\.js/);
     expect(joinedImports).not.toMatch(/shouldDispatchResponsesSseToClientForHttp[\s\S]*responses-response-bridge\.js/);
     expect(source).not.toContain('persistResponsesConversationLifecycleForHttp');
     expect(source).not.toContain('planResponsesContinuationCloseActionForHttp');
   });
 
-  it('keeps handler-response-utils split between SSE facade and lifecycle facade', () => {
+  it('keeps handler-response-utils transport-only without continuation save owner', () => {
     const source = readFileSync(join(root, 'src/server/handlers/handler-response-utils.ts'), 'utf8');
 
-    expect(source).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
     expect(source).toContain("from '../../modules/llmswitch/bridge/responses-response-bridge.js'");
+    expect(source).not.toContain('persistResponsesConversationLifecycleForHttp');
   });
 
   it('does not re-export SSE bridge symbols from the lifecycle bridge index section', () => {

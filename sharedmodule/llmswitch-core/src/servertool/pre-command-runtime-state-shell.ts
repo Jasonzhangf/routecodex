@@ -5,6 +5,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { resolveServertoolPersistentScopeKey } from './state-scope.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './stopless-metadata-carrier.js';
 
 export function resolveServertoolRuntimePreCommandState(args: {
   adapterContext: unknown;
@@ -13,6 +14,8 @@ export function resolveServertoolRuntimePreCommandState(args: {
   entryEndpoint?: string;
   providerProtocol?: string;
 }): JsonObject | undefined {
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown> | undefined);
   const persistentScopeKey = resolveServertoolPersistentScopeKey(args.adapterContext);
   const directRuntime = asObject((args.adapterContext as Record<string, unknown> | undefined)?.__rt);
   const runtimeActionBase = {
@@ -53,7 +56,7 @@ export function resolveServertoolRuntimePreCommandState(args: {
       requestId: args.requestId,
       stickyKey: persistentScopeKey ?? '',
       entryEndpoint: args.entryEndpoint,
-      providerProtocol: args.providerProtocol
+      providerProtocol
     });
     if (failedAction.action !== 'throw_state_load_failed' || !failedAction.errorPlan) {
       throw new Error(

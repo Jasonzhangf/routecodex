@@ -205,14 +205,14 @@ fn parse_stop_message_instruction(instruction: &str) -> Result<Option<RoutingIns
         kind: "stopMessageSet".to_string(),
         target: None,
         provider: None,
-            stop_message: Some(StopMessageInstruction {
-                kind: "set".to_string(),
-                text: Some(resolved_text),
-                max_repeats: parsed.max_repeats,
-                stage_mode: None,
-                source,
-                from_historical: false,
-            }),
+        stop_message: Some(StopMessageInstruction {
+            kind: "set".to_string(),
+            text: Some(resolved_text),
+            max_repeats: parsed.max_repeats,
+            stage_mode: None,
+            source,
+            from_historical: false,
+        }),
         pre_command: None,
     }))
 }

@@ -1,11 +1,11 @@
 use serde_json::{Map, Value};
 
 use crate::shared_json_utils::read_trimmed_string;
-use crate::shared_tooling::{normalize_tool_result_text, parse_lenient_string};
 use crate::shared_tool_call_id_core::{
     clamp_prefixed_tool_call_id, extract_tool_call_id_core, normalize_prefixed_tool_call_id,
     sanitize_id_core,
 };
+use crate::shared_tooling::{normalize_tool_result_text, parse_lenient_string};
 
 #[derive(Debug, Clone)]
 pub(crate) struct MediaBlock {

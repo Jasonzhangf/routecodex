@@ -187,12 +187,7 @@ mod tests {
         });
         registry.load(providers.as_object().unwrap());
 
-        let selected = select_direct_provider_model(
-            "DF",
-            "deepseek-v4-pro",
-            &registry,
-            |_| true,
-        );
+        let selected = select_direct_provider_model("DF", "deepseek-v4-pro", &registry, |_| true);
         assert_eq!(selected, Some("DF.key1.DeepSeek-V4-Pro".to_string()));
     }
 }

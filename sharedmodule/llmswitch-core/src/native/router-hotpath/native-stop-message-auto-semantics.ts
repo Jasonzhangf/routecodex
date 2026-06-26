@@ -1,10 +1,19 @@
-// Native bridge for stop-message-core decision engine.
-// Types defined inline — no self-import.
+/**
+ * Native bridge for stop-message-core decision engine.
+ *
+ * Types defined inline — no self-import.
+ *
+ * NOTE: All functions in this file are kept for type re-export only.
+ * The actual implementation now calls the Rust NAPI entry points directly.
+ * This file preserves the exported TypeScript types that are used by
+ * stop-message-auto.ts and other TS consumers.
+ */
 
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
 import { failNativeRequired } from './native-router-hotpath-policy.js';
+import type { ServerToolFollowupPlan } from '../../servertool/types.js';
 
-// ── Types ───────────────────────────────────────────────────────────────────
+// ── Types (re-exported for TS consumers) ─────────────────────────────────────
 
 export type StageMode = 'on' | 'off' | 'auto';
 export type SnapshotSource = 'persisted' | 'default' | 'implicit_gemini';
@@ -56,14 +65,7 @@ function fallbackSkip(reason: string): StopMessageDecision {
   return { action: 'skip', skip_reason: reason, used: 0, max_repeats: 0 };
 }
 
-// ── Native bridge ───────────────────────────────────────────────────────────
-
-type StopMessageHandlerResult = {
-  chatResponse: Record<string, unknown>;
-  flowId: string;
-  followup: Record<string, unknown> | null;
-  stoplessRuntimeState: Record<string, unknown> | null;
-};
+// ── Native bridge (kept for TS callers that have not yet migrated) ──────────
 
 export type StopSchemaGateDecision = {
   action: 'allow_stop' | 'followup' | 'fail_fast';
@@ -86,7 +88,7 @@ export type StopSchemaGateDecision = {
   parsed?: Record<string, unknown>;
 };
 
-export type GoalActiveStopLoopDecision = {
+export type StoplessLoopGuardDecision = {
   loopDetected: boolean;
   repeatCount: number;
   threshold: number;
@@ -226,13 +228,13 @@ export function evaluateStopSchemaGateWithNative(args: {
   }
 }
 
-export function evaluateGoalActiveStopLoopGuardWithNative(args: {
+export function evaluateStoplessLoopGuardWithNative(args: {
   capturedRequest: Record<string, unknown>;
   assistantText: string;
   threshold?: number;
-}): GoalActiveStopLoopDecision {
-  const capability = 'evaluateGoalActiveStopLoopGuardJson';
-  const fail = (reason?: string) => failNativeRequired<GoalActiveStopLoopDecision>(capability, reason);
+}): StoplessLoopGuardDecision {
+  const capability = 'evaluateStoplessLoopGuardJson';
+  const fail = (reason?: string) => failNativeRequired<StoplessLoopGuardDecision>(capability, reason);
   try {
     const fn = readNativeFunction(capability);
     if (!fn) {
@@ -242,9 +244,18 @@ export function evaluateGoalActiveStopLoopGuardWithNative(args: {
     if (typeof raw !== 'string') {
       return fail(`native_returned_non_string: ${typeof raw}`);
     }
-    return JSON.parse(raw) as GoalActiveStopLoopDecision;
+    return JSON.parse(raw) as StoplessLoopGuardDecision;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
 }
+
+// ── Internal types ──────────────────────────────────────────────────────────
+
+type StopMessageHandlerResult = {
+  chatResponse: Record<string, unknown>;
+  flowId: string;
+  followup: ServerToolFollowupPlan | null;
+  stoplessRuntimeState: Record<string, unknown> | null;
+};

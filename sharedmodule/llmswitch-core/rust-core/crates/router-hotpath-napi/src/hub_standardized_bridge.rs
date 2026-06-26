@@ -145,8 +145,11 @@ fn normalize_chat_message(message: &Value) -> Value {
         .unwrap_or("user")
         .to_string();
     let tool_name = message_row.get("name").and_then(|v| v.as_str());
-    let content =
-        normalize_chat_tool_message_content(role.as_str(), tool_name, clone_message_content(message_row.get("content")));
+    let content = normalize_chat_tool_message_content(
+        role.as_str(),
+        tool_name,
+        clone_message_content(message_row.get("content")),
+    );
 
     let mut out = Map::new();
     out.insert("role".to_string(), Value::String(role));

@@ -1765,6 +1765,21 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('request-stage bridge must not retain legacy metadataCenter or __rt compatibility residue', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'legacy __metadataCenter fallback residue', pattern: /__metadataCenter/ },
+      { label: 'legacy __rt read/write residue', pattern: /metadata\.__rt|__rt\s*=/ },
+      { label: 'legacy runtime whitelist helper residue', pattern: /projectLegacyRuntimeControlWhitelist|readRuntimeMetadataControl/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy TS outbound provider payload orchestration file must be physically removed', () => {
     const filePath = path.join(
       process.cwd(),

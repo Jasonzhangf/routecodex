@@ -346,7 +346,8 @@ export function planResponsesStreamEndRepairForHttp(args: {
   shouldRepairContinuationTerminal: boolean;
   shouldProjectIncompleteError: boolean;
 } {
-  const shouldRepairTerminalFrames = !args.sawResponsesCompletedChunk || !args.sawResponsesDoneEvent;
+  const shouldRepairTerminalFrames =
+    Boolean(args.probe) && (!args.sawResponsesCompletedChunk || !args.sawResponsesDoneEvent);
   const shouldRepairContinuationTerminal =
     !args.sawTerminalEvent
     && Boolean(args.probe)

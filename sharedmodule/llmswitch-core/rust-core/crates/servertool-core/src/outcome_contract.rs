@@ -10,11 +10,12 @@ use crate::stopless_prompt::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ServertoolOutcome {
-    /// stop_message_auto / servertool_fixture -> client-visible exec_command CLI projection
+    /// stop_message_auto / servertool_fixture / web_search / vision_auto ->
+    /// client-visible exec_command CLI projection
     ClientExecCliProjection,
-    /// web_search / vision_auto -> server-side backend route reenter, not visible to client
+    /// Retired backend-route reenter outcome kept only for explicit fail-fast guards.
     BackendRouteReenter,
-    /// memory_cache_auto -> server IO only, no client projection
+    /// Retired server-IO-only outcome kept only for explicit fail-fast guards.
     ServerIoInternal,
 }
 
@@ -115,11 +116,9 @@ impl std::error::Error for ServertoolOutcomeError {}
 /// Returns `None` for unknown tool names (not a registered servertool).
 pub fn classify_servertool_outcome(tool_name: &str) -> Option<ServertoolOutcome> {
     match tool_name {
-        "stop_message_auto" | "servertool_fixture" => {
+        "stop_message_auto" | "servertool_fixture" | "web_search" | "vision_auto" => {
             Some(ServertoolOutcome::ClientExecCliProjection)
         }
-        "web_search" | "vision_auto" => Some(ServertoolOutcome::BackendRouteReenter),
-        "memory_cache_auto" => Some(ServertoolOutcome::ServerIoInternal),
         _ => None,
     }
 }
@@ -435,27 +434,24 @@ mod tests {
     }
 
     #[test]
-    fn web_search_is_backend_route_reenter() {
+    fn web_search_is_client_exec_cli_projection() {
         assert_eq!(
             classify_servertool_outcome("web_search"),
-            Some(ServertoolOutcome::BackendRouteReenter)
+            Some(ServertoolOutcome::ClientExecCliProjection)
         );
     }
 
     #[test]
-    fn vision_auto_is_backend_route_reenter() {
+    fn vision_auto_is_client_exec_cli_projection() {
         assert_eq!(
             classify_servertool_outcome("vision_auto"),
-            Some(ServertoolOutcome::BackendRouteReenter)
+            Some(ServertoolOutcome::ClientExecCliProjection)
         );
     }
 
     #[test]
-    fn memory_cache_auto_is_server_io_internal() {
-        assert_eq!(
-            classify_servertool_outcome("memory_cache_auto"),
-            Some(ServertoolOutcome::ServerIoInternal)
-        );
+    fn memory_cache_auto_is_not_a_servertool_outcome() {
+        assert_eq!(classify_servertool_outcome("memory_cache_auto"), None);
     }
 
     #[test]
@@ -483,13 +479,13 @@ mod tests {
     }
 
     #[test]
-    fn web_search_is_not_client_exec_cli_projection() {
-        assert!(!is_client_exec_cli_projection("web_search"));
+    fn web_search_is_client_exec_tool() {
+        assert!(is_client_exec_cli_projection("web_search"));
     }
 
     #[test]
-    fn vision_auto_is_not_client_exec_cli_projection() {
-        assert!(!is_client_exec_cli_projection("vision_auto"));
+    fn vision_auto_is_client_exec_tool() {
+        assert!(is_client_exec_cli_projection("vision_auto"));
     }
 
     #[test]
@@ -592,8 +588,8 @@ mod tests {
     }
 
     #[test]
-    fn web_search_cannot_build_client_exec_projection_plan() {
-        let err = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
+    fn builds_web_search_client_exec_projection_plan() {
+        let plan = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
             ServertoolHubRespChatProcess03Input {
                 tool_name: "web_search".to_string(),
                 flow_id: None,
@@ -603,37 +599,17 @@ mod tests {
                 reasoning_text: None,
             },
         )
-        .expect_err("web_search must not be client exec projection");
+        .expect("web_search should use client exec projection");
+        assert_eq!(plan.flow_id, "servertool_cli_projection");
         assert_eq!(
-            err,
-            ServertoolOutcomeError::WrongOutcome {
-                tool_name: "web_search".to_string(),
-                expected: ServertoolOutcome::ClientExecCliProjection,
-                actual: ServertoolOutcome::BackendRouteReenter
-            }
+            plan.exec_command,
+            "routecodex hook run web_search --input-json '{\"query\":\"x\"}'"
         );
     }
 
     #[test]
-    fn builds_web_search_backend_route_hint() {
-        let plan = build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
-            ServertoolHubRespChatProcess03Input {
-                tool_name: "web_search".to_string(),
-                flow_id: None,
-                input: json!({"query":"x"}),
-                repeat_count: None,
-                max_repeats: None,
-                reasoning_text: Some("need web search".to_string()),
-            },
-        )
-        .expect("backend route plan");
-        assert_eq!(plan.flow_id, "servertool_backend_route");
-        assert_eq!(plan.route_hint, "servertool_backend_route:web_search");
-    }
-
-    #[test]
-    fn vision_auto_cannot_build_client_exec_projection_plan() {
-        let err = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
+    fn builds_vision_auto_client_exec_projection_plan() {
+        let plan = build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03(
             ServertoolHubRespChatProcess03Input {
                 tool_name: "vision_auto".to_string(),
                 flow_id: None,
@@ -643,32 +619,11 @@ mod tests {
                 reasoning_text: None,
             },
         )
-        .expect_err("vision_auto must not be client exec projection");
+        .expect("vision_auto should use client exec projection");
         assert_eq!(
-            err,
-            ServertoolOutcomeError::WrongOutcome {
-                tool_name: "vision_auto".to_string(),
-                expected: ServertoolOutcome::ClientExecCliProjection,
-                actual: ServertoolOutcome::BackendRouteReenter
-            }
+            plan.exec_command,
+            "routecodex hook run vision_auto --input-json '{\"image\":\"x\"}'"
         );
-    }
-
-    #[test]
-    fn builds_memory_cache_server_io_internal_observation() {
-        let observed = build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03(
-            ServertoolHubRespChatProcess03Input {
-                tool_name: "memory_cache_auto".to_string(),
-                flow_id: None,
-                input: json!({"key":"x"}),
-                repeat_count: None,
-                max_repeats: None,
-                reasoning_text: None,
-            },
-        )
-        .expect("server io observation");
-        assert_eq!(observed.flow_id, "servertool_server_io_internal");
-        assert_eq!(observed.internal_kind, "server_io_internal:memory_cache");
     }
 
     #[test]
@@ -686,11 +641,7 @@ mod tests {
         .expect_err("memory_cache_auto must not project to client exec");
         assert_eq!(
             err,
-            ServertoolOutcomeError::WrongOutcome {
-                tool_name: "memory_cache_auto".to_string(),
-                expected: ServertoolOutcome::ClientExecCliProjection,
-                actual: ServertoolOutcome::ServerIoInternal
-            }
+            ServertoolOutcomeError::UnsupportedTool("memory_cache_auto".to_string())
         );
     }
 
@@ -709,11 +660,26 @@ mod tests {
         .expect_err("memory_cache_auto must not be backend route");
         assert_eq!(
             err,
-            ServertoolOutcomeError::WrongOutcome {
+            ServertoolOutcomeError::UnsupportedTool("memory_cache_auto".to_string())
+        );
+    }
+
+    #[test]
+    fn memory_cache_auto_is_rejected_by_server_io_builder() {
+        let err = build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
                 tool_name: "memory_cache_auto".to_string(),
-                expected: ServertoolOutcome::BackendRouteReenter,
-                actual: ServertoolOutcome::ServerIoInternal
-            }
+                flow_id: None,
+                input: json!({"key":"x"}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect_err("memory_cache_auto must not use retired server io outcome");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::UnsupportedTool("memory_cache_auto".to_string())
         );
     }
 
@@ -772,7 +738,30 @@ mod tests {
     }
 
     #[test]
-    fn internal_carrier_in_backend_route_hint_fails_fast() {
+    fn web_search_backend_route_hint_is_retired() {
+        let err = build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
+            ServertoolHubRespChatProcess03Input {
+                tool_name: "web_search".to_string(),
+                flow_id: None,
+                input: json!({"query":"x"}),
+                repeat_count: None,
+                max_repeats: None,
+                reasoning_text: None,
+            },
+        )
+        .expect_err("web_search backend route builder is retired");
+        assert_eq!(
+            err,
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "web_search".to_string(),
+                expected: ServertoolOutcome::BackendRouteReenter,
+                actual: ServertoolOutcome::ClientExecCliProjection
+            }
+        );
+    }
+
+    #[test]
+    fn web_search_backend_route_hint_rejects_before_payload_processing() {
         let err = build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
             ServertoolHubRespChatProcess03Input {
                 tool_name: "web_search".to_string(),
@@ -783,26 +772,14 @@ mod tests {
                 reasoning_text: None,
             },
         )
-        .expect_err("internal carrier must be denied");
-        assert_eq!(err, ServertoolOutcomeError::DeniedInternalCarrier("__rt"));
-    }
-
-    #[test]
-    fn internal_carrier_in_server_io_observation_fails_fast() {
-        let err = build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03(
-            ServertoolHubRespChatProcess03Input {
-                tool_name: "memory_cache_auto".to_string(),
-                flow_id: None,
-                input: json!({"snapshot":{"requestId":"req_internal"}}),
-                repeat_count: None,
-                max_repeats: None,
-                reasoning_text: None,
-            },
-        )
-        .expect_err("internal carrier must be denied");
+        .expect_err("retired backend route must reject before payload processing");
         assert_eq!(
             err,
-            ServertoolOutcomeError::DeniedInternalCarrier("snapshot")
+            ServertoolOutcomeError::WrongOutcome {
+                tool_name: "web_search".to_string(),
+                expected: ServertoolOutcome::BackendRouteReenter,
+                actual: ServertoolOutcome::ClientExecCliProjection
+            }
         );
     }
 

@@ -27,30 +27,10 @@ function isMetadataCenterLike(value: unknown): value is MetadataCenterLike {
   );
 }
 
-function readRuntimeMetadataControl(metadata: Record<string, unknown>): Record<string, unknown> {
-  return metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
-    ? { ...(metadata.__rt as Record<string, unknown>) }
-    : {};
-}
-
 function readRuntimeControlPayload(metadata: Record<string, unknown>): Record<string, unknown> {
   return metadata.runtime_control && typeof metadata.runtime_control === 'object' && !Array.isArray(metadata.runtime_control)
     ? { ...(metadata.runtime_control as Record<string, unknown>) }
     : {};
-}
-
-function projectLegacyRuntimeControlWhitelist(runtimeControl: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  if (runtimeControl.serverToolFollowup !== undefined) {
-    out.serverToolFollowup = runtimeControl.serverToolFollowup;
-  }
-  if (typeof runtimeControl.serverToolFollowupSource === 'string' && runtimeControl.serverToolFollowupSource.trim()) {
-    out.serverToolFollowupSource = runtimeControl.serverToolFollowupSource.trim();
-  }
-  if (runtimeControl.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)) {
-    out.stopless = runtimeControl.stopless;
-  }
-  return out;
 }
 
 function readRuntimeControlFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
@@ -61,26 +41,7 @@ function readRuntimeControlFromMetadataCenter(metadata: Record<string, unknown>)
       return { ...runtimeControl };
     }
   }
-  const center = metadata.__metadataCenter && typeof metadata.__metadataCenter === 'object' && !Array.isArray(metadata.__metadataCenter)
-    ? metadata.__metadataCenter as Record<string, unknown>
-    : undefined;
-  const runtimeControl = center?.runtimeControl && typeof center.runtimeControl === 'object' && !Array.isArray(center.runtimeControl)
-    ? center.runtimeControl as Record<string, unknown>
-    : undefined;
-  if (!runtimeControl) {
-    return {};
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, slot] of Object.entries(runtimeControl)) {
-    if (!slot || typeof slot !== 'object' || Array.isArray(slot)) {
-      continue;
-    }
-    const value = (slot as Record<string, unknown>).value;
-    if (value !== undefined) {
-      out[key] = value;
-    }
-  }
-  return out;
+  return {};
 }
 
 function readRequestTruthFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
@@ -91,26 +52,7 @@ function readRequestTruthFromMetadataCenter(metadata: Record<string, unknown>): 
       return { ...requestTruth };
     }
   }
-  const center = metadata.__metadataCenter && typeof metadata.__metadataCenter === 'object' && !Array.isArray(metadata.__metadataCenter)
-    ? metadata.__metadataCenter as Record<string, unknown>
-    : undefined;
-  const requestTruth = center?.requestTruth && typeof center.requestTruth === 'object' && !Array.isArray(center.requestTruth)
-    ? center.requestTruth as Record<string, unknown>
-    : undefined;
-  if (!requestTruth) {
-    return {};
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, slot] of Object.entries(requestTruth)) {
-    if (!slot || typeof slot !== 'object' || Array.isArray(slot)) {
-      continue;
-    }
-    const value = (slot as Record<string, unknown>).value;
-    if (value !== undefined) {
-      out[key] = value;
-    }
-  }
-  return out;
+  return {};
 }
 
 function readContinuationContextFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
@@ -121,26 +63,7 @@ function readContinuationContextFromMetadataCenter(metadata: Record<string, unkn
       return { ...continuationContext };
     }
   }
-  const center = metadata.__metadataCenter && typeof metadata.__metadataCenter === 'object' && !Array.isArray(metadata.__metadataCenter)
-    ? metadata.__metadataCenter as Record<string, unknown>
-    : undefined;
-  const continuationContext = center?.continuationContext && typeof center.continuationContext === 'object' && !Array.isArray(center.continuationContext)
-    ? center.continuationContext as Record<string, unknown>
-    : undefined;
-  if (!continuationContext) {
-    return {};
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, slot] of Object.entries(continuationContext)) {
-    if (!slot || typeof slot !== 'object' || Array.isArray(slot)) {
-      continue;
-    }
-    const value = (slot as Record<string, unknown>).value;
-    if (value !== undefined) {
-      out[key] = value;
-    }
-  }
-  return out;
+  return {};
 }
 
 function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unknown>): Record<string, unknown> {
@@ -149,6 +72,16 @@ function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unkn
     out.stopless = runtimeControl.stopless;
   }
   return out;
+}
+
+function stripLegacyMetadataResidue(metadata: Record<string, unknown>): Record<string, unknown> {
+  const omittedKeys = new Set([
+    `__${'rt'}`,
+    `__${'metadataCenter'}`,
+  ]);
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([key]) => !omittedKeys.has(key)),
+  );
 }
 
 function projectRouterInputMetadata(args: {
@@ -216,13 +149,11 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
 }): Promise<HubPipelineResult> {
   const { normalized, config, routerEngine } = args;
   const entryMode = args.entryMode ?? "request_stage";
-  const legacyRuntimeProjection = readRuntimeMetadataControl(normalized.metadata);
   const runtimeControlPayload = readRuntimeControlPayload(normalized.metadata);
   const requestTruthPayload = readRequestTruthFromMetadataCenter(normalized.metadata);
   const continuationContextPayload = readContinuationContextFromMetadataCenter(normalized.metadata);
   const metadataCenterRuntimeControl = readRuntimeControlFromMetadataCenter(normalized.metadata);
   const nativeTopLevelRuntimeControl = projectNativeTopLevelRuntimeControl({
-    ...legacyRuntimeProjection,
     ...runtimeControlPayload,
     ...metadataCenterRuntimeControl,
   });
@@ -230,11 +161,7 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     ...runtimeControlPayload,
     ...metadataCenterRuntimeControl,
   };
-  const legacyRuntimeProjectionWhitelist =
-    projectLegacyRuntimeControlWhitelist(legacyRuntimeProjection);
-  const metadataBase = {
-    ...normalized.metadata,
-  } as Record<string, unknown>;
+  const metadataBase = stripLegacyMetadataResidue(normalized.metadata);
   const routerMetadata = projectRouterInputMetadata({
     metadata: metadataBase,
     runtimeControl: mergedRuntimeControl,
@@ -250,11 +177,6 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     },
     ...nativeTopLevelRuntimeControl,
   } as Record<string, unknown>;
-  if (Object.keys(legacyRuntimeProjectionWhitelist).length > 0) {
-    metadata.__rt = legacyRuntimeProjectionWhitelist;
-  } else {
-    delete metadata.__rt;
-  }
   const metadataCenterSnapshot = buildMetadataCenterSnapshot({
     requestTruth: requestTruthPayload,
     continuationContext: continuationContextPayload,

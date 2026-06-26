@@ -305,13 +305,20 @@ impl VirtualRouterEngineCore {
         // Keep health selection state scoped to the current runtime override context
         // (sessionDir/rccUserDir). This prevents cross-port/session pollution.
         self.refresh_provider_health_from_store(false);
+        let metadata_center_snapshot = metadata
+            .get("metadataCenterSnapshot")
+            .and_then(|value| value.as_object())
+            .ok_or_else(|| {
+                "metadataCenterSnapshot is required for virtual router metadata reads".to_string()
+            })?;
+        let metadata_center_snapshot_value = Value::Object(metadata_center_snapshot.clone());
         let mut request_working = request.clone();
         clean_malformed_routing_instruction_markers(&mut request_working);
-        let is_continuation = is_continuation_request(metadata);
-        let request_routing_state_key = resolve_routing_state_key(metadata);
-        let session_scope = resolve_session_scope(metadata);
-        let stop_message_scope = resolve_stop_message_scope(metadata);
-        let meta_route_03 = build_meta_route_03_from_metadata(metadata);
+        let is_continuation = is_continuation_request(&metadata_center_snapshot_value);
+        let request_routing_state_key = resolve_routing_state_key(&metadata_center_snapshot_value);
+        let session_scope = resolve_session_scope(&metadata_center_snapshot_value);
+        let stop_message_scope = resolve_stop_message_scope(&metadata_center_snapshot_value);
+        let meta_route_03 = build_meta_route_03_from_metadata(&metadata_center_snapshot_value);
         let routing_state_key = session_scope.clone().unwrap_or_else(|| {
             if is_continuation {
                 request_routing_state_key.clone()
@@ -788,8 +795,10 @@ mod tests {
             ]
         });
         let metadata = json!({
-            "endpoint": "/v1/chat/completions",
-            "requestId": "test-123"
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-123"
+            }
         });
 
         let result = core.route(
@@ -824,10 +833,12 @@ mod tests {
             ]
         });
         let metadata = json!({
-            "endpoint": "/v1/chat/completions",
-            "requestId": "test-followup-route-hint:stop_followup",
-            "routeHint": "search",
-            "runtime_control": { "serverToolFollowup": true }
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-followup-route-hint:stop_followup",
+                "routeHint": "search",
+                "runtime_control": { "serverToolFollowup": true }
+            }
         });
 
         let result = core
@@ -855,12 +866,14 @@ mod tests {
             ]
         });
         let metadata = json!({
-            "endpoint": "/v1/chat/completions",
-            "requestId": "test-stopless-strip-tools-hint",
-            "routeHint": "tools",
-            "runtime_control": {
-                "serverToolFollowup": true,
-                "serverToolFollowupSource": "servertool.stop_message"
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-stopless-strip-tools-hint",
+                "routeHint": "tools",
+                "runtime_control": {
+                    "serverToolFollowup": true,
+                    "serverToolFollowupSource": "servertool.stop_message"
+                }
             }
         });
 
@@ -897,12 +910,14 @@ mod tests {
             ]
         });
         let metadata = json!({
-            "endpoint": "/v1/chat/completions",
-            "requestId": "test-stopless-strip-search-hint",
-            "routeHint": "search",
-            "runtime_control": {
-                "serverToolFollowup": true,
-                "serverToolFollowupSource": "servertool.stop_message"
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-stopless-strip-search-hint",
+                "routeHint": "search",
+                "runtime_control": {
+                    "serverToolFollowup": true,
+                    "serverToolFollowupSource": "servertool.stop_message"
+                }
             }
         });
 
@@ -959,9 +974,11 @@ mod tests {
             ]
         });
         let metadata = json!({
-            "endpoint": "/v1/responses",
-            "routerDirectInboundProtocol": "openai-responses",
-            "requestId": "test-router-direct-direct-model-protocol"
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/responses",
+                "routerDirectInboundProtocol": "openai-responses",
+                "requestId": "test-router-direct-direct-model-protocol"
+            }
         });
 
         let error = core
@@ -1008,9 +1025,11 @@ mod tests {
             ]
         });
         let metadata = json!({
-            "endpoint": "/v1/chat/completions",
-            "routerDirectInboundProtocol": "openai-chat",
-            "requestId": "test-router-direct-direct-model-alias"
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "routerDirectInboundProtocol": "openai-chat",
+                "requestId": "test-router-direct-direct-model-alias"
+            }
         });
 
         let result = core
@@ -1054,8 +1073,10 @@ mod tests {
             ]
         });
         let metadata = json!({
-            "endpoint": "/v1/chat/completions",
-            "requestId": "test-456"
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-456"
+            }
         });
 
         let result = core.route(
@@ -1078,8 +1099,10 @@ mod tests {
             ]
         });
         let metadata = json!({
-            "endpoint": "/v1/chat/completions",
-            "requestId": "test-789"
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-789"
+            }
         });
 
         let result = core

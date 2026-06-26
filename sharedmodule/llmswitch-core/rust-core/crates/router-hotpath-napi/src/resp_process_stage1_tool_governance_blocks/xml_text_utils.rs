@@ -173,7 +173,7 @@ pub(crate) fn strip_xml_tags_preserve_text(raw: &str) -> String {
         return raw.trim().to_string();
     };
     let decoded = decode_basic_xml_entities(raw);
-    let text = tag_pattern.replace_all(decoded.as_str(), " ").to_string();
+    let text = tag_pattern.replace_all(decoded.as_str(), "").to_string();
     normalize_preserved_text_whitespace(text.as_str())
 }
 

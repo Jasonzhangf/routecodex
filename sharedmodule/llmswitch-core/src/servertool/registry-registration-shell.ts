@@ -1,8 +1,7 @@
 import type { ServerToolHandler } from './types.js';
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import {
-  getBuiltinHandlerEntry,
-  listBuiltinHandlerNames
+  getBuiltinHandlerEntry
 } from './builtin-handler-catalog.js';
 import {
   getAdHocHandlerEntry,
@@ -20,6 +19,15 @@ import {
 type TriggerMode = 'tool_call' | 'auto';
 type AutoHookPhase = 'pre' | 'default' | 'post';
 
+function resolveBuiltinEntry(name: string): ServerToolHandlerEntry | undefined {
+  const rawName = typeof name === 'string' ? name.trim() : '';
+  if (!rawName) {
+    return undefined;
+  }
+  const canonicalName = rawName.toLowerCase();
+  return getBuiltinHandlerEntry(rawName) ?? getBuiltinHandlerEntry(canonicalName);
+}
+
 export const registerServerToolHandlerViaNativePlan = (
   name: string,
   handler: ServerToolHandler,
@@ -34,10 +42,8 @@ export const registerServerToolHandlerViaNativePlan = (
   }
 ): void => {
   const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
-  const builtinNameMatched = listBuiltinHandlerNames().includes(canonicalName);
-  const builtinEntry = builtinNameMatched
-    ? getBuiltinHandlerEntry(canonicalName)
-    : undefined;
+  const builtinEntry = resolveBuiltinEntry(name);
+  const builtinNameMatched = Boolean(builtinEntry);
   const actionPlan = planServertoolRegistryRegistrationActionWithNative({
     name: typeof name === 'string' ? name : '',
     hasHandler: typeof handler === 'function',
@@ -55,9 +61,7 @@ export const getServerToolHandlerViaNativePlan = (
   name: string
 ): ServerToolHandlerEntry | undefined => {
   const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
-  const builtinEntry = listBuiltinHandlerNames().includes(canonicalName)
-    ? getBuiltinHandlerEntry(canonicalName)
-    : undefined;
+  const builtinEntry = resolveBuiltinEntry(name);
   const adHocEntry = canonicalName ? getAdHocHandlerEntry(canonicalName) : undefined;
   const actionPlan = planServertoolRegistryLookupActionWithNative({
     name: typeof name === 'string' ? name : '',
