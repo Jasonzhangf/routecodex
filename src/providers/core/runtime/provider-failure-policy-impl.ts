@@ -557,6 +557,9 @@ export function resolveProviderFailureClassification(args: {
   ) {
     return 'unrecoverable';
   }
+  if (isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason })) {
+    return 'recoverable';
+  }
   if (errorCode === 'CONTEXT_LENGTH_EXCEEDED' || upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
     return 'recoverable';
   }
@@ -792,7 +795,7 @@ export function resolveProviderFailureActionPlan(args: {
   promptTooLong?: boolean;
   retryAction?: ProviderFailureRetryAction;
 }): ProviderFailureActionPlan {
-  const classification =
+  const resolvedClassification =
     args.classification
     ?? resolveProviderFailureClassification({
       error: args.error,
@@ -802,6 +805,14 @@ export function resolveProviderFailureActionPlan(args: {
       upstreamCode: args.upstreamCode,
       reason: args.reason
     });
+  const classification =
+    args.promptTooLong === true
+    && (
+      resolvedClassification === undefined
+      || resolvedClassification === 'special_400'
+    )
+      ? 'recoverable'
+      : resolvedClassification;
   const affectsHealth = !isProviderFailureHealthNeutral({
     stage: args.stage,
     error: args.error,

@@ -1734,7 +1734,7 @@ describe('HubRequestExecutor failover', () => {
         reason: 'context exceeded'
       },
       stage: 'provider.send'
-    })).toBe('special_400');
+    })).toBe('recoverable');
 
     expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
       error: Object.assign(new Error('invalid access token or token expired'), {
@@ -2114,6 +2114,35 @@ describe('HubRequestExecutor failover', () => {
       providerKey: 'mimo.key1.mimo-v2.5-pro'
     })).toEqual({
       shouldRetry: false,
+      blockingRecoverable: false
+    });
+  });
+
+  test('classifies CONTEXT_LENGTH_EXCEEDED as recoverable provider failure', () => {
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('context exceeded'), {
+        code: 'CONTEXT_LENGTH_EXCEEDED',
+        statusCode: 400
+      }),
+      retryError: {
+        statusCode: 400,
+        errorCode: 'CONTEXT_LENGTH_EXCEEDED',
+        reason: 'context exceeded'
+      },
+      stage: 'provider.send'
+    })).toBe('recoverable');
+
+    expect(__requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+      error: new Error('context exceeded'),
+      retryError: { statusCode: 400, reason: 'context exceeded' },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'tabglm.key1.glm-5',
+      promptTooLong: true,
+      contextOverflowRetries: 1,
+      maxContextOverflowRetries: 2
+    })).toEqual({
+      shouldRetry: true,
       blockingRecoverable: false
     });
   });
