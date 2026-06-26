@@ -6,9 +6,6 @@ const mockCloneClientHeaders = jest.fn(() => undefined);
 const mockResolveClientRequestId = jest.fn(() => 'client-req-1');
 const mockBindSessionConversationSession = jest.fn();
 const mockWriteInboundClientSnapshot = jest.fn(async () => undefined);
-const mockResolveSessionStormBackoffScopes = jest.fn(() => []);
-const mockPeekSessionStormBackoffWaitMs = jest.fn(() => 0);
-const mockWaitSessionStormBackoffWithGate = jest.fn(async () => undefined);
 const mockGetClientConnectionAbortSignal = jest.fn(() => undefined);
 
 jest.unstable_mockModule('../../../../../src/server/utils/request-log-color.js', () => ({
@@ -27,12 +24,6 @@ jest.unstable_mockModule('../../../../../src/server/runtime/http-server/executor
 
 jest.unstable_mockModule('../../../../../src/server/runtime/http-server/executor/request-executor-core-utils.js', () => ({
   writeInboundClientSnapshot: mockWriteInboundClientSnapshot
-}));
-
-jest.unstable_mockModule('../../../../../src/server/runtime/http-server/executor/request-executor-retry-planner.js', () => ({
-  peekSessionStormBackoffWaitMs: mockPeekSessionStormBackoffWaitMs,
-  resolveSessionStormBackoffScopes: mockResolveSessionStormBackoffScopes,
-  waitSessionStormBackoffWithGate: mockWaitSessionStormBackoffWithGate
 }));
 
 jest.unstable_mockModule('../../../../../src/server/utils/client-connection-state.js', () => ({

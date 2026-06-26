@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
-import { resetSessionStormBackoffStateForTests } from '../../../../src/server/runtime/http-server/executor/request-executor-session-storm-backoff';
 import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { readRuntimeControlProjection } from '../../../../src/server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 describe('router direct protocol boundary', () => {
   afterEach(() => {
     jest.useRealTimers();
-    resetSessionStormBackoffStateForTests();
   });
 
   function createRouterServer() {

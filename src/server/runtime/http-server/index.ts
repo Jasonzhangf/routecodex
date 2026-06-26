@@ -206,10 +206,6 @@ import {
   logProviderRetrySwitchCompact,
   REQUEST_EXECUTOR_NON_BLOCKING_LOG_THROTTLE_MS,
 } from './executor/request-executor-runtime-blocks.js';
-import {
-  consumeSessionStormBackoffMs,
-  isSessionStormBackoffCandidate,
-} from './executor/request-executor-session-storm-backoff.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
 
 const ROUTER_DIRECT_PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;

@@ -10,24 +10,6 @@ import {
   retainLogicalRequestChain,
 } from './request-executor-retry-state.js';
 import {
-  buildSessionStormHardBlockError,
-  clearSessionStormBackoff,
-  consumeSessionStormBackoffMs,
-  isSessionStormBackoffCandidate,
-  peekSessionStormBackoffConsecutiveForTests,
-  peekSessionStormBackoffWaitMs,
-  peekSessionStormBackoffWaitMsForTests,
-  resetSessionStormBackoffStateForTests,
-  resolveSessionStormBackoffBaseMs,
-  resolveSessionStormBackoffBaseMsForError,
-  resolveSessionStormBackoffMaxMs,
-  resolveSessionStormBackoffMaxMsForError,
-  resolveSessionStormBackoffScope,
-  resolveSessionStormBackoffScopes,
-  sessionStormBackoffGateState,
-  waitSessionStormBackoffWithGate
-} from './request-executor-session-storm-backoff.js';
-import {
   isLastAvailableProvider429,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan
@@ -66,23 +48,4 @@ export {
 
 export function resetRequestExecutorRetryPlannerState(): void {
   resetRequestExecutorRetryStateForTests();
-  resetSessionStormBackoffStateForTests();
 }
-
-export {
-  buildSessionStormHardBlockError,
-  clearSessionStormBackoff,
-  consumeSessionStormBackoffMs,
-  isSessionStormBackoffCandidate,
-  peekSessionStormBackoffConsecutiveForTests,
-  peekSessionStormBackoffWaitMs,
-  peekSessionStormBackoffWaitMsForTests,
-  resolveSessionStormBackoffBaseMs,
-  resolveSessionStormBackoffBaseMsForError,
-  resolveSessionStormBackoffMaxMs,
-  resolveSessionStormBackoffMaxMsForError,
-  resolveSessionStormBackoffScope,
-  resolveSessionStormBackoffScopes,
-  sessionStormBackoffGateState,
-  waitSessionStormBackoffWithGate
-};

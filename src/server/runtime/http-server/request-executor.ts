@@ -212,7 +212,6 @@ import {
   consumeProviderScopedRetryBackoffMs,
   consumeRecoverableErrorBackoffMs,
   deriveLogicalRequestChainKey,
-  peekSessionStormBackoffConsecutiveForTests,
   releaseLogicalRequestChain,
   retainLogicalRequestChain,
   resetRequestExecutorRetryPlannerState,
