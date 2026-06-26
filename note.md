@@ -1,3 +1,18 @@
+# 2026-06-27 retry switch log signature cleanup
+
+- 已收缩：
+  - `backoffMs` 已从 `request-executor-provider-resolve-failure.ts` / `request-executor-provider-send-failure.ts` 的 `logProviderRetrySwitch` 签名中删除
+- 已同步修改：
+  - `src/server/runtime/http-server/executor/request-executor-provider-resolve-failure.ts`
+  - `src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts`
+- 已验证：
+  - `tests/server/runtime/http-server/executor/request-executor-provider-send-failure.abort.spec.ts`
+  - `tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts`
+  - `tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - 这个字段只挂在 retry switch 日志签名上，没有进入决策路径；删掉后 retry 语义不变。
+
 # 2026-06-27 provider failure policy impl-local type cleanup
 
 - 已收缩：
