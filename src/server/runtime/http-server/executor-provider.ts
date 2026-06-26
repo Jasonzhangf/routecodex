@@ -128,36 +128,6 @@ export function shouldRetryProviderError(error: unknown): boolean {
     maxContextOverflowRetries: 0
   }).shouldRetry;
 }
-type WaitBeforeRetryOptions = {
-  attempt?: number;
-  signal?: AbortSignal;
-};
-
-export function computeRetryDelayMs(error: unknown, options?: WaitBeforeRetryOptions): number {
-  void error;
-  void options;
-  return 0;
-}
-
-export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryOptions): Promise<number> {
-  const signal = options?.signal;
-  if (signal?.aborted) {
-    const reason = (signal as { reason?: unknown }).reason;
-    throw reason instanceof Error ? reason : Object.assign(new Error(String(reason ?? 'CLIENT_DISCONNECTED')), {
-      code: 'CLIENT_DISCONNECTED',
-      name: 'AbortError'
-    });
-  }
-  if (typeof signal?.addEventListener === 'function') {
-    const abortListener = () => undefined;
-    signal.addEventListener('abort', abortListener, { once: true });
-    if (typeof signal.removeEventListener === 'function') {
-      signal.removeEventListener('abort', abortListener);
-    }
-  }
-  return 0;
-}
-
 export function isPromptTooLongError(error: unknown): boolean {
   const status = extractErrorStatusCode(error);
   // Most upstreams return 400 for context overflow; keep this narrow to avoid retries on generic 400s.
