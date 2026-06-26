@@ -265,6 +265,81 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies thinking.signature invalid as health-neutral unrecoverable local errors', () => {
+    const error = Object.assign(
+      new Error('HTTP 400: thinking.signature invalid'),
+      {
+        statusCode: 400,
+        code: 'HTTP_400',
+        response: {
+          data: {
+            error: {
+              message: 'Bad Request: thinking.signature',
+              type: 'invalid_request_error'
+            }
+          }
+        }
+      }
+    );
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message
+    });
+
+    expect(classification).toBe('unrecoverable');
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message,
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'unrecoverable',
+      affectsHealth: false,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
+    }));
+  });
+
+  it('classifies mimoweb local harvest/contract failures as health-neutral unrecoverable local errors', () => {
+    const samples = [
+      '[mimoweb] upstream assistant response was empty',
+      '[mimoweb] upstream emitted tool markers but no tool calls could be harvested',
+      '[mimoweb] upstream repeated prior tool call after tool_result',
+      '[mimoweb] serialized query exceeds empty-safe limit'
+    ];
+
+    for (const reason of samples) {
+      const error = new Error(reason);
+      const classification = resolveProviderFailureClassification({
+        error,
+        stage: 'provider.send',
+        reason
+      });
+
+      expect(classification).toBe('unrecoverable');
+      expect(resolveProviderFailureActionPlan({
+        error,
+        stage: 'provider.send',
+        reason,
+        attempt: 1,
+        maxAttempts: 6
+      })).toEqual(expect.objectContaining({
+        classification: 'unrecoverable',
+        affectsHealth: false,
+        shouldRetry: false,
+        action: 'direct_return',
+        decisionLabel: 'direct_return'
+      }));
+    }
+  });
+
   it('classifies provider business error 2013 context overflow as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('provider business error: context_length_exceeded'), {
       code: 'MALFORMED_RESPONSE',

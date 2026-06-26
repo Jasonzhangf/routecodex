@@ -225,6 +225,13 @@ function isProviderRuntimeRequestContractError(reason: string): boolean {
     || reason.includes('provider-runtime-error: missing model from direct passthrough responses payload');
 }
 
+function isLocalResponseContractValidationError(reason: string): boolean {
+  return reason.includes('[mimoweb] upstream assistant response was empty')
+    || reason.includes('[mimoweb] upstream emitted tool markers but no tool calls could be harvested')
+    || reason.includes('[mimoweb] upstream repeated prior tool call after tool_result')
+    || reason.includes('[mimoweb] serialized query exceeds empty-safe limit');
+}
+
 function isLocalRequestContractValidationError(args: {
   statusCode?: number;
   nestedParam?: string;
@@ -426,13 +433,8 @@ export function resolveProviderFailureClassification(args: {
     return 'unrecoverable';
   }
 
-  if (
-    reason.includes('[mimoweb] upstream assistant response was empty')
-    || reason.includes('[mimoweb] upstream emitted tool markers but no tool calls could be harvested')
-    || reason.includes('[mimoweb] upstream repeated prior tool call after tool_result')
-    || reason.includes('[mimoweb] serialized query exceeds empty-safe limit')
-  ) {
-    return 'special_400';
+  if (isLocalResponseContractValidationError(reason)) {
+    return 'unrecoverable';
   }
 
   if (
@@ -950,6 +952,9 @@ export function isProviderFailureHealthNeutral(args: {
     ? args.reason.trim().toLowerCase()
     : '';
   if (isProviderRuntimeRequestContractError(reason)) {
+    return true;
+  }
+  if (isLocalResponseContractValidationError(reason)) {
     return true;
   }
   const nested = readNestedProviderErrorDetails(args.error);
