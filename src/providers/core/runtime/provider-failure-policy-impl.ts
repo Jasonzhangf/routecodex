@@ -578,21 +578,7 @@ export function resolveProviderFailureClassification(args: {
   ) {
     return 'unrecoverable';
   }
-  if (
-    (nestedType === 'INVALID_REQUEST_ERROR' || String(nestedType).startsWith('INVALID_') || String(nestedCode).startsWith('INVALID_'))
-    && !isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason: nestedMessage || reason })
-  ) {
-    return 'special_400';
-  }
   if (statusCode === 400 && !isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason })) {
-    return 'special_400';
-  }
-  if (
-    errorCode === 'INVALID_REQUEST_ERROR'
-    || upstreamCode === 'INVALID_REQUEST_ERROR'
-    || reason.includes('invalid request payload')
-    || reason.includes('signature-invalid')
-  ) {
     return 'special_400';
   }
   if (
