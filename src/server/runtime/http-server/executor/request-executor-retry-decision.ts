@@ -1,14 +1,13 @@
 import {
-  resolveProviderFailureExclusionDecision,
   resolveProviderFailureRetryEligibility
+} from '../../../../providers/core/runtime/provider-failure-policy.js';
+import {
+  resolveProviderFailureClassification
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
   readString,
   normalizeCodeKey
 } from './request-executor-error-shared.js';
-import {
-  resolveRequestExecutorProviderErrorClassification
-} from './request-executor-provider-failure.js';
 import type {
   ProviderRetryEligibilityPlan,
   ProviderRetryExclusionPlan,
@@ -69,10 +68,7 @@ export function resolveProviderRetryExclusionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
   const hasExplicitRoutePool = Array.isArray(args.routePool) && args.routePool.length > 0;
-  const exclusionDecision = resolveProviderFailureExclusionDecision({
-    hasAlternativeCandidate,
-  });
-  if (exclusionDecision.excludeCurrentProvider && hasExplicitRoutePool) {
+  if (hasAlternativeCandidate && hasExplicitRoutePool) {
     args.excludedProviderKeys.add(providerKey);
     return {
       excludedCurrentProvider: true
@@ -101,10 +97,13 @@ export function resolveProviderRetryEligibilityPlan(args: {
     errorCode: args.retryError.errorCode,
     upstreamCode: args.retryError.upstreamCode,
     reason: args.retryError.reason,
-    classification: resolveRequestExecutorProviderErrorClassification({
+    classification: resolveProviderFailureClassification({
       error: args.error,
-      retryError: args.retryError,
-      stage: args.stage
+      stage: args.stage,
+      statusCode: args.retryError.statusCode,
+      errorCode: args.retryError.errorCode,
+      upstreamCode: args.retryError.upstreamCode,
+      reason: args.retryError.reason
     }),
     attempt: args.attempt,
     maxAttempts: args.maxAttempts,

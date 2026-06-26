@@ -1,8 +1,6 @@
 import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import {
-  normalizeProviderFailureCodeKey,
   resolveProviderFailureOutcome,
-  type ProviderFailureOutcome
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
   isSseDecodeRateLimitError,
@@ -27,48 +25,6 @@ import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
-function readProviderProtocolErrorDetailUpstreamCode(error: unknown): string | undefined {
-  if (!error || typeof error !== 'object' || Array.isArray(error)) {
-    return undefined;
-  }
-  const details = (error as { details?: unknown }).details;
-  if (!details || typeof details !== 'object' || Array.isArray(details)) {
-    return undefined;
-  }
-  const upstreamCode = (details as { upstreamCode?: unknown }).upstreamCode;
-  return typeof upstreamCode === 'string' && upstreamCode.trim() ? upstreamCode : undefined;
-}
-
-export function resolveRequestExecutorProviderErrorClassification(args: {
-  error: unknown;
-  retryError: RetryErrorSnapshot;
-  stage?: RequestExecutorProviderErrorStage;
-}): RequestExecutorProviderErrorClassification | undefined {
-  return resolveRequestExecutorProviderFailureOutcome(args).classification;
-}
-
-export function resolveRequestExecutorProviderFailureOutcome(args: {
-  error: unknown;
-  retryError: RetryErrorSnapshot;
-  stage?: RequestExecutorProviderErrorStage;
-}): ProviderFailureOutcome {
-  return resolveProviderFailureOutcome({
-    error: args.error,
-    stage: args.stage,
-    statusCode:
-      typeof args.retryError.statusCode === 'number'
-        ? args.retryError.statusCode
-        : extractStatusCodeFromError(args.error),
-    errorCode:
-      normalizeProviderFailureCodeKey((args.error as { code?: unknown } | undefined)?.code)
-      ?? normalizeProviderFailureCodeKey(args.retryError.errorCode),
-    upstreamCode:
-      normalizeProviderFailureCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode)
-      ?? normalizeProviderFailureCodeKey(args.retryError.upstreamCode),
-    reason: String(args.retryError.reason || (args.error as { message?: string } | undefined)?.message || '')
-  });
-}
-
 export function resolveRequestExecutorProviderErrorReportPlan(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
@@ -79,7 +35,19 @@ export function resolveRequestExecutorProviderErrorReportPlan(args: {
     ?? normalizeCodeKey(args.retryError.errorCode);
   const upstreamCode =
     normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode)
-    ?? normalizeCodeKey(readProviderProtocolErrorDetailUpstreamCode(args.error))
+    ?? normalizeCodeKey(
+      (() => {
+        if (!args.error || typeof args.error !== 'object' || Array.isArray(args.error)) {
+          return undefined;
+        }
+        const details = (args.error as { details?: unknown }).details;
+        if (!details || typeof details !== 'object' || Array.isArray(details)) {
+          return undefined;
+        }
+        const upstreamCode = (details as { upstreamCode?: unknown }).upstreamCode;
+        return typeof upstreamCode === 'string' && upstreamCode.trim() ? upstreamCode : undefined;
+      })()
+    )
     ?? normalizeCodeKey(args.retryError.upstreamCode);
   const statusCode =
     typeof args.retryError.statusCode === 'number'
@@ -118,10 +86,13 @@ export async function reportRequestExecutorProviderError(
   const upstreamCode = reportPlan.upstreamCode;
   const statusCode = reportPlan.statusCode;
   const stage = reportPlan.stageHint;
-  const outcome = resolveRequestExecutorProviderFailureOutcome({
+  const outcome = resolveProviderFailureOutcome({
     error: args.error,
-    retryError: args.retryError,
-    stage
+    stage,
+    statusCode,
+    errorCode,
+    upstreamCode,
+    reason: args.retryError.reason
   });
   const classification = outcome.classification;
   if (isHostRequestExecutorErrorStage(stage)) {

@@ -1,3 +1,14 @@
+# 2026-06-27 request-executor thin-shell closeout slice
+
+- 当前 slice：
+  - `src/server/runtime/http-server/executor/request-executor-provider-failure.ts`
+  - `src/server/runtime/http-server/executor/request-executor-retry-decision.ts`
+  - `src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts`
+- 已验证：
+  - `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts`
+- 观察：
+  - 这轮改动是把 executor 侧的 helper / wrapper 继续内联收口，验证目前通过。
+
 # 2026-06-27 retry reselection helper commit slice
 
 - 已提交：

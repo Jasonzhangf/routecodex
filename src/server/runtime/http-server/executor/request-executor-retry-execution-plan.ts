@@ -1,6 +1,5 @@
 import {
   isHostRequestExecutorErrorStage,
-  resolveRequestExecutorProviderErrorClassification,
 } from './request-executor-provider-failure.js';
 import {
   resolveRequestExecutorNativeRetryPolicy,
@@ -10,16 +9,14 @@ import {
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan
 } from './request-executor-retry-decision.js';
+import {
+  resolveProviderFailureClassification
+} from '../../../../providers/core/runtime/provider-failure-policy.js';
 import type {
   ProviderRetryExecutionPlan,
   RequestExecutorProviderErrorStage,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
-
-function isReroutableHostResponseContractRetryError(retryError: RetryErrorSnapshot): boolean {
-  return retryError.errorCode === 'EMPTY_ASSISTANT_RESPONSE'
-    || retryError.errorCode === 'MISSING_REQUIRED_TOOL_CALL';
-}
 
 export const ERROR_EXECUTION_DECISION_CONSUMER_FEATURE_ID = 'feature_id: error.execution_decision_consumer';
 
@@ -29,12 +26,6 @@ export type RequestExecutorErrorErr04RouterPolicyEnvelope = {
 };
 
 export type ErrorErr05ExecutionDecision = ProviderRetryExecutionPlan;
-
-export function consume_error_err_05_execution_decision_from_error_err_04_router_policy(
-  applied: RequestExecutorErrorErr04RouterPolicyEnvelope
-): ErrorErr05ExecutionDecision {
-  return applied.retryExecutionPlan;
-}
 
 /**
  * ErrorErr05 execution-decision exhaustion gate.
@@ -74,32 +65,6 @@ export function resolveProviderRetryExecutionPlanExhaustionGate(args: {
     defaultPoolAvailable: args.defaultPoolAvailable === true,
     policyExhausted,
     mayProject,
-  };
-}
-
-/**
- * Build the ErrorErr05 gate fields once, then return a new plan that merges
- * the partial decisions with the gate. Centralized so that all return paths
- * share the same source of truth for `mayProject` / `policyExhausted`.
- */
-function attachErrorErr05ExhaustionGate(
-  partial: Omit<ProviderRetryExecutionPlan,
-    'routePoolRemainingAfterExclusion' | 'defaultPoolAvailable' | 'policyExhausted' | 'mayProject'>,
-  routePool: string[] | undefined,
-  excludedProviderKeys: Set<string>,
-  defaultTierAvailable: boolean | undefined,
-): ProviderRetryExecutionPlan {
-  const gate = resolveProviderRetryExecutionPlanExhaustionGate({
-    routePool,
-    excludedProviderKeys,
-    defaultPoolAvailable: defaultTierAvailable === true,
-  });
-  return {
-    ...partial,
-    routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
-    defaultPoolAvailable: gate.defaultPoolAvailable,
-    policyExhausted: gate.policyExhausted,
-    mayProject: gate.mayProject,
   };
 }
 
@@ -145,11 +110,16 @@ export async function resolveProviderRetryExecutionPlan(args: {
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryExecutionPlan> {
   const hostContractStage = isHostRequestExecutorErrorStage(args.stage ?? 'provider.send');
-  const hostContractFailure = hostContractStage && !isReroutableHostResponseContractRetryError(args.retryError);
-  const classification = resolveRequestExecutorProviderErrorClassification({
+  const hostContractFailure = hostContractStage
+    && args.retryError.errorCode !== 'EMPTY_ASSISTANT_RESPONSE'
+    && args.retryError.errorCode !== 'MISSING_REQUIRED_TOOL_CALL';
+  const classification = resolveProviderFailureClassification({
     error: args.error,
-    retryError: args.retryError,
-    stage: args.stage
+    stage: args.stage,
+    statusCode: args.retryError.statusCode,
+    errorCode: args.retryError.errorCode,
+    upstreamCode: args.retryError.upstreamCode,
+    reason: args.retryError.reason
   });
   const eligibilityPlan = resolveProviderRetryEligibilityPlan({
     error: args.error,
@@ -211,13 +181,22 @@ export async function resolveProviderRetryExecutionPlan(args: {
     && !eligibilityPlan.shouldRetry
     && retryExcludedCurrentProvider
     && hasTerminalAlternativeCandidate;
+  const gate = resolveProviderRetryExecutionPlanExhaustionGate({
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys,
+    defaultPoolAvailable: args.defaultTierAvailable === true,
+  });
   if (!eligibilityPlan.shouldRetry && !shouldRerouteExcludedFailure) {
     const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
-    return attachErrorErr05ExhaustionGate({
+    return {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
-      excludedCurrentProvider: keepTerminalExclusion
-    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
+      excludedCurrentProvider: keepTerminalExclusion,
+      routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+      defaultPoolAvailable: gate.defaultPoolAvailable,
+      policyExhausted: gate.policyExhausted,
+      mayProject: gate.mayProject,
+    };
   }
 
   if (shouldRerouteExcludedFailure) {
@@ -226,21 +205,29 @@ export async function resolveProviderRetryExecutionPlan(args: {
     decisionLabel: 'exclude_and_reroute',
     runtimeScopeExcluded: [],
     runtimeScopeExcludedCount: 0
-  } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
+    } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
     if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
-      return attachErrorErr05ExhaustionGate({
+      return {
         shouldRetry: false,
         blockingRecoverable: eligibilityPlan.blockingRecoverable,
-        excludedCurrentProvider: true
-      }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
+        excludedCurrentProvider: true,
+        routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+        defaultPoolAvailable: gate.defaultPoolAvailable,
+        policyExhausted: gate.policyExhausted,
+        mayProject: gate.mayProject,
+      };
     }
-    return attachErrorErr05ExhaustionGate({
+    return {
       shouldRetry: true,
       blockingRecoverable: false,
       excludedCurrentProvider: true,
       retrySwitchPlan,
-      retryExecutionPolicyReason: nativeExecutionPolicy.reason
-    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
+      retryExecutionPolicyReason: nativeExecutionPolicy.reason,
+      routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+      defaultPoolAvailable: gate.defaultPoolAvailable,
+      policyExhausted: gate.policyExhausted,
+      mayProject: gate.mayProject,
+    };
   }
 
   const retrySwitchPlan = {
@@ -250,17 +237,25 @@ export async function resolveProviderRetryExecutionPlan(args: {
     runtimeScopeExcludedCount: 0
   } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
   if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
-    return attachErrorErr05ExhaustionGate({
+    return {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
-      excludedCurrentProvider: retryExcludedCurrentProvider
-    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
+      excludedCurrentProvider: retryExcludedCurrentProvider,
+      routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+      defaultPoolAvailable: gate.defaultPoolAvailable,
+      policyExhausted: gate.policyExhausted,
+      mayProject: gate.mayProject,
+    };
   }
-  return attachErrorErr05ExhaustionGate({
+  return {
     shouldRetry: true,
     blockingRecoverable: eligibilityPlan.blockingRecoverable,
     excludedCurrentProvider: retryExcludedCurrentProvider,
     retrySwitchPlan,
-    retryExecutionPolicyReason: nativeExecutionPolicy.reason
-  }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
+    retryExecutionPolicyReason: nativeExecutionPolicy.reason,
+    routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+    defaultPoolAvailable: gate.defaultPoolAvailable,
+    policyExhausted: gate.policyExhausted,
+    mayProject: gate.mayProject,
+  };
 }
