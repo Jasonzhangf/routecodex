@@ -43,32 +43,6 @@ export function isClientDisconnectAbortError(error: unknown): boolean {
   return false;
 }
 
-export function hasVirtualRouterSeriesCooldown(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-  const details = (error as { details?: unknown }).details;
-  if (!details || typeof details !== 'object') {
-    return false;
-  }
-  const seriesDetail = (details as { virtualRouterSeriesCooldown?: unknown }).virtualRouterSeriesCooldown;
-  if (!seriesDetail || typeof seriesDetail !== 'object') {
-    return false;
-  }
-  const record = seriesDetail as {
-    cooldownMs?: unknown;
-    source?: unknown;
-    quotaResetDelay?: unknown;
-  };
-  const cooldownMs = typeof record.cooldownMs === 'number' ? record.cooldownMs : undefined;
-  if (!cooldownMs || !Number.isFinite(cooldownMs) || cooldownMs <= 0) {
-    return false;
-  }
-  const source = typeof record.source === 'string' ? record.source.trim().toLowerCase() : undefined;
-  const hasQuotaHint = source === 'quota_reset_delay' || typeof record.quotaResetDelay === 'string';
-  return hasQuotaHint;
-}
-
 export function isNetworkTransportError(error: unknown): boolean {
   if (isClientDisconnectAbortError(error)) {
     return false;
@@ -104,11 +78,6 @@ export function shouldRetryProviderError(error: unknown): boolean {
     return false;
   }
   const status = extractErrorStatusCode(error);
-  // virtualRouterSeriesCooldown 表示 provider 已经把 alias 从池子里拉黑，需要切换到下一位。
-  // 这类错误仍然属于「可恢复」，因为虚拟路由会根据 cooldown 信息选择新的目标。
-  if (hasVirtualRouterSeriesCooldown(error)) {
-    return true;
-  }
   const providerError = error as ProviderError;
   const upstreamCode =
     typeof (providerError as ProviderError & { upstreamCode?: unknown }).upstreamCode === 'string'
