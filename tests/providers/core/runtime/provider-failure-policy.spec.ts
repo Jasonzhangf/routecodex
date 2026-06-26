@@ -221,7 +221,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies responses reasoning.content array_above_max_length as health-neutral special_400', () => {
+  it('classifies responses reasoning.content array_above_max_length as health-neutral unrecoverable local errors', () => {
     const error = Object.assign(
       new Error("HTTP 400: Invalid 'input[22].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead."),
       {
@@ -247,7 +247,7 @@ describe('provider failure policy ssot', () => {
       reason: error.message
     });
 
-    expect(classification).toBe('special_400');
+    expect(classification).toBe('unrecoverable');
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -257,7 +257,7 @@ describe('provider failure policy ssot', () => {
       attempt: 1,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
-      classification: 'special_400',
+      classification: 'unrecoverable',
       affectsHealth: false,
       shouldRetry: false,
       action: 'direct_return',

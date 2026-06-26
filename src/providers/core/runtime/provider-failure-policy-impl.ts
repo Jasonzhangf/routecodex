@@ -225,6 +225,35 @@ function isProviderRuntimeRequestContractError(reason: string): boolean {
     || reason.includes('provider-runtime-error: missing model from direct passthrough responses payload');
 }
 
+function isLocalRequestContractValidationError(args: {
+  statusCode?: number;
+  nestedParam?: string;
+  nestedType?: string;
+  nestedCode?: string;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+}): boolean {
+  const nestedParam = args.nestedParam ?? '';
+  const nestedType = String(args.nestedType ?? '');
+  const nestedCode = String(args.nestedCode ?? '');
+  const errorCode = String(args.errorCode ?? '');
+  const upstreamCode = String(args.upstreamCode ?? '');
+  const reason = String(args.reason ?? '').toLowerCase();
+  return (
+    nestedParam.startsWith('tools.')
+    || nestedParam.startsWith('messages.')
+    || nestedParam.startsWith('input.')
+    || nestedType === 'INVALID_REQUEST_ERROR'
+    || nestedType.startsWith('INVALID_')
+    || nestedCode.startsWith('INVALID_')
+    || errorCode === 'INVALID_REQUEST_ERROR'
+    || upstreamCode === 'INVALID_REQUEST_ERROR'
+    || reason.includes('invalid request payload')
+    || reason.includes('signature-invalid')
+  );
+}
+
 function readNestedProviderErrorDetails(error: unknown): {
   code?: string;
   type?: string;
@@ -519,11 +548,18 @@ export function resolveProviderFailureClassification(args: {
     return 'recoverable';
   }
   if (
-    nestedParam.startsWith('tools.')
-    || nestedParam.startsWith('messages.')
-    || nestedParam.startsWith('input.')
+    isLocalRequestContractValidationError({
+      statusCode,
+      nestedParam,
+      nestedType,
+      nestedCode,
+      errorCode,
+      upstreamCode,
+      reason
+    })
+    && !isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason: nestedMessage || reason })
   ) {
-    return 'special_400';
+    return 'unrecoverable';
   }
   if (
     (nestedType === 'INVALID_REQUEST_ERROR' || String(nestedType).startsWith('INVALID_') || String(nestedCode).startsWith('INVALID_'))
@@ -914,6 +950,18 @@ export function isProviderFailureHealthNeutral(args: {
     ? args.reason.trim().toLowerCase()
     : '';
   if (isProviderRuntimeRequestContractError(reason)) {
+    return true;
+  }
+  const nested = readNestedProviderErrorDetails(args.error);
+  if (isLocalRequestContractValidationError({
+    statusCode,
+    nestedParam: typeof nested.param === 'string' ? nested.param.trim().toLowerCase() : '',
+    nestedType: normalizeProviderFailureCodeKey(nested.type),
+    nestedCode: normalizeProviderFailureCodeKey(nested.code),
+    errorCode,
+    upstreamCode,
+    reason
+  })) {
     return true;
   }
   if (args.classification === 'special_400') {
