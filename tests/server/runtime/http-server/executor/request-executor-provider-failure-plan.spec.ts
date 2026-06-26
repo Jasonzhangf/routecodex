@@ -1,7 +1,7 @@
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
-  test('special_400 no longer suppresses explicit force-exclude when caller requests it', async () => {
+  test('local CLIENT_TOOL_ARGS_INVALID conversion failures still suppress force-exclude', async () => {
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(
         new Error('Converted provider tool call has invalid client arguments'),
@@ -34,7 +34,7 @@ describe('request-executor-provider-failure-plan', () => {
       logNonBlockingError: () => undefined
     });
 
-    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
     expect(plan.retryExecutionPlan.shouldRetry).toBe(false);
   });
 
@@ -118,22 +118,27 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
   });
 
-  test('special_400 provider.send failures reroute when route pool still has alternatives', async () => {
+  test('real provider business error 2013 traffic saturation reroutes when route pool still has alternatives', async () => {
     const excludedProviderKeys = new Set<string>();
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(
-        new Error('Converted provider tool call has invalid client arguments'),
+        new Error('Token Plan 当前请求量较高，请稍后重试'),
         {
-          code: 'CLIENT_TOOL_ARGS_INVALID',
-          upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
-          statusCode: 502
+          code: 'MALFORMED_RESPONSE',
+          upstreamCode: 'PROVIDER_STATUS_2013',
+          statusCode: 200,
+          details: {
+            providerStatusCode: 2013,
+            upstreamCode: 'PROVIDER_STATUS_2013',
+            reason: 'token plan 当前请求量较高，请稍后重试'
+          }
         }
       ),
       retryError: {
-        statusCode: 502,
-        errorCode: 'CLIENT_TOOL_ARGS_INVALID',
-        upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
-        reason: 'Converted provider tool call has invalid client arguments'
+        statusCode: 200,
+        errorCode: 'MALFORMED_RESPONSE',
+        upstreamCode: 'PROVIDER_STATUS_2013',
+        reason: 'Token Plan 当前请求量较高，请稍后重试'
       },
       requestId: 'req-special-400-reroute',
       providerKey: 'mini27.key1.MiniMax-M2.7',
