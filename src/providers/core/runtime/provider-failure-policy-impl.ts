@@ -898,17 +898,7 @@ export function resolveProviderFailureRetryEligibility(args: {
 }
 
 export function resolveProviderFailureExclusionDecision(args: {
-  promptTooLong?: boolean;
-  classification?: ProviderFailureClassification;
-  statusCode?: number;
-  errorCode?: string;
-  upstreamCode?: string;
-  isProviderTrafficSaturated?: boolean;
-  isNetworkTransport?: boolean;
   hasAlternativeCandidate: boolean;
-  is429?: boolean;
-  isVerify?: boolean;
-  isReauth?: boolean;
 }): ProviderFailureExclusionDecision {
   return {
     excludeCurrentProvider: args.hasAlternativeCandidate,

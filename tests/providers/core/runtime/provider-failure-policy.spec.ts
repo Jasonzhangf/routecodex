@@ -748,16 +748,6 @@ describe('provider failure policy ssot', () => {
   it('exclusion decision only depends on whether an alternative candidate exists', () => {
     expect(resolveProviderFailureExclusionDecision({
       hasAlternativeCandidate: false,
-      classification: 'unrecoverable',
-      statusCode: 401,
-      errorCode: 'INVALID_API_KEY',
-      upstreamCode: 'INSUFFICIENT_QUOTA',
-      promptTooLong: true,
-      isProviderTrafficSaturated: true,
-      isNetworkTransport: true,
-      is429: true,
-      isVerify: true,
-      isReauth: true,
     })).toEqual({
       excludeCurrentProvider: false,
       retryAction: 'reroute_explicit_alternative',
@@ -765,16 +755,6 @@ describe('provider failure policy ssot', () => {
 
     expect(resolveProviderFailureExclusionDecision({
       hasAlternativeCandidate: true,
-      classification: 'recoverable',
-      statusCode: 503,
-      errorCode: 'ERR_HTTP2_STREAM_CANCEL',
-      upstreamCode: 'HTTP_503',
-      promptTooLong: true,
-      isProviderTrafficSaturated: true,
-      isNetworkTransport: true,
-      is429: true,
-      isVerify: true,
-      isReauth: true,
     })).toEqual({
       excludeCurrentProvider: true,
       retryAction: 'reroute_explicit_alternative',

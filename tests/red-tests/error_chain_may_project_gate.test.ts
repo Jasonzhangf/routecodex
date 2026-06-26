@@ -120,28 +120,20 @@ describe(`${FEATURE_ID} — ErrorErr05 mayProject gate`, () => {
 
   it('401 without alternative must not force exclusion by status shortcut alone', () => {
     const decision = resolveProviderFailureExclusionDecision({
-      classification: 'unrecoverable',
       hasAlternativeCandidate: false,
-      statusCode: 401,
     });
     expect(decision.excludeCurrentProvider).toBe(false);
   });
 
   it('403 and auth/quota codes with alternatives must still take exclusion+rerroute path', () => {
     const viaStatus = resolveProviderFailureExclusionDecision({
-      classification: 'unrecoverable',
       hasAlternativeCandidate: true,
-      statusCode: 403,
     });
     const viaInvalidApiKey = resolveProviderFailureExclusionDecision({
-      classification: 'unrecoverable',
       hasAlternativeCandidate: true,
-      errorCode: 'INVALID_API_KEY',
     });
     const viaInsufficientQuota = resolveProviderFailureExclusionDecision({
-      classification: 'unrecoverable',
       hasAlternativeCandidate: true,
-      upstreamCode: 'INSUFFICIENT_QUOTA',
     });
     expect(viaStatus).toMatchObject({
       excludeCurrentProvider: true,
