@@ -8,7 +8,24 @@
 - 结论：
   - 该文件无任何外部真实消费者，属于死文件；
   - TS 侧 synthetic cooldown / 429 本地计数器面已进一步收口；
-  - 后续继续追 provider-failure-policy-impl 里尚未删干净的多分类残留，以及 Rust/VR 的唯一 strike/cooldown 真源。
+- 后续继续追 provider-failure-policy-impl 里尚未删干净的多分类残留，以及 Rust/VR 的唯一 strike/cooldown 真源。
+
+# 2026-06-27 quota doc cleanup follow-up
+
+- 已提交一刀：`d7100fe refactor(runtime): align snapshot ports`
+- 已核对的结论：
+  - `docs/goals/virtual-router-unified-quota-health-rustification-plan.md`
+  - `docs/goals/virtual-router-unified-quota-host-facing-contract-gap-map.md`
+  - `docs/goals/virtual-router-unified-quota-rust-host-contract-implementation-slice.md`
+  - `docs/routing-awrr-health-weighted-round-robin.md`
+  这些文档仍在描述 Rust host-facing quota contract / `quotaView` / `resetAt` / `inPool` 的活迁移与待办，不是纯死文档，不能直接物理删除。
+- 下一步只该继续找“已经没有任何活 owner 的旧 quota 语义残留”，先历史化或删除确定无主内容，再避免动活合同。
+
+# 2026-06-27 orphan awrr design cleanup
+
+- 已确认 `docs/routing-awrr-health-weighted-round-robin.md` 在仓库内没有任何引用，且其 `quotaView` / AWRR 叙述与 `docs/VIRTUAL_ROUTER_PRIORITY_AND_HEALTH.md` 重复。
+- 这份文档属于可物理删除的旧设计草案，不再承担唯一真源职责。
+- `docs/QUOTA_MANAGER_V3.md` 仍被 `README.md` 作为历史入口引用，不能单独删成无入口文档；README 已改成历史参考。
 
 # 2026-06-27 TS rate-limit state cleanup slice
 

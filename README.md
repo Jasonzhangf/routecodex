@@ -387,7 +387,7 @@ curl http://127.0.0.1:5555/v1/messages \
 ### 高级主题
 - **路由策略**：`docs/ROUTING_POLICY_SCHEMA.md`
 - **虚拟路由器优先级与健康**：`docs/VIRTUAL_ROUTER_PRIORITY_AND_HEALTH.md`
-- **配额管理 V3**：`docs/QUOTA_MANAGER_V3.md`
+- **配额管理 V3（历史参考）**：`docs/QUOTA_MANAGER_V3.md`
 
 ### 开发者文档
 - **源代码目录说明**：`src/README.md`
