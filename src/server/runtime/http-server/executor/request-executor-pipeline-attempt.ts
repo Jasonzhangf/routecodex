@@ -1,6 +1,5 @@
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import { finalizeRequestExecutorAttemptMetadata } from './request-executor-attempt-state.js';
-import { resolveExcludedProviderReselectionPlan } from './request-executor-reselection-plan.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
@@ -53,6 +52,27 @@ function mergeObservedRoutePoolChain(
     merged.push(candidate);
   }
   return merged;
+}
+
+function hasAlternativeRouteCandidate(args: {
+  providerKey?: string;
+  routePool?: string[];
+  excludedProviderKeys: Set<string>;
+}): boolean {
+  if (!Array.isArray(args.routePool) || args.routePool.length === 0) {
+    return false;
+  }
+  const currentProviderKey = typeof args.providerKey === 'string' ? args.providerKey.trim() : '';
+  return args.routePool.some((candidate) => {
+    if (typeof candidate !== 'string' || candidate.trim().length === 0) {
+      return false;
+    }
+    const normalized = candidate.trim();
+    if (currentProviderKey && normalized === currentProviderKey) {
+      return false;
+    }
+    return !args.excludedProviderKeys.has(normalized);
+  });
 }
 
 export type ResolvedRequestExecutorPipelineAttempt =
@@ -134,20 +154,18 @@ export function resolveRequestExecutorPipelineAttempt(args: {
         }
       );
     }
-    const reselectedExcludedPlan = resolveExcludedProviderReselectionPlan({
+    const hasAlternativeCandidate = hasAlternativeRouteCandidate({
       providerKey: target.providerKey,
       routePool: routePoolForAttempt,
-      excludedProviderKeys: args.excludedProviderKeys,
-      lastError: args.lastError,
-      extractRetryErrorSnapshot: args.extractRetryErrorSnapshot
+      excludedProviderKeys: args.excludedProviderKeys
     });
     args.logStage('provider.retry.excluded_target_reselected', args.providerRequestId, {
       providerKey: target.providerKey,
       excluded: Array.from(args.excludedProviderKeys),
       attempt: args.attempt,
-      hasAlternativeCandidate: reselectedExcludedPlan.hasAlternativeCandidate
+      hasAlternativeCandidate
     });
-    if (!reselectedExcludedPlan.hasAlternativeCandidate) {
+    if (!hasAlternativeCandidate) {
       args.excludedProviderKeys.delete(target.providerKey);
       if (args.lastError) {
         throw args.lastError;

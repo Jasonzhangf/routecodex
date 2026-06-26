@@ -16,9 +16,6 @@ import {
 import {
   resolveProviderRetryExecutionPlan
 } from './request-executor-retry-execution-plan.js';
-import {
-  resolveExcludedProviderReselectionPlan
-} from './request-executor-reselection-plan.js';
 import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
@@ -29,7 +26,6 @@ export {
   deriveLogicalRequestChainKey,
   emitRequestExecutorProviderRetryTelemetry,
   releaseLogicalRequestChain,
-  resolveExcludedProviderReselectionPlan,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExecutionPlan,
   resolveProviderRetryExclusionPlan,

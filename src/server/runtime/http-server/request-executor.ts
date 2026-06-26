@@ -3,7 +3,6 @@ import type { PipelineExecutionInput, PipelineExecutionResult } from '../../hand
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
-  resolveProviderFailureExclusionDecision,
   normalizeProviderFailureCodeKey,
   resolveProviderFailureRetryEligibility,
   resolveProviderFailureActionPlan,
@@ -202,7 +201,6 @@ import {
   releaseLogicalRequestChain,
   retainLogicalRequestChain,
   resetRequestExecutorRetryPlannerState,
-  resolveExcludedProviderReselectionPlan,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExecutionPlan,
   resolveProviderRetryExclusionPlan,
@@ -1485,7 +1483,6 @@ export const __requestExecutorTestables = {
   resolveRequestExecutorProviderErrorReportPlan,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan,
-  resolveExcludedProviderReselectionPlan,
   resolveProviderRetryExecutionPlan,
   resolveRequestExecutorPipelineAttempt,
   buildProviderRetryTelemetryPlan,
