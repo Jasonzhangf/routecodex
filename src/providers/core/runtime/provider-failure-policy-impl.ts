@@ -38,10 +38,6 @@ const BLOCKING_RECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
   ...PROVIDER_BLOCKING_RECOVERABLE_CODES
 ]);
 
-function isHostFailureStage(stage?: string): boolean {
-  return stage === 'host.response_contract';
-}
-
 export function normalizeProviderFailureCodeKey(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -218,7 +214,7 @@ export function resolveProviderFailureClassification(args: {
   if (args.stage === 'provider.followup') {
     return undefined;
   }
-  if (isHostFailureStage(args.stage)) {
+  if (args.stage === 'host.response_contract') {
     if (errorCode === 'EMPTY_ASSISTANT_RESPONSE'
       || errorCode === 'MISSING_REQUIRED_TOOL_CALL'
       || upstreamCode === 'EMPTY_ASSISTANT_RESPONSE'
