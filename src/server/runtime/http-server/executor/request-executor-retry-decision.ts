@@ -166,7 +166,6 @@ export function resolveProviderRetryEligibilityPlan(args: {
     promptTooLong: args.promptTooLong,
     contextOverflowRetries: args.contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries ?? MAX_CONTEXT_OVERFLOW_RETRIES,
-    allowNonPolicyRetry: false,
     stageOutsideProviderFailurePolicy: args.stage === 'host.response_contract'
   });
   return {

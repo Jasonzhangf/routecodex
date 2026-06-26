@@ -818,8 +818,6 @@ export function resolveProviderFailureRetryEligibility(args: {
   promptTooLong?: boolean;
   contextOverflowRetries?: number;
   maxContextOverflowRetries?: number;
-  shouldRetryByError?: boolean;
-  allowNonPolicyRetry?: boolean;
   stageOutsideProviderFailurePolicy?: boolean;
 }): ProviderFailureRetryEligibilityPlan {
   const actionPlan = resolveProviderFailureActionPlan({
@@ -879,7 +877,7 @@ export function resolveProviderFailureRetryEligibility(args: {
   return {
     classification: actionPlan.classification,
     blockingRecoverable,
-    shouldRetry: actionPlan.shouldRetry || Boolean(args.allowNonPolicyRetry)
+    shouldRetry: actionPlan.shouldRetry
   };
 }
 
