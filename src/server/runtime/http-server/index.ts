@@ -311,16 +311,6 @@ function isRouterDirectRelayableSkip(reason: unknown): boolean {
     || message === 'servertool_followup_requires_hub_relay';
 }
 
-function shouldRecordRouterDirectStorm(error: unknown, readableMessage?: string): boolean {
-  if (isSessionStormBackoffCandidate(error)) {
-    return true;
-  }
-  if (!readableMessage) {
-    return false;
-  }
-  return isSessionStormBackoffCandidate(new Error(readableMessage));
-}
-
 export class RouteCodexHttpServer {
   private app: Application;
   private server?: Server;
@@ -1322,7 +1312,6 @@ export class RouteCodexHttpServer {
         try {
           directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
         } catch (error) {
-          this.recordRouterDirectStormBackoff(input.requestId, routerDirectStormScopes, error);
           throw error;
         }
         if (directResult.used) {
@@ -1333,7 +1322,6 @@ export class RouteCodexHttpServer {
             reason: directResult.reason,
           });
           const directError = buildRouterDirectFailureError(directResult.reason);
-          this.recordRouterDirectStormBackoff(input.requestId, routerDirectStormScopes, directError);
           throw directError;
         }
         this.logStage('router-direct.relay', input.requestId, {
@@ -1967,25 +1955,6 @@ export class RouteCodexHttpServer {
       providerPayload,
       pipelineMetadata: metadataForHub,
     };
-  }
-
-  private recordRouterDirectStormBackoff(
-    requestId: string,
-    scopes: string[],
-    error: unknown,
-    readableMessage?: string,
-  ): void {
-    if (!shouldRecordRouterDirectStorm(error, readableMessage)) {
-      return;
-    }
-    for (const scope of scopes) {
-      const backoffMs = consumeSessionStormBackoffMs(scope, error);
-      this.logStage('request.session_storm_backoff.recorded', requestId, {
-        scope,
-        backoffMs,
-        source: 'router-direct',
-      });
-    }
   }
 
   private async persistOrClearResponsesDirectContinuation(args: {

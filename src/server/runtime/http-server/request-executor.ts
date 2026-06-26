@@ -1403,9 +1403,6 @@ export class HubRequestExecutor implements RequestExecutor {
           // direct/relay hops. Keep executor transport-only; handler owns responses store finalization.
 
           recordAttempt({ usage: aggregatedUsage, error: false });
-          for (const scope of sessionStormBackoffScopes ?? []) {
-            clearSessionStormBackoff(scope);
-          }
           resetScopedErrorBackoffByProvider(`${portScope}|${target.providerKey}|`);
           return buildProviderExecutionSuccessResult({
             converted,
