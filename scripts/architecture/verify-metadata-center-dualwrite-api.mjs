@@ -23,6 +23,7 @@ const dualwriteTest = read('tests/server/runtime/http-server/metadata-center/met
 const rustDirectDecision = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
 const rustReqGovernance = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs');
 const rustStoplessSignals = read('sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs');
+const tsRequestStageBridge = read('sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts');
 
 if (!functionMap.includes('feature_id: hub.metadata_center_dualwrite_api')) {
   fail('function-map missing hub.metadata_center_dualwrite_api');
@@ -134,6 +135,25 @@ const forbiddenRustTruthResidueNeedles = [
 for (const { source, needle, label } of forbiddenRustTruthResidueNeedles) {
   if (source.includes(needle)) {
     fail(`forbidden Rust truth residue present: ${label}`);
+  }
+}
+
+const forbiddenTsTruthResidueNeedles = [
+  {
+    source: tsRequestStageBridge,
+    needle: 'out.stopMessageEnabled = runtimeControl.stopMessageEnabled',
+    label: 'request stage bridge top-level stopMessageEnabled projection',
+  },
+  {
+    source: tsRequestStageBridge,
+    needle: 'out.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect',
+    label: 'request stage bridge top-level stopMessageExcludeDirect projection',
+  }
+];
+
+for (const { source, needle, label } of forbiddenTsTruthResidueNeedles) {
+  if (source.includes(needle)) {
+    fail(`forbidden TS truth residue present: ${label}`);
   }
 }
 

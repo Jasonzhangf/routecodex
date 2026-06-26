@@ -50,12 +50,6 @@ function projectLegacyRuntimeControlWhitelist(runtimeControl: Record<string, unk
   if (runtimeControl.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)) {
     out.stopless = runtimeControl.stopless;
   }
-  if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
-    out.stopMessageEnabled = runtimeControl.stopMessageEnabled;
-  }
-  if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
-    out.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
-  }
   return out;
 }
 

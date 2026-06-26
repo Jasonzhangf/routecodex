@@ -529,8 +529,6 @@ describe('HubPipeline preselected route ownership', () => {
               flowId: 'stopless-flow-1',
               repeatCount: 2,
             },
-            stopMessageEnabled: true,
-            stopMessageExcludeDirect: true,
             servertoolResponseOrchestration: true,
             providerFamily: 'should-not-leak',
             randomLegacyKey: 'should-not-leak',
@@ -549,8 +547,6 @@ describe('HubPipeline preselected route ownership', () => {
         flowId: 'stopless-flow-1',
         repeatCount: 2,
       },
-      stopMessageEnabled: true,
-      stopMessageExcludeDirect: true,
     });
   });
 
