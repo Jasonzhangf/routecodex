@@ -195,3 +195,4 @@ client-visible error
 - Rust runtime: 不得用 provider key 前缀特判 persisted 503 family cleanup；必须使用通用 provider-family cleanup 语义。
 - 红测先行: 每个 Phase 必须有红测先红后绿；TS 端参考 `tests/server/runtime/http-server/phase3-provider-family-abstraction.red.spec.ts`；Rust 端用 provider-family cleanup 双向 fixture 锁住不串台。
 - 完成标准 5 验证: `pnpm run verify:hardcode` 必须 PASS; `silent-failure-audit.mjs` 命中数 < 488 (基线) 且 < 后续 Phase 4 后的新基线。
+- SSE / transport 日志只能当证据，不能当语义 owner；与更高层 regression 重叠的日志型测试应优先物理删除，避免在 handler/outbound 再补第二套“日志即真相”的断言。

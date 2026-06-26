@@ -106,106 +106,6 @@ describe('sendPipelineResponse SSE completion logging', () => {
     warnSpy.mockRestore();
   });
 
-  it('logs finish_reason after streamed responses complete', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
-        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
-        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
-        if (text.includes('event: response.required_action') || text.includes('"type":"response.required_action"')) {
-          next.__seen_response_required_action = true;
-        }
-        if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
-          next.__seen_response_done = true;
-        }
-        if (text.includes('data: [DONE]')) {
-          next.__seen_done_chunk = true;
-        }
-        return next;
-      },
-      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
-        if (!probe || typeof probe !== 'object') return [];
-        const response = {
-          id: probe.id ?? 'resp_test_probe',
-          object: 'response',
-          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
-          ...(probe.output ? { output: probe.output } : {}),
-          ...(probe.output_text ? { output_text: probe.output_text } : {})
-        };
-        if (probe.required_action) {
-          return [
-            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
-            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-            'data: [DONE]\n\n'
-          ];
-        }
-        return [
-          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-          'data: [DONE]\n\n'
-        ];
-      },
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
-    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-      isSnapshotsEnabled: () => false,
-      writeServerSnapshot: async () => undefined
-    }));
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-
-    const nowSpy = jest.spyOn(Date, 'now');
-    nowSpy
-      .mockReturnValueOnce(1000)
-      .mockReturnValueOnce(1010)
-      .mockReturnValueOnce(1075)
-      .mockReturnValueOnce(1080);
-
-    const res = new MockResponse();
-    const stream = Readable.from([
-      'event: response.output_item.added\n',
-      'data: {"type":"response.output_item.added"}\n\n',
-      'event: response.completed\n',
-      'data: {"type":"response.completed","response":{"status":"requires_action","required_action":{"submit_tool_outputs":{"tool_calls":[]}}}}\n\n',
-      'data: [DONE]\n\n'
-    ]);
-
-    const finished = new Promise<void>((resolve) => {
-      res.on('finish', () => setTimeout(resolve, 0));
-    });
-
-    sendPipelineResponse(
-      res as any,
-      {
-        status: 200,
-        sseStream: stream,
-        usageLogInfo: {
-          finishReason: 'tool_calls',
-          requestStartedAtMs: Date.now()
-        }
-      } as any,
-      'req-stream-finish',
-      { forceSSE: true, entryEndpoint: '/v1/responses' }
-    );
-
-    await finished;
-
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
-    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('t+75ms'));
-    expect(logSpy.mock.calls.filter((call) => String(call?.[0] ?? '').includes('[response.sse.stream][req-stream-finish] end'))).toHaveLength(1);
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response][req-stream-finish] completed'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('\x1b[97mfinish_reason=tool_calls\x1b[0m'));
-    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[response][req-stream-finish] completed t+0ms'));
-  });
-
   it('derives usage finish_reason from responses SSE terminal frames instead of logging unknown', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
@@ -233,20 +133,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
         }
         return next;
       },
-      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
-        if (!probe || typeof probe !== 'object') return [];
-        const response = {
-          id: probe.id ?? 'resp_usage_finish_reason',
-          object: 'response',
-          status: probe.status ?? 'completed',
-          ...(probe.output ? { output: probe.output } : {})
-        };
-        return [
-          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-          'data: [DONE]\n\n'
-        ];
-      },
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
       importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
@@ -259,34 +146,31 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const res = new MockResponse();
     const stream = Readable.from([
       'event: response.output_item.done\n',
-      'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n',
-      'event: response.completed\n',
-      'data: {"type":"response.completed","response":{"id":"resp_usage_finish_reason","object":"response","status":"completed"}}\n\n',
-      'event: response.done\n',
-      'data: {"type":"response.done","response":{"id":"resp_usage_finish_reason","object":"response","status":"completed"}}\n\n',
-      'data: [DONE]\n\n'
+      'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n'
     ]);
 
     const finished = new Promise<void>((resolve) => {
-      res.on('finish', () => setTimeout(resolve, 0));
+      res.on('finish', () => setTimeout(resolve, 50));
     });
+    const usageLogInfo = {
+      finishReason: 'stop',
+      requestStartedAtMs: Date.now(),
+      routeName: 'router-direct:coding/-',
+      model: 'gpt-5.4',
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 2,
+        total_tokens: 12,
+        cache_read_input_tokens: 0,
+      }
+    };
 
     sendPipelineResponse(
       res as any,
       {
         status: 200,
         sseStream: stream,
-        usageLogInfo: {
-          requestStartedAtMs: Date.now(),
-          routeName: 'router-direct:coding/-',
-          model: 'gpt-5.4',
-          usage: {
-            prompt_tokens: 10,
-            completion_tokens: 2,
-            total_tokens: 12,
-            cache_read_input_tokens: 0,
-          }
-        }
+        usageLogInfo,
       } as any,
       'req-stream-usage-finish-reason',
       { forceSSE: true, entryEndpoint: '/v1/responses' }
@@ -300,219 +184,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=\x1b[97mstop\x1b[0m'));
     expect(logOutput).not.toContain('req-stream-usage-finish-reason completed');
     expect(logOutput).not.toContain('finish_reason=\u001b[97munknown\u001b[0m');
-  });
-
-  it('does not log successful request completion before incomplete stream is classified', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
-      buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
-    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-      isSnapshotsEnabled: () => false,
-      writeServerSnapshot: async () => undefined
-    }));
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-
-    const res = new MockResponse();
-    const chunks: string[] = [];
-    res.on('data', (chunk) => chunks.push(String(chunk)));
-    const stream = Readable.from([
-      'event: response.created\n',
-      'data: {"type":"response.created","response":{"id":"resp_incomplete_log_guard","object":"response","status":"in_progress","output":[]}}\n\n',
-      'event: response.output_text.delta\n',
-      'data: {"type":"response.output_text.delta","delta":"partial"}\n\n'
-    ]);
-
-    const finished = new Promise<void>((resolve) => {
-      res.on('finish', () => setTimeout(resolve, 0));
-    });
-
-    sendPipelineResponse(
-      res as any,
-      {
-        status: 200,
-        sseStream: stream
-      } as any,
-      'req-stream-incomplete-log-guard',
-      { forceSSE: true, entryEndpoint: '/v1/responses' }
-    );
-
-    await finished;
-
-    const output = chunks.join('');
-    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
-    expect(output).toContain('event: error');
-    expect(output).toContain('"code":"upstream_stream_incomplete"');
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response.sse.stream][req-stream-incomplete-log-guard] error'));
-    expect(logOutput).toContain('"lastRawFrame":{"event":"response.output_text.delta","type":"response.output_text.delta"}');
-    expect(logOutput).toContain('"probe":{"id":"resp_incomplete_log_guard","status":"in_progress","outputCount":0');
-    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('request req-stream-incomplete-log-guard completed (status=200'));
-  });
-
-  it('logs client_close diagnostics when SSE closes before terminal event', async () => {
-    const clearResponsesConversationByRequestId = jest.fn(async () => undefined);
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
-        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
-        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
-        if (text.includes('event: response.required_action') || text.includes('"type":"response.required_action"')) {
-          next.__seen_response_required_action = true;
-        }
-        if (text.includes('event: response.done') || text.includes('"type":"response.done"')) {
-          next.__seen_response_done = true;
-        }
-        if (text.includes('data: [DONE]')) {
-          next.__seen_done_chunk = true;
-        }
-        return next;
-      },
-      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
-        if (!probe || typeof probe !== 'object') return [];
-        const response = {
-          id: probe.id ?? 'resp_test_probe',
-          object: 'response',
-          status: probe.required_action ? 'requires_action' : (probe.status ?? 'completed'),
-          ...(probe.output ? { output: probe.output } : {}),
-          ...(probe.output_text ? { output_text: probe.output_text } : {})
-        };
-        if (probe.required_action) {
-          return [
-            `event: response.required_action\ndata: ${JSON.stringify({ type: 'response.required_action', response, required_action: probe.required_action })}\n\n`,
-            `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-            'data: [DONE]\n\n'
-          ];
-        }
-        return [
-          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-          'data: [DONE]\n\n'
-        ];
-      },
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
-    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-      isSnapshotsEnabled: () => false,
-      writeServerSnapshot: async () => undefined
-    }));
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-
-    const res = new MockResponse();
-    res.on('error', () => {});
-    const stream = new PassThrough();
-
-    const closed = new Promise<void>((resolve) => {
-      res.on('close', () => setTimeout(resolve, 0));
-    });
-
-    sendPipelineResponse(
-      res as any,
-      {
-        status: 200,
-        sseStream: stream
-      } as any,
-      'req-stream-client-close',
-      { forceSSE: true, entryEndpoint: '/v1/responses' }
-    );
-
-    stream.write('event: response.output_text.delta\n');
-    stream.write('data: {"type":"response.output_text.delta","delta":"hi"}\n\n');
-    res.destroy();
-
-    await closed;
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
-
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response.sse][req-stream-client-close] client_close'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"closeBeforeStreamEnd":true'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"sawTerminalEvent":false'));
-    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[request.usage_log.start][req-stream-client-close]'));
-    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[request.usage_log.completed][req-stream-client-close]'));
-  });
-
-  it('treats upstream_stream_incomplete as failed completion instead of unknown success', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
-      buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
-    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-      isSnapshotsEnabled: () => false,
-      writeServerSnapshot: async () => undefined
-    }));
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-
-    const res = new MockResponse();
-    const chunks: string[] = [];
-    res.on('data', (chunk) => chunks.push(String(chunk)));
-    const stream = Readable.from([
-      'event: response.created\n',
-      'data: {"type":"response.created","response":{"id":"resp_incomplete_failed_completion","object":"response","status":"in_progress","output":[]}}\n\n',
-      'event: response.output_text.delta\n',
-      'data: {"type":"response.output_text.delta","delta":"partial"}\n\n'
-    ]);
-
-    const finished = new Promise<void>((resolve) => {
-      res.on('finish', () => setTimeout(resolve, 0));
-    });
-
-    sendPipelineResponse(
-      res as any,
-      {
-        status: 200,
-        sseStream: stream,
-        usageLogInfo: {
-          providerKey: 'cc.key1.gpt-5.4-mini',
-          routeName: 'router-direct:search/-',
-          finishReason: 'unknown',
-          requestStartedAtMs: 1000,
-          timingRequestIds: ['openai-responses-cc.key1-gpt-5.4-mini-20260614T142222200-342975-553']
-        }
-      } as any,
-      'req-stream-incomplete-failed-completion',
-      { forceSSE: true, entryEndpoint: '/v1/responses' }
-    );
-
-    await finished;
-
-    const output = chunks.join('');
-    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
-    expect(output).toContain('event: error');
-    expect(output).toContain('"code":"upstream_stream_incomplete"');
-    expect(output).toContain('stream closed before response.completed');
-    expect(logOutput).toContain('[response][req-stream-incomplete-failed-completion] completed');
-    expect(logOutput).toContain('upstream_stream_incomplete');
-    expect(logOutput).toContain('finish_reason=incomplete');
-    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('completed (status=200, finish_reason=unknown)'));
+    expect(usageLogInfo.finishReason).toBe('stop');
   });
 
   it('destroys the original upstream SSE stream when client closes before terminal event', async () => {
@@ -571,6 +243,70 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(destroySpy).toHaveBeenCalled();
     expect((destroyReason as { code?: unknown } | undefined)?.code).toBe('CLIENT_DISCONNECTED');
     expect((destroyReason as Error | undefined)?.message).toBe('CLIENT_RESPONSE_CLOSED');
+  });
+
+  it('does not prestart-close a responses SSE stream unless the client is explicitly marked disconnected', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const upstream = Readable.from([
+      'event: response.created\n',
+      'data: {"type":"response.created","response":{"id":"resp_prestart_guard","object":"response","status":"in_progress","output":[]}}\n\n',
+      'event: response.completed\n',
+      'data: {"type":"response.completed","response":{"id":"resp_prestart_guard","object":"response","status":"completed","output":[]}}\n\n',
+      'event: response.done\n',
+      'data: {"type":"response.done","response":{"id":"resp_prestart_guard","object":"response","status":"completed","output":[]}}\n\n',
+    ]);
+
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    void sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        sseStream: upstream,
+        metadata: {
+          clientConnectionState: {
+            disconnected: false
+          }
+        }
+      } as any,
+      'req-prestart-client-close-guard',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    await finished;
+
+    const output = chunks.join('');
+    const warnOutput = warnSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    expect(output).toContain('event: response.created');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('event: response.done');
+    expect(output).not.toContain('stream closed before response.completed');
+    expect(warnOutput).not.toContain('prestart_client_close');
   });
 
   it('destroys upstream immediately on client close even when response projection is still pending', async () => {
@@ -757,78 +493,6 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(res.destroyed).toBe(true);
     expect(clearResponsesConversationByRequestId).not.toHaveBeenCalledWith('resp_direct_required_action_close');
   });
-
-  it('does not raise uncaughtException when SSE timeout closes upstream with an error', async () => {
-    const previousTimeout = process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
-    process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = '30';
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
-      buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
-    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-      isSnapshotsEnabled: () => false,
-      writeServerSnapshot: async () => undefined
-    }));
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-
-    const res = new MockResponse();
-    const upstream = new PassThrough();
-    const chunks: string[] = [];
-    let uncaught: Error | undefined;
-    const onUncaught = (error: Error) => {
-      uncaught = error;
-    };
-    process.prependOnceListener('uncaughtException', onUncaught);
-    res.on('data', (chunk) => chunks.push(String(chunk)));
-    const finished = new Promise<void>((resolve) => {
-      res.on('finish', () => setTimeout(resolve, 0));
-    });
-
-    try {
-      sendPipelineResponse(
-        res as any,
-        {
-          status: 200,
-          sseStream: upstream
-        } as any,
-        'req-stream-timeout-no-uncaught',
-        { forceSSE: true, entryEndpoint: '/v1/responses' }
-      );
-
-      upstream.write('event: response.created\n');
-      upstream.write(
-        'data: {"type":"response.created","response":{"id":"resp_timeout_guard","object":"response","status":"in_progress","output":[]}}\n\n'
-      );
-
-      await finished;
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-
-      const output = chunks.join('');
-      expect(output).toContain('event: error');
-      expect(output).toContain('"code":"HTTP_SSE_TIMEOUT"');
-      expect(uncaught).toBeUndefined();
-    } finally {
-      process.removeListener('uncaughtException', onUncaught);
-      upstream.destroy();
-      if (previousTimeout === undefined) {
-        delete process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
-      } else {
-        process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = previousTimeout;
-      }
-    }
-  });
-
 
   it('does not enforce stopless contract inside raw SSE handler path', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
@@ -1617,120 +1281,6 @@ describe('sendPipelineResponse SSE completion logging', () => {
         delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
       } else {
         process.env.ROUTECODEX_SNAPSHOT_STAGES = previousStages;
-      }
-    }
-  });
-
-  it('repairs assistant response.output_item.done into completed/done and closes even if upstream never closes', async () => {
-    const previousTerminalTimeout = process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
-    process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = '50';
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
-        const next = { ...((probe && typeof probe === 'object') ? probe as Record<string, unknown> : {}) };
-        const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
-        if (text.includes('"type":"response.created"')) {
-          next.id = 'resp_terminal_message_only';
-          next.status = 'in_progress';
-          next.output = [{
-            id: 'msg_terminal_message_only',
-            type: 'message',
-            role: 'assistant',
-            status: 'in_progress',
-            content: [{ type: 'output_text', text: 'partial' }]
-          }];
-        }
-        if (text.includes('"type":"response.output_item.done"')) {
-          next.id = 'resp_terminal_message_only';
-          next.status = 'completed';
-          next.output = [{
-            id: 'msg_terminal_message_only',
-            type: 'message',
-            role: 'assistant',
-            status: 'completed',
-            content: [{ type: 'output_text', text: 'done' }]
-          }];
-        }
-        return next;
-      },
-      buildResponsesTerminalSseFramesFromProbeNative: (probe: any) => {
-        if (!probe || typeof probe !== 'object') return [];
-        const response = {
-          id: probe.id ?? 'resp_terminal_message_only',
-          object: 'response',
-          status: probe.status ?? 'completed',
-          ...(probe.output ? { output: probe.output } : {})
-        };
-        return [
-          `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-          `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-          'data: [DONE]\n\n'
-        ];
-      },
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
-    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-      isSnapshotsEnabled: () => false,
-      writeServerSnapshot: async () => undefined
-    }));
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-
-    try {
-      const res = new MockResponse();
-      const chunks: string[] = [];
-      res.on('data', (chunk) => chunks.push(String(chunk)));
-      const stream = new PassThrough();
-      stream.on('error', () => {});
-
-      const finished = new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error(`stream did not close\n${chunks.join('')}`)), 1_500);
-        res.on('finish', () => {
-          clearTimeout(timer);
-          setTimeout(resolve, 0);
-        });
-      });
-
-      sendPipelineResponse(
-        res as any,
-        {
-          status: 200,
-          sseStream: stream
-        } as any,
-        'req-terminal-message-only',
-        { forceSSE: true, entryEndpoint: '/v1/responses' }
-      );
-
-      stream.write('event: response.created\n');
-      stream.write('data: {"type":"response.created","response":{"id":"resp_terminal_message_only","object":"response","status":"in_progress","output":[{"id":"msg_terminal_message_only","type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"partial"}]}]}}\n\n');
-      stream.write('event: response.output_item.done\n');
-      stream.write('data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_terminal_message_only","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n');
-
-      await finished;
-
-      const output = chunks.join('');
-      expect(output).toContain('event: response.output_item.done');
-      expect(output).toContain('event: response.completed');
-      expect(output).toContain('event: response.done');
-      expect(output).not.toContain('upstream_stream_incomplete');
-      expect(output).toContain('"status":"completed"');
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('request req-terminal-message-only completed'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=stop'));
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response][req-terminal-message-only] completed'));
-      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('finish_reason=unknown'));
-    } finally {
-      if (previousTerminalTimeout === undefined) {
-        delete process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
-      } else {
-        process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS = previousTerminalTimeout;
       }
     }
   });

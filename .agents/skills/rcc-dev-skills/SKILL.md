@@ -76,6 +76,8 @@ description: RouteCodex 调试与架构路由入口
 - `23` 也是 servertool 开发 + debug 的执行真源：每轮新增的稳定 slice 顺序、串行验证顺序、黑盒口径、删 TS 前置条件，都必须回写到 `23` 或当月 lessons，不能只留在聊天或 `note.md`。
 - servertool 相关开发/调试一旦形成稳定动作序列、切段法、反模式或验证口径，必须同步回写 `23` 或当月 lessons；禁止只留在 `note.md` 或聊天上下文里。
 - 若 `mainline-call-map` 仍是 `binding pending`，只能宣称“目标/骨架已锁定”，不能宣称 runtime 已 Rust-only 落地。
+- 发现 inbound/outbound 里混入逻辑时，先查真源 owner 是否应上移到 chat process，再做唯一修改点修复；修复后必须物理删除错误 helper / 重复实现，禁止在 outbound 留第二套语义补丁。
+- SSE / transport 日志只可作为证据，不可作为语义 owner；当日志类测试与更高层 regression 重叠时，优先删重复断言，不要在 handler/outbound 里再补一套“日志即真相”的测试语义。
 
 ### 2. 再做三问
 1. 失败在哪一段？
