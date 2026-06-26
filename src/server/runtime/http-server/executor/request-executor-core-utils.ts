@@ -1,5 +1,4 @@
 import { writeClientSnapshot } from '../../../../providers/core/utils/snapshot-writer.js';
-import { evaluateSingletonRoutePoolExhaustionNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
 import { planPrimaryExhaustedToDefaultPoolNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
 import { asRecord } from '../provider-utils.js';
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
@@ -72,36 +71,6 @@ export function isPoolExhaustedPipelineError(pipelineError: unknown): boolean {
     /virtual router did not produce a provider target/i.test(pipelineErrorMessage)
   );
 }
-
-export const POOL_EXHAUSTED_BACKOFF_ATTEMPTS = 3;
-const POOL_EXHAUSTED_BACKOFF_STEPS_MS = [1_000, 2_000, 3_000] as const;
-
-export function resolvePoolExhaustedBackoffMs(attemptIndex: number): number {
-  return POOL_EXHAUSTED_BACKOFF_STEPS_MS[Math.min(attemptIndex, POOL_EXHAUSTED_BACKOFF_STEPS_MS.length - 1)] ?? 3_000;
-}
-
-export function resolvePoolCooldownWaitMs(pipelineError: unknown): number | undefined {
-  return evaluateSingletonRoutePoolExhaustionNative({
-    pipelineError,
-    excludedProviderCount: 0
-  }).waitMs;
-}
-
-export function shouldBlockSingletonRoutePoolExhaustion(args: {
-  pipelineError: unknown;
-  initialRoutePool?: string[] | null;
-  explicitSingletonPool?: boolean;
-  excludedProviderCount: number;
-}): boolean {
-  return evaluateSingletonRoutePoolExhaustionNative({
-    pipelineError: args.pipelineError,
-    initialRoutePoolLen: Array.isArray(args.initialRoutePool) ? args.initialRoutePool.length : undefined,
-    explicitSingletonPool: args.explicitSingletonPool === true,
-    excludedProviderCount: args.excludedProviderCount
-  }).shouldBlock;
-}
-
-
 
 export interface ResolvePrimaryExhaustedPlanInput {
   route: string;

@@ -99,13 +99,10 @@ import {
 import {
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
-  POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
   resolveDefaultTierAvailableForErrorErr05,
-  resolvePoolExhaustedBackoffMs,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
 } from './executor/request-executor-core-utils.js';
-import { waitWithClientAbortSignal } from './executor/request-executor-abort.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
@@ -223,7 +220,6 @@ type RouterDirectRetryState = {
   excludedProviderKeys: Set<string>;
   retryProviderKey?: string;
   lastError?: unknown;
-  poolExhaustedBackoffAttempts: number;
 };
 
 function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDirectRetryState {
@@ -236,7 +232,6 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
   return {
     maxAttempts: resolveMaxProviderAttempts(),
     excludedProviderKeys,
-    poolExhaustedBackoffAttempts: 0,
   };
 }
 
@@ -1492,7 +1487,6 @@ export class RouteCodexHttpServer {
       routeResult = routerEngine.route(rawDirectPayload as never, metadataForHub as never) as typeof routeResult;
     } catch (error) {
       if (isPoolExhaustedPipelineError(error)) {
-        const exhaustedAttempt = retryState.poolExhaustedBackoffAttempts;
         this.logStage('router-direct.pool_exhausted', input.requestId, {
           error: error instanceof Error ? error.message : String(error),
           code: error && typeof error === 'object' && typeof (error as Record<string, unknown>).code === 'string'
@@ -1504,31 +1498,7 @@ export class RouteCodexHttpServer {
           model: input.body && typeof input.body === 'object' && !Array.isArray(input.body) && typeof (input.body as Record<string, unknown>).model === 'string'
             ? (input.body as Record<string, unknown>).model
             : undefined,
-          poolExhaustedBackoffAttempt: exhaustedAttempt,
-          maxPoolExhaustedBackoffAttempts: POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
         });
-        if (exhaustedAttempt < POOL_EXHAUSTED_BACKOFF_ATTEMPTS) {
-          const waitMs = resolvePoolExhaustedBackoffMs(exhaustedAttempt);
-          retryState.poolExhaustedBackoffAttempts += 1;
-          this.logStage('router-direct.pool_exhausted.backoff_wait', input.requestId, {
-            waitMs,
-            poolExhaustedBackoffAttempt: retryState.poolExhaustedBackoffAttempts,
-            maxPoolExhaustedBackoffAttempts: POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
-            excludedProviderKeys: Array.from(retryState.excludedProviderKeys),
-            lastError: retryState.lastError instanceof Error ? retryState.lastError.message : (retryState.lastError ? String(retryState.lastError) : undefined),
-            poolError: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
-          });
-          await waitWithClientAbortSignal(
-            waitMs,
-            getClientConnectionAbortSignal(metadataForHub),
-            logRouterDirectNonBlockingError,
-          );
-          this.logStage('router-direct.pool_exhausted.backoff_wait.completed', input.requestId, {
-            waitMs,
-            poolExhaustedBackoffAttempt: retryState.poolExhaustedBackoffAttempts,
-          });
-          return await this.executeRouterDirectPipelineForPort(portConfig, input, retryState, directAttempt);
-        }
         // G3: primary_exhausted -> default_pool. Before failing fast, ask the
         // Rust VR planner for a default_pool plan and re-inject it as the next
         // allowedProviders target list. Host MUST NOT synthesize fallback
@@ -1561,7 +1531,6 @@ export class RouteCodexHttpServer {
         });
         if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
           retryState.excludedProviderKeys.clear();
-          retryState.poolExhaustedBackoffAttempts = 0;
           retryState.retryProviderKey = undefined;
           metadataForHub.allowedProviders = [...plan.defaultPoolTargets];
           this.logStage('router-direct.primary_exhausted_to_default_pool.applied', input.requestId, {
@@ -1580,7 +1549,6 @@ export class RouteCodexHttpServer {
       });
       throw error;
     }
-    retryState.poolExhaustedBackoffAttempts = 0;
 
     const target = routeResult.target;
     const routingDecision = routeResult.decision;

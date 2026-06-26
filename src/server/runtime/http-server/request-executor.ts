@@ -63,14 +63,10 @@ import {
 import {
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
-  POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
   mergeMetadataPreservingDefined,
   resolveDefaultTierAvailableForErrorErr05,
-  resolvePoolCooldownWaitMs,
-  resolvePoolExhaustedBackoffMs,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
-  shouldBlockSingletonRoutePoolExhaustion,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
 import {
@@ -170,10 +166,8 @@ function shouldRebindResponsesConversationForEntry(entryEndpoint: string | undef
   return typeof entryEndpoint === 'string' && entryEndpoint.startsWith('/v1/responses');
 }
 
-const SINGLETON_ROUTE_POOL_COOLDOWN_WAIT_ATTEMPTS = 3;
 import {
-  throwIfClientAbortSignalAborted,
-  waitWithClientAbortSignal
+  throwIfClientAbortSignalAborted
 } from './executor/request-executor-abort.js';
 import { resolveClientAbortSignalFromCarrier } from './executor/request-executor-client-abort-block.js';
 import {
@@ -576,14 +570,12 @@ export class HubRequestExecutor implements RequestExecutor {
         let cumulativeExternalLatencyMs = 0;
         let cumulativeTrafficWaitMs = 0;
         let cumulativeClientInjectWaitMs = 0;
-        let poolExhaustedBackoffAttempts = 0;
-        let singletonRoutePoolCooldownWaitAttempts = 0;
-        let allowPoolExhaustedBackoffBeyondAttemptBudget = false;
+        let allowPrimaryExhaustedReplayBeyondAttemptBudget = false;
 
-        while (attempt < maxAttempts || allowBlockingRecoverableRetryBeyondAttemptBudget || allowPoolExhaustedBackoffBeyondAttemptBudget) {
+        while (attempt < maxAttempts || allowBlockingRecoverableRetryBeyondAttemptBudget || allowPrimaryExhaustedReplayBeyondAttemptBudget) {
         attempt += 1;
         allowBlockingRecoverableRetryBeyondAttemptBudget = false;
-        allowPoolExhaustedBackoffBeyondAttemptBudget = false;
+        allowPrimaryExhaustedReplayBeyondAttemptBudget = false;
         const {
           metadataForAttempt,
           clientAbortSignal,
@@ -611,77 +603,6 @@ export class HubRequestExecutor implements RequestExecutor {
           pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         } catch (pipelineError) {
           if (isPoolExhaustedPipelineError(pipelineError)) {
-            const cooldownWaitMs = resolvePoolCooldownWaitMs(pipelineError);
-            if (shouldBlockSingletonRoutePoolExhaustion({
-              pipelineError,
-              initialRoutePool,
-              explicitSingletonPool: blockingRecoverableRouteHoldState?.explicitSingletonPool === true,
-              excludedProviderCount: excludedProviderKeys.size
-            })) {
-              if (singletonRoutePoolCooldownWaitAttempts >= SINGLETON_ROUTE_POOL_COOLDOWN_WAIT_ATTEMPTS) {
-                logStage('provider.route_pool_cooldown_wait.exhausted', providerRequestId, {
-                  singletonRoutePoolCooldownWaitAttempts,
-                  maxSingletonRoutePoolCooldownWaitAttempts: SINGLETON_ROUTE_POOL_COOLDOWN_WAIT_ATTEMPTS,
-                  candidateProviderCount:
-                    typeof ((pipelineError as { details?: { candidateProviderCount?: unknown } }).details?.candidateProviderCount) === 'number'
-                      ? (pipelineError as { details?: { candidateProviderCount?: number } }).details?.candidateProviderCount
-                      : undefined,
-                  routePoolSize: initialRoutePool?.length ?? 0,
-                  excludedProviderKeys: Array.from(excludedProviderKeys),
-                  lastError: lastError instanceof Error ? lastError.message : (lastError ? String(lastError) : undefined),
-                  poolError: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? 'Unknown error')
-                });
-                throw lastError ?? pipelineError;
-              }
-              const waitMs = cooldownWaitMs ?? resolvePoolExhaustedBackoffMs(poolExhaustedBackoffAttempts);
-              singletonRoutePoolCooldownWaitAttempts += 1;
-              logStage('provider.route_pool_cooldown_wait', providerRequestId, {
-                waitMs,
-                singletonRoutePoolCooldownWaitAttempt: singletonRoutePoolCooldownWaitAttempts,
-                maxSingletonRoutePoolCooldownWaitAttempts: SINGLETON_ROUTE_POOL_COOLDOWN_WAIT_ATTEMPTS,
-                candidateProviderCount:
-                  typeof ((pipelineError as { details?: { candidateProviderCount?: unknown } }).details?.candidateProviderCount) === 'number'
-                    ? (pipelineError as { details?: { candidateProviderCount?: number } }).details?.candidateProviderCount
-                    : undefined,
-                routePoolSize: initialRoutePool?.length ?? 0,
-                excludedProviderKeys: Array.from(excludedProviderKeys),
-                lastError: lastError instanceof Error ? lastError.message : (lastError ? String(lastError) : undefined),
-                poolError: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? 'Unknown error')
-              });
-              await waitWithClientAbortSignal(waitMs, clientAbortSignal, logRequestExecutorNonBlockingError);
-              logStage('provider.route_pool_cooldown_wait.completed', providerRequestId, {
-                waitMs,
-                singletonRoutePoolCooldownWaitAttempt: singletonRoutePoolCooldownWaitAttempts,
-                candidateProviderCount:
-                  typeof ((pipelineError as { details?: { candidateProviderCount?: unknown } }).details?.candidateProviderCount) === 'number'
-                    ? (pipelineError as { details?: { candidateProviderCount?: number } }).details?.candidateProviderCount
-                    : undefined,
-                routePoolSize: initialRoutePool?.length ?? 0
-              });
-              excludedProviderKeys.clear();
-              blockingRecoverableRouteHoldState = null;
-              allowPoolExhaustedBackoffBeyondAttemptBudget = true;
-              continue;
-            }
-            if (poolExhaustedBackoffAttempts < POOL_EXHAUSTED_BACKOFF_ATTEMPTS) {
-              const waitMs = resolvePoolExhaustedBackoffMs(poolExhaustedBackoffAttempts);
-              poolExhaustedBackoffAttempts += 1;
-              logStage('hub.pool_exhausted.backoff_wait', providerRequestId, {
-                waitMs,
-                poolExhaustedBackoffAttempt: poolExhaustedBackoffAttempts,
-                maxPoolExhaustedBackoffAttempts: POOL_EXHAUSTED_BACKOFF_ATTEMPTS,
-                excludedProviderKeys: Array.from(excludedProviderKeys),
-                lastError: lastError instanceof Error ? lastError.message : (lastError ? String(lastError) : undefined),
-                poolError: pipelineError instanceof Error ? pipelineError.message : String(pipelineError ?? 'Unknown error')
-              });
-              await waitWithClientAbortSignal(waitMs, clientAbortSignal, logRequestExecutorNonBlockingError);
-              logStage('hub.pool_exhausted.backoff_wait.completed', providerRequestId, {
-                waitMs,
-                poolExhaustedBackoffAttempt: poolExhaustedBackoffAttempts
-              });
-              allowPoolExhaustedBackoffBeyondAttemptBudget = true;
-              continue;
-            }
             // G3: primary_exhausted -> default_pool. Before failing fast, ask the
             // Rust VR planner for a default_pool plan and re-inject it as the
             // next allowedProviders target list. Host MUST NOT synthesize
@@ -707,23 +628,19 @@ export class HubRequestExecutor implements RequestExecutor {
             });
             if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
               excludedProviderKeys.clear();
-              poolExhaustedBackoffAttempts = 0;
-              singletonRoutePoolCooldownWaitAttempts = 0;
               initialMetadata.allowedProviders = [...plan.defaultPoolTargets];
               metadataForAttempt.allowedProviders = [...plan.defaultPoolTargets];
               logStage('provider.primary_exhausted_to_default_pool.applied', providerRequestId, {
                 defaultPoolTargets: plan.defaultPoolTargets,
                 fromTierId: plan.fromTierId ?? null
               });
-              allowPoolExhaustedBackoffBeyondAttemptBudget = true;
+              allowPrimaryExhaustedReplayBeyondAttemptBudget = true;
               continue;
             }
             throw lastError ?? pipelineError;
           }
           throw pipelineError;
         }
-        poolExhaustedBackoffAttempts = 0;
-        singletonRoutePoolCooldownWaitAttempts = 0;
         const resolvedPipelineAttempt = resolveRequestExecutorPipelineAttempt({
           inputRequestId: input.requestId,
           providerRequestId,

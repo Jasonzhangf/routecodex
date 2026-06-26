@@ -330,7 +330,7 @@ describe('router direct protocol boundary', () => {
     expect(directSend).not.toHaveBeenCalled();
   });
 
-  it('backs off direct route pool exhaustion three times before surfacing the original error', async () => {
+  it('fails fast on direct route pool exhaustion without local backoff wait', async () => {
     jest.useFakeTimers();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
     const server = new RouteCodexHttpServer(createRouterServer());
@@ -365,15 +365,11 @@ describe('router direct protocol boundary', () => {
     );
     const expectation = expect(pending).rejects.toThrow('All providers unavailable for model mini27.MiniMax-M2.7');
 
-    await jest.advanceTimersByTimeAsync(999);
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.pool_exhausted.backoff_wait.completed')).toHaveLength(0);
-    await jest.advanceTimersByTimeAsync(1);
-    await jest.advanceTimersByTimeAsync(2_000);
-    await jest.advanceTimersByTimeAsync(3_000);
+    await jest.advanceTimersByTimeAsync(1_000);
     await expectation;
 
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.pool_exhausted.backoff_wait')).toHaveLength(3);
-    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.pool_exhausted.backoff_wait.completed')).toHaveLength(3);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.pool_exhausted.backoff_wait')).toHaveLength(0);
+    expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.pool_exhausted.backoff_wait.completed')).toHaveLength(0);
     expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.route_failed')).toHaveLength(0);
     expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(0);
   });
