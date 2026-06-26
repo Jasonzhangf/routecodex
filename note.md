@@ -17382,3 +17382,21 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
 - focused 验证：
   - `cargo test -p servertool-core stopless_cli_projection_context_contract --lib -- --nocapture` PASS
   - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/servertool-cli-native-bridge.spec.ts --runInBand` PASS
+
+# 2026-06-26 metadata center servertool adapter projection closeout slice 7
+
+- 本轮继续收 metadata owner，而不是继续扩 stopless 业务逻辑；只切
+  `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+  这一层 projection owner。
+- 现状核对：
+  - `servertool-adapter-context` 已经不再从 origin request / continuation 回填 request truth；
+  - 但它仍会对同一个 bound `MetadataCenter` 再写一次
+    `serverToolFollowup` / `stopMessageEnabled` / `stopMessageClientInject`，
+    这会让 projection owner 继续像 runtime-control 语义 owner。
+- 本轮动作：
+  1. 保留 adapter-context 写入缺失字段的能力；
+  2. 新增显式 guard：如果 bound center 上这 3 个 runtime_control 字段已经存在，
+     adapter-context 不再覆盖；
+  3. 补 focused contract test，锁住 version 不递增，证明没有发生重复写。
+- focused 验证：
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts --runInBand` PASS

@@ -42,6 +42,14 @@ function stripServertoolRuntimeControlMetadataFields(metadata: Record<string, un
   }
 }
 
+function hasOwnRuntimeControlValue(
+  center: MetadataCenter,
+  key: 'serverToolFollowup' | 'stopMessageEnabled' | 'stopMessageClientInject'
+): boolean {
+  const runtimeControl = center.snapshot().runtimeControl;
+  return runtimeControl[key] !== undefined;
+}
+
 export function buildServerToolAdapterContext(args: {
   metadata?: Record<string, unknown>;
   entryOriginRequest?: Record<string, unknown>;
@@ -116,7 +124,10 @@ export function buildServerToolAdapterContext(args: {
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol);
   const baseCenter = MetadataCenter.attach(baseContext);
-  if (runtimeControl.serverToolFollowup === true) {
+  if (
+    runtimeControl.serverToolFollowup === true
+    && !hasOwnRuntimeControlValue(baseCenter, 'serverToolFollowup')
+  ) {
     baseCenter.writeRuntimeControl(
       'serverToolFollowup',
       true,
@@ -128,7 +139,10 @@ export function buildServerToolAdapterContext(args: {
       'servertool adapter context projection'
     );
   }
-  if (typeof stopMessagePortEnabled === 'boolean') {
+  if (
+    typeof stopMessagePortEnabled === 'boolean'
+    && !hasOwnRuntimeControlValue(baseCenter, 'stopMessageEnabled')
+  ) {
     baseCenter.writeRuntimeControl(
       'stopMessageEnabled',
       stopMessagePortEnabled,
@@ -140,25 +154,27 @@ export function buildServerToolAdapterContext(args: {
       'servertool adapter stop-message port projection'
     );
   }
-  baseCenter.writeRuntimeControl(
-    'stopMessageClientInject',
-    {
-      ready: stopMessageInjectReadiness.ready,
-      reason: stopMessageInjectReadiness.reason,
-      ...(stopMessageInjectReadiness.sessionScope
-        ? { sessionScope: stopMessageInjectReadiness.sessionScope }
-        : {}),
-      ...(stopMessageInjectReadiness.tmuxSessionId
-        ? { tmuxSessionId: stopMessageInjectReadiness.tmuxSessionId }
-        : {})
-    },
-    {
-      module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
-      symbol: 'buildServerToolAdapterContext',
-      stage: 'ServertoolAdapterContextRuntimeControl'
-    },
-    'servertool adapter client inject readiness'
-  );
+  if (!hasOwnRuntimeControlValue(baseCenter, 'stopMessageClientInject')) {
+    baseCenter.writeRuntimeControl(
+      'stopMessageClientInject',
+      {
+        ready: stopMessageInjectReadiness.ready,
+        reason: stopMessageInjectReadiness.reason,
+        ...(stopMessageInjectReadiness.sessionScope
+          ? { sessionScope: stopMessageInjectReadiness.sessionScope }
+          : {}),
+        ...(stopMessageInjectReadiness.tmuxSessionId
+          ? { tmuxSessionId: stopMessageInjectReadiness.tmuxSessionId }
+          : {})
+      },
+      {
+        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
+        symbol: 'buildServerToolAdapterContext',
+        stage: 'ServertoolAdapterContextRuntimeControl'
+      },
+      'servertool adapter client inject readiness'
+    );
+  }
   if (clientProtocol) {
     baseContext.clientProtocol = clientProtocol;
   }

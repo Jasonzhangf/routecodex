@@ -307,6 +307,75 @@ describe('servertool adapter context builder', () => {
     expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageEnabled).toBe(true);
   });
 
+  it('does not overwrite existing runtime_control fields on the bound MetadataCenter', async () => {
+    jest.resetModules();
+
+    const { buildServerToolAdapterContext } = await import(
+      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
+    );
+
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRuntimeControl(
+      'serverToolFollowup',
+      true,
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'does not overwrite existing runtime_control fields on the bound MetadataCenter',
+        stage: 'test'
+      },
+      'seed existing followup truth'
+    );
+    center.writeRuntimeControl(
+      'stopMessageEnabled',
+      false,
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'does not overwrite existing runtime_control fields on the bound MetadataCenter',
+        stage: 'test'
+      },
+      'seed existing stop-message truth'
+    );
+    center.writeRuntimeControl(
+      'stopMessageClientInject',
+      {
+        ready: false,
+        reason: 'seeded',
+        sessionScope: 'session:seeded'
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
+        symbol: 'does not overwrite existing runtime_control fields on the bound MetadataCenter',
+        stage: 'test'
+      },
+      'seed existing client inject truth'
+    );
+
+    const context = buildServerToolAdapterContext({
+      metadata,
+      entryOriginRequest: {
+        input: 'continue'
+      },
+      requestId: 'req-preserve-runtime-control',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    });
+
+    const snapshot = MetadataCenter.read(context)?.snapshot();
+    expect(snapshot?.runtimeControl.serverToolFollowup?.version).toBe(1);
+    expect(snapshot?.runtimeControl.stopMessageEnabled?.version).toBe(1);
+    expect(snapshot?.runtimeControl.stopMessageClientInject?.version).toBe(1);
+    expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageEnabled).toBe(false);
+    expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageClientInject).toEqual({
+      ready: false,
+      reason: 'seeded',
+      sessionScope: 'session:seeded'
+    });
+  });
+
   it('does not project providerFamily into MetadataCenter runtime_control', async () => {
     jest.resetModules();
 
