@@ -919,6 +919,21 @@ export function extractProviderFailureStatusCode(error: unknown): number | undef
     return err.status;
   }
   const response = err.response as Record<string, unknown> | undefined;
+  const parseStatusCandidate = (value: unknown): number | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (/^\d{3}$/.test(trimmed)) {
+        const parsed = Number.parseInt(trimmed, 10);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+    }
+    return undefined;
+  };
   const directStatus = parseStatusCandidate(response?.status);
   const directStatusCode = parseStatusCandidate((response as { statusCode?: unknown } | undefined)?.statusCode);
   const nestedStatus = parseStatusCandidate((response as { data?: Record<string, unknown> } | undefined)?.data?.status);
@@ -938,22 +953,6 @@ export function extractProviderFailureStatusCode(error: unknown): number | undef
     const match = err.message.match(/HTTP\s+(\d{3})/i);
     if (match) {
       const parsed = Number.parseInt(match[1], 10);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-  }
-  return undefined;
-}
-
-function parseStatusCandidate(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (/^\d{3}$/.test(trimmed)) {
-      const parsed = Number.parseInt(trimmed, 10);
       if (Number.isFinite(parsed)) {
         return parsed;
       }

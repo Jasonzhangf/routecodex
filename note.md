@@ -15,6 +15,7 @@
   - `isRecoverableHostResponseContractCode` 已物理删除，host response contract recoverable 判定已直接展开到唯一调用点。
   - `isHostFailureStage` 已物理删除，host contract stage 判定直接内联到分类分支。
   - `ProviderFailureAction` 和 `BLOCKING_RECOVERABLE_CODE_SET` 已删除，属于 provider-failure-policy-impl 里的纯死残留。
+  - `parseStatusCandidate` 已物理删除，status code 解析直接内联到 `extractProviderFailureStatusCode`。
 
 # 2026-06-27 retry reselection helper commit slice
 
