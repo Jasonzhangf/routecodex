@@ -452,6 +452,18 @@
 - 当前结论：
   - 这只是单消费者装配壳收口，不改变 provider 分类结果；
   - `provider-failure-policy-impl.ts` 仍保留真正的分类/健康判定主逻辑，不能整体删。
+
+# 2026-06-27 provider business status 2013 helper inline slice
+
+- 已收口：
+  - `provider-failure-policy-impl.ts` 删除模块级 `isProviderBusinessStatus2013`
+  - 两处 2013 判定改为函数体内局部 predicate
+- 已验证：
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+  - `npx jest tests/providers/core/runtime/provider-failure-policy.spec.ts tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts tests/server/runtime/http-server/request-executor.spec.ts --runInBand`
+- 当前结论：
+  - 这个 helper 是纯内部重复抽象，收掉后没有改 provider 分类 / retry 输出；
+  - 继续保留其它真正多消费者的分类与健康函数。
 - 当前事实：
   - `ProviderHealthManager::import_persistable_state(...)` 仍是 noop；
   - `export_persistable_state(...)` 仍固定导出空 `providerCooldowns`；

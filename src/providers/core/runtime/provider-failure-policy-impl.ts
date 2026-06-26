@@ -46,23 +46,6 @@ function isRecoverableHostResponseContractCode(code?: string): boolean {
   return code === 'EMPTY_ASSISTANT_RESPONSE' || code === 'MISSING_REQUIRED_TOOL_CALL';
 }
 
-function isProviderBusinessStatus2013(value: unknown): boolean {
-  if (typeof value === 'number') {
-    return value === 2013;
-  }
-  if (typeof value !== 'string') {
-    return false;
-  }
-  const normalized = value.trim().toUpperCase();
-  if (!normalized) {
-    return false;
-  }
-  if (normalized === '2013') {
-    return true;
-  }
-  return /(?:^|_)2013(?:_|$)/.test(normalized);
-}
-
 function isProviderBusinessStatus2013ContextOverflow(args: {
   statusCode?: number;
   error?: unknown;
@@ -74,11 +57,24 @@ function isProviderBusinessStatus2013ContextOverflow(args: {
   protocolUpstreamCode?: string;
   providerStatusCode?: number;
 }): boolean {
+  const matches2013 = (value: unknown): boolean => {
+    if (typeof value === 'number') {
+      return value === 2013;
+    }
+    if (typeof value !== 'string') {
+      return false;
+    }
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) {
+      return false;
+    }
+    return normalized === '2013' || /(?:^|_)2013(?:_|$)/.test(normalized);
+  };
   const has2013Signal =
-    isProviderBusinessStatus2013(args.errorCode)
-    || isProviderBusinessStatus2013(args.upstreamCode)
-    || isProviderBusinessStatus2013(args.protocolUpstreamCode)
-    || isProviderBusinessStatus2013(args.providerStatusCode);
+    matches2013(args.errorCode)
+    || matches2013(args.upstreamCode)
+    || matches2013(args.protocolUpstreamCode)
+    || matches2013(args.providerStatusCode);
   if (!has2013Signal) {
     return false;
   }
@@ -352,12 +348,25 @@ export function resolveProviderFailureClassification(args: {
   })();
   const protocolReason = typeof protocolDetails.reason === 'string' ? protocolDetails.reason.trim().toLowerCase() : '';
   const protocolUpstreamCode = normalizeProviderFailureCodeKey(protocolDetails.upstreamCode);
+  const matches2013 = (value: unknown): boolean => {
+    if (typeof value === 'number') {
+      return value === 2013;
+    }
+    if (typeof value !== 'string') {
+      return false;
+    }
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) {
+      return false;
+    }
+    return normalized === '2013' || /(?:^|_)2013(?:_|$)/.test(normalized);
+  };
   const has2013Signal =
-    isProviderBusinessStatus2013(errorCode)
-    || isProviderBusinessStatus2013(upstreamCode)
-    || isProviderBusinessStatus2013(nestedCode)
-    || isProviderBusinessStatus2013(protocolUpstreamCode)
-    || isProviderBusinessStatus2013(protocolDetails.providerStatusCode);
+    matches2013(errorCode)
+    || matches2013(upstreamCode)
+    || matches2013(nestedCode)
+    || matches2013(protocolUpstreamCode)
+    || matches2013(protocolDetails.providerStatusCode);
   const isMalformedProviderBusiness2013 =
     (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
     && (
@@ -365,9 +374,9 @@ export function resolveProviderFailureClassification(args: {
       || upstreamCode === 'PROVIDER_STATUS_2013'
       || nestedCode === 'PROVIDER_STATUS_2013'
       || protocolDetails.providerStatusCode === 2013
-      || isProviderBusinessStatus2013(protocolUpstreamCode)
-      || isProviderBusinessStatus2013(upstreamCode)
-      || isProviderBusinessStatus2013(nestedCode)
+      || matches2013(protocolUpstreamCode)
+      || matches2013(upstreamCode)
+      || matches2013(nestedCode)
     );
 
   if (isProviderRuntimeRequestContractError(reason)) {
@@ -495,9 +504,9 @@ export function resolveProviderFailureClassification(args: {
       || upstreamCode === 'PROVIDER_STATUS_2013'
       || nestedCode === 'PROVIDER_STATUS_2013'
       || protocolDetails.providerStatusCode === 2013
-      || isProviderBusinessStatus2013(protocolUpstreamCode)
-      || isProviderBusinessStatus2013(upstreamCode)
-      || isProviderBusinessStatus2013(nestedCode)
+      || matches2013(protocolUpstreamCode)
+      || matches2013(upstreamCode)
+      || matches2013(nestedCode)
     )
     && !isProviderBusinessStatus2013ContextOverflow({
       error: args.error,
