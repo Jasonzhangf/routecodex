@@ -76,8 +76,6 @@ pub struct ProviderRetryExecutionPolicyDecision {
     pub reason: &'static str,
 }
 
-const ERROR_ACTION_BACKOFF_SEQUENCE_MS: [u64; 3] = [1_000, 2_000, 3_000];
-
 pub fn classify_failure(
     status_code: Option<u16>,
     error_code: Option<&str>,
@@ -134,11 +132,9 @@ pub fn should_retry(
 }
 
 pub fn compute_backoff(classification: FailureClassification, attempt: u32) -> u64 {
-    if classification != FailureClassification::Recoverable {
-        return 0;
-    }
-    let step = attempt.saturating_sub(1) as usize;
-    ERROR_ACTION_BACKOFF_SEQUENCE_MS[step % ERROR_ACTION_BACKOFF_SEQUENCE_MS.len()]
+    let _ = classification;
+    let _ = attempt;
+    0
 }
 
 pub fn resolve_retry_execution_policy(
@@ -210,12 +206,12 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_backoff_uses_fixed_cycle() {
+    fn test_compute_backoff_is_always_zero() {
         let classification = FailureClassification::Recoverable;
-        assert_eq!(compute_backoff(classification, 1), 1_000);
-        assert_eq!(compute_backoff(classification, 2), 2_000);
-        assert_eq!(compute_backoff(classification, 3), 3_000);
-        assert_eq!(compute_backoff(classification, 4), 1_000);
+        assert_eq!(compute_backoff(classification, 1), 0);
+        assert_eq!(compute_backoff(classification, 2), 0);
+        assert_eq!(compute_backoff(classification, 3), 0);
+        assert_eq!(compute_backoff(classification, 4), 0);
         assert_eq!(compute_backoff(FailureClassification::Unrecoverable, 1), 0);
     }
 
