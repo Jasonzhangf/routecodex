@@ -19,7 +19,6 @@ import {
   type ResponsesRequestContext,
 } from './handler-response-common.js';
 import { logPipelineStage } from '../utils/stage-logger.js';
-import { extractUsageFromResult } from '../runtime/http-server/executor/usage-aggregator.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
@@ -237,29 +236,6 @@ function maybeUpdateUsageLogInfoFromSseFrame(
   if (typeof nextTerminalState.finishReason === 'string' && nextTerminalState.finishReason.trim()) {
     usageLogInfo.finishReason = nextTerminalState.finishReason.trim();
   }
-  if (!/usage|usageMetadata|input_tokens|output_tokens|prompt_tokens|completion_tokens/.test(frame)) {
-    return nextTerminalState;
-  }
-  const usage = extractUsageFromResult({
-    body: {
-      bodyText: frame
-    }
-  }, {
-    providerProtocol: undefined
-  });
-  if (!usage) {
-    return;
-  }
-  const hasNonZeroUsage =
-    (usage.prompt_tokens ?? 0) > 0
-    || (usage.completion_tokens ?? 0) > 0
-    || (usage.total_tokens ?? 0) > 0
-    || (usage.cache_read_input_tokens ?? 0) > 0
-    || (usage.cache_creation_input_tokens ?? 0) > 0;
-  if (!hasNonZeroUsage) {
-    return nextTerminalState;
-  }
-  usageLogInfo.usage = usage as unknown as Record<string, unknown>;
   return nextTerminalState;
 }
 

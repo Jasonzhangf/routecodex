@@ -15,12 +15,10 @@ import { sendSsePipelineResponse } from './handler-response-sse.js';
 import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
 import { logUsageSummary } from '../runtime/http-server/executor/usage-logger.js';
 import { deriveFinishReason } from '../utils/finish-reason.js';
-import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { registerRequestLogContext } from '../utils/request-log-color.js';
-import { attachResponsesStreamSemanticsForHttp } from '../../modules/llmswitch/bridge/responses-stream-semantics.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildResponsesRequestLogContextForHttp,
@@ -172,16 +170,27 @@ export async function sendPipelineResponse(
     continuationOwner: result.continuationOwner,
   });
 
+  const chatUsageNormalized = normalizeChatUsagePayloadForHttp(body, {
+    entryEndpoint,
+    usageFallback: result.usageLogInfo?.usage
+  });
+  if (chatUsageNormalized.normalized) {
+    logPipelineStage('response.chat_usage.normalized', requestLabel, {
+      source: chatUsageNormalized.source
+    });
+  }
+  const responseBody = chatUsageNormalized.payload;
+
   if (
     forceSSE
     && result.sseStream === undefined
     && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && body
-    && typeof body === 'object'
-    && !Array.isArray(body)
+    && responseBody
+    && typeof responseBody === 'object'
+    && !Array.isArray(responseBody)
   ) {
     const forceSseJsonDispatchPlan = await prepareResponsesJsonClientDispatchPlanForHttp({
-      body,
+      body: responseBody,
       entryEndpoint,
       requestLabel,
       requestContext: effectiveResponsesRequestContext,
@@ -199,29 +208,27 @@ export async function sendPipelineResponse(
         if (!stream) {
           return result;
         }
-        const semanticsStream = attachResponsesStreamSemanticsForHttp({
-          stream,
-          entryEndpoint,
-          requestLabel,
-          onNonBlockingError: logResponseNonBlockingError,
-        });
         return {
           ...result,
-          sseStream: semanticsStream,
+          body: responseBody,
+          sseStream: stream,
         };
       })()
-      : result;
+      : {
+        ...result,
+        body: responseBody,
+      };
 
   const preparedResponsesJsonSseDispatch =
     forceSSE
     && result.sseStream === undefined
     && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && body
-    && typeof body === 'object'
-    && !Array.isArray(body)
+    && responseBody
+    && typeof responseBody === 'object'
+    && !Array.isArray(responseBody)
       ? await (async () => {
         const responsesPayload = await prepareResponsesJsonBodyForSseBridgeForHttp({
-          body,
+          body: responseBody,
           entryEndpoint,
           requestLabel,
         });
@@ -248,7 +255,7 @@ export async function sendPipelineResponse(
     result: responseForDispatch,
     requestLabel,
     status,
-    body,
+    body: responseBody,
     forceSSE,
     expectsStream,
     entryEndpoint,
@@ -303,27 +310,16 @@ export async function sendPipelineResponse(
 
   logPipelineStage('response.json.write', requestLabel, { status });
   const jsonDispatchPlan = await prepareResponsesJsonClientDispatchPlanForHttp({
-    body,
+    body: responseBody,
     entryEndpoint,
     requestLabel,
     requestContext: effectiveResponsesRequestContext,
     metadata: resultMetadata,
     resolveBridge: importResponsesHandlerCoreDist,
   });
-  const usageNormalized = normalizeChatUsagePayloadForHttp(jsonDispatchPlan.clientBody, {
-    entryEndpoint,
-    usageFallback: result.usageLogInfo?.usage
-  });
-  if (usageNormalized.normalized) {
-    logPipelineStage('response.chat_usage.normalized', requestLabel, {
-      source: usageNormalized.source
-    });
-  }
-  const clientBody = usageNormalized.payload;
+  const clientBody = jsonDispatchPlan.clientBody;
   assertClientResponseHasNoInternalCarriers(clientBody, requestLabel);
-  const sanitized = usageNormalized.normalized
-    ? stripInternalKeysDeep(clientBody)
-    : jsonDispatchPlan.sanitizedBody;
+  const sanitized = jsonDispatchPlan.sanitizedBody;
   if (shouldClearResponsesConversationOnFailureForHttp({
     entryEndpoint,
     status,
@@ -337,7 +333,7 @@ export async function sendPipelineResponse(
       onNonBlockingError: logResponseNonBlockingError,
     });
   }
-  const jsonFinishReason = usageNormalized.normalized
+  const jsonFinishReason = chatUsageNormalized.normalized
     ? resolveResponsesClientPayloadFinishReasonForHttp(clientBody)
     : jsonDispatchPlan.finishReason;
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);

@@ -52,6 +52,9 @@ const mockBridgeModule = async () => ({
     convertResponseToJsonToSse: async (payload: Record<string, unknown>) => {
       const responseId = typeof payload.id === 'string' ? payload.id : 'chatcmpl_mock';
       const model = typeof payload.model === 'string' ? payload.model : 'gpt-5.4-mini';
+      const usage = payload.usage && typeof payload.usage === 'object' && !Array.isArray(payload.usage)
+        ? payload.usage as Record<string, unknown>
+        : undefined;
       const choice = Array.isArray(payload.choices) ? payload.choices[0] : undefined;
       const message =
         choice && typeof choice === 'object' && !Array.isArray(choice)
@@ -89,6 +92,24 @@ const mockBridgeModule = async () => ({
             }
           ]
         })}\n\n`,
+        ...(usage
+          ? [
+              `data: ${JSON.stringify({
+                id: responseId,
+                object: 'chat.completion.chunk',
+                created: 1,
+                model,
+                choices: [
+                  {
+                    index: 0,
+                    delta: {},
+                    finish_reason: 'stop'
+                  }
+                ],
+                usage
+              })}\n\n`
+            ]
+          : []),
         `data: ${JSON.stringify({
           id: responseId,
           object: 'chat.completion.chunk',
@@ -154,21 +175,6 @@ const mockBridgeModule = async () => ({
       },
     };
   }),
-  attachResponsesConversationLifecycleStreamForHttp: jest.fn((args: {
-    stream: Readable;
-    requestLabel: string;
-  }) => args.stream.pipe(new Transform({
-    transform(chunk, _encoding, callback) {
-      callback(null, chunk);
-    },
-    flush(callback) {
-      void finalizeRetentionMock(args.requestLabel, { keepForSubmitToolOutputs: true })
-        .then(() => callback())
-        .catch((error) => callback(error as Error));
-    },
-  }))),
-  captureResponsesRequestContextForHttpProjection: jest.fn(async () => undefined),
-  clearResponsesConversationByRequestIdForHttpProjection: jest.fn(async () => undefined),
   clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
   sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
@@ -198,7 +204,6 @@ const mockBridgeModule = async () => ({
       return Readable.from(chunks);
     }
   })),
-  finalizeResponsesConversationRequestRetentionForHttp: finalizeRetentionMock,
   resolveResponsesRequestContextForHttp: jest.fn((args: {
     metadata?: unknown;
     fallback?: Record<string, unknown>;
@@ -212,11 +217,36 @@ const mockBridgeModule = async () => ({
       : args.fallback;
   }),
   importResponsesHandlerCoreDist: jest.fn(async () => ({})),
-  normalizeChatUsagePayloadForHttp: jest.fn((body: unknown) => ({
-    payload: body,
-    normalized: false,
-    source: undefined,
-  })),
+  normalizeChatUsagePayloadForHttp: jest.fn((body: unknown, options?: { entryEndpoint?: string; usageFallback?: Record<string, unknown> }) => {
+    const entryEndpoint = typeof options?.entryEndpoint === 'string' ? options.entryEndpoint : '';
+    const isChat = entryEndpoint.toLowerCase().includes('/v1/chat/completions');
+    const fallback = options?.usageFallback;
+    if (
+      isChat
+      && body
+      && typeof body === 'object'
+      && !Array.isArray(body)
+      && fallback
+      && typeof fallback === 'object'
+      && !Array.isArray(fallback)
+    ) {
+      return {
+        payload: {
+          ...(body as Record<string, unknown>),
+          usage: {
+            ...(fallback as Record<string, unknown>),
+          }
+        },
+        normalized: true,
+        source: 'usage_log',
+      };
+    }
+    return {
+      payload: body,
+      normalized: false,
+      source: undefined,
+    };
+  }),
   resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn((args: {
     finishReason?: string;
     probe: unknown;
@@ -373,11 +403,11 @@ const mockBridgeModule = async () => ({
     forceSSE: boolean;
     metadata?: Record<string, unknown>;
   }) => {
-    if (!args.body || typeof args.body !== 'object' || !('sseStream' in (args.body as Record<string, unknown>))) {
-      return false;
-    }
     if (args.forceSSE) {
       return true;
+    }
+    if (!args.body || typeof args.body !== 'object' || !('sseStream' in (args.body as Record<string, unknown>))) {
+      return false;
     }
     return MetadataCenter.read(args.metadata)?.readRuntimeControl().streamIntent === 'stream';
   }),
@@ -495,10 +525,8 @@ const mockBridgeModule = async () => ({
     return mod.buildResponsesPayloadFromChat(body, { requestId: requestLabel });
   }),
   normalizeResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => frame),
-  persistResponsesConversationLifecycleForHttp: jest.fn(async () => undefined),
   projectResponsesClientPayloadForClientForHttp: jest.fn(async ({ payload }: { payload: unknown }) => payload),
   projectResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => ({ emit: true, frame, state: undefined })),
-  recordResponsesResponseForHttpProjection: jest.fn(async () => undefined),
   rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
   resolveResponsesConversationClearReasonForHttp: jest.fn((phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json') => {
@@ -1204,6 +1232,68 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
       expect(text).toContain('data: {"id":"chatcmpl_force_sse_1"');
+      expect(text).toContain('"object":"chat.completion.chunk"');
+      expect(text).toContain('[DONE]');
+      expect(text).not.toContain('sse_bridge_error');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('projects chat usage fallback into direct chat SSE body before stream conversion', async () => {
+    const sendPipelineResponse = await loadSendPipelineResponse();
+    const app = express();
+    app.get('/direct-chat-sse-usage-fallback', (_req, res) => {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          headers: {},
+          body: {
+            id: 'chatcmpl_usage_fallback',
+            object: 'chat.completion',
+            model: 'glm-5.2',
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: 'OK'
+                },
+                finish_reason: 'stop'
+              }
+            ]
+          },
+          metadata: {
+            outboundStream: true,
+          },
+          continuationOwner: 'direct',
+          usageLogInfo: {
+            usage: {
+              prompt_tokens: 12,
+              completion_tokens: 8,
+              total_tokens: 20
+            },
+            routeName: 'router-direct:thinking',
+            requestStartedAtMs: Date.now(),
+          },
+        } as any,
+        'req_direct_chat_sse_usage_fallback',
+        { forceSSE: true, entryEndpoint: '/v1/chat/completions' }
+      );
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    try {
+      const response = await fetch(`http://127.0.0.1:${addr.port}/direct-chat-sse-usage-fallback`, {
+        headers: { accept: 'text/event-stream' }
+      });
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+      expect(text).toContain('"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}');
       expect(text).toContain('"object":"chat.completion.chunk"');
       expect(text).toContain('[DONE]');
       expect(text).not.toContain('sse_bridge_error');

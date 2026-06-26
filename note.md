@@ -225,11 +225,124 @@
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs`
     - 仍含 `stopMessageState`
 - 黑盒与 contract tests 仍覆盖它：
-  - `tests/servertool/stop-message-runtime-utils.continuation.spec.ts`
+- `tests/servertool/stop-message-runtime-utils.continuation.spec.ts`
   - `tests/servertool/stopless-metadata-writer-ownership.spec.ts`
   - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
   - `tests/sharedmodule/chat-semantics-stage1.spec.ts`
-- 这说明 `stopMessageState` 也不是可直接删的死字段。
+  - 这说明 `stopMessageState` 也不是可直接删的死字段。
+
+# 2026-06-26 metadata center write-point / mirror audit slice 3
+
+- 最新核对结论：
+  - `MetadataCenter` 本身已经是中心化写容器，`writeMetadataCenterSlot` 走 JS mirror + Rust snapshot dualwrite；
+  - 但 `runtime_control` 仍不是单一 canonical 真源，TS 侧和 Rust 侧仍保留顶层镜像/兼容读路径；
+  - 当前卡点不是“没有中心”，而是“中心外仍有镜像契约和旧字段读写”。
+- 证据：
+  - `src/server/runtime/http-server/metadata-center/dualwrite-api.ts`
+    - `writeMetadataCenterSlot` 同时写 JS mirror 和 Rust snapshot。
+  - `src/server/runtime/http-server/executor-metadata.ts`
+    - `buildRequestMetadata(...)` 末尾仍调用 `projectNativeTopLevelRuntimeControl(...)`。
+  - `src/server/handlers/handler-utils.ts`
+    - `buildHandlerPipelineMetadata(...)` 仍保留同类投影壳。
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+    - 仍从 `runtime_control.stopMessageEnabled` / `stopMessageExcludeDirect` 回退读取顶层字段。
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/metadata_center/reader.rs`
+    - 仍消费 `stopless`、`serverToolLoopState`、`stopMessageState`，说明这些镜像尚未完成收口。
+- 当前主线判断：
+  - `MetadataCenter` 的“唯一写点”已经成立于代码层；
+  - 但“唯一真源”还没成立，因为镜像读写和兼容字段还在服务主线。
+  - 下一步应先收口 reader 到 `MetadataCenter` 视图，再删顶层镜像投影壳和旧字段。
+
+# 2026-06-26 metadata center contract/gate closeout slice 4
+
+- 本轮按 active goal 先收文档真源和 gate，不先改实现。
+- 已完成的 contract 收口：
+  - `docs/architecture/metadata-center-manifest.yml`
+
+# 2026-06-26 5555 continuation 顺序审计 slice 2
+
+- Jason 最新边界已锁：
+  - `req_inbound / resp_inbound / req_outbound / resp_outbound` 只允许做语义归一化 / 投影；
+  - 所有 continuation/save/restore/tool/stopless 逻辑都必须回到 `chat process`；
+  - 请求与响应位置必须对称：
+    - request restore: `HubReqInbound02Standardized` 之后、`HubReqChatProcess03Governed` 之前；
+    - response save: `HubRespChatProcess03Governed` 之后、`HubRespOutbound04ClientSemantic` 之前。
+- 文件级根因证据已收敛：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
+    - `persistResponsesConversationLifecycleAtChatProcessExitWithinCore(...)`
+    - 当前 canonical save owner 仍在 core chat-process closeout，位置正确。
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts`
+    - `bridgeConvertProviderResponse(...)` 返回后仍执行
+      `normalizeResponsesToolCallsViaRustSsot(...)`
+    - 该逻辑直接重写 `converted.body`
+    - 这意味着 save owner 保存的 canonical truth 与 outbound 最终交付 truth 可能不一致。
+- 当前唯一修改点判断：
+  - 第一实现修改点应是 `src/server/runtime/http-server/executor/provider-response-converter.ts`
+  - 动作是物理删除 bridge 后的 responses body 二次语义改写
+  - 不在 SSE / handler / response bridge 补语义
+  - 若删除后出现缺口，缺口应回补到 core chat-process owner，而不是在 outbound 留第二套修补。
+
+# 2026-06-26 5555 continuation 顺序审计 slice 1
+
+- Jason 明确纠偏本轮 contract：
+  - `req_inbound` / `resp_inbound` / `req_outbound` / `resp_outbound` 都只允许做语义归一化 / 协议投影；
+  - 逻辑只能在 `Chat Process`；
+  - continuation restore/save 必须 request/response 对称：
+    - request side: `HubReqInbound02Standardized` 之后、`HubReqChatProcess03Governed` 之前；
+    - response side: `HubRespChatProcess03Governed` 之后、`HubRespOutbound04ClientSemantic` 之前。
+- 已重新核对的真源文件：
+  - `docs/architecture/function-map.yml`
+    - `hub.chat_process_responses_continuation` 已写明 continuation save/restore 是 Chat Process boundary block；
+    - `server.responses_sse_bridge_surface` / `server.responses_response_handler_bridge_surface` 已写明 SSE/handler transport-only；
+    - 但当前 map 还没把“ReqInbound/RespInbound/ReqOutbound/RespOutbound 全部只做归一化、不做逻辑”提升成更硬的全局流水线 contract。
+  - `docs/architecture/mainline-call-map.yml`
+    - `resp-04` 已明确 transport-only；
+    - `responses.continuation.mainline` 已明确：
+      - save 在 `ChatProcRespContinuation07CanonicalSaved`
+      - 位置在 `HubRespChatProcess03Governed` 之后、`HubRespOutbound04ClientSemantic` 之前。
+  - `docs/architecture/verification-map.yml`
+    - `hub.chat_process_responses_continuation` 已要求验证 request restore / response save 的对称位置；
+    - 但尚未把“inbound/outbound 不得承载逻辑”的 gate 口径写到和 continuation 同级的强度。
+  - `docs/architecture/wiki/responses-continuation-mainline-source.md`
+    - 已写：
+      - SSE 只能封装完成后的 client semantic；
+      - save 必须在 response projection finalized 之后、client delivery 之前；
+      - continuation / stopless owner 都在 Chat Process。
+- 现阶段根因方向更新：
+  - 不再怀疑 `handler-response-sse.ts` 作为 owner。
+  - 当前更可疑的是“顺序被破坏”：
+    1. request bridge 是否在 `req_inbound` 提前做了本该在 Chat Process 内完成的 continuation/materialize 语义转换；
+    2. `provider-response-converter.ts` 是否在 `bridgeConvertProviderResponse(...)` 之后继续对 `converted.body` 做语义改写，导致 chat-process save 与 outbound 投影真相不一致。
+- 已验证/排除：
+  - `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts` PASS：
+    - request-side submit_tool_outputs direct/relay 分流、relay 改写回 `/v1/responses` mainline、MetadataCenter 绑定/provider pin 这些请求侧最小链路当前未红。
+  - 因此当前优先排查 response-side save 顺序与 outbound 二次改写，不优先改 request-side handler/SSE。
+    - 为每个 family 补了 `write_policy / initial_write_owner / legal_rewrite_owners`
+    - 明确 `MetaResp07ServertoolContextProjected` 是 read-only projection，不再把它记成 `runtime_control` 写点
+    - 补了 `runtime_control / request_truth / continuation_context / response_observation / closeout_status` 的阶段禁止写规则
+    - 把 `npm run verify:metadata-center-dualwrite-api` 挂进 canonical manifest required_gates
+  - `scripts/architecture/verify-architecture-metadata-center-write-boundaries.mjs`
+    - 新增 family -> expected write_policy 校验
+    - 新增 `runtime_control.must_not_be_written_by_stages` 校验
+    - 新增 `MetaResp07ServertoolContextProjected` 必须 `write_families: []` 校验
+  - `scripts/architecture/verify-metadata-center-dualwrite-api.mjs`
+    - 改为读取 canonical manifest `docs/architecture/metadata-center-manifest.yml`，不再盯旧派生副本
+  - `docs/architecture/function-map.yml`
+    - 给 `hub.metadata_center_mainline` / `hub.metadata_center_dualwrite_api` / `hub.metadata_center_request_capture` 加了 `verify:architecture-metadata-center-write-boundaries`
+  - `docs/architecture/verification-map.yml`
+    - 同步把 boundary gate 纳入 metadata-center 相关 feature 的最小验证栈
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`
+    - 删掉“`response_observation` 还不是 first-class family”的过期叙述
+- 本轮已验证通过：
+  - `npm run verify:function-map-compile-gate`
+  - `npm run verify:architecture-mainline-call-map`
+  - `npm run verify:architecture-metadata-center-write-boundaries`
+  - `npm run verify:architecture-metadata-center-manifest-code-sync`
+  - `npm run verify:metadata-center-dualwrite-api`
+- 当前剩余核心缺口已缩小为实现层：
+  - 顶层 control residue / `__rt` / runtime_control mirror reader 仍在
+  - `serverToolLoopState` / `stopMessageState` 仍是 active migration mirror
+  - 下一步应按新 gate 继续收 reader/writer 实现，不再争论文档边界
 
 3. 它们不是 MetadataCenter canonical slot 的证据
 
@@ -258,6 +371,72 @@
 
 - 先不删 `serverToolLoopState` / `stopMessageState`
 - 先清旧文档/旧计划里若把它们写成“已迁入 MetadataCenter canonical slot”的失真叙述
+
+# 2026-06-26 metadata center closeout remaining-work checklist slice 3
+
+- 本轮重新按 active goal 文件 + 当前 repo 文档真源核对了 metadata 收口剩余工作，并把执行清单落盘到：
+  - `docs/goals/metadata-center-closeout-remaining-work-checklist.md`
+- 本轮结论不是新设计，而是把当前剩余工作按“能不能直接删”重新分组，避免后续误删：
+
+1. P0 仍未闭环：单 request 一个 MetadataCenter 的 request 主线实现
+
+- 现有 doc/gate 方向已明确，但 runtime 仍存在 request outbound 复用旧 inbound context snapshot 的风险。
+- 这会导致 chat process 后的新 truth（尤其 stopless/schema contract）没有稳定进入最终 provider payload。
+- 证据仍指向：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs`
+  - failing blackbox:
+    `tests/sharedmodule/hub-pipeline-rust-responses-provider-payload.regression.spec.ts`
+
+2. P0 阻塞仍在：release native 验证前必须恢复真实 Rust owner
+
+- `servertool_core::stop_message_auto_handler` 不能维持在“占位/损坏/假删除”状态。
+- release build 是否可信，取决于：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_auto_handler.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
+
+3. top-level `stopMessage*` mirror 仍是过渡层，不可直接物理删除
+
+- 当前 reader 还在消费：
+  - `metadata.stopMessageEnabled`
+  - `metadata.stopMessageExcludeDirect`
+  - `routecodexPortStopMessageEnabled`
+- 关键 reader：
+  - `req_process_stage1_tool_governance_blocks/orchestrator.rs`
+  - `stopless_decision_context_signals.rs`
+  - `hub_pipeline_blocks/napi_bindings.rs`
+- 关键 projection 壳：
+  - `src/server/runtime/http-server/executor-metadata.ts`
+  - `src/server/handlers/handler-utils.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+- 正确顺序必须是：
+  - 先迁 Rust reader -> 再删 top-level projection
+
+4. 残留字段当前分两类，不能混删
+
+- 可继续清理的 dead residue：
+  - `stoplessGoalStatus`
+- 当前仍是 active runtime mirror、不能直接删：
+  - `serverToolLoopState`
+  - `stopMessageState`
+- 这两者仍被 Rust servertool-core contract 消费，证据仍在：
+  - `loop_state_contract.rs`
+  - `persisted_lookup.rs`
+  - `stopless_orchestration_contract.rs`
+  - `tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts`
+
+5. 下一步收口顺序已固定写入 checklist
+
+- 1) 恢复 `stop_message_auto_handler` Rust owner，打通 release build
+- 2) 修 request chatprocess -> outbound truth 传递，先让 provider payload 回归转绿
+- 3) focused regression 证明当前 request-truth/context-truth 真正到 provider payload
+- 4) 迁 Rust reader，不再读 top-level `stopMessage*`
+- 5) 删除 host/request-stage projection 壳
+- 6) 继续清 `stoplessGoalStatus` 文档残留
+- 7) 把 metadata write-boundary gate 挂入验证面
+- 8) 最后再审 `serverToolLoopState` / `stopMessageState` 是继续保留 mirror 还是进入下一阶段 owner 迁移
 
 # 2026-06-26 architecture wiki drift closeout slice 1
 
@@ -17460,3 +17639,203 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
      这不是本轮 projection 变更引入的 focused 语义红点；
    - 本轮只用 request-stage focused tests 证明删除 top-level projection 后，
      native request 仍保留 `runtime_control` / `metadataCenterSnapshot` 真相。
+
+# 2026-06-26 host stop-message top-level projection closeout slice 11
+
+- 本轮继续物理删 host 侧 top-level `stopMessage*` projection：
+  - `src/server/runtime/http-server/executor-metadata.ts`
+  - `src/server/handlers/handler-utils.ts`
+- 现状核对：
+  - request-stage 删除后，host 侧这两层仍会把
+    `runtimeControl.stopMessageEnabled/ExcludeDirect`
+    再投到 top-level metadata；
+  - 当前 live consumer 已经主要走 `MetadataCenter.readRuntimeControl()` /
+    `readRuntimeControlProjection(...)`，不再需要 host top-level 平铺字段。
+- 本轮动作：
+  1. 删除 `buildRequestMetadata(...)` 末尾的 top-level `stopMessageEnabled/ExcludeDirect` 投影；
+  2. 删除 `buildHandlerPipelineMetadata(...)` 的同类投影；
+  3. focused tests 改成只认 `MetadataCenter.runtime_control`，不再把
+     `input.metadata.stopMessageEnabled` 当 contract。
+
+# 2026-06-26 stopless real-entry outbound context regression slice 12
+
+- `tests/sharedmodule/hub-pipeline-rust-responses-provider-payload.regression.spec.ts`
+  的 real-entry 用例失败后，白盒诊断确认：
+  - `ReqProcessToolGovernance` 已执行；
+  - `metadata.runtime_control.stopMessageEnabled=true` 仍在；
+  - 但 `ReqOutboundContextMerge` 使用的是 `ReqInboundContextCapture` 时抓到的旧
+    `responsesContext/contextSnapshot`，其中只有原始 user turn；
+  - 结果：req_chatprocess 注入后的 stopless `instructions/systemInstruction`
+    没有进入 outbound rebuild，最终 anthropic provider payload 丢失 stop schema 合同。
+- 根因不是 metadata center 丢失，也不是 stopless 注入没跑；根因是
+  `hub_pipeline_lib/engine.rs` 在 outbound 仍复用 inbound 旧 snapshot。
+- 修复方向：outbound attach 的 responses context 必须基于
+  `governed.processed_request` 重抓当前 turn canonical snapshot，而不是贴回 inbound snapshot。
+# 2026-06-26 chat usage normalization closeout
+- Symptom: chat SSE / direct relay usage split across request-executor, converter, SSE handler, and outbound logger.
+- Hypothesis: single helper should normalize provider raw/chat SSE usage once, then outbound should only project from usageLogInfo.
+- Next: add red test for OpenAI chat SSE frame with usage, wire normalize helper, remove SSE handler usage parsing.
+
+# 2026-06-26 5555 stream disconnect read-only audit
+- User symptom:
+  - Codex TUI on port `5555` still shows `Stream disconnected before completion: Upstream request failed`.
+- Sample evidence:
+  - Latest first-round sample:
+    - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782443696584_f10410c9/`
+  - Latest continuation sample right after tool-required response:
+    - `~/.rcc/codex-samples/openai-responses/ports/5555/req_1782443703580_d5803128/`
+  - First-round `provider-response.json` proves upstream returned healthy SSE with:
+    - `response.completed`
+    - `response.done`
+    - `status="requires_action"`
+    - `required_action.submit_tool_outputs`
+    - `usage={input_tokens:516,output_tokens:166,total_tokens:682}`
+  - Same first-round `client-response.json` also contains the completed SSE payload, so first round is not upstream-failed and not provider stream break.
+- Runtime/log conclusion:
+  - Failure surface is continuation / submit-tool-outputs path after first-round tool request, not the initial `/v1/responses` provider stream.
+  - Historic exact server failure already exists in canonical `~/.rcc/logs/server-5555.log`:
+    - `Error [ERR_STREAM_WRITE_AFTER_END]: write after end`
+    - followed by `response.sse.client_close ... closeBeforeStreamEnd=true`
+    - triggered during `/v1/responses.submit_tool_outputs`
+  - This matches user-visible "stream disconnected before completion" far better than provider/network failure.
+- Owner direction locked from map/docs:
+  - `handler-response-sse.ts` is transport-only; docs explicitly forbid treating SSE layer as continuation / tool-governance owner.
+  - Real owner direction is `responses.continuation.mainline` + response/request lifecycle around `submit_tool_outputs`, with SSE only as symptom surface.
+- Read-only conclusion:
+  - Current strongest root-cause candidate is local continuation/SSE closeout ordering on the submit-tool-outputs round:
+    - first round finishes and asks for tool outputs correctly;
+    - later stream/write path closes client stream too early or writes after stream end;
+    - TUI then reports generic upstream failure even though upstream first-round response was normal.
+
+# 2026-06-26 metadata center closeout slice 5
+- 按 active goal 的“先 contract/gate，再收实现”顺序，继续收最小 Rust truth-reader 残留：
+  - `router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+    - `stop_message_excludes_direct(...)` 已移除 top-level
+      `root.stopMessageEnabled / root.stopMessageExcludeDirect` 真源读取；
+    - 当前只允许：
+      1. `metadataCenterSnapshot.runtimeControl.stopMessage.*`
+      2. `runtime_control.stopMessageEnabled / stopMessageExcludeDirect`
+  - `router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+    - `should_inject_stopless_system_instruction(...)` 已移除
+      top-level `metadata.stopMessageEnabled` 真源读取；
+    - 当前只允许：
+      1. `MetadataCenterReader::stop_message_enabled()`
+      2. `metadata.runtime_control.stopMessageEnabled`
+- 同步修改 focused Rust tests：
+  - `req_process_stage1_tool_governance_tests.rs`
+    - 将 stopless 开关输入从 top-level `stopMessageEnabled`
+      改为 `runtime_control.stopMessageEnabled`
+    - 保留 `__rt.stopMessageEnabled` 的负向测试，继续证明 legacy residue 不再激活 request-side stopless
+  - `hub_pipeline_blocks/napi_bindings.rs` 内 direct-decision tests
+    - stop-message control 输入改为 `runtime_control.*`
+- 新增静态 gate 收口：
+  - `scripts/architecture/verify-metadata-center-dualwrite-api.mjs`
+    - 新增 forbidden residue 检查，防止上述两个 Rust owner 重新读取：
+      - `root.get("stopMessageEnabled")`
+      - `root.get("stopMessageExcludeDirect")`
+      - `metadata.get("stopMessageEnabled")`
+- 这一轮仍未收：
+  - `servertool-core/src/stopless_decision_context_signals.rs`
+    - 仍有 adapter/runtime/top-level 兼容读链，后续需要单独审它是否还能保留，还是也必须收成 center/runtime_control-only。
+
+# 2026-06-26 metadata center closeout slice 6
+- 继续收 `servertool-core/src/stopless_decision_context_signals.rs`：
+  - 当前真实 runtime caller 已核实只有
+    `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+    的 `planStoplessDecisionContextSignals(...)`；
+  - 该 caller 传入的是 servertool adapter context，本身由
+    `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+    统一构造并绑定 MetadataCenter；
+  - 没有 runtime 主线 caller 会显式传 `runtimeMetadata`。
+- 因此本轮把 signals planner 收成：
+  - carrier 优先级：
+    1. `adapterContext.metadata`（若存在）
+    2. 否则直接把 `adapterContext` 本身视为 carrier
+  - 允许读取：
+    - `metadataCenterSnapshot.runtimeControl.stopMessage.enabled`
+    - `runtime_control.stopMessageEnabled`
+    - `responsesResume.toolOutputsDetailed`
+  - 已移除的 truth residue：
+    - `adapter_context.stopMessageEnabled`
+    - flat `metadata.stopMessageEnabled`
+    - `runtime_metadata.stopMessageEnabled`
+    - `runtime_metadata.runtime_control.stopMessageEnabled`
+    - `runtime_metadata.stopMessagePortEnabled`
+- 同步改动：
+  - `servertool_core_blocks.rs` bridge test 不再用 `runtimeMetadata.responsesResume` 驱动 planner，
+    改成 adapterContext carrier 自身提供 `responsesResume`
+  - `stopless_decision_context_signals.rs` focused tests 增加：
+    - top-level adapter-context carrier 正向测试
+    - nested metadata carrier 兼容测试
+- 新增 gate 收口：
+  - `scripts/architecture/verify-metadata-center-dualwrite-api.mjs`
+    - 新增对 `stopless_decision_context_signals.rs` 的禁止模式检查，
+      防止重新读取上述 top-level/runtime_metadata `stopMessage*` truth residue
+- 本轮验证：
+  - `cargo test -p servertool-core stopless_decision_context_signals --lib -- --nocapture`
+    - 5 passed
+  - `cargo test -p router-hotpath-napi plans_stopless_decision_context_signals_via_servertool_core_bridge --lib -- --nocapture`
+    - 1 passed
+  - `npm run verify:metadata-center-dualwrite-api`
+    - pass
+  - `npm run verify:architecture-metadata-center-write-boundaries`
+    - pass
+- 收口后剩余主线缺口：
+  - host/request-stage top-level `stopMessage*` projection 壳仍在若干 TS 层残留；
+  - `stop-message-auto` handler / response-side orchestration 等更大主线仍未彻底摆脱旧镜像字段。
+
+# 2026-06-26 chat usage normalization收口 - 唯一语义点 + 接线 + 移除零散
+
+## 目标
+Jason 要求：先确认唯一语义点（`normalizeChatUsagePayloadForHttp` 归一化到 `handler-response-utils.ts` 出口层），再接线（让 SSE/JSON 两条路径都走这份归一化），最后移除零散实现。
+
+## 已确认的改动
+
+### 1. handler-response-utils.ts - 唯一归一化点
+- `sendPipelineResponse` 在入口处对 `body` 做一次 `normalizeChatUsagePayloadForHttp`，生成 `responseBody`
+- JSON/SSE 两条出口都用这份 `responseBody`
+- 移除了 JSON 路径的第二次归一化（原来在 `prepareResponsesJsonClientDispatchPlanForHttp` 之后）
+
+### 2. handler-response-sse.ts - 移除 SSE 内 usage 二次解析
+- 删除了 `maybeUpdateUsageLogInfoFromSseFrame` 函数（约 24 行）
+- 该函数原在 SSE frame 流中尝试解析 usage 并回填 `result.usageLogInfo.usage`
+- 现在 usage 归一化统一在 `handler-response-utils.ts` 入口层一次完成
+
+### 3. 测试验证
+- `handler-response-utils.force-sse-json-responses.spec.ts` 新增用例：
+  `projects chat usage fallback into direct chat SSE body before stream conversion`
+- 用例覆盖：`forceSSE=true` + `entryEndpoint=/v1/chat/completions` + `body` 无 usage + `usageLogInfo.usage` 有值
+- 验证 SSE 最终 chunk 包含 `usage` 从 `usageLogInfo` 回填
+
+## 编译期 bug 修复
+- `handler-response-utils.ts` L339：变量名拼写错误 `usageNormalized` → `chatUsageNormalized`
+- 原代码：先移除了第二次归一化（用 `usageNormalized` 变量），但漏改了 L339 的变量名引用
+- 影响：`usageNormalized is not defined` 运行时错误
+- 修复：`sed -i '' 's/const jsonFinishReason = usageNormalized.normalized/const jsonFinishReason = chatUsageNormalized.normalized/'`
+
+## 剩余风险
+1. `tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts` 的 `MetadataCenter` top-level import 会在直接 `pnpm exec jest` 时触发 `.js` 文件语法错误（因为 `.js` 旁有同名的 `.ts` 源码）
+   - 解决：必须用 `NODE_OPTIONS='--experimental-vm-modules'` 运行
+   - CI 正常走 `scripts/tests/ci-jest.mjs`，有 `--experimental-vm-modules` 覆盖
+2. `tests/server/handlers/handler-response-utils.chat-usage.spec.ts` 有 TS 语法问题（`sseStream` 内嵌 `usage` 字段导致结构解析错误），与本次改动无关，为既有 bug
+3. `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts` 有 6 个失败，均为 CI 环境 pre-existing，与本次改动无关
+4. `tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts` 有 3 个 pre-existing 失败，均与 chat usage 无关
+
+## 测试结果
+- 本次新增用例：PASS ✓
+- 同文件其余 chat SSE / JSON bridge 用例：全部 PASS ✓
+- 编译检查：无新错误 ✓
+
+## 下一步
+- Jason 确认：可以进入接线阶段（目前已部分完成），然后移除零散实现
+- 需要确认哪些零散实现（chat usage 相关散落在各层的旧代码）需要清理
+- 可能需要更新 `docs/architecture/function-map.yml` 的 `server.responses_response_handler_bridge_surface` feature，标注 `normalizeChatUsagePayloadForHttp` 的 owner
+
+## 2026-06-26T03:45:32.136Z stopless learned
+
+- requestId: openai-responses-minimonth.key1-MiniMax-M2.7-20260626T114459606-402167-2160
+- sessionId: 019f01b5-6fcd-7700-9e71-1fb8212e6ce5
+- stopReason: 进展已汇报，bug已修复，测试已验证PASS；待Jason确认是否继续清理零散实现
+- evidence: git diff确认变量修复；NODE_OPTIONS='--experimental-vm-modules' pnpm exec jest跑通chat usage新增用例和同文件其余用例
+
+NODE_OPTIONS='--experimental-vm-modules'是本地调试ESM测试的正确方式；直接pnpm exec jest without NODE_OPTIONS会触发.js/.ts冲突导致SyntaxError

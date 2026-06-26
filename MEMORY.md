@@ -1,5 +1,7 @@
 # RouteCodex Memory
 
+- 2026-06-25: direct `/v1/chat/completions` 工具续轮排障再次确认一个硬规则：`client-response` / `SSE` / outbound 样本只提供症状证据，不能直接当 owner 归因。即使样本表现为“停在 `finish_reason=tool_calls` + [DONE]”，也必须先回 function-map/mainline 锁 direct request-side continuation / tool-result follow-up owner；只有当合同明确把语义归到 outbound/transport，才能在那里修。可复用规则：证据层 != owner 层，症状出现层 != 修复 owner 层。
+
 - 2026-06-24: 复杂 debug 的验证升级顺序已经固定。先 focused whitebox，再 focused provider/client blackbox，再重编 blackbox 实际消费的产物（native `.node`、`routecodex-servertool` standalone binary、或全局安装），然后回旧样本/live sample，最后回完整 gate 链。可复用规则：如果 Rust 白盒已绿而 JS 黑盒还在吐旧文案，优先怀疑“黑盒吃的是旧 binary/旧安装”，不要立刻把它当成 owner 还没修好。
 
 - 2026-06-24: 复杂生命周期问题的固定方法已收口进 `rcc-dev-skills/references/24-node-contract-debug-method.md`。高优先级规则：任何 stopless / continuation / servertool / hook / schema gate / tool governance 类问题，必须先画完整生命周期，再逐节点写 contract（输入/输出/caller-callee/正常/错误/超预期），然后先设计白盒节点测试和 provider/client 两端黑盒，再开始 debug 或改代码。黑盒锁结果面，白盒锁节点合同；黑盒红了必须回到对应白盒 owner，不允许跳过合同直接改代码。
