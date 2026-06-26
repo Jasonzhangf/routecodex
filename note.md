@@ -1,3 +1,17 @@
+# 2026-06-27 provider error classifier options type cleanup
+
+- 已收缩：
+  - `ProviderErrorClassifierOptions` 已从单独导出类型改为 `classifyProviderError` 的内联参数类型
+- 已同步修改：
+  - `src/providers/core/runtime/provider-error-classifier.ts`
+- 已验证：
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - 这个 options type 没有外部消费，收进函数签名后没有行为变化，只是缩小了 classifier 的 API 面。
+
 # 2026-06-27 provider failure decision-label wrapper cleanup
 
 - 已物理删除的薄壳：

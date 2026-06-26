@@ -17,11 +17,9 @@ export type ProviderErrorClassification = {
   isRateLimit: boolean;
 };
 
-export type ProviderErrorClassifierOptions = {
+export function classifyProviderError(options: {
   error: unknown;
-};
-
-export function classifyProviderError(options: ProviderErrorClassifierOptions): ProviderErrorClassification {
+}): ProviderErrorClassification {
   const err: ProviderErrorAugmented =
     (options.error instanceof Error ? options.error : new Error(String(options.error))) as ProviderErrorAugmented;
   const message = typeof err.message === 'string' ? err.message : String(options.error ?? 'unknown error');
