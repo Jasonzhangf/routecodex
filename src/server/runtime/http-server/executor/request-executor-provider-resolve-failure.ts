@@ -8,8 +8,7 @@ import {
 } from './request-executor-provider-failure-plan.js';
 import type {
   RetryErrorSnapshot,
-  BlockingRecoverableRouteHoldState,
-  RequestLocalProviderRetryState
+  BlockingRecoverableRouteHoldState
 } from './request-executor-error-types.js';
 
 type RequestExecutorProviderResolveFailureArgs = {
@@ -58,7 +57,6 @@ export type RequestExecutorProviderResolveFailureResult = {
   lastError: unknown;
   blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
-  requestLocalProviderRetryState?: RequestLocalProviderRetryState;
 };
 
 export async function processProviderResolveFailure(
@@ -135,7 +133,6 @@ export async function processProviderResolveFailure(
   return {
     lastError: args.error,
     blockingRecoverableRouteHoldState,
-    allowBlockingRecoverableRetryBeyondAttemptBudget,
-    requestLocalProviderRetryState: providerFailurePlan.requestLocalProviderRetryState
+    allowBlockingRecoverableRetryBeyondAttemptBudget
   };
 }

@@ -29,7 +29,6 @@ export function prepareRequestExecutorAttemptState(args: {
   attempt: number;
   initialMetadata: Record<string, unknown>;
   excludedProviderKeys: Set<string>;
-  retryProviderKey?: string;
   inboundClientHeaders: Record<string, string> | undefined;
   clientRequestId: string;
   forcedRouteHint?: string;
@@ -59,35 +58,6 @@ export function prepareRequestExecutorAttemptState(args: {
       ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
       'request executor forced route hint'
     );
-  }
-  if (Object.prototype.hasOwnProperty.call(metadataForAttempt, '__routecodexRetryProviderKey')) {
-    delete metadataForAttempt.__routecodexRetryProviderKey;
-  }
-  const responsesResume =
-    metadataCenter.readContinuationContext().responsesResume
-    && typeof metadataCenter.readContinuationContext().responsesResume === 'object'
-    && !Array.isArray(metadataCenter.readContinuationContext().responsesResume)
-      ? (metadataCenter.readContinuationContext().responsesResume as Record<string, unknown>)
-      : undefined;
-  const resumeContinuationOwner =
-    typeof responsesResume?.continuationOwner === 'string'
-      ? responsesResume.continuationOwner.trim()
-      : undefined;
-  const resumeRetryProviderKey =
-    resumeContinuationOwner === 'relay'
-      ? undefined
-      : typeof responsesResume?.providerKey === 'string' && responsesResume.providerKey.trim()
-        ? responsesResume.providerKey.trim()
-        : undefined;
-  const effectiveRetryProviderKey = args.retryProviderKey?.trim() || resumeRetryProviderKey;
-  if (effectiveRetryProviderKey) {
-    metadataCenter.writeRuntimeControl(
-      'retryProviderKey',
-      effectiveRetryProviderKey,
-      ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
-      'request executor retry provider pin'
-    );
-    delete metadataForAttempt.excludedProviderKeys;
   }
 
   const loggerRecord =

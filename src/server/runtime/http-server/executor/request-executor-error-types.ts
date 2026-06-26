@@ -93,7 +93,6 @@ export type RequestExecutorProviderErrorReportPlan = {
 export type RequestExecutorProviderFailurePlan = {
   reportPlan: RequestExecutorProviderErrorReportPlan;
   retryExecutionPlan: ProviderRetryExecutionPlan;
-  requestLocalProviderRetryState?: RequestLocalProviderRetryState;
   retryTelemetryPlan?: ProviderRetryTelemetryPlan;
 };
 
@@ -103,12 +102,6 @@ export type BlockingRecoverableRouteHoldState = {
   retryError: RetryErrorSnapshot;
   explicitSingletonPool: boolean;
   routePoolForSameProviderRetry?: string[];
-};
-
-export type RequestLocalProviderRetryState = {
-  switchAction?: ProviderRetrySwitchAction;
-  retryProviderKey?: string;
-  rotateApiKey?: boolean;
 };
 
 export type ProviderErrorStageLogger = (

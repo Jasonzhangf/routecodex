@@ -17,8 +17,7 @@ import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normali
 import { extractRequestExecutorProviderErrorStage } from './request-executor-error-shared.js';
 import type {
   RetryErrorSnapshot,
-  BlockingRecoverableRouteHoldState,
-  RequestLocalProviderRetryState
+  BlockingRecoverableRouteHoldState
 } from './request-executor-error-types.js';
 
 type RequestExecutorProviderSendFailureArgs = {
@@ -99,7 +98,6 @@ export type RequestExecutorProviderSendFailureResult = {
   lastError: unknown;
   blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
-  requestLocalProviderRetryState?: RequestLocalProviderRetryState;
   forcedRouteHint?: string;
   contextOverflowRetries: number;
   cumulativeExternalLatencyMs: number;
@@ -389,7 +387,6 @@ export async function processProviderSendFailure(
     lastError: args.error,
     blockingRecoverableRouteHoldState,
     allowBlockingRecoverableRetryBeyondAttemptBudget,
-    requestLocalProviderRetryState: providerFailurePlan.requestLocalProviderRetryState,
     forcedRouteHint,
     contextOverflowRetries,
     cumulativeExternalLatencyMs

@@ -225,7 +225,6 @@ import type {
   ProviderRetryTelemetryPlan,
   RequestExecutorProviderFailurePlan,
   RequestExecutorProviderErrorStage,
-  RequestLocalProviderRetryState,
   RetryErrorSnapshot
 } from './executor/request-executor-error-types.js';
 import {
@@ -577,8 +576,6 @@ export class HubRequestExecutor implements RequestExecutor {
         let cumulativeExternalLatencyMs = 0;
         let cumulativeTrafficWaitMs = 0;
         let cumulativeClientInjectWaitMs = 0;
-        let retryProviderKeyForNextAttempt: string | undefined;
-        let requestLocalProviderRetryState: RequestLocalProviderRetryState | undefined;
         let poolExhaustedBackoffAttempts = 0;
         let singletonRoutePoolCooldownWaitAttempts = 0;
         let allowPoolExhaustedBackoffBeyondAttemptBudget = false;
@@ -598,14 +595,11 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt,
           initialMetadata,
           excludedProviderKeys,
-          retryProviderKey: retryProviderKeyForNextAttempt,
           inboundClientHeaders,
           clientRequestId,
           forcedRouteHint,
           throwIfClientAbortSignalAborted
         });
-        retryProviderKeyForNextAttempt = undefined;
-        requestLocalProviderRetryState = undefined;
         const hubStartedAtMs = Date.now();
         logStageLazy(`${pipelineLabel}.start`, providerRequestId, () => ({
           endpoint: input.entryEndpoint,
@@ -666,7 +660,6 @@ export class HubRequestExecutor implements RequestExecutor {
               });
               excludedProviderKeys.clear();
               blockingRecoverableRouteHoldState = null;
-              retryProviderKeyForNextAttempt = undefined;
               allowPoolExhaustedBackoffBeyondAttemptBudget = true;
               continue;
             }
@@ -716,7 +709,6 @@ export class HubRequestExecutor implements RequestExecutor {
               excludedProviderKeys.clear();
               poolExhaustedBackoffAttempts = 0;
               singletonRoutePoolCooldownWaitAttempts = 0;
-              retryProviderKeyForNextAttempt = undefined;
               initialMetadata.allowedProviders = [...plan.defaultPoolTargets];
               metadataForAttempt.allowedProviders = [...plan.defaultPoolTargets];
               logStage('provider.primary_exhausted_to_default_pool.applied', providerRequestId, {
@@ -869,8 +861,6 @@ export class HubRequestExecutor implements RequestExecutor {
           blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
           allowBlockingRecoverableRetryBeyondAttemptBudget =
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
-          requestLocalProviderRetryState = failureState.requestLocalProviderRetryState;
-          retryProviderKeyForNextAttempt = requestLocalProviderRetryState?.retryProviderKey;
           continue;
         }
         let providerProtocol: ProviderProtocol;
@@ -1009,8 +999,6 @@ export class HubRequestExecutor implements RequestExecutor {
           blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
           allowBlockingRecoverableRetryBeyondAttemptBudget =
             failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
-          requestLocalProviderRetryState = failureState.requestLocalProviderRetryState;
-          retryProviderKeyForNextAttempt = requestLocalProviderRetryState?.retryProviderKey;
           continue;
         }
         const emptyProviderRequestSignal = detectEmptyProviderRequestPayload(providerPayload);
@@ -1482,9 +1470,7 @@ export class HubRequestExecutor implements RequestExecutor {
           forcedRouteHint = failureState.forcedRouteHint;
           contextOverflowRetries = failureState.contextOverflowRetries;
           cumulativeExternalLatencyMs = failureState.cumulativeExternalLatencyMs;
-          requestLocalProviderRetryState = failureState.requestLocalProviderRetryState;
-          retryProviderKeyForNextAttempt = requestLocalProviderRetryState?.retryProviderKey;
-          if (target.providerKey && !requestLocalProviderRetryState) {
+          if (target.providerKey) {
             const scopedErrorCode = resolveScopedBackoffErrorCode(error);
             const scopedBackoffKey = buildScopedBackoffKey(target.providerKey, scopedErrorCode);
             const pendingScopedWaitMs = peekScopedErrorBackoffWaitMs(scopedBackoffKey);
