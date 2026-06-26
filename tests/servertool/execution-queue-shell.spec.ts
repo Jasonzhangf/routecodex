@@ -22,6 +22,7 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     materializeServertoolPlannedResult,
+    executeBuiltinServerToolHandler: jest.fn(),
     runServertoolHandler,
     createServertoolExecutionLoopStateFromNative,
     appendExecutedToolRecordFromNative
@@ -146,7 +147,10 @@ describe('execution-queue-shell', () => {
     getServerToolHandler.mockReturnValue({
       trigger: 'tool_call',
       registration: { executionMode: 'guarded' },
-      handler: jest.fn()
+      execution: {
+        kind: 'adhoc',
+        handler: jest.fn()
+      }
     });
   });
 

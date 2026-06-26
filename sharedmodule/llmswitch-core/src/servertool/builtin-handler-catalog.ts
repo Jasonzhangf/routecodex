@@ -1,5 +1,5 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import type { ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerResult } from './types.js';
+import type { ServerToolHandlerContext, ServerToolHandlerResult } from './types.js';
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
 import { getServertoolToolSpec, listServertoolToolSpecs } from './skeleton-config.js';
@@ -285,8 +285,11 @@ async function runBuiltinHandler(
   }
 }
 
-function buildBuiltinHandler(name: string): ServerToolHandler {
-  return async (ctx) => runBuiltinHandler(name, ctx);
+export async function __executeBuiltinHandlerForRuntime(
+  name: string,
+  ctx: ServerToolHandlerContext
+): Promise<{ flowId: string; finalize: () => Promise<ServerToolHandlerResult> } | null> {
+  return runBuiltinHandler(name, ctx);
 }
 
 function readSkeletonOwnedRegistration(name: string): ServerToolHandlerRegistrationSpec | null {
@@ -323,7 +326,10 @@ export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | u
   const entry: ServerToolHandlerEntry = {
     name: registration.name,
     trigger: registration.trigger,
-    handler: buildBuiltinHandler(registration.name),
+    execution: {
+      kind: 'builtin',
+      builtinName: registration.name
+    },
     registration
   };
   if (registration.trigger === 'auto' && registration.autoHook) {

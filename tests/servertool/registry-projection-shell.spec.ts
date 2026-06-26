@@ -42,8 +42,18 @@ describe('registry-projection-shell', () => {
   });
 
   test('projects auto handler order and maps back to entries', () => {
-    const alpha = { name: 'alpha', trigger: 'auto', registration: {}, handler: jest.fn() } as any;
-    const beta = { name: 'beta', trigger: 'auto', registration: {}, handler: jest.fn() } as any;
+    const alpha = {
+      name: 'alpha',
+      trigger: 'auto',
+      registration: {},
+      execution: { kind: 'builtin', builtinName: 'alpha' }
+    } as any;
+    const beta = {
+      name: 'beta',
+      trigger: 'auto',
+      registration: {},
+      execution: { kind: 'builtin', builtinName: 'beta' }
+    } as any;
     planServertoolRegistryProjectionWithNativeMock.mockReturnValue({
       registeredNames: [],
       registeredRecords: [],
@@ -54,7 +64,12 @@ describe('registry-projection-shell', () => {
   });
 
   test('throws when native auto handler projection references a missing entry', () => {
-    const alpha = { name: 'alpha', trigger: 'auto', registration: {}, handler: jest.fn() } as any;
+    const alpha = {
+      name: 'alpha',
+      trigger: 'auto',
+      registration: {},
+      execution: { kind: 'builtin', builtinName: 'alpha' }
+    } as any;
     planServertoolRegistryProjectionWithNativeMock.mockReturnValue({
       registeredNames: [],
       registeredRecords: [],
@@ -66,13 +81,13 @@ describe('registry-projection-shell', () => {
     );
   });
 
-  test('projects auto-hook descriptors and maps back registration plus handler', () => {
-    const handler = jest.fn();
+  test('projects auto-hook descriptors and maps back registration plus execution', () => {
+    const execution = { kind: 'builtin', builtinName: 'alpha' };
     const entry = {
       name: 'alpha',
       trigger: 'auto',
       registration: { name: 'alpha', trigger: 'auto' },
-      handler,
+      execution,
       autoHook: { phase: 'post', priority: 9, order: 1 },
     } as any;
     planServertoolRegistryAutoHookDescriptorsWithNativeMock.mockReturnValue([
@@ -86,7 +101,7 @@ describe('registry-projection-shell', () => {
         priority: 9,
         order: 1,
         registration: entry.registration,
-        handler,
+        execution,
       },
     ]);
   });

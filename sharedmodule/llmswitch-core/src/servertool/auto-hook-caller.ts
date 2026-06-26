@@ -14,17 +14,21 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   materializeServertoolPlannedResult,
+  executeBuiltinServerToolHandler,
   runServertoolHandler
 } from './execution-handler-materialization-shell.js';
+import type { ServerToolExecutionDescriptor } from './registry-types.js';
+
+type AutoHookExecutionItem = {
+  id: string;
+  phase: string;
+  priority: number;
+  execution: ServerToolExecutionDescriptor;
+};
 
 export async function runAutoHookExecutionQueue(args: {
   queueName: ServerToolAutoHookTraceEvent['queue'];
-  hooks: Array<{
-    id: string;
-    phase: string;
-    priority: number;
-    handler: (ctx: ServerToolHandlerContext) => Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null>;
-  }>;
+  hooks: AutoHookExecutionItem[];
   options: ServerSideToolEngineOptions;
   contextBase: ServerToolHandlerContext;
 }): Promise<ServerToolHandlerResult | null> {
@@ -42,7 +46,12 @@ export async function runAutoHookExecutionQueue(args: {
 
     let planned: unknown = null;
     try {
-      planned = await runServertoolHandler(hook.handler, args.contextBase);
+      planned = hook.execution.kind === 'builtin'
+        ? await executeBuiltinServerToolHandler({
+            builtinName: hook.execution.builtinName,
+            ctx: args.contextBase
+          })
+        : await runServertoolHandler(hook.execution.handler, args.contextBase);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown');
       const decision = planAutoHookExecutionDecisionWithNative({
@@ -113,12 +122,7 @@ export async function runServertoolAutoHookCaller(args: {
   });
   const queueOrder: Array<{
     queueName: ServerToolAutoHookTraceEvent['queue'];
-    hooks: Array<{
-      id: string;
-      phase: string;
-      priority: number;
-      handler: (ctx: ServerToolHandlerContext) => Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null>;
-    }>;
+    hooks: AutoHookExecutionItem[];
   }> = [
     { queueName: 'A_optional', hooks: optionalQueue },
     { queueName: 'B_mandatory', hooks: mandatoryQueue }

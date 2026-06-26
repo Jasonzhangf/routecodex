@@ -5,13 +5,14 @@ import type {
   ServerToolHandlerContext,
 } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
+import type { ServerToolExecutionDescriptor } from '../../sharedmodule/llmswitch-core/src/servertool/registry-types.js';
 
 const registryHooks: Array<{
   id: string;
   phase: string;
   priority: number;
   order: number;
-  handler: (ctx: ServerToolHandlerContext) => Promise<any>;
+  execution: ServerToolExecutionDescriptor & { __testHandler?: (ctx: ServerToolHandlerContext) => Promise<any> };
 }> = [];
 
 const planAutoHookExecutionDecisionWithNativeMock = jest.fn((input: any) => {
@@ -109,6 +110,15 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     runServertoolHandler: jest.fn(async (handler: any, context: any) => await handler(context)),
+    executeBuiltinServerToolHandler: jest.fn(async ({ builtinName, ctx }: any) => {
+      const hook = registryHooks.find(
+        (entry) => entry.id === builtinName && entry.execution.kind === 'builtin'
+      );
+      if (!hook || typeof hook.execution.__testHandler !== 'function') {
+        throw new Error(`missing test builtin handler for ${builtinName}`);
+      }
+      return await hook.execution.__testHandler(ctx);
+    }),
     materializeServertoolPlannedResult: jest.fn(async (planned: any) => {
       if (!planned) {
         return null;
@@ -244,12 +254,16 @@ describe('servertool auto hook trace', () => {
       phase: 'default',
       priority: 40,
       order: 2,
-      handler: async () => ({
-        chatResponse: { ok: true } as JsonObject,
-        execution: {
-          flowId: 'stop_message_flow'
-        }
-      })
+      execution: {
+        kind: 'builtin',
+        builtinName: 'stop_message_auto',
+        __testHandler: async () => ({
+          chatResponse: { ok: true } as JsonObject,
+          execution: {
+            flowId: 'stop_message_flow'
+          }
+        })
+      }
     });
 
     const options = createOptions(traces);
@@ -275,19 +289,26 @@ describe('servertool auto hook trace', () => {
         phase: 'default',
         priority: 20,
         order: 1,
-        handler: async () => null
+        execution: {
+          kind: 'adhoc',
+          handler: async () => null
+        }
       },
       {
         id: 'stop_message_auto',
         phase: 'default',
         priority: 40,
         order: 2,
-        handler: async () => ({
-          chatResponse: { ok: true } as JsonObject,
-          execution: {
-            flowId: 'stop_message_flow'
-          }
-        })
+        execution: {
+          kind: 'builtin',
+          builtinName: 'stop_message_auto',
+          __testHandler: async () => ({
+            chatResponse: { ok: true } as JsonObject,
+            execution: {
+              flowId: 'stop_message_flow'
+            }
+          })
+        }
       }
     );
 
@@ -317,19 +338,26 @@ describe('servertool auto hook trace', () => {
         phase: 'default',
         priority: 20,
         order: 1,
-        handler: async () => null
+        execution: {
+          kind: 'adhoc',
+          handler: async () => null
+        }
       },
       {
         id: 'stop_message_auto',
         phase: 'default',
         priority: 40,
         order: 2,
-        handler: async () => ({
-          chatResponse: { ok: true } as JsonObject,
-          execution: {
-            flowId: 'stop_message_flow'
-          }
-        })
+        execution: {
+          kind: 'builtin',
+          builtinName: 'stop_message_auto',
+          __testHandler: async () => ({
+            chatResponse: { ok: true } as JsonObject,
+            execution: {
+              flowId: 'stop_message_flow'
+            }
+          })
+        }
       }
     );
 
@@ -354,7 +382,11 @@ describe('servertool auto hook trace', () => {
       phase: 'default',
       priority: 40,
       order: 1,
-      handler: async () => null
+      execution: {
+        kind: 'builtin',
+        builtinName: 'stop_message_auto',
+        __testHandler: async () => null
+      }
     });
     planAutoHookExecutionDecisionWithNativeMock.mockImplementationOnce((input: any) => ({
       action: 'return_result',

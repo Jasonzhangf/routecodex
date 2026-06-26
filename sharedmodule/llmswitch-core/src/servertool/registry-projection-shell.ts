@@ -65,7 +65,7 @@ export function projectAutoServerToolHookDescriptors(args: {
       priority: descriptor.priority,
       order: descriptor.order,
       registration: entry.registration,
-      handler: entry.handler
+      execution: entry.execution
     };
   });
 }
@@ -75,7 +75,7 @@ export function projectRegisteredServerToolHandlerRecords(args: {
     name: string;
     trigger: string;
     registration: ServerToolRegisteredHandlerRecord['registration'];
-    handler: ServerToolRegisteredHandlerRecord['handler'];
+    handler?: ServerToolRegisteredHandlerRecord['handler'];
   }>;
 }): ServerToolRegisteredHandlerRecord[] {
   const projection = planServertoolRegistryProjectionWithNative({
