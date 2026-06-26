@@ -22,6 +22,7 @@ const metadataCenter = read('src/server/runtime/http-server/metadata-center/meta
 const dualwriteTest = read('tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts');
 const rustDirectDecision = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
 const rustReqGovernance = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs');
+const rustStoplessSignals = read('sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs');
 
 if (!functionMap.includes('feature_id: hub.metadata_center_dualwrite_api')) {
   fail('function-map missing hub.metadata_center_dualwrite_api');
@@ -102,6 +103,31 @@ const forbiddenRustTruthResidueNeedles = [
     source: rustReqGovernance,
     needle: 'metadata\n            .get("stopMessageEnabled")',
     label: 'req governance top-level stopMessageEnabled truth read',
+  },
+  {
+    source: rustStoplessSignals,
+    needle: 'adapter_context.get("stopMessageEnabled")',
+    label: 'stopless decision signals adapter-context top-level stopMessageEnabled truth read',
+  },
+  {
+    source: rustStoplessSignals,
+    needle: 'metadata.and_then(|row| row.get("stopMessageEnabled"))',
+    label: 'stopless decision signals flat metadata stopMessageEnabled truth read',
+  },
+  {
+    source: rustStoplessSignals,
+    needle: 'runtime_metadata.and_then(|row| row.get("stopMessageEnabled"))',
+    label: 'stopless decision signals runtime metadata stopMessageEnabled truth read',
+  },
+  {
+    source: rustStoplessSignals,
+    needle: 'runtime_metadata\n            .and_then(|row| row.get("runtime_control"))',
+    label: 'stopless decision signals runtime metadata runtime_control truth read',
+  },
+  {
+    source: rustStoplessSignals,
+    needle: 'runtime_metadata.and_then(|row| row.get("stopMessagePortEnabled"))',
+    label: 'stopless decision signals stopMessagePortEnabled truth read',
   }
 ];
 

@@ -2712,11 +2712,9 @@ mod tests {
         let output = plan_stopless_decision_context_signals_json(
             &json!({
                 "adapterContext": {
-                    "metadata": {
+                    "runtime_control": {
                         "stopMessageEnabled": false
-                    }
-                },
-                "runtimeMetadata": {
+                    },
                     "responsesResume": {
                         "toolOutputsDetailed": [{ "tool_call_id": "call_1" }]
                     }
