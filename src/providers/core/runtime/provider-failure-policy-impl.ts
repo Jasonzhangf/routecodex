@@ -394,7 +394,7 @@ export function resolveProviderFailureClassification(args: {
     || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
     || nestedCode === 'CLIENT_TOOL_ARGS_INVALID'
   ) {
-    return 'special_400';
+    return 'unrecoverable';
   }
 
   if (

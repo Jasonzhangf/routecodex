@@ -1,7 +1,7 @@
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
-  test('local CLIENT_TOOL_ARGS_INVALID conversion failures still suppress force-exclude', async () => {
+  test('local CLIENT_TOOL_ARGS_INVALID conversion failures no longer classify as special_400 but still suppress force-exclude', async () => {
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(
         new Error('Converted provider tool call has invalid client arguments'),
@@ -36,6 +36,7 @@ describe('request-executor-provider-failure-plan', () => {
 
     expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
     expect(plan.retryExecutionPlan.shouldRetry).toBe(false);
+    expect(plan.reportPlan.stageHint).toBe('provider.send');
   });
 
   test('does not force-exclude provider when route pool is unknown/empty', async () => {
