@@ -170,8 +170,7 @@ fn test_req_process_does_not_duplicate_stopless_responses_instructions() {
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
           "clientInjectReady": true,
-          "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true
+          "stopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_instruction_dedup".to_string(),
@@ -203,8 +202,7 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
           "clientInjectReady": true,
-          "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true
+          "stopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_input".to_string(),
@@ -241,8 +239,7 @@ fn test_req_process_responses_input_materializes_stopless_instructions_without_c
           "entryEndpoint": "/v1/responses",
           "clientInjectReady": false,
           "clientInjectReason": "tmux_session_missing",
-          "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true
+          "stopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_no_tmux_inject".to_string(),
@@ -942,8 +939,7 @@ fn test_terminal_budget_exhausted_stopless_turn_strips_reasoning_stop_controls()
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "clientInjectReady": true,
-          "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true
+          "stopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_budget_terminal".to_string(),
@@ -999,8 +995,7 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "clientInjectReady": true,
-          "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true
+          "stopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_retry".to_string(),
@@ -1059,8 +1054,7 @@ fn test_terminal_schema_pass_stopless_turn_strips_reasoning_stop_controls() {
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "clientInjectReady": true,
-          "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true
+          "stopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass".to_string(),
@@ -1166,7 +1160,6 @@ fn test_terminal_schema_pass_metadata_center_runtime_control_still_strip_reasoni
         metadata: serde_json::json!({
           "clientInjectReady": true,
           "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true,
           "runtime_control": {
             "stopless": {
               "sessionId": "sess-stopless-runtime-control",
@@ -1235,7 +1228,6 @@ fn test_terminal_budget_exhausted_reason_code_in_metadata_center_still_strips_re
         metadata: serde_json::json!({
           "clientInjectReady": true,
           "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true,
           "runtime_control": {
             "stopless": {
               "sessionId": "sess-stopless-budget-reason-code",
@@ -1293,7 +1285,6 @@ fn test_captured_tool_results_alone_no_longer_strip_reasoning_stop_controls() {
         metadata: serde_json::json!({
           "clientInjectReady": true,
           "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true,
           "context": {
             "__captured_tool_results": [
               {

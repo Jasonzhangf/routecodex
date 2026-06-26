@@ -17314,3 +17314,23 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
      - 允许 `metadata.stopMessageEnabled`
      - 明确断言 `routecodexPortStopMessageEnabled === undefined`
   3. 不扩散到黑盒 fixture 批量改写，先锁住真实边界 writer 已消失。
+
+# 2026-06-26 routecodexPortStopMessageEnabled closeout slice 4
+
+- 本轮继续按 request-scoped `MetadataCenter` 收口，目标是把 `routecodexPortStopMessageEnabled`
+  从生产 `src/` owner 文本里进一步清零，并收掉仍把它当输入样本的 sharedmodule/servertool fixture。
+- 文件级结论：
+  - `src/server/handlers/handler-response-common.ts`
+    - `INTERNAL_METADATA_KEYS` 仍把 `routecodexPortStopMessageEnabled` 当 response-side internal key。
+    - 当前生产 owner 已不再写这个字段，因此这里属于残留 guard 名单，不再需要单列保留。
+  - `src/server/runtime/http-server/executor/servertool-followup-metadata.ts`
+    - `STOP_MESSAGE_CONTROL_METADATA_KEYS` 仍包含 `routecodexPortStopMessageEnabled`。
+    - 当前 followup nested metadata 应只收 `stopMessageEnabled/stopMessageExcludeDirect` 兼容面，不需要继续维护已退役字段名。
+  - sharedmodule/servertool Rust tests 仍有多处样本同时写：
+    - `stopMessageEnabled`
+    - `routecodexPortStopMessageEnabled`
+    - 这会继续制造“第二个 top-level port stop field 仍被 runtime 需要”的假象。
+- 本轮动作：
+  1. 从上述两个 `src/` 文件中物理删除 `routecodexPortStopMessageEnabled` 文本残留；
+  2. 把 `router-hotpath-napi` 与 `servertool_core_blocks` 的 fixture 全部改成只保留 `stopMessageEnabled`；
+  3. 验证 sharedmodule Rust 聚焦测试与 metadata gate 仍绿。

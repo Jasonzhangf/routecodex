@@ -75,8 +75,7 @@ const PROVIDER_SELECTION_METADATA_KEYS = [
 
 const STOP_MESSAGE_CONTROL_METADATA_KEYS = [
   'stopMessageEnabled',
-  'stopMessageExcludeDirect',
-  'routecodexPortStopMessageEnabled'
+  'stopMessageExcludeDirect'
 ] as const;
 
 const SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS = [
@@ -367,8 +366,17 @@ export function buildServerToolNestedRequestMetadata(args: {
   }
 
   const routeHintFromHeader = extractRouteHintHeader(out.clientHeaders);
-  if (routeHintFromHeader && !readNonEmptyString(out.routeHint)) {
-    out.routeHint = routeHintFromHeader;
+  if (routeHintFromHeader && !readNonEmptyString(readRuntimeControlProjection(out).routeHint)) {
+    MetadataCenter.attach(out).writeRuntimeControl(
+      'routeHint',
+      routeHintFromHeader,
+      {
+        module: 'src/server/runtime/http-server/executor/servertool-followup-metadata.ts',
+        symbol: 'buildServerToolNestedRequestMetadata',
+        stage: 'ServertoolFollowupRuntimeControlBound'
+      },
+      'followup route hint from client headers'
+    );
   }
 
   try {

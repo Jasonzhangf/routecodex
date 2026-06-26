@@ -42,7 +42,6 @@ const INTERNAL_METADATA_KEYS: ReadonlySet<string> = new Set([
   'serverToolFollowup',
   'serverToolFollowupMode',
   'stopMessageEnabled',
-  'routecodexPortStopMessageEnabled',
   'clientAbortSignal',
   'clientConnectionState',
 ]);

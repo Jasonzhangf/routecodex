@@ -2713,7 +2713,7 @@ mod tests {
             &json!({
                 "adapterContext": {
                     "metadata": {
-                        "routecodexPortStopMessageEnabled": false
+                        "stopMessageEnabled": false
                     }
                 },
                 "runtimeMetadata": {
