@@ -31,6 +31,9 @@ import {
   buildServerToolAdapterContext
 } from './servertool-adapter-context.js';
 import {
+  readRuntimeControlProjection
+} from '../metadata-center/request-truth-readers.js';
+import {
   compactFollowupLogReason,
   extractServerToolFollowupErrorLogDetails,
   finalizeServerToolBridgeConvertError
@@ -305,11 +308,27 @@ function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
 
 function readRuntimeControlForProviderResponseConverter(
   metadata?: Record<string, unknown>
-): { serverToolFollowup?: boolean } {
-  const runtimeControl = MetadataCenter.read(metadata)?.readRuntimeControl();
+): { serverToolFollowup?: boolean; providerProtocol?: string } {
+  const runtimeControl = readRuntimeControlProjection(metadata);
   return {
-    serverToolFollowup: runtimeControl?.serverToolFollowup === true
+    serverToolFollowup: runtimeControl.serverToolFollowup === true,
+    providerProtocol: runtimeControl.providerProtocol
   };
+}
+
+function readProviderProtocolForProviderResponseConverter(args: {
+  metadata?: Record<string, unknown>;
+  adapterContext?: Record<string, unknown>;
+}): string {
+  const adapterContextProviderProtocol = readRuntimeControlForProviderResponseConverter(args.adapterContext).providerProtocol;
+  if (adapterContextProviderProtocol) {
+    return adapterContextProviderProtocol;
+  }
+  const metadataProviderProtocol = readRuntimeControlForProviderResponseConverter(args.metadata).providerProtocol;
+  if (metadataProviderProtocol) {
+    return metadataProviderProtocol;
+  }
+  throw new Error('Provider response converter requires metadata center runtime_control.providerProtocol');
 }
 
 export function buildResponseMetadataBagForProviderResponseConverter(args: {
@@ -369,12 +388,15 @@ function buildProviderContextForResponseConversion(
     ...(asRecord(options.pipelineMetadata) ?? {}),
     ...(extensions ? { extensions } : {})
   };
+  const providerProtocol = readProviderProtocolForProviderResponseConverter({
+    metadata: runtimeMetadata
+  });
   return {
     requestId: options.requestId,
     providerType: (options.providerType || 'unknown') as ProviderContext['providerType'],
     providerFamily: options.providerFamily,
     providerKey: options.providerKey,
-    providerProtocol: options.providerProtocol,
+    providerProtocol,
     startTime: Date.now(),
     runtimeMetadata,
     extensions,
@@ -469,6 +491,13 @@ export async function convertProviderResponseIfNeeded(
   if (!needsAnthropicConversion && !needsResponsesConversion && !needsChatConversion) {
     return options.response;
   }
+  const responseMetadataBag = buildResponseMetadataBagForProviderResponseConverter({
+    metadata: asRecord(options.pipelineMetadata),
+    providerFamily: options.providerFamily
+  });
+  const effectiveProviderProtocol = readProviderProtocolForProviderResponseConverter({
+    metadata: responseMetadataBag
+  });
   const bridgeProviderResponseSeed = buildBridgeProviderResponseSeed(options.response, body);
   if (!bridgeProviderResponseSeed) {
     return options.response;
@@ -477,40 +506,40 @@ export async function convertProviderResponseIfNeeded(
   body = bridgeProviderResponseSeed;
   const isDirectResponsesPrebuiltSsePassthrough = shouldAllowDirectResponsesPrebuiltSsePassthrough({
     entryEndpoint: options.entryEndpoint || entry,
-    providerProtocol: options.providerProtocol,
+    providerProtocol: effectiveProviderProtocol,
     hasSseStream: options.response.sseStream !== undefined,
     continuationOwner: options.response.continuationOwner
   });
   if (isDirectResponsesPrebuiltSsePassthrough) {
     logPipelineStage('convert.bridge.prebuilt_sse_passthrough', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,
-      providerProtocol: options.providerProtocol,
+      providerProtocol: effectiveProviderProtocol,
       continuationOwner: options.response.continuationOwner
     });
     return options.response;
   }
   let adapterContext: Record<string, unknown> | undefined;
   try {
-    const responseMetadataBag = buildResponseMetadataBagForProviderResponseConverter({
-      metadata: asRecord(options.pipelineMetadata),
-      providerFamily: options.providerFamily
-    });
     const baseContext = buildServerToolAdapterContext({
       metadata: responseMetadataBag,
       entryOriginRequest: options.entryOriginRequest,
       requestSemantics: options.requestSemantics,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint || entry,
-      providerProtocol: options.providerProtocol,
+      providerProtocol: effectiveProviderProtocol,
       serverToolsEnabled: options.serverToolsEnabled !== false
     });
     adapterContext = baseContext;
+    const bridgeProviderProtocol = readProviderProtocolForProviderResponseConverter({
+      metadata: responseMetadataBag,
+      adapterContext
+    });
     const serverToolsEnabled = options.serverToolsEnabled !== false;
     let stageRecorder: unknown;
     if (shouldEnableHubStageRecorder()) {
       logPipelineStage('convert.snapshot_recorder.start', options.requestId, {
         entryEndpoint: options.entryEndpoint || entry,
-        providerProtocol: options.providerProtocol
+        providerProtocol: bridgeProviderProtocol
       });
       const snapshotRecorderStartMs = Date.now();
       stageRecorder = await bridgeCreateSnapshotRecorder(
@@ -521,14 +550,14 @@ export async function convertProviderResponseIfNeeded(
       );
       logPipelineStage('convert.snapshot_recorder.completed', options.requestId, {
         entryEndpoint: options.entryEndpoint || entry,
-        providerProtocol: options.providerProtocol,
+        providerProtocol: bridgeProviderProtocol,
         elapsedMs: Date.now() - snapshotRecorderStartMs
       });
     }
 
     logPipelineStage('convert.bridge.start', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,
-      providerProtocol: options.providerProtocol,
+      providerProtocol: bridgeProviderProtocol,
       wantsStream: options.wantsStream
     });
     const bridgeStartMs = Date.now();
@@ -536,7 +565,6 @@ export async function convertProviderResponseIfNeeded(
       extractBridgeProviderResponsePayload(bridgeProviderResponseSeed)
       ?? bridgeProviderResponseSeed;
     bridgePayloadForError = bridgeProviderResponse;
-    const bridgeProviderProtocol = options.providerProtocol;
     bridgeProviderProtocolForError = bridgeProviderProtocol;
     const effectiveRequestSemantics = (() => {
       const existing = asFlatRecord(options.requestSemantics);
@@ -616,7 +644,7 @@ export async function convertProviderResponseIfNeeded(
         ? extractUsageFromResult(
           { body: converted.body },
           {
-            providerProtocol: options.providerProtocol,
+            providerProtocol: bridgeProviderProtocol,
             providerType: options.providerType,
             providerKey: options.providerKey
           }

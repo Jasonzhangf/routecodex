@@ -103,7 +103,27 @@ export function buildServerToolAdapterContext(args: {
   }
   baseContext.requestId = args.requestId;
   baseContext.entryEndpoint = args.entryEndpoint;
-  baseContext.providerProtocol = args.providerProtocol;
+  const runtimeControl = readRuntimeControlProjection(metadataBag);
+  const providerProtocol = typeof runtimeControl.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
+    ? runtimeControl.providerProtocol.trim()
+    : args.providerProtocol.trim();
+  if (!providerProtocol) {
+    throw new Error('Servertool adapter context requires providerProtocol');
+  }
+  const providerProtocolCenter = MetadataCenter.attach(baseContext);
+  if (readRuntimeControlProjection(baseContext).providerProtocol !== providerProtocol) {
+    providerProtocolCenter.writeRuntimeControl(
+      'providerProtocol',
+      providerProtocol,
+      {
+        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
+        symbol: 'buildServerToolAdapterContext',
+        stage: 'ServertoolAdapterContextRuntimeControl'
+      },
+      'servertool adapter provider protocol seed'
+    );
+  }
+  baseContext.providerProtocol = providerProtocol;
 
   const originalModelId = extractClientModelId(metadataBag, originRequest);
   if (originalModelId) {
@@ -116,7 +136,6 @@ export function buildServerToolAdapterContext(args: {
 
   applyClientConnectionStateToContext(metadataBag, baseContext);
 
-  const runtimeControl = readRuntimeControlProjection(metadataBag);
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol);
   const baseCenter = MetadataCenter.attach(baseContext);

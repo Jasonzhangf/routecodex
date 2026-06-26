@@ -1,3 +1,20 @@
+# 2026-06-26 providerProtocol metadata-center no-fallback closeout
+
+- 当前残余 `providerProtocol` 真源回退已定位到这几处：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/native-adapter-context.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts`
+  - `src/server/runtime/http-server/executor/provider-response-converter.ts`
+  - `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+- 当前判断：
+  - 这些地方不该继续读 flat `providerProtocol` 作为 truth。
+  - 必须改成只读已绑定的 MetadataCenter runtime_control.providerProtocol。
+  - 读不到时应 fail-fast，不能保留兼容 fallback。
+- 已确认的测试契约：
+  - 现有 metadata-center providerProtocol spec 都在锁“center truth wins over outer arg”。
+  - 适合直接把 fallback 分支删掉，再补 targeted fail-fast 验证。
+
 # 2026-06-26 metadata center nested stop-message scope fix
 
 - 已确认真实 blocker 之一在 Rust `resolve_stop_message_router_metadata(...)`：
@@ -15,6 +32,23 @@
   - 需要把 targeted test 结果落盘后再判断是否要同步旧预期
 
 # 2026-06-26 active metadata-center goal reusability audit
+
+# 2026-06-26 stopless loop guard naming closeout
+
+- 本轮范围仅收 stopless loop guard 命名，不改行为。
+- 已统一 owner / NAPI / TS shell / focused tests 命名：
+  - Rust enum `ThrowGoalActiveLoop` -> `ThrowStoplessLoop`
+  - TS shell dispatch `throw_goal_active_loop` -> `throw_stopless_loop`
+  - focused test 标题改为 stopless wording
+  - `docs/plans/rustify-stop-message-auto-handler.md` 的 `goal_loop*` / `GOAL_ACTIVE_STOP_LOOP_DETECTED` 残留已改为 stopless wording
+- 复验：
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`
+  - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json`
+  - `cargo test -p stop-message-core detects_stopless_repeated_stop_text --lib -- --nocapture`
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stop-message-native-decision.spec.ts --runInBand`
+- 当前结论：
+  - active code/test surface 的旧 `GoalActiveStopLoop` / `evaluateGoalActiveStopLoop*` / `throw_goal_active_loop` 残留已清掉
+  - 剩余历史文本若再出现，优先视为非 active fixture / 旧构建物，再按需处理
 
 # 2026-06-26 anthropic user-turn merge fix for port-10000 sample
 

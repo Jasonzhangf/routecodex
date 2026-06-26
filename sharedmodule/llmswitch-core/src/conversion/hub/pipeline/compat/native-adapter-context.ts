@@ -1,11 +1,13 @@
 import type { AdapterContext } from '../../types/chat-envelope.js';
 import type { JsonObject } from '../../types/json.js';
 import type { NativeReqOutboundCompatAdapterContextInput } from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
+import { readRuntimeControlFromBoundMetadataCenter } from '../../../../servertool/stopless-metadata-carrier.js';
 
 export function buildNativeReqOutboundCompatAdapterContext(
   adapterContext?: AdapterContext
 ): NativeReqOutboundCompatAdapterContextInput {
   const row = (adapterContext ?? {}) as Record<string, unknown>;
+  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(row);
 
   const readString = (key: string): string | undefined => {
     const value = row[key];
@@ -28,7 +30,16 @@ export function buildNativeReqOutboundCompatAdapterContext(
   return {
     __rt: readRecord('__rt'),
     compatibilityProfile: readString('compatibilityProfile'),
-    providerProtocol: readString('providerProtocol') ?? adapterContext?.providerProtocol,
+    providerProtocol: (() => {
+      const providerProtocol =
+        typeof runtimeControl?.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
+          ? runtimeControl.providerProtocol.trim()
+          : undefined;
+      if (!providerProtocol) {
+        throw new Error('Native req outbound compat adapter context requires metadata center runtime_control.providerProtocol');
+      }
+      return providerProtocol;
+    })(),
     providerId: readString('providerId'),
     providerKey: readString('providerKey'),
     runtimeKey: readString('runtimeKey'),

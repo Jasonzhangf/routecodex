@@ -17,6 +17,8 @@ type StoplessRuntimeControlValue = {
   updatedAt?: number;
 };
 
+export type { StoplessRuntimeControlValue };
+
 type MetadataCenterLike = {
   writeRuntimeControl?: (
     key: string,
@@ -121,6 +123,38 @@ export function readRuntimeControlFromBoundMetadataCenter(
     : undefined;
 }
 
+export function readStoplessRuntimeControlFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): StoplessRuntimeControlValue | undefined {
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(target);
+  const stopless = runtimeControl?.stopless;
+  if (!stopless || typeof stopless !== 'object' || Array.isArray(stopless)) {
+    return undefined;
+  }
+  const record = stopless as Record<string, unknown>;
+  if (typeof record.flowId !== 'string') {
+    return undefined;
+  }
+  if (typeof record.repeatCount !== 'number' || typeof record.maxRepeats !== 'number') {
+    return undefined;
+  }
+  if (typeof record.active !== 'boolean') {
+    return undefined;
+  }
+  return {
+    flowId: record.flowId,
+    repeatCount: record.repeatCount,
+    maxRepeats: record.maxRepeats,
+    ...(typeof record.triggerHint === 'string' ? { triggerHint: record.triggerHint } : {}),
+    ...(typeof record.continuationPrompt === 'string' ? { continuationPrompt: record.continuationPrompt } : {}),
+    ...(record.schemaFeedback && typeof record.schemaFeedback === 'object' && !Array.isArray(record.schemaFeedback)
+      ? { schemaFeedback: record.schemaFeedback as Record<string, unknown> }
+      : {}),
+    active: record.active,
+    ...(typeof record.updatedAt === 'number' ? { updatedAt: record.updatedAt } : {}),
+  };
+}
+
 export function readRequestTruthSessionIdFromBoundMetadataCenter(
   metadata: Record<string, unknown> | undefined
 ): string | undefined {
@@ -145,15 +179,4 @@ export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(
   }
   const metadata = asRecord(target?.metadata);
   return readRequestTruthSessionIdFromBoundMetadataCenter(metadata);
-}
-
-export function readRuntimeControlFromAnyBoundMetadataCenter(
-  target: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  const direct = readRuntimeControlFromBoundMetadataCenter(target);
-  if (direct) {
-    return direct;
-  }
-  const metadata = asRecord(target?.metadata);
-  return readRuntimeControlFromBoundMetadataCenter(metadata);
 }

@@ -40,6 +40,13 @@ export async function runServertoolResponseStageOrchestrationShell(
 ): Promise<ServertoolResponseStageShellResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
   const runtimeControl = readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
+  const providerProtocol =
+    typeof runtimeControl?.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
+      ? runtimeControl.providerProtocol.trim()
+      : undefined;
+  if (!providerProtocol) {
+    throw new Error('Servertool response stage orchestration requires metadata center runtime_control.providerProtocol');
+  }
   if (runtimeControl?.servertoolResponseOrchestration === true) {
     writeRuntimeControlToBoundMetadataCenter({
       metadata: options.adapterContext as Record<string, unknown>,
@@ -84,7 +91,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     adapterContext: options.adapterContext,
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
-    providerProtocol: options.providerProtocol,
+    providerProtocol,
     stageRecorder: options.stageRecorder
   });
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'completed', {

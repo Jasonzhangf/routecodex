@@ -14,6 +14,7 @@ import {
 } from "../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { isRecord } from "../../../shared/common-utils.js";
+import { readRuntimeControlFromBoundMetadataCenter } from "../../../servertool/stopless-metadata-carrier.js";
 import type {
   HubPipelineConfig,
   HubPipelineRequest,
@@ -110,7 +111,12 @@ function readString(value: unknown): string | undefined {
 }
 
 function readProviderProtocol(metadata: Record<string, unknown>): HubPipelineProviderProtocol {
-  return (readString(metadata.providerProtocol) ?? "openai-chat") as HubPipelineProviderProtocol;
+  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(metadata);
+  const providerProtocol = readString(runtimeControl?.providerProtocol);
+  if (!providerProtocol) {
+    throw new Error("HubPipeline requires metadata center runtime_control.providerProtocol");
+  }
+  return providerProtocol as HubPipelineProviderProtocol;
 }
 
 function readStageRecorder(metadata: Record<string, unknown>): StageRecorder | undefined {
@@ -168,10 +174,9 @@ function buildMaterializedRequest(args: {
 }): NormalizedRequest {
   const endpoint = readString(args.metadata.endpoint) ?? args.endpoint;
   const entryEndpoint = readString(args.metadata.entryEndpoint) ?? endpoint;
-  const providerProtocol = (readString(args.metadata.providerProtocol) ?? "openai-chat") as ProviderProtocol;
+  const providerProtocol = readProviderProtocol(args.metadata) as ProviderProtocol;
   const direction = args.metadata.direction === "response" ? "response" : "request";
   const stage = args.metadata.stage === "outbound" ? "outbound" : "inbound";
-  const routeHint = readString(args.metadata.routeHint);
   const hubEntryRaw = readString(args.metadata.__hubEntry);
   const hubEntryMode = hubEntryRaw && ["chat_process", "chat-process", "chatprocess"].includes(hubEntryRaw.toLowerCase())
     ? "chat_process" as const
@@ -205,7 +210,6 @@ function buildMaterializedRequest(args: {
     direction,
     stage,
     stream: args.metadata.stream === true,
-    ...(routeHint ? { routeHint } : {}),
     ...(hubEntryMode ? { hubEntryMode } : {}),
   };
 }

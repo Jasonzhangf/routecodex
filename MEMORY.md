@@ -1,4 +1,26 @@
+# 2026-06-26: providerProtocol metadata-center no-fallback closeout
+
+- 已验证 `providerProtocol` 收口到 metadata center 的关键 contract spec 全绿：
+  - `tests/server/runtime/http-server/executor/provider-response-converter.metadata-center-provider-protocol.spec.ts`
+  - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+  - `tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts`
+  - `tests/sharedmodule/native-adapter-context.metadata-center-provider-protocol.spec.ts`
+- 当前已收口的实现面：
+  - `hub-pipeline.ts` / `native-adapter-context.ts` / `provider-response.ts` / `provider-response-converter.ts` / `servertool-adapter-context.ts` / `response-stage-orchestration-shell.ts`
+  - 统一改为读取已绑定的 MetadataCenter runtime_control.providerProtocol，并删除了 fallback / any-bound 兼容读取 helper。
+- 可复用规则：
+  - center-only 真源可以直接 fail-fast；不要保留 flat mirror 作为备份 truth。
+  - 入口上下文要先 seed center，再让下游节点消费中心值。
+- 验证口径：
+  - 只看本次 4 个中心化 contract spec，不把仓库里其他既有红面算进这个 slice。
+
 # RouteCodex Memory
+
+- 2026-06-26: `metadata.center.mainline` 的 `mtc-03` 已从 partial 收口为 anchored first-batch runtime-control owner。`request-executor.ts` 现在通过绑定的 `MetadataCenter` 写入 `runtime_control.providerProtocol`，`providerProtocol` 不再只停留在 top-level protocol-shell transport；`mainline-call-map.yml`、`verification-map.yml` 和 `metadata-center-mainline-source.md` 已同步收紧。验证时，架构门禁通过，但 `pnpm test -- --runInBand tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts` 会先串到仓库里其他既有失败样本，不应把那些 unrelated failures 归因到本次改动。
+
+- 2026-06-26: VR metadata center 收口已验证通过。`vr.metadata_center_surface` 已进入 function-map / verification-map / mainline-call-map / wiki boundary，`metadata.center.mainline` 已在 mainline / manifest 中成链，VR runtime 读面从 `metadataCenterSnapshot.runtimeControl` 读取，旧 `__rt` / 顶层 fallback 读面已从 VR 路径移除。验证通过 `cargo test -p router-hotpath-napi metadata::tests --lib -- --nocapture`、`cargo test -p router-hotpath-napi route_select --lib -- --nocapture`、`npm run verify:function-map-compile-gate`、`npm run verify:architecture-mainline-call-map`、`npm run verify:architecture-owner-queryability`、`npm run verify:architecture-metadata-leak-boundary`、`npm run verify:architecture-nonadjacent-conversion`、`npm run verify:vr-no-ts-runtime`。可复用规则：VR 只读共享中心快照，不从 `__rt` 或 flat metadata 恢复路由真源；route-scoped runtime override 必须从 `metadataCenterSnapshot.runtimeControl` 取值。
+
+- 2026-06-26: MetadataCenter contract 收口已再次验证：`metadata-center-manifest.yml` 通过 `verify:architecture-metadata-center-manifest-code-sync` 与 `verify:architecture-metadata-center-write-boundaries`，`function-map` / `mainline-call-map` / wiki 同步后通过；当前统一口径是 `request_truth` write_once、`continuation_context` replaceable、`runtime_control` replaceable、`provider_observation` append_only、`response_observation` append_only、`closeout_status` finalize_only。可复用规则：`request_truth.sessionId/conversationId` 只能 inbound 一次性写入，后续阶段只读；`continuation_context` 不能回填 request identity；closeout 只做 finalize/release，不做语义修复；SSE/handler/outbound 只能投影 finalized truth。
 
 - 2026-06-25: direct `/v1/chat/completions` 工具续轮排障再次确认一个硬规则：`client-response` / `SSE` / outbound 样本只提供症状证据，不能直接当 owner 归因。即使样本表现为“停在 `finish_reason=tool_calls` + [DONE]”，也必须先回 function-map/mainline 锁 direct request-side continuation / tool-result follow-up owner；只有当合同明确把语义归到 outbound/transport，才能在那里修。可复用规则：证据层 != owner 层，症状出现层 != 修复 owner 层。
 
@@ -3440,3 +3462,30 @@ Tags: startupExcludedProviderKeys, virtual-router-config, direct_model, ecodev, 
 - Live closeout rule: after cleaning old samples, the only allowed top-level sample dir under `openai-responses` / `openai-chat` is `ports`.
 - 2026-06-26: `virtual-router-builder` 恢复多服务器时，`forwarder.targets[].modelId/model` 不能作为独立真源；它们只能作为与 `forwarder.model` 一致的校验位。若 target-level model 与 forwarder.model 冲突，必须 fail-fast；若一致，则允许恢复多服务器配置。验证通过 `tests/config/virtual-router-builder.model-alias-contract.spec.ts` 的同值接受 / 冲突拒绝双向测试，以及真实 `routecodex start --config /Users/fanzhang/.rcc/config.toml` 多端口启动成功。
 - 2026-06-26: `handler-response-utils.sse-finish-reason.spec.ts` 中 5 个日志型/重复性测试已物理删除，保留的语义测试仍通过；同类 `responses-handler.stream-closed-before-completed.regression.spec.ts` 也保持绿色。可复用规则：SSE/transport 日志只作为证据，不是语义 owner，重复日志型测试应删，不要在 handler/outbound 再补一套“日志即真相”的断言。
+- 2026-06-26: response 侧 stopless/schema/tool-injection 的唯一顺序已收紧为 `HubRespChatProcess03Governed` 内的「先拦截 -> 再归一化 -> 再 canonical save -> 最后桥接」，`HubRespOutbound04ClientSemantic` 与 SSE 只能做纯投影。可复用规则：若恢复上下文后会丢失中间处理，就说明 save 点放晚了或桥层误承担了语义 owner。
+
+# 2026-06-26 metadata-center mainline contract gate closeout
+
+- 已验证 `MetadataCenter` 目标收口到“单 request-scoped carrier + family 唯一写点/改写点”：
+  - `docs/architecture/function-map.yml`
+  - `docs/architecture/verification-map.yml`
+  - `docs/architecture/mainline-call-map.yml`
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`
+  - `docs/architecture/wiki/responses-continuation-mainline-source.md`
+- 已验证 family write policy 与 gate 同步：
+  - `request_truth: write_once`
+  - `continuation_context / runtime_control: replaceable_by_owner_only`
+  - `provider_observation / response_observation / debug_snapshot: append_only`
+  - `closeout_status: finalize_only`
+- 已验证门禁通过：
+  - `npm run verify:function-map-compile-gate`
+  - `npm run verify:architecture-mainline-call-map`
+  - `npm run verify:architecture-metadata-center-manifest-code-sync`
+  - `npm run verify:architecture-metadata-center-write-boundaries`
+  - `npm run verify:architecture-review-surface-light`
+  - `npm run verify:architecture-topology-doc-sync`
+- 已补齐同步债务：
+  - `docs/architecture/mainline-binding-budget.yml` 新增 `vr.route_availability.mainline` 预算，避免新链把 binding-pending gate 卡成假失败。
+  - `docs/architecture/topology-sync-manifest.yml` 删除已被引用的 `MetaRoute03RouteCarrier` allowlist 残留，并把 referenced count 对齐为 18。
+- 已确认 `hub.metadata_center_dualwrite_api` 仍是 planned migration feature，不再作为当前冲突项；当前 contract 闭环不依赖它作为活 owner。
+- 旧样本 replay 的 404 只证明 anthropic replay 入口未挂载，不影响本次 metadata-center contract/gate closeout 结论。
