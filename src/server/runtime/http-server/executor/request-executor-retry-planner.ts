@@ -10,7 +10,6 @@ import {
   retainLogicalRequestChain,
 } from './request-executor-retry-state.js';
 import {
-  isLastAvailableProvider429,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan
 } from './request-executor-retry-decision.js';
@@ -37,7 +36,6 @@ export {
   consumeRecoverableErrorBackoffMs,
   deriveLogicalRequestChainKey,
   emitRequestExecutorProviderRetryTelemetry,
-  isLastAvailableProvider429,
   releaseLogicalRequestChain,
   resolveExcludedProviderReselectionPlan,
   resolveProviderRetryEligibilityPlan,

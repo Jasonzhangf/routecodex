@@ -9,7 +9,6 @@ import {
   applyRetryExclusionForCurrentProvider,
   buildProviderRetrySwitchPlan,
   hasAlternativeRouteCandidate,
-  isLastAvailableProvider429,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan
 } from './request-executor-retry-decision.js';
@@ -200,12 +199,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
           }) || baseExclusionPlan.excludedCurrentProvider
         }
       : { excludedCurrentProvider: false };
-  const holdOnLastAvailable429 = isLastAvailableProvider429({
-    providerKey: args.providerKey,
-    routePool: args.routePool,
-    excludedProviderKeys: args.excludedProviderKeys,
-    retryError: args.retryError
-  });
   const hasAlternativeCandidate = hasAlternativeRouteCandidate({
     providerKey: args.providerKey,
     routePool: args.routePool,
@@ -213,8 +206,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   });
   const retryExcludedCurrentProvider = exclusionPlan.excludedCurrentProvider;
   const hasTerminalAlternativeCandidate =
-    !holdOnLastAvailable429
-    && hasAlternativeCandidate
+    hasAlternativeCandidate
     && (
       exclusionPlan.excludedCurrentProvider
       || classification === 'unrecoverable'

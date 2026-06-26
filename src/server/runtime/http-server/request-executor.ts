@@ -205,7 +205,6 @@ import {
 import { readRuntimeRequestTruthIdentifiers } from './metadata-center/request-truth-readers.js';
 import { buildProviderRetryTelemetryPlan } from './executor/request-executor-retry-telemetry.js';
 import {
-  isLastAvailableProvider429,
   buildRecoverableErrorBackoffKey,
   clearRecoverableErrorBackoff,
   consumeLogicalChainRecoverableRetry,
@@ -1576,7 +1575,6 @@ export const __requestExecutorTestables = {
   readString,
   extractRetryErrorSnapshot,
   truncateReason,
-  isLastAvailableProvider429,
   shouldApplyProviderTransportBackoff,
   buildRecoverableErrorBackoffKey,
   clearRecoverableErrorBackoff,

@@ -7,7 +7,7 @@ import {
   detectRetryableEmptyAssistantResponse,
   persistPayloadContractProviderSnapshots
 } from './request-executor-response-contract.js';
-import { extractUsageFromResult, mergeUsageMetrics } from './usage-aggregator.js';
+import { extractUsageFromResult } from './usage-aggregator.js';
 import { extractStatusCodeFromError } from './utils.js';
 import { resolveSessionLogColorKey } from '../../../../utils/session-log-color.js';
 import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
@@ -47,6 +47,7 @@ export function buildProviderExecutionSuccessResult(args: {
   providerKey: string;
   providerModel?: string;
   requestModel?: string;
+  providerProtocol?: string;
   routeName?: string;
   routingPoolId?: string;
   finishReason?: string;
@@ -98,6 +99,7 @@ export function buildProviderExecutionSuccessResult(args: {
       providerKey: args.providerKey,
       model: args.providerModel,
       requestModel: args.requestModel,
+      providerProtocol: args.providerProtocol,
       routeName: args.routeName,
       poolId: args.routingPoolId,
       entryPort: typeof args.entryPort === 'number' ? args.entryPort : undefined,
@@ -550,7 +552,7 @@ export async function processSuccessfulProviderResponse(args: {
     providerKey: args.providerKey
   });
   const usage = coalesceUsageMetrics(args.providerUsageFallback, convertedUsage);
-  const aggregatedUsage = mergeUsageMetrics(args.aggregatedUsage, usage);
+  const aggregatedUsage = usage ?? args.aggregatedUsage;
   args.logStage('provider.usage_extract.completed', args.inputRequestId, {
     providerKey: args.providerKey,
     source: 'converted_response',

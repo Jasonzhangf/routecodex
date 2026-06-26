@@ -7,7 +7,6 @@ import {
   readString,
   normalizeCodeKey
 } from './request-executor-error-shared.js';
-import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 import {
   resolveRequestExecutorProviderErrorClassification
 } from './request-executor-provider-failure.js';
@@ -107,35 +106,6 @@ export function resolveProviderRetryExclusionPlan(args: {
   return {
     excludedCurrentProvider: false
   };
-}
-
-export function isLastAvailableProvider429(args: {
-  providerKey?: string;
-  routePool?: string[];
-  excludedProviderKeys: Set<string>;
-  retryError: RetryErrorSnapshot;
-}): boolean {
-  const status = typeof args.retryError.statusCode === 'number' ? args.retryError.statusCode : undefined;
-  const errorCode = normalizeCodeKey(args.retryError.errorCode);
-  const upstreamCode = normalizeCodeKey(args.retryError.upstreamCode);
-  const known = normalizeKnownProviderError({
-    statusCode: status,
-    code: errorCode,
-    upstreamCode,
-    message: args.retryError.reason,
-  });
-  const is429 = known?.code?.startsWith('429.') || status === 429 || errorCode === 'HTTP_429' || upstreamCode === 'HTTP_429';
-  if (!is429 || !readString(args.providerKey)) {
-    return false;
-  }
-  if (!Array.isArray(args.routePool) || args.routePool.length === 0) {
-    return true;
-  }
-  return !hasAlternativeRouteCandidate({
-    providerKey: args.providerKey,
-    routePool: args.routePool,
-    excludedProviderKeys: args.excludedProviderKeys
-  });
 }
 
 export function resolveProviderRetryEligibilityPlan(args: {
