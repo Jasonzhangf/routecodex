@@ -18,16 +18,12 @@ export type ProviderFailureClassification =
 export type ProviderFailureRetryAction =
   | 'reroute_explicit_alternative';
 
-type ProviderFailureAction =
-  | 'direct_return'
-  | ProviderFailureRetryAction;
-
 export type ProviderFailureActionPlan = {
   classification?: ProviderFailureClassification;
   affectsHealth: boolean;
   blockingRecoverable: boolean;
   shouldRetry: boolean;
-  action: ProviderFailureAction;
+  action: 'direct_return' | ProviderFailureRetryAction;
   decisionLabel: 'direct_return' | 'exclude_and_reroute';
 };
 
