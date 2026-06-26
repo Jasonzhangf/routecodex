@@ -468,23 +468,35 @@ describe('HubPipeline preselected route ownership', () => {
     expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
       request: expect.objectContaining({
         metadata: expect.objectContaining({
-          sessionId: 'sess-resume-1',
-          conversationId: 'conv-resume-1',
-          responsesResume: expect.objectContaining({
-            responseId: 'resp-resume-1',
-            providerKey: 'minimonth.key1.MiniMax-M2.7',
-            routeHint: 'search/gateway-priority-5555-priority-search',
-            sessionId: 'sess-resume-1',
-            conversationId: 'conv-resume-1',
-            continuationOwner: 'relay'
-          }),
           runtime_control: expect.objectContaining({
             routeHint: 'search/gateway-priority-5555-priority-search',
             preselectedRoute,
           }),
         }),
+        metadataCenterSnapshot: expect.objectContaining({
+          requestTruth: expect.objectContaining({
+            sessionId: 'sess-resume-1',
+            conversationId: 'conv-resume-1',
+          }),
+          continuationContext: expect.objectContaining({
+            responsesResume: expect.objectContaining({
+              responseId: 'resp-resume-1',
+              providerKey: 'minimonth.key1.MiniMax-M2.7',
+              routeHint: 'search/gateway-priority-5555-priority-search',
+              sessionId: 'sess-resume-1',
+              conversationId: 'conv-resume-1',
+              continuationOwner: 'relay'
+            }),
+          }),
+        }),
       }),
     }));
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.sessionId)
+      .toBeUndefined();
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.conversationId)
+      .toBeUndefined();
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.responsesResume)
+      .toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.routeHint)
       .toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.retryProviderKey)
@@ -635,21 +647,32 @@ describe('HubPipeline preselected route ownership', () => {
 
     expect(routerEngine.route).toHaveBeenCalledTimes(1);
     expect(routedMetadataSnapshots[0]).toEqual(expect.objectContaining({
-      sessionId: 'sess-route-1',
-      conversationId: 'conv-route-1',
       retryProviderKey: 'minimonth.key1.MiniMax-M2.7',
-      responsesResume: expect.objectContaining({
-        responseId: 'resp-route-1',
-        providerKey: 'minimonth.key1.MiniMax-M2.7',
-        sessionId: 'sess-route-1',
-        conversationId: 'conv-route-1',
-        continuationOwner: 'relay'
-      })
     }));
+    expect(routedMetadataSnapshots[0]?.sessionId).toBeUndefined();
+    expect(routedMetadataSnapshots[0]?.conversationId).toBeUndefined();
+    expect(routedMetadataSnapshots[0]?.responsesResume).toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.runtimeControl).toEqual(
       expect.objectContaining({
         routeHint: 'search/gateway-priority-5555-priority-search',
         retryProviderKey: 'minimonth.key1.MiniMax-M2.7'
+      })
+    );
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.requestTruth).toEqual(
+      expect.objectContaining({
+        sessionId: 'sess-route-1',
+        conversationId: 'conv-route-1',
+      })
+    );
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.continuationContext).toEqual(
+      expect.objectContaining({
+        responsesResume: expect.objectContaining({
+          responseId: 'resp-route-1',
+          providerKey: 'minimonth.key1.MiniMax-M2.7',
+          sessionId: 'sess-route-1',
+          conversationId: 'conv-route-1',
+          continuationOwner: 'relay'
+        })
       })
     );
   });

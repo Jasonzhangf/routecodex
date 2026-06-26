@@ -153,12 +153,10 @@ function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unkn
 
 function projectRouterInputMetadata(args: {
   metadata: Record<string, unknown>;
-  requestTruth: Record<string, unknown>;
   runtimeControl: Record<string, unknown>;
   continuationContext: Record<string, unknown>;
 }): Record<string, unknown> {
   const metadata = { ...args.metadata };
-  const requestTruth = args.requestTruth;
   const runtimeControl = args.runtimeControl;
   const continuationContext = args.continuationContext;
   const responsesResume =
@@ -167,9 +165,6 @@ function projectRouterInputMetadata(args: {
     && !Array.isArray(continuationContext.responsesResume)
       ? { ...(continuationContext.responsesResume as Record<string, unknown>) }
       : undefined;
-  if (responsesResume) {
-    metadata.responsesResume = responsesResume;
-  }
   const resumeContinuationOwner =
     typeof responsesResume?.continuationOwner === 'string'
       ? responsesResume.continuationOwner.trim()
@@ -239,21 +234,9 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     projectLegacyRuntimeControlWhitelist(legacyRuntimeProjection);
   const metadataBase = {
     ...normalized.metadata,
-    ...(typeof requestTruthPayload.sessionId === 'string' && requestTruthPayload.sessionId.trim()
-      ? { sessionId: requestTruthPayload.sessionId.trim() }
-      : {}),
-    ...(typeof requestTruthPayload.conversationId === 'string' && requestTruthPayload.conversationId.trim()
-      ? { conversationId: requestTruthPayload.conversationId.trim() }
-      : {}),
-    ...(continuationContextPayload.responsesResume
-      && typeof continuationContextPayload.responsesResume === 'object'
-      && !Array.isArray(continuationContextPayload.responsesResume)
-      ? { responsesResume: continuationContextPayload.responsesResume }
-      : {}),
   } as Record<string, unknown>;
   const routerMetadata = projectRouterInputMetadata({
     metadata: metadataBase,
-    requestTruth: requestTruthPayload,
     runtimeControl: mergedRuntimeControl,
     continuationContext: continuationContextPayload,
   });
