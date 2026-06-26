@@ -17421,3 +17421,20 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
   - `cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture` PASS
   - `cargo test -p router-hotpath-napi responses_client_tools_prefer_metadata_center_stop_message_controls_for_direct_decision --lib -- --nocapture` PASS
   - `cargo test -p servertool-core stopless_decision_context_signals --lib -- --nocapture` PASS
+
+# 2026-06-26 stopless persisted lookup canonical runtime-control closeout slice 9
+
+- 本轮继续压 `serverToolLoopState / stopMessageState` 的主读面，只改 Rust 恢复/判定 contract：
+  - `servertool-core/src/persisted_lookup.rs`
+  - `servertool-core/src/stopless_orchestration_contract.rs`
+- 现状核对：
+  - `resolve_runtime_stop_message_state(...)` 之前仍直接靠
+    `stopMessageState -> serverToolLoopState`
+    恢复 repeat/max/text；
+  - 这意味着 canonical `runtime_control.stopless` 已经存在，但还不是恢复主真源。
+- 本轮动作：
+  1. `resolve_runtime_stop_message_state(...)` 改成优先读
+     `metadataCenterSnapshot.runtimeControl.stopless -> runtime_control.stopless -> top-level stopless`；
+  2. `read_servertool_followup_flow_id(...)` 同步改成 stopless flowId first；
+  3. 补冲突测试，锁住 canonical stopless 会压过 legacy `stopMessageState/serverToolLoopState`；
+  4. 补 `stopless_orchestration_contract` 测试，锁住 budget 判定优先用 canonical stopless。

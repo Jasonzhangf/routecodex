@@ -224,6 +224,31 @@ mod tests {
     }
 
     #[test]
+    fn stop_message_budget_exhausted_prefers_canonical_stopless_budget_over_legacy_loop_budget() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "requestTruth": { "sessionId": "sess-budget-canonical" },
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 2,
+                        "maxRepeats": 3
+                    },
+                    "serverToolLoopState": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 9,
+                        "maxRepeats": 9
+                    }
+                }
+            }),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
+        assert_eq!(plan.reason, "stop_message_cli_projection");
+    }
+
+    #[test]
     fn non_stop_flow_uses_cli_projection_without_session_truth() {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("vision_flow".to_string()),
