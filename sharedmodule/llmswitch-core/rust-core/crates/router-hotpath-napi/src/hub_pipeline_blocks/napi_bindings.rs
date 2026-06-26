@@ -79,14 +79,6 @@ fn evaluate_responses_direct_route_decision(
     }))
 }
 
-fn read_boolish(value: Option<&Value>) -> bool {
-    matches!(value, Some(Value::Bool(true)))
-        || value
-            .and_then(Value::as_str)
-            .map(|text| text.trim().eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-}
-
 fn stop_message_excludes_direct(metadata: &Value) -> bool {
     let Some(root) = metadata.as_object() else {
         return false;
@@ -97,26 +89,14 @@ fn stop_message_excludes_direct(metadata: &Value) -> bool {
     let stop_message_enabled = center
         .as_ref()
         .and_then(MetadataCenterReader::stop_message_enabled)
-        .unwrap_or_else(|| {
-            root.get("runtime_control")
-                .and_then(Value::as_object)
-                .and_then(|runtime_control| runtime_control.get("stopMessageEnabled"))
-                .map(|value| read_boolish(Some(value)))
-                .unwrap_or(false)
-        });
+        .unwrap_or(false);
     if !stop_message_enabled {
         return false;
     }
     center
         .as_ref()
         .and_then(MetadataCenterReader::stop_message_exclude_direct)
-        .unwrap_or_else(|| {
-            root.get("runtime_control")
-                .and_then(Value::as_object)
-                .and_then(|runtime_control| runtime_control.get("stopMessageExcludeDirect"))
-                .map(|value| read_boolish(Some(value)))
-                .unwrap_or(false)
-        })
+        .unwrap_or(false)
 }
 
 fn read_trimmed_lower(value: Option<&Value>) -> Option<String> {
@@ -230,9 +210,13 @@ mod responses_direct_route_decision_tests {
                 ]
             }),
             &serde_json::json!({
-                "runtime_control": {
-                    "stopMessageEnabled": true,
-                    "stopMessageExcludeDirect": true
+                "metadataCenterSnapshot": {
+                    "runtimeControl": {
+                        "stopMessage": {
+                            "enabled": true,
+                            "excludeDirect": true
+                        }
+                    }
                 }
             }),
             "openai-responses",
@@ -263,10 +247,6 @@ mod responses_direct_route_decision_tests {
                 ]
             }),
             &serde_json::json!({
-                "runtime_control": {
-                    "stopMessageEnabled": false,
-                    "stopMessageExcludeDirect": false
-                },
                 "metadataCenterSnapshot": {
                     "runtimeControl": {
                         "stopMessage": {
@@ -301,9 +281,13 @@ mod responses_direct_route_decision_tests {
                 ]
             }),
             &serde_json::json!({
-                "runtime_control": {
-                    "stopMessageEnabled": true,
-                    "stopMessageExcludeDirect": false
+                "metadataCenterSnapshot": {
+                    "runtimeControl": {
+                        "stopMessage": {
+                            "enabled": true,
+                            "excludeDirect": false
+                        }
+                    }
                 }
             }),
             "openai-responses",

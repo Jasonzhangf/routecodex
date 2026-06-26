@@ -38,15 +38,18 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
-          "clientInjectReady": true,
-          "runtime_control": {
-            "stopMessageEnabled": true
-          }
+          "clientInjectReady": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_instruction".to_string(),
         has_active_stop_message_for_continue_execution: None,
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -172,14 +175,17 @@ fn test_req_process_does_not_duplicate_stopless_responses_instructions() {
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
           "clientInjectReady": true,
-          "runtime_control": {
-            "stopMessageEnabled": true
-          }
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_instruction_dedup".to_string(),
         has_active_stop_message_for_continue_execution: None,
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -205,15 +211,18 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
-          "clientInjectReady": true,
-          "runtime_control": {
-            "stopMessageEnabled": true
-          }
+          "clientInjectReady": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_input".to_string(),
         has_active_stop_message_for_continue_execution: None,
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -244,15 +253,18 @@ fn test_req_process_responses_input_materializes_stopless_instructions_without_c
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
           "clientInjectReady": false,
-          "clientInjectReason": "tmux_session_missing",
-          "runtime_control": {
-            "stopMessageEnabled": true
-          }
+          "clientInjectReason": "tmux_session_missing"
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_no_tmux_inject".to_string(),
         has_active_stop_message_for_continue_execution: None,
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -829,14 +841,17 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "clientInjectReady": true,
-          "runtime_control": {
-            "stopMessageEnabled": true
-          }
         }),
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_reasoning_stop_tool_schema".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -948,15 +963,18 @@ fn test_terminal_budget_exhausted_stopless_turn_strips_reasoning_stop_controls()
         }),
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
-          "clientInjectReady": true,
-          "runtime_control": {
-            "stopMessageEnabled": true
-          }
+          "clientInjectReady": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_budget_terminal".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1006,15 +1024,18 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
         }),
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
-          "clientInjectReady": true,
-          "runtime_control": {
-            "stopMessageEnabled": true
-          }
+          "clientInjectReady": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_retry".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1067,15 +1088,18 @@ fn test_terminal_schema_pass_stopless_turn_strips_reasoning_stop_controls() {
         }),
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
-          "clientInjectReady": true,
-          "runtime_control": {
-            "stopMessageEnabled": true
-          }
+          "clientInjectReady": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1121,16 +1145,18 @@ fn test_terminal_schema_pass_input_trigger_only_still_strips_reasoning_stop_cont
         }),
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
-          "clientInjectReady": true,
-          "runtime_control": {
-            "stopMessageEnabled": true
-          },
-          "routecodexPortStopMessageEnabled": true
+          "clientInjectReady": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass_input_only".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1178,7 +1204,6 @@ fn test_terminal_schema_pass_metadata_center_runtime_control_still_strip_reasoni
         metadata: serde_json::json!({
           "clientInjectReady": true,
           "runtime_control": {
-            "stopMessageEnabled": true,
             "stopless": {
               "sessionId": "sess-stopless-runtime-control",
               "flowId": "stop_message_flow",
@@ -1197,7 +1222,13 @@ fn test_terminal_schema_pass_metadata_center_runtime_control_still_strip_reasoni
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass_metadata_center".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1246,7 +1277,6 @@ fn test_terminal_budget_exhausted_reason_code_in_metadata_center_still_strips_re
         metadata: serde_json::json!({
           "clientInjectReady": true,
           "runtime_control": {
-            "stopMessageEnabled": true,
             "stopless": {
               "sessionId": "sess-stopless-budget-reason-code",
               "flowId": "stop_message_flow",
@@ -1265,7 +1295,13 @@ fn test_terminal_budget_exhausted_reason_code_in_metadata_center_still_strips_re
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_budget_exhausted_reason_code_metadata_center".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1303,7 +1339,9 @@ fn test_captured_tool_results_alone_no_longer_strip_reasoning_stop_controls() {
         metadata: serde_json::json!({
           "clientInjectReady": true,
           "runtime_control": {
-            "stopMessageEnabled": true
+            "stopless": {
+              "active": true
+            }
           },
           "context": {
             "__captured_tool_results": [
@@ -1319,7 +1357,13 @@ fn test_captured_tool_results_alone_no_longer_strip_reasoning_stop_controls() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass_captured_legacy_only".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
-        metadata_center_snapshot: serde_json::json!({}),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
