@@ -9,7 +9,7 @@ import {
   resolveRequestExecutorProviderErrorClassification,
   resolveRequestExecutorProviderFailureOutcome
 } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure.js';
-import { buildProviderRetrySwitchPlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-decision.js';
+import { resolveProviderRetryExecutionPlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-execution-plan.js';
 
 describe('Error chain singleton — runtime binding', () => {
   it('isProviderFailureNetworkTransportLike recognizes ECONNRESET', () => {
@@ -60,17 +60,26 @@ describe('Error chain singleton — runtime binding', () => {
     }));
   });
 
-  it('buildProviderRetrySwitchPlan uses policy-driven network-transport signal', () => {
+  it('resolveProviderRetryExecutionPlan builds the reroute switch plan inline', async () => {
     const err = Object.assign(new Error('fetch failed'), { code: 'ECONNRESET' });
-    const switchPlan = buildProviderRetrySwitchPlan({
-      runtimeKey: 'rt-1',
+    const plan = await resolveProviderRetryExecutionPlan({
+      error: err,
+      retryError: { statusCode: 502, errorCode: 'HTTP_502', upstreamCode: undefined, reason: 'bad gateway' },
+      attempt: 1,
+      maxAttempts: 3,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'chain-1',
+      logicalChainRetryLimitStageRequestId: 'req-1',
       routePool: ['prov-a', 'prov-b'],
       excludedProviderKeys: new Set<string>(),
-      excludedCurrentProvider: false,
-      promptTooLong: false,
-      error: err,
-      retryError: { statusCode: 502, errorCode: 'HTTP_502', upstreamCode: undefined, reason: 'bad gateway' }
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      defaultTierAvailable: false,
+      logNonBlockingError: () => undefined
     });
-    expect(switchPlan.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retrySwitchPlan).toEqual(expect.objectContaining({
+      switchAction: 'exclude_and_reroute',
+      decisionLabel: 'exclude_and_reroute'
+    }));
   });
 });

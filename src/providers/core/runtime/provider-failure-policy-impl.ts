@@ -906,12 +906,6 @@ export function resolveProviderFailureExclusionDecision(args: {
   };
 }
 
-export function shouldKeepProviderExcludedForNextAttempt(args: {
-  hasAlternativeCandidate: boolean;
-}): boolean {
-  return args.hasAlternativeCandidate;
-}
-
 export function isProviderFailureHealthNeutral(args: {
   stage?: string;
   error?: unknown;

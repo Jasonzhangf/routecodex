@@ -1,3 +1,21 @@
+# 2026-06-27 provider failure helper closeout slice
+
+- 已物理删除的纯包装：
+  - `shouldKeepProviderExcludedForNextAttempt`
+- 已同步修改：
+  - `src/providers/core/runtime/provider-failure-policy.ts`
+  - `src/providers/core/runtime/provider-failure-policy-impl.ts`
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+- 已验证：
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - `shouldKeepProviderExcludedForNextAttempt` 只是 policy 的薄转发壳，已从实现和 re-export 面物理删除。
+  - `error-chain-singleton.unit.test.ts` 改为直接绑定 `resolveProviderRetryExecutionPlan`，锁住 inline reroute switch-plan 的新真相。
+
 # 2026-06-27 retry exclusion helper inline closeout slice
 
 - 已处理：
