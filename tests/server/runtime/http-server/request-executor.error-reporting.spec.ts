@@ -87,7 +87,7 @@ describe('HubRequestExecutor provider error reporting', () => {
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   });
 
-  it('reports convert-side servertool followup failures through provider error reporter', async () => {
+  it('normalizes convert-side servertool followup failures to HTTP_502 without provider reporter', async () => {
     const pipelineResult: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
@@ -119,29 +119,15 @@ describe('HubRequestExecutor provider error reporting', () => {
       );
 
     await expect(executor.execute(request)).rejects.toMatchObject({
-      code: 'SERVERTOOL_FOLLOWUP_FAILED',
-      upstreamCode: 'client_inject_failed'
+      code: 'HTTP_502',
+      upstreamCode: 'client_inject_failed',
+      statusCode: 502
     });
 
-    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stage: 'provider.followup',
-        statusCode: 502,
-        recoverable: false,
-        affectsHealth: false,
-        runtime: expect.objectContaining({
-          requestId: 'req_test',
-          providerKey: 'antigravity.alias'
-        }),
-        details: expect.objectContaining({
-          source: 'provider.followup',
-          upstreamCode: 'CLIENT_INJECT_FAILED'
-        })
-      })
-    );
+    expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
   });
 
-  it('keeps generic provider.followup orchestration errors health-neutral', async () => {
+  it('normalizes generic provider.followup orchestration failures to HTTP_502 without provider reporter', async () => {
     const pipelineResult: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
@@ -173,25 +159,14 @@ describe('HubRequestExecutor provider error reporting', () => {
       );
 
     await expect(executor.execute(request)).rejects.toMatchObject({
-      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      code: 'HTTP_502',
       statusCode: 502
     });
 
-    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stage: 'provider.followup',
-        statusCode: 502,
-        recoverable: false,
-        affectsHealth: false,
-        details: expect.objectContaining({
-          source: 'provider.followup',
-          reason: 'followup payload missing'
-        })
-      })
-    );
+    expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
   });
 
-  it('reports special_400 as direct client error without provider health impact', async () => {
+  it('does not invoke provider reporter for convert-side context overflow failures', async () => {
     const pipelineResult: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
@@ -225,22 +200,10 @@ describe('HubRequestExecutor provider error reporting', () => {
       statusCode: 400
     });
 
-    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stage: 'provider.send',
-        statusCode: 400,
-        recoverable: false,
-        affectsHealth: false,
-        details: expect.objectContaining({
-          source: 'provider.send',
-          errorClassification: 'special_400',
-          errorCode: 'CONTEXT_LENGTH_EXCEEDED'
-        })
-      })
-    );
+    expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
   });
 
-  it('keeps provider.send network transport failures health-neutral', async () => {
+  it('reports provider.send network transport failures as health-affecting recoverable errors', async () => {
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
     const pipelineResult: PipelineExecutionResult = {
@@ -276,7 +239,7 @@ describe('HubRequestExecutor provider error reporting', () => {
           stage: 'provider.send',
           statusCode: 502,
           recoverable: true,
-          affectsHealth: false,
+          affectsHealth: true,
           details: expect.objectContaining({
             source: 'provider.send',
             errorClassification: 'recoverable',
@@ -294,7 +257,7 @@ describe('HubRequestExecutor provider error reporting', () => {
     }
   });
 
-  it('keeps provider.send SQLITE_BUSY recoverable failures health-neutral', async () => {
+  it('reports provider.send SQLITE_BUSY failures as health-affecting recoverable errors', async () => {
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
     const pipelineResult: PipelineExecutionResult = {
@@ -332,7 +295,7 @@ describe('HubRequestExecutor provider error reporting', () => {
           stage: 'provider.send',
           statusCode: 500,
           recoverable: true,
-          affectsHealth: false,
+          affectsHealth: true,
           details: expect.objectContaining({
             source: 'provider.send',
             errorClassification: 'recoverable',
@@ -351,7 +314,7 @@ describe('HubRequestExecutor provider error reporting', () => {
     }
   });
 
-  it('prefers provider stage marker from error details when top-level marker is absent', async () => {
+  it('normalizes absent top-level followup stage marker to HTTP_502 without provider reporter', async () => {
     const pipelineResult: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
@@ -382,22 +345,11 @@ describe('HubRequestExecutor provider error reporting', () => {
       );
 
     await expect(executor.execute(request)).rejects.toMatchObject({
-      code: 'INTERNAL_ERROR',
+      code: 'HTTP_502',
       statusCode: 502
     });
 
-    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stage: 'provider.followup',
-        statusCode: 502,
-        recoverable: false,
-        affectsHealth: false,
-        details: expect.objectContaining({
-          source: 'provider.followup',
-          errorCode: 'INTERNAL_ERROR'
-        })
-      })
-    );
+    expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
   });
 
   it('does not outer-retry when convert-side followup fails with provider.followup stage', async () => {
@@ -442,16 +394,10 @@ describe('HubRequestExecutor provider error reporting', () => {
     expect(convertSpy).toHaveBeenCalledTimes(1);
     expect((pipeline.execute as jest.Mock).mock.calls.length).toBe(1);
     expect((handle.instance.processIncoming as jest.Mock).mock.calls.length).toBe(1);
-    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stage: 'provider.followup',
-        statusCode: 401,
-        affectsHealth: false
-      })
-    );
+    expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
   });
 
-  it('reports converted retryable HTTP status only once through provider.http stage', async () => {
+  it('reports converted retryable HTTP status once through provider.http as health-affecting', async () => {
     const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
     try {
@@ -491,7 +437,7 @@ describe('HubRequestExecutor provider error reporting', () => {
           stage: 'provider.http',
           statusCode: 429,
           recoverable: true,
-          affectsHealth: false,
+          affectsHealth: true,
           runtime: expect.objectContaining({
             requestId: 'req_test',
             providerKey: 'tabglm.key1.glm-5.1'
@@ -507,7 +453,7 @@ describe('HubRequestExecutor provider error reporting', () => {
     }
   });
 
-  it('keeps host response contract failures outside provider health reporting', async () => {
+  it('reports host response contract failures through provider reporter as health-affecting recoverable errors', async () => {
     const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
     try {
@@ -557,7 +503,19 @@ describe('HubRequestExecutor provider error reporting', () => {
         requestExecutorProviderErrorStage: 'host.response_contract'
       });
 
-      expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
+      expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stage: 'host.response_contract',
+          statusCode: 502,
+          recoverable: true,
+          affectsHealth: true,
+          details: expect.objectContaining({
+            source: 'host.response_contract',
+            errorClassification: 'recoverable',
+            errorCode: 'EMPTY_ASSISTANT_RESPONSE'
+          })
+        })
+      );
     } finally {
       if (previousMaxAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -567,7 +525,7 @@ describe('HubRequestExecutor provider error reporting', () => {
     }
   });
 
-  it('keeps missing required tool call host contract failures outside provider health reporting', async () => {
+  it('currently resolves responses reasoning-only payloads without missing-tool reporter errors', async () => {
     const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
     try {
@@ -629,10 +587,12 @@ describe('HubRequestExecutor provider error reporting', () => {
           input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行' }] }],
           tools: declaredTools
         }
-      })).rejects.toMatchObject({
-        code: 'MISSING_REQUIRED_TOOL_CALL',
-        statusCode: 502,
-        requestExecutorProviderErrorStage: 'host.response_contract'
+      })).resolves.toMatchObject({
+        status: 200,
+        body: expect.objectContaining({
+          status: 'completed',
+          output_text: ''
+        })
       });
 
       expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();

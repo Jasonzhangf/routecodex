@@ -102,12 +102,6 @@ impl VirtualRouterEngineCore {
             return;
         }
         let classification = extract_provider_error_classification(event);
-        if matches!(
-            classification,
-            Some(ProviderErrorClassification::Special400)
-        ) {
-            return;
-        }
         if let Some(classification) = classification {
             if self.apply_classified_provider_error(event, classification) {
                 return;
@@ -129,7 +123,6 @@ impl VirtualRouterEngineCore {
         let reason = extract_error_reason(event);
         let now = now_ms();
         match classification {
-            ProviderErrorClassification::Special400 => true,
             _ => {
                 self.health_manager.record_failure(provider_key, reason, now);
                 self.persist_provider_health();
@@ -374,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn special_400_does_not_mutate_provider_health() {
+    fn special_400_records_single_strike_like_other_real_provider_errors() {
         let provider_key = "test.key1.model";
         let mut core = build_test_core(provider_key, "gpt-test");
 
@@ -382,7 +375,7 @@ mod tests {
 
         let state = provider_state(&core, provider_key);
         assert_eq!(state.state, "healthy");
-        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.failure_count, 1);
         assert_eq!(state.cooldown_expires_at, None);
     }
 
@@ -472,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn top_level_error_classification_is_consumed_without_details_fallback() {
+    fn top_level_error_classification_records_failure_without_details_fallback() {
         let provider_key = "test.key1.model";
         let mut core = build_test_core(provider_key, "gpt-test");
 
@@ -480,7 +473,7 @@ mod tests {
 
         let state = provider_state(&core, provider_key);
         assert_eq!(state.state, "healthy");
-        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.failure_count, 1);
         assert_eq!(state.cooldown_expires_at, None);
     }
 
