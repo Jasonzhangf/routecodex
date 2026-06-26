@@ -982,38 +982,6 @@ export function shouldKeepProviderExcludedForNextAttempt(args: {
   return args.hasAlternativeCandidate;
 }
 
-export function shouldRerouteTerminalUnrecoverableProviderFailure(args: {
-  classification?: ProviderFailureClassification;
-  shouldRetry: boolean;
-  hasTerminalAlternativeCandidate: boolean;
-  statusCode?: number;
-  errorCode?: string;
-  upstreamCode?: string;
-}): boolean {
-  if (
-    args.shouldRetry
-    || !args.hasTerminalAlternativeCandidate
-    || args.classification !== 'unrecoverable'
-  ) {
-    return false;
-  }
-  if (args.statusCode === 401 || args.statusCode === 402 || args.statusCode === 403) {
-    return true;
-  }
-  const errorCode = normalizeProviderFailureCodeKey(args.errorCode);
-  const upstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
-  return [errorCode, upstreamCode].some((candidate) => {
-    return candidate === 'INVALID_API_KEY'
-      || candidate === 'INVALID_ACCESS_TOKEN'
-      || candidate === 'ACCESS_DENIED'
-      || candidate === 'FORBIDDEN'
-      || candidate === 'INSUFFICIENT_QUOTA'
-      || candidate === 'QUOTA_DEPLETED'
-      || candidate === 'ACCOUNT_DISABLED'
-      || candidate === 'ACCOUNT_SUSPENDED';
-  });
-}
-
 export function shouldDirectReturnUnrecoverableWithoutForcedExclusion(args: {
   classification?: ProviderFailureClassification;
   excludedCurrentProvider: boolean;

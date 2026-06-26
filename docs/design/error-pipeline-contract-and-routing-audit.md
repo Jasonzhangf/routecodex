@@ -26,7 +26,7 @@ ErrorErr01SourceRaised
 |---|---|---|---|
 | `ErrorErr01SourceRaised` | 源头只产生原始 error + stage marker | provider runtime / direct / executor source | 源头自行判定 retry/cooldown |
 | `ErrorErr02HostCaptured` | 组装 provider error event carrier | `src/providers/core/utils/provider-error-reporter.ts` | 各调用点手拼 event / 多套 marker |
-| `ErrorErr03RuntimeClassified` | 归一 code/status/classification（`recoverable | unrecoverable | special_400 | periodic_recovery`） | `src/providers/core/runtime/provider-error-catalog.ts` + `provider-failure-policy*` | message-only 分叉、局部分类器 |
+| `ErrorErr03RuntimeClassified` | 归一 code/status/classification（`recoverable | unrecoverable | special_400`） | `src/providers/core/runtime/provider-error-catalog.ts` + `provider-failure-policy*` | message-only 分叉、局部分类器 |
 | `ErrorErr04RouterPolicyApplied` | 写入 VR health/quota/cooldown/policy state | `sharedmodule/.../virtual_router_engine/engine/events.rs` + `health.rs` | executor/direct 自己维护 provider health |
 | `ErrorErr05ExecutionDecision` | 消费 router policy 输出并执行 retry/reroute/fail | `RequestExecutor` / future direct consumer | 自己重新决策 provider 池切换 |
 | `ErrorErr06ClientProjected` | 投影 HTTP/client 错误响应 | handler response utils / ErrorHandlingCenter | 回写 provider policy / 修补请求 payload / 反推分类 |

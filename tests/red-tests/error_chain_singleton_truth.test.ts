@@ -28,6 +28,8 @@ const ERROR_CHAIN_DOCS = [
   'docs/design/error-pipeline-contract-and-routing-audit.md',
   'docs/design/provider-failure-policy-ssot.md',
   'docs/goals/error-policy-center-unification-plan.md',
+];
+const ERROR_CHAIN_SKILL_DOCS = [
   '.agents/skills/rcc-dev-skills/SKILL.md'
 ];
 const ERROR_POLICY_SOURCE_GLOBS = [
@@ -110,7 +112,7 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
 
   it('authoritative docs and skill do not use stale error node names', () => {
     const staleNames = /ErrorErr02CatalogNormalized|ErrorErr03PolicyClassified|ErrorErr04RetryOrFailPlanned|ErrorErr05ClientProjected/;
-    for (const rel of ERROR_CHAIN_DOCS) {
+    for (const rel of [...ERROR_CHAIN_DOCS, ...ERROR_CHAIN_SKILL_DOCS]) {
       expect(readSrc(rel)).not.toMatch(staleNames);
     }
   });
@@ -124,6 +126,10 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
       expect(src).toMatch(/ErrorErr04RouterPolicyApplied/);
       expect(src).toMatch(/ErrorErr05ExecutionDecision/);
       expect(src).toMatch(/ErrorErr06ClientProjected/);
+      expect(src).not.toMatch(/periodic_recovery/);
+    }
+    for (const rel of ERROR_CHAIN_SKILL_DOCS) {
+      const src = readSrc(rel);
       expect(src).not.toMatch(/periodic_recovery/);
     }
   });
@@ -178,8 +184,9 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
 
   it('request-executor-retry-execution delegates terminal classification branch policy', () => {
     const executionPlan = readSrc(EXECUTOR_RETRY_EXECUTION_PLAN);
-    expect(executionPlan).toMatch(/shouldDirectReturnUnrecoverableWithoutForcedExclusion/);
-    expect(executionPlan).toMatch(/shouldCancelUnrecoverableRerouteWithoutAlternative/);
+    expect(executionPlan).not.toMatch(/shouldDirectReturnUnrecoverableWithoutForcedExclusion/);
+    expect(executionPlan).not.toMatch(/shouldCancelUnrecoverableRerouteWithoutAlternative/);
+    expect(executionPlan).toMatch(/shouldRerouteExcludedFailure/);
     expect(executionPlan).not.toMatch(/classification\s*===\s*['"]periodic_recovery['"]/);
     expect(executionPlan).not.toMatch(/classification\s*===\s*['"]unrecoverable['"][\s\S]{0,240}retrySwitchPlan/);
   });

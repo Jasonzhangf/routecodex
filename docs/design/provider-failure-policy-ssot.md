@@ -53,7 +53,7 @@
 - 记录 telemetry
 
 但不允许再独立决定：
-- recoverable / unrecoverable / special_400 / periodic_recovery
+- recoverable / unrecoverable / special_400
 - affectsHealth
 - should exclude current provider
 - should reroute
@@ -67,7 +67,6 @@
 - unrecoverable → 直接返回
 - special_400 → 直接投影 4xx，不进入 provider retry/reroute
 - recoverable → 阻塞 + 统一错误动作队列 backoff
-- periodic_recovery → 进入 quota/cooldown/VR health 周期恢复链
 
 禁止先做“切 provider 试试”，再回头补 recoverable 判定。
 
@@ -131,7 +130,7 @@ provider/runtime/send/convert/direct error
 新增唯一策略块：`ProviderFailurePolicy`
 
 它是唯一允许回答以下问题的地方：
-1. `classification`: `special_400 | recoverable | unrecoverable | periodic_recovery`
+1. `classification`: `special_400 | recoverable | unrecoverable`
 2. `affectsHealth`: `true | false`
 3. `action`:
    - `direct_return`

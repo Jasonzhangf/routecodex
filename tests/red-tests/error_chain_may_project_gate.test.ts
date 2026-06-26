@@ -27,7 +27,7 @@ import {
   isEarlyProjectionBlockedError,
   project_error_err_06_client_from_error_err_05_execution_decision,
 } from '../../src/server/utils/http-error-mapper.js';
-import { shouldRerouteTerminalUnrecoverableProviderFailure } from '../../src/providers/core/runtime/provider-failure-policy.js';
+import { resolveProviderFailureExclusionDecision } from '../../src/providers/core/runtime/provider-failure-policy.js';
 
 const FEATURE_ID = ERROR_EXECUTION_DECISION_CONSUMER_FEATURE_ID;
 
@@ -118,45 +118,42 @@ describe(`${FEATURE_ID} — ErrorErr05 mayProject gate`, () => {
     expect(payload.body.error).toBeDefined();
   });
 
-  it('401 must still take reroute path (excludedCurrentProvider=true) even when no alternative', () => {
-    // After bypassing the 401/403/INVALID_API_KEY shortcut, the function MUST
-    // still report true (reroute) when classification=unrecoverable + alternative
-    // exists, OR reroute by exclusion. Either way, returning false here would mean
-    // we still leak a 401 to the client. Lock the truth.
-    const decision = shouldRerouteTerminalUnrecoverableProviderFailure({
+  it('401 without alternative must not force exclusion by status shortcut alone', () => {
+    const decision = resolveProviderFailureExclusionDecision({
       classification: 'unrecoverable',
-      shouldRetry: false,
-      hasTerminalAlternativeCandidate: false,
+      hasAlternativeCandidate: false,
       statusCode: 401,
     });
-    expect(decision).toBe(false);
+    expect(decision.excludeCurrentProvider).toBe(false);
   });
 
-  it('403 must NOT take a separate "direct return" path (no provider-specific shortcut)', () => {
-    const viaStatus = shouldRerouteTerminalUnrecoverableProviderFailure({
+  it('403 and auth/quota codes with alternatives must still take exclusion+rerroute path', () => {
+    const viaStatus = resolveProviderFailureExclusionDecision({
       classification: 'unrecoverable',
-      shouldRetry: false,
-      hasTerminalAlternativeCandidate: true,
+      hasAlternativeCandidate: true,
       statusCode: 403,
     });
-    const viaInvalidApiKey = shouldRerouteTerminalUnrecoverableProviderFailure({
+    const viaInvalidApiKey = resolveProviderFailureExclusionDecision({
       classification: 'unrecoverable',
-      shouldRetry: false,
-      hasTerminalAlternativeCandidate: true,
+      hasAlternativeCandidate: true,
       errorCode: 'INVALID_API_KEY',
     });
-    const viaInsufficientQuota = shouldRerouteTerminalUnrecoverableProviderFailure({
+    const viaInsufficientQuota = resolveProviderFailureExclusionDecision({
       classification: 'unrecoverable',
-      shouldRetry: false,
-      hasTerminalAlternativeCandidate: true,
+      hasAlternativeCandidate: true,
       upstreamCode: 'INSUFFICIENT_QUOTA',
     });
-    // Per docs/goals/provider-error-reroutable-until-pool-and-default-empty.md §1,
-    // 401/403/INVALID_API_KEY/INSUFFICIENT_QUOTA/ACCOUNT_DISABLED MUST still reroute
-    // when an alternative candidate exists. The decision must not be
-    // provider-visible-only.
-    expect(viaStatus).toBe(true);
-    expect(viaInvalidApiKey).toBe(true);
-    expect(viaInsufficientQuota).toBe(true);
+    expect(viaStatus).toMatchObject({
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative',
+    });
+    expect(viaInvalidApiKey).toMatchObject({
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative',
+    });
+    expect(viaInsufficientQuota).toMatchObject({
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative',
+    });
   });
 });

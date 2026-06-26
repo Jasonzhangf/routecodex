@@ -5,7 +5,7 @@
 
 ## 验收标准
 - 错误链唯一：`ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`
-- 分类唯一：`recoverable | unrecoverable | special_400 | periodic_recovery`
+- 分类唯一：`recoverable | unrecoverable | special_400`
 - `ErrorHandlingCenter` 仅负责 HTTP/server/client projection，不参与 provider policy
 - executor/direct/provider runtime 不再自写 retry/reroute/cooldown/health 语义
 - 文档、红测、代码命名完全对齐新拓扑
