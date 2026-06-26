@@ -230,20 +230,6 @@ export async function processProviderSendFailure(
   }
 
   const errorMessage = args.error instanceof Error ? args.error.message : String(args.error ?? 'Unknown error');
-  if (args.sessionStormBackoffScopes?.length && args.isSessionStormBackoffCandidate(args.error)) {
-    for (const scope of args.sessionStormBackoffScopes) {
-      const backoffMs = args.consumeSessionStormBackoffMs(scope, args.error);
-      args.logStage('request.session_storm_backoff.recorded', args.requestId, {
-        scope,
-        backoffMs,
-        consecutive: args.getSessionStormBackoffConsecutive(scope),
-        reason: retryError.reason,
-        errorCode: retryError.errorCode,
-        upstreamCode: retryError.upstreamCode,
-        statusCode: retryError.statusCode
-      });
-    }
-  }
 
   if (!args.bypassTrafficGovernor) {
     try {

@@ -1554,20 +1554,6 @@ export class HubRequestExecutor implements RequestExecutor {
       } catch {
         // non-blocking cleanup
       }
-      if (isSessionStormBackoffCandidate(error)) {
-        const scopes = sessionStormBackoffScopesForCatch?.length
-          ? sessionStormBackoffScopesForCatch
-          : resolveSessionStormBackoffScopes(metadataRecord ?? {});
-        for (const scope of scopes) {
-          const backoffMs = consumeSessionStormBackoffMs(scope, error);
-          logStage('request.session_storm_backoff.recorded', input.requestId || executorRequestId, {
-            scope,
-            backoffMs,
-            source: 'pipeline_or_pre_provider_failure',
-            code: resolveScopedBackoffErrorCode(error)
-          });
-        }
-      }
       const scopedErrorCode = resolveScopedBackoffErrorCode(error);
       const scopedBackoffKey = buildScopedBackoffKey('unresolved-provider', scopedErrorCode);
       recordScopedErrorBackoff(scopedBackoffKey);
