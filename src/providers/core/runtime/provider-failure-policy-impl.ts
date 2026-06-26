@@ -8,7 +8,6 @@
 
 import type {
   ProviderFailureClassification,
-  ProviderFailureRateLimitKind,
   ProviderFailureRetryAction,
   ProviderFailureAction,
   ProviderFailureDecisionLabel,
@@ -283,7 +282,6 @@ export function resolveProviderFailureClassification(args: {
   errorCode?: string;
   upstreamCode?: string;
   reason?: string;
-  rateLimitKind?: ProviderFailureRateLimitKind;
 }): ProviderFailureClassification | undefined {
   const errorCode = normalizeProviderFailureCodeKey(args.errorCode ?? (args.error as { code?: unknown } | undefined)?.code);
   const upstreamCode = normalizeProviderFailureCodeKey(
@@ -624,7 +622,6 @@ export function resolveProviderFailureOutcome(args: {
   upstreamCode?: string;
   reason?: string;
   classification?: ProviderFailureClassification;
-  rateLimitKind?: ProviderFailureRateLimitKind;
 }): ProviderFailureOutcome {
   const classification =
     args.classification
@@ -634,8 +631,7 @@ export function resolveProviderFailureOutcome(args: {
       statusCode: args.statusCode,
       errorCode: args.errorCode,
       upstreamCode: args.upstreamCode,
-      reason: args.reason,
-      rateLimitKind: args.rateLimitKind
+      reason: args.reason
     });
   return {
     classification,
@@ -661,7 +657,6 @@ export function classify_error_err_03_runtime_from_error_err_02_host(
       status: captured.status,
       statusCode: captured.status,
       upstreamCode: captured.details?.upstreamCode,
-      rateLimitKind: captured.details?.rateLimitKind,
     },
     stage: captured.stage,
     statusCode: captured.status,
@@ -734,7 +729,6 @@ export function resolveProviderFailureActionPlan(args: {
   upstreamCode?: string;
   reason?: string;
   classification?: ProviderFailureClassification;
-  rateLimitKind?: ProviderFailureRateLimitKind;
   attempt?: number;
   maxAttempts?: number;
   promptTooLong?: boolean;
@@ -748,8 +742,7 @@ export function resolveProviderFailureActionPlan(args: {
       statusCode: args.statusCode,
       errorCode: args.errorCode,
       upstreamCode: args.upstreamCode,
-      reason: args.reason,
-      rateLimitKind: args.rateLimitKind
+      reason: args.reason
     });
   const affectsHealth = !isProviderFailureHealthNeutral({
     stage: args.stage,
@@ -810,7 +803,6 @@ export function resolveProviderFailureRetryEligibility(args: {
   upstreamCode?: string;
   reason?: string;
   classification?: ProviderFailureClassification;
-  rateLimitKind?: ProviderFailureRateLimitKind;
   attempt: number;
   maxAttempts: number;
   promptTooLong?: boolean;
@@ -826,7 +818,6 @@ export function resolveProviderFailureRetryEligibility(args: {
     upstreamCode: args.upstreamCode,
     reason: args.reason,
     classification: args.classification,
-    rateLimitKind: args.rateLimitKind,
     attempt: args.attempt,
     maxAttempts: args.maxAttempts,
     promptTooLong: args.promptTooLong

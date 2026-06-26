@@ -27,26 +27,6 @@ import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
-function extractProviderRateLimitKind(error: unknown): 'short_lived' | undefined {
-  if (!error || typeof error !== 'object') {
-    return undefined;
-  }
-  const record = error as { rateLimitKind?: unknown; details?: unknown };
-  const direct = typeof record.rateLimitKind === 'string' ? record.rateLimitKind.trim().toLowerCase() : '';
-  if (direct === 'short_lived') {
-    return 'short_lived';
-  }
-  const details =
-    record.details && typeof record.details === 'object' && !Array.isArray(record.details)
-      ? (record.details as Record<string, unknown>)
-      : undefined;
-  const nested = typeof details?.rateLimitKind === 'string' ? details.rateLimitKind.trim().toLowerCase() : '';
-  if (nested === 'short_lived') {
-    return 'short_lived';
-  }
-  return undefined;
-}
-
 function readProviderProtocolErrorDetailUpstreamCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object' || Array.isArray(error)) {
     return undefined;
@@ -85,8 +65,7 @@ export function resolveRequestExecutorProviderFailureOutcome(args: {
     upstreamCode:
       normalizeProviderFailureCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode)
       ?? normalizeProviderFailureCodeKey(args.retryError.upstreamCode),
-    reason: String(args.retryError.reason || (args.error as { message?: string } | undefined)?.message || ''),
-    rateLimitKind: extractProviderRateLimitKind(args.error)
+    reason: String(args.retryError.reason || (args.error as { message?: string } | undefined)?.message || '')
   });
 }
 

@@ -5,8 +5,7 @@ import {
   extractProviderFailureStatusCode,
   isProviderFailureNetworkTransportLike,
   resolveProviderFailureOutcome,
-  type ProviderFailureClassification,
-  type ProviderFailureRateLimitKind
+  type ProviderFailureClassification
 } from './provider-failure-policy.js';
 
 export type ProviderErrorClassification = {
@@ -57,7 +56,6 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   const isRateLimit = statusText.includes('429') || msgLower.includes('429');
   const isDailyLimit429 = isRateLimit && options.detectDailyLimit(msgLower, upstreamMessageLower);
   const isSyntheticCooldown = err instanceof RateLimitCooldownError;
-  let rateLimitKind: ProviderFailureRateLimitKind | undefined;
   let forceFatalRateLimit = false;
 
   if (isRateLimit) {
@@ -66,15 +64,12 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
     // - 日额度类 429：记为不可恢复 provider 错误
     // - 其他 429：记为可恢复 provider 错误
     if (isSyntheticCooldown) {
-      rateLimitKind = 'short_lived';
       forceFatalRateLimit = false;
     } else if (isDailyLimit429) {
       options.forceRateLimitFailure(options.context.providerKey, options.context.model);
-      rateLimitKind = undefined;
       forceFatalRateLimit = true;
     } else {
       options.registerRateLimitFailure(options.context.providerKey, options.context.model);
-      rateLimitKind = 'short_lived';
       forceFatalRateLimit = false;
     }
   }
@@ -85,8 +80,7 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
     errorCode: typeof err.code === 'string' ? err.code : undefined,
     upstreamCode: typeof upstreamCode === 'string' ? upstreamCode : undefined,
     reason: message,
-    classification: isDailyLimit429 ? 'unrecoverable' : undefined,
-    rateLimitKind
+    classification: isDailyLimit429 ? 'unrecoverable' : undefined
   });
   return {
     error: err,

@@ -31,7 +31,6 @@ type ErrorWithMetadata = Error & {
   status?: number;
   statusCode?: number;
   retryable?: boolean;
-  rateLimitKind?: string;
   cooldownOverrideMs?: number;
   /**
    * 粗粒度错误类别：EXTERNAL_ERROR / TOOL_ERROR / INTERNAL_ERROR。
@@ -100,12 +99,6 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
     mergedDetails = {
       ...(mergedDetails ?? {}),
       protocolErrorCode: err.code.toUpperCase()
-    };
-  }
-  if (typeof err.rateLimitKind === 'string' && err.rateLimitKind.trim().length) {
-    mergedDetails = {
-      ...(mergedDetails ?? {}),
-      rateLimitKind: err.rateLimitKind.trim()
     };
   }
   if (typeof err.cooldownOverrideMs === 'number' && Number.isFinite(err.cooldownOverrideMs) && err.cooldownOverrideMs > 0) {

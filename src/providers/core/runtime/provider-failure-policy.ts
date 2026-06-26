@@ -22,9 +22,6 @@ export type ProviderFailureClassification =
   | 'recoverable'
   | 'special_400';
 
-export type ProviderFailureRateLimitKind =
-  | 'short_lived';
-
 export type ProviderFailureRetryAction =
   | 'reroute_explicit_alternative';
 

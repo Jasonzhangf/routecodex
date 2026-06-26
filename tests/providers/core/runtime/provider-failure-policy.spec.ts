@@ -86,20 +86,18 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('keeps short-lived 429 recovery classified as recoverable', () => {
-    const shortLivedError = Object.assign(new Error('HTTP 429: saturated'), {
+  it('classifies HTTP 429 as recoverable without rate-limit side metadata', () => {
+    const rateLimitedError = Object.assign(new Error('HTTP 429: saturated'), {
       code: 'HTTP_429',
-      statusCode: 429,
-      rateLimitKind: 'short_lived'
+      statusCode: 429
     });
 
     expect(resolveProviderFailureClassification({
-      error: shortLivedError,
+      error: rateLimitedError,
       stage: 'provider.send',
       statusCode: 429,
       errorCode: 'HTTP_429',
-      reason: 'HTTP 429: saturated',
-      rateLimitKind: 'short_lived'
+      reason: 'HTTP 429: saturated'
     })).toBe('recoverable');
   });
 
