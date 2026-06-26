@@ -13,7 +13,6 @@ import type {
   ProviderFailureRetryEligibilityPlan,
   ProviderFailureOutcome,
 } from './provider-failure-policy.js';
-import type { ErrorErr02HostCaptured } from '../utils/provider-error-reporter.js';
 import { loadNativeFailurePolicyBridge } from './provider-failure-policy-native.js';
 import {
   normalizeKnownProviderError,
