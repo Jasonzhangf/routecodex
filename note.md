@@ -52,6 +52,13 @@
   - 保留的有效样本只应覆盖 dual-provider 场景，证明 TS quotaView poison 不能改 Rust route/health 真相；
   - Rust health 3-strike 语义仍成立，测试必须用同一 health 状态对齐后再断言路由结果。
 
+# 2026-06-27 provider startup health design removal
+
+- 已物理删除：`docs/providers/provider-startup-health-design.md`
+- 结论：
+  - startup reprobe / persisted_503_reprobe_available 旧设计稿属于过时方案，不应继续被当作活文档引用；
+  - 后续只保留“不再使用 startup reprobe”的红测和已废弃引用残影，避免把旧设计误读成真源。
+
 # 2026-06-27 special_400 audit gate
 
 - 结论：`special_400` 目前不是单点死语义，不能直接物理删除。
