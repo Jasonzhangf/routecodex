@@ -77,35 +77,12 @@ describe('router direct protocol boundary', () => {
     );
   }
 
-  function bindTestRuntimeControl(
-    metadata: Record<string, unknown>,
-    key: 'serverToolFollowup' | 'serverToolFollowupSource',
-    value: boolean | string
-  ): void {
-    MetadataCenter.attach(metadata).writeRuntimeControl(
-      key,
-      value as never,
-      {
-        module: 'tests/server/runtime/http-server/router-direct-protocol-boundary.spec.ts',
-        symbol: 'buildResponsesInput',
-        stage: 'test_runtime_control',
-      }
-    );
-  }
-
   function buildResponsesInput(
     requestId: string,
     sessionId = 'router-direct-protocol-boundary',
-    runtimeControl?: { serverToolFollowup?: boolean; serverToolFollowupSource?: string }
   ) {
     const metadata: Record<string, unknown> = { sessionId };
     bindTestRequestTruth(metadata, requestId, sessionId);
-    if (runtimeControl?.serverToolFollowup !== undefined) {
-      bindTestRuntimeControl(metadata, 'serverToolFollowup', runtimeControl.serverToolFollowup);
-    }
-    if (runtimeControl?.serverToolFollowupSource) {
-      bindTestRuntimeControl(metadata, 'serverToolFollowupSource', runtimeControl.serverToolFollowupSource);
-    }
     return {
       requestId,
       entryEndpoint: '/v1/responses',
@@ -152,37 +129,6 @@ describe('router direct protocol boundary', () => {
     expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.relay')).toHaveLength(1);
   });
 
-  it('relays first-turn responses stopless into Hub before router-direct transport when includeDirect is enabled', async () => {
-    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
-    const server = new RouteCodexHttpServer(createRouterServer());
-    attachRouterPortWithStoplessRelay(server as any);
-    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
-      status: 200,
-      body: { id: 'relay_before_router_direct_transport', object: 'response' },
-      metadata: { relayed: true },
-    } as any);
-    const logStageSpy = jest.spyOn(server as any, 'logStage');
-
-    const result = await (server as any).executePortAwarePipeline(
-      5555,
-      buildResponsesInput(
-        'req_router_direct_stopless_relay',
-        'router-direct-protocol-boundary',
-        { serverToolFollowup: true, serverToolFollowupSource: 'stop_message_auto' },
-      ),
-    );
-
-    expect(result).toMatchObject({
-      status: 200,
-      body: { id: 'relay_before_router_direct_transport', object: 'response' },
-      metadata: { relayed: true },
-    });
-    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
-    expect(logStageSpy.mock.calls.filter(([stage, , detail]) => (
-      stage === 'router-direct.skipped'
-      && detail?.reason === 'servertool_followup_requires_hub_relay'
-    ))).toHaveLength(1);
-  });
 
   it('reuses preselected route on router-direct relayable skip so Hub does not route twice', async () => {
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

@@ -1319,10 +1319,7 @@ describe('HubRequestExecutor failover', () => {
           }
         ]
       },
-      __routecodex: {
-        serverToolFollowup: true,
-        serverToolFollowupSource: 'servertool.reasoning_stop_guard'
-      }
+      __routecodex: {}
     })).resolves.toBeNull();
 
     await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
@@ -1358,10 +1355,7 @@ describe('HubRequestExecutor failover', () => {
           }
         ]
       },
-      __routecodex: {
-        serverToolFollowup: true,
-        serverToolFollowupSource: 'servertool.reasoning_stop_guard'
-      }
+      __routecodex: {}
     })).resolves.toBeNull();
 
     await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
@@ -1374,10 +1368,7 @@ describe('HubRequestExecutor failover', () => {
         }
       ]
     }, {
-      __routecodex: {
-        serverToolFollowup: true,
-        serverToolFollowupSource: 'servertool.reasoning_stop_continue'
-      },
+      __routecodex: {},
       tools: {
         clientToolsRaw: [
           {

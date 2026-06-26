@@ -2247,16 +2247,14 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     stubConvertProviderResponse();
 
     const response = await executor.execute({
-      requestId: 'req_followup_root:reasoning_stop_guard',
+      requestId: 'req_stopmessage_disabled_single_attempt',
       entryEndpoint: '/v1/responses',
       headers: {},
       body: { messages: [{ role: 'user', content: 'continue' }] },
       metadata: {
         stream: false,
         inboundStream: false,
-        __rt: {
-          serverToolFollowup: true
-        }
+        stopMessageEnabled: false
       }
     });
 

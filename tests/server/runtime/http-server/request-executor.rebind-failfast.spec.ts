@@ -266,15 +266,6 @@ describe('HubRequestExecutor requestId rebind', () => {
       inboundStream: false
     } as Record<string, unknown>;
     MetadataCenter.attach(metadata).writeRuntimeControl(
-      'serverToolFollowup',
-      true,
-      {
-        module: 'tests/server/runtime/http-server/request-executor.rebind-failfast.spec.ts',
-        symbol: 'nested_followup_test',
-        stage: 'test_runtime_control'
-      }
-    );
-    MetadataCenter.attach(metadata).writeRuntimeControl(
       'stopMessageEnabled',
       false,
       {

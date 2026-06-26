@@ -39,7 +39,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     expect(clientToolsRaw[0]?.function?.name).toBe('exec_command');
   });
 
-  it('reads requestSemantics from merged request metadata on nested followup when processed requests lost semantics', () => {
+  it('reads requestSemantics from merged request metadata when processed requests lost semantics', () => {
     const semantics = resolveRequestSemantics(
       {
         tools: [
@@ -57,7 +57,6 @@ describe('provider-response-utils resolveRequestSemantics', () => {
           }
         },
         __rt: {
-          serverToolFollowup: true,
           clientInjectSource: 'servertool.reasoning_stop_continue'
         }
       }
@@ -71,7 +70,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     expect((semantics as any)?.__routecodex).toBeUndefined();
   });
 
-  it('prefers metadata.requestSemantics on servertool followup so original client tools survive nested turns', () => {
+  it('prefers metadata.requestSemantics so original client tools survive nested turns', () => {
     const processed = {
       semantics: {
         tools: {
@@ -91,7 +90,6 @@ describe('provider-response-utils resolveRequestSemantics', () => {
           }
         },
         __rt: {
-          serverToolFollowup: true,
           clientInjectSource: 'servertool.reasoning_stop_continue'
         }
       }
@@ -107,7 +105,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
     expect((semantics as any)?.__routecodex).toBeUndefined();
   });
 
-  it('merges followup root tools into clientToolsRaw so internal reasoningStop stays declared', () => {
+  it('merges root tools into clientToolsRaw so internal reasoningStop stays declared', () => {
     const semantics = resolveRequestSemantics(
       {
         tools: [
@@ -124,10 +122,7 @@ describe('provider-response-utils resolveRequestSemantics', () => {
             ]
           }
         },
-        runtime_control: {
-          serverToolFollowup: true,
-          serverToolFollowupSource: 'servertool.reasoning_stop_guard'
-        }
+        runtime_control: {}
       }
     );
 

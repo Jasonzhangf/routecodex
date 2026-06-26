@@ -33,11 +33,10 @@ describe('stopless VR route hint contract', () => {
     expect(scope).toBeUndefined();
   });
 
-  it('stopless followup never carries route_hint:tools in normalized metadata', () => {
+  it('stopless never carries route_hint:tools in normalized metadata', () => {
     const meta = {
       sessionId: 'sess-vr-route-2',
       requestId: 'req-vr-route-2',
-      serverToolFollowup: true,
       routecodexPortMode: 'router',
       routeHint: 'tools'
     } as any;
@@ -45,6 +44,5 @@ describe('stopless VR route hint contract', () => {
       delete meta.routeHint;
     }
     expect(meta.routeHint).toBeUndefined();
-    expect(meta.serverToolFollowup).toBe(true);
   });
 });

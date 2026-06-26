@@ -43,11 +43,6 @@ families:
       - providerProtocol
       - retryProviderKey
       - preselectedRoute
-      - serverToolFollowup
-      - serverToolFollowupSource
-      - stopless
-      - stopMessageEnabled
-      - stopMessageExcludeDirect
       - streamIntent
       - clientAbort
   provider_observation:

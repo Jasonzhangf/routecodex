@@ -91,13 +91,6 @@ carrier_runtime_surfaces:
         owner_queryability: unique-owner
         verification_state: present
         note: "stale retry provider pin delete guard after MetadataCenter runtime_control migration."
-      - path: src/server/runtime/http-server/executor/servertool-followup-metadata.ts
-        owner_feature_id: server.servertool_followup_metadata_surface
-        category: guard_surface
-        semantic_family: request_route_control
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "followup metadata guard strips provider-selection residue before hub reentry."
   - carrier_id: response_metadata
     description: "response.metadata runtime residues still present before full response projection cleanup."
     files:

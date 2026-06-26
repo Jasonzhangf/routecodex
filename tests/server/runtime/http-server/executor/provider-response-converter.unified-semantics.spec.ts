@@ -1232,10 +1232,7 @@ describe('provider-response-converter unified semantics handoff', () => {
               }
             ]
           },
-          __routecodex: {
-            serverToolFollowup: true,
-            serverToolFollowupSource: 'servertool.reasoning_stop_guard'
-          }
+          __routecodex: {}
         } as any,
         originalRequest: {
           model: 'mimo-v2.5-pro',
@@ -1257,7 +1254,6 @@ describe('provider-response-converter unified semantics handoff', () => {
             ]
           },
           __rt: {
-            serverToolFollowup: true,
             clientProtocol: 'openai-responses'
           }
         })

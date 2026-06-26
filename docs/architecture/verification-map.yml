@@ -523,28 +523,6 @@ verification:
     notes:
       - "servertool-core owns timeout watcher, client disconnect detection/watcher, servertool error payload, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers or execute timer/Error-object glue from native plans."
 
-  - feature_id: hub.servertool_backend_route_runtime
-    change_risk: high
-    unit:
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts
-      - sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts
-      - sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.ts
-    contract:
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    integration:
-      - tests/servertool/servertool-mixed-tools.spec.ts
-      - tests/servertool/server-side-tools.dispatch-native.spec.ts
-      - tests/servertool/execution-shell.backend-failfast.spec.ts
-      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
-    smoke:
-      - npm run verify:servertool-rust-only
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "servertool-core owns followup materialization, runtime metadata/action, terminal error envelope, and bootstrap replay plans; TS may only execute IO builders and native plans."
 
   - feature_id: hub.servertool_rust_only_closeout
     change_risk: high
@@ -1896,38 +1874,6 @@ verification:
       - npm run build:base
     notes:
       - "Inspection helpers must stay pure reads; payload mutation or recovery logic belongs elsewhere."
-
-  - feature_id: server.servertool_followup_dispatch_surface
-    change_risk: high
-    unit:
-      - src/server/runtime/http-server/executor/servertool-followup-dispatch.ts
-    contract:
-      - tests/server/runtime/http-server/executor/servertool-followup-dispatch.contract.spec.ts
-      - tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts
-      - tests/server/runtime/http-server/executor/servertool-followup-model-pin-regression.spec.ts
-    integration:
-      - tests/server/handlers/responses-handler.stop-followup-metadata.blackbox.spec.ts
-    smoke:
-      - npm run verify:function-map-compile-gate
-      - npm run verify:architecture-ci
-    build:
-      - npm run build:base
-    notes:
-      - "Followup dispatch host may execute nested reenter/client-inject glue only; no TS followup semantics or fallback."
-
-  - feature_id: server.servertool_followup_metadata_surface
-    change_risk: medium
-    unit:
-      - src/server/runtime/http-server/executor/servertool-followup-metadata.ts
-    contract:
-      - tests/server/runtime/http-server/executor/servertool-followup-metadata.spec.ts
-    integration: []
-    smoke:
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "Nested followup metadata projection must preserve continuity headers without upgrading relay-only context into request truth."
 
   - feature_id: server.models_capability_contract
     change_risk: high

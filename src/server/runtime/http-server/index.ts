@@ -713,10 +713,6 @@ export class RouteCodexHttpServer {
     await waitForRuntimeReady(this);
   }
 
-  private isQuotaRoutingEnabled(): boolean {
-    return isQuotaRoutingEnabled(this);
-  }
-
   private shouldStartManagerDaemon(): boolean {
     return shouldStartManagerDaemon(this);
   }
@@ -1394,13 +1390,6 @@ export class RouteCodexHttpServer {
           routingPolicyGroup: portConfig?.routingPolicyGroup,
           sameProtocolBehavior: portConfig?.sameProtocolBehavior,
           continuationOwner: resumeContinuationOwner,
-        });
-      }
-      if (mustRelayServerToolFollowup) {
-        this.logStage('router-direct.skipped', input.requestId, {
-          reason: 'servertool_followup_requires_hub_relay',
-          routingPolicyGroup: portConfig?.routingPolicyGroup,
-          sameProtocolBehavior: portConfig?.sameProtocolBehavior,
         });
       }
       return await this.executePipeline(nextInput);
