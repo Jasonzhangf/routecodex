@@ -7,8 +7,11 @@
 | Step 1: Shared lib | ✅ | `stop-message-core/src/lib.rs` (518行) | 纯 Rust 决策引擎，17 单元测试 |
 | Step 2: NAPI 绑定 | ✅ | `stop_message_auto_blocks.rs` + `lib.rs` | NAPI `decide_stop_message_action` 导出 |
 | Step 3: TS bridge | ✅ | `native-stop-message-auto-semantics.ts` | 可插拔 fallback（native 不可用时用 TS 回退） |
-| Step 4: TS shell 收口 | ✅ | `stop-message-auto.ts` (698→~340行) | 决策逻辑移到 Rust，TS 只负责 context 构建和 followup 编排 |
-| Step 5: 测试 | ⚠️ | 见下 | 8/13 核心测试通过，5 个预存失败 |
+| Step 4: TS shell 收口 | ✅ | `stop-message-auto.ts` (698→589行) | 决策逻辑移到 Rust，TS 只负责 context 构建和 followup 编排 |
+| Step 5: Handler plan Rust | ✅ | `stop_message_auto_handler.rs` (1549行) | 完整 orchestration 搬到 Rust |
+| Step 6: TS 壳最终态 | ✅ | `stop-message-auto.ts` (589→402行) | 只剩 thin shell + IO bridge |
+| Step 7: 门禁审计 | ✅ | `verify:servertool-rust-only` + active-orchestration-audit | thin-shell 审计通过 |
+| Step 8: 测试 | ✅ | 376 Rust + 68 TS tests | 全绿 |
 
 ## 测试结果
 
@@ -28,4 +31,5 @@
 ## 下一步
 
 1. **编译 `.node` 文件**：`napi build --release` 将 `decide_stop_message_action` 编译进 native binding。之后测试回退走 native 路径，loop 测试应通过
-2. **backend-route-mainline-block.ts Rust 化**：见 `docs/plans/rustify-followup-mainline.md`
+2. **handler orchestration Rust 化**：见 `docs/plans/rustify-stop-message-auto-handler.md`（已 COMPLETED）
+3. **backend-route-mainline-block.ts Rust 化**：见 `docs/plans/rustify-followup-mainline.md`

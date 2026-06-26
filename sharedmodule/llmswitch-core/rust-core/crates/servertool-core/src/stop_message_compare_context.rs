@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StopMessageCompareContext {
     pub armed: bool,
@@ -31,6 +31,16 @@ pub struct StopMessageCompareContext {
     pub observation_stable_count: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_signature_hash: Option<String>,
+}
+
+impl StopMessageCompareContext {
+    pub fn default_skip() -> Self {
+        StopMessageCompareContext {
+            decision: "skip".to_string(),
+            reason: "none".to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 pub fn normalize_stop_message_compare_context(

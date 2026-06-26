@@ -463,3 +463,52 @@ describe('servertool active orchestration audit', () => {
     });
   }
 });
+
+// ── stop-message-auto handler thin-shell audit ────────────────────────────────
+
+describe('stop-message-auto handler thin-shell audit', () => {
+  test('stop-message-auto.ts delegates to Rust-owned handler plan', () => {
+    const source = fs.readFileSync(repoPath('sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts'), 'utf8');
+
+    // Must call the new Rust handler plan
+    expect(source).toContain('planStopMessageAutoHandlerWithNative');
+    // Must consume Rust-owned decision signals plan
+    expect(source).toContain('planStoplessDecisionContextSignals');
+    // Must consume Rust-owned default config plan
+    expect(source).toContain('planStopMessageDefaultConfig');
+    // Must NOT contain TS-owned orchestration logic that was migrated
+    const forbidden = [
+      'readPersistedStopMessageSnapshotFromCandidateKeys',
+      'readPersistedStopMessageStageModeFromCandidateKeys',
+      'readPersistedStopMessageTombstoneFromCandidateKeys',
+      'isDefaultStopMessageExhausted',
+      'isStopMessageClearedTombstone',
+      'function hasResponsesSubmitToolOutputsResume',
+      'function isStopMessageDisabledByPort',
+      'function isPlanModeActiveFromCapturedRequest',
+      'toolOutputsDetailed.length',
+      'routecodexPortStopMessageEnabled',
+      'collaboration mode: plan',
+      'function resolveStopMessageDefaultEnabledLive',
+      'function resolveStopMessageDefaultTextLive',
+      'function resolveStopMessageDefaultMaxRepeatsLive',
+      'const gateMaxRepeats',
+      'const resolvedMaxRepeats',
+      'const schemaBudgetMaxRepeats',
+      'const nextMaxRepeats',
+      'const nextUsed',
+      'Math.max(0, Math.floor(persistedSnap.maxRepeats))',
+      'Math.max(0, Math.floor(persistedSnap.used))',
+      'Math.max(0, Math.floor(runtimeSnap.maxRepeats))',
+      'Math.max(0, Math.floor(runtimeSnap.used))',
+      "String(persistedSnap.text ?? '')",
+      "String(runtimeSnap.text ?? '')",
+      'const STOP_MESSAGE_EXECUTION_APPEND',
+      'resolveStopMessageSnapshot(loadRoutingInstructionStateSync',
+      'normalizeStopMessageStageMode(state?.stopMessageStageMode',
+      'stopMessageSource ===',
+    ];
+    const hits = forbidden.filter((marker) => source.includes(marker));
+    expect(hits).toEqual([]);
+  });
+});

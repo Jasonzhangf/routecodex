@@ -1550,6 +1550,21 @@ export function buildClientExecCliProjectionOutputWithNative(
   return JSON.parse(resultJson);
 }
 
+export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string, unknown>>(
+  input: Record<string, unknown>,
+): TPlan {
+  const capability = 'planStopMessageAutoHandlerJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planStopMessageAutoHandlerJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStopMessageAutoHandlerJson native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson) as TPlan;
+}
+
 export function planStoplessOrchestrationActionWithNative(
   input: StoplessOrchestrationActionInput,
 ): StoplessOrchestrationActionPlan {

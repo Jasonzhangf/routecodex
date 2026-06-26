@@ -629,7 +629,9 @@ fn read_followup_source<'a>(
 ) -> Option<String> {
     processed_runtime_control
         .and_then(|row| row.get("serverToolFollowupSource"))
-        .or_else(|| standardized_runtime_control.and_then(|row| row.get("serverToolFollowupSource")))
+        .or_else(|| {
+            standardized_runtime_control.and_then(|row| row.get("serverToolFollowupSource"))
+        })
         .or_else(|| request_runtime_control.and_then(|row| row.get("serverToolFollowupSource")))
         .and_then(Value::as_str)
         .map(str::trim)
@@ -660,13 +662,6 @@ fn read_runtime_control_field<'a>(
                 .and_then(Value::as_object)
                 .and_then(|row| row.get(key))
         })
-        .or_else(|| {
-            adapter_context
-                .and_then(Value::as_object)
-                .and_then(|row| row.get("__rt"))
-                .and_then(Value::as_object)
-                .and_then(|row| row.get(key))
-        })
 }
 
 fn read_followup_source_from_gate_input(
@@ -683,10 +678,7 @@ fn read_followup_source_from_gate_input(
         })
 }
 
-fn read_stop_eligible_from_gate_input(
-    payload: &Value,
-    adapter_context: Option<&Value>,
-) -> bool {
+fn read_stop_eligible_from_gate_input(payload: &Value, adapter_context: Option<&Value>) -> bool {
     let adapter_truth = adapter_context
         .and_then(Value::as_object)
         .and_then(|row| row.get("__rt"))
@@ -694,7 +686,8 @@ fn read_stop_eligible_from_gate_input(
         .and_then(|rt| rt.get("stopGatewayContext"))
         .and_then(servertool_core::stop_gateway_context::normalize_stop_gateway_context)
         .map(|context| context.eligible);
-    adapter_truth.unwrap_or_else(|| servertool_core::stop_gateway_context::is_stop_eligible(payload))
+    adapter_truth
+        .unwrap_or_else(|| servertool_core::stop_gateway_context::is_stop_eligible(payload))
 }
 
 fn resolve_provider_response_request_semantics_value(
@@ -1627,9 +1620,7 @@ pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResul
             schema_source: None,
             skip_reason: Some("empty_assistant_payload".to_string()),
         }
-    } else if servertool_followup
-        && !input.allow_followup
-        && !allow_reasoning_stop_followup_reentry
+    } else if servertool_followup && !input.allow_followup && !allow_reasoning_stop_followup_reentry
     {
         ServertoolResponseStageGateOutput {
             should_bypass: true,
@@ -2262,19 +2253,21 @@ fn is_persistent_sticky_key(key: &str) -> bool {
     key.starts_with("tmux:") || key.starts_with("session:") || key.starts_with("conversation:")
 }
 
-/// Stopless path persistence is strict-session-only. The stop_message_flow
-/// `flow_id` is set above to `stop_message_flow`; the persisted key must be a
-/// `session:<sessionId>` key. We never fall back to `tmux:` or
-/// `conversation:` here, even though the generic `is_persistent_sticky_key`
-/// still accepts those prefixes for non-stopless servertool flows.
-fn is_stopless_persistent_key(key: &str) -> bool {
-    key.starts_with("session:")
-}
-
 /// Build the handler result for stop_message_auto.
 ///
-/// Rust produces the complete followup plan + persistence metadata.
-/// TS keeps I/O (loading/saving routing state files).
+/// Rust produces the complete followup plan + request-local stopless runtime state.
+/// TS writes the result into MetadataCenter only.
+#[napi]
+pub fn plan_stop_message_auto_handler_json(input_json: String) -> NapiResult<String> {
+    let input: servertool_core::stop_message_auto_handler::StopMessageAutoHandlerInput =
+        serde_json::from_str(&input_json).map_err(|e| {
+            napi::Error::from_reason(format!("deserialize StopMessageAutoHandlerInput: {e}"))
+        })?;
+    let plan = servertool_core::stop_message_auto_handler::plan_stop_message_auto_handler(&input);
+    serde_json::to_string(&plan)
+        .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageAutoHandlerPlan: {e}")))
+}
+
 #[napi]
 pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<String> {
     #[derive(Debug, Deserialize)]
@@ -2286,12 +2279,6 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         adapter_context: Value,
         /// Base chat response (passthrough).
         base: Value,
-        /// Candidate keys for persistence scope lookup.
-        candidate_keys: Vec<String>,
-        /// Optional sticky key from persisted lookup.
-        sticky_key: Option<String>,
-        /// Optional strict session scope from persisted lookup.
-        strict_session_scope: Option<String>,
         /// Followup flow id (e.g. "stop_message_flow").
         followup_flow_id: Option<String>,
     }
@@ -2302,8 +2289,7 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         chat_response: Value,
         flow_id: String,
         followup: Value,
-        persist_keys: Vec<String>,
-        state_update: Value,
+        stopless_runtime_state: Value,
     }
 
     let input: StopMessageHandlerInput = serde_json::from_str(&input_json).map_err(|e| {
@@ -2325,8 +2311,7 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
             chat_response: input.base,
             flow_id: String::new(),
             followup: Value::Null,
-            persist_keys: Vec::new(),
-            state_update: Value::Null,
+            stopless_runtime_state: Value::Null,
         };
         return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
@@ -2347,7 +2332,12 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .decision
         .get("reason_code")
         .and_then(|v| v.as_str())
-        .or_else(|| input.decision.get("stopSchemaTriggerHint").and_then(|v| v.as_str()))
+        .or_else(|| {
+            input
+                .decision
+                .get("stopSchemaTriggerHint")
+                .and_then(|v| v.as_str())
+        })
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let trigger = trigger_hint
@@ -2358,9 +2348,7 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
             | "stop_schema_stopreason_missing_or_non_numeric"
             | "stop_schema_needs_user_input_missing_next_step"
             | "stop_schema_next_step_missing"
-            | "stop_schema_forcestop_reason_missing" => {
-                StoplessContinuationTrigger::InvalidSchema
-            }
+            | "stop_schema_forcestop_reason_missing" => StoplessContinuationTrigger::InvalidSchema,
             "stop_schema_continue_without_next_step" | "stop_schema_continue_next_step" => {
                 StoplessContinuationTrigger::NonTerminalSchema
             }
@@ -2382,13 +2370,14 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_string);
-    let natural_followup_text = resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
-        used,
-        max_repeats,
-        trigger,
-    })
-    .map(|resolved| resolved.client_visible_text)
-    .unwrap_or_default();
+    let natural_followup_text =
+        resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
+            used,
+            max_repeats,
+            trigger,
+        })
+        .map(|resolved| resolved.client_visible_text)
+        .unwrap_or_default();
     let followup_text = if matches!(
         trigger,
         StoplessContinuationTrigger::NoSchema
@@ -2492,28 +2481,8 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
     // physically removed.
     let followup = Value::Null;
 
-    // 8. Compute persist keys (deduplicated union)
-    let mut persist_keys_set: Vec<String> = Vec::new();
-    let raw_keys: Vec<&str> = [
-        input.sticky_key.as_deref(),
-        input.strict_session_scope.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .chain(input.candidate_keys.iter().map(|s| s.as_str()))
-    .collect();
-
-    for key in raw_keys {
-        if !is_stopless_persistent_key(key) {
-            continue;
-        }
-        if !persist_keys_set.contains(&key.to_string()) {
-            persist_keys_set.push(key.to_string());
-        }
-    }
-
-    // 9. Build state update
-    let state_update = serde_json::json!({
+    // 8. Build request-local runtime state. MetadataCenter is the only write target.
+    let stopless_runtime_state = serde_json::json!({
         "text": followup_text,
         "maxRepeats": max_repeats,
         "used": used + 1,
@@ -2525,8 +2494,7 @@ pub fn run_stop_message_auto_handler_json(input_json: String) -> NapiResult<Stri
         chat_response: input.base,
         flow_id: "stop_message_flow".to_string(),
         followup,
-        persist_keys: persist_keys_set,
-        state_update,
+        stopless_runtime_state,
     };
 
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -2973,14 +2941,8 @@ mod tests {
             parsed["strictSessionScope"].as_str(),
             Some("session:sess-a")
         );
-        assert_eq!(
-            parsed["stickyKey"].as_str(),
-            Some("session:sess-a")
-        );
-        assert_eq!(
-            parsed["lookupPolicy"].as_str(),
-            Some("strict_session_only")
-        );
+        assert_eq!(parsed["stickyKey"].as_str(), Some("session:sess-a"));
+        assert_eq!(parsed["lookupPolicy"].as_str(), Some("strict_session_only"));
         assert_eq!(parsed["readStopMessageSnapshot"].as_bool(), Some(false));
         assert_eq!(parsed["readStopMessageTombstone"].as_bool(), Some(true));
         assert_eq!(
@@ -3055,11 +3017,9 @@ mod tests {
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0]["function"]["name"], "exec_command");
         assert_eq!(tools[1]["function"]["name"], "apply_patch");
-        assert!(
-            !tools
-                .iter()
-                .any(|tool| tool["function"]["name"] == "reasoning.stop")
-        );
+        assert!(!tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "reasoning.stop"));
     }
 
     #[test]
@@ -3093,11 +3053,9 @@ mod tests {
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0]["function"]["name"], "exec_command");
         assert_eq!(tools[1]["function"]["name"], "apply_patch");
-        assert!(
-            !tools
-                .iter()
-                .any(|tool| tool["function"]["name"] == "reasoning.stop")
-        );
+        assert!(!tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "reasoning.stop"));
     }
 
     #[test]
@@ -3224,9 +3182,6 @@ mod tests {
                 },
                 "routecodexPortMode": "router"
             },
-            "candidateKeys": [],
-            "stickyKey": null,
-            "strictSessionScope": null
         });
 
         let output: Value = serde_json::from_str(
@@ -3235,9 +3190,9 @@ mod tests {
         .expect("json output");
         assert!(output["followup"].is_null());
         assert_eq!(output["flowId"].as_str(), Some("stop_message_flow"));
-        assert_eq!(output["stateUpdate"]["used"].as_u64(), Some(1));
-        assert_eq!(output["stateUpdate"]["maxRepeats"].as_u64(), Some(3));
-        assert!(output["stateUpdate"]["text"]
+        assert_eq!(output["stoplessRuntimeState"]["used"].as_u64(), Some(1));
+        assert_eq!(output["stoplessRuntimeState"]["maxRepeats"].as_u64(), Some(3));
+        assert!(output["stoplessRuntimeState"]["text"]
             .as_str()
             .unwrap_or_default()
             .contains("继续做下一步"));
@@ -3258,16 +3213,15 @@ mod tests {
                 "routeId": "tools",
                 "routecodexPortMode": "router"
             },
-            "candidateKeys": [],
-            "stickyKey": null,
-            "strictSessionScope": null
         });
 
         let output: Value = serde_json::from_str(
             &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
         )
         .expect("json output");
-        let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+        let text = output["stoplessRuntimeState"]["text"]
+            .as_str()
+            .expect("followup text");
         assert!(text.contains("继续做下一步"));
         assert!(!text.contains("schema"));
         assert!(!text.contains("hook"));
@@ -3294,16 +3248,15 @@ mod tests {
                 "routeId": "tools",
                 "routecodexPortMode": "router"
             },
-            "candidateKeys": [],
-            "stickyKey": null,
-            "strictSessionScope": null
         });
 
         let output: Value = serde_json::from_str(
             &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
         )
         .expect("json output");
-        let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+        let text = output["stoplessRuntimeState"]["text"]
+            .as_str()
+            .expect("followup text");
         assert!(text.contains("stopreason"), "text={text}");
         assert!(text.contains("next_step"), "text={text}");
         assert!(text.contains("evidence"), "text={text}");
@@ -3327,16 +3280,15 @@ mod tests {
                 "routeId": "tools",
                 "routecodexPortMode": "router"
             },
-            "candidateKeys": [],
-            "stickyKey": null,
-            "strictSessionScope": null
         });
 
         let output: Value = serde_json::from_str(
             &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
         )
         .expect("json output");
-        let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+        let text = output["stoplessRuntimeState"]["text"]
+            .as_str()
+            .expect("followup text");
         assert!(text.contains("继续做下一步"));
         assert!(!text.contains("schema"));
         assert!(!text.contains("hook"));
@@ -3376,7 +3328,9 @@ mod tests {
                 &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
             )
             .expect("json output");
-            let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+            let text = output["stoplessRuntimeState"]["text"]
+                .as_str()
+                .expect("followup text");
             assert!(text.contains(expected), "used={used} text={text}");
             assert!(!text.contains("schema"), "used={used} text={text}");
             assert!(!text.contains("hook"), "used={used} text={text}");
@@ -3403,9 +3357,6 @@ mod tests {
                     "routeId": "search",
                     "routecodexPortMode": "router"
                 },
-                "candidateKeys": [],
-                "stickyKey": null,
-                "strictSessionScope": null
             });
 
             let output: Value = serde_json::from_str(
@@ -3414,19 +3365,19 @@ mod tests {
             .expect("json output");
 
             assert_eq!(
-                output["stateUpdate"]["used"].as_u64(),
+                output["stoplessRuntimeState"]["used"].as_u64(),
                 Some(expected_state_used),
-                "used={used} stateUpdate.used must advance"
+                "used={used} stoplessRuntimeState.used must advance"
             );
             assert_eq!(
-                output["stateUpdate"]["maxRepeats"].as_u64(),
+                output["stoplessRuntimeState"]["maxRepeats"].as_u64(),
                 Some(3),
-                "used={used} stateUpdate.maxRepeats must stay stable"
+                "used={used} stoplessRuntimeState.maxRepeats must stay stable"
             );
-            let text = output["stateUpdate"]["text"].as_str().unwrap_or_default();
+            let text = output["stoplessRuntimeState"]["text"].as_str().unwrap_or_default();
             assert!(
                 !text.is_empty(),
-                "used={used} stateUpdate.text must keep client-visible stopless guidance"
+                "used={used} stoplessRuntimeState.text must keep client-visible stopless guidance"
             );
             assert_eq!(expected_repeat_count, expected_state_used);
         }
@@ -3448,16 +3399,15 @@ mod tests {
                 "routeId": "tools",
                 "routecodexPortMode": "router"
             },
-            "candidateKeys": [],
-            "stickyKey": null,
-            "strictSessionScope": null
         });
 
         let output: Value = serde_json::from_str(
             &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
         )
         .expect("json output");
-        let text = output["stateUpdate"]["text"].as_str().expect("followup text");
+        let text = output["stoplessRuntimeState"]["text"]
+            .as_str()
+            .expect("followup text");
         assert!(text.contains("继续做下一步"));
         assert!(!text.contains("验证证据"));
         assert!(!text.contains("schema"));
@@ -3487,16 +3437,13 @@ mod tests {
                     "routeId": "search",
                     "routecodexPortMode": "router"
                 },
-                "candidateKeys": [],
-                "stickyKey": null,
-                "strictSessionScope": null
             });
 
             let output: Value = serde_json::from_str(
                 &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
             )
             .expect("json output");
-            let text = output["stateUpdate"]["text"].as_str().unwrap_or_default();
+            let text = output["stoplessRuntimeState"]["text"].as_str().unwrap_or_default();
             assert!(
                 text.contains(expected_fragment),
                 "reason_code={reason_code} must select matching prompt fragment, got: {text}"
@@ -3720,7 +3667,10 @@ mod tests {
         .expect("gate");
         let value: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["shouldBypass"], Value::Bool(true));
-        assert_eq!(value["skipReason"], Value::String("followup_bypass".to_string()));
+        assert_eq!(
+            value["skipReason"],
+            Value::String("followup_bypass".to_string())
+        );
     }
 
     #[test]
@@ -3752,7 +3702,10 @@ mod tests {
         .expect("gate");
         let value: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["shouldBypass"], Value::Bool(false));
-        assert_eq!(value["nextAction"], Value::String("run_auto_hooks".to_string()));
+        assert_eq!(
+            value["nextAction"],
+            Value::String("run_auto_hooks".to_string())
+        );
         assert_eq!(value["responseHookMatched"], Value::Bool(true));
         assert_eq!(value["responseHookRequired"], Value::Bool(true));
         assert_eq!(
@@ -3768,6 +3721,22 @@ mod tests {
             Value::String("assistant_stop_text".to_string())
         );
         assert_eq!(value.get("skipReason"), None);
+    }
+
+    #[test]
+    fn read_followup_source_from_gate_input_ignores_adapter_context_legacy_rt() {
+        let runtime_control = Value::Null;
+        let adapter_context = json!({
+            "__rt": {
+                "serverToolFollowup": true,
+                "serverToolFollowupSource": "servertool.reasoning_stop_guard"
+            }
+        });
+
+        assert_eq!(
+            read_followup_source_from_gate_input(Some(&runtime_control), Some(&adapter_context)),
+            None
+        );
     }
 
     #[test]
@@ -3800,7 +3769,10 @@ mod tests {
         .expect("gate");
         let value: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["shouldBypass"], Value::Bool(false));
-        assert_eq!(value["nextAction"], Value::String("run_auto_hooks".to_string()));
+        assert_eq!(
+            value["nextAction"],
+            Value::String("run_auto_hooks".to_string())
+        );
         assert_eq!(value["responseHookMatched"], Value::Bool(true));
         assert_eq!(value["responseHookRequired"], Value::Bool(true));
         assert_eq!(
@@ -4159,7 +4131,10 @@ mod tests {
             parsed.get("outcomeMode").and_then(|v| v.as_str()),
             Some("mixed_client_tools")
         );
-        assert!(parsed.get("pendingSessionId").is_none() || parsed.get("pendingSessionId") == Some(&serde_json::Value::Null));
+        assert!(
+            parsed.get("pendingSessionId").is_none()
+                || parsed.get("pendingSessionId") == Some(&serde_json::Value::Null)
+        );
         assert_eq!(
             parsed
                 .get("aliasSessionIds")
