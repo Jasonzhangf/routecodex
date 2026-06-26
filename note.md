@@ -44,6 +44,22 @@
   - 删除 `request-executor.spec.ts` 里对应的旧字段断言与旧 logger 入参；
   - 保持现有 retry/exclusion/telemetry 决策逻辑不动。
 
+# 2026-06-27 special_400 audit gate
+
+- 结论：`special_400` 目前不是单点死语义，不能直接物理删除。
+- 现有活 surface：
+  - Rust 真源：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs`
+  - Rust 事件面：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/engine/events.rs`
+  - TS policy / bridge / reporter / executor 仍保留该分类
+  - 多条 policy / red / native / router 相关测试仍显式断言 `special_400`
+- 已确认的白盒样本：
+  - `Invalid request payload: missing field "input"`
+  - `HTTP 400: {"error":{"message":"bad request"}}`
+  - `HTTP 400: Invalid 'input[22].content'...`
+  - `HTTP 400: thinking.signature invalid`
+  - `invalid params, tool call result does not follow tool call (2013)`
+  这些样本当前都能直接收敛到已有 policy 语义，不支持在本轮把 `special_400` 作为孤立 dead code 删除。
+
 # 2026-06-27 provider error truth collapse - generic HTTP 400 catalog fallback slice
 
 - 当前 `HEAD` 已在 `743ac3d refactor(policy): drop duplicate invalid400`；本线没有新的未提交 focused 改动，工作树其余脏文件属于 quota/servertool/doc 删除面，不能混提。
