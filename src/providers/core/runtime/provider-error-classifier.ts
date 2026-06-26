@@ -1,6 +1,5 @@
 import type { ProviderContext } from '../api/provider-types.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
-import { RateLimitCooldownError } from './rate-limit-manager.js';
 import {
   extractProviderFailureStatusCode,
   isProviderFailureNetworkTransportLike,
@@ -26,8 +25,6 @@ export type ProviderErrorClassifierOptions = {
   error: unknown;
   context: ProviderContext;
   detectDailyLimit(messageLower: string, upstreamLower?: string): boolean;
-  registerRateLimitFailure(providerKey?: string, model?: string): boolean;
-  forceRateLimitFailure(providerKey?: string, model?: string): void;
   authMode?: 'apikey' | 'oauth';
 };
 
@@ -55,23 +52,10 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
 
   const isRateLimit = statusText.includes('429') || msgLower.includes('429');
   const isDailyLimit429 = isRateLimit && options.detectDailyLimit(msgLower, upstreamMessageLower);
-  const isSyntheticCooldown = err instanceof RateLimitCooldownError;
   let forceFatalRateLimit = false;
 
   if (isRateLimit) {
-    // 当前收口模型里，429 不再分裂成 synthetic/daily/special cooldown 语义。
-    // 只保留：
-    // - 日额度类 429：记为不可恢复 provider 错误
-    // - 其他 429：记为可恢复 provider 错误
-    if (isSyntheticCooldown) {
-      forceFatalRateLimit = false;
-    } else if (isDailyLimit429) {
-      options.forceRateLimitFailure(options.context.providerKey, options.context.model);
-      forceFatalRateLimit = true;
-    } else {
-      options.registerRateLimitFailure(options.context.providerKey, options.context.model);
-      forceFatalRateLimit = false;
-    }
+    forceFatalRateLimit = Boolean(isDailyLimit429);
   }
   const outcome = resolveProviderFailureOutcome({
     error: err,

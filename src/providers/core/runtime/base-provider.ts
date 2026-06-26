@@ -17,7 +17,6 @@ import {
 import { classifyProviderError } from './provider-error-classifier.js';
 import { getStatsCenterSafe as getStatsCenterSafeFromBridge } from '../../../modules/llmswitch/bridge.js';
 import type { ProviderUsageEvent } from '../../../modules/llmswitch/bridge.js';
-import { RateLimitCooldownError } from './rate-limit-manager.js';
 import {
   createProviderContext,
   extractUsageTokensFromResponse,
@@ -71,8 +70,6 @@ export abstract class BaseProvider implements IProviderV2 {
   protected oauthProviderId?: string;
   private lastRuntimeMetadata?: ProviderRuntimeMetadata;
   private runtimeProfile?: ProviderRuntimeProfile;
-  private static rateLimitFailures: Map<string, number> = new Map();
-  private static readonly RATE_LIMIT_THRESHOLD = 4;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
     // Internal unique id; do not use it as a log prefix (it's not human-readable).
@@ -171,7 +168,6 @@ export abstract class BaseProvider implements IProviderV2 {
       responseTime: endTime - context.startTime
     });
     await emitProviderSuccessAndWait(buildRuntimeFromProviderContext(context));
-    this.resetRateLimitCounter(context.providerKey);
 
     return finalResponse;
   }
@@ -211,7 +207,6 @@ export abstract class BaseProvider implements IProviderV2 {
       const finalResponse = await this.postprocessResponse(response, context);
 
       const endTime = Date.now();
-      this.resetRateLimitCounter(context.providerKey, context.model);
       await emitProviderSuccessAndWait(buildRuntimeFromProviderContext(context));
       try {
         const usage = extractUsageTokensFromResponse(finalResponse);
@@ -238,13 +233,6 @@ export abstract class BaseProvider implements IProviderV2 {
       return finalResponse;
     } catch (error) {
       this.errorCount++;
-      if (error instanceof RateLimitCooldownError) {
-        this.dependencies.logger?.logModule(this.getLogId(), 'rate-limit-skip', {
-          providerKey: context.providerKey,
-          model: context.model,
-          message: error.message
-        });
-      }
       const endTime = Date.now();
       try {
         const event: ProviderUsageEvent = {
@@ -362,8 +350,6 @@ export abstract class BaseProvider implements IProviderV2 {
       error,
       context: _context,
       detectDailyLimit: (messageLower, upstreamLower) => isDailyLimitRateLimitMessage(messageLower, upstreamLower),
-      registerRateLimitFailure: this.registerRateLimitFailure.bind(this),
-      forceRateLimitFailure: this.forceRateLimitFailure.bind(this),
       authMode: this.authMode
     });
     const augmentedError = classification.error;
@@ -372,10 +358,6 @@ export abstract class BaseProvider implements IProviderV2 {
     const upstreamCode = classification.upstreamCode;
     const upstreamMessage = classification.upstreamMessage;
     const providerKey = _context.providerKey || runtimeProfile?.providerKey;
-
-    if (!classification.isRateLimit && providerKey) {
-      this.resetRateLimitCounter(providerKey, _context.model);
-    }
 
     const affectsHealth = classification.affectsHealth;
     const recoverable = classification.recoverable;
@@ -457,58 +439,6 @@ export abstract class BaseProvider implements IProviderV2 {
   }
 
   protected hasDataEnvelope(value: UnknownObject): value is UnknownObject & { data?: UnknownObject } { return hasDataEnvelope(value); }
-
-  private getRateLimitBucketKey(providerKey?: string, model?: string): string | undefined {
-    if (!providerKey) {
-      return undefined;
-    }
-    const runtimeProfile = this.getRuntimeProfile();
-    const providerIdRaw = runtimeProfile?.providerId || this.config.config.providerId;
-    const providerId = typeof providerIdRaw === 'string' ? providerIdRaw.trim().toLowerCase() : '';
-    // 对 Gemini 按「providerKey+model」粒度计数，避免不同模型间共享 429 计数。
-    if ((providerId === 'gemini' || providerId.startsWith('gemini.')) && model) {
-      return `${providerKey}::${model}`;
-    }
-    return providerKey;
-  }
-
-  private registerRateLimitFailure(providerKey?: string, model?: string): boolean {
-    const bucketKey = this.getRateLimitBucketKey(providerKey, model);
-    if (!bucketKey) {
-      return false;
-    }
-    const current = BaseProvider.rateLimitFailures.get(bucketKey) ?? 0;
-    const next = current + 1;
-    BaseProvider.rateLimitFailures.set(bucketKey, next);
-    // 调试：记录当前 key 的第几次 429 命中，方便观察是否触发熔断
-    if (this.dependencies.logger) {
-      this.dependencies.logger.logModule(this.getLogId(), 'rate-limit-429', {
-        providerKey: bucketKey,
-        hitCount: next
-      });
-    }
-    if (next >= BaseProvider.RATE_LIMIT_THRESHOLD) {
-      BaseProvider.rateLimitFailures.set(bucketKey, 0);
-      return true;
-    }
-    return false;
-  }
-
-  private resetRateLimitCounter(providerKey?: string, model?: string): void {
-    const bucketKey = this.getRateLimitBucketKey(providerKey, model);
-    if (!bucketKey) {
-      return;
-    }
-    BaseProvider.rateLimitFailures.delete(bucketKey);
-  }
-
-  private forceRateLimitFailure(providerKey?: string, model?: string): void {
-    const bucketKey = this.getRateLimitBucketKey(providerKey, model);
-    if (!bucketKey) {
-      return;
-    }
-    BaseProvider.rateLimitFailures.set(bucketKey, BaseProvider.RATE_LIMIT_THRESHOLD);
-  }
 
   // Kept for compatibility with existing tests/introspection helpers.
   private static parseDurationToMs(value?: string): number | null {
