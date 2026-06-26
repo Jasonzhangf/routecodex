@@ -238,6 +238,24 @@
   - 决策标签改成非 backoff 语义
 - 之后同步修 focused tests，再跑最小 jest + tsc 验证。
 - 2026-06-27 继续收口：
+
+# 2026-06-27 cooldownOverrideMs top-level override removal slice
+
+- 当前 focused 目标：删除 provider error event 到 VR ingress 的 `cooldownOverrideMs` 活链，避免单次顶层错误直接 override cooldown；provider availability 真源只允许走 strike 计数阈值。
+- 已完成的未提交代码面：
+  - `src/providers/core/utils/provider-error-reporter.ts`
+    - 删除 error/event/details 上的 `cooldownOverrideMs` 透传。
+  - `src/types/llmswitch-local-types.ts`
+  - `src/types/llmswitch-local-types.d.ts`
+  - `src/types/llmswitch-core.d.ts`
+    - 删除 `ProviderErrorEvent.cooldownOverrideMs` 类型。
+  - `tests/providers/core/utils/provider-error-reporter.spec.ts`
+  - `tests/sharedmodule/provider-runtime-ingress.spec.ts`
+  - `tests/sharedmodule/virtual-router-error-classification-top-level-native.spec.ts`
+    - 回归锁定：单次 unrecoverable top-level error 只记一次 strike，不直接进入 cooldown。
+- 独立非本刀问题：
+  - `tests/sharedmodule/virtual-router-health-last-provider.spec.ts`
+    - 当前失败原因为 `metadataCenterSnapshot is required for virtual router metadata reads`，不是 `cooldownOverrideMs` 语义回归；本次提交不带这个文件。
   - 已从 `request-executor-error-types.ts` / retry execution plan / telemetry / compact log / provider resolve+send failure 签名中删除 `recoverableBackoffMs` 与 `backoffScope`。
   - 已删除空壳 helper `src/server/runtime/http-server/executor/request-executor-retry-backoff.ts`，不再保留“固定返回 0ms/none”的第二层语义外壳。
   - focused jest 已通过，剩余下一层应继续审 `request-executor-provider-failure` / `provider-failure-policy` 是否还有“backoff”命名只剩文案壳。

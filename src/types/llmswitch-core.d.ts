@@ -7,7 +7,6 @@ declare module 'rcc-llmswitch-core/dist/native/router-hotpath/native-provider-ru
     recoverable?: boolean;
     affectsHealth?: boolean;
     fatal?: boolean;
-    cooldownOverrideMs?: number;
     errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
     runtime: ProviderErrorRuntimeMetadata;
     timestamp: number;

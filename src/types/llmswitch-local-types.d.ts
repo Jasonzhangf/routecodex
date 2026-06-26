@@ -19,7 +19,6 @@ export interface ProviderErrorEvent {
     recoverable?: boolean;
     affectsHealth?: boolean;
     fatal?: boolean;
-    cooldownOverrideMs?: number;
     errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
     runtime: ProviderErrorRuntimeMetadata;
     timestamp: number;

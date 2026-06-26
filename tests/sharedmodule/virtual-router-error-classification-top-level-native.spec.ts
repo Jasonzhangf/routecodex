@@ -55,7 +55,7 @@ function buildDualProviderConfig(providerA = 'test.key1.gpt-test', providerB = '
 function buildTopLevelEvent(
   providerKey: string,
   classification: 'recoverable' | 'unrecoverable',
-  options?: { status?: number; code?: string; cooldownOverrideMs?: number }
+  options?: { status?: number; code?: string }
 ): any {
   return {
     code: options?.code ?? (classification === 'unrecoverable' ? 'INVALID_API_KEY' : 'HTTP_502'),
@@ -63,7 +63,6 @@ function buildTopLevelEvent(
     stage: 'provider.send',
     status: options?.status ?? (classification === 'unrecoverable' ? 401 : 502),
     errorClassification: classification,
-    ...(typeof options?.cooldownOverrideMs === 'number' ? { cooldownOverrideMs: options.cooldownOverrideMs } : {}),
     runtime: {
       requestId: 'req-top-level-native',
       routeName: 'thinking',
@@ -93,24 +92,19 @@ describe('virtual router native top-level error event consumption', () => {
     expect(state.failureCount).toBe(1);
   });
 
-  test('consumes top-level cooldownOverrideMs on unrecoverable errors', () => {
+  test('unrecoverable top-level errors still require strike threshold before cooldown', () => {
     const providerKey = 'test.key1.gpt-test';
     const engine = new VirtualRouterEngine({} as any);
     engine.initialize(buildDualProviderConfig());
-    const startedAt = Date.now();
 
     engine.handleProviderError(buildTopLevelEvent(providerKey, 'unrecoverable', {
       status: 401,
-      code: 'INVALID_API_KEY',
-      cooldownOverrideMs: 4321
+      code: 'INVALID_API_KEY'
     }));
 
     const state = readHealthState(engine, providerKey);
-    expect(state.state).toBe('tripped');
-    expect(state.failureCount).toBeGreaterThanOrEqual(3);
-    expect(typeof state.cooldownExpiresAt).toBe('number');
-    const ttl = (state.cooldownExpiresAt ?? 0) - startedAt;
-    expect(ttl).toBeGreaterThan(0);
-    expect(ttl).toBeLessThanOrEqual(10_000);
+    expect(state.state).toBe('healthy');
+    expect(state.failureCount).toBe(1);
+    expect(state.cooldownExpiresAt ?? null).toBeNull();
   });
 });

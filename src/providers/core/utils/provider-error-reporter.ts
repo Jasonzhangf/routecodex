@@ -20,7 +20,6 @@ type ExtendedRuntimeMetadata = ProviderErrorRuntimeMetadata & {
 type ProviderErrorEventExtended = ProviderErrorEvent & {
   affectsHealth?: boolean;
   fatal?: boolean;
-  cooldownOverrideMs?: number;
   errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
   routePool?: string[];
   excludedProviderKeys?: string[];
@@ -31,7 +30,6 @@ type ErrorWithMetadata = Error & {
   status?: number;
   statusCode?: number;
   retryable?: boolean;
-  cooldownOverrideMs?: number;
   /**
    * 粗粒度错误类别：EXTERNAL_ERROR / TOOL_ERROR / INTERNAL_ERROR。
    * 当错误来自 llmswitch-core 的 ProviderProtocolError 时会自动携带。
@@ -101,13 +99,6 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
       protocolErrorCode: err.code.toUpperCase()
     };
   }
-  if (typeof err.cooldownOverrideMs === 'number' && Number.isFinite(err.cooldownOverrideMs) && err.cooldownOverrideMs > 0) {
-    mergedDetails = {
-      ...(mergedDetails ?? {}),
-      cooldownOverrideMs: err.cooldownOverrideMs
-    };
-  }
-  
   if (status !== undefined) {
     mergedDetails = { ...(mergedDetails ?? {}), statusCode: status };
   }
@@ -118,10 +109,6 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
       : '';
     return raw || undefined;
   })();
-  const cooldownOverrideMs = typeof err.cooldownOverrideMs === 'number' && Number.isFinite(err.cooldownOverrideMs) && err.cooldownOverrideMs > 0
-    ? err.cooldownOverrideMs
-    : undefined;
-
   const event: ProviderErrorEventExtended = {
     code,
     message: err.message || code,
@@ -129,7 +116,6 @@ function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtend
     status,
     recoverable,
     fatal: recoverable ? false : true,
-    cooldownOverrideMs,
     errorClassification,
     runtime: options.runtime,
     timestamp: Date.now(),

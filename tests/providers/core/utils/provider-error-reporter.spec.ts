@@ -38,8 +38,7 @@ describe('provider-error-reporter', () => {
     emitProviderError({
       error: Object.assign(new Error('fetch failed'), {
         code: 'HTTP_502',
-        retryable: false,
-        cooldownOverrideMs: 4321
+        retryable: false
       }),
       stage: 'provider.send',
       runtime: {
@@ -62,7 +61,6 @@ describe('provider-error-reporter', () => {
       recoverable: true,
       affectsHealth: false,
       fatal: false,
-      cooldownOverrideMs: 4321,
       errorClassification: 'recoverable',
       status: 502,
       runtime: expect.objectContaining({

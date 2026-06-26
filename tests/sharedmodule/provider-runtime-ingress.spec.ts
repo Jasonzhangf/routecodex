@@ -21,7 +21,6 @@ describe('provider runtime ingress', () => {
       stage: '',
       affectsHealth: false,
       fatal: true,
-      cooldownOverrideMs: 1234,
       errorClassification: 'unrecoverable',
       runtime: undefined as any,
       timestamp: undefined as any,
@@ -35,7 +34,7 @@ describe('provider runtime ingress', () => {
     expect(returned.stage).toBe('unknown');
     expect(returned.affectsHealth).toBe(false);
     expect(returned.fatal).toBe(true);
-    expect(returned.cooldownOverrideMs).toBe(1234);
+    expect(returned.cooldownOverrideMs).toBeUndefined();
     expect(returned.errorClassification).toBe('unrecoverable');
     expect(returned.runtime).toEqual({});
     expect(returned.timestamp).toBeGreaterThanOrEqual(before);
