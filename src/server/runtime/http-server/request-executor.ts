@@ -4,6 +4,7 @@ import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
   normalizeProviderFailureCodeKey,
+  resolveProviderFailureClassification,
   resolveProviderFailureRetryEligibility,
   resolveProviderFailureActionPlan,
   type ProviderFailureClassification
@@ -190,7 +191,6 @@ import {
 import { processProviderSendFailure } from './executor/request-executor-provider-send-failure.js';
 import {
   reportRequestExecutorProviderError,
-  resolveRequestExecutorProviderErrorClassification,
   resolveRequestExecutorProviderErrorReportPlan
 } from './executor/request-executor-provider-failure.js';
 import { readRuntimeRequestTruthIdentifiers } from './metadata-center/request-truth-readers.js';
@@ -1479,7 +1479,7 @@ export const __requestExecutorTestables = {
   resetScopedErrorBackoffByProvider,
   prepareRequestPayloadRetrySeed,
   resolveOriginalRequestForResponseConversion,
-  resolveRequestExecutorProviderErrorClassification,
+  resolveProviderFailureClassification,
   resolveRequestExecutorProviderErrorReportPlan,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan,

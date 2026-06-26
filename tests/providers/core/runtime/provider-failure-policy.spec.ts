@@ -3,7 +3,6 @@ import {
   isProviderFailureHealthNeutral,
   resolveProviderFailureActionPlan,
   resolveProviderFailureClassification,
-  resolveProviderFailureExclusionDecision,
   resolveProviderFailureRetryEligibility
 } from '../../../../src/providers/core/runtime/provider-failure-policy.js';
 
@@ -588,7 +587,7 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -631,7 +630,7 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -713,7 +712,7 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true
     }));
   });
@@ -742,22 +741,6 @@ describe('provider failure policy ssot', () => {
     for (const classification of samples) {
       expect(['recoverable', 'unrecoverable']).toContain(classification);
     }
-  });
-
-  it('exclusion decision only depends on whether an alternative candidate exists', () => {
-    expect(resolveProviderFailureExclusionDecision({
-      hasAlternativeCandidate: false,
-    })).toEqual({
-      excludeCurrentProvider: false,
-      retryAction: 'reroute_explicit_alternative',
-    });
-
-    expect(resolveProviderFailureExclusionDecision({
-      hasAlternativeCandidate: true,
-    })).toEqual({
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative',
-    });
   });
 
   it('does not let promptTooLong bypass unified recoverable reroute action', () => {
@@ -853,7 +836,7 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -887,7 +870,7 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -911,7 +894,7 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -936,7 +919,7 @@ describe('provider failure policy ssot', () => {
     expect(plan).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -961,7 +944,7 @@ describe('provider failure policy ssot', () => {
     expect(plan).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative'
     }));
@@ -1003,7 +986,7 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -1046,7 +1029,7 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: true,
+      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative'
     }));

@@ -5,10 +5,8 @@ export {
   isProviderFailureNetworkTransportLike,
   resolveProviderFailureClassification,
   resolveProviderFailureOutcome,
-  isBlockingRecoverableProviderFailure,
   resolveProviderFailureActionPlan,
   resolveProviderFailureRetryEligibility,
-  resolveProviderFailureExclusionDecision,
   isProviderFailureHealthNeutral,
   extractProviderFailureStatusCode,
   classify_error_err_03_runtime_from_error_err_02_host,
@@ -25,17 +23,13 @@ type ProviderFailureAction =
   | 'direct_return'
   | ProviderFailureRetryAction;
 
-type ProviderFailureDecisionLabel =
-  | 'direct_return'
-  | 'exclude_and_reroute';
-
 export type ProviderFailureActionPlan = {
   classification?: ProviderFailureClassification;
   affectsHealth: boolean;
   blockingRecoverable: boolean;
   shouldRetry: boolean;
   action: ProviderFailureAction;
-  decisionLabel: ProviderFailureDecisionLabel;
+  decisionLabel: 'direct_return' | 'exclude_and_reroute';
 };
 
 export type ProviderFailureRetryEligibilityPlan = {
@@ -48,11 +42,6 @@ export type ProviderFailureOutcome = {
   classification?: ProviderFailureClassification;
   recoverable: boolean;
   affectsHealth: boolean;
-};
-
-export type ProviderFailureExclusionDecision = {
-  excludeCurrentProvider: boolean;
-  retryAction: ProviderFailureRetryAction;
 };
 
 export type ProviderFailureStage =

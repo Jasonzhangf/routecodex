@@ -12,7 +12,6 @@ import type {
   ProviderFailureActionPlan,
   ProviderFailureRetryEligibilityPlan,
   ProviderFailureOutcome,
-  ProviderFailureExclusionDecision,
   ProviderFailureStage,
 } from './provider-failure-policy.js';
 import type { ErrorErr02HostCaptured } from '../utils/provider-error-reporter.js';
@@ -28,10 +27,6 @@ import { DEEPSEEK_UNRECOVERABLE_CODES } from '../contracts/deepseek-provider-con
 type ProviderFailureAction =
   | 'direct_return'
   | ProviderFailureRetryAction;
-
-type ProviderFailureDecisionLabel =
-  | 'direct_return'
-  | 'exclude_and_reroute';
 
 // Phase 2: SSOT composition - provider-agnostic catalog + provider-specific contracts.
 const UNRECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
@@ -716,46 +711,6 @@ export function classify_error_err_03_runtime_from_error_err_02_host(
   });
 }
 
-export function isBlockingRecoverableProviderFailure(args: {
-  statusCode?: number;
-  errorCode?: string;
-  upstreamCode?: string;
-  reason?: string;
-}): boolean {
-  const status = typeof args.statusCode === 'number' ? args.statusCode : undefined;
-  const errorCode = normalizeProviderFailureCodeKey(args.errorCode);
-  const upstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
-  const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
-
-  if (status === 408 || status === 425 || status === 429 || (typeof status === 'number' && status >= 500)) {
-    return true;
-  }
-  if (
-    (errorCode && BLOCKING_RECOVERABLE_CODE_SET.has(errorCode))
-    || (upstreamCode && BLOCKING_RECOVERABLE_CODE_SET.has(upstreamCode))
-  ) {
-    return true;
-  }
-  if (errorCode === 'MALFORMED_RESPONSE' && upstreamCode === 'PROVIDER_STATUS_2013') {
-    return true;
-  }
-  if (errorCode === 'MALFORMED_RESPONSE' && upstreamCode === 'SERVER_ERROR') {
-    return true;
-  }
-  if (
-    reason.includes('fetch failed')
-    || reason.includes('building not completed')
-    || reason.includes('network')
-    || reason.includes('timeout')
-    || reason.includes('temporarily unavailable')
-    || reason.includes('当前请求量较高')
-    || reason.includes('请稍后重试')
-  ) {
-    return true;
-  }
-  return false;
-}
-
 export function resolveProviderFailureActionPlan(args: {
   error: unknown;
   stage?: string;
@@ -793,25 +748,7 @@ export function resolveProviderFailureActionPlan(args: {
     classification,
     reason: args.reason
   });
-  const blockingRecoverable =
-    classification === 'recoverable'
-      && isBlockingRecoverableProviderFailure({
-        statusCode: args.statusCode,
-        errorCode: args.errorCode,
-        upstreamCode: args.upstreamCode,
-        reason: args.reason
-      });
-  const hasAttemptsBudget =
-    typeof args.maxAttempts === 'number' && Number.isFinite(args.maxAttempts)
-      ? (typeof args.attempt === 'number' && Number.isFinite(args.attempt)
-        ? args.attempt < args.maxAttempts
-        : args.maxAttempts > 0)
-      : true;
-
-  if (
-    classification !== 'recoverable'
-    || (!hasAttemptsBudget && !blockingRecoverable)
-  ) {
+  if (classification !== 'recoverable') {
     return {
       classification,
       affectsHealth,
@@ -826,7 +763,7 @@ export function resolveProviderFailureActionPlan(args: {
   return {
     classification,
     affectsHealth,
-    blockingRecoverable,
+    blockingRecoverable: false,
     shouldRetry: true,
     action,
     decisionLabel: 'exclude_and_reroute'
@@ -860,12 +797,11 @@ export function resolveProviderFailureRetryEligibility(args: {
     maxAttempts: args.maxAttempts,
     promptTooLong: args.promptTooLong
   });
-  const blockingRecoverable = actionPlan.blockingRecoverable;
 
   if (args.stage === 'provider.followup' || args.stageOutsideProviderFailurePolicy) {
     return {
       classification: actionPlan.classification,
-      blockingRecoverable,
+      blockingRecoverable: false,
       shouldRetry: false
     };
   }
@@ -879,23 +815,14 @@ export function resolveProviderFailureRetryEligibility(args: {
   if (!(args.attempt < args.maxAttempts)) {
     return {
       classification: actionPlan.classification,
-      blockingRecoverable,
+      blockingRecoverable: false,
       shouldRetry: false
     };
   }
   return {
     classification: actionPlan.classification,
-    blockingRecoverable,
+    blockingRecoverable: false,
     shouldRetry: actionPlan.shouldRetry
-  };
-}
-
-export function resolveProviderFailureExclusionDecision(args: {
-  hasAlternativeCandidate: boolean;
-}): ProviderFailureExclusionDecision {
-  return {
-    excludeCurrentProvider: args.hasAlternativeCandidate,
-    retryAction: 'reroute_explicit_alternative'
   };
 }
 
