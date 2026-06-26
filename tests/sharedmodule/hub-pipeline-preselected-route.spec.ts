@@ -176,7 +176,6 @@ describe('HubPipeline preselected route ownership', () => {
           requestId: 'req_preselected_route',
           routeHint: 'flat-route-should-not-enter-snapshot',
           __rt: {
-            stopMessageEnabled: false,
             retryProviderKey: 'legacy.retry.should-not-enter-snapshot',
           },
           runtime_control: {
