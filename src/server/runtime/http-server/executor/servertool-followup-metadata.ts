@@ -317,16 +317,6 @@ function extractPreservedInjectToken(
   return undefined;
 }
 
-function readResponsesRequestContextIdentifiers(
-  metadata: Record<string, unknown> | undefined
-): {
-  sessionId?: string;
-  conversationId?: string;
-} {
-  return {
-  };
-}
-
 export function buildServerToolNestedRequestMetadata(args: {
   baseMetadata?: Record<string, unknown>;
   extraMetadata?: Record<string, unknown>;

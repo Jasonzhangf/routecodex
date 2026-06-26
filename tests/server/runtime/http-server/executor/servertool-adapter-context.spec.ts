@@ -330,16 +330,6 @@ describe('servertool adapter context builder', () => {
       'seed existing followup truth'
     );
     center.writeRuntimeControl(
-      'stopMessageEnabled',
-      false,
-      {
-        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
-        symbol: 'does not overwrite existing runtime_control fields on the bound MetadataCenter',
-        stage: 'test'
-      },
-      'seed existing stop-message truth'
-    );
-    center.writeRuntimeControl(
       'stopMessageClientInject',
       {
         ready: false,
@@ -366,9 +356,7 @@ describe('servertool adapter context builder', () => {
 
     const snapshot = MetadataCenter.read(context)?.snapshot();
     expect(snapshot?.runtimeControl.serverToolFollowup?.version).toBe(1);
-    expect(snapshot?.runtimeControl.stopMessageEnabled?.version).toBe(1);
     expect(snapshot?.runtimeControl.stopMessageClientInject?.version).toBe(1);
-    expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageEnabled).toBe(false);
     expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageClientInject).toEqual({
       ready: false,
       reason: 'seeded',

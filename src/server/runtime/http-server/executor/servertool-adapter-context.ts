@@ -44,7 +44,7 @@ function stripServertoolRuntimeControlMetadataFields(metadata: Record<string, un
 
 function hasOwnRuntimeControlValue(
   center: MetadataCenter,
-  key: 'serverToolFollowup' | 'stopMessageEnabled' | 'stopMessageClientInject'
+  key: 'serverToolFollowup' | 'stopMessageClientInject'
 ): boolean {
   const runtimeControl = center.snapshot().runtimeControl;
   return runtimeControl[key] !== undefined;
@@ -117,10 +117,6 @@ export function buildServerToolAdapterContext(args: {
   applyClientConnectionStateToContext(metadataBag, baseContext);
 
   const runtimeControl = readRuntimeControlProjection(metadataBag);
-  const stopMessagePortEnabled = typeof runtimeControl.stopMessageEnabled === 'boolean'
-    ? runtimeControl.stopMessageEnabled
-    : undefined;
-
   const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol);
   const baseCenter = MetadataCenter.attach(baseContext);
@@ -137,21 +133,6 @@ export function buildServerToolAdapterContext(args: {
         stage: 'ServertoolAdapterContextRuntimeControl'
       },
       'servertool adapter context projection'
-    );
-  }
-  if (
-    typeof stopMessagePortEnabled === 'boolean'
-    && !hasOwnRuntimeControlValue(baseCenter, 'stopMessageEnabled')
-  ) {
-    baseCenter.writeRuntimeControl(
-      'stopMessageEnabled',
-      stopMessagePortEnabled,
-      {
-        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
-        symbol: 'buildServerToolAdapterContext',
-        stage: 'ServertoolAdapterContextRuntimeControl'
-      },
-      'servertool adapter stop-message port projection'
     );
   }
   if (!hasOwnRuntimeControlValue(baseCenter, 'stopMessageClientInject')) {

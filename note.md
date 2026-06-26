@@ -259,6 +259,20 @@
 - 已完成的 contract 收口：
   - `docs/architecture/metadata-center-manifest.yml`
 
+# 2026-06-26 metadata center dead-helper / duplicate-write slice 5
+
+- 本轮只做了两个最小安全删除：
+  1. 删除 `src/server/runtime/http-server/executor/servertool-followup-metadata.ts` 中无 consumer 的空壳 helper `readResponsesRequestContextIdentifiers(...)`。
+  2. 删除 `src/server/runtime/http-server/executor/servertool-adapter-context.ts` 中不可达的 `stopMessageEnabled` 重写分支，以及对应测试里的重复 seed / 断言。
+- 证据：
+  - `rg -n "readResponsesRequestContextIdentifiers\\(" src tests sharedmodule` 只有定义命中，没有调用。
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/executor/servertool-followup-metadata.spec.ts` 通过。
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts` 通过。
+  - `npm run verify:metadata-center-dualwrite-api` 通过。
+- 结论：
+  - 这次删除的是 dead helper 和重复写回，不是入口 truth。
+  - `MetadataCenter.runtime_control.stopMessageEnabled` 仍是活字段，不能整体删除。
+
 # 2026-06-26 5555 continuation 顺序审计 slice 2
 
 - Jason 最新边界已锁：
