@@ -13,7 +13,6 @@ export type RequestExecutorInitialRequestState = {
   inboundClientHeaders: Record<string, string> | undefined;
   providerRequestId: string;
   clientRequestId: string;
-  sessionStormBackoffScopes?: string[];
 };
 
 export async function initializeRequestExecutorRequestState(args: {
@@ -60,7 +59,6 @@ export async function initializeRequestExecutorRequestState(args: {
     initialMetadata,
     inboundClientHeaders,
     providerRequestId,
-    clientRequestId,
-    ...(sessionStormBackoffScopes.length ? { sessionStormBackoffScopes } : {})
+    clientRequestId
   };
 }

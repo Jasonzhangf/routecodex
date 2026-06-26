@@ -556,22 +556,19 @@ export class HubRequestExecutor implements RequestExecutor {
         || (typeof extractStatusCodeFromError(error) === 'number' ? `status_${extractStatusCodeFromError(error)}` : '');
       return normalizeCodeKey(code || 'unknown_error') || 'unknown_error';
     };
-    let sessionStormBackoffScopesForCatch: string[] | undefined;
     try {
       const hubPipeline = ensureHubPipeline(() => this.deps.getHubPipeline(readString(metadataRecord?.routecodexRoutingPolicyGroup)));
       const {
         initialMetadata,
         inboundClientHeaders,
         providerRequestId,
-        clientRequestId,
-        sessionStormBackoffScopes
+        clientRequestId
       } = await initializeRequestExecutorRequestState({
         input,
         logStage,
         onRequestStart: this.deps.onRequestStart,
         logNonBlockingError: logRequestExecutorNonBlockingError
       });
-      sessionStormBackoffScopesForCatch = sessionStormBackoffScopes;
       try {
         const pipelineLabel = 'hub';
         let aggregatedUsage: UsageMetrics | undefined;
@@ -1455,10 +1452,6 @@ export class HubRequestExecutor implements RequestExecutor {
             trafficGovernor: this.trafficGovernor,
             trafficActiveInFlightAtAcquire,
             trafficPolicyMaxInFlight,
-            sessionStormBackoffScopes,
-            isSessionStormBackoffCandidate,
-            consumeSessionStormBackoffMs,
-            getSessionStormBackoffConsecutive: peekSessionStormBackoffConsecutiveForTests,
             providerSendStartedAtMs,
             providerSendElapsedMs,
             cumulativeExternalLatencyMs,
