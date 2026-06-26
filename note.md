@@ -440,6 +440,18 @@
 - 已知结果：
   - `resolveProviderRetryExecutionPlanExhaustionGate` 仍是当前主链 gate，不能删
   - `hasAlternativeRouteCandidate` 只保留一份实现，出口在 `request-executor-retry-decision.ts`
+
+# 2026-06-27 provider failure protocol detail helper inline slice
+
+- 已收口：
+  - `provider-failure-policy-impl.ts` 删除 `readProviderProtocolErrorDetails`
+  - 分类逻辑在唯一调用点内联读取 `details.reason/upstreamCode/providerStatusCode`
+- 已验证：
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+  - `npx jest tests/providers/core/runtime/provider-failure-policy.spec.ts tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts tests/server/runtime/http-server/request-executor.spec.ts --runInBand`
+- 当前结论：
+  - 这只是单消费者装配壳收口，不改变 provider 分类结果；
+  - `provider-failure-policy-impl.ts` 仍保留真正的分类/健康判定主逻辑，不能整体删。
 - 当前事实：
   - `ProviderHealthManager::import_persistable_state(...)` 仍是 noop；
   - `export_persistable_state(...)` 仍固定导出空 `providerCooldowns`；

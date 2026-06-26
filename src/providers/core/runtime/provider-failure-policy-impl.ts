@@ -291,26 +291,6 @@ function readNestedProviderErrorDetails(error: unknown): {
   };
 }
 
-function readProviderProtocolErrorDetails(error: unknown): {
-  reason?: string;
-  upstreamCode?: string;
-  providerStatusCode?: number;
-} {
-  if (!error || typeof error !== 'object' || Array.isArray(error)) {
-    return {};
-  }
-  const details = (error as { details?: unknown }).details;
-  if (!details || typeof details !== 'object' || Array.isArray(details)) {
-    return {};
-  }
-  const record = details as Record<string, unknown>;
-  return {
-    reason: typeof record.reason === 'string' ? record.reason : undefined,
-    upstreamCode: typeof record.upstreamCode === 'string' ? record.upstreamCode : undefined,
-    providerStatusCode: typeof record.providerStatusCode === 'number' ? record.providerStatusCode : undefined
-  };
-}
-
 export function resolveProviderFailureClassification(args: {
   error: unknown;
   stage?: string;
@@ -340,7 +320,6 @@ export function resolveProviderFailureClassification(args: {
       ? args.statusCode
       : extractProviderFailureStatusCode(args.error);
   const nested = readNestedProviderErrorDetails(args.error);
-  const protocolDetails = readProviderProtocolErrorDetails(args.error);
   const nestedCode = normalizeProviderFailureCodeKey(nested.code);
   const nestedType = normalizeProviderFailureCodeKey(nested.type);
   const nestedParam = typeof nested.param === 'string' ? nested.param.trim().toLowerCase() : '';
@@ -348,6 +327,29 @@ export function resolveProviderFailureClassification(args: {
     .trim()
     .toLowerCase();
   const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
+  const protocolDetails = (() => {
+    if (!args.error || typeof args.error !== 'object' || Array.isArray(args.error)) {
+      return {} as {
+        reason?: string;
+        upstreamCode?: string;
+        providerStatusCode?: number;
+      };
+    }
+    const details = (args.error as { details?: unknown }).details;
+    if (!details || typeof details !== 'object' || Array.isArray(details)) {
+      return {} as {
+        reason?: string;
+        upstreamCode?: string;
+        providerStatusCode?: number;
+      };
+    }
+    const record = details as Record<string, unknown>;
+    return {
+      reason: typeof record.reason === 'string' ? record.reason : undefined,
+      upstreamCode: typeof record.upstreamCode === 'string' ? record.upstreamCode : undefined,
+      providerStatusCode: typeof record.providerStatusCode === 'number' ? record.providerStatusCode : undefined
+    };
+  })();
   const protocolReason = typeof protocolDetails.reason === 'string' ? protocolDetails.reason.trim().toLowerCase() : '';
   const protocolUpstreamCode = normalizeProviderFailureCodeKey(protocolDetails.upstreamCode);
   const has2013Signal =
