@@ -2829,24 +2829,6 @@ pub(crate) fn normalize_message_reasoning_tools_record(
     let trimmed = cleaned_text.trim().to_string();
     write_reasoning_content(message_obj, trimmed.as_str());
 
-    let raw_content = message_obj
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let prefix = id_prefix.trim().to_ascii_lowercase();
-    let allow_reasoning_tag_lift = !prefix.starts_with("responses_response_output");
-    if raw_content.is_empty() && !trimmed.is_empty() && allow_reasoning_tag_lift {
-        let has_thinking_tags = trimmed.contains("[思考]") && trimmed.contains("[/思考]");
-        let next_content = if has_thinking_tags {
-            trimmed.clone()
-        } else {
-            format!("[思考]\n{}\n[/思考]", trimmed)
-        };
-        message_obj.insert("content".to_string(), Value::String(next_content));
-    }
-
     if tool_calls.is_empty() {
         let added_from_content = harvest_tool_calls_from_message_content(message_obj, id_prefix);
         if added_from_content > 0 {
@@ -3343,7 +3325,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_message_lifts_reasoning_to_content() {
+    fn normalize_message_keeps_reasoning_out_of_content() {
         let mut message = json!({
             "role": "assistant",
             "reasoning_content": "analysis",
@@ -3352,10 +3334,7 @@ mod tests {
         let row = message.as_object_mut().unwrap();
         let (_added, cleaned) = normalize_message_reasoning_tools_record(row, "reasoning_test");
         assert_eq!(cleaned.unwrap_or_default(), "analysis");
-        assert_eq!(
-            row.get("content").and_then(Value::as_str),
-            Some("[思考]\nanalysis\n[/思考]")
-        );
+        assert_eq!(row.get("content").and_then(Value::as_str), Some(""));
         assert_eq!(
             row["reasoning"]["content"][0]["text"],
             Value::String("analysis".to_string())
@@ -3430,7 +3409,32 @@ mod tests {
                 .and_then(Value::as_object)
                 .and_then(|msg| msg.get("content"))
                 .and_then(Value::as_str),
-            Some("[思考]\nfirst\n[/思考]")
+            None
+        );
+    }
+
+    #[test]
+    fn normalize_message_does_not_materialize_reasoning_only_sample_into_content() {
+        let mut message = json!({
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "null>\n\n[recovered]",
+            "reasoning": {
+                "content": [
+                    {
+                        "type": "reasoning_text",
+                        "text": "null>\n\n[recovered]"
+                    }
+                ]
+            }
+        });
+        let row = message.as_object_mut().unwrap();
+        let (_added, cleaned) = normalize_message_reasoning_tools_record(row, "chat_seq_reasoning_1");
+        assert_eq!(cleaned.unwrap_or_default(), "null>\n\n[recovered]");
+        assert_eq!(row.get("content").and_then(Value::as_str), Some(""));
+        assert_eq!(
+            row["reasoning"]["content"][0]["text"],
+            Value::String("null>\n\n[recovered]".to_string())
         );
     }
 

@@ -321,7 +321,12 @@ export function createChatSequencer(config?: Partial<ChatSequencerConfig>) {
      * 序列化响应
      */
     async *sequenceResponse(response: ChatCompletionResponse, model: string, requestId: string) {
-      const context = createDefaultContext(model, requestId);
+      const context = createDefaultContext(
+        model,
+        requestId,
+        typeof (response as { id?: unknown }).id === 'string' ? (response as { id: string }).id : undefined,
+        typeof (response as { created?: unknown }).created === 'number' ? (response as { created: number }).created : undefined
+      );
       yield* sequenceChatResponse(response, context, finalConfig);
     },
 
