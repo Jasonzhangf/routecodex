@@ -369,6 +369,10 @@ fn read_stopless_schema_feedback_text(
     row: &Map<String, Value>,
     repeat_count: u32,
 ) -> Option<String> {
+    if repeat_count <= 1 {
+        return Some("继续执行，完成既定目标。".to_string());
+    }
+
     let feedback = row
         .get("schemaFeedback")
         .or_else(|| row.get("schema_feedback"))?
@@ -391,13 +395,7 @@ fn read_stopless_schema_feedback_text(
     }
     let joined = missing_fields.join(", ");
     match reason_code.as_str() {
-        "stop_schema_missing" => Some(if repeat_count <= 1 {
-            if joined.is_empty() {
-                "继续执行；如果任务已经完成，就按下面 schema 补齐收尾字段。".to_string()
-            } else {
-                format!("继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：{joined}。")
-            }
-        } else if joined.is_empty() {
+        "stop_schema_missing" => Some(if joined.is_empty() {
             "如果任务已经完成，就按下面 schema 补齐收尾字段；如果任务还没完成，不要停，继续执行当前任务。".to_string()
         } else {
             format!(
@@ -579,6 +577,9 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
                 .and_then(Value::as_u64)
                 .map(|value| value as u32)
                 .unwrap_or(1);
+            if repeat_count <= 1 {
+                return "继续执行，完成既定目标。".to_string();
+            }
             if let Some(snapshot) = read_stopless_tool_result_snapshot_text(&row) {
                 parts.push(snapshot);
             }
@@ -590,12 +591,31 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
             {
                 parts.push(prompt);
             }
+            let mut rendered_schema_guidance = false;
             if let Some(schema_guidance) = row
                 .get("schemaGuidance")
                 .or_else(|| row.get("schema_guidance"))
                 .and_then(render_stopless_schema_guidance_text)
             {
                 parts.push(schema_guidance);
+                rendered_schema_guidance = true;
+            }
+            if !rendered_schema_guidance {
+                let guidance = serde_json::json!({
+                    "triggerHint": row
+                        .get("triggerHint")
+                        .or_else(|| row.get("trigger_hint"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("no_schema"),
+                    "maxRepeats": row
+                        .get("maxRepeats")
+                        .or_else(|| row.get("max_repeats"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(3)
+                });
+                if let Some(schema_guidance) = render_stopless_schema_guidance_text(&guidance) {
+                    parts.push(schema_guidance);
+                }
             }
             if !parts.is_empty() {
                 return parts.join("\n");
@@ -632,6 +652,23 @@ fn is_stopless_guidance_message(entry: &Value) -> bool {
 }
 
 fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
+    let completed_stopless_call_ids: HashSet<String> = items
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|row| {
+            let item_type = read_trimmed_string(row.get("type"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !is_bridge_tool_output_item_type(item_type.as_str()) {
+                return None;
+            }
+            let output = row.get("output")?;
+            if !is_stopless_tool_output_payload(output) {
+                return None;
+            }
+            read_bridge_function_call_id(row)
+        })
+        .collect();
     let latest_stopless_call_id = items
         .iter()
         .rev()
@@ -650,37 +687,36 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
             read_bridge_function_call_id(row)
         });
     let latest_stopless_guidance = latest_stopless_call_id.as_ref().and_then(|latest_call_id| {
-        items.iter().rev().filter_map(Value::as_object).find_map(|row| {
-            let item_type = read_trimmed_string(row.get("type"))
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if !is_bridge_tool_output_item_type(item_type.as_str()) {
-                return None;
-            }
-            let call_id = read_bridge_function_call_id(row)?;
-            if call_id != *latest_call_id {
-                return None;
-            }
-            let output = row.get("output")?;
-            if !is_stopless_tool_output_payload(output) {
-                return None;
-            }
-            let output_text = match output {
-                Value::String(text) => text.clone(),
-                other => serde_json::to_string(other).ok()?,
-            };
-            Some(build_responses_text_guidance_input_item(
-                build_stop_hook_guidance_text_from_output(&output_text),
-            ))
-        })
+        items
+            .iter()
+            .rev()
+            .filter_map(Value::as_object)
+            .find_map(|row| {
+                let item_type = read_trimmed_string(row.get("type"))
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if !is_bridge_tool_output_item_type(item_type.as_str()) {
+                    return None;
+                }
+                let call_id = read_bridge_function_call_id(row)?;
+                if call_id != *latest_call_id {
+                    return None;
+                }
+                let output = row.get("output")?;
+                if !is_stopless_tool_output_payload(output) {
+                    return None;
+                }
+                let output_text = match output {
+                    Value::String(text) => text.clone(),
+                    other => serde_json::to_string(other).ok()?,
+                };
+                Some(build_responses_text_guidance_input_item(
+                    build_stop_hook_guidance_text_from_output(&output_text),
+                ))
+            })
     });
-    let auto_stop_hook_call_ids: HashSet<String> = latest_stopless_call_id
-        .as_ref()
-        .into_iter()
-        .cloned()
-        .collect();
-    let auto_stop_hook_call_ids: HashSet<String> = auto_stop_hook_call_ids.into_iter().collect();
     let mut normalized = Vec::<Value>::with_capacity(items.len());
+    let mut guidance_injected = false;
     for item in items {
         let Some(row) = item.as_object() else {
             normalized.push(item);
@@ -698,11 +734,7 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
                 continue;
             };
             if is_stop_hook_function_call(row)
-                && !auto_stop_hook_call_ids.contains(call_id.as_str())
-            {
-                continue;
-            }
-            if is_stop_hook_function_call(row) && auto_stop_hook_call_ids.contains(call_id.as_str())
+                && completed_stopless_call_ids.contains(call_id.as_str())
             {
                 continue;
             }
@@ -712,16 +744,24 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
         if is_bridge_tool_output_item_type(item_type.as_str()) {
             let call_id = read_bridge_function_call_id(row).unwrap_or_default();
             if is_stopless_tool_output_payload(row.get("output").unwrap_or(&Value::Null))
-                && !auto_stop_hook_call_ids.contains(call_id.as_str())
+                && completed_stopless_call_ids.contains(call_id.as_str())
             {
+                if !guidance_injected && latest_stopless_call_id.as_deref() == Some(call_id.as_str()) {
+                    if let Some(guidance) = latest_stopless_guidance.clone() {
+                        normalized.push(guidance);
+                    }
+                    guidance_injected = true;
+                }
                 continue;
             }
             if is_stopless_tool_output_payload(row.get("output").unwrap_or(&Value::Null))
-                && auto_stop_hook_call_ids.contains(call_id.as_str())
+                && latest_stopless_call_id.as_deref() == Some(call_id.as_str())
+                && !guidance_injected
             {
                 if let Some(guidance) = latest_stopless_guidance.clone() {
                     normalized.push(guidance);
                 }
+                guidance_injected = true;
                 continue;
             }
         }
@@ -1252,8 +1292,8 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         base_payload.insert("stream".to_string(), Value::Bool(stream));
     }
 
-    let input = normalize_responses_history_items(clone_array(
-        context.as_object().and_then(|row| row.get("input")),
+    let input = collapse_auto_stop_hook_pairs_in_history(normalize_responses_history_items(
+        clone_array(context.as_object().and_then(|row| row.get("input"))),
     ));
     let tools = normalize_responses_tool_definitions(
         payload
@@ -2433,11 +2473,13 @@ mod tests {
     }
 
     #[test]
-    fn resume_preserves_stopless_tool_pairs_in_canonical_continuation_history() {
-        let resumed = resume_responses_conversation_payload(
+    fn prepare_collapses_auto_projected_stopless_pairs_into_guidance_only() {
+        let entry = prepare_responses_conversation_entry(
             &json!({
-                "requestId": "req-stopless-1",
-                "basePayload": { "model": "gpt-5.5", "store": true },
+                "model": "gpt-5.5",
+                "store": true
+            }),
+            &json!({
                 "input": [
                     {
                         "type": "message",
@@ -2463,8 +2505,79 @@ mod tests {
                         "call_id": "call_third_round_2",
                         "name": "exec_command",
                         "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":2,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_third_round_2",
+                        "call_id": "call_third_round_2",
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。\",\"repeatCount\":3,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
                     }
                 ]
+            }),
+        );
+
+        let input = entry.get("input").and_then(Value::as_array).unwrap();
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[0]["type"], json!("message"));
+        assert_eq!(input[1]["type"], json!("message"));
+        let serialized = serde_json::to_string(input).unwrap();
+        assert!(!serialized.contains("reasoningStop"));
+        assert!(!serialized.contains("stop_message_auto"));
+        let guidance = input[1]["content"][0]["text"].as_str().expect("guidance");
+        assert!(guidance.contains("上一轮执行结果：repeatCount=3/3。"));
+        assert!(guidance.contains("继续往下做"));
+        assert!(guidance.contains("stopreason"));
+    }
+
+    #[test]
+    fn resume_does_not_replay_auto_projected_stopless_pairs_from_canonical_history() {
+        let entry = prepare_responses_conversation_entry(
+            &json!({
+                "model": "gpt-5.5",
+                "store": true
+            }),
+            &json!({
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "这是第三轮 stopless 恢复测试" }]
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_third_round_1",
+                        "call_id": "call_third_round_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":1,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "id": "fc_third_round_1",
+                        "call_id": "call_third_round_1",
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续往下做；先把手头能确认的结果拿回来。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_third_round_2",
+                        "call_id": "call_third_round_2",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":2,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "继续执行中" }]
+                    }
+                ]
+            }),
+        );
+
+        let resumed = resume_responses_conversation_payload(
+            &json!({
+                "requestId": "req-stopless-1",
+                "basePayload": entry.get("basePayload").cloned().unwrap_or(Value::Null),
+                "input": entry.get("input").cloned().unwrap_or(Value::Null),
+                "tools": Value::Null
             }),
             "resp-third-round-2",
             &json!({
@@ -2482,23 +2595,29 @@ mod tests {
         let input = payload.get("input").and_then(Value::as_array).unwrap();
         assert_eq!(input.len(), 5);
         assert_eq!(input[0]["type"], json!("message"));
-        assert_eq!(input[1]["type"], json!("function_call"));
-        assert_eq!(input[2]["type"], json!("function_call_output"));
-        assert_eq!(input[3]["type"], json!("function_call"));
-        assert_eq!(input[4]["type"], json!("function_call_output"));
+        assert_eq!(input[1]["type"], json!("message"));
+        assert_eq!(input[2]["type"], json!("function_call"));
+        assert_eq!(input[3]["type"], json!("message"));
         let serialized = serde_json::to_string(input).unwrap();
-        assert!(serialized.contains("call_third_round_1"));
-        assert!(serialized.contains("call_third_round_2"));
-        assert!(serialized.contains("\"function_call_output\""));
+        assert!(!serialized.contains("call_third_round_1"));
+        assert_eq!(input[2]["call_id"], json!("call_third_round_2"));
+        assert_eq!(input[4]["type"], json!("function_call_output"));
+        assert_eq!(input[4]["call_id"], json!("call_third_round_2"));
+        assert!(input[4]["output"]
+            .as_str()
+            .expect("output")
+            .contains("stop_message_auto"));
 
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
         assert_eq!(full_input.len(), 5);
-        assert_eq!(full_input[1]["type"], json!("function_call"));
-        assert_eq!(full_input[2]["type"], json!("function_call_output"));
-        assert_eq!(full_input[3]["type"], json!("function_call"));
+        assert_eq!(full_input[0]["type"], json!("message"));
+        assert_eq!(full_input[1]["type"], json!("message"));
+        assert_eq!(full_input[2]["type"], json!("function_call"));
+        assert_eq!(full_input[3]["type"], json!("message"));
         assert_eq!(full_input[4]["type"], json!("function_call_output"));
-        assert_eq!(full_input[4]["call_id"], json!("call_third_round_2"));
+        let full_input_serialized = serde_json::to_string(full_input).unwrap();
+        assert!(!full_input_serialized.contains("call_third_round_1"));
     }
 
     #[test]
@@ -2506,11 +2625,13 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"continuationPrompt\":\"继续推进当前任务。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
         );
-        assert!(text.contains("上一轮执行结果：repeatCount=1；reasonCode=stop_schema_missing；missingFields=stopreason, reason, next_step。"));
-        assert!(text.contains("继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"));
+        assert_eq!(text, "继续执行，完成既定目标。");
+        assert!(!text.contains("上一轮执行结果"));
+        assert!(!text.contains("missingFields"));
+        assert!(!text.contains("按下面 schema 补齐缺失字段"));
         assert!(!text.contains("如果任务还没完成，不要停，继续执行当前任务"));
-        assert!(text.contains("收尾时至少带上这些字段：stopreason, reason, next_step"));
-        assert!(text.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+        assert!(!text.contains("收尾时至少带上这些字段：stopreason, reason, next_step"));
+        assert!(!text.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
     }
 
     #[test]
