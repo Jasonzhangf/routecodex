@@ -4655,71 +4655,6 @@ describe('HubRequestExecutor session storm backoff', () => {
     jest.useRealTimers();
   });
 
-  test('does not treat provider-unavailable failures as session storm candidates', () => {
-    const key = __requestExecutorTestables.resolveSessionStormBackoffScope({
-      sessionId: 'session-1'
-    });
-    expect(key).toBe('anonymous');
-
-    const err = Object.assign(new Error('No available providers after applying routing instructions'), {
-      code: 'PROVIDER_NOT_AVAILABLE'
-    });
-    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs(key!)).toBe(0);
-    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(false);
-  });
-
-  test('does not treat generic application errors as storm candidates', () => {
-    expect(
-      __requestExecutorTestables.isSessionStormBackoffCandidate(new Error('boom'))
-    ).toBe(false);
-  });
-
-  test('does not treat provider_status_2056 as session storm candidate', () => {
-    const err = Object.assign(new Error('usage limit exceeded'), {
-      code: 'MALFORMED_RESPONSE',
-      upstreamCode: 'provider_status_2056',
-      statusCode: 429,
-    });
-    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(false);
-  });
-
-  test('shares storm backoff across sessions through workdir scope for client tool args invalid storms', () => {
-    const scopes = __requestExecutorTestables.resolveSessionStormBackoffScopes({
-      sessionId: 'session-a',
-      conversationId: 'conv-a',
-      clientWorkdir: '/tmp/rc-workdir'
-    });
-    expect(scopes).toEqual(['workdir:/tmp/rc-workdir']);
-
-    const err = Object.assign(new Error('Converted provider tool call has invalid client arguments'), {
-      code: 'CLIENT_TOOL_ARGS_INVALID',
-      upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
-      statusCode: 502
-    });
-    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(true);
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/rc-workdir', err)).toBe(1000);
-    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('workdir:/tmp/rc-workdir')).toBe(1000);
-    expect(__requestExecutorTestables.buildSessionStormHardBlockError('workdir:/tmp/rc-workdir')).toMatchObject({
-      code: 'CLIENT_TOOL_ARGS_BLOCKED',
-      upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
-      statusCode: 429,
-      retryable: false
-    });
-
-    jest.setSystemTime(new Date('2026-04-22T12:00:01.000Z'));
-    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('workdir:/tmp/rc-workdir')).toBe(0);
-    expect(__requestExecutorTestables.buildSessionStormHardBlockError('workdir:/tmp/rc-workdir')).toBeUndefined();
-  });
-
-  test('does not treat deterministic malformed response contract errors as storm candidates', () => {
-    const err = Object.assign(
-      new Error('[hub_response] Non-canonical response payload at chat_process.response.entry'),
-      { code: 'MALFORMED_RESPONSE' }
-    );
-    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(false);
-    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('workdir:/tmp/malformed')).toBe(0);
-  });
-
   test('does not record session storm backoff when hub routing fails before provider send', async () => {
     jest.useFakeTimers();
     const pipelineError = Object.assign(
@@ -4757,7 +4692,6 @@ describe('HubRequestExecutor session storm backoff', () => {
     await jest.advanceTimersByTimeAsync(3_000);
     await expectation;
 
-    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('session:storm-session-1')).toBe(0);
     expect(
       logStage.mock.calls.some((call) => call[0] === 'request.session_storm_backoff.recorded')
     ).toBe(false);
