@@ -38,13 +38,3 @@ export type ProviderFailureOutcome = {
   recoverable: boolean;
   affectsHealth: boolean;
 };
-
-export type ProviderFailureStage =
-  | 'provider.runtime_resolve'
-  | 'provider.send'
-  | 'host.response_contract'
-  | 'provider.followup'
-  | 'provider.sse_decode'
-  | 'provider.http'
-  | 'provider.runtime.init'
-  | 'provider.responses';

@@ -20,6 +20,7 @@
   - `classify_error_err_03_runtime_from_error_err_02_host` 已物理删除，Error Pipeline contract 测试同步去掉该 owner 断言。
   - `ErrorErr02HostCaptured` 类型 import 已从 `provider-failure-policy-impl.ts` 删除。
   - `ProviderFailureAction` 已从 `provider-failure-policy.ts` 删除，`ProviderFailureActionPlan.action` 直接内联为联合类型。
+  - `ProviderFailureStage` 已从 `provider-failure-policy.ts` 删除，属于空导出收口。
 
 # 2026-06-27 retry reselection helper commit slice
 
