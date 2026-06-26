@@ -396,8 +396,19 @@ export function resolveProviderFailureClassification(args: {
     return 'recoverable';
   }
 
-  if (has2013Signal && !isMalformedProviderBusiness2013) {
-    return 'special_400';
+  if (
+    has2013Signal
+    && !isMalformedProviderBusiness2013
+    && (
+      reason.includes('当前请求量较高')
+      || reason.includes('请稍后重试')
+      || reason.includes('traffic saturation')
+      || reason.includes('rate limited')
+      || reason.includes('too many requests')
+      || reason.includes('token plan')
+    )
+  ) {
+    return 'recoverable';
   }
 
   if (

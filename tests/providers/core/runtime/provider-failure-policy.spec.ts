@@ -340,6 +340,49 @@ describe('provider failure policy ssot', () => {
     }
   });
 
+  it('classifies invalid_request_error tool-history 2013 as health-neutral unrecoverable local errors', () => {
+    const error = Object.assign(
+      new Error('invalid params, tool call result does not follow tool call (2013)'),
+      {
+        statusCode: 400,
+        code: 'HTTP_400',
+        response: {
+          data: {
+            error: {
+              message: 'invalid params, tool call result does not follow tool call (2013)',
+              type: 'invalid_request_error',
+              code: 'HTTP_400'
+            }
+          }
+        }
+      }
+    );
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message
+    });
+
+    expect(classification).toBe('unrecoverable');
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message,
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'unrecoverable',
+      affectsHealth: false,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
+    }));
+  });
+
   it('classifies provider business error 2013 context overflow as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('provider business error: context_length_exceeded'), {
       code: 'MALFORMED_RESPONSE',
@@ -414,6 +457,49 @@ describe('provider failure policy ssot', () => {
       errorCode: 'HTTP_429_2013',
       upstreamCode: 'HTTP_429_2013',
       reason: 'provider business error 2013',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: true,
+      blockingRecoverable: true,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'exclude_and_reroute'
+    }));
+  });
+
+  it('RED: classifies non-malformed PROVIDER_STATUS_2013 traffic saturation as recoverable and health-affecting', () => {
+    const error = Object.assign(new Error('Token Plan 当前请求量较高，请稍后重试'), {
+      code: 'PROVIDER_STATUS_2013',
+      upstreamCode: 'PROVIDER_STATUS_2013',
+      statusCode: 200
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 200,
+      errorCode: 'PROVIDER_STATUS_2013',
+      upstreamCode: 'PROVIDER_STATUS_2013',
+      reason: 'Token Plan 当前请求量较高，请稍后重试'
+    });
+
+    expect(classification).toBe('recoverable');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      error,
+      errorCode: 'PROVIDER_STATUS_2013',
+      upstreamCode: 'PROVIDER_STATUS_2013',
+      statusCode: 200,
+      classification
+    })).toBe(false);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 200,
+      errorCode: 'PROVIDER_STATUS_2013',
+      upstreamCode: 'PROVIDER_STATUS_2013',
+      reason: 'Token Plan 当前请求量较高，请稍后重试',
       attempt: 1,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
