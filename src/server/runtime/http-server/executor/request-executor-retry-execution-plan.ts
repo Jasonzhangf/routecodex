@@ -1,10 +1,7 @@
 import {
   isHostRequestExecutorErrorStage,
   resolveRequestExecutorProviderErrorClassification,
-  shouldApplyProviderTransportBackoff,
 } from './request-executor-provider-failure.js';
-import {
-} from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
   resolveRequestExecutorNativeRetryPolicy,
 } from './request-executor-native-retry-policy.js';
@@ -215,11 +212,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
   const retryExcludedCurrentProvider = exclusionPlan.excludedCurrentProvider;
-  const shouldSkipBackoffForImmediate429Reroute =
-    retryExcludedCurrentProvider
-    && !holdOnLastAvailable429
-    && hasAlternativeCandidate;
-
   const hasTerminalAlternativeCandidate =
     !holdOnLastAvailable429
     && hasAlternativeCandidate

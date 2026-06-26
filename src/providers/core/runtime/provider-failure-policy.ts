@@ -11,8 +11,6 @@ export {
   resolveProviderFailureRetryEligibility,
   resolveProviderFailureExclusionDecision,
   shouldKeepProviderExcludedForNextAttempt,
-  shouldDirectReturnUnrecoverableWithoutForcedExclusion,
-  shouldCancelUnrecoverableRerouteWithoutAlternative,
   shouldSuppressForcedProviderExclusion,
   isProviderFailureHealthNeutral,
   extractProviderFailureStatusCode,

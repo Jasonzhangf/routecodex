@@ -982,24 +982,6 @@ export function shouldKeepProviderExcludedForNextAttempt(args: {
   return args.hasAlternativeCandidate;
 }
 
-export function shouldDirectReturnUnrecoverableWithoutForcedExclusion(args: {
-  classification?: ProviderFailureClassification;
-  excludedCurrentProvider: boolean;
-  retryable?: boolean;
-}): boolean {
-  return args.classification === 'unrecoverable' && !args.excludedCurrentProvider && args.retryable !== true;
-}
-
-export function shouldCancelUnrecoverableRerouteWithoutAlternative(args: {
-  classification?: ProviderFailureClassification;
-  switchAction: ProviderFailureRetryAction;
-  hasAlternativeCandidate: boolean;
-}): boolean {
-  return args.classification === 'unrecoverable'
-    && args.switchAction === 'reroute_explicit_alternative'
-    && !args.hasAlternativeCandidate;
-}
-
 export function shouldSuppressForcedProviderExclusion(args: {
   classification?: ProviderFailureClassification;
   stage?: string;
