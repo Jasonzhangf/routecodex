@@ -164,21 +164,17 @@ function stripServertoolRuntimeControlMetadataFields(metadata: Record<string, un
   }
 }
 
-function readMetadataCenterFrom(value: Record<string, unknown>): MetadataCenter | undefined {
-  return MetadataCenter.read(value);
-}
-
 function mergeNestedMetadataCenters(
   target: Record<string, unknown>,
   sources: Array<Record<string, unknown>>
 ): void {
   const centers = sources
-    .map(readMetadataCenterFrom)
+    .map((value) => MetadataCenter.read(value))
     .filter((center): center is MetadataCenter => Boolean(center));
   if (!centers.length) {
     return;
   }
-  const merged = new MetadataCenter();
+  const merged = MetadataCenter.attach(target);
   for (const center of centers) {
     const snapshot = center.snapshot();
     for (const [key, slot] of Object.entries(snapshot.requestTruth)) {
@@ -252,7 +248,6 @@ function mergeNestedMetadataCenters(
       );
     }
   }
-  MetadataCenter.bind(target, merged);
 }
 
 export function extractFollowupSessionHeaders(

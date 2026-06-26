@@ -273,6 +273,20 @@
   - 这次删除的是 dead helper 和重复写回，不是入口 truth。
   - `MetadataCenter.runtime_control.stopMessageEnabled` 仍是活字段，不能整体删除。
 
+# 2026-06-26 metadata center single-center followup merge slice 6
+
+- 本轮确认并修掉一处真正违背 contract 的实现：
+  - `src/server/runtime/http-server/executor/servertool-followup-metadata.ts` 原先会把多个已绑定 center 的 snapshot 合并到一个新建 `MetadataCenter` 再 bind 回 target。
+  - 这直接违反“同一个 request 只有一个 MetadataCenter，后续阶段不得新建第二个 center 再 merge”的目标。
+- 处理方式：
+  - 让 `mergeNestedMetadataCenters(...)` 直接附着到目标 target 的现有 center 上，再写入合并结果。
+  - 删除显式 `new MetadataCenter()` + `MetadataCenter.bind(target, merged)` 的 second-center 路径。
+- 验证：
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/executor/servertool-followup-metadata.spec.ts` 通过。
+- 结论：
+  - 这是按“单 request 一个 center”方向前进的有效收口。
+  - 仍需继续审后续阶段是否还有 request truth / continuation_context 的越权回填或 top-level 镜像残留。
+
 # 2026-06-26 5555 continuation 顺序审计 slice 2
 
 - Jason 最新边界已锁：
