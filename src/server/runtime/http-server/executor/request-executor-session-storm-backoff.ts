@@ -105,52 +105,11 @@ export function isClientToolArgsInvalidStorm(error: unknown): boolean {
   );
 }
 
-function isDeterministicMalformedResponseStorm(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-  const record = error as { code?: unknown; upstreamCode?: unknown; message?: unknown; reason?: unknown };
-  const code = normalizeCodeKey(record.code);
-  const upstreamCode = normalizeCodeKey(record.upstreamCode);
-  const message = typeof record.message === 'string' ? record.message.toLowerCase() : '';
-  const reason = typeof record.reason === 'string' ? record.reason.toLowerCase() : '';
-  if (code !== 'MALFORMED_RESPONSE' && upstreamCode !== 'MALFORMED_RESPONSE') {
-    return false;
-  }
-  return (
-    message.includes('[hub_response] non-canonical response payload')
-    || message.includes('[hub_response] failed to canonicalize response payload')
-    || message.includes('[servertool] tool_call missing required id')
-    || reason.includes('missing_tool_call_id')
-    || reason.includes('tool_call missing required id')
-  );
-}
-
-function isDeterministicNoProviderStorm(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-  const record = error as { code?: unknown; upstreamCode?: unknown; message?: unknown };
-  const code = normalizeCodeKey(record.code);
-  const upstreamCode = normalizeCodeKey(record.upstreamCode);
-  const message = typeof record.message === 'string' ? record.message.toLowerCase() : '';
-  if (code !== 'PROVIDER_NOT_AVAILABLE' && upstreamCode !== 'PROVIDER_NOT_AVAILABLE') {
-    return false;
-  }
-  return (
-    message.includes('no available providers after applying routing instructions')
-    || message.includes('no provider target selected')
-  );
-}
-
 export function isSessionStormBackoffCandidate(error: unknown): boolean {
   if (error == null) {
     return false;
   }
   if (isClientToolArgsInvalidStorm(error)) {
-    return true;
-  }
-  if (isDeterministicMalformedResponseStorm(error)) {
     return true;
   }
   const status = extractStatusCodeFromError(error);
@@ -184,9 +143,6 @@ export function resolveSessionStormBackoffBaseMsForError(error?: unknown): numbe
   if (isClientToolArgsInvalidStorm(error)) {
     return resolveSessionStormBackoffBaseMs();
   }
-  if (isDeterministicMalformedResponseStorm(error)) {
-    return resolveSessionStormBackoffBaseMs();
-  }
   return resolveSessionStormBackoffBaseMs();
 }
 
@@ -200,9 +156,6 @@ export function resolveSessionStormHardBlockMsForError(error?: unknown): number 
 }
 
 export function resolveSessionStormBackoffMaxMsForError(error?: unknown): number {
-  if (isDeterministicMalformedResponseStorm(error)) {
-    return 3_000;
-  }
   return resolveSessionStormBackoffMaxMs();
 }
 

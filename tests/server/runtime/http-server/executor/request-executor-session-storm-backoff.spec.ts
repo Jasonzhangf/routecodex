@@ -38,6 +38,16 @@ describe('request-executor session storm backoff', () => {
     expect(consumeSessionStormBackoffMs('session:hard-block', clientToolArgsError)).toBe(1000);
   });
 
+  test('does not treat malformed response contract errors as session storm candidates', () => {
+    const malformed = Object.assign(
+      new Error('[hub_response] Non-canonical response payload at chat_process.response.entry'),
+      { code: 'MALFORMED_RESPONSE' }
+    );
+
+    expect(isSessionStormBackoffCandidate(malformed)).toBe(false);
+    expect(peekSessionStormBackoffWaitMs('session:malformed')).toBe(0);
+  });
+
   test('does not treat provider availability errors as session storm candidates', () => {
     const provider429 = Object.assign(new Error('HTTP 429: upstream rate limited'), {
       statusCode: 429,

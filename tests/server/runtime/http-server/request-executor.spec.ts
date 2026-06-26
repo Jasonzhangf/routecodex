@@ -4711,20 +4711,13 @@ describe('HubRequestExecutor session storm backoff', () => {
     expect(__requestExecutorTestables.buildSessionStormHardBlockError('workdir:/tmp/rc-workdir')).toBeUndefined();
   });
 
-  test('treats deterministic malformed response contract errors as storm candidates and uses unified cycle', () => {
+  test('does not treat deterministic malformed response contract errors as storm candidates', () => {
     const err = Object.assign(
       new Error('[hub_response] Non-canonical response payload at chat_process.response.entry'),
       { code: 'MALFORMED_RESPONSE' }
     );
-    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(true);
-
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(1000);
-    jest.setSystemTime(new Date('2026-04-22T12:00:01.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(2000);
-    jest.setSystemTime(new Date('2026-04-22T12:00:03.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(3000);
-    jest.setSystemTime(new Date('2026-04-22T12:00:06.000Z'));
-    expect(__requestExecutorTestables.consumeSessionStormBackoffMs('workdir:/tmp/malformed', err)).toBe(1000);
+    expect(__requestExecutorTestables.isSessionStormBackoffCandidate(err)).toBe(false);
+    expect(__requestExecutorTestables.peekSessionStormBackoffWaitMs('workdir:/tmp/malformed')).toBe(0);
   });
 
   test('does not record session storm backoff when hub routing fails before provider send', async () => {

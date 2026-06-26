@@ -7,8 +7,7 @@
 import {
   describeRetryReason,
   isPromptTooLongError,
-  shouldRetryProviderError,
-  waitBeforeRetry
+  shouldRetryProviderError
 } from '../executor-provider.js';
 import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 
@@ -16,8 +15,7 @@ import { normalizeKnownProviderError } from '../../../../providers/core/runtime/
 export {
   describeRetryReason,
   isPromptTooLongError,
-  shouldRetryProviderError,
-  waitBeforeRetry
+  shouldRetryProviderError
 };
 
 // Retryable error detection for SSE responses
