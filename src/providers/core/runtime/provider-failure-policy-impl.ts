@@ -352,6 +352,14 @@ export function resolveProviderFailureClassification(args: {
     return 'special_400';
   }
 
+  const isHttp429Business2013 =
+    statusCode === 429
+    && has2013Signal
+    && !isMalformedProviderBusiness2013;
+  if (isHttp429Business2013) {
+    return 'recoverable';
+  }
+
   if (has2013Signal && !isMalformedProviderBusiness2013) {
     return 'special_400';
   }

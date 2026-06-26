@@ -307,7 +307,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies HTTP_429_2013 as special_400 to avoid pool eviction', () => {
+  it('classifies HTTP_429_2013 as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('provider business error 2013'), {
       code: 'HTTP_429_2013',
       upstreamCode: 'HTTP_429_2013',
@@ -322,14 +322,31 @@ describe('provider failure policy ssot', () => {
       reason: 'provider business error 2013'
     });
 
-    expect(classification).toBe('special_400');
+    expect(classification).toBe('recoverable');
     expect(isProviderFailureHealthNeutral({
       stage: 'provider.send',
       errorCode: 'HTTP_429_2013',
       upstreamCode: 'HTTP_429_2013',
       statusCode: 429,
       classification
-    })).toBe(true);
+    })).toBe(false);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 429,
+      errorCode: 'HTTP_429_2013',
+      upstreamCode: 'HTTP_429_2013',
+      reason: 'provider business error 2013',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: true,
+      blockingRecoverable: true,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'exclude_and_reroute'
+    }));
   });
 
   it('classifies local network error ECONNRESET as recoverable via unified catalog', () => {
