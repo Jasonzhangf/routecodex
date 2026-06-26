@@ -24,19 +24,12 @@ import {
 } from './provider-error-catalog.js';
 import { DEEPSEEK_UNRECOVERABLE_CODES } from '../contracts/deepseek-provider-contract.js';
 
-type ProviderFailureAction =
-  | 'direct_return'
-  | ProviderFailureRetryAction;
-
 // Phase 2: SSOT composition - provider-agnostic catalog + provider-specific contracts.
 const UNRECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
   ...PROVIDER_UNRECOVERABLE_CODES,
   ...DEEPSEEK_UNRECOVERABLE_CODES
 ]);
 const NETWORK_ERROR_CODE_SET: ReadonlySet<string> = PROVIDER_NETWORK_CODES;
-const BLOCKING_RECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
-  ...PROVIDER_BLOCKING_RECOVERABLE_CODES
-]);
 
 export function normalizeProviderFailureCodeKey(value: unknown): string | undefined {
   if (typeof value !== 'string') {
