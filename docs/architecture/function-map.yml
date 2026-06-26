@@ -207,9 +207,9 @@ owners:
 
   - feature_id: hub.servertool_stopless_cli_continuation
     status: active
-    summary: "stop_message_auto current-turn CLI continuation planning"
+    summary: "stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary"
     owner_kind: rust_ssot
-    owner_scope: "stop_message_auto current-turn tool_output continuation planning"
+    owner_scope: "Chat Process-owned stopless lifecycle: response-side stop/reasoningStop schema judgment plus CLI/terminal normalization, request-side CLI result restore/guidance rewrite/schema-contract reinjection"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
     canonical_types:
       - StoplessOrchestrationPlanInput
@@ -250,6 +250,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
+      - "Stopless is not an outbound owner and not an SSE owner. Request-side stopless belongs to the ReqChatProcess entry boundary after `/v1/responses` continuation restore and before normal request governance; response-side stopless belongs to the RespChatProcess exit boundary before continuation save and before RespOutbound."
       - "servertool-core owns stopless CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline."
       - "req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts."
       - "Stopless is a dual-gate stop contract: `finish_reason=stop` is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard."
@@ -268,7 +269,7 @@ owners:
       - "NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only."
       - "NoSchema stopless progression must advance `used/repeatCount` from current request tool_output/runtime metadata truth, not through file persistence or tmux/sessionDir fallback."
       - "Once the standard `reasoningStop` tool is exposed on the request, legacy shell-projected stop history such as `exec_command(cmd=\"reasoningStop\")`, `reasoning_stop`, and their paired `command not found` tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests."
-      - "Model side must stay unaware of stopless identity, but runtime stopless CLI projection still requires active request-truth `sessionId/requestId` flags for same-session loop counting; `sessionDir` and persisted writeback remain forbidden."
+      - "Model side must stay unaware of stopless identity, but runtime stopless CLI projection still requires active request-truth `sessionId/requestId` flags for same-session loop counting; `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only allowed progression truth, and `sessionDir`/persisted writeback are forbidden."
       - "TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows."
       - "Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter."
       - "`responsesRequestContext.sessionId/conversationId` is continuation-only context for `/v1/responses`; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material."
@@ -858,7 +859,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
       - sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts
-      - sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts
       - docs
     forbidden_paths:
       - src/providers
@@ -866,7 +866,8 @@ owners:
       - sharedmodule/llmswitch-core/src/servertool/handlers
     required_tests:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-      - tests/servertool/stop-message-auto.goal-default.spec.ts
+      - tests/servertool/loop-state-block.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -1019,7 +1020,6 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts
-      - sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts
       - sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts
       - sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.ts
       - docs
@@ -1242,12 +1242,12 @@ owners:
     summary: "Hub req-04 Rust bridge that applies `VrRoute04SelectedTarget` to `HubReqOutbound05ProviderSemantic`"
     owner_kind: rust_ssot
     owner_scope: "VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic typed bridge and provider-neutral outbound semantic handoff"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
     canonical_types:
       - VrRoute04SelectedTarget
       - HubReqOutbound05ProviderSemantic
     canonical_builders:
-      - run_hub_req_outbound_05_provider_semantic_entrypoint
+      - build_hub_req_outbound_05_from_vr_route_04_selected_target
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
@@ -1310,6 +1310,48 @@ owners:
     migration_target: rust
     notes:
       - "This broader surface names the real second builder-bearing Rust file; keep the owner truthful instead of forcing a file-scoped singleton that the compile gate cannot prove."
+
+  - feature_id: vr.metadata_center_surface
+    status: active
+    summary: "Virtual Router read-only metadata-center-backed route surface"
+    owner_kind: rust_ssot
+    owner_scope: "Virtual Router read-only metadata-center-backed route scope surface for route hint, session scope, and stop-message routing reads"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs
+    canonical_types:
+      - MetadataCenter
+      - MetaRoute03RouteCarrier
+    canonical_builders:
+      - resolve_routing_state_key
+      - resolve_session_scope
+      - resolve_stop_message_scope
+      - is_server_tool_followup_request
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs
+      - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - tests/servertool/virtual-router-servertool-routing.spec.ts
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+      - docs
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - src/client
+      - sharedmodule/llmswitch-core/src/router
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - tests/servertool/virtual-router-servertool-routing.spec.ts
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-owner-queryability
+      - npm run verify:vr-no-ts-runtime
+    migration_target: rust
+    notes:
+      - "VR reads route scope from the request-scoped MetadataCenter snapshot and its typed reader only; it must not restore route truth from `__rt`, flat metadata, or a separate VR-local store."
+      - "Route selection still outputs `VrRoute04SelectedTarget` through `hub.route_selection_bridge`; this owner only covers the read-only metadata surface used by VR decisions."
 
   - feature_id: vr.route_retry_pin_surface
     status: active
@@ -1441,6 +1483,7 @@ owners:
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
       - npm run build:base
     migration_target: rust
     notes:
@@ -1448,6 +1491,7 @@ owners:
       - "Host may extract route-scoped tier shape from runtime config and pass it to Rust unchanged; this is config plumbing, not planner ownership."
       - "Unknown target and empty default-pool are explicit contract states, never fallback."
       - "Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list."
+      - "Ordinary route-pool removal must not project terminal no-provider while default pool still retains its last provider; this guard is part of the Rust-owned plan/consumer contract, not a handler/executor-local reinterpretation."
 
   - feature_id: quota.unified_control_surface
     status: active
@@ -1510,13 +1554,16 @@ owners:
     required_gates:
       - npm run verify:vr-no-ts-runtime
       - npm run verify:architecture-ci
+      - npm run verify:architecture-mainline-call-map
       - npm run verify:llmswitch-rustification-audit
+      - npm run verify:vr-route-availability-default-floor
     migration_target: rust
     notes:
       - "non-empty routing invariant belongs to Rust Virtual Router selection only."
       - "singleton/default hold decision and cooldown-hint parsing belong to Rust Virtual Router; TS executor may only consume native output and perform wait/log IO."
       - "do not patch empty-pool behavior in handlers, adapters, provider TS runtime, or executor-local policy code."
       - "route order is requested route -> inserted tools route when required -> default; search/tool path must stay `search -> tools -> default`, and if default pool has providers routing must not return empty."
+      - "Before excluding/removing an ordinary-route candidate, runtime truth must preserve the default-pool last-provider floor; `forwarder_no_available_target` or route-local empty-pool is non-terminal while default-pool availability remains."
 
   - feature_id: vr.provider_forwarder_runtime
     status: active
@@ -1628,9 +1675,9 @@ owners:
 
   - feature_id: hub.metadata_center_mainline
     status: active
-    summary: "request-scoped metadata center registry and response closeout release remain on one request-local owner"
+    summary: "single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout"
     owner_kind: transitional
-    owner_scope: "request-scoped metadata truth/provenance registry core plus response closeout release; surrounding TS shells may read/write through this owner but do not own the registry state machine"
+    owner_scope: "single request-scoped metadata truth/provenance registry core plus response closeout release; surrounding TS shells may read/write through this owner but must not create a second center or rewrite another family's truth"
     owner_module: src/server/runtime/http-server/metadata-center/metadata-center.ts
     canonical_types:
       - MetaReq01InboundSeeded
@@ -1663,14 +1710,16 @@ owners:
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-metadata-center-manifest-code-sync
+      - npm run verify:architecture-metadata-center-write-boundaries
     migration_target: rust
     notes:
       - "This row now owns the registry core and release edge only; request capture, attempt merge, and servertool adapter projection moved to file-scoped sub-features for queryability."
+      - "The same request-scoped `MetadataCenter` must flow from server inbound through Hub Pipeline and provider/runtime into response closeout; stage-local plain-object mirrors may exist only as thin projections around the same bound center, never as a second truth source."
       - "The machine-readable metadata-center manifest must stay code-bound: every declared family/slot needs matching TS type, state bucket, writer, reader, and release coverage until the owner migrates to Rust."
       - "Closeout release is now a real handler owner path: response closeout must call `releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`, not stay as documentation-only pending state."
       - "First-batch `runtime_control` carrier plumbing now lives in the registry core plus host-side projection reader; stopless followup materialization writes `runtime_control.stopless` through the bound MetadataCenter side-channel with fail-fast binding checks, while broader request-attempt / entry-shell writer migration remains partial."
       - "Current repeated merge/backfill surfaces (`buildHandlerPipelineMetadata`, `finalizeRequestExecutorAttemptMetadata`) are now thin projection surfaces; adapter-context session backfill has been physically deleted."
-      - "`request_truth.sessionId/conversationId` must remain distinct from `continuation_context.responsesRequestContext.*` and from tmux/client attachment scope."
+      - "`request_truth.sessionId/conversationId` are write-once inbound identity facts. They must remain distinct from `continuation_context.responsesRequestContext.*`, must not be restored from continuation history, and must not be derived from tmux/client attachment scope."
       - "Future center must store provenance: writer module, symbol, stage, status, overwrite history."
       - "Retired standalone SSE sniffer helper exports (`inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, `validateSseEventTypeJson`) are physically deleted; the helpers stay Rust-internal under `parseSseEventWithConfigJson` / stream parser exports."
       - "Retired zero-consumer SSE stats/timeout public wrappers (`extractDecodeStatsWithNative`, `resolveSseTimeoutOptionsWithNative`, `extractDecodeStatsJson`, `resolveSseTimeoutOptionsJson`) are physically deleted; live SSE public bridges remain parser/stream/error descriptor/context diagnostics surfaces, not standalone stats/timeout helpers."
@@ -1716,9 +1765,10 @@ owners:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-metadata-center-manifest-code-sync
       - npm run verify:metadata-center-dualwrite-api
+      - npm run verify:architecture-metadata-center-write-boundaries
     migration_target: rust
     notes:
-      - "Execution checklist: docs/goals/metadata-center-dualwrite-dualread-closeout-checklist.md."
+      - "Execution checklist: docs/goals/metadata-center-request-scoped-closeout-plan.md."
       - "Current status is planned because Rust MetadataCenter is still snapshot-read-only for several fields; do not mark anchored until the unified API writes both JS mirror and Rust center."
       - "Pending builders for implementation phase: buildMetadataCenterRustSnapshot, applyMetadataCenterRustWriteResult."
       - "All metadata control writes must go through this API; direct business writes to `runtime_control`, `__rt`, or top-level control projections must be gated and then deleted."
@@ -1750,11 +1800,15 @@ owners:
     required_tests:
       - tests/server/http-server/executor-metadata.spec.ts
       - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-metadata-center-write-boundaries
     migration_target: rust
     notes:
       - "This owner captures request/session/continuation-facing metadata into the request-local carrier; it must not project provider semantics or client response payloads."
+      - "For relay `/v1/responses` resume, this owner may preserve `continuation_context.responsesResume` and bind `runtime_control.routeHint`, but it must not become the effective owner of relay `retryProviderKey` truth."
+      - "The narrow request-capture exception `hasStoplessDirectiveInRequestPayload(...) -> runtime_control.stopMessageEnabled` is an entry-side owner for direct stopless intent only; the later top-level `metadata.stopMessageEnabled` mirror remains transitional projection, not a second truth source."
 
   - feature_id: hub.metadata_center_attempt_merge
     status: active
@@ -1780,12 +1834,15 @@ owners:
     required_tests:
       - tests/server/http-server/executor-metadata.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts
+      - tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
       - "This owner may merge request-local metadata-center state with pipeline result state, but must not recreate legacy flat metadata backfill."
       - "Current implementation also merges center-backed `provider_observation` from pipeline-result/request-local carriers; `target` / `compatibilityProfile` must not be revived as flat request metadata fields."
+      - "Effective relay `/v1/responses` provider pin must be proven on the request-executor path before Hub execution; handler/bridge request shells alone are not sufficient owner evidence for `runtime_control.retryProviderKey`."
+      - "Single-use `runtime_control.preselectedRoute` is currently written by router-direct relay handoff and released here on retry-attempt preparation; TS request-stage transport may carry it, but must not become its semantic owner."
 
   - feature_id: hub.metadata_center_servertool_context
     status: active
@@ -2042,9 +2099,9 @@ owners:
 
   - feature_id: hub.response_post_servertool_client_projection
     status: active
-    summary: "Post-servertool response action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection"
+    summary: "Post-servertool response action planning after HubRespChatProcess03Governed; HubRespOutbound04ClientSemantic is projection-only"
     owner_kind: rust_ssot
-    owner_scope: "Post-servertool response runtime action planning and HubRespChatProcess03Governed to HubRespOutbound04ClientSemantic projection"
+    owner_scope: "Post-servertool response runtime action planning after HubRespChatProcess03Governed; HubRespOutbound04ClientSemantic is projection-only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - HubRespChatProcess03Governed
@@ -2071,13 +2128,13 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - "Post-servertool runtime action planning, missing-executor error descriptors, and client projection decisions belong to Rust; TS provider-response may only execute IO callbacks, pass payload/entry endpoint/request id/same-request response semantics into native, and throw Rust-described errors."
+      - "Post-servertool runtime action planning, missing-executor error descriptors, and response-side normalization/removal decisions belong to Chat Process Rust; HubRespOutbound04ClientSemantic may only project finalized truth and TS provider-response may only execute IO callbacks, pass payload/entry endpoint/request id/same-request response semantics into native, and throw Rust-described errors."
 
   - feature_id: hub.response_responses_client_projection
     status: active
-    summary: "OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore"
+    summary: "OpenAI Responses client-visible payload projection for JSON body and SSE frames after HubRespChatProcess03Governed normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore"
     owner_kind: rust_ssot
-    owner_scope: "OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore"
+    owner_scope: "OpenAI Responses client-visible payload projection for JSON body and SSE frames after Chat Process normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
     canonical_types:
       - HubRespOutbound04ClientSemantic
@@ -3574,7 +3631,6 @@ owners:
       - recordResponsesResponseForHttp
       - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
-      - clearResponsesConversationByRequestIdForHttpProjection
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
@@ -3600,6 +3656,7 @@ owners:
       - "Responses handler must not locally assemble protocol-scoped pipeline metadata (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream-intent carrier); that request metadata build must stay behind the single request bridge surface."
       - "Responses handler must not locally read/strip request-body `metadata` or introspect `clientAbortSignal`; request-body preprocessing and abort-signal extraction must stay behind the single request bridge surface."
       - "Protocol truth is write-once at request entry and VR selection; handler/bridge code must only read MetadataCenter truth and must not infer `providerProtocol` / `clientProtocol` from payload shape or endpoint fallbacks."
+      - "Current repo truth: `providerProtocol` is still transported primarily as a top-level protocol-shell field on request metadata / normalized request; this bridge must not be documented as an owner of `runtime_control.providerProtocol` until a real center-backed write path exists."
 
   - feature_id: hub.chat_process_responses_continuation
     status: active
@@ -3617,16 +3674,17 @@ owners:
       - ChatProcRespContinuation07CanonicalSaved
       - ChatProcRespContinuation08Released
     canonical_builders:
-      - recordResponsesResponseForHttpProjection
-      - buildPersistResponsesRequestContextForHttp
+      - resumeResponsesConversation
+      - materializeLatestResponsesContinuationByScope
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
       - src/modules/llmswitch/bridge
       - docs/architecture
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+      - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/servertool-cli-projection.spec.ts
     forbidden_paths:
@@ -3636,7 +3694,7 @@ owners:
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+      - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
@@ -3644,8 +3702,10 @@ owners:
       - npm run verify:architecture-mainline-manifest-sync
     migration_target: rust
     notes:
+      - "This continuation block is `/v1/responses`-only. Other protocols must skip it entirely and continue through their normal Chat Process path."
       - "Request-side continuation restore is positioned after `HubReqInbound02Standardized` and before `HubReqChatProcess03Governed`."
       - "Response-side continuation save is positioned after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`."
+      - "Req/Resp inbound and outbound are normalization/projection-only nodes; all continuation, tool governance, and semantic recovery must happen in Chat Process before save/restore."
       - "Tool governance, tool result governance, stopless hook restore/projection, and CLI result restoration belong to Chat Process. Handler/SSE code must not implement them."
       - "SSE is transport-only. No continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic may live in `handler-response-sse.ts` or `responses-sse-bridge.ts`."
       - "Responses handler/bridge may prepare request body and continuation carrier IO, but must not synthesize stopless instructions or request-side governance text. Chat Process Rust remains the semantic owner."
@@ -3709,21 +3769,18 @@ owners:
       - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, finish_reason derivation, protocol-hint parsing, or `__sse_responses` dispatch-entry detection; those stay behind the dedicated SSE owner or disappear with TS semantic deletion."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
-    summary: "/v1/responses response lifecycle bridge uses one opaque continuation/conversation facade only; protocol semantics stay in Hub Pipeline/native owner"
+    summary: "/v1/responses response bridge now owns only transport-facing close/clear helpers; continuation save truth lives in core Chat Process closeout"
     owner_kind: ts_bridge
-    owner_scope: "/v1/responses response lifecycle bridge uses one opaque continuation/conversation facade only; protocol semantics stay in Hub Pipeline/native owner"
+    owner_scope: "/v1/responses response bridge now owns only transport-facing close/clear helpers; continuation save truth lives in core Chat Process closeout"
     owner_module: src/modules/llmswitch/bridge/responses-response-bridge.ts
     canonical_types:
       - ResponsesResponseLifecycleBridgeFacade
     canonical_builders:
-      - captureResponsesRequestContextForHttpProjection
       - rebindResponsesConversationRequestIdForHttp
-      - clearResponsesConversationByRequestIdForHttpProjection
-      - finalizeResponsesConversationRequestRetentionForHttp
-      - persistResponsesConversationLifecycleForHttp
       - resolveResponsesConversationClearReasonForHttp
       - shouldClearResponsesConversationOnClientCloseForHttp
       - shouldClearResponsesConversationOnFailureForHttp
+      - clearResponsesConversationRequestIdsForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-response-bridge.ts
       - src/server/handlers/handler-response-sse.ts
@@ -3738,7 +3795,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+      - tests/red-tests/server_responses_sse_surface_single_owner.test.ts
     required_gates:
       - npm run verify:server-function-map-boundary
       - npm run verify:function-map-compile-gate
