@@ -1,7 +1,5 @@
 import {
-  resolveProviderFailureRetryEligibility
-} from '../../../../providers/core/runtime/provider-failure-policy.js';
-import {
+  resolveProviderFailureActionPlan,
   resolveProviderFailureClassification
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
@@ -16,8 +14,6 @@ import type {
   RequestExecutorProviderErrorStage,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
-
-const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
 
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
@@ -90,7 +86,7 @@ export function resolveProviderRetryEligibilityPlan(args: {
   contextOverflowRetries?: number;
   maxContextOverflowRetries?: number;
 }): ProviderRetryEligibilityPlan {
-  const eligibility = resolveProviderFailureRetryEligibility({
+  const eligibility = resolveProviderFailureActionPlan({
     error: args.error,
     stage: args.stage,
     statusCode: args.retryError.statusCode,
@@ -105,12 +101,7 @@ export function resolveProviderRetryEligibilityPlan(args: {
       upstreamCode: args.retryError.upstreamCode,
       reason: args.retryError.reason
     }),
-    attempt: args.attempt,
-    maxAttempts: args.maxAttempts,
     promptTooLong: args.promptTooLong,
-    contextOverflowRetries: args.contextOverflowRetries,
-    maxContextOverflowRetries: args.maxContextOverflowRetries ?? MAX_CONTEXT_OVERFLOW_RETRIES,
-    stageOutsideProviderFailurePolicy: args.stage === 'host.response_contract'
   });
   return {
     shouldRetry: eligibility.shouldRetry,

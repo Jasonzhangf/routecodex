@@ -2,8 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   isProviderFailureHealthNeutral,
   resolveProviderFailureActionPlan,
-  resolveProviderFailureClassification,
-  resolveProviderFailureRetryEligibility
+  resolveProviderFailureClassification
 } from '../../../../src/providers/core/runtime/provider-failure-policy.js';
 
 describe('provider failure policy ssot', () => {
@@ -207,7 +206,7 @@ describe('provider failure policy ssot', () => {
       action: 'direct_return',
       decisionLabel: 'direct_return'
     }));
-    expect(resolveProviderFailureRetryEligibility({
+    expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
       reason,
@@ -767,7 +766,7 @@ describe('provider failure policy ssot', () => {
       decisionLabel: 'exclude_and_reroute'
     }));
 
-    expect(resolveProviderFailureRetryEligibility({
+    expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
       statusCode: 400,
@@ -784,7 +783,7 @@ describe('provider failure policy ssot', () => {
       shouldRetry: true
     }));
 
-    expect(resolveProviderFailureRetryEligibility({
+    expect(resolveProviderFailureActionPlan({
       error: new Error('context exceeded'),
       stage: 'provider.send',
       statusCode: 400,

@@ -21,6 +21,7 @@
   - `ErrorErr02HostCaptured` 类型 import 已从 `provider-failure-policy-impl.ts` 删除。
   - `ProviderFailureAction` 已从 `provider-failure-policy.ts` 删除，`ProviderFailureActionPlan.action` 直接内联为联合类型。
   - `ProviderFailureStage` 已从 `provider-failure-policy.ts` 删除，属于空导出收口。
+  - `resolveProviderFailureRetryEligibility` 已从 policy 面删除，executor 改为直读 `resolveProviderFailureActionPlan`。
 
 # 2026-06-27 retry reselection helper commit slice
 

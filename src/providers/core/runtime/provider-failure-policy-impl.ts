@@ -10,7 +10,6 @@ import type {
   ProviderFailureClassification,
   ProviderFailureRetryAction,
   ProviderFailureActionPlan,
-  ProviderFailureRetryEligibilityPlan,
   ProviderFailureOutcome,
 } from './provider-failure-policy.js';
 import { loadNativeFailurePolicyBridge } from './provider-failure-policy-native.js';
@@ -709,62 +708,6 @@ export function resolveProviderFailureActionPlan(args: {
     shouldRetry: true,
     action,
     decisionLabel: 'exclude_and_reroute'
-  };
-}
-
-export function resolveProviderFailureRetryEligibility(args: {
-  error: unknown;
-  stage?: string;
-  statusCode?: number;
-  errorCode?: string;
-  upstreamCode?: string;
-  reason?: string;
-  classification?: ProviderFailureClassification;
-  attempt: number;
-  maxAttempts: number;
-  promptTooLong?: boolean;
-  contextOverflowRetries?: number;
-  maxContextOverflowRetries?: number;
-  stageOutsideProviderFailurePolicy?: boolean;
-}): ProviderFailureRetryEligibilityPlan {
-  const actionPlan = resolveProviderFailureActionPlan({
-    error: args.error,
-    stage: args.stage,
-    statusCode: args.statusCode,
-    errorCode: args.errorCode,
-    upstreamCode: args.upstreamCode,
-    reason: args.reason,
-    classification: args.classification,
-    attempt: args.attempt,
-    maxAttempts: args.maxAttempts,
-    promptTooLong: args.promptTooLong
-  });
-
-  if (args.stage === 'provider.followup' || args.stageOutsideProviderFailurePolicy) {
-    return {
-      classification: actionPlan.classification,
-      blockingRecoverable: false,
-      shouldRetry: false
-    };
-  }
-  if (actionPlan.classification === 'unrecoverable') {
-    return {
-      classification: actionPlan.classification,
-      blockingRecoverable: false,
-      shouldRetry: false
-    };
-  }
-  if (!(args.attempt < args.maxAttempts)) {
-    return {
-      classification: actionPlan.classification,
-      blockingRecoverable: false,
-      shouldRetry: false
-    };
-  }
-  return {
-    classification: actionPlan.classification,
-    blockingRecoverable: false,
-    shouldRetry: actionPlan.shouldRetry
   };
 }
 

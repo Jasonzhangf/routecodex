@@ -5,7 +5,6 @@ import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/p
 import {
   normalizeProviderFailureCodeKey,
   resolveProviderFailureClassification,
-  resolveProviderFailureRetryEligibility,
   resolveProviderFailureActionPlan,
   type ProviderFailureClassification
 } from '../../../providers/core/runtime/provider-failure-policy.js';

@@ -6,7 +6,6 @@ export {
   resolveProviderFailureClassification,
   resolveProviderFailureOutcome,
   resolveProviderFailureActionPlan,
-  resolveProviderFailureRetryEligibility,
   isProviderFailureHealthNeutral,
   extractProviderFailureStatusCode,
 } from './provider-failure-policy-impl.js';
@@ -25,12 +24,6 @@ export type ProviderFailureActionPlan = {
   shouldRetry: boolean;
   action: 'direct_return' | ProviderFailureRetryAction;
   decisionLabel: 'direct_return' | 'exclude_and_reroute';
-};
-
-export type ProviderFailureRetryEligibilityPlan = {
-  classification?: ProviderFailureClassification;
-  blockingRecoverable: boolean;
-  shouldRetry: boolean;
 };
 
 export type ProviderFailureOutcome = {
