@@ -1,3 +1,120 @@
+# 2026-06-27 retry exclusion helper inline closeout slice
+
+- 已处理：
+  - `request-executor-pipeline-attempt.ts` 删除了已死的 `applyRetryExclusionForCurrentProvider` 导入
+  - `request-executor-retry-decision.ts` / `request-executor-retry-execution-plan.ts` 保持当前内联收口状态
+- 已验证：
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - 这轮只是在 retry / reselection 主链里继续删除薄包装和残留导入，没有改 policy 真值。
+  - 提交前曾遇到一次 `.git/index.lock` 残留，已确认无 git 进程后移除锁文件并继续。
+
+# 2026-06-27 retry switch plan inline closeout slice
+
+- 已物理删除的纯包装：
+  - `buildProviderRetrySwitchPlan`
+- 已同步修改：
+  - `src/server/runtime/http-server/executor/request-executor-retry-decision.ts`
+  - `src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts`
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+- 已验证：
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - `buildProviderRetrySwitchPlan` 只是固定 switch-plan 装配壳，已内联到 `resolveProviderRetryExecutionPlan`。
+  - telemetry 仍消费 `ProviderRetrySwitchPlan` 结构，不能删类型结构本身。
+
+# 2026-06-27 retry-decision wrapper closeout slice
+
+- 已物理删除的纯包装：
+  - `hasExplicitAlternativeRouteCandidate`
+- 已同步修改：
+  - `src/server/runtime/http-server/executor/request-executor-retry-decision.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+- 已验证：
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - `hasExplicitAlternativeRouteCandidate` 是单消费者转发壳，删除后 `hasAlternativeRouteCandidate` 直接成为唯一事实。
+  - `resolveProviderRetryExclusionPlan` 仍在用，不能删。
+
+# 2026-06-27 reselection plan shape reduction slice
+
+- 已继续收口：
+  - `ExcludedProviderReselectionPlan.keepExcludedForNextAttempt` 已删除
+  - `request-executor-reselection-plan.ts` 只保留 `hasAlternativeCandidate`
+  - `request-executor-pipeline-attempt.ts` 直接消费 `hasAlternativeCandidate`
+- 已同步修改：
+  - `src/server/runtime/http-server/executor/request-executor-error-types.ts`
+  - `src/server/runtime/http-server/executor/request-executor-reselection-plan.ts`
+  - `src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts`
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+- 已验证：
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - reselection plan 的同义字段已物理删除，接口面更小。
+  - 目前没有证据支持继续删 `resolveProviderFailureExclusionDecision` 或主 policy retry/classification 逻辑。
+
+# 2026-06-27 reselection wrapper closeout slice
+
+- 已物理删除的纯包装：
+  - `shouldKeepProviderExcludedForNextAttempt`
+- 已同步修改：
+  - `src/providers/core/runtime/provider-failure-policy.ts`
+  - `src/providers/core/runtime/provider-failure-policy-impl.ts`
+  - `src/server/runtime/http-server/executor/request-executor-reselection-plan.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+- 已验证：
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `tests/server/runtime/http-server/request-executor.excluded-provider-reselection.spec.ts`
+  - `tests/red-tests/error_chain_singleton_truth.test.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - `shouldKeepProviderExcludedForNextAttempt` 是单消费者纯转发壳，删除后语义由 `hasAlternativeCandidate` 直接表达。
+  - `resolveProviderFailureExclusionDecision` 仍在用，不能删。
+  - `resolveProviderFailureActionPlan` / `resolveProviderFailureRetryEligibility` 仍有真实消费者，不能删。
+
+# 2026-06-27 doc residual cleanup for deleted policy files
+
+- 已确认已物理删除的候选文件不在源码树中：
+  - `src/providers/core/runtime/provider-failure-policy-backoff.ts`
+  - `src/providers/core/runtime/base-provider-series-cooldown.ts`
+  - `src/providers/auth/oauth-repair-cooldown.ts`
+- 已修正的残影：
+  - `docs/goals/error-module-function-map-closeout-plan.md` 中仍挂着 `provider-failure-policy-backoff.ts` 的 owner 列表已删除。
+- 继续结论：
+  - `error.provider_failure_policy` 仍有真实消费者，不能把整个 policy 主链当死代码删掉。
+  - 下一步应该继续搜文档/测试里是否还有已删文件的残余路径，而不是动仍在消费的执行链。
+
+# 2026-06-27 usage protocol accounting commit slice
+
+- 已提交：`7edfdf5 refactor(executor): unify usage protocol accounting`
+- 本次提交内容：
+  - `log-rollup.ts` / `usage-logger.ts` / `usage-aggregator.ts` / `usage-aggregator.js`
+    引入 protocol-aware cache hit ratio 计算，并把 `providerProtocol` 贯穿到 usage 计量与日志汇总中。
+  - `request-executor-error-action-queue.ts`
+    删除了已死的 `provider_traffic_saturated` action 队列分支。
+  - 两个 red tests 改为对齐新的 metadata center / servertool 边界引用。
+- 已知事实：
+  - 当前工作区仍有大量与这轮无关的 quota / servertool / docs 脏改，未纳入本次提交。
+  - `provider-failure-policy-impl.ts` 里仍有活的本地 contract / 业务样本分支，暂时没有足够证据再删。
+- 下一步：
+  - 继续审 `provider-failure-policy-impl.ts` 中剩余的分类分支，只在拿到可删死证据后再做物理删除。
+
 # 2026-06-27 provider-error-classifier thin shell cleanup
 
 - 已继续收口：

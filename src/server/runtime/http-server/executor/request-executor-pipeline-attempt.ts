@@ -1,7 +1,6 @@
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import { finalizeRequestExecutorAttemptMetadata } from './request-executor-attempt-state.js';
 import { resolveExcludedProviderReselectionPlan } from './request-executor-reselection-plan.js';
-import { applyRetryExclusionForCurrentProvider } from './request-executor-retry-decision.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
@@ -148,15 +147,8 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       attempt: args.attempt,
       hasAlternativeCandidate: reselectedExcludedPlan.hasAlternativeCandidate
     });
-    if (!reselectedExcludedPlan.keepExcludedForNextAttempt) {
+    if (!reselectedExcludedPlan.hasAlternativeCandidate) {
       args.excludedProviderKeys.delete(target.providerKey);
-    } else {
-      if (reselectedExcludedPlan.hasAlternativeCandidate) {
-        return {
-          kind: 'retry_next_attempt',
-          initialRoutePool
-        };
-      }
       if (args.lastError) {
         throw args.lastError;
       }
@@ -166,6 +158,10 @@ export function resolveRequestExecutorPipelineAttempt(args: {
         providerKey: target.providerKey
       });
     }
+    return {
+      kind: 'retry_next_attempt',
+      initialRoutePool
+    };
   }
 
   const metadataCenter = MetadataCenter.read(mergedMetadata);

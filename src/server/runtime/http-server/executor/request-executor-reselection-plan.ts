@@ -1,7 +1,4 @@
 import {
-  shouldKeepProviderExcludedForNextAttempt,
-} from '../../../../providers/core/runtime/provider-failure-policy.js';
-import {
   hasAlternativeRouteCandidate,
 } from './request-executor-retry-decision.js';
 import type {
@@ -22,9 +19,6 @@ export function resolveExcludedProviderReselectionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
   return {
-    hasAlternativeCandidate,
-    keepExcludedForNextAttempt: shouldKeepProviderExcludedForNextAttempt({
-      hasAlternativeCandidate
-    })
+    hasAlternativeCandidate
   };
 }

@@ -1,5 +1,4 @@
 import {
-  describeProviderFailureDecision,
   resolveProviderFailureExclusionDecision,
   resolveProviderFailureRetryEligibility
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
@@ -14,8 +13,6 @@ import type {
   ProviderRetryEligibilityPlan,
   ProviderRetryExclusionPlan,
   ProviderRetryExecutionPlan,
-  ProviderRetrySwitchAction,
-  ProviderRetrySwitchPlan,
   RequestExecutorProviderErrorClassification,
   RequestExecutorProviderErrorStage,
   RetryErrorSnapshot
@@ -48,26 +45,6 @@ export function hasAlternativeRouteCandidate(args: {
   });
 }
 
-function hasExplicitAlternativeRouteCandidate(args: {
-  providerKey?: string;
-  routePool?: string[];
-  excludedProviderKeys: Set<string>;
-}): boolean {
-  return hasAlternativeRouteCandidate(args);
-}
-
-export function applyRetryExclusionForCurrentProvider(args: {
-  providerKey?: string;
-  excludedProviderKeys: Set<string>;
-}): boolean {
-  const providerKey = readString(args.providerKey);
-  if (!providerKey) {
-    return false;
-  }
-  args.excludedProviderKeys.add(providerKey);
-  return true;
-}
-
 export function resolveProviderRetryExclusionPlan(args: {
   providerKey?: string;
   status?: number;
@@ -86,7 +63,7 @@ export function resolveProviderRetryExclusionPlan(args: {
     };
   }
   const is429 = args.status === 429;
-  const hasAlternativeCandidate = hasExplicitAlternativeRouteCandidate({
+  const hasAlternativeCandidate = hasAlternativeRouteCandidate({
     providerKey,
     routePool: args.routePool,
     excludedProviderKeys: args.excludedProviderKeys
@@ -96,11 +73,9 @@ export function resolveProviderRetryExclusionPlan(args: {
     hasAlternativeCandidate,
   });
   if (exclusionDecision.excludeCurrentProvider && hasExplicitRoutePool) {
+    args.excludedProviderKeys.add(providerKey);
     return {
-      excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
-        providerKey,
-        excludedProviderKeys: args.excludedProviderKeys
-      })
+      excludedCurrentProvider: true
     };
   }
   return {
@@ -141,27 +116,5 @@ export function resolveProviderRetryEligibilityPlan(args: {
   return {
     shouldRetry: eligibility.shouldRetry,
     blockingRecoverable: eligibility.blockingRecoverable
-  };
-}
-
-export function buildProviderRetrySwitchPlan(args: {
-  runtimeKey?: string;
-  routePool?: string[];
-  runtimeManager?: RuntimeManager;
-  excludedProviderKeys: Set<string>;
-  excludedCurrentProvider: boolean;
-  promptTooLong?: boolean;
-  error?: unknown;
-  retryError?: RetryErrorSnapshot;
-}): ProviderRetrySwitchPlan {
-  const switchAction: ProviderRetrySwitchAction = 'exclude_and_reroute';
-  const runtimeScopeExcluded: string[] = [];
-  return {
-    switchAction,
-    decisionLabel: describeProviderFailureDecision({
-      action: 'reroute_explicit_alternative'
-    }),
-    runtimeScopeExcluded,
-    runtimeScopeExcludedCount: runtimeScopeExcluded.length
   };
 }

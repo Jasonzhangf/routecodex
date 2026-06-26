@@ -79,7 +79,6 @@ export type ProviderRetryTelemetryPlan = {
 
 export type ExcludedProviderReselectionPlan = {
   hasAlternativeCandidate: boolean;
-  keepExcludedForNextAttempt: boolean;
 };
 
 export type RequestExecutorProviderErrorReportPlan = {

@@ -6,8 +6,6 @@ import {
   resolveRequestExecutorNativeRetryPolicy,
 } from './request-executor-native-retry-policy.js';
 import {
-  applyRetryExclusionForCurrentProvider,
-  buildProviderRetrySwitchPlan,
   hasAlternativeRouteCandidate,
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan
@@ -193,10 +191,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   });
   const exclusionPlan = (nativeExecutionPolicy.excludeCurrentProvider || baseExclusionPlan.excludedCurrentProvider)
       ? {
-          excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
-            providerKey: args.providerKey,
-            excludedProviderKeys: args.excludedProviderKeys
-          }) || baseExclusionPlan.excludedCurrentProvider
+          excludedCurrentProvider: args.providerKey ? (args.excludedProviderKeys.add(args.providerKey), true) : baseExclusionPlan.excludedCurrentProvider
         }
       : { excludedCurrentProvider: false };
   const hasAlternativeCandidate = hasAlternativeRouteCandidate({
@@ -226,16 +221,12 @@ export async function resolveProviderRetryExecutionPlan(args: {
   }
 
   if (shouldRerouteExcludedFailure) {
-  const retrySwitchPlan = buildProviderRetrySwitchPlan({
-    runtimeKey: args.runtimeKey,
-    routePool: args.routePool,
-    runtimeManager: args.runtimeManager,
-    excludedProviderKeys: args.excludedProviderKeys,
-    excludedCurrentProvider: true,
-    promptTooLong: args.promptTooLong,
-    error: args.error,
-    retryError: args.retryError
-  });
+  const retrySwitchPlan = {
+    switchAction: 'exclude_and_reroute',
+    decisionLabel: 'exclude_and_reroute',
+    runtimeScopeExcluded: [],
+    runtimeScopeExcludedCount: 0
+  } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
     if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
       return attachErrorErr05ExhaustionGate({
         shouldRetry: false,
@@ -252,16 +243,12 @@ export async function resolveProviderRetryExecutionPlan(args: {
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
-  const retrySwitchPlan = buildProviderRetrySwitchPlan({
-    runtimeKey: args.runtimeKey,
-    routePool: args.routePool,
-    runtimeManager: args.runtimeManager,
-    excludedProviderKeys: args.excludedProviderKeys,
-    excludedCurrentProvider: retryExcludedCurrentProvider,
-    promptTooLong: args.promptTooLong,
-    error: args.error,
-    retryError: args.retryError
-  });
+  const retrySwitchPlan = {
+    switchAction: 'exclude_and_reroute',
+    decisionLabel: 'exclude_and_reroute',
+    runtimeScopeExcluded: [],
+    runtimeScopeExcludedCount: 0
+  } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
   if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
     return attachErrorErr05ExhaustionGate({
       shouldRetry: false,

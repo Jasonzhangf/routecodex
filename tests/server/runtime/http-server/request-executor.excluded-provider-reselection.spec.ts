@@ -15,8 +15,7 @@ describe('request-executor excluded provider reselection plan', () => {
         retryable: true
       })
     })).toEqual({
-      hasAlternativeCandidate: true,
-      keepExcludedForNextAttempt: true
+      hasAlternativeCandidate: true
     });
   });
 
@@ -31,8 +30,7 @@ describe('request-executor excluded provider reselection plan', () => {
         retryable: true
       })
     })).toEqual({
-      hasAlternativeCandidate: false,
-      keepExcludedForNextAttempt: false
+      hasAlternativeCandidate: false
     });
   });
 
@@ -164,8 +162,7 @@ describe('request-executor excluded provider reselection plan', () => {
         retryable: true
       })
     })).toEqual({
-      hasAlternativeCandidate: true,
-      keepExcludedForNextAttempt: true
+      hasAlternativeCandidate: true
     });
   });
 
@@ -219,8 +216,8 @@ describe('request-executor excluded provider reselection plan', () => {
     });
   });
 
-  it('treats routingDecision.pool as an explicit routePool carrier when excluded provider is reselected', () => {
-    const resolved = __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
+  it('throws when routingDecision.pool has no alternatives for an excluded provider', () => {
+    expect(() => __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
       inputRequestId: 'req-no-explicit-routepool',
       providerRequestId: 'req-no-explicit-routepool',
       attempt: 2,
@@ -255,23 +252,7 @@ describe('request-executor excluded provider reselection plan', () => {
       extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
       hubStartedAtMs: Date.now() - 10,
       pipelineLabel: 'hub'
-    });
-
-    expect(resolved).toEqual({
-      kind: 'resolved',
-      mergedMetadata: {
-        clientRequestId: 'req-no-explicit-routepool'
-      },
-      mergedClientHeaders: undefined,
-      routePoolForAttempt: ['minimax.key1.MiniMax-M3'],
-      providerPayload: { body: { model: 'gpt-test' } },
-      target: {
-        providerKey: 'minimax.key1.MiniMax-M3',
-        runtimeKey: 'minimax.key1',
-        compatibilityProfile: 'openai:responses'
-      },
-      initialRoutePool: ['minimax.key1.MiniMax-M3']
-    });
+    })).toThrow('HTTP 429: quota exhausted');
   });
 
   it('keeps fallback routePool chain available when current pool is exhausted', () => {

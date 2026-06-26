@@ -96,6 +96,19 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(pf).not.toMatch(/isBlockingRecoverableProviderFailure/);
   });
 
+  it('request-executor-reselection-plan.ts derives keepExcludedForNextAttempt directly from route alternatives', () => {
+    const reselection = readSrc('src/server/runtime/http-server/executor/request-executor-reselection-plan.ts');
+    expect(reselection).toMatch(/hasAlternativeRouteCandidate/);
+    expect(reselection).toMatch(/return\s*\{\s*hasAlternativeCandidate\s*\}/s);
+    expect(reselection).not.toMatch(/shouldKeepProviderExcludedForNextAttempt/);
+  });
+
+  it('request-executor-retry-decision.ts computes alternative candidate truth directly', () => {
+    const decision = readSrc('src/server/runtime/http-server/executor/request-executor-retry-decision.ts');
+    expect(decision).toMatch(/hasAlternativeRouteCandidate/);
+    expect(decision).not.toMatch(/hasExplicitAlternativeRouteCandidate/);
+  });
+
   it('isBlockingRecoverableProviderFailure: re-exported only from provider-failure-policy.ts', () => {
     const policy = readSrc(PROVIDER_FAILURE_POLICY);
     const impl = readSrc(PROVIDER_FAILURE_IMPL);
@@ -172,12 +185,6 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(pf).not.toMatch(/function\s+isHealthNeutralProviderError/);
     expect(pf).not.toMatch(/function\s+resolveReportedProviderErrorRecoverable/);
     expect(pf).not.toMatch(/classification\s*===\s*['"]recoverable['"][\s\S]{0,180}return\s+true/);
-  });
-
-  it('request-executor-reselection delegates keep-excluded classification policy', () => {
-    const reselection = readSrc('src/server/runtime/http-server/executor/request-executor-reselection-plan.ts');
-    expect(reselection).toMatch(/shouldKeepProviderExcludedForNextAttempt/);
-    expect(reselection).not.toMatch(/classification\s*===\s*['"]unrecoverable['"]\s*\|\|\s*hasAlternativeCandidate/);
   });
 
   it('request-executor-retry-execution delegates terminal classification branch policy', () => {
