@@ -1,3 +1,40 @@
+# 2026-06-27 rate-limit-manager dead file removal slice
+
+- 已物理删除：`src/providers/core/runtime/rate-limit-manager.ts`
+- 已验证：
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - 该文件无任何外部真实消费者，属于死文件；
+  - TS 侧 synthetic cooldown / 429 本地计数器面已进一步收口；
+  - 后续继续追 provider-failure-policy-impl 里尚未删干净的多分类残留，以及 Rust/VR 的唯一 strike/cooldown 真源。
+
+# 2026-06-27 TS rate-limit state cleanup slice
+
+- 已删除 TS 侧 legacy rate-limit 状态面：
+  - `src/providers/core/runtime/base-provider.ts`
+  - `src/providers/core/runtime/provider-error-classifier.ts`
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+- 已验证：
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `tests/providers/core/runtime/base-provider-success-report.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 当前结论：
+  - TS 侧 `registerRateLimitFailure` / `forceRateLimitFailure` / `RateLimitCooldownError` 入口已删除；
+  - 429 不再通过 TS 本地计数器转成独立 cooldown 状态；
+  - 后续继续追 VR / Rust 侧的真实 strike/cooldown 真源，不回头复活 TS rate-limit machinery。
+
+# 2026-06-27 executor retry switch backoff slice
+
+- 已提交当前 focused slice：`272af8f refactor(executor): drop retry switch backoff logs`
+- 已验证：
+  - `tests/server/runtime/http-server/executor/request-executor-provider-response.usage.spec.ts`
+  - `tests/server/runtime/http-server/executor/request-executor-provider-response.metadata-propagation.spec.ts`
+  - `tests/server/runtime/http-server/executor/request-executor-provider-response.stopless-contract-removal.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 当前已知剩余残留集中在 request-executor 主链 retry / reselection 路径，下一步继续追 `retryProviderKey`、`requestLocalProviderRetryState`、`resolveExcludedProviderReselectionPlan` 的真实 owner 和消费者。
+
 # 2026-06-27 executor retry switch log cleanup
 
 - 当前 `request-executor` retry 链里，`retryBackoffMs` / `holdOnLastAvailable429` 已经不再是生产契约字段，但 `request-executor.spec.ts` 里还残留旧断言。
