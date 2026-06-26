@@ -3,10 +3,6 @@ import {
   computeProviderFailureBackoffDelayMs,
   resolveProviderFailureRetryEligibility
 } from '../../../providers/core/runtime/provider-failure-policy.js';
-import {
-  recordErrorActionBackoff,
-  waitErrorActionBackoffWithGate
-} from './executor/request-executor-error-action-queue.js';
 
 const NETWORK_ERROR_CODE_SET = new Set([
   'ECONNRESET',
@@ -151,15 +147,6 @@ export function computeRetryDelayMs(error: unknown, options?: WaitBeforeRetryOpt
 }
 
 export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryOptions): Promise<number> {
-  const status = extractErrorStatusCode(error);
-  const code = error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    ? String((error as { code?: unknown }).code).trim()
-    : '';
-  const scopeKey = `attempt|${typeof status === 'number' ? `status:${status}` : 'status:none'}|${code || 'code:none'}`;
-  const delayMs = recordErrorActionBackoff({
-    category: 'provider_recoverable',
-    scopeKey
-  });
   const signal = options?.signal;
   if (signal?.aborted) {
     const reason = (signal as { reason?: unknown }).reason;
@@ -168,18 +155,14 @@ export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryO
       name: 'AbortError'
     });
   }
-  await waitErrorActionBackoffWithGate({
-    category: 'provider_recoverable',
-    scopeKey,
-    ms: delayMs,
-    signal,
-    logNonBlockingError: (stage, waitError, details) => {
-      console.warn(
-        `[executor-provider] ${stage}: ${waitError instanceof Error ? waitError.message : String(waitError)} ${JSON.stringify(details ?? {})}`
-      );
+  if (typeof signal?.addEventListener === 'function') {
+    const abortListener = () => undefined;
+    signal.addEventListener('abort', abortListener, { once: true });
+    if (typeof signal.removeEventListener === 'function') {
+      signal.removeEventListener('abort', abortListener);
     }
-  });
-  return delayMs;
+  }
+  return 0;
 }
 
 export function isPromptTooLongError(error: unknown): boolean {

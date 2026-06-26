@@ -10,19 +10,15 @@ describe('executor-provider waitBeforeRetry', () => {
     resetErrorActionQueueStateForTests();
   });
 
-  it('uses unified 1s backoff for HTTP 429', async () => {
-    jest.useFakeTimers();
+  it('returns immediately for HTTP 429', async () => {
     const err = Object.assign(new Error('HTTP 429: rate limited'), {
       statusCode: 429
     });
 
-    const pending = waitBeforeRetry(err, { attempt: 3 });
-    await jest.advanceTimersByTimeAsync(1000);
-    await expect(pending).resolves.toBe(1000);
+    await expect(waitBeforeRetry(err, { attempt: 3 })).resolves.toBe(0);
   });
 
-  it('uses unified backoff for errors carrying upstream retry-after details', async () => {
-    jest.useFakeTimers();
+  it('ignores upstream retry-after details and returns immediately', async () => {
     const err = Object.assign(new Error('HTTP 429: rate limited'), {
       statusCode: 429,
       response: {
@@ -32,42 +28,31 @@ describe('executor-provider waitBeforeRetry', () => {
       }
     });
 
-    const pending = waitBeforeRetry(err, { attempt: 1 });
-    await jest.advanceTimersByTimeAsync(1000);
-    await expect(pending).resolves.toBe(1000);
+    await expect(waitBeforeRetry(err, { attempt: 1 })).resolves.toBe(0);
   });
 
-  it('uses unified 1s backoff for transport errors', async () => {
-    jest.useFakeTimers();
+  it('returns immediately for transport errors', async () => {
     const err = Object.assign(new Error('fetch failed'), {
       code: 'ECONNRESET'
     });
 
-    const pending = waitBeforeRetry(err, { attempt: 4 });
-    await jest.advanceTimersByTimeAsync(1000);
-    await expect(pending).resolves.toBe(1000);
+    await expect(waitBeforeRetry(err, { attempt: 4 })).resolves.toBe(0);
   });
 
-  it('uses unified 1s backoff for non-429 retries (single-provider pool)', async () => {
-    jest.useFakeTimers();
+  it('returns immediately for non-429 retries (single-provider pool)', async () => {
     const err = Object.assign(new Error('HTTP 500: upstream unavailable'), {
       statusCode: 500
     });
 
-    const pending = waitBeforeRetry(err, { attempt: 4 });
-    await jest.advanceTimersByTimeAsync(1000);
-    await expect(pending).resolves.toBe(1000);
+    await expect(waitBeforeRetry(err, { attempt: 4 })).resolves.toBe(0);
   });
 
-  it('keeps fixed sequence across attempts without per-call configuration', async () => {
-    jest.useFakeTimers();
+  it('does not keep attempt-based wait sequencing', async () => {
     const err = Object.assign(new Error('HTTP 500: upstream unavailable'), {
       statusCode: 500
     });
 
-    const pending = waitBeforeRetry(err, { attempt: 2 });
-    await jest.advanceTimersByTimeAsync(1000);
-    await expect(pending).resolves.toBe(1000);
+    await expect(waitBeforeRetry(err, { attempt: 2 })).resolves.toBe(0);
   });
 
   it('fails fast when abort listener registration fails instead of silently waiting for timeout', async () => {
