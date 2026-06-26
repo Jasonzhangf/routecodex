@@ -25,7 +25,7 @@
 还没闭环的部分：
 
 - request 主线仍有“旧 inbound context snapshot 在 outbound 被重新贴回”的风险，导致 chat process 后的新真相没有稳定进入最终 provider payload。
-- top-level runtime-control mirror 已被标记为 stale residue，后续只允许按残留清理，不再把它描述成活兼容层。
+- top-level runtime-control residue 已被标记为 stale residue，后续只允许按残留清理，不再把它描述成真源、兼容层或兼容投影。
 - `serverToolLoopState` / `stopMessageState` 仍是 active runtime mirror，不是死代码。
 - `stoplessGoalStatus` 已经是死残留，但文档/goal 引用还没清干净。
 - metadata write-boundary gate 虽已起草，但还没证明成为最终硬门。
@@ -81,16 +81,16 @@
 完成标准：
 
 - Rust reader 只读 `MetadataCenter.runtime_control`。
-- TS/host 不再把 top-level mirror 当真源。
+- TS/host 不再把 top-level runtime-control residue 当真源。
 - 删除 request-stage / handler-stage top-level projection 壳。
 
-当前仍在读 top-level mirror 的关键实现：
+当前仍在读 top-level runtime-control residue 的关键实现：
 
 - [sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs](/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs)
 - [sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_decision_context_signals.rs](/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_decision_context_signals.rs)
 - [sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs](/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs)
 
-当前仍在投影 top-level mirror 的关键实现：
+当前仍在投影 top-level runtime-control residue 的关键实现：
 
 - [src/server/runtime/http-server/executor-metadata.ts](/Users/fanzhang/Documents/github/routecodex/src/server/runtime/http-server/executor-metadata.ts)
 - [src/server/handlers/handler-utils.ts](/Users/fanzhang/Documents/github/routecodex/src/server/handlers/handler-utils.ts)
@@ -98,7 +98,7 @@
 
 当前状态：
 
-- 当前代码面仍有少量读侧残留，但 top-level `metadata.stopMessageEnabled` / `metadata.stopMessageExcludeDirect` / `routecodexPortStopMessageEnabled` 已不再是 owner truth；文档不再把它们描述成“过渡兼容层”。
+- 当前代码面仍有少量读侧残留，但 top-level `metadata.stopMessageEnabled` / `metadata.stopMessageExcludeDirect` / `routecodexPortStopMessageEnabled` 已不再是 owner truth；文档不再把它们描述成 runtime-control residue 以外的真源、兼容层或兼容投影。
 
 ### D. P1: 区分 active runtime mirror 和 dead residue，避免误删
 
@@ -167,7 +167,7 @@
 
 - 不能因为 `stoplessGoalStatus` 已死，就误删 `serverToolLoopState` / `stopMessageState`。
 - 不能因为 center contract 已写文档，就宣称 request 主线已经闭环。
-- 不能在 Rust reader 还读 top-level mirror 时先删 host projection。
+- 不能在 Rust reader 还读 top-level runtime-control residue 时先删 host projection。
 - 不能用 SSE/handler/outbound 的补丁修复 request truth 丢失问题。
 - 不能把 continuation context 重新升级成 request truth。
 

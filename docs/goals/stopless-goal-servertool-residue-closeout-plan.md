@@ -87,7 +87,7 @@ Audit at minimum:
 - `runtime_control.stopMessageExcludeDirect`
 - any `stoplessGoalStatus`
 - any `stopMessageCompareContext`
-- any top-level mirrors:
+- any top-level runtime-control residue:
   - `metadata.stopMessageEnabled`
   - `routecodexPortStopMessageEnabled`
   - remaining `serverToolLoopState` / `stopMessageState` projections
@@ -154,7 +154,7 @@ Completion for Phase 1:
 
 ### Phase 2: runtime reader/writer convergence
 
-1. Migrate any still-live readers away from top-level mirrors or legacy fields.
+1. Migrate any still-live readers away from top-level runtime-control residue or legacy fields.
 2. Keep `MetadataCenter` family truth as the only surviving control carrier where applicable.
 3. Remove stale residue only after proving no active reader still depends on it.
 
@@ -200,7 +200,7 @@ This closeout is complete only when all of the following are true:
 
 1. no active architecture truth overclaims dead stopless/goal/servertool owners;
 2. all still-live stopless/servertool control semantics have one coherent owner path;
-3. top-level mirror residue is either proven necessary current truth or physically deleted;
+3. top-level runtime-control residue is either proven necessary current truth or physically deleted;
 4. no dead goal-state / stop-message / stopless docs, tests, gates, or code remain in the repo as “historical leftovers”;
 5. required gates pass with the new, narrower truth.
 
