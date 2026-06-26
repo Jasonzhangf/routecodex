@@ -40,12 +40,10 @@ import {
 } from '../stopless-metadata-carrier.js';
 import {
   applyStoplessMetadataCenterWritePlan,
-  buildStoplessMetadataCenterWritePlan,
-  findBoundMetadataCenter
+  buildStoplessMetadataCenterWritePlan
 } from '../stopless-metadata-center-writer.js';
 import {
   writeRuntimeControlToBoundMetadataCenter,
-  writeStoplessRuntimeControlToBoundMetadataCenter
 } from '../stopless-metadata-carrier.js';
 import { readNativeFunction } from '../../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import { shouldBypassStopMessageForMediaContext, shouldRunVisionFlowForAdapterContext } from './vision-eligibility.js';
@@ -361,48 +359,6 @@ function dispatchPlan(
               plan: writePlan,
               reason: 'stopless-runtime-state'
             });
-            // Always keep the legacy direct-write path too, for tests / code
-            // paths that observe the per-key TS carriers.
-            const directCenter = findBoundMetadataCenter(record);
-            if (directCenter) {
-              if (writePlan.stopless) {
-                const sl = writePlan.stopless;
-                writeStoplessRuntimeControlToBoundMetadataCenter({
-                  metadata: record,
-                  value: {
-                    flowId: sl.flowId,
-                    repeatCount: sl.repeatCount,
-                    maxRepeats: sl.maxRepeats,
-                    ...(sl.triggerHint ? { triggerHint: sl.triggerHint } : {}),
-                    ...(sl.continuationPrompt ? { continuationPrompt: sl.continuationPrompt } : {}),
-                    ...(sl.schemaFeedback ? { schemaFeedback: sl.schemaFeedback } : {}),
-                    active: sl.active,
-                    updatedAt: sl.updatedAt
-                  },
-                  writer: {
-                    module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
-                    symbol: 'attachStoplessRuntimeControlToMetadata',
-                    stage: 'stop_message_auto_runtime_control_writer'
-                  },
-                  reason: 'stopless-runtime-state',
-                  required: true
-                });
-              }
-              if (writePlan.stopMessageCompareContext) {
-                writeRuntimeControlToBoundMetadataCenter({
-                  metadata: record,
-                  key: 'stopMessageCompareContext',
-                  value: writePlan.stopMessageCompareContext,
-                  writer: {
-                    module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
-                    symbol: 'stopMessageAutoServerToolHandler',
-                    stage: 'stop_message_auto_runtime_control_writer'
-                  },
-                  reason: 'stop-message-compare-context',
-                  required: true
-                });
-              }
-            }
           }
 
           const execution: ServerToolExecution = {

@@ -21,7 +21,7 @@ chains:
         semantic_output: "response interception event for normal response, abnormal/error response, stopless trigger, `finish_reason=stop` schema candidate, `finish_reason=tool_calls` registered internal servertool call candidate, or no-op"
         status: binding pending
         binding_pending: true
-        note: "Target standard skeleton edge. Current runtime still uses TS transitional servertool orchestration; do not bind to TS symbols."
+        note: "Target standard skeleton edge. Chat Process owns the interception point before any bridge/outbound mapping, normalization, or continuation save. Current runtime still uses TS transitional servertool orchestration; do not bind to TS symbols."
       - step_id: sth-resp-02
         from_node: ServertoolRespHook01Intercepted
         to_node: ServertoolRespHook02SchemaValidated
@@ -30,7 +30,7 @@ chains:
         semantic_output: "single schema validation event covering valid terminal, non-terminal/still-running, empty schema/no_schema, invalid schema, malformed args, already-terminal cases, and client-projection-required cases"
         status: binding pending
         binding_pending: true
-        note: "Required for schema-managed flows; missing/invalid schema must not be silently accepted. `reasoningStop` is internal/model-facing and must not be returned to the client as raw required_action."
+        note: "Required for schema-managed flows; missing/invalid schema must not be silently accepted. This validation belongs inside Chat Process before any continuation save or outbound bridge. `reasoningStop` is internal/model-facing and must not be returned to the client as raw required_action."
       - step_id: sth-resp-03
         from_node: ServertoolRespHook02SchemaValidated
         to_node: ServertoolRespHook03HookResponseInjected
@@ -39,7 +39,7 @@ chains:
         semantic_output: "terminal-stop summary projection when schema passes, or client-visible shell `exec_command(routecodex hook run reasoningStop ...)` projection plan when feedback/client execution is required"
         status: binding pending
         binding_pending: true
-        note: "Business execution remains client-visible CLI; hook only plans injection/projection. Client-visible continuation uses shell exec_command only, never raw internal `reasoningStop`."
+        note: "Business execution remains client-visible CLI; hook only plans injection/projection. This remains a Chat Process concern and must complete before canonical continuation save and before HubRespOutbound04ClientSemantic."
       - step_id: sth-resp-04
         from_node: ServertoolRespHook03HookResponseInjected
         to_node: ServertoolRespHook04FollowupPlanned
@@ -111,7 +111,7 @@ chains:
         semantic_output: "request tool declarations, stop hook contract, and tool constraints injected for servertool-managed turns"
         status: binding pending
         binding_pending: true
-        note: "Required for servertool-managed turns."
+        note: "Required for servertool-managed turns. Tool injection belongs to Chat Process request closeout, not bridge/outbound mapping."
       - step_id: sth-req-04
         from_node: ServertoolReqHook03ToolInjected
         to_node: ServertoolReqHook04RequestFinalized
@@ -120,7 +120,7 @@ chains:
         semantic_output: "final request semantic ready for HubReqChatProcess03Governed"
         status: binding pending
         binding_pending: true
-        note: "Required request finalize hook."
+        note: "Required request finalize hook. This finalize step must happen before any provider wire build."
       - step_id: sth-req-05
         from_node: ServertoolReqHook04RequestFinalized
         to_node: HubReqChatProcess03Governed
@@ -184,7 +184,7 @@ chains:
         semantic_input: "governed Hub request plus route-selection-ready request metadata"
         semantic_output: "selected virtual-router target contract"
         status: anchored
-        note: "Runtime route selection still resolves the route decision earlier in `HubPipelineEngine::select_route`, but `req-03` is now anchored at the Rust typed entrypoint that seals the decision into `VrRoute04SelectedTarget`. M4 still owns applying the selected target to outbound request semantics."
+        note: "Runtime route selection still resolves the route decision earlier in `HubPipelineEngine::select_route`, but `req-03` is now anchored at the Rust typed entrypoint that seals the decision into `VrRoute04SelectedTarget`. M4 still owns applying the selected target to outbound request semantics. VR route reads now come through `vr.metadata_center_surface` backed by the request-scoped `MetadataCenter` snapshot; `__rt` and flat metadata mirrors must not participate in route selection."
       - step_id: req-04
         from_node: VrRoute04SelectedTarget
         to_node: HubReqOutbound05ProviderSemantic
@@ -237,6 +237,7 @@ chains:
         semantic_input: "typed Hub resp-inbound payload + governed response payload"
         semantic_output: "typed Hub resp-chatprocess governed payload"
         status: anchored
+        note: "Chat Process owns response interception, schema/tool normalization, and canonical continuation save preconditions. Bridge/outbound mapping begins only after this node completes."
       - step_id: resp-03
         from_node: HubRespChatProcess03Governed
         to_node: HubRespOutbound04ClientSemantic
@@ -248,6 +249,7 @@ chains:
         semantic_input: "post-governed Hub response truth + entry endpoint + request context"
         semantic_output: "client-visible responses payload after native projection"
         status: anchored
+        note: "Projection only. This edge must not own schema interception, stopless tool injection, or continuation restore/save."
       - step_id: resp-04
         from_node: HubRespOutbound04ClientSemantic
         to_node: ServerRespOutbound05ClientFrame
@@ -278,7 +280,7 @@ chains:
         semantic_input: "raw current request payload plus explicit continuation evidence such as submit_tool_outputs, previous_response_id, response_id, or internal reentry marker"
         semantic_output: "entry evidence classified into ordinary create vs legal continuation candidate"
         status: partial
-        note: "Request-visible evidence is the only legal starting point. Session/scope-only hits are forbidden. Handler/bridge code is a temporary shell; semantic owner is the Chat Process continuation block."
+        note: "Request-visible evidence is the only legal starting point. Session/scope-only hits are forbidden. Handler/bridge code is a temporary shell; semantic owner is the Chat Process continuation block. Non-responses protocols must skip this block entirely."
       - step_id: rct-02
         from_node: ChatProcReqContinuation02OwnerResolved
         to_node: ChatProcReqContinuation03CanonicalRestored
@@ -326,15 +328,15 @@ chains:
       - step_id: rct-06
         from_node: ChatProcRespContinuation06ResponseGoverned
         to_node: ChatProcRespContinuation07CanonicalSaved
-        caller_symbol: persistResponsesConversationLifecycleForHttp
-        caller_file: src/server/handlers/handler-response-utils.ts
-        callee_symbol: recordResponsesResponseForHttp
-        callee_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        caller_symbol: persistResponsesConversationLifecycleAtChatProcessExitWithinCore
+        caller_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+        callee_symbol: recordResponsesResponse
+        callee_file: sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "finalized client-visible response truth after response governance/projection, including response.id, required_action, projected tool calls, and merged tool definitions"
         semantic_output: "canonical continuation truth saved for the next legal restore/materialize"
-        status: partial
-        note: "Saving pre-hook/pre-projection shell truth here is invalid. A valid gate must prove saved truth is the same semantic body the client can continue from. Save is a Chat Process response-end boundary action, not SSE closeout."
+        status: anchored
+        note: "Saving pre-hook/pre-projection shell truth here is invalid. The canonical save owner is now core Chat Process closeout before resp_outbound; SSE/handler closeout must not revive save logic."
       - step_id: rct-07
         from_node: ChatProcRespContinuation07CanonicalSaved
         to_node: ChatProcRespContinuation08Released
@@ -416,6 +418,58 @@ chains:
         semantic_input: "execution decision result"
         semantic_output: "client-visible http error projection"
         status: anchored
+
+  - chain_id: vr.route_availability.mainline
+    summary: "Virtual Router ordinary-route filtering, default-pool availability floor, and primary_exhausted planning remain Rust-owned; TS may only consume the floor/plan output and must not locally re-decide terminal no-provider."
+    entry_contract:
+      node: VrAvail01RouteCandidates
+      owner_doc: docs/architecture/wiki/virtual-router-route-availability-mainline-source.md
+    edges:
+      - step_id: vra-01
+        from_node: VrAvail01RouteCandidates
+        to_node: VrAvail02PoolFiltered
+        caller_symbol: resolve_forwarder_candidate_for_pool
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+        callee_symbol: select
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/forwarder.rs
+        owner_feature_id: vr.provider_forwarder_runtime
+        semantic_input: "ordinary route-pool targets plus request-scoped excluded keys, health/quota state, protocol/multimodal constraints"
+        semantic_output: "route-local filtered pool plus forwarder empty-vs-real-target availability result"
+        status: anchored
+      - step_id: vra-02
+        from_node: VrAvail02PoolFiltered
+        to_node: VrAvail03DefaultFloorEvaluated
+        caller_symbol: build_provider_not_available_error
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+        callee_symbol: evaluate_singleton_route_pool_exhaustion
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+        owner_feature_id: vr.route_availability_floor
+        semantic_input: "filtered ordinary route pool, unavailable-route-pool details, candidate provider count, and recoverable cooldown hints"
+        semantic_output: "explicit route-availability floor truth: route exhausted vs default-pool still available"
+        status: anchored
+      - step_id: vra-03
+        from_node: VrAvail03DefaultFloorEvaluated
+        to_node: VrAvail04PrimaryExhaustedPlanned
+        caller_symbol: resolvePrimaryExhaustedPlan
+        caller_file: src/server/runtime/http-server/executor/request-executor-core-utils.ts
+        callee_symbol: planPrimaryExhaustedToDefaultPoolNative
+        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        owner_feature_id: virtual_router.primary_exhausted_to_default_pool
+        semantic_input: "primary exhausted route name, exhausted targets, route-scoped tiers, and known targets"
+        semantic_output: "Rust-owned declarative default-pool plan only; no host-synthesized fallback chain"
+        status: anchored
+      - step_id: vra-04
+        from_node: VrAvail04PrimaryExhaustedPlanned
+        to_node: ErrorErr05ExecutionDecision
+        caller_symbol: executeRouterDirectPipelineForPort
+        caller_file: src/server/runtime/http-server/index.ts
+        callee_symbol: resolveDefaultTierAvailableForErrorErr05
+        callee_file: src/server/runtime/http-server/executor/request-executor-core-utils.ts
+        owner_feature_id: error.execution_decision_consumer
+        semantic_input: "Rust-owned route floor + default-pool plan + current request excluded-provider set"
+        semantic_output: "executor-visible mayProject=false until route pool and default pool are both empty"
+        status: partial
+        note: "TS is a consumer only on this edge. It may not infer global no-provider from forwarder empty or ordinary route exhaustion while a default-pool last provider remains."
 
   - chain_id: runtime.lifecycle.mainline
     summary: "Managed server and token-daemon lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
@@ -608,7 +662,7 @@ chains:
         status: anchored
 
   - chain_id: stopless.session.mainline
-    summary: "Stopless three-round contract: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop->CLI rewriting."
+    summary: "Stopless three-round contract inside Chat Process boundary: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop->CLI rewriting."
     entry_contract:
       node: StoplessResp01StopDetected
       owner_doc: docs/architecture/wiki/stopless-session-mainline-source.md
@@ -624,7 +678,7 @@ chains:
         semantic_input: "HubRespChatProcess03Governed stop response + adapterContext carrying requestId/sessionId/entryEndpoint/routeName"
         semantic_output: "stop schema gate decision and stopless loop state candidate"
         status: anchored
-        note: "Response-side stage. Same-round provider request must already have injected stop guidance plus internal reasoningStop."
+        note: "Response-side Chat Process exit stage. Same-round provider request must already have injected stop guidance plus internal reasoningStop."
       - step_id: stl-02
         from_node: StoplessResp02SchemaGateEvaluated
         to_node: StoplessState03RuntimeSnapshotResolved
@@ -670,7 +724,7 @@ chains:
         semantic_input: "next request tool_outputs / runtime metadata"
         semantic_output: "stopless runtime snapshot restored into request turn without file persistence"
         status: anchored
-        note: "Round-2 starts only after continuation restore has completed."
+        note: "Round-2 starts only after `/v1/responses` continuation restore has completed. Non-responses protocols skip continuation restore and enter the same request-side stopless hook boundary directly from standard request truth."
       - step_id: stl-06
         from_node: StoplessReq07ContinuationRestored
         to_node: StoplessReq08GuidanceRewritten
@@ -707,7 +761,7 @@ chains:
         note: "Round-3 guard: after 3 consecutive no_schema rounds, do not rewrite another finish_reason=stop into CLI projection."
 
   - chain_id: metadata.center.mainline
-    summary: "request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release."
+    summary: "single request-scoped metadata center mainline: one bound center flows across server -> Hub Pipeline -> provider/runtime -> response closeout; request truth is materialized once, continuation/runtime/provider observation attach as separate families, and later stages consume read-only projections before closeout release."
     entry_contract:
       node: MetaReq01InboundSeeded
       owner_doc: docs/architecture/wiki/metadata-center-mainline-source.md
@@ -723,7 +777,7 @@ chains:
         semantic_input: "client request metadata seed plus request body metadata"
         semantic_output: "request truth candidates (`requestId/sessionId/conversationId/entryEndpoint/clientRequestId`) captured into one request-scoped carrier"
         status: anchored
-        note: "Current implementation writes `request_truth.sessionId/conversationId` in `buildRequestMetadata`; `buildHandlerPipelineMetadata` is no longer the request-truth owner."
+        note: "Current implementation writes `request_truth.sessionId/conversationId` in `buildRequestMetadata`; `buildHandlerPipelineMetadata` is no longer the request-truth owner. Later stages must not rewrite these fields from continuation or attachment scope."
       - step_id: mtc-02
         from_node: MetaReq02TruthMaterialized
         to_node: MetaReq03ContinuationAttached
@@ -735,7 +789,7 @@ chains:
         semantic_input: "request truth plus responses pipeline continuation inputs"
         semantic_output: "responses request context and resume metadata attached as continuation context without redefining request truth"
         status: anchored
-        note: "Pipeline metadata write attaches `responsesRequestContext` and optional `responsesResume` into `continuation_context`; request truth remains write-once."
+        note: "Pipeline metadata write attaches `responsesRequestContext` and optional `responsesResume` into `continuation_context`; request truth remains write-once and continuation fields must not be promoted back into request identity."
       - step_id: mtc-02-result
         from_node: MetaReq02TruthMaterialized
         to_node: MetaReq03ContinuationAttached
@@ -757,9 +811,9 @@ chains:
         callee_file: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "request metadata carrier plus pipeline result metadata"
-        semantic_output: "dual-write migration node for runtime-control contract: request-route (`routeHint/routeName/routeId/providerProtocol/retryProviderKey/preselectedRoute`), followup (`serverToolFollowup/serverToolFollowupSource/stopless`), and stop-message (`stopMessageEnabled/stopMessageExcludeDirect`) must move behind one metadata-center API"
-        status: partial
-        note: "Closeout checklist: docs/goals/metadata-center-dualwrite-dualread-closeout-checklist.md. Current implementation has JS MetadataCenter plus partial Rust snapshot readers; it is not complete dual-write. All control writes must move to `hub.metadata_center_dualwrite_api`; payload residue remains migration-only and must be deleted field by field."
+        semantic_output: "runtime-control binding node for request-route (`routeHint/routeName/routeId/providerProtocol/retryProviderKey/preselectedRoute`), followup (`serverToolFollowup/serverToolFollowupSource/stopless`), and stop-message (`stopMessageEnabled/stopMessageExcludeDirect`) written into one request-scoped metadata-center family"
+        status: anchored
+        note: "Current owner now writes request-route control, including `providerProtocol`, through the request-executor request-route owner onto the shared MetadataCenter. `preselectedRoute` still has router-direct relay/release handling, but `providerProtocol` is no longer only top-level transport."
       - step_id: mtc-04
         from_node: MetaReq04RuntimeControlBound
         to_node: MetaReq05ProviderObservationProjected
@@ -775,15 +829,15 @@ chains:
       - step_id: mtc-05
         from_node: MetaReq05ProviderObservationProjected
         to_node: MetaResp06ResponseObserved
-        caller_symbol: resolveResponsesConversationPersistInputsForHttp
-        caller_file: src/modules/llmswitch/bridge/responses-response-bridge.ts
-        callee_symbol: readRuntimeRequestTruthIdentifiers
-        callee_file: src/server/runtime/http-server/metadata-center/request-truth-readers.ts
+        caller_symbol: persistResponsesConversationLifecycleAtChatProcessExitWithinCore
+        caller_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+        callee_symbol: readMetadataCenterRequestTruth
+        callee_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "provider response plus provider observation plus request-scoped metadata carrier"
         semantic_output: "response closeout derives `finishReason` and uses MetadataCenter-backed request truth for lifecycle persistence without reopening request truth"
         status: anchored
-        note: "The closeout helper still derives `finishReason` locally, but the request-truth read for lifecycle persistence is now a concrete edge to `readRuntimeRequestTruthIdentifiers(...)`; a first-class `response_observation` family is still not implemented."
+        note: "The response closeout owner now reads request truth directly from the bound MetadataCenter inside core Chat Process closeout; handler/bridge closeout no longer participates in persistence."
       - step_id: mtc-06
         from_node: MetaResp06ResponseObserved
         to_node: MetaResp07ServertoolContextProjected
@@ -807,7 +861,7 @@ chains:
         semantic_input: "response observation plus final client/servertool outcome reaching handler closeout"
         semantic_output: "metadata center request-truth and continuation-context slots marked released for the current request closeout"
         status: anchored
-        note: "The closeout helper is invoked by JSON response completion, SSE finish/close cleanup, and SSE bridge-error early-close paths."
+        note: "The closeout helper is invoked by JSON response completion, SSE finish/close cleanup, and SSE bridge-error early-close paths. Closeout may mark release only; it must not repair or backfill prior families."
 
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture

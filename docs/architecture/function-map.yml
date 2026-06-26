@@ -3656,7 +3656,7 @@ owners:
       - "Responses handler must not locally assemble protocol-scoped pipeline metadata (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream-intent carrier); that request metadata build must stay behind the single request bridge surface."
       - "Responses handler must not locally read/strip request-body `metadata` or introspect `clientAbortSignal`; request-body preprocessing and abort-signal extraction must stay behind the single request bridge surface."
       - "Protocol truth is write-once at request entry and VR selection; handler/bridge code must only read MetadataCenter truth and must not infer `providerProtocol` / `clientProtocol` from payload shape or endpoint fallbacks."
-      - "Current repo truth: `providerProtocol` is still transported primarily as a top-level protocol-shell field on request metadata / normalized request; this bridge must not be documented as an owner of `runtime_control.providerProtocol` until a real center-backed write path exists."
+      - "Current repo truth: request-executor request-route owner writes `runtime_control.providerProtocol`; Rust mainline readers with `metadataCenterSnapshot` must prefer `runtimeControl.providerProtocol`, while top-level `providerProtocol` remains a transitional transport shell where no center input is available yet."
 
   - feature_id: hub.chat_process_responses_continuation
     status: active

@@ -529,7 +529,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts
-      - sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts
       - sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts
       - sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.ts
     contract:
@@ -728,6 +727,29 @@ verification:
     notes:
       - "Request-route metadata input must stay queryable as a dedicated Rust route-control surface and must not be hidden behind broad crate ownership."
 
+  - feature_id: vr.metadata_center_surface
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+    contract:
+      - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - tests/servertool/virtual-router-servertool-routing.spec.ts
+      - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
+    integration:
+      - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
+      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-owner-queryability
+      - npm run verify:vr-no-ts-runtime
+    build:
+      - npm run build:base
+    notes:
+      - "VR route metadata reads must stay metadataCenterSnapshot-backed and read-only; route scope can be consumed, but request truth must not be reconstituted from `__rt` or flat metadata."
+      - "If VR metadata reads need new fields, extend the shared MetadataCenter contract first, then the VR reader surface, then the gates."
+
   - feature_id: vr.route_retry_pin_surface
     change_risk: medium
     unit:
@@ -798,6 +820,7 @@ verification:
       - pnpm exec jest tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     smoke:
       - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
       - pnpm exec jest tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     build:
@@ -806,6 +829,7 @@ verification:
       - "Primary exhausted -> default pool contract must stay Rust-owned; host only consumes plan."
       - "Host verification must prove real route-tier extraction stays ordered, route-scoped, and unflattened before calling Rust."
       - "Forward and reverse candidate-exhaustion cases both required; no local fallback chain synthesis."
+      - "When ordinary route candidates are excluded, verification must prove terminal no-provider is blocked while default pool still has a last provider."
 
   - feature_id: quota.unified_control_surface
     change_risk: medium
@@ -836,15 +860,19 @@ verification:
     integration:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
       - tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     smoke:
       - npm run verify:vr-no-ts-runtime
       - npm run verify:architecture-ci
+      - npm run verify:architecture-mainline-call-map
       - npm run verify:llmswitch-rustification-audit
+      - npm run verify:vr-route-availability-default-floor
     build:
       - npm run build:base
     notes:
       - "Empty-pool closeout belongs to Rust VR selection only; no TS-side policy recovery or fallback is allowed."
       - "Singleton/default hold decision must be exported from Rust and consumed by TS executor shell only."
+      - "Verification must lock the rule: ordinary route pool may collapse, but default-pool last-provider protection must still keep projection non-terminal until default is also empty."
 
   - feature_id: vr.provider_forwarder_runtime
     change_risk: high
@@ -937,7 +965,10 @@ verification:
       - "Validation must prove one request uses one bound MetadataCenter across server -> Hub Pipeline -> provider/runtime -> response closeout; tests must fail if a second center or plain-object shadow truth becomes the semantic source."
       - "Validation must prove `request_truth.sessionId/conversationId` are written only at inbound request capture and are never restored from continuation context, tmux/client attachment scope, or response-side metadata."
       - "Validation must prove continuation fields are not promoted back into request identity."
+      - "Validation must prove `continuation_context` and `runtime_control` are `replaceable_by_owner_only`, never by SSE/handler/outbound closeout."
+      - "Validation must prove `response_observation` is append-only at `HubRespInbound02Parsed`, and never rewritten by request-side or closeout stages."
       - "Validation must prove closeout release/finalize writes provenance only and does not repair or backfill prior families."
+      - "Validation must prove `closeout_status` is finalize-only and `debug_snapshot` is append-only; neither may become runtime decision truth."
       - "The first-batch `runtime_control` carrier and host-side projection reader now belong to this owner; stopless followup materialization is covered by bound MetadataCenter side-channel tests, while broader request-route writer migration remains partial."
       - "Retired edge-stage public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for sanitize/chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope bridge helpers."
       - "Retired zero-consumer routing-instruction public helpers must stay deleted; marker cleanup belongs to the Rust Virtual Router mainline, not a standalone NAPI/TS bridge."
@@ -977,8 +1008,9 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Execution checklist: docs/goals/metadata-center-dualwrite-dualread-closeout-checklist.md."
+      - "Execution checklist: docs/goals/metadata-center-request-scoped-closeout-plan.md."
       - "Gate must fail on direct business writes to `runtime_control`, `__rt`, top-level control projections, or stopless/servertool control fields outside the unified API."
+      - "Gate must fail if any required family policy drifts from `write_once` / `replaceable_by_owner_only` / `append_only` / `finalize_only`."
       - "Rust reader tests must prove typed center is preferred over payload residue before each residue allowlist entry is removed."
 
   - feature_id: hub.metadata_center_request_capture
@@ -1195,8 +1227,8 @@ verification:
     build:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
     notes:
-      - "Responses client-visible body/SSE projection for apply_patch freeform custom tools must stay Rust-owned; TS may only call native and write returned JSON/SSE frames."
-      - "Responses client-visible model/reasoning restore from metadata must stay Rust-owned; residue gate blocks TS restore helpers and metadata parsing in `handler-response-utils.ts`."
+      - "Responses client-visible body/SSE projection for apply_patch freeform custom tools must stay Rust-owned; Chat Process owns interception, normalization, and continuation-save preconditions while TS may only call native and write returned JSON/SSE frames."
+      - "Responses client-visible model/reasoning restore from metadata must stay Rust-owned in Chat Process; residue gate blocks TS restore helpers and metadata parsing in `handler-response-utils.ts`."
       - "Rust response projection contract must lock that client-visible reasoning items never contain `content`; replay-safe `summary`/`encrypted_content` only."
       - "Direct passthrough metadata must not short-circuit replay-safe response projection; transport directness cannot leak `reasoning.content` or item-level pending `status` into client history."
       - "Rust response projection contract must also lock that internal stopless/servertool CLI `function_call` artifacts and illegal pending fields like `status=in_progress` never become replayable client history for the next `/v1/responses` request."
@@ -1964,7 +1996,7 @@ verification:
       - "request-side stream-intent defaults, request-start stream metadata, and port-scope parsing are covered by the same request-bridge gate plus request-start/accept-header/submit_tool_outputs handler regressions."
       - "request-side protocol-scoped pipeline metadata assembly (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream carrier) is covered by the same request-bridge gate plus accept-header/submit_tool_outputs handler regressions."
       - "request-side request-body metadata strip/read and `clientAbortSignal` extraction are covered by the same request-bridge gate plus request-timeout blackbox regressions."
-      - "Validation must not overclaim `runtime_control.providerProtocol`: current request-bridge evidence only proves top-level protocol-shell transport, not a center-backed runtime_control write owner."
+      - "Validation must prove `runtime_control.providerProtocol` is written into the bound MetadataCenter on the request-executor request-route path; top-level protocol-shell transport may remain transitional, but it is no longer the only owner evidence."
   - feature_id: server.responses_sse_bridge_surface
     change_risk: high
     unit:

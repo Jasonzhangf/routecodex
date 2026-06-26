@@ -50,6 +50,17 @@
   - active code/test surface 的旧 `GoalActiveStopLoop` / `evaluateGoalActiveStopLoop*` / `throw_goal_active_loop` 残留已清掉
   - 剩余历史文本若再出现，优先视为非 active fixture / 旧构建物，再按需处理
 
+# 2026-06-26 metadata center Rust write-plan closeout
+
+- 本轮确认 metadata center 的单一写路径收束为：
+  - Rust 侧生成 `StoplessMetadataCenterWritePlan`
+  - TS 侧只做 `applyStoplessMetadataCenterWritePlan`
+  - TS 不再保留并行 direct-write 兜底路径
+- `stopless-metadata-carrier.ts` 继续只承担 bound center 读取/写入辅助，不再做第二套业务写计划。
+- 验证通过：
+  - `cargo test -p router-hotpath-napi metadata_center::write_plan --lib -- --nocapture`
+  - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json`
+
 # 2026-06-26 anthropic user-turn merge fix for port-10000 sample
 
 - 针对 `~/.rcc/codex-samples/openai-responses/ports/10000/req_1782450432857_e0d9fca2/provider-request.json`

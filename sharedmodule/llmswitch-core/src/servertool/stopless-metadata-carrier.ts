@@ -123,6 +123,17 @@ export function readRuntimeControlFromBoundMetadataCenter(
     : undefined;
 }
 
+export function readRuntimeControlFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const direct = readRuntimeControlFromBoundMetadataCenter(target);
+  if (direct) {
+    return direct;
+  }
+  const metadata = asRecord(target?.metadata);
+  return readRuntimeControlFromBoundMetadataCenter(metadata);
+}
+
 export function readStoplessRuntimeControlFromAnyBoundMetadataCenter(
   target: Record<string, unknown> | undefined
 ): StoplessRuntimeControlValue | undefined {
@@ -153,6 +164,28 @@ export function readStoplessRuntimeControlFromAnyBoundMetadataCenter(
     active: record.active,
     ...(typeof record.updatedAt === 'number' ? { updatedAt: record.updatedAt } : {}),
   };
+}
+
+export function readProviderProtocolFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): string | undefined {
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(target);
+  const direct = runtimeControl?.providerProtocol;
+  if (typeof direct === 'string' && direct.trim()) {
+    return direct.trim();
+  }
+  const flat = target?.providerProtocol;
+  if (typeof flat === 'string' && flat.trim()) {
+    return flat.trim();
+  }
+  const nested = asRecord(target?.metadata);
+  const nestedRuntimeControl = readRuntimeControlFromBoundMetadataCenter(nested);
+  const nestedProtocol = nestedRuntimeControl?.providerProtocol;
+  if (typeof nestedProtocol === 'string' && nestedProtocol.trim()) {
+    return nestedProtocol.trim();
+  }
+  const nestedFlat = nested?.providerProtocol;
+  return typeof nestedFlat === 'string' && nestedFlat.trim() ? nestedFlat.trim() : undefined;
 }
 
 export function readRequestTruthSessionIdFromBoundMetadataCenter(
