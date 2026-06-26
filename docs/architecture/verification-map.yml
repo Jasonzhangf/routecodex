@@ -134,6 +134,7 @@ verification:
     build:
       - npm run build:base
     notes:
+      - "Validation must prove stopless request-side restore/guidance rewrite/schema-contract reinjection happens on the Chat Process request boundary after `/v1/responses` continuation restore and before normal request governance; response-side stop/schema/reasoningStop normalization must happen on the Chat Process response boundary before continuation save and before RespOutbound."
       - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessOrchestrationAction` must expose `cli_projection` for non-terminal stop_message_flow."
       - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
       - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoningStop` CLI."
@@ -928,10 +929,15 @@ verification:
     smoke: []
     build:
       - npm run verify:architecture-metadata-center-manifest-code-sync
+      - npm run verify:architecture-metadata-center-write-boundaries
       - npm run build:base
     notes:
       - "Registry core and response closeout release remain here; request capture, attempt merge, and servertool adapter context each moved to file-scoped sub-features."
       - "Manifest/code sync must prove every metadata-center family and slot is backed by a real type, state bucket, writer, reader, and release path."
+      - "Validation must prove one request uses one bound MetadataCenter across server -> Hub Pipeline -> provider/runtime -> response closeout; tests must fail if a second center or plain-object shadow truth becomes the semantic source."
+      - "Validation must prove `request_truth.sessionId/conversationId` are written only at inbound request capture and are never restored from continuation context, tmux/client attachment scope, or response-side metadata."
+      - "Validation must prove continuation fields are not promoted back into request identity."
+      - "Validation must prove closeout release/finalize writes provenance only and does not repair or backfill prior families."
       - "The first-batch `runtime_control` carrier and host-side projection reader now belong to this owner; stopless followup materialization is covered by bound MetadataCenter side-channel tests, while broader request-route writer migration remains partial."
       - "Retired edge-stage public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for sanitize/chat reasoning/strip-private/compat/SSE effect/format-envelope/chat-envelope bridge helpers."
       - "Retired zero-consumer routing-instruction public helpers must stay deleted; marker cleanup belongs to the Rust Virtual Router mainline, not a standalone NAPI/TS bridge."
@@ -967,6 +973,7 @@ verification:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-metadata-center-manifest-code-sync
       - npm run verify:metadata-center-dualwrite-api
+      - npm run verify:architecture-metadata-center-write-boundaries
     build:
       - npm run build:base
     notes:
@@ -981,13 +988,17 @@ verification:
     contract:
       - tests/server/http-server/executor-metadata.spec.ts
       - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
     integration: []
     smoke:
       - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-metadata-center-write-boundaries
     build:
       - npm run build:base
     notes:
       - "Request capture must keep request truth, client attachment scope, and retry-attempt carrier seeding request-local and queryable."
+      - "Validation must prove relay `/v1/responses` bridge entry keeps `responsesResume` in continuation_context, binds `routeHint`, and does not claim effective `retryProviderKey` ownership at the handler shell boundary."
+      - "Validation must prove the narrow stopless-directive entry write only lands `runtime_control.stopMessageEnabled`, and any remaining top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` references are stale residue, not independent truth."
 
   - feature_id: hub.metadata_center_attempt_merge
     change_risk: high
@@ -996,7 +1007,8 @@ verification:
     contract:
       - tests/server/http-server/executor-metadata.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts
-    integration: []
+    integration:
+      - tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts
     smoke:
       - npm run verify:function-map-compile-gate
     build:
@@ -1004,6 +1016,8 @@ verification:
     notes:
       - "Attempt merge must preserve metadata-center truth over pipeline-result drift and must not recreate flat metadata backfill."
       - "Validation must prove provider target/model compatibility observation stays in `MetadataCenter.provider_observation` and is still readable by servertool/provider context readers without reviving flat `metadata.target` / `metadata.compatibilityProfile`."
+      - "Validation must prove effective relay `/v1/responses` provider pin is present on the request-executor path before Hub execution, rather than inferred only from an earlier handler/bridge shell."
+      - "Validation must prove single-use `preselectedRoute` is released before retry attempts and is not revived from `__rt` / top-level relay residue."
 
   - feature_id: hub.metadata_center_servertool_context
     change_risk: medium
@@ -1319,7 +1333,7 @@ verification:
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+      - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
     integration:
@@ -1332,7 +1346,9 @@ verification:
     build:
       - npm run build:base
     notes:
+      - "Validation must prove this continuation block is `/v1/responses`-only and is skipped by chat/messages/non-responses protocol paths."
       - "Responses continuation is a Chat Process boundary block: request restore runs after `HubReqInbound02Standardized` and before `HubReqChatProcess03Governed`; response save runs after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`."
+      - "Req/Resp inbound and outbound are normalization/projection-only nodes; all continuation, tool governance, and semantic recovery must happen in Chat Process before save/restore."
       - "Tests must lock current-request explicit evidence, owner resolution, canonical restore, stopless CLI result restore, response schema judgment/projection, post-projection canonical save, stale transient request-id clearing, and released retained state."
       - "SSE tests are not continuation gates. `handler-response-sse.ts` and `responses-sse-bridge.ts` must not contain continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic."
 
@@ -1948,6 +1964,7 @@ verification:
       - "request-side stream-intent defaults, request-start stream metadata, and port-scope parsing are covered by the same request-bridge gate plus request-start/accept-header/submit_tool_outputs handler regressions."
       - "request-side protocol-scoped pipeline metadata assembly (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream carrier) is covered by the same request-bridge gate plus accept-header/submit_tool_outputs handler regressions."
       - "request-side request-body metadata strip/read and `clientAbortSignal` extraction are covered by the same request-bridge gate plus request-timeout blackbox regressions."
+      - "Validation must not overclaim `runtime_control.providerProtocol`: current request-bridge evidence only proves top-level protocol-shell transport, not a center-backed runtime_control write owner."
   - feature_id: server.responses_sse_bridge_surface
     change_risk: high
     unit:
