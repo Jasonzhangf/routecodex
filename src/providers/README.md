@@ -30,11 +30,6 @@ These are enforced in the HTTP server SSE bridge (not in provider runtime), but 
 - `ROUTECODEX_HTTP_SSE_TIMEOUT_MS` / `RCC_HTTP_SSE_TIMEOUT_MS`: client SSE total timeout (default `300000`).
 - `ROUTECODEX_HTTP_SSE_KEEPALIVE_MS` / `RCC_HTTP_SSE_KEEPALIVE_MS`: server-side SSE keepalive comment interval (default `15000`).
 
-## Rate-limit cooldown knobs
-These envs influence how the provider layer annotates retry/cooldown hints for VirtualRouter.
-
-- `ROUTECODEX_RL_CAPACITY_COOLDOWN` / `RCC_RL_CAPACITY_COOLDOWN`: series cooldown used for short-lived "No capacity available" / `MODEL_CAPACITY_EXHAUSTED` 429s (default `30s`).
-
 ## Do / Don't
 **Do**
 - Handle HTTP, auth, retries, snapshots

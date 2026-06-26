@@ -25,13 +25,32 @@ import {
   reattachRuntimeMetadata,
   truncateLogMessage
 } from './base-provider-runtime-helpers.js';
-import {
-  buildSeriesCooldownDetail,
-  isDailyLimitRateLimitMessage,
-  parseDurationToMs as parseSeriesCooldownDurationToMs,
-  SERIES_COOLDOWN_DETAIL_KEY,
-  type SeriesCooldownDetail
-} from './base-provider-series-cooldown.js';
+function isDailyLimitRateLimitMessage(messageLower: string, upstreamLower?: string): boolean {
+  const haystack = `${messageLower} ${upstreamLower ?? ''}`;
+  if (
+    haystack.includes('no capacity available')
+    || haystack.includes('model_capacity_exhausted')
+    || haystack.includes('model capacity exhausted')
+  ) {
+    return false;
+  }
+  return (
+    haystack.includes('daily cost limit')
+    || haystack.includes('daily quota')
+    || haystack.includes('weekly usage quota has been exhausted')
+    || haystack.includes('weekly quota has been exhausted')
+    || haystack.includes('weekly usage quota exhausted')
+    || haystack.includes('quota has been exhausted')
+    || haystack.includes('quota exceeded')
+    || haystack.includes('resource has been exhausted')
+    || haystack.includes('resource exhausted')
+    || haystack.includes('resource_exhausted')
+    || haystack.includes('费用限制')
+    || haystack.includes('每日费用限制')
+    || haystack.includes('余额不足')
+    || haystack.includes('无可用资源包')
+  );
+}
 
 type StatsCenterLike = {
   recordProviderUsage(ev: ProviderUsageEvent): void;
@@ -358,19 +377,6 @@ export abstract class BaseProvider implements IProviderV2 {
       this.resetRateLimitCounter(providerKey, _context.model);
     }
 
-    let seriesCooldownDetail: SeriesCooldownDetail | null = null;
-    if (classification.isRateLimit && providerKey) {
-      // 仅负责从上游错误中提取配额冷却信息，并通过 virtualRouterSeriesCooldown
-      // 提供给 llmswitch-core 的 VirtualRouter。具体的 alias / series 冷却与重路由
-      // 逻辑完全由 VirtualRouterEngine 处理，Provider 层不再维护独立的 backoff 状态。
-      seriesCooldownDetail = buildSeriesCooldownDetail(
-        augmentedError,
-        _context,
-        runtimeProfile,
-        providerKey
-      );
-    }
-
     const affectsHealth = classification.affectsHealth;
     const recoverable = classification.recoverable;
 
@@ -403,8 +409,7 @@ export abstract class BaseProvider implements IProviderV2 {
       upstreamCode,
       upstreamMessage,
       requestContext: _context.runtimeMetadata,
-      meta: augmentedError.details,
-      ...(seriesCooldownDetail ? { [SERIES_COOLDOWN_DETAIL_KEY]: seriesCooldownDetail } : {})
+      meta: augmentedError.details
     };
     if (!augmentedError.requestId) {
       augmentedError.requestId = _context.requestId;
@@ -507,6 +512,33 @@ export abstract class BaseProvider implements IProviderV2 {
 
   // Kept for compatibility with existing tests/introspection helpers.
   private static parseDurationToMs(value?: string): number | null {
-    return parseSeriesCooldownDurationToMs(value);
+    if (!value || typeof value !== 'string') {
+      return null;
+    }
+    const pattern = /(\d+(?:\.\d+)?)(ms|s|m|h)/gi;
+    let totalMs = 0;
+    let matched = false;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(value)) !== null) {
+      matched = true;
+      const amount = Number.parseFloat(match[1]);
+      if (!Number.isFinite(amount)) {
+        continue;
+      }
+      const unit = match[2].toLowerCase();
+      if (unit === 'ms') {
+        totalMs += amount;
+      } else if (unit === 's') {
+        totalMs += amount * 1000;
+      } else if (unit === 'm') {
+        totalMs += amount * 60_000;
+      } else if (unit === 'h') {
+        totalMs += amount * 3_600_000;
+      }
+    }
+    if (!matched || totalMs <= 0) {
+      return null;
+    }
+    return Math.round(totalMs);
   }
 }

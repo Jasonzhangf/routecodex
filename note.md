@@ -26,6 +26,34 @@
   - targeted policy spec 为绿，说明当前剩余 `special_400` contract 已收束成“未知裸 400 保守桶”
   - 结论：下一刀若想继续缩 `special_400`，必须先拿到新的 deterministic 400 样本，不能直接删 policy 的 generic `statusCode===400` fallback
 
+# 2026-06-27 stale architecture contract cleanup for removed backoff files
+
+- 当前树已确认不存在这些旧文件：
+  - `src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts`
+  - `src/providers/core/runtime/provider-failure-policy-backoff.ts`
+  - `src/server/runtime/http-server/executor/request-executor-retry-backoff.ts`
+- 但 `docs/architecture/function-map.yml`、`docs/architecture/verification-map.yml`、`docs/error-handling-v2.md`
+  仍把它们写成 active owner / active path / active category，属于 contract 失真。
+- 当前真实现状：
+  - session storm / fixed wait queue owner 是 `src/server/runtime/http-server/executor/request-executor-error-action-queue.ts`
+  - provider/global wait wrapper 现存文件是 `src/server/runtime/http-server/executor/request-executor-global-error-backoff.ts`
+  - queue 当前真实 category 只有：`global_error` / `session_storm` / `provider_traffic_saturated` / `servertool_followup`
+- 本轮先只收 stale map/doc，不碰运行时语义；跑 `verify:function-map-compile-gate` 验证 contract 与现存文件一致。
+
+# 2026-06-27 virtualRouterSeriesCooldown physical removal slice
+
+- 重新核对目标后，`virtualRouterSeriesCooldown` 明确违背“只允许真实 provider 错误 strike×3 -> 30m cooldown；禁止 series/family cooldown 影响 eligibility”。
+- 现状证据：
+  - provider 侧仍在 `src/providers/core/runtime/base-provider.ts` 注入 `virtualRouterSeriesCooldown`
+  - `tests/servertool/virtual-router-series-cooldown.spec.ts` 还在宣称该 signal 应该直接 trip 当前 provider
+  - 但当前树实际运行该 spec 已红，说明 VR 已不再消费这条 detail，属于死语义残留
+- 本轮处理：
+  - 从 `BaseProvider` 删除 `virtualRouterSeriesCooldown` 注入
+  - 删除 `src/providers/core/runtime/base-provider-series-cooldown.ts`
+  - 将仅剩的 `parseDurationToMs` helper 内联回 `BaseProvider`
+  - 删除失真测试 `tests/servertool/virtual-router-series-cooldown.spec.ts`
+  - 同步删 `src/providers/README.md` 中 series cooldown env 文档
+
 # 2026-06-26 servertool followup stopmessage backend retirement
 
 - Jason 已明确纠偏：`servertool followup`、`stopmessage/stopless`、`apply_patch` servertool、backend route/followup 都不再是活功能面，不能继续按 active capability 保留。
