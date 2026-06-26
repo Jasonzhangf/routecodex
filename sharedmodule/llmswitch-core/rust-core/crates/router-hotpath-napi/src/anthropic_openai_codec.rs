@@ -426,8 +426,21 @@ fn should_merge_adjacent_anthropic_messages(role: &str, previous: &Value, next: 
             && content_blocks_are_all_type(next, "tool_use");
     }
     if role.eq_ignore_ascii_case("user") {
-        return content_blocks_contain_type(previous, "tool_result")
-            && content_blocks_are_all_type(next, "tool_result");
+        let previous_has_tool_result = content_blocks_contain_type(previous, "tool_result");
+        let next_is_tool_result_only = content_blocks_are_all_type(next, "tool_result");
+        let next_has_non_empty_text = next.as_array().is_some_and(|blocks| {
+            blocks.iter().any(|block| {
+                let Some(row) = block.as_object() else {
+                    return false;
+                };
+                let is_text = read_trimmed_string(row.get("type"))
+                    .is_some_and(|block_type| block_type.eq_ignore_ascii_case("text"));
+                let has_text = read_trimmed_string(row.get("text"))
+                    .is_some_and(|text| !text.is_empty());
+                is_text && has_text
+            })
+        });
+        return previous_has_tool_result && (next_is_tool_result_only || next_has_non_empty_text);
     }
     false
 }
@@ -1516,7 +1529,7 @@ mod tests {
     }
 
     #[test]
-    fn build_anthropic_from_openai_chat_keeps_tool_result_and_user_text_in_separate_turns() {
+    fn build_anthropic_from_openai_chat_merges_tool_result_with_following_user_text_turn() {
         let payload = json!({
             "model": "MiniMax-M3",
             "messages": [
@@ -1561,16 +1574,94 @@ mod tests {
         .expect("json output");
 
         let messages = output["messages"].as_array().expect("messages array");
-        assert_eq!(messages.len(), 3);
+        assert_eq!(messages.len(), 2);
         assert_eq!(messages[1]["role"].as_str(), Some("user"));
-        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 1);
+        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 2);
         assert_eq!(
             messages[1]["content"][0]["type"].as_str(),
             Some("tool_result")
         );
-        assert_eq!(messages[2]["role"].as_str(), Some("user"));
-        assert_eq!(messages[2]["content"].as_array().unwrap().len(), 1);
-        assert_eq!(messages[2]["content"][0]["type"].as_str(), Some("text"));
+        assert_eq!(messages[1]["content"][1]["type"].as_str(), Some("text"));
+        assert_eq!(messages[1]["content"][1]["text"].as_str(), Some("继续"));
+    }
+
+    #[test]
+    fn build_anthropic_from_openai_chat_keeps_tool_result_then_user_image_placeholder_in_one_user_turn() {
+        let payload = json!({
+            "model": "MiniMax-M3",
+            "messages": [
+                { "role": "user", "content": "start" },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_inline_image_history",
+                            "tool_call_id": "call_inline_image_history",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"tail -n 60 note.md\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_inline_image_history",
+                    "id": "call_inline_image_history",
+                    "content": "Total output lines: 141\n[data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB]"
+                },
+                {
+                    "role": "user",
+                    "content": [{ "type": "text", "text": "[Image omitted]" }]
+                },
+                { "role": "assistant", "content": "continue" }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": { "type": "object" }
+                    }
+                }
+            ]
+        });
+
+        let output: Value = serde_json::from_str(
+            &build_anthropic_from_openai_chat_json(payload.to_string(), None)
+                .expect("build success"),
+        )
+        .expect("json output");
+
+        let messages = output["messages"].as_array().expect("messages array");
+        let tool_use_index = messages
+            .iter()
+            .position(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        part["type"].as_str() == Some("tool_use")
+                            && part["id"].as_str() == Some("call_inline_image_history")
+                    })
+                })
+            })
+            .expect("tool_use exists");
+        let merged_user_turn = messages
+            .get(tool_use_index + 1)
+            .expect("merged user turn follows tool_use");
+        assert_eq!(merged_user_turn["role"].as_str(), Some("user"));
+        let content = merged_user_turn["content"]
+            .as_array()
+            .expect("merged user content");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"].as_str(), Some("tool_result"));
+        assert_eq!(
+            content[0]["tool_use_id"].as_str(),
+            Some("call_inline_image_history")
+        );
+        assert_eq!(content[1]["type"].as_str(), Some("text"));
+        assert_eq!(content[1]["text"].as_str(), Some("[Image omitted]"));
     }
 
     #[test]
