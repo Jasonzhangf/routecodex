@@ -1,14 +1,11 @@
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import { registerRequestLogContext } from '../../../utils/request-log-color.js';
-import { getClientConnectionAbortSignal } from '../../../utils/client-connection-state.js';
 import { buildRequestMetadata, cloneClientHeaders, resolveClientRequestId } from '../executor-metadata.js';
 import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 import { bindSessionConversationSession } from './request-retry-helpers.js';
 import { writeInboundClientSnapshot } from './request-executor-core-utils.js';
 import {
-  peekSessionStormBackoffWaitMs,
-  resolveSessionStormBackoffScopes,
-  waitSessionStormBackoffWithGate
+  resolveSessionStormBackoffScopes
 } from './request-executor-retry-planner.js';
 
 export type RequestExecutorInitialRequestState = {
@@ -46,26 +43,6 @@ export async function initializeRequestExecutorRequestState(args: {
   const providerRequestId = args.input.requestId;
   const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
   const sessionStormBackoffScopes = resolveSessionStormBackoffScopes(initialMetadata);
-  for (const scope of sessionStormBackoffScopes) {
-    const pendingSessionStormWaitMs = peekSessionStormBackoffWaitMs(scope);
-    if (!(pendingSessionStormWaitMs > 0)) {
-      continue;
-    }
-    args.logStage('request.session_storm_backoff_wait', providerRequestId, {
-      scope,
-      waitMs: pendingSessionStormWaitMs
-    });
-    await waitSessionStormBackoffWithGate(
-      scope,
-      pendingSessionStormWaitMs,
-      getClientConnectionAbortSignal(initialMetadata),
-      args.logNonBlockingError
-    );
-    args.logStage('request.session_storm_backoff_wait.completed', providerRequestId, {
-      scope,
-      waitMs: pendingSessionStormWaitMs
-    });
-  }
 
   args.logStage('request.received', providerRequestId, {
     endpoint: args.input.entryEndpoint,

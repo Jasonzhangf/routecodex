@@ -209,9 +209,7 @@ import {
 import {
   consumeSessionStormBackoffMs,
   isSessionStormBackoffCandidate,
-  peekSessionStormBackoffWaitMs,
   resolveSessionStormBackoffScopes,
-  waitSessionStormBackoffWithGate,
 } from './executor/request-executor-session-storm-backoff.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
 
@@ -1320,28 +1318,6 @@ export class RouteCodexHttpServer {
             ? (input.body as Record<string, unknown>).model
             : undefined,
         });
-        for (const scope of routerDirectStormScopes) {
-          const waitMs = peekSessionStormBackoffWaitMs(scope);
-          if (!(waitMs > 0)) {
-            continue;
-          }
-          this.logStage('request.session_storm_backoff_wait', input.requestId, {
-            scope,
-            waitMs,
-            source: 'router-direct',
-          });
-          await waitSessionStormBackoffWithGate(
-            scope,
-            waitMs,
-            getClientConnectionAbortSignal(asMetadataRecord(nextInput.metadata)),
-            logRouterDirectNonBlockingError,
-          );
-          this.logStage('request.session_storm_backoff_wait.completed', input.requestId, {
-            scope,
-            waitMs,
-            source: 'router-direct',
-          });
-        }
         let directResult: RouterDirectOutcome;
         try {
           directResult = await this.executeRouterDirectPipelineForPort(portConfig, nextInput);
