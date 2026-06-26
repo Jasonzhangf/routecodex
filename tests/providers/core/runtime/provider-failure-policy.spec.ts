@@ -4,6 +4,7 @@ import {
   isProviderFailureHealthNeutral,
   resolveProviderFailureActionPlan,
   resolveProviderFailureClassification,
+  resolveProviderFailureExclusionDecision,
   resolveProviderFailureRetryEligibility
 } from '../../../../src/providers/core/runtime/provider-failure-policy.js';
 
@@ -437,6 +438,42 @@ describe('provider failure policy ssot', () => {
     for (const classification of samples) {
       expect(['recoverable', 'unrecoverable', 'special_400']).toContain(classification);
     }
+  });
+
+  it('exclusion decision only depends on whether an alternative candidate exists', () => {
+    expect(resolveProviderFailureExclusionDecision({
+      hasAlternativeCandidate: false,
+      classification: 'unrecoverable',
+      statusCode: 401,
+      errorCode: 'INVALID_API_KEY',
+      upstreamCode: 'INSUFFICIENT_QUOTA',
+      promptTooLong: true,
+      isProviderTrafficSaturated: true,
+      isNetworkTransport: true,
+      is429: true,
+      isVerify: true,
+      isReauth: true,
+    })).toEqual({
+      excludeCurrentProvider: false,
+      retryAction: 'reroute_explicit_alternative',
+    });
+
+    expect(resolveProviderFailureExclusionDecision({
+      hasAlternativeCandidate: true,
+      classification: 'special_400',
+      statusCode: 503,
+      errorCode: 'ERR_HTTP2_STREAM_CANCEL',
+      upstreamCode: 'HTTP_503',
+      promptTooLong: true,
+      isProviderTrafficSaturated: true,
+      isNetworkTransport: true,
+      is429: true,
+      isVerify: true,
+      isReauth: true,
+    })).toEqual({
+      excludeCurrentProvider: true,
+      retryAction: 'reroute_explicit_alternative',
+    });
   });
 
   it('classifies sqlite busy 500 as recoverable and health-affecting', () => {

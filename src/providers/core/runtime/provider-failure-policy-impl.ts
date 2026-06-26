@@ -907,71 +907,8 @@ export function resolveProviderFailureExclusionDecision(args: {
   isVerify?: boolean;
   isReauth?: boolean;
 }): ProviderFailureExclusionDecision {
-  if (!args.hasAlternativeCandidate) {
-    return {
-      excludeCurrentProvider: false,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  const normalizedErrorCode = normalizeProviderFailureCodeKey(args.errorCode);
-  const normalizedUpstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
-  const isStreamCanceled =
-    normalizedErrorCode === 'ERR_HTTP2_STREAM_CANCEL'
-    || normalizedUpstreamCode === 'ERR_HTTP2_STREAM_CANCEL';
-  if (isStreamCanceled && args.hasAlternativeCandidate) {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  const isHttp503 =
-    args.statusCode === 503
-    || normalizedErrorCode === 'HTTP_503'
-    || normalizedUpstreamCode === 'HTTP_503';
-  if (isHttp503) {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  if (args.promptTooLong) {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  if (args.classification === 'special_400') {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  if (args.classification === 'unrecoverable') {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  if (args.classification === 'recoverable') {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  if (args.isProviderTrafficSaturated || args.isNetworkTransport) {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  if (args.isVerify || args.is429 || args.isReauth) {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
   return {
-    excludeCurrentProvider: true,
+    excludeCurrentProvider: args.hasAlternativeCandidate,
     retryAction: 'reroute_explicit_alternative'
   };
 }
