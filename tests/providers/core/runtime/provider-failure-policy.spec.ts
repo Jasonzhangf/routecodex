@@ -414,6 +414,37 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies bare HTTP_400 missing input payload errors as health-neutral unrecoverable local errors', () => {
+    const error = Object.assign(new Error('Invalid request payload: missing field "input"'), {
+      statusCode: 400,
+      code: 'HTTP_400'
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message
+    });
+
+    expect(classification).toBe('unrecoverable');
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message,
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'unrecoverable',
+      affectsHealth: false,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
+    }));
+  });
+
   it('classifies INVALID_REQUEST_ERROR code path as health-neutral unrecoverable local errors', () => {
     const error = Object.assign(new Error('invalid request payload'), {
       statusCode: 400,

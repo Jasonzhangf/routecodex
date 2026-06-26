@@ -15,6 +15,12 @@
 - 同一 spec 文件里还存在一个与本切片无关的独立旧红：
   - `detects OpenAI-compatible SSE error payload with string type`
   - 后续验证必须用 `--testNamePattern` 缩窄，避免把该旧红误算进本切片
+- 后续补的白盒样本：
+  - `Invalid request payload: missing field "input"`（裸 `HTTP_400`、无 nested payload）
+  - targeted policy spec 已直接为绿，说明当前 `isLocalRequestContractValidationError(reason.includes('invalid request payload'))`
+    已足够把该样本判成 `unrecoverable + affectsHealth:false + shouldRetry:false`
+  - 结论：这类 deterministic local payload-shape 400 当前已被 policy owner 覆盖，暂时不是继续删
+    `statusCode===400 -> special_400` 的 blocker
 
 # 2026-06-26 servertool followup stopmessage backend retirement
 
