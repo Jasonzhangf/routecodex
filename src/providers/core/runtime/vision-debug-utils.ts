@@ -32,8 +32,10 @@ function readSnapshotEntryPort(source?: UnknownObject): number | undefined {
     record?.matchedPort,
     record?.routecodexLocalPort,
     record?.localPort,
+    record?.portScope,
     portContext?.matchedPort,
-    portContext?.localPort
+    portContext?.localPort,
+    portContext?.port
   ]) {
     const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
     if (Number.isFinite(numeric) && numeric > 0) {

@@ -228,6 +228,34 @@ describe('usage logger timing summary', () => {
     expect(lines.some((line) => line.replace(/\u001b\[[0-9;]*m/g, '').includes('cache=800/1000(80.0%)'))).toBe(true);
   });
 
+  it('prints protocol-aware cache hit for openai responses usage lines', async () => {
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logUsageSummary('req_cache_openai_responses', {
+      providerKey: 'demo.key1',
+      providerProtocol: 'openai-responses',
+      model: 'demo-model',
+      routeName: 'tools',
+      poolId: 'tools-primary',
+      finishReason: 'stop',
+      latencyMs: 120,
+      usage: {
+        prompt_tokens: 29056,
+        completion_tokens: 100,
+        total_tokens: 29156,
+        cache_read_input_tokens: 29056
+      }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('cache=29056/29056(100.0%)');
+  });
+
 
   it('prints breakdown in dev usage summary when summary mode is enabled and scoped timings exist', async () => {
     process.env.NODE_ENV = 'development';

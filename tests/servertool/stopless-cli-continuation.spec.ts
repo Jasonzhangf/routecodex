@@ -3,7 +3,20 @@ import { Command } from 'commander';
 import path from 'node:path';
 
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
-import { resolveStateKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
+
+import { readNativeFunction } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
+
+function resolveStateKeyRust(record: Record<string, unknown>): string {
+  const fn = readNativeFunction('resolveServertoolStateKeyJson');
+  if (!fn) {
+    throw new Error('resolveServertoolStateKeyJson native unavailable');
+  }
+  const raw = fn(JSON.stringify(record));
+  if (typeof raw !== 'string') {
+    throw new Error(`resolveServertoolStateKeyJson native returned non-string: ${typeof raw}`);
+  }
+  return JSON.parse(raw) as string;
+}
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import { createServertoolCommand } from '../../src/cli/commands/servertool.js';
@@ -190,7 +203,7 @@ describe('stopless CLI continuation', () => {
   });
 
   test('resolveStateKey still uses only sessionId (no tmux/conversation/inject fallback)', () => {
-    expect(resolveStateKey({
+    expect(resolveStateKeyRust({
       providerProtocol: 'openai-responses',
       requestId: 'req-stopless-session-only',
       sessionId: 'session-a',
@@ -572,14 +585,14 @@ describe('stopless CLI continuation', () => {
       flowId: 'stop_message_flow',
       repeatCount: 1,
       maxRepeats: 3,
-      triggerHint: 'invalid_schema'
+      triggerHint: 'stop_schema_terminal_missing_fields'
     });
     expect(center?.readRuntimeControl().stopless).toEqual(
       expect.objectContaining({
         flowId: 'stop_message_flow',
         repeatCount: 1,
         maxRepeats: 3,
-        triggerHint: 'invalid_schema',
+        triggerHint: 'stop_schema_terminal_missing_fields',
         active: true
       })
     );

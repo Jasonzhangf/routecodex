@@ -8,10 +8,6 @@ import {
   ProviderTrafficSaturatedError,
   resolveProviderTrafficPolicy
 } from '../../../../src/server/runtime/http-server/provider-traffic-governor.js';
-import {
-  registerErrorActionQueueHook,
-  resetErrorActionQueueStateForTests
-} from '../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue.js';
 
 function createRuntime(overrides?: Partial<ProviderRuntimeProfile>): ProviderRuntimeProfile {
   return {
@@ -37,7 +33,6 @@ describe('provider-traffic-governor', () => {
     } else {
       delete process.env.ROUTECODEX_DYNAMIC_CONCURRENCY_CONFIG_PATH;
     }
-    resetErrorActionQueueStateForTests();
   });
 
   it('applies generic defaults when provider config omits concurrency/rpm', () => {
@@ -447,7 +442,7 @@ describe('provider-traffic-governor', () => {
     }
   });
 
-  it('blocks once through the unified queue, then raises saturation if still full', async () => {
+  it('raises saturation immediately when concurrency remains full', async () => {
     const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-unified-${process.pid}-${randomUUID()}`);
     const governor = new ProviderTrafficGovernor(rootDir);
     const runtime = createRuntime({
@@ -484,81 +479,14 @@ describe('provider-traffic-governor', () => {
         statusCode: 429,
         code: 'PROVIDER_TRAFFIC_SATURATED',
         details: expect.objectContaining({
-          reason: 'acquire_after_backoff_concurrency',
-          unifiedBackoffMs: 1000
+          reason: 'acquire_concurrency'
         })
       });
       const elapsed = Date.now() - startedAt;
-      expect(elapsed).toBeGreaterThanOrEqual(1000);
-      expect(elapsed).toBeLessThan(2500);
+      expect(elapsed).toBeLessThan(1000);
 
       await governor.release(first.permit);
     } finally {
-      await fs.rm(rootDir, { recursive: true, force: true });
-    }
-  });
-
-  it('queues saturated acquires through unified action hooks before retrying capacity', async () => {
-    const rootDir = path.join(os.tmpdir(), `provider-traffic-governor-queue-${process.pid}-${randomUUID()}`);
-    const governor = new ProviderTrafficGovernor(rootDir);
-    const runtime = createRuntime({
-      runtimeKey: 'queue.runtime',
-      providerId: 'ali-coding-plan',
-      providerFamily: 'ali-coding-plan',
-      concurrency: {
-        maxInFlight: 1,
-        acquireTimeoutMs: 2000,
-        staleLeaseMs: 60000
-      },
-      rpm: {
-        requestsPerMinute: 100,
-        acquireTimeoutMs: 2000
-      }
-    });
-    const events: unknown[] = [];
-    const unregister = registerErrorActionQueueHook((event) => events.push(event));
-    try {
-      const first = await governor.acquire({
-        runtimeKey: runtime.runtimeKey,
-        providerKey: 'ali-coding-plan.key1.glm-5',
-        requestId: 'waiter-1',
-        runtime
-      });
-
-      const second = governor.acquire({
-        runtimeKey: runtime.runtimeKey,
-        providerKey: 'ali-coding-plan.key1.glm-5',
-        requestId: 'waiter-2',
-        runtime
-      });
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      await governor.release(first.permit);
-      const secondPermit = await second;
-      expect(secondPermit.activeInFlight).toBe(1);
-      expect(secondPermit.waitedMs).toBeGreaterThanOrEqual(1000);
-      expect(events).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          type: 'record',
-          category: 'provider_traffic_saturated',
-          scopeKey: 'runtime:queue.runtime',
-          delayMs: 1000
-        }),
-        expect.objectContaining({
-          type: 'wait_start',
-          category: 'provider_traffic_saturated',
-          scopeKey: 'runtime:queue.runtime',
-          delayMs: 1000
-        }),
-        expect.objectContaining({
-          type: 'wait_end',
-          category: 'provider_traffic_saturated',
-          scopeKey: 'runtime:queue.runtime',
-          delayMs: 1000
-        })
-      ]));
-      await governor.release(secondPermit.permit);
-    } finally {
-      unregister();
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   });

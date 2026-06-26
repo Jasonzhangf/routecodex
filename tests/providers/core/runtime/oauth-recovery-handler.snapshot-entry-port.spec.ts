@@ -3,22 +3,21 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 const writeProviderSnapshot = jest.fn(async () => {});
 const attachProviderSseSnapshotStream = jest.fn((stream: NodeJS.ReadableStream) => stream);
 
-jest.mock('../../../../src/providers/core/utils/snapshot-writer.ts', () => ({
-  writeProviderSnapshot,
-  attachProviderSseSnapshotStream
-}), { virtual: true });
-
-jest.mock('../../../../src/providers/auth/oauth-lifecycle.ts', () => ({
-  handleUpstreamInvalidOAuthToken: async () => false
-}), { virtual: true });
-
 describe('OAuthRecoveryHandler snapshot entryPort', () => {
   beforeEach(() => {
+    jest.resetModules();
     writeProviderSnapshot.mockClear();
     attachProviderSseSnapshotStream.mockClear();
   });
 
-  it('forwards entryPort on non-stream retry provider-response snapshots', async () => {
+  it('forwards portContext.port on non-stream retry provider-response snapshots', async () => {
+    jest.unstable_mockModule('../../../../src/providers/core/utils/snapshot-writer.js', () => ({
+      writeProviderSnapshot,
+      attachProviderSseSnapshotStream
+    }));
+    jest.unstable_mockModule('../../../../src/providers/auth/oauth-lifecycle.js', () => ({
+      handleUpstreamInvalidOAuthToken: async () => false
+    }));
     const { OAuthRecoveryHandler } = await import(
       '../../../../src/providers/core/runtime/transport/oauth-recovery-handler.ts'
     );
@@ -61,7 +60,7 @@ describe('OAuthRecoveryHandler snapshot entryPort', () => {
         requestId: 'req-oauth-retry-entry-port',
         providerKey: 'deepseek.key1.deepseek-v4-pro',
         providerId: 'deepseek',
-        metadata: { matchedPort: 5520 }
+        metadata: { portContext: { port: 5520 } }
       } as any,
       wrapUpstreamSseResponse: async () => ({}),
       extra: { retry: true },

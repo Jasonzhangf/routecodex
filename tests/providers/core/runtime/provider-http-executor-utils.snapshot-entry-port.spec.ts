@@ -1,21 +1,22 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 const writeProviderSnapshot = jest.fn(async () => {});
-
-jest.mock('../../../../src/providers/core/utils/snapshot-writer.ts', () => ({
-  writeProviderSnapshot
-}), { virtual: true });
-
-jest.mock('../../../../src/providers/auth/oauth-lifecycle.ts', () => ({
-  handleUpstreamInvalidOAuthToken: async () => false
-}), { virtual: true });
+const attachProviderSseSnapshotStream = jest.fn((stream: NodeJS.ReadableStream) => stream);
 
 describe('normalizeProviderHttpError snapshot entryPort', () => {
   beforeEach(() => {
+    jest.resetModules();
     writeProviderSnapshot.mockClear();
   });
 
-  it('forwards entryPort from provider context metadata into provider-error snapshots', async () => {
+  it('forwards portScope from provider context metadata into provider-error snapshots', async () => {
+    jest.unstable_mockModule('../../../../src/providers/core/utils/snapshot-writer.js', () => ({
+      writeProviderSnapshot,
+      attachProviderSseSnapshotStream
+    }));
+    jest.unstable_mockModule('../../../../src/providers/auth/oauth-lifecycle.js', () => ({
+      handleUpstreamInvalidOAuthToken: async () => false
+    }));
     const { normalizeProviderHttpError } = await import(
       '../../../../src/providers/core/runtime/provider-http-executor-utils.ts'
     );
@@ -35,7 +36,7 @@ describe('normalizeProviderHttpError snapshot entryPort', () => {
         providerKey: 'XLC.key1.glm-5.2',
         providerId: 'XLC',
         metadata: {
-          entryPort: 5555
+          portScope: 5555
         }
       } as any
     });

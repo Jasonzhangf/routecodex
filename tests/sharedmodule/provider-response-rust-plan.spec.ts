@@ -837,7 +837,7 @@ describe('provider response Rust native plan', () => {
     ]);
   });
 
-  it('does not bypass Rust native response plan for inert serverToolFollowup metadata', async () => {
+  it('does not bypass Rust native response plan for inert legacy runtime metadata', async () => {
     const recorder = new StubStageRecorder();
     const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_native_followup_inert_plan_1',
@@ -845,7 +845,7 @@ describe('provider response Rust native plan', () => {
       providerProtocol: 'openai-chat',
       stopMessageEnabled: false,
       routecodexPortStopMessageEnabled: false,
-      __rt: { serverToolFollowup: true, serverToolFollowupSource: 'servertool.reasoning_stop_continue' }
+      __rt: { legacyRuntimeFlag: true }
     });
 
     const result = await convertProviderResponse({

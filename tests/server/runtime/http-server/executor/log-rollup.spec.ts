@@ -337,6 +337,39 @@ describe('log rollup', () => {
     expect(lines.some((line) => line.includes('usage('))).toBe(true);
   });
 
+  it('prints protocol-aware realtime cache usage breakdown for openai responses', async () => {
+    process.env.ROUTECODEX_LOG_ROLLUP = '1';
+    process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { recordUsageRollup } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
+
+    recordUsageRollup({
+      requestId: 'req-cache-rt-openai-responses',
+      routeName: 'thinking',
+      poolId: 'thinking-deepseek-web-primary',
+      providerKey: 'openai.resp',
+      model: 'gpt-5.4',
+      providerProtocol: 'openai-responses',
+      sessionId: 'sid-cache-rt-openai-responses',
+      projectPath: '/tmp/project-cache-rt',
+      latencyMs: 10000,
+      internalLatencyMs: 1000,
+      externalLatencyMs: 3000,
+      sseDecodeMs: 6000,
+      providerAttemptCount: 1,
+      retryCount: 0,
+      finishReason: 'stop',
+      promptTokens: 29056,
+      completionTokens: 200,
+      cacheReadTokens: 29056,
+      cacheCreationTokens: 125,
+      totalTokens: 29256
+    });
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(lines.some((line) => line.replace(/\u001b\[[0-9;]*m/g, '').includes('cache.hit=100.0%'))).toBe(true);
+  });
+
   it('suppresses realtime session-request line when caller marks usage line as primary', async () => {
     process.env.ROUTECODEX_LOG_ROLLUP = '1';
     process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '1';

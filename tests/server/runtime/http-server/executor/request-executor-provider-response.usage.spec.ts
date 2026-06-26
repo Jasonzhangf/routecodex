@@ -195,4 +195,48 @@ describe('processSuccessfulProviderResponse usage protocol accounting', () => {
       cache_creation_input_tokens: undefined
     });
   });
+
+  it('keeps final successful attempt usage instead of summing failed-attempt prompt totals', async () => {
+    const { processSuccessfulProviderResponse } = await import(
+      '../../../../../src/server/runtime/http-server/executor/request-executor-provider-response.js'
+    );
+
+    const result = await processSuccessfulProviderResponse(baseArgs({
+      providerProtocol: 'openai-responses',
+      aggregatedUsage: {
+        prompt_tokens: 58575,
+        completion_tokens: 415,
+        total_tokens: 58990,
+        cache_read_input_tokens: 29056
+      },
+      providerUsageFallback: {
+        prompt_tokens: 29385,
+        completion_tokens: 415,
+        total_tokens: 29800,
+        cache_read_input_tokens: 29056
+      },
+      converted: {
+        status: 200,
+        body: {
+          data: {
+            usage: {
+              input_tokens: 29385,
+              input_tokens_details: { cached_tokens: 29056 },
+              output_tokens: 415,
+              total_tokens: 29800
+            }
+          }
+        }
+      } as any,
+      attempt: 3
+    }) as any);
+
+    expect(result.aggregatedUsage).toEqual({
+      prompt_tokens: 29385,
+      completion_tokens: 415,
+      total_tokens: 29800,
+      cache_read_input_tokens: 29056,
+      cache_creation_input_tokens: undefined
+    });
+  });
 });

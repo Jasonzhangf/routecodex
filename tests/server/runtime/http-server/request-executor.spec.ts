@@ -737,10 +737,9 @@ describe('HubRequestExecutor failover', () => {
           code: 'PROVIDER_TRAFFIC_SATURATED',
           retryable: true,
           details: {
-            reason: 'acquire_after_backoff_concurrency',
+            reason: 'acquire_concurrency',
             runtimeKey,
-            providerKey: runtimeKey,
-            unifiedBackoffMs: 1000
+            providerKey: runtimeKey
           }
         });
       }
@@ -757,7 +756,7 @@ describe('HubRequestExecutor failover', () => {
           concurrency: { maxInFlight: 1, acquireTimeoutMs: 100, staleLeaseMs: 1000 },
           rpm: { requestsPerMinute: 10, acquireTimeoutMs: 100, windowMs: 60000 }
         },
-        waitedMs: 1000,
+        waitedMs: 0,
         activeInFlight: 1,
         rpmInWindow: 1
       };
@@ -1685,28 +1684,34 @@ describe('HubRequestExecutor failover', () => {
       excludedProviderKeys: new Set<string>()
     });
     expect(multi429ThirdAttemptExclusionPlan.excludedCurrentProvider).toBe(true);
-    expect(__requestExecutorTestables.isLastAvailableProvider429({
+    expect(__requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'mimo.key1.mimo-v2.5-pro',
-      routePool: ['mimo.key1.mimo-v2.5-pro'],
-      excludedProviderKeys: new Set<string>(),
-      retryError: {
+      status: 429,
+      error: Object.assign(new Error('HTTP 429: overload'), {
         statusCode: 429,
-        errorCode: 'HTTP_429',
-        reason: 'HTTP 429: overload'
-      }
-    })).toBe(true);
+        code: 'HTTP_429'
+      }),
+      classification: 'recoverable',
+      attempt: 3,
+      promptTooLong: false,
+      routePool: ['mimo.key1.mimo-v2.5-pro'],
+      excludedProviderKeys: new Set<string>()
+    })).toEqual({ excludedCurrentProvider: false });
 
-    expect(__requestExecutorTestables.isLastAvailableProvider429({
+    expect(__requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'mimo.key1.mimo-v2.5-pro',
-      routePool: ['mimo.key1.mimo-v2.5-pro'],
-      excludedProviderKeys: new Set<string>(),
-      retryError: {
+      status: 429,
+      error: Object.assign(new Error('usage limit exceeded'), {
         statusCode: 429,
-        errorCode: 'MALFORMED_RESPONSE',
-        upstreamCode: 'provider_status_2056',
-        reason: 'usage limit exceeded'
-      }
-    })).toBe(true);
+        code: 'HTTP_429_2056',
+        upstreamCode: 'provider_status_2056'
+      }),
+      classification: 'recoverable',
+      attempt: 3,
+      promptTooLong: false,
+      routePool: ['mimo.key1.mimo-v2.5-pro'],
+      excludedProviderKeys: new Set<string>()
+    })).toEqual({ excludedCurrentProvider: false });
 
     const promptTooLongPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
       error: new Error('context exceeded'),
@@ -4595,7 +4600,7 @@ describe('HubRequestExecutor failover', () => {
     expect(Array.from(excluded)).toEqual(['mini27.key1.MiniMax-M2.7']);
   });
 
-  test('RED: last available provider 429 is excluded instead of retrying same provider', () => {
+  test('last available provider 429 does not synthesize same-provider exclusion', () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'mini27.key1.MiniMax-M2.7',
@@ -4612,8 +4617,8 @@ describe('HubRequestExecutor failover', () => {
       excludedProviderKeys: excluded
     });
 
-    expect(plan.excludedCurrentProvider).toBe(true);
-    expect(Array.from(excluded)).toEqual(['mini27.key1.MiniMax-M2.7']);
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excluded)).toEqual([]);
   });
 
   test('recoverable 502 excludes current provider when alternative exists', () => {

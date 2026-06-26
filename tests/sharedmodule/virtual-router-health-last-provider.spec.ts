@@ -58,8 +58,7 @@ describe('virtual router native last-provider guard', () => {
       reason: 'upstream_error',
       fatal: false,
       statusCode: 502,
-      affectsHealth: true,
-      cooldownOverrideMs: 30_000
+      affectsHealth: true
     });
 
     expect(routeOnce(engine, 'req-last-provider-nonfatal')).toBe('provider.a');
@@ -75,8 +74,7 @@ describe('virtual router native last-provider guard', () => {
       reason: 'client_error',
       fatal: true,
       statusCode: 400,
-      affectsHealth: true,
-      cooldownOverrideMs: 120_000
+      affectsHealth: true
     });
 
     expect(routeOnce(engine, 'req-last-provider-fatal')).toBe('provider.a');

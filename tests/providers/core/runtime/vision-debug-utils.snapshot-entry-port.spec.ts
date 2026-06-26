@@ -2,14 +2,11 @@ import { afterAll, beforeEach, describe, expect, it, jest } from '@jest/globals'
 
 const writeProviderSnapshot = jest.fn(async () => {});
 
-jest.mock('../../../../src/providers/core/utils/snapshot-writer.ts', () => ({
-  writeProviderSnapshot
-}), { virtual: true });
-
 describe('captureVisionDebugPayloadSnapshot snapshot entryPort', () => {
   const previousEnv = process.env.ROUTECODEX_VISION_DEBUG;
 
   beforeEach(() => {
+    jest.resetModules();
     process.env.ROUTECODEX_VISION_DEBUG = '1';
     writeProviderSnapshot.mockClear();
   });
@@ -23,6 +20,9 @@ describe('captureVisionDebugPayloadSnapshot snapshot entryPort', () => {
   });
 
   it('forwards entryPort from provider runtime metadata into vision debug snapshots', async () => {
+    jest.unstable_mockModule('../../../../src/providers/core/utils/snapshot-writer.js', () => ({
+      writeProviderSnapshot
+    }));
     const { captureVisionDebugPayloadSnapshot } = await import(
       '../../../../src/providers/core/runtime/vision-debug-utils.ts'
     );

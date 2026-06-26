@@ -729,7 +729,7 @@ describe('stopMessage is tmux-scoped', () => {
       sessionId,
       tmuxSessionId: sessionId,
       routeHint: 'default',
-      __rt: { serverToolFollowup: true }
+      __rt: { legacyRuntimeMarker: true }
     } as any;
 
     engine.route(

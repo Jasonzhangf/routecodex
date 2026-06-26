@@ -413,8 +413,6 @@ describe('HubPipeline preselected route ownership', () => {
           __rt: {
             preselectedRoute,
             retryProviderKey: 'legacy.retry.key',
-            serverToolFollowup: true,
-            serverToolFollowupSource: 'servertool.stop_message_flow',
             stopless: {
               flowId: 'stopless-flow-1',
               repeatCount: 2,
@@ -431,8 +429,6 @@ describe('HubPipeline preselected route ownership', () => {
 
     expect(routerEngine.route).toHaveBeenCalledTimes(1);
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.__rt).toBeUndefined();
-    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.serverToolFollowup)
-      .toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.stopless)
       .toBeUndefined();
   });

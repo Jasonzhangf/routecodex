@@ -2,6 +2,7 @@ import {
   buildUsageLogText,
   extractUsageFromResult,
   computeCacheHitRatio,
+  computeProtocolAwareCacheHitRatio,
   mergeUsageMetrics
 } from '../../../../../src/server/runtime/http-server/executor/usage-aggregator.js';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
@@ -85,6 +86,8 @@ describe('usage log text', () => {
           }
         }
       }
+    }, {
+      providerProtocol: 'anthropic'
     });
 
     expect(usage).toEqual({
@@ -227,6 +230,8 @@ describe('usage log text', () => {
           total_tokens: 115
         }
       }
+    }, {
+      providerProtocol: 'anthropic'
     });
 
     expect(usage).toEqual({
@@ -236,6 +241,23 @@ describe('usage log text', () => {
       cache_read_input_tokens: 106944,
       cache_creation_input_tokens: undefined
     });
+  });
+
+  it('uses protocol-aware cache hit ratio for non-Anthropic providers', () => {
+    expect(computeProtocolAwareCacheHitRatio({
+      prompt_tokens: 29056,
+      cache_read_input_tokens: 29056
+    }, 'openai-responses')).toBe(1);
+
+    expect(computeProtocolAwareCacheHitRatio({
+      prompt_tokens: 58575,
+      cache_read_input_tokens: 29056
+    }, 'openai-responses')).toBeCloseTo(29056 / 58575, 10);
+
+    expect(computeProtocolAwareCacheHitRatio({
+      prompt_tokens: 58575,
+      cache_read_input_tokens: 29056
+    }, 'anthropic')).toBeCloseTo(29056 / 58575, 10);
   });
 
   it('extracts cache hits from DeepSeek prompt_cache_hit_tokens', () => {
@@ -280,6 +302,40 @@ describe('usage log text', () => {
       cache_read_input_tokens: 68539,
       cache_creation_input_tokens: undefined
     });
+  });
+
+  it('does not add cached tokens twice for non-anthropic input_tokens providers', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        usage: {
+          input_tokens: 68992,
+          output_tokens: 395,
+          total_tokens: 69387,
+          prompt_tokens_details: {
+            cached_tokens: 68539
+          }
+        }
+      }
+    }, {
+      providerProtocol: 'glm'
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 68992,
+      completion_tokens: 395,
+      total_tokens: 69387,
+      cache_read_input_tokens: 68539,
+      cache_creation_input_tokens: undefined
+    });
+  });
+
+  it('computes non-anthropic cache hit ratio from final successful prompt tokens', () => {
+    expect(computeCacheHitRatio({
+      prompt_tokens: 29385,
+      completion_tokens: 415,
+      total_tokens: 29800,
+      cache_read_input_tokens: 29056
+    })).toBeCloseTo(29056 / 29385, 10);
   });
 
   it('extracts usage from body.payload.response.usage', () => {

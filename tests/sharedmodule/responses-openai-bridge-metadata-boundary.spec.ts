@@ -15,12 +15,12 @@ describe('responses-openai bridge metadata boundary', () => {
       },
       {
         requestId: 'req_metadata_boundary',
-        metadata: { routeHint: 'tools', __rt: { serverToolFollowup: true } },
+        metadata: { routeHint: 'tools', __rt: { internalRuntimeMarker: true } },
       } as any
     ) as Record<string, unknown>;
 
     expect(result.object).toBe('response');
     expect(result.metadata).toBeUndefined();
-    expect(JSON.stringify(result)).not.toContain('serverToolFollowup');
+    expect(JSON.stringify(result)).not.toContain('internalRuntimeMarker');
   });
 });

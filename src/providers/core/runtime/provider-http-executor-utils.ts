@@ -25,8 +25,10 @@ function readSnapshotEntryPort(metadata?: Record<string, unknown>): number | und
     metadata.matchedPort,
     metadata.routecodexLocalPort,
     metadata.localPort,
+    metadata.portScope,
     portContext?.matchedPort,
-    portContext?.localPort
+    portContext?.localPort,
+    portContext?.port
   ]) {
     const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
     if (Number.isFinite(numeric) && numeric > 0) {

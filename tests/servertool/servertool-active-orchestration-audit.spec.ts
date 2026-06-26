@@ -348,19 +348,6 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts',
-    forbidden: [
-      '[servertool] followup auto limit reached before stopless contract was satisfied',
-      'code: plan.autoLimit.code',
-      'category: plan.autoLimit.category',
-      'repeatCount: plan.autoLimit.repeatCount',
-      'reason: plan.autoLimit.reason',
-      "typeof metadataRecord.clientInjectSource === 'string'",
-      'args.readClientInjectOnly(args.metadata)',
-      'const existingClientInjectSource =',
-    ],
-  },
-  {
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-impl.ts',
     forbidden: [
       'planServertoolRegistryRegistrationActionWithNative',

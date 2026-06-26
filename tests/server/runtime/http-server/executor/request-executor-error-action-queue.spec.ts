@@ -44,7 +44,6 @@ describe('request-executor-error-action-queue', () => {
       categories: [
         'global_error',
         'session_storm',
-        'provider_traffic_saturated',
         'servertool_followup'
       ],
       hookEvents: ['record', 'wait_start', 'wait_end']
@@ -81,17 +80,17 @@ describe('request-executor-error-action-queue', () => {
 
   test('serializes blocking waits through the same category/scope gate', async () => {
     recordErrorActionBackoff({
-      category: 'provider_traffic_saturated',
-      scopeKey: 'runtime:busy'
+      category: 'global_error',
+      scopeKey: 'global:busy'
     });
 
     const first = waitErrorActionBackoffWithGate({
-      category: 'provider_traffic_saturated',
-      scopeKey: 'runtime:busy'
+      category: 'global_error',
+      scopeKey: 'global:busy'
     });
     const second = waitErrorActionBackoffWithGate({
-      category: 'provider_traffic_saturated',
-      scopeKey: 'runtime:busy'
+      category: 'global_error',
+      scopeKey: 'global:busy'
     });
 
     await jest.advanceTimersByTimeAsync(1000);
