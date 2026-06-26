@@ -1,7 +1,6 @@
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import {
   extractProviderFailureStatusCode,
-  isProviderFailureNetworkTransportLike,
   resolveProviderFailureOutcome,
   type ProviderFailureClassification
 } from './provider-failure-policy.js';
@@ -67,8 +66,4 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
 
 export function extractStatusCodeFromError(error: ProviderErrorAugmented): number | undefined {
   return extractProviderFailureStatusCode(error);
-}
-
-export function looksLikeNetworkTransportError(error: ProviderErrorAugmented, msgLower: string): boolean {
-  return isProviderFailureNetworkTransportLike(error) || msgLower.includes('network error');
 }

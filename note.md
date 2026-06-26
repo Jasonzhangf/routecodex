@@ -1,3 +1,18 @@
+# 2026-06-27 provider error classifier thin shell cleanup
+
+- 已物理删除的薄壳：
+  - `looksLikeNetworkTransportError`
+- 已同步修改：
+  - `src/providers/core/runtime/provider-error-classifier.ts`
+- 已验证：
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - `looksLikeNetworkTransportError` 没有外部消费者，只是 classifier 内部的冗余薄壳，已物理删除。
+  - 继续保留 `extractStatusCodeFromError`，因为它仍被 provider / executor / http server 多处消费。
+
 # 2026-06-27 provider failure helper closeout slice
 
 - 已物理删除的纯包装：
