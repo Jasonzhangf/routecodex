@@ -44,8 +44,6 @@ describe('request-executor-error-action-queue', () => {
       categories: [
         'global_error',
         'session_storm',
-        'provider_recoverable',
-        'provider_transport',
         'provider_traffic_saturated',
         'servertool_followup'
       ],
@@ -58,20 +56,20 @@ describe('request-executor-error-action-queue', () => {
     const unregister = registerErrorActionQueueHook((event) => events.push(event));
 
     expect(recordErrorActionBackoff({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:openai.key1|status:429'
+      category: 'session_storm',
+      scopeKey: 'session:storm-1'
     })).toBe(1000);
     expect(recordErrorActionBackoff({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:openai.key1|status:429'
+      category: 'session_storm',
+      scopeKey: 'session:storm-1'
     })).toBe(2000);
     expect(peekErrorActionBackoffConsecutiveForTests({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:openai.key1|status:429'
+      category: 'session_storm',
+      scopeKey: 'session:storm-1'
     })).toBe(2);
     expect(peekErrorActionBackoffWaitMs({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:openai.key1|status:429'
+      category: 'session_storm',
+      scopeKey: 'session:storm-1'
     })).toBe(2000);
     expect(events).toEqual([
       expect.objectContaining({ type: 'record', delayMs: 1000, consecutive: 1 }),
@@ -104,43 +102,43 @@ describe('request-executor-error-action-queue', () => {
 
   test('reset clears one category/scope without touching other categories', () => {
     recordErrorActionBackoff({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:openai.key1|status:429'
+      category: 'session_storm',
+      scopeKey: 'session:storm-1'
     });
     recordErrorActionBackoff({
-      category: 'session_storm',
-      scopeKey: 'session:abc'
+      category: 'global_error',
+      scopeKey: 'global:error'
     });
 
     resetErrorActionBackoff({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:openai.key1|status:429'
+      category: 'session_storm',
+      scopeKey: 'session:storm-1'
     });
 
     expect(peekErrorActionBackoffWaitMs({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:openai.key1|status:429'
+      category: 'session_storm',
+      scopeKey: 'session:storm-1'
     })).toBe(0);
     expect(peekErrorActionBackoffWaitMs({
-      category: 'session_storm',
-      scopeKey: 'session:abc'
+      category: 'global_error',
+      scopeKey: 'global:error'
     })).toBe(1000);
   });
 
   test('uses a fixed waiter cap without per-call env configuration', async () => {
     recordErrorActionBackoff({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:busy'
+      category: 'session_storm',
+      scopeKey: 'session:busy'
     });
 
     const waiters = Array.from({ length: 64 }, () => waitErrorActionBackoffWithGate({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:busy'
+      category: 'session_storm',
+      scopeKey: 'session:busy'
     }));
 
     await expect(waitErrorActionBackoffWithGate({
-      category: 'provider_recoverable',
-      scopeKey: 'provider:busy'
+      category: 'session_storm',
+      scopeKey: 'session:busy'
     })).rejects.toMatchObject({
       code: 'PROVIDER_TRAFFIC_SATURATED',
       details: expect.objectContaining({

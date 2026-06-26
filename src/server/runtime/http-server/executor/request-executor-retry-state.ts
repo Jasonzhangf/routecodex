@@ -93,16 +93,7 @@ export function clearProviderTransportBackoff(key?: string): void {
 }
 
 export function clearRecoverableErrorBackoff(key?: string): void {
-  if (key) {
-    resetErrorActionBackoff({
-      category: 'provider_recoverable',
-      scopeKey: key
-    });
-    return;
-  }
-  resetErrorActionBackoff({
-    category: 'provider_recoverable'
-  });
+  void key;
 }
 
 export function deriveLogicalRequestChainKey(requestId: string): string {
@@ -183,13 +174,6 @@ export function consumeLogicalChainRecoverableRetry(key: string): {
     count,
     limit
   };
-}
-
-export function peekProviderTransportBackoffConsecutiveForTests(key: string): number {
-  return peekErrorActionBackoffConsecutiveForTests({
-    category: 'provider_transport',
-    scopeKey: key
-  });
 }
 
 export function resetRequestExecutorRetryStateForTests(): void {

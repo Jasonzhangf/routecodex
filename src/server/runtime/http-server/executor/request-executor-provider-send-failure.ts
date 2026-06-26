@@ -2,8 +2,7 @@ import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces
 import type { ProviderProtocol } from '../types.js';
 import type { ProviderTrafficGovernorLike } from '../provider-traffic-governor.js';
 import {
-  emitRequestExecutorProviderRetryTelemetry,
-  peekProviderTransportBackoffConsecutiveForTests
+  emitRequestExecutorProviderRetryTelemetry
 } from './request-executor-retry-planner.js';
 import {
   resolveRequestExecutorProviderFailurePlan

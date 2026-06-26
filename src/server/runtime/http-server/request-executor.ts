@@ -493,7 +493,7 @@ export class HubRequestExecutor implements RequestExecutor {
     errorCode?: string;
     upstreamCode?: string;
     upstreamStatus?: number;
-    switchAction: 'exclude_and_reroute' | 'retry_same_provider_once';
+    switchAction: 'exclude_and_reroute';
     backoffScope?: 'none' | 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
     retryExecutionPolicyReason?: string;

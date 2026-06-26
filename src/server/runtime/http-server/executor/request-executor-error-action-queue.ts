@@ -7,8 +7,6 @@ export const ERROR_ACTION_QUEUE_FEATURE_ID = 'feature_id: error.backoff_action_q
 export type ErrorActionCategory =
   | 'global_error'
   | 'session_storm'
-  | 'provider_recoverable'
-  | 'provider_transport'
   | 'provider_traffic_saturated'
   | 'servertool_followup';
 
@@ -61,8 +59,6 @@ export function describeErrorActionQueueContract(): {
     categories: [
       'global_error',
       'session_storm',
-      'provider_recoverable',
-      'provider_transport',
       'provider_traffic_saturated',
       'servertool_followup'
     ],
