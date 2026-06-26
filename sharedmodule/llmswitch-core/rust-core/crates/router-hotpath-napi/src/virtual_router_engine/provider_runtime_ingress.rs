@@ -100,11 +100,6 @@ fn normalize_provider_error_event(event: &Value) -> Value {
     insert_if_present(&mut out, "fatal", event.get("fatal"));
     insert_if_present(
         &mut out,
-        "cooldownOverrideMs",
-        event.get("cooldownOverrideMs"),
-    );
-    insert_if_present(
-        &mut out,
         "errorClassification",
         event.get("errorClassification"),
     );

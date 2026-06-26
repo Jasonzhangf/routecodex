@@ -323,7 +323,6 @@ mod tests {
             "stage": "provider.send",
             "status": 429,
             "errorClassification": classification,
-            "cooldownOverrideMs": 4321,
             "runtime": {
                 "requestId": "req-top-level",
                 "providerKey": provider_key

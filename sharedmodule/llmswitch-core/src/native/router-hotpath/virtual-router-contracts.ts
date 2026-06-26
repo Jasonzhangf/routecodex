@@ -668,7 +668,6 @@ export interface ProviderFailureEvent {
   errorCode?: string;
   retryable?: boolean;
   affectsHealth?: boolean;
-  cooldownOverrideMs?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -693,7 +692,6 @@ export interface ProviderErrorEvent {
   recoverable?: boolean;
   affectsHealth?: boolean;
   fatal?: boolean;
-  cooldownOverrideMs?: number;
   errorClassification?: 'recoverable' | 'unrecoverable' | 'special_400' | string;
   runtime: ProviderErrorRuntimeMetadata;
   timestamp: number;

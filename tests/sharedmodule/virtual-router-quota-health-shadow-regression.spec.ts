@@ -223,7 +223,6 @@ describe('virtual router quota/health shadow regression gate', () => {
       stage: 'provider.send',
       status: 401,
       errorClassification: 'unrecoverable',
-      cooldownOverrideMs: 4321,
       runtime: {
         requestId: 'req-shadow-auth-fatal',
         routeName: 'default',
@@ -264,7 +263,6 @@ describe('virtual router quota/health shadow regression gate', () => {
       stage: 'provider.send',
       status: 503,
       errorClassification: 'recoverable',
-      cooldownOverrideMs: 1500,
       runtime: {
         requestId: 'req-shadow-transport-cooldown',
         routeName: 'default',
