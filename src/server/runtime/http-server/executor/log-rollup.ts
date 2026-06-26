@@ -33,7 +33,7 @@ import {
   ANSI_SESSION,
   ANSI_BAR
 } from './log-rollup-format-blocks.js';
-import { computeCacheHitRatio } from './usage-aggregator.js';
+import { computeProtocolAwareCacheHitRatio } from './usage-aggregator.js';
 
 type VirtualRouterHitRecord = {
   routeName?: string;
@@ -79,6 +79,7 @@ type UsageRollupRecord = {
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
   totalTokens?: number;
+  providerProtocol?: string;
   firstContentAtMs?: number;
   lastContentAtMs?: number;
   requestStartedAtMs?: number;
@@ -92,6 +93,7 @@ type SessionRequestEvent = {
   poolId: string;
   providerKey: string;
   model: string;
+  providerProtocol?: string;
   latencyMs: number;
   internalLatencyMs: number;
   externalLatencyMs: number;
@@ -444,10 +446,10 @@ function emitRealtimeSessionRequestLog(args: {
     }
     if (reqUsage.cacheReadTokens !== undefined) {
       tokParts.push(`cache.read=${formatWholeNumber(reqUsage.cacheReadTokens)}`);
-      const cacheHitRatio = computeCacheHitRatio({
+      const cacheHitRatio = computeProtocolAwareCacheHitRatio({
         prompt_tokens: reqUsage.promptTokens,
         cache_read_input_tokens: reqUsage.cacheReadTokens
-      });
+      }, reqUsage.providerProtocol);
       if (cacheHitRatio !== undefined) {
         tokParts.push(`cache.hit=${(cacheHitRatio * 100).toFixed(1)}%`);
       }
@@ -790,6 +792,9 @@ export function recordUsageRollup(event: UsageRollupRecord): void {
     poolId,
     providerKey,
     model,
+    providerProtocol: typeof event.providerProtocol === 'string' && event.providerProtocol.trim()
+      ? event.providerProtocol.trim()
+      : undefined,
     latencyMs: Math.max(0, event.latencyMs),
     internalLatencyMs,
     externalLatencyMs,

@@ -217,6 +217,7 @@ export function normalizeUsage(value, options) {
     const cacheCreation = readNumeric(usageRecord.cache_creation_input_tokens);
     const sourceProtocol = options?.sourceProtocol?.toLowerCase();
     const isResponsesProtocol = sourceProtocol === 'openai-responses';
+    const isAnthropicProtocol = sourceProtocol === 'anthropic';
     // prompt_tokens (OpenAI chat) already includes cache — do NOT add cacheRead again.
     // input_tokens (OpenAI responses) already includes cache — do NOT add cacheRead again.
     // input_tokens (Anthropic) does NOT include cache — add cacheRead.
@@ -224,9 +225,9 @@ export function normalizeUsage(value, options) {
         ? basePromptOpenAI
         : isResponsesProtocol
             ? basePromptAnthropic
-            : basePromptAnthropic !== undefined
+            : isAnthropicProtocol && basePromptAnthropic !== undefined
                 ? basePromptAnthropic + (cacheRead ?? 0)
-                : basePromptOther;
+                : basePromptAnthropic ?? basePromptOther;
     const completion = readNumeric(usageRecord.completion_tokens) ??
         readNumeric(usageRecord.output_tokens) ??
         readNumeric(usageRecord.candidatesTokenCount) ??
@@ -286,6 +287,18 @@ export function computeCacheHitRatio(usage) {
         return undefined;
     }
     return Math.min(1, cacheRead / inputTokens);
+}
+export function computeProtocolAwareCacheHitRatio(usage, providerProtocol) {
+    const protocol = typeof providerProtocol === 'string' ? providerProtocol.trim().toLowerCase() : '';
+    const promptTokens = usage?.prompt_tokens;
+    const cacheRead = usage?.cache_read_input_tokens;
+    if (cacheRead === undefined || cacheRead <= 0 || promptTokens === undefined || promptTokens <= 0) {
+        return undefined;
+    }
+    if (protocol === 'anthropic') {
+        return computeCacheHitRatio(usage);
+    }
+    return Math.min(1, cacheRead / promptTokens);
 }
 export function buildUsageLogText(usage) {
     const inputTokens = usage?.prompt_tokens;

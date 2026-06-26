@@ -5,7 +5,7 @@ import { join } from 'node:path';
 const repoRoot = process.cwd();
 const carrierPath = join(
   repoRoot,
-  'sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts'
+  'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts'
 );
 
 describe('servertool providerProtocol metadata center only boundary', () => {

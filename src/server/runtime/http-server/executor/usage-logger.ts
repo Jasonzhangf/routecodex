@@ -1,6 +1,6 @@
 import { isUsageLoggingEnabled } from './env-config.js';
 import type { UsageMetrics } from './usage-aggregator.js';
-import { computeCacheHitRatio } from './usage-aggregator.js';
+import { computeProtocolAwareCacheHitRatio } from './usage-aggregator.js';
 import { buildProviderLabel } from './provider-response-utils.js';
 import { registerRequestLogContext, resolveRequestLogColorToken } from '../../../utils/request-log-color.js';
 import { formatRequestTimingSummary, isUsageTimingOutputEnabled } from '../../../utils/stage-logger.js';
@@ -162,6 +162,7 @@ export function logUsageSummary(
     providerKey?: string;
     model?: string;
     requestModel?: string;
+    providerProtocol?: string;
     routeName?: string;
     poolId?: string;
     entryPort?: number;
@@ -221,6 +222,10 @@ export function logUsageSummary(
     conversationId: info.conversationId,
     conversation_id: info.conversation_id
   };
+  const providerProtocol =
+    typeof info.providerProtocol === 'string' && info.providerProtocol.trim()
+      ? info.providerProtocol.trim().toLowerCase()
+      : undefined;
   const logSessionColorKey =
     typeof info.logSessionColorKey === 'string' && info.logSessionColorKey.trim()
       ? info.logSessionColorKey.trim()
@@ -263,6 +268,7 @@ export function logUsageSummary(
     poolId: info.poolId,
     providerKey: info.providerKey,
     model: info.model,
+    providerProtocol,
     sessionId:
       (typeof info.sessionId === 'string' && info.sessionId.trim()
         ? info.sessionId
@@ -310,7 +316,7 @@ export function logUsageSummary(
     retryCount,
     finishReason: info.finishReason
   });
-  const cacheRatio = computeCacheHitRatio(info.usage);
+  const cacheRatio = computeProtocolAwareCacheHitRatio(info.usage, providerProtocol);
   const cacheValue = cacheRatio !== undefined ? `${(cacheRatio * 100).toFixed(1)}%` : '-';
   const sampleId =
     (typeof info.providerRequestId === 'string' && info.providerRequestId.trim())
