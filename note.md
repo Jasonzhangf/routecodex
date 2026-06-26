@@ -1,3 +1,17 @@
+# 2026-06-27 provider error classification type cleanup
+
+- 已收缩：
+  - `ProviderErrorClassification` 已从导出类型改为 `provider-error-classifier.ts` 内部私有类型
+- 已同步修改：
+  - `src/providers/core/runtime/provider-error-classifier.ts`
+- 已验证：
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - 这是 classifier 的纯 API 收口，不改变 behavior；外部代码只依赖函数结果，不依赖这个 type 的导出面。
+
 # 2026-06-27 provider error classifier options type cleanup
 
 - 已收缩：

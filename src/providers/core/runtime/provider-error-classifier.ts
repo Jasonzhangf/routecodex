@@ -5,7 +5,7 @@ import {
   type ProviderFailureClassification
 } from './provider-failure-policy.js';
 
-export type ProviderErrorClassification = {
+type ProviderErrorClassification = {
   error: ProviderErrorAugmented;
   message: string;
   statusCode?: number;
