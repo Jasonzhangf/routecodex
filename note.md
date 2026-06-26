@@ -21,6 +21,10 @@
     已足够把该样本判成 `unrecoverable + affectsHealth:false + shouldRetry:false`
   - 结论：这类 deterministic local payload-shape 400 当前已被 policy owner 覆盖，暂时不是继续删
     `statusCode===400 -> special_400` 的 blocker
+- 新增边界样本：
+  - `HTTP 400: upstream rejected request for unknown reason`
+  - targeted policy spec 为绿，说明当前剩余 `special_400` contract 已收束成“未知裸 400 保守桶”
+  - 结论：下一刀若想继续缩 `special_400`，必须先拿到新的 deterministic 400 样本，不能直接删 policy 的 generic `statusCode===400` fallback
 
 # 2026-06-26 servertool followup stopmessage backend retirement
 

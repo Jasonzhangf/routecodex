@@ -445,6 +445,37 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('keeps unknown bare HTTP_400 payload errors in special_400 until a deterministic contract signal exists', () => {
+    const error = Object.assign(new Error('HTTP 400: upstream rejected request for unknown reason'), {
+      statusCode: 400,
+      code: 'HTTP_400'
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message
+    });
+
+    expect(classification).toBe('special_400');
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message,
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'special_400',
+      affectsHealth: false,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
+    }));
+  });
+
   it('classifies INVALID_REQUEST_ERROR code path as health-neutral unrecoverable local errors', () => {
     const error = Object.assign(new Error('invalid request payload'), {
       statusCode: 400,
