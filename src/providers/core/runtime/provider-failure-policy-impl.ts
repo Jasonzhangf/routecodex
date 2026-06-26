@@ -257,6 +257,7 @@ function isLocalRequestContractValidationError(args: {
     || errorCode === 'INVALID_REQUEST_ERROR'
     || upstreamCode === 'INVALID_REQUEST_ERROR'
     || reason.includes('invalid request payload')
+    || reason.includes('"message":"bad request"')
     || reason.includes('signature-invalid')
   );
 }

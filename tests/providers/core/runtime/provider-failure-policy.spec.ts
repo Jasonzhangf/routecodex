@@ -383,6 +383,37 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies bare HTTP_400 bad request as health-neutral unrecoverable local errors', () => {
+    const error = Object.assign(new Error('HTTP 400: {"error":{"message":"bad request"}}'), {
+      statusCode: 400,
+      code: 'HTTP_400'
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message
+    });
+
+    expect(classification).toBe('unrecoverable');
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'HTTP_400',
+      reason: error.message,
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'unrecoverable',
+      affectsHealth: false,
+      shouldRetry: false,
+      action: 'direct_return',
+      decisionLabel: 'direct_return'
+    }));
+  });
+
   it('classifies provider business error 2013 context overflow as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('provider business error: context_length_exceeded'), {
       code: 'MALFORMED_RESPONSE',
@@ -684,6 +715,22 @@ describe('provider failure policy ssot', () => {
       statusCode: 400,
       errorCode: 'CONTEXT_LENGTH_EXCEEDED',
       reason: 'Request input tokens exceeds the model maximum context length',
+      attempt: 1,
+      maxAttempts: 6,
+      promptTooLong: true,
+      contextOverflowRetries: 99,
+      maxContextOverflowRetries: 1
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      blockingRecoverable: false,
+      shouldRetry: true
+    }));
+
+    expect(resolveProviderFailureRetryEligibility({
+      error: new Error('context exceeded'),
+      stage: 'provider.send',
+      statusCode: 400,
+      reason: 'context exceeded',
       attempt: 1,
       maxAttempts: 6,
       promptTooLong: true,
