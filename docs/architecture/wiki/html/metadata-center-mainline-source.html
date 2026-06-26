@@ -192,7 +192,7 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>request_truth</code></td><td><code>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized</code></td><td><code>requestId</code>, <code>pipelineId</code>, <code>entryEndpoint</code>, <code>sessionId</code>, <code>conversationId</code>, <code>clientRequestId</code>, <code>portScope</code></td><td><code>write_once</code></td><td>continuation restore, stopless/servertool, tmux/client attachment, provider response, SSE/handler closeout</td></tr>
         <tr><td><code>continuation_context</code></td><td><code>HubReqChatProcess03Governed</code> continuation owner</td><td><code>responsesRequestContext</code>, <code>responsesResume</code>, <code>previousResponseId</code>, <code>responseId</code>, <code>toolOutputs</code>, <code>continuationOwner</code>, <code>resumeFrom</code>, <code>chainId</code>, <code>stickyScope</code></td><td><code>replaceable_by_owner_only</code></td><td>upgrading any field into <code>request_truth</code>; stopless using it as session truth</td></tr>
-        <tr><td><code>runtime_control</code></td><td><code>HubReqChatProcess03Governed</code> then request-route owner</td><td><code>routeHint</code>, <code>routeName</code>, <code>routeId</code>, <code>providerProtocol</code>, <code>retryProviderKey</code>, <code>preselectedRoute</code>, <code>serverToolFollowup</code>, <code>serverToolFollowupSource</code>, <code>stopless</code>, <code>stopMessage*</code>, <code>streamIntent</code>, <code>clientAbort</code></td><td><code>replaceable_by_owner_only</code></td><td>flat top-level metadata mirrors, <code>__rt</code>, SSE/JSON projection repair; relay continuation fields becoming handler-owned retry pin truth</td></tr>
+        <tr><td><code>runtime_control</code></td><td><code>HubReqChatProcess03Governed</code> then request-route owner</td><td><code>routeHint</code>, <code>routeName</code>, <code>routeId</code>, <code>providerProtocol</code>, <code>retryProviderKey</code>, <code>preselectedRoute</code>, <code>stopless</code>, <code>stopMessage*</code>, <code>streamIntent</code>, <code>clientAbort</code></td><td><code>replaceable_by_owner_only</code></td><td>flat top-level metadata mirrors, <code>__rt</code>, SSE/JSON projection repair; relay continuation fields becoming handler-owned retry pin truth</td></tr>
         <tr><td><code>provider_observation</code></td><td><code>VrRoute04SelectedTarget / HubReqOutbound05ProviderSemantic</code> then <code>HubRespInbound02Parsed</code> append</td><td><code>target</code>, <code>providerKey</code>, <code>assignedModelId</code>, <code>compatibilityProfile</code>, <code>responseSemantics</code>, <code>finishReason</code></td><td><code>append_only</code> or owner-replaceable documented slot-by-slot</td><td>writing back into <code>request_truth</code> or reviving flat <code>metadata.target</code> / <code>metadata.compatibilityProfile</code></td></tr>
         <tr><td><code>response_observation</code></td><td><code>HubRespInbound02Parsed</code></td><td>response status / finish-reason / protocol-observed facts</td><td><code>append_only</code></td><td>request-side identity/control rewrites</td></tr>
         <tr><td><code>closeout_status</code></td><td><code>HubRespOutbound04ClientSemantic / ServerRespOutbound05ClientFrame</code></td><td>release/finalized status and provenance only</td><td><code>finalize_only</code></td><td>semantic repair, continuation save/restore, request-truth mutation</td></tr>
@@ -245,7 +245,6 @@
           <li><code>routeName</code></li>
           <li><code>routeId</code></li>
           <li><code>providerProtocol</code></li>
-          <li><code>serverToolFollowup</code></li>
           <li><code>stopMessage*</code></li>
           <li><code>streamIntent</code></li>
           <li><code>clientAbort</code></li>
@@ -255,7 +254,7 @@
           <li>the center now implements first-class <code>runtimeControl</code> state/read/write/release plus a host-side projection reader, so the family is no longer &quot;manifest/type only&quot;</li>
           <li>the current repo already exposes a narrower first-batch runtime-control contract that is stronger than the generic manifest wording:</li>
           <li>request-route control: <code>routeHint</code>, <code>routeName</code>, <code>routeId</code>, <code>providerProtocol</code>, <code>retryProviderKey</code>, <code>preselectedRoute</code></li>
-          <li>followup / stopless control: <code>serverToolFollowup</code>, <code>serverToolFollowupSource</code>, <code>stopless</code></li>
+          <li>stopless control: <code>stopless</code></li>
           <li>stop-message control: <code>stopMessageEnabled</code>, <code>stopMessageExcludeDirect</code></li>
           <li>current request-path owner split for relay <code>/v1/responses</code> continuation must stay explicit:</li>
           <li>handler/bridge entry may bind <code>continuation_context.responsesResume</code> plus <code>runtime_control.routeHint</code></li>
@@ -397,10 +396,10 @@
         <ul>
           <li><code>routeHint</code>, <code>routeName</code>, <code>routeId</code>, <code>providerProtocol</code></li>
           <li><code>retryProviderKey</code>, <code>preselectedRoute</code></li>
-          <li><code>serverToolFollowup</code>, <code>serverToolFollowupSource</code>, <code>stopless</code></li>
+          <li><code>stopless</code></li>
           <li><code>stopMessageEnabled</code>, <code>stopMessageExcludeDirect</code></li>
         </ul>
-        <p>4. move remaining followup/control readers to center-backed runtime-control projection 5. continue replay closeout for the remaining upstream <code>/v1/messages</code> <code>HTTP_400</code> that is no longer a session-truth bug</p>
+        <p>4. move remaining runtime-control readers to center-backed projection 5. continue replay closeout for the remaining upstream <code>/v1/messages</code> <code>HTTP_400</code> that is no longer a session-truth bug</p>
         <h2>Migration Order</h2>
         <p>Next migration order:</p>
         <p>1. keep <code>request_truth</code> write-once and <code>continuation_context</code> replaceable as separate center families 2. keep the landed first-class <code>runtime_control</code> carrier plumbing as the only new center-backed control surface 3. migrate the narrow request-attempt writer onto that runtime-control carrier before touching wider entry-shell writers 4. migrate wider entry-shell and followup/control readers onto center-backed runtime-control projection 5. finish provider observation and response observation family projection without reopening request-truth writes 6. replace remaining flat merge/projection surfaces with center-backed projections 7. add manifest and wiki sync gates so node IDs stay shared across machine and human review surfaces 8. replay real request samples after each runtime-facing migration slice</p>

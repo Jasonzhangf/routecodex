@@ -74,7 +74,7 @@ This is the contract that must be mirrored into `function-map`, `mainline-call-m
 | --- | --- | --- | --- | --- |
 | `request_truth` | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | `requestId`, `pipelineId`, `entryEndpoint`, `sessionId`, `conversationId`, `clientRequestId`, `portScope` | `write_once` | continuation restore, stopless/servertool, tmux/client attachment, provider response, SSE/handler closeout |
 | `continuation_context` | `HubReqChatProcess03Governed` continuation owner | `responsesRequestContext`, `responsesResume`, `previousResponseId`, `responseId`, `toolOutputs`, `continuationOwner`, `resumeFrom`, `chainId`, `stickyScope` | `replaceable_by_owner_only` | upgrading any field into `request_truth`; stopless using it as session truth |
-| `runtime_control` | `HubReqChatProcess03Governed` then request-route owner | `routeHint`, `routeName`, `routeId`, `providerProtocol`, `retryProviderKey`, `preselectedRoute`, `serverToolFollowup`, `serverToolFollowupSource`, `stopless`, `stopMessage*`, `streamIntent`, `clientAbort` | `replaceable_by_owner_only` | flat top-level metadata mirrors, `__rt`, SSE/JSON projection repair; relay continuation fields becoming handler-owned retry pin truth |
+| `runtime_control` | `HubReqChatProcess03Governed` then request-route owner | `routeHint`, `routeName`, `routeId`, `providerProtocol`, `retryProviderKey`, `preselectedRoute`, `stopless`, `stopMessage*`, `streamIntent`, `clientAbort` | `replaceable_by_owner_only` | flat top-level metadata mirrors, `__rt`, SSE/JSON projection repair; relay continuation fields becoming handler-owned retry pin truth |
 | `provider_observation` | `VrRoute04SelectedTarget / HubReqOutbound05ProviderSemantic` then `HubRespInbound02Parsed` append | `target`, `providerKey`, `assignedModelId`, `compatibilityProfile`, `responseSemantics`, `finishReason` | `append_only` or owner-replaceable documented slot-by-slot | writing back into `request_truth` or reviving flat `metadata.target` / `metadata.compatibilityProfile` |
 | `response_observation` | `HubRespInbound02Parsed` | response status / finish-reason / protocol-observed facts | `append_only` | request-side identity/control rewrites |
 | `closeout_status` | `HubRespOutbound04ClientSemantic / ServerRespOutbound05ClientFrame` | release/finalized status and provenance only | `finalize_only` | semantic repair, continuation save/restore, request-truth mutation |
@@ -130,7 +130,6 @@ These are internal control semantics:
 - `routeName`
 - `routeId`
 - `providerProtocol`
-- `serverToolFollowup`
 - `stopMessage*`
 - `streamIntent`
 - `clientAbort`
@@ -140,7 +139,7 @@ Current schema gap:
 - the center now implements first-class `runtimeControl` state/read/write/release plus a host-side projection reader, so the family is no longer "manifest/type only"
 - the current repo already exposes a narrower first-batch runtime-control contract that is stronger than the generic manifest wording:
   - request-route control: `routeHint`, `routeName`, `routeId`, `providerProtocol`, `retryProviderKey`, `preselectedRoute`
-  - followup / stopless control: `serverToolFollowup`, `serverToolFollowupSource`, `stopless`
+  - stopless control: `stopless`
   - stop-message control: `stopMessageEnabled`, `stopMessageExcludeDirect`
 - current request-path owner split for relay `/v1/responses` continuation must stay explicit:
   - handler/bridge entry may bind `continuation_context.responsesResume` plus `runtime_control.routeHint`
@@ -160,11 +159,10 @@ Current schema gap:
 - this first batch is not speculative. It is directly evidenced by current writers/readers:
   - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
   - `src/server/runtime/http-server/index.ts`
-  - `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
 - the remaining gap is no longer carrier availability. The gap is that production writers/readers still mostly materialize these controls through flat metadata or request-semantics residue instead of writing/reading the new center family first
-- this is why `mtc-03` is still only `partial`: the first-class center contract now exists, but the request-route-control and followup-control writers have not yet been migrated onto it
+- this is why `mtc-03` is still only `partial`: the first-class center contract now exists, but the remaining request-route-control writers have not yet been migrated onto it
 
 ### `provider_observation`
 
@@ -307,7 +305,7 @@ Still open:
 3. migrate the narrow request-attempt/runtime-entry writers onto the landed runtime-control family:
    - `routeHint`, `routeName`, `routeId`, `providerProtocol`
    - `retryProviderKey`, `preselectedRoute`
-   - `serverToolFollowup`, `serverToolFollowupSource`, `stopless`
+- `stopless`
    - `stopMessageEnabled`, `stopMessageExcludeDirect`
 4. move remaining followup/control readers to center-backed runtime-control projection
 5. continue replay closeout for the remaining upstream `/v1/messages` `HTTP_400` that is no longer a session-truth bug

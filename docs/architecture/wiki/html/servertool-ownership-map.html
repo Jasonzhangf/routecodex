@@ -162,7 +162,6 @@
         <tr><td><code>hub.servertool_loop_warning</code></td><td>stop-message loop warning text/count injection and seed payload bridge</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/followup-core/src</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_rust_only_closeout</code></td><td>servertool hook skeleton closeout gate; proves remaining TS orchestration has been reduced to thin shells before physical deletion and anchors the Rust hook skeleton contract</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code></td></tr>
         <tr><td><code>hub.servertool_orchestration_policy</code></td><td>servertool timeout, client-inject, followup error, and adapter provider-key policy</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
-        <tr><td><code>hub.servertool_backend_route_runtime</code></td><td>servertool backend-route followup endpoint, payload, injection, metadata, error envelope, and bootstrap replay planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         </tbody>
         </table>
         <h2>hub.servertool_followup</h2>
@@ -1227,7 +1226,6 @@
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts</code></li>
           <li><code>docs</code></li>
         </ul>
         <p>Forbidden paths:</p>
@@ -1386,65 +1384,6 @@
           <li>TS server-side-tools may only consume <code>isAdapterClientDisconnected</code> from the native timeout-error shell; it must not restore local adapter disconnect scanning.</li>
           <li>TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.</li>
           <li>Do not restore local <code>parseTimeoutMs</code>, <code>parseBooleanLike</code>, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.</li>
-        </ul>
-        <h2>hub.servertool_backend_route_runtime</h2>
-        <p>Summary: servertool backend-route followup endpoint, payload, injection, metadata, error envelope, and bootstrap replay planning</p>
-        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs</code> Owner scope: servertool backend-route followup endpoint, payload, injection, runtime metadata, error envelope, and bootstrap replay planning</p>
-        <p>Canonical types:</p>
-        <ul>
-          <li><code>ServertoolFollowupMaterializationInput</code></li>
-          <li><code>ServertoolFollowupMaterializationPlan</code></li>
-          <li><code>ServertoolFollowupRuntimeActionPlan</code></li>
-          <li><code>ServertoolFollowupRuntimeMetadataPlan</code></li>
-          <li><code>ServertoolFollowupErrorEnvelopePlan</code></li>
-          <li><code>ServertoolBootstrapReplayPlan</code></li>
-        </ul>
-        <p>Canonical builders:</p>
-        <ul>
-          <li><code>plan_followup_materialization</code></li>
-          <li><code>plan_followup_runtime_action</code></li>
-          <li><code>plan_followup_runtime_metadata</code></li>
-          <li><code>plan_followup_error_envelope</code></li>
-          <li><code>plan_bootstrap_replay</code></li>
-        </ul>
-        <p>Allowed paths:</p>
-        <ul>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/backend-route-bootstrap-replay-block.ts</code></li>
-          <li><code>docs</code></li>
-        </ul>
-        <p>Forbidden paths:</p>
-        <ul>
-          <li><code>src/providers</code></li>
-          <li><code>src/server/runtime/http-server/executor</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/handlers</code></li>
-        </ul>
-        <p>Required tests:</p>
-        <ul>
-          <li><code>tests/servertool/servertool-mixed-tools.spec.ts</code></li>
-          <li><code>tests/servertool/server-side-tools.dispatch-native.spec.ts</code></li>
-          <li><code>tests/servertool/execution-shell.backend-failfast.spec.ts</code></li>
-          <li><code>tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts</code></li>
-        </ul>
-        <p>Required gates:</p>
-        <ul>
-          <li><code>npm run verify:servertool-rust-only</code></li>
-          <li><code>npm run verify:function-map-compile-gate</code></li>
-        </ul>
-        <p>Notes:</p>
-        <ul>
-          <li>Rust owns followupPlan <code>entryEndpoint</code> precedence and payload/injection source recognition.</li>
-          <li>Rust owns followup terminal error envelope classification and transparent bootstrap replay preflight/replay payload planning.</li>
-          <li>TS backend-route runtime may only call native, invoke injection IO builders, mutate metadata from Rust plans, and throw Rust-described errors.</li>
-          <li>Retired backend/reenter/bootstrap replay mainline must fail fast through the native contract; do not restore deleted bootstrap replay tests as active required coverage.</li>
-          <li>Do not restore local <code>followupPlan.payload</code> / <code>followupPlan.injection</code> / <code>entryEndpoint</code> scanning, chat endpoint defaults, followup terminal classification, preflight status parsing, or replay payload building in TS.</li>
         </ul>
       </article>
     </section>

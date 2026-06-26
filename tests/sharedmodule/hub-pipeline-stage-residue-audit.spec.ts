@@ -571,7 +571,6 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('runtime.clock');
     expect(source).not.toContain('runtime.webSearch');
     expect(source).not.toContain('runtime.servertool');
-    expect(source).not.toContain('runtime.serverToolFollowup');
     expect(source).not.toContain('effectPlan.effects.length !== 1');
     const servertoolRuntimeActionFindings = collectMatches(source, [
       { label: 'ts-servertool-action-reenter-branch', pattern: /effect\.action\s*===\s*['"]requireReenterPipeline['"]/ },
@@ -1410,9 +1409,10 @@ describe('hub pipeline stage residue audit', () => {
     const deletedFiles = [
       'sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts',
       'sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts',
+      'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
     ];
     const files = [
-      'sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts',
       'sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.ts',
       'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
     ];
@@ -4219,29 +4219,25 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('stop_message schema budget must not be restored from servertool loop repeat count', () => {
-    const runtimeUtilsPath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts',
-    );
     const nativeWrapperPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
+    );
+    const stopMessageNativePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts',
     );
     const rustLookupPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs',
     );
-    const handlerPath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
-    );
-    const runtimeUtilsSource = fs.readFileSync(runtimeUtilsPath, 'utf8');
     const nativeWrapperSource = fs.readFileSync(nativeWrapperPath, 'utf8');
+    const stopMessageNativeSource = fs.readFileSync(stopMessageNativePath, 'utf8');
     const rustLookupSource = fs.readFileSync(rustLookupPath, 'utf8');
-    const handlerSource = fs.readFileSync(handlerPath, 'utf8');
-    const runtimeStateBlock = extractFunctionBlock(runtimeUtilsSource, 'resolveRuntimeStopMessageState');
-    const runtimeStageBlock = extractFunctionBlock(runtimeUtilsSource, 'readRuntimeStopMessageStageMode');
-    const followupFlowBlock = extractFunctionBlock(runtimeUtilsSource, 'readServerToolFollowupFlowId');
+    const runtimeStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateWithNative');
+    const runtimeStageBlock = extractFunctionBlock(nativeWrapperSource, 'readRuntimeStopMessageStageModeWithNative');
+    const followupFlowBlock = extractFunctionBlock(nativeWrapperSource, 'readServertoolFollowupFlowIdWithNative');
+    const adapterStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateFromAdapterContextWithNative');
 
     expect(rustLookupSource).toContain('pub fn resolve_runtime_stop_message_state');
     expect(rustLookupSource).toContain('pub fn read_servertool_followup_flow_id');
@@ -4250,23 +4246,19 @@ describe('hub pipeline stage residue audit', () => {
     expect(rustLookupSource).not.toContain('loop_state.get("repeatCount")');
     expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
     expect(nativeWrapperSource).toContain('readServertoolFollowupFlowIdWithNative');
-    expect(runtimeStateBlock).toContain('resolveRuntimeStopMessageStateWithNative(runtimeMetadata)');
-    expect(runtimeStageBlock).toContain('readRuntimeStopMessageStageModeWithNative(runtimeMetadata)');
-    expect(followupFlowBlock).toContain('readServertoolFollowupFlowIdWithNative(runtimeMetadata)');
-    expect(handlerSource).toContain('if (followupFlowId && followupFlowId !== FLOW_ID)');
-    expect(handlerSource).toContain("reason: 'skip_servertool_followup_hop'");
-    expect(handlerSource).not.toContain('stop_message_followup_policy');
-    expect(handlerSource).not.toContain('preserve_eligibility');
+    expect(adapterStateBlock).toContain('resolveRuntimeStopMessageStateFromAdapterContextJson');
+    expect(stopMessageNativeSource).toContain('followupFlowId?: string;');
 
-    const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${followupFlowBlock}`, [
-      { label: 'runtime stop snapshot ignores servertool loop state', pattern: /return\s+resolveStopMessageSnapshot\(state\);/ },
+    const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${followupFlowBlock}\n${adapterStateBlock}`, [
       { label: 'runtime stop state TS reads loop state', pattern: /serverToolLoopState|loopState\.maxRepeats|stopMessageState|stopMessageUsed|stopMessageText/ },
-      { label: 'runtime stop stage TS normalizes state', pattern: /stopMessageStageMode|toLowerCase\(\)/ },
-      { label: 'servertool followup flow id TS reads loop state', pattern: /serverToolLoopState|\.flowId|toNonEmptyText/ },
+      { label: 'runtime stop stage TS normalizes state locally', pattern: /toLowerCase\(\)|normalizeStopMessageStageMode/i },
+      { label: 'servertool followup flow id TS reads loop state locally', pattern: /serverToolLoopState|\.flowId|toNonEmptyText/ },
+      { label: 'adapter-context stop state TS rebuilds snapshot locally', pattern: /serverToolLoopState|stopMessageState|stopMessageText|repeatCount|maxRepeats/ },
     ]);
-    const handlerFindings = collectMatches(handlerSource, [
-      { label: 'followup hop preserves stop_message eligibility', pattern: /preserve_eligibility|stop_message_followup_policy|stopMessageFollowupPolicy/ },
+    const stopMessageNativeFindings = collectMatches(stopMessageNativeSource, [
+      { label: 'stop-message native bridge keeps TS skip-hop branch', pattern: /skip_servertool_followup_hop/ },
+      { label: 'stop-message native bridge keeps local followup flow routing policy', pattern: /followupFlowId\s*&&|FLOW_ID|preserve_eligibility|stop_message_followup_policy/ },
     ]);
-    expect([...runtimeFindings, ...handlerFindings]).toEqual([]);
+    expect([...runtimeFindings, ...stopMessageNativeFindings]).toEqual([]);
   });
 });

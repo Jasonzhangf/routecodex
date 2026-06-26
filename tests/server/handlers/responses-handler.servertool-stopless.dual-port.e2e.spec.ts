@@ -340,7 +340,6 @@ describe('responses HTTP servertool stopless dual-port e2e', () => {
     const providerPayloadJson = JSON.stringify(capturedProviderPayload);
     expect(providerPayloadJson).toContain('reasoning.stop');
     expect(providerPayloadJson).toContain('stopreason');
-    expect(providerPayloadJson).not.toContain('"serverToolFollowup"');
     expect(providerPayloadJson).not.toContain('"runtime_control"');
     expect(providerPayloadJson).not.toContain('"__rt"');
     expect(logStages.some((entry) => entry.stage === 'provider.send.start')).toBe(true);
