@@ -837,14 +837,7 @@ export function resolveProviderFailureRetryEligibility(args: {
   });
   const blockingRecoverable = actionPlan.blockingRecoverable;
 
-  if (args.stage === 'provider.followup') {
-    return {
-      classification: actionPlan.classification,
-      blockingRecoverable,
-      shouldRetry: false
-    };
-  }
-  if (args.stageOutsideProviderFailurePolicy) {
+  if (args.stage === 'provider.followup' || args.stageOutsideProviderFailurePolicy) {
     return {
       classification: actionPlan.classification,
       blockingRecoverable,
@@ -859,14 +852,10 @@ export function resolveProviderFailureRetryEligibility(args: {
         (args.contextOverflowRetries ?? 0) <= (args.maxContextOverflowRetries ?? 1)
     };
   }
-  if (actionPlan.classification === 'special_400') {
-    return {
-      classification: actionPlan.classification,
-      blockingRecoverable: false,
-      shouldRetry: false
-    };
-  }
-  if (actionPlan.classification === 'unrecoverable') {
+  if (
+    actionPlan.classification === 'special_400'
+    || actionPlan.classification === 'unrecoverable'
+  ) {
     return {
       classification: actionPlan.classification,
       blockingRecoverable: false,
