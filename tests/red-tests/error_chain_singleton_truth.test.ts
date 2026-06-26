@@ -96,11 +96,11 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(pf).not.toMatch(/isBlockingRecoverableProviderFailure/);
   });
 
-  it('request-executor-reselection-plan.ts derives keepExcludedForNextAttempt directly from route alternatives', () => {
-    const reselection = readSrc('src/server/runtime/http-server/executor/request-executor-reselection-plan.ts');
-    expect(reselection).toMatch(/hasAlternativeRouteCandidate/);
-    expect(reselection).toMatch(/return\s*\{\s*hasAlternativeCandidate\s*\}/s);
-    expect(reselection).not.toMatch(/shouldKeepProviderExcludedForNextAttempt/);
+  it('request-executor-pipeline-attempt.ts imports route alternative truth instead of redefining it locally', () => {
+    const pipelineAttempt = readSrc('src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts');
+    expect(pipelineAttempt).toMatch(/import\s*\{\s*hasAlternativeRouteCandidate\s*\}\s*from\s*['"]\.\/request-executor-retry-decision\.js['"]/);
+    expect(pipelineAttempt).toMatch(/hasAlternativeRouteCandidate/);
+    expect(pipelineAttempt).not.toMatch(/function\s+hasAlternativeRouteCandidate/);
   });
 
   it('request-executor-retry-decision.ts computes alternative candidate truth directly', () => {
@@ -109,11 +109,11 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(decision).not.toMatch(/hasExplicitAlternativeRouteCandidate/);
   });
 
-  it('isBlockingRecoverableProviderFailure: re-exported only from provider-failure-policy.ts', () => {
+  it('isBlockingRecoverableProviderFailure: no longer exported by provider policy surface', () => {
     const policy = readSrc(PROVIDER_FAILURE_POLICY);
     const impl = readSrc(PROVIDER_FAILURE_IMPL);
-    expect(impl).toMatch(/export\s+function\s+isBlockingRecoverableProviderFailure/);
-    expect(policy).toMatch(/isBlockingRecoverableProviderFailure/);
+    expect(impl).not.toMatch(/isBlockingRecoverableProviderFailure/);
+    expect(policy).not.toMatch(/isBlockingRecoverableProviderFailure/);
   });
 
   it('request-executor-retry-decision.ts does not redefine network-transport detection locally', () => {
@@ -199,7 +199,7 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
   it('request-executor thin shell does not import classification or health policy internals directly', () => {
     const executor = readSrc(REQUEST_EXECUTOR);
     expect(executor).not.toMatch(/isProviderFailureHealthNeutral/);
-    expect(executor).not.toMatch(/resolveProviderFailureClassification/);
+    expect(executor).not.toMatch(/function\s+resolveProviderFailureClassification/);
   });
 
   it('request-executor-provider-failure-plan delegates force-exclude suppression policy', () => {

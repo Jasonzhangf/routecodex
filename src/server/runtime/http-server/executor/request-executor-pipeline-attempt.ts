@@ -3,6 +3,9 @@ import { finalizeRequestExecutorAttemptMetadata } from './request-executor-attem
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
+import {
+  hasAlternativeRouteCandidate
+} from './request-executor-retry-decision.js';
 
 type PipelineAttemptTarget = HubPipelineResult['target'];
 
@@ -52,27 +55,6 @@ function mergeObservedRoutePoolChain(
     merged.push(candidate);
   }
   return merged;
-}
-
-function hasAlternativeRouteCandidate(args: {
-  providerKey?: string;
-  routePool?: string[];
-  excludedProviderKeys: Set<string>;
-}): boolean {
-  if (!Array.isArray(args.routePool) || args.routePool.length === 0) {
-    return false;
-  }
-  const currentProviderKey = typeof args.providerKey === 'string' ? args.providerKey.trim() : '';
-  return args.routePool.some((candidate) => {
-    if (typeof candidate !== 'string' || candidate.trim().length === 0) {
-      return false;
-    }
-    const normalized = candidate.trim();
-    if (currentProviderKey && normalized === currentProviderKey) {
-      return false;
-    }
-    return !args.excludedProviderKeys.has(normalized);
-  });
 }
 
 export type ResolvedRequestExecutorPipelineAttempt =

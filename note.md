@@ -430,6 +430,16 @@
 - 当前结论：
   - `blockingRecoverable` 仍存在，但不再由这批 recoverable action plan 样本投影为 true；
   - 这次改动只是在测试面收口到新输出，没有动 `servertool` 主线。
+
+# 2026-06-27 executor duplicate helper import slice
+
+- 已收口：
+  - `request-executor-pipeline-attempt.ts` 删除本地 `hasAlternativeRouteCandidate` 重复实现
+  - `tests/red-tests/error_chain_singleton_truth.test.ts` 改为锁当前的 `pipeline-attempt.ts` import 真相
+  - 该 red test 同时移除了对已删除 `request-executor-reselection-plan.ts` 的路径依赖
+- 已知结果：
+  - `resolveProviderRetryExecutionPlanExhaustionGate` 仍是当前主链 gate，不能删
+  - `hasAlternativeRouteCandidate` 只保留一份实现，出口在 `request-executor-retry-decision.ts`
 - 当前事实：
   - `ProviderHealthManager::import_persistable_state(...)` 仍是 noop；
   - `export_persistable_state(...)` 仍固定导出空 `providerCooldowns`；
