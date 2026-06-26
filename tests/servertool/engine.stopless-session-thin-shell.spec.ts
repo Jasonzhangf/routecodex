@@ -52,6 +52,8 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain('!stoplessPlan.isStopMessageFlow &&');
     expect(source).not.toContain('const hasServertoolCliProjectionContext =');
     expect(source).not.toContain('.servertoolCliProjection');
+    expect(source).not.toContain('serverToolLoopState: {');
+    expect(source).toContain('stopless: {');
   });
 
   test('runServerToolOrchestration routes synthetic/direct preflight through native planning', () => {

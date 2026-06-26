@@ -103,16 +103,29 @@ fn is_stop_message_budget_exhausted(execution: &Value) -> bool {
     let Some(context) = execution.get("context").and_then(Value::as_object) else {
         return false;
     };
-    let Some(loop_state) = context.get("serverToolLoopState").and_then(Value::as_object) else {
-        return false;
-    };
-    let repeat_count = loop_state
-        .get("repeatCount")
+    let stopless = context
+        .get("stopless")
+        .and_then(Value::as_object);
+    let loop_state = context
+        .get("serverToolLoopState")
+        .and_then(Value::as_object);
+    let repeat_count = stopless
+        .and_then(|row| row.get("repeatCount"))
         .and_then(Value::as_u64)
+        .or_else(|| {
+            loop_state
+                .and_then(|row| row.get("repeatCount"))
+                .and_then(Value::as_u64)
+        })
         .unwrap_or(0);
-    let max_repeats = loop_state
-        .get("maxRepeats")
+    let max_repeats = stopless
+        .and_then(|row| row.get("maxRepeats"))
         .and_then(Value::as_u64)
+        .or_else(|| {
+            loop_state
+                .and_then(|row| row.get("maxRepeats"))
+                .and_then(Value::as_u64)
+        })
         .unwrap_or(0);
     max_repeats > 0 && repeat_count >= max_repeats
 }
@@ -179,6 +192,26 @@ mod tests {
                 "context": {
                     "requestTruth": { "sessionId": "sess-budget" },
                     "serverToolLoopState": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 3,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+        });
+        assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
+        assert_eq!(plan.reason, "stop_message_budget_exhausted");
+    }
+
+    #[test]
+    fn stop_message_budget_exhausted_prefers_stopless_runtime_control_without_loop_state() {
+        let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
+            flow_id: Some("stop_message_flow".to_string()),
+            execution: json!({
+                "flowId": "stop_message_flow",
+                "context": {
+                    "requestTruth": { "sessionId": "sess-budget-stopless" },
+                    "stopless": {
                         "flowId": "stop_message_flow",
                         "repeatCount": 3,
                         "maxRepeats": 3

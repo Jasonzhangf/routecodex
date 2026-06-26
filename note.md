@@ -17334,3 +17334,31 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
   1. 从上述两个 `src/` 文件中物理删除 `routecodexPortStopMessageEnabled` 文本残留；
   2. 把 `router-hotpath-napi` 与 `servertool_core_blocks` 的 fixture 全部改成只保留 `stopMessageEnabled`；
   3. 验证 sharedmodule Rust 聚焦测试与 metadata gate 仍绿。
+
+# 2026-06-26 stopless loop-state mirror closeout slice 5
+
+- 本轮开始真收 `serverToolLoopState` mirror，而不是只做 residue grep。
+- 目标切片：
+  - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`
+- 旧问题：
+  - TS orchestration shell 仍把 `MetadataCenter.runtime_control.stopless`
+    再镜像写成 `execution.context.serverToolLoopState`
+  - Rust `stopless_orchestration_contract` 的 budget exhausted 判断优先依赖
+    `context.serverToolLoopState.repeatCount/maxRepeats`
+  - 这会让 `serverToolLoopState` 持续像 canonical runtime truth，而不是过渡 mirror
+- 本轮动作：
+  1. `engine-orchestration-shell.ts`
+     - 改为直接把 stopless continuation truth 写到 `execution.context.stopless`
+     - 不再在这里构造 `serverToolLoopState`
+  2. `stopless_orchestration_contract.rs`
+     - `is_stop_message_budget_exhausted(...)` 先读 `context.stopless`
+     - `serverToolLoopState` 只保留 fallback
+  3. `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+     - 增加文本级 guard：shell 不再包含 `serverToolLoopState: {`
+     - 必须包含 `stopless: {`
+- focused 验证：
+  - `cargo test -p servertool-core stopless_orchestration_contract --lib -- --nocapture` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/engine.stopless-session-thin-shell.spec.ts --runInBand` PASS
+  - `rg -n "serverToolLoopState: \\{|stopless: \\{" sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+    - 只剩 `stopless: {`

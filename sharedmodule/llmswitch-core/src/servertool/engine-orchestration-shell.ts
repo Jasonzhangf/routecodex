@@ -28,8 +28,8 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { runEnginePreflight } from './engine-preflight-shell.js';
 import {
-  readRuntimeControlFromBoundMetadataCenter,
-  readRequestTruthSessionIdFromAnyBoundMetadataCenter
+  readRequestTruthSessionIdFromAnyBoundMetadataCenter,
+  readStoplessRuntimeControlFromAnyBoundMetadataCenter
 } from './stopless-metadata-carrier.js';
 
 export interface ServerToolOrchestrationOptions {
@@ -165,11 +165,9 @@ export async function runServerToolOrchestrationShell(
     engineResult.execution?.context && typeof engineResult.execution.context === 'object' && !Array.isArray(engineResult.execution.context)
       ? engineResult.execution.context as Record<string, unknown>
       : undefined;
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
-  const stoplessControl =
-    runtimeControl?.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)
-      ? runtimeControl.stopless
-      : undefined;
+  const stoplessControl = readStoplessRuntimeControlFromAnyBoundMetadataCenter(
+    options.adapterContext as Record<string, unknown>
+  );
   const requestTruthSessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
@@ -182,8 +180,9 @@ export async function runServerToolOrchestrationShell(
       ...(requestTruthSessionId ? { requestTruth: { sessionId: requestTruthSessionId } } : {}),
       ...(stoplessControl
         ? {
-            serverToolLoopState: {
-              flowId,
+            stopless: {
+              ...(typeof stoplessControl.flowId === 'string' ? { flowId: stoplessControl.flowId } : {}),
+              ...(flowId ? { flowId } : {}),
               ...(typeof stoplessControl.repeatCount === 'number' ? { repeatCount: stoplessControl.repeatCount } : {}),
               ...(typeof stoplessControl.maxRepeats === 'number' ? { maxRepeats: stoplessControl.maxRepeats } : {}),
               ...(typeof stoplessControl.triggerHint === 'string' ? { triggerHint: stoplessControl.triggerHint } : {}),
