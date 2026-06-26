@@ -180,7 +180,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies responses runtime payload contract failures as health-neutral special_400', () => {
+  it('classifies responses runtime payload contract failures as health-neutral unrecoverable local errors', () => {
     const reason = 'provider-runtime-error: responses payload missing "input" or "instructions"';
     const error = new Error(reason);
     const classification = resolveProviderFailureClassification({
@@ -189,7 +189,7 @@ describe('provider failure policy ssot', () => {
       reason
     });
 
-    expect(classification).toBe('special_400');
+    expect(classification).toBe('unrecoverable');
     expect(isProviderFailureHealthNeutral({
       error,
       stage: 'provider.send',
@@ -203,7 +203,7 @@ describe('provider failure policy ssot', () => {
       attempt: 2,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
-      classification: 'special_400',
+      classification: 'unrecoverable',
       affectsHealth: false,
       shouldRetry: false,
       action: 'direct_return',
@@ -216,7 +216,7 @@ describe('provider failure policy ssot', () => {
       attempt: 2,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
-      classification: 'special_400',
+      classification: 'unrecoverable',
       shouldRetry: false
     }));
   });

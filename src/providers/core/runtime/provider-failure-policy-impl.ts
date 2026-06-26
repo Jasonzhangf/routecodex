@@ -333,7 +333,7 @@ export function resolveProviderFailureClassification(args: {
     );
 
   if (isProviderRuntimeRequestContractError(reason)) {
-    return 'special_400';
+    return 'unrecoverable';
   }
 
   if (
@@ -650,7 +650,8 @@ export function resolveProviderFailureOutcome(args: {
       errorCode: args.errorCode,
       upstreamCode: args.upstreamCode,
       statusCode: args.statusCode,
-      classification
+      classification,
+      reason: args.reason
     })
   };
 }
@@ -758,7 +759,8 @@ export function resolveProviderFailureActionPlan(args: {
     errorCode: args.errorCode,
     upstreamCode: args.upstreamCode,
     statusCode: args.statusCode,
-    classification
+    classification,
+    reason: args.reason
   });
   const blockingRecoverable =
     classification === 'recoverable'
@@ -894,6 +896,7 @@ export function isProviderFailureHealthNeutral(args: {
   upstreamCode?: string;
   statusCode?: number;
   classification?: ProviderFailureClassification;
+  reason?: string;
 }): boolean {
   if (args.stage === 'provider.followup') {
     return true;
@@ -906,6 +909,12 @@ export function isProviderFailureHealthNeutral(args: {
   const upstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
   if (statusCode === 503 || errorCode === 'HTTP_503' || upstreamCode === 'HTTP_503') {
     return false;
+  }
+  const reason = typeof args.reason === 'string'
+    ? args.reason.trim().toLowerCase()
+    : '';
+  if (isProviderRuntimeRequestContractError(reason)) {
+    return true;
   }
   if (args.classification === 'special_400') {
     return true;
