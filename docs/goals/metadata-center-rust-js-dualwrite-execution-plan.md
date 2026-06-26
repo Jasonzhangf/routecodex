@@ -8,7 +8,7 @@
 
 1. 近端目标：先把现有 JS center 的 owner、merge、projection、payload residue 收紧，避免继续扩散第二套写点和读点。
 2. 中端目标：在不破坏现有 Hub/servertool 主线的前提下，确认 Rust side 要不要、以及如何引入真正的 Rust request-scoped center。
-3. 终态目标：如果 Rust center 引入可行，再把 `runtime_control` / `__rt` / 顶层 runtime projection 从“逻辑真源”降为“stale residue”，并最终删除。
+3. 终态目标：如果 Rust center 引入可行，再把 `runtime_control` / `__rt` / 顶层 runtime residue 全部降为非 owner truth，并最终删除。
 
 ### 验收标准
 
@@ -147,7 +147,7 @@
 | `stoplessGoal` | `provider-response-converter.ts` | 已入 center，但不在原始 `/goal` 首批字段列表中；当前已是活字段，不能忽略 |
 | `stopMessageEnabled` | `executor-metadata.ts`、`index.ts`、`servertool-adapter-context.ts` | 已入 center，但顶层 `stopMessageEnabled` / `routecodexPortStopMessageEnabled` 仍是 stale residue |
 | `stopMessageExcludeDirect` | `index.ts`、`executor-metadata.ts` residue 链 | 已入 center，但 direct/request-stage/Rust 仍可能直接读残留 |
-| `stopMessageClientInject` | `servertool-adapter-context.ts` | 已入 center，但属于 servertool projection family，暂不宜提前删兼容层 |
+| `stopMessageClientInject` | `servertool-adapter-context.ts` | 已入 center，但属于 servertool projection family，暂不宜提前删过渡残留 |
 | `stopMessageState` | `sharedmodule/llmswitch-core/src/handlers/stop-message-auto.ts` | 未作为 `MetadataCenter.runtime_control` canonical slot 收口；当前仍是 Rust servertool-core 直接消费的 runtime/migration mirror |
 | `serverToolLoopState` | `sharedmodule/llmswitch-core/src/handlers/stop-message-auto.ts` | 未作为 `MetadataCenter.runtime_control` canonical slot 收口；当前仍是 Rust servertool-core 直接消费的 runtime/migration mirror |
 | `streamIntent` | `responses-request-bridge.ts` | 已入 center，当前主要由 host/bridge 读 |
@@ -190,7 +190,7 @@
 代码级依据：
 
 1. 当前 native ingress 入口仍以 metadata JSON 作为主载体：
-  - `hub-pipeline-execute-request-stage.ts` 仍会把 JS center projection 重新 materialize 为 `metadata.runtime_control` / `metadata.__rt` / 顶层投影，再喂给 native。
+  - `hub-pipeline-execute-request-stage.ts` 仍会把 JS center projection 重新 materialize 为 `metadata.runtime_control` / `metadata.__rt` / 顶层残留字段，再喂给 native。
   - 但同一个入口现在也会额外构造 `metadataCenterSnapshot`，作为最小只读 adapter 送入 native。
 2. Rust 侧现有消费者普遍以 `serde_json::Value` + metadata field 读取为前提：
   - `chat_servertool_orchestration.rs`
@@ -306,7 +306,7 @@
   - `responses-request-bridge.ts`
   - `servertool-followup-dispatch.ts`
   - `provider-response-converter.ts`
-3. 清点并限制当前仍需要的 payload projection：
+3. 清点并限制当前仍需要的 payload residue：
   - `runtime_control`
   - `__rt`
   - top-level `stopMessageEnabled` / `stopMessageExcludeDirect`
@@ -318,7 +318,7 @@
 
 #### Slice 1: Request-Route Control Residue Tightening
 
-目标：先锁最窄、最可验证的一组 request-route control 字段，避免继续把 `__rt` / `runtime_control` / top-level projection 同时当真源。
+目标：先锁最窄、最可验证的一组 request-route control 字段，避免继续把 `__rt` / `runtime_control` / top-level residue 同时当真源。
 
 当前代码证据：
 
@@ -377,9 +377,9 @@
 
 - Rust servertool orchestration 仍直接读 `runtime_control`：
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
-- Rust same-protocol direct 决策仍直接读 stop-message 顶层投影与 `__rt`：
+- Rust same-protocol direct 决策曾直接读 stop-message 顶层残留与 `__rt`：
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
-- request-stage 仍把 stop-message / stopless 投影回 top-level：
+- request-stage 仍把 stop-message / stopless materialize 回 top-level residue：
   - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
 
 本 slice 允许继续保留过渡镜像的字段，只限于：
@@ -414,7 +414,7 @@
   - `napi_bindings.rs` 的 stop-message direct 决策不再接受 `__rt.stopMessageEnabled` / `__rt.stopMessageExcludeDirect`
 - 当前仍未完成：
   - Rust servertool orchestration 仍接受 `runtime_control` / `adapter_context.runtime_control`，这仍是当前显式过渡面
-  - request-stage 仍会 materialize top-level `stopMessageEnabled` / `stopMessageExcludeDirect` / `stopless`
+  - request-stage 仍会 materialize top-level residue `stopMessageEnabled` / `stopMessageExcludeDirect` / `stopless`
   - 因此本 slice 还不能宣称“servertool / stop-message payload projection 已完全收口”，只能宣称“host ingress projection 面 + 两条 Rust legacy `__rt` 读侧已先收紧一层”
 
 #### Slice 3: Rust-Side Snapshot Adapter Feasibility
@@ -571,11 +571,11 @@
    - 目标字段：
      - `stopMessageEnabled`
      - `routecodexPortStopMessageEnabled`
-   - 当前读取方式：只读 `metadata` 顶层残留
+  - 当前读取方式：只读 `metadata` 顶层残留字段
    - 原因：
      - 这是当前唯一真正活着的 `stopMessageEnabled` 消费者
      - 读面窄（只决定是否注入 stopless system instruction + reasoningStop tool）
-     - 改成 snapshot-first 后，顶层投影可以逐步降级
+    - 改成 snapshot-first 后，顶层残留可以逐步降级
 2. 再切 `req_process_stage1_tool_governance_blocks/servertool_injection.rs`
    - 目标函数：`read_runtime_metadata(metadata)`
    - 当前读取方式：`metadata.__rt`（仍读整个 `__rt` 对象，主要消费 `webSearch`）
@@ -701,7 +701,7 @@ type MetadataCenterSnapshotInput = {
 以下 Phase 3-8 仍保留原始方向描述，但当前代码事实表明它们不构成近期可执行计划：
 
 - Phase 2 snapshot adapter 仍处于"窄 reader 逐步接通"阶段，尚未到达"可建完整 Rust registry"的前置条件。
-- 当前真正的 bottleneck 是：Rust 侧仍有大量活 reader 在吃 `runtime_control` / 顶层投影 / `__rt`，而不是 snapshot。
+- 当前真正的 bottleneck 是：Rust 侧仍有大量活 reader 在吃 `runtime_control` / 顶层残留 / `__rt`，而不是 snapshot。
 - 在这些活 reader 没有逐个迁到 snapshot-first 之前，建 Rust registry 只会新增第三真源。
 
 远期方向（Phase 3-8）简述：
@@ -710,7 +710,7 @@ type MetadataCenterSnapshotInput = {
 - Phase 4: Single Dual-Write Sync Owner（当前 blocker：Phase 3 未完成）
 - Phase 5: Hub Request Path Consumer Migration（部分已由 snapshot-first reader 替代，`routeHint/retryProviderKey/preselectedRoute` 已迁，其余仍需逐字段推进）
 - Phase 6: Servertool / Stopless / Followup Consumer Migration（当前最活跃的未迁 reader：`orchestrator.rs` 的 `should_inject_stopless_system_instruction()`、`servertool_injection.rs` 的 `read_runtime_metadata()`、`chat_servertool_orchestration.rs` 的 followup/source gate）
-- Phase 7: Delete Payload Residue（当前 blocker：Phase 5-6 未完成，`runtime_control` / `__rt` / 顶层投影仍有活 consumer）
+- Phase 7: Delete Payload Residue（当前 blocker：Phase 5-6 未完成，`runtime_control` / `__rt` / 顶层残留仍有活 consumer）
 - Phase 8: Shrink JS Center / Reclassify Owner（当前 blocker：Phase 7 未完成）
 
 这些方向的有效性仍成立，但不应被当成当前可立即开工的任务。每一阶段进入前，必须先确认前置 snapshot-first reader 已按当前代码 truth 逐字段验证完毕。
@@ -792,7 +792,7 @@ type MetadataCenterSnapshotInput = {
 
 - `metadata.__rt` 承载的 runtime control 真源
 - `metadata.runtime_control` 真源读路径
-- 顶层 `stopMessageEnabled` / `routecodexPortStopMessageEnabled` 等逻辑真源残留
+- 顶层 `stopMessageEnabled` / `routecodexPortStopMessageEnabled` 等 stale residue
 - Rust 各模块对这些字段的直接读取
 
 重点文件：
