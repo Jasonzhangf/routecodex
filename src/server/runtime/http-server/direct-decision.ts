@@ -43,7 +43,6 @@ export interface DirectRetryPlanLike {
   shouldRetry?: boolean;
   retrySwitchPlan?: { switchAction?: string } | null | undefined;
   excludedCurrentProvider?: boolean;
-  requestLocalTransient?: boolean;
   blockingRecoverable?: boolean;
   defaultPoolAvailable?: boolean;
   mayProject?: boolean;

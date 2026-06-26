@@ -2,7 +2,6 @@ import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces
 import type {
   ProviderRetryExecutionPlan,
   RequestExecutorProviderFailurePlan,
-  RequestLocalTransientRetryTracker,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 import type {
@@ -66,7 +65,6 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   defaultTierAvailable?: boolean;
   isStreamingRequest?: boolean;
   providerOwnedContinuation?: boolean;
-  transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   metadata?: Record<string, unknown>;
   extraDetails?: Record<string, unknown>;
@@ -113,7 +111,6 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     defaultTierAvailable: args.defaultTierAvailable,
     isStreamingRequest: args.isStreamingRequest,
     providerOwnedContinuation: args.providerOwnedContinuation,
-    transientRetryTracker: args.transientRetryTracker,
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });

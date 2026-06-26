@@ -22,7 +22,6 @@ import {
 import type {
   ProviderRetryExecutionPlan,
   RequestExecutorProviderErrorStage,
-  RequestLocalTransientRetryTracker,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
@@ -141,7 +140,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
   forceExcludeCurrentProviderOnRetry?: boolean;
   isStreamingRequest?: boolean;
   providerOwnedContinuation?: boolean;
-  transientRetryTracker?: RequestLocalTransientRetryTracker;
   abortSignal?: AbortSignal;
   /**
    * VR-derived truth: does the current routing group have a non-empty default
@@ -186,8 +184,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
         promptTooLong: Boolean(args.promptTooLong),
         routePool: args.routePool,
         excludedProviderKeys: args.excludedProviderKeys,
-        retryError: args.retryError,
-        transientRetryTracker: args.transientRetryTracker
+        retryError: args.retryError
       });
   if (!classification) {
     throw new Error('[request-executor] provider failure classification missing');
@@ -209,8 +206,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
           }) || baseExclusionPlan.excludedCurrentProvider
         }
       : { excludedCurrentProvider: false };
-  const requestLocalTransient = false;
-
   const holdOnLastAvailable429 = isLastAvailableProvider429({
     providerKey: args.providerKey,
     routePool: args.routePool,
@@ -226,8 +221,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   const shouldSkipBackoffForImmediate429Reroute =
     retryExcludedCurrentProvider
     && !holdOnLastAvailable429
-    && hasAlternativeCandidate
-    && !requestLocalTransient;
+    && hasAlternativeCandidate;
 
   const hasTerminalAlternativeCandidate =
     !holdOnLastAvailable429
@@ -251,7 +245,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: keepTerminalExclusion,
-      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
@@ -273,7 +266,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
         shouldRetry: false,
         blockingRecoverable: eligibilityPlan.blockingRecoverable,
         excludedCurrentProvider: true,
-        requestLocalTransient,
         holdOnLastAvailable429,
         retryBackoffMs: 0
       }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
@@ -282,7 +274,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: true,
       blockingRecoverable: false,
       excludedCurrentProvider: true,
-      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0,
       retrySwitchPlan,
@@ -301,7 +292,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: false,
-      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
@@ -322,7 +312,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: retryExcludedCurrentProvider,
-      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
@@ -338,7 +327,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
       excludedCurrentProvider: retryExcludedCurrentProvider,
-      requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
@@ -347,7 +335,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     shouldRetry: true,
     blockingRecoverable: eligibilityPlan.blockingRecoverable,
     excludedCurrentProvider: retryExcludedCurrentProvider,
-    requestLocalTransient,
     holdOnLastAvailable429,
     retryBackoffMs: 0,
     retrySwitchPlan,

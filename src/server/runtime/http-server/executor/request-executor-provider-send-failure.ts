@@ -18,8 +18,7 @@ import { extractRequestExecutorProviderErrorStage } from './request-executor-err
 import type {
   RetryErrorSnapshot,
   BlockingRecoverableRouteHoldState,
-  RequestLocalProviderRetryState,
-  RequestLocalTransientRetryTracker
+  RequestLocalProviderRetryState
 } from './request-executor-error-types.js';
 
 type RequestExecutorProviderSendFailureArgs = {
@@ -45,7 +44,6 @@ type RequestExecutorProviderSendFailureArgs = {
   routePoolForAttempt?: string[];
   defaultTierAvailable?: boolean;
   excludedProviderKeys: Set<string>;
-  transientRetryTracker?: RequestLocalTransientRetryTracker;
   recordAttempt: (args: { error: boolean }) => void;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
   logProviderRetrySwitch: (args: {
@@ -372,7 +370,6 @@ export async function processProviderSendFailure(
     status,
     isStreamingRequest: args.isStreamingRequest,
     providerOwnedContinuation: args.providerOwnedContinuation,
-    transientRetryTracker: args.transientRetryTracker,
     abortSignal: args.abortSignal,
     metadata: args.metadata,
     logNonBlockingError: args.logNonBlockingError

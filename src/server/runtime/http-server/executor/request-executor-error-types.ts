@@ -32,13 +32,6 @@ export type ProviderRetryExclusionPlan = {
   excludedCurrentProvider: boolean;
 };
 
-export type RequestLocalTransientRetryTracker = {
-  observe(args: {
-    providerKey?: string;
-    retryError: RetryErrorSnapshot;
-  }): number;
-};
-
 export type ProviderRetryEligibilityPlan = {
   shouldRetry: boolean;
   blockingRecoverable: boolean;
@@ -48,7 +41,6 @@ export type ProviderRetryExecutionPlan = {
   shouldRetry: boolean;
   blockingRecoverable: boolean;
   excludedCurrentProvider: boolean;
-  requestLocalTransient: boolean;
   holdOnLastAvailable429: boolean;
   retryBackoffMs: number;
   retrySwitchPlan?: ProviderRetrySwitchPlan;

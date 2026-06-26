@@ -18,7 +18,6 @@ import type {
   ProviderRetryExecutionPlan,
   ProviderRetrySwitchAction,
   ProviderRetrySwitchPlan,
-  RequestLocalTransientRetryTracker,
   RequestExecutorProviderErrorClassification,
   RequestExecutorProviderErrorStage,
   RetryErrorSnapshot
@@ -108,7 +107,6 @@ export function resolveProviderRetryExclusionPlan(args: {
   promptTooLong: boolean;
   routePool?: string[];
   excludedProviderKeys: Set<string>;
-  transientRetryTracker?: RequestLocalTransientRetryTracker;
 }): ProviderRetryExclusionPlan {
   const providerKey = readString(args.providerKey);
   if (!providerKey) {

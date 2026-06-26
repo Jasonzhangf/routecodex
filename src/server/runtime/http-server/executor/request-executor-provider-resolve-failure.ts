@@ -9,8 +9,7 @@ import {
 import type {
   RetryErrorSnapshot,
   BlockingRecoverableRouteHoldState,
-  RequestLocalProviderRetryState,
-  RequestLocalTransientRetryTracker
+  RequestLocalProviderRetryState
 } from './request-executor-error-types.js';
 
 type RequestExecutorProviderResolveFailureArgs = {
@@ -29,7 +28,6 @@ type RequestExecutorProviderResolveFailureArgs = {
   routePoolForAttempt?: string[];
   defaultTierAvailable?: boolean;
   excludedProviderKeys: Set<string>;
-  transientRetryTracker?: RequestLocalTransientRetryTracker;
   recordAttempt: (args: { error: boolean }) => void;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
   logProviderRetrySwitch: (args: {
@@ -99,7 +97,6 @@ export async function processProviderResolveFailure(
     recordAttempt: args.recordAttempt,
     logStage: args.logStage,
     routeHint: args.forcedRouteHint,
-    transientRetryTracker: args.transientRetryTracker,
     forceExcludeCurrentProviderOnRetry: true,
     abortSignal: args.abortSignal,
     metadata: args.metadata,

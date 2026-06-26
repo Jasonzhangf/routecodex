@@ -1,5 +1,4 @@
 import { jest } from '@jest/globals';
-import { createRequestLocalTransientRetryTracker } from '../../../../../src/server/runtime/http-server/executor/request-executor-transient-retry-tracker.js';
 import { resetRequestExecutorRetryStateForTests } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-state.js';
 
 jest.unstable_mockModule('../../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js', () => ({
@@ -110,7 +109,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
     expect(plan.shouldRetry).toBe(true);
     expect(plan.excludedCurrentProvider).toBe(true);
-    expect(plan.requestLocalTransient).toBe(false);
     expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
     expect(plan.retrySwitchPlan?.decisionLabel).toBe('exclude_and_reroute');
     expect(Array.from(excludedProviderKeys)).toEqual(['mini27.key1.MiniMax-M2.7']);
@@ -118,7 +116,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
   it('reroutes recoverable HTTP 502 immediately when an alternative provider exists', async () => {
     const excludedProviderKeys = new Set<string>();
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {
       statusCode: 502,
       code: 'HTTP_502',
@@ -144,12 +141,10 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       excludedProviderKeys,
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
-      logNonBlockingError: jest.fn(),
-      transientRetryTracker
+      logNonBlockingError: jest.fn()
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.requestLocalTransient).toBe(false);
     expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
     expect(plan.excludedCurrentProvider).toBe(true);
     expect(plan.retryBackoffMs).toBe(0);
@@ -158,7 +153,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
   it('does not reroute provider-owned continuation failures across providers', async () => {
     const excludedProviderKeys = new Set<string>();
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: SSE_TO_JSON_ERROR'), {
       statusCode: 502,
       code: 'SSE_TO_JSON_ERROR',
@@ -185,7 +179,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
       logNonBlockingError: jest.fn(),
-      transientRetryTracker,
       isStreamingRequest: true,
       providerOwnedContinuation: true
     });
@@ -198,7 +191,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
   it('keeps reroute enabled for relay continuation recoverable failures when an alternative provider exists', async () => {
     const excludedProviderKeys = new Set<string>();
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: fetch failed'), {
       statusCode: 502,
       code: 'HTTP_502',
@@ -225,7 +217,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
       logNonBlockingError: jest.fn(),
-      transientRetryTracker,
       isStreamingRequest: true,
       providerOwnedContinuation: false
     });
@@ -242,7 +233,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
   it('does not synthesize same-provider retry for streaming recoverable pre-response failures', async () => {
     const excludedProviderKeys = new Set<string>();
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
       statusCode: 525,
       code: 'HTTP_525',
@@ -269,12 +259,10 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
       logNonBlockingError: jest.fn(),
-      transientRetryTracker,
       isStreamingRequest: true
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.requestLocalTransient).toBe(false);
     expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
     expect(plan.retrySwitchPlan?.decisionLabel).not.toContain('same_provider');
     expect(plan.excludedCurrentProvider).toBe(true);
@@ -283,7 +271,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
   it('keeps current provider when non-stream recoverable pre-response failure is already the last provider', async () => {
     const excludedProviderKeys = new Set<string>();
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
       statusCode: 525,
       code: 'HTTP_525',
@@ -310,12 +297,10 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
       logNonBlockingError: jest.fn(),
-      transientRetryTracker,
       isStreamingRequest: false
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.requestLocalTransient).toBe(false);
     expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
     expect(plan.retrySwitchPlan?.decisionLabel).toBe('exclude_and_reroute');
     expect(plan.excludedCurrentProvider).toBe(false);
@@ -324,7 +309,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
   it('excludes current provider for recoverable HTTP 502 as soon as alternatives exist', async () => {
     const excludedProviderKeys = new Set<string>();
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {
       statusCode: 502,
       code: 'HTTP_502',
@@ -348,8 +332,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       excludedProviderKeys,
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
-      logNonBlockingError: jest.fn(),
-      transientRetryTracker
+      logNonBlockingError: jest.fn()
     };
 
     const firstPlan = await resolveProviderRetryExecutionPlan({
@@ -403,7 +386,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
   it('keeps other excluded providers and adds current HTTP 503 provider for reroute', async () => {
     const excludedProviderKeys = new Set<string>(['cc.key1.gpt-5.5']);
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 503'), {
       statusCode: 503,
       code: 'HTTP_503',
@@ -429,8 +411,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       excludedProviderKeys,
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
-      logNonBlockingError: jest.fn(),
-      transientRetryTracker
+      logNonBlockingError: jest.fn()
     });
 
     expect(plan.shouldRetry).toBe(true);
@@ -442,7 +423,6 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
   it('excludes current HTTP 503 provider immediately when alternatives exist', async () => {
     const excludedProviderKeys = new Set<string>();
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 503'), {
       statusCode: 503,
       code: 'HTTP_503',
@@ -468,8 +448,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       excludedProviderKeys,
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
-      logNonBlockingError: jest.fn(),
-      transientRetryTracker
+      logNonBlockingError: jest.fn()
     });
 
     expect(plan.shouldRetry).toBe(true);

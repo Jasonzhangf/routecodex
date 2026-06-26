@@ -2011,7 +2011,6 @@ describe('HubRequestExecutor failover', () => {
         shouldRetry: false,
         blockingRecoverable: false,
         excludedCurrentProvider: true,
-        requestLocalTransient: false,
         holdOnLastAvailable429: false,
         retryBackoffMs: 0,
         });

@@ -28,7 +28,6 @@ function plan(over: Partial<Plan> = {}): Plan {
       switchAction: 'exclude_and_reroute',
     } as Plan['retrySwitchPlan'],
     excludedCurrentProvider: true,
-    requestLocalTransient: true,
     blockingRecoverable: true,
     ...over,
   } as Plan;
@@ -64,7 +63,6 @@ describe('provider-direct.candidate-exhaustion', () => {
         shouldRetry: false,
         retrySwitchPlan: undefined,
         excludedCurrentProvider: false,
-        requestLocalTransient: false,
         blockingRecoverable: false,
       } as Plan,
       error: { code: 'special_400', message: 'malformed request' },

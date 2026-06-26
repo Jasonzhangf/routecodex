@@ -80,7 +80,6 @@ import { resolveRequestExecutorProviderFailurePlan } from './executor/request-ex
 import { decideDirectProviderRetry, decideDirectRouterRetry } from './direct-decision.js';
 import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
 import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
-import { createRequestLocalTransientRetryTracker } from './executor/request-executor-transient-retry-tracker.js';
 import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
@@ -134,7 +133,6 @@ import {
   ensureHubPipelineEngineShadow,
   isPipelineReady,
   waitForRuntimeReady,
-  isQuotaRoutingEnabled,
   shouldStartManagerDaemon,
   initializeRouteErrorHub,
 } from './http-server-bootstrap.js';
@@ -230,7 +228,6 @@ const HTTP_RUNTIME_ENTRY_RUNTIME_CONTROL_WRITER = {
 type RouterDirectRetryState = {
   maxAttempts: number;
   excludedProviderKeys: Set<string>;
-  transientRetryTracker: ReturnType<typeof createRequestLocalTransientRetryTracker>;
   retryProviderKey?: string;
   lastError?: unknown;
   poolExhaustedBackoffAttempts: number;
@@ -246,7 +243,6 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
   return {
     maxAttempts: resolveMaxProviderAttempts(),
     excludedProviderKeys,
-    transientRetryTracker: createRequestLocalTransientRetryTracker(),
     poolExhaustedBackoffAttempts: 0,
   };
 }
@@ -1897,7 +1893,6 @@ export class RouteCodexHttpServer {
           recordAttempt: () => {},
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
           routeHint: readRuntimeControlProjection(metadataForHub).routeHint,
-          transientRetryTracker: retryState.transientRetryTracker,
           isStreamingRequest: readRuntimeControlProjection(metadataForHub).streamIntent === 'stream',
           logNonBlockingError: logRouterDirectNonBlockingError,
           metadata: {
@@ -1949,7 +1944,6 @@ export class RouteCodexHttpServer {
           providerKey: ctx.providerKey,
           switchAction,
           excludedCurrentProvider: retryPlan.excludedCurrentProvider,
-          requestLocalTransient: retryPlan.requestLocalTransient,
           blockingRecoverable: retryPlan.blockingRecoverable,
           directAttempt,
         });

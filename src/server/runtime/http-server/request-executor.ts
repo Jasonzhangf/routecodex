@@ -3,7 +3,6 @@ import type { PipelineExecutionInput, PipelineExecutionResult } from '../../hand
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
-  computeProviderFailureBackoffDelayMs,
   describeProviderFailureDecision,
   resolveProviderFailureExclusionDecision,
   normalizeProviderFailureCodeKey,
@@ -276,9 +275,6 @@ import {
   hasNonEmptyToolCalls,
   hasOutputFunctionCalls
 } from './executor/request-executor-response-inspect.js';
-import {
-  createRequestLocalTransientRetryTracker
-} from './executor/request-executor-transient-retry-tracker.js';
 export type RequestExecutorDeps = {
   runtimeManager: {
     resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
@@ -598,7 +594,6 @@ export class HubRequestExecutor implements RequestExecutor {
         let cumulativeClientInjectWaitMs = 0;
         let retryProviderKeyForNextAttempt: string | undefined;
         let requestLocalProviderRetryState: RequestLocalProviderRetryState | undefined;
-        const transientRetryTracker = createRequestLocalTransientRetryTracker();
         let poolExhaustedBackoffAttempts = 0;
         let singletonRoutePoolCooldownWaitAttempts = 0;
         let allowPoolExhaustedBackoffBeyondAttemptBudget = false;
@@ -868,7 +863,6 @@ export class HubRequestExecutor implements RequestExecutor {
             routePoolForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
-            transientRetryTracker,
             recordAttempt,
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
@@ -1009,7 +1003,6 @@ export class HubRequestExecutor implements RequestExecutor {
             routePoolForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
-            transientRetryTracker,
             recordAttempt,
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
@@ -1458,7 +1451,6 @@ export class HubRequestExecutor implements RequestExecutor {
             logicalRequestChainKey,
             routePoolForAttempt,
             excludedProviderKeys,
-            transientRetryTracker,
             recordAttempt,
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),

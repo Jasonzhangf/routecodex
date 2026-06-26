@@ -1,4 +1,3 @@
-import { createRequestLocalTransientRetryTracker } from '../../../../../src/server/runtime/http-server/executor/request-executor-transient-retry-tracker.js';
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
@@ -224,7 +223,6 @@ describe('request-executor-provider-failure-plan', () => {
 
   test('single-provider retry path does not synthesize same-provider retry state', async () => {
     const excludedProviderKeys = new Set<string>();
-    const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
         code: 'HTTP_525',
@@ -248,7 +246,6 @@ describe('request-executor-provider-failure-plan', () => {
       logicalChainRetryLimitStageRequestId: 'logical-same-provider-rotate-apikey',
       routePool: ['asxs.gpt-5.4'],
       excludedProviderKeys,
-      transientRetryTracker,
       isStreamingRequest: false,
       recordAttempt: () => undefined,
       logStage: () => undefined,
