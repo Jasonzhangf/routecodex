@@ -12,7 +12,6 @@ import type {
   ProviderFailureActionPlan,
   ProviderFailureRetryEligibilityPlan,
   ProviderFailureOutcome,
-  ProviderFailureStage,
 } from './provider-failure-policy.js';
 import type { ErrorErr02HostCaptured } from '../utils/provider-error-reporter.js';
 import { loadNativeFailurePolicyBridge } from './provider-failure-policy-native.js';
