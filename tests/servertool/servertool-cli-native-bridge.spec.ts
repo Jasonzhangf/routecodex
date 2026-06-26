@@ -306,7 +306,7 @@ describe('servertool CLI native bridge', () => {
     expect(
       planStoplessCliProjectionContextWithNative({
         executionContext: {
-          serverToolLoopState: {
+          stopless: {
             repeatCount: 4,
             maxRepeats: 6,
             triggerHint: 'loop-hint',
@@ -333,9 +333,39 @@ describe('servertool CLI native bridge', () => {
       reasoningText: '来自 chat 的 stop 文本',
       repeatCount: 4,
       maxRepeats: 6,
-      triggerHint: 'context-hint',
+      triggerHint: 'loop-hint',
       schemaFeedback: {
-        reason_code: 'context_feedback'
+        reason_code: 'loop_feedback'
+      }
+    });
+  });
+
+  it('keeps serverToolLoopState only as fallback when execution.stopless is absent', () => {
+    expect(
+      planStoplessCliProjectionContextWithNative({
+        executionContext: {
+          serverToolLoopState: {
+            repeatCount: 4,
+            maxRepeats: 6,
+            triggerHint: 'loop-hint',
+            schemaFeedback: {
+              reason_code: 'loop_feedback'
+            }
+          }
+        },
+        runtimeSnapshot: {
+          used: 1,
+          maxRepeats: 3
+        },
+        chatStopText: '来自 chat 的 stop 文本'
+      })
+    ).toEqual({
+      reasoningText: '来自 chat 的 stop 文本',
+      repeatCount: 4,
+      maxRepeats: 6,
+      triggerHint: 'loop-hint',
+      schemaFeedback: {
+        reason_code: 'loop_feedback'
       }
     });
   });

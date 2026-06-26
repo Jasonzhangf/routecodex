@@ -17362,3 +17362,23 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
   - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/engine.stopless-session-thin-shell.spec.ts --runInBand` PASS
   - `rg -n "serverToolLoopState: \\{|stopless: \\{" sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
     - 只剩 `stopless: {`
+
+# 2026-06-26 stopless cli projection loop-state fallback closeout slice 6
+
+- 本轮继续沿同一条 mirror 收口，但只改有 focused contract 的一段：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
+  - `tests/servertool/servertool-cli-native-bridge.spec.ts`
+- 现状核对：
+  - Rust contract 本身已经按这个优先级运行：
+    1. `executionContext.stopless`
+    2. `stoplessControl`
+    3. `executionContext.serverToolLoopState`
+    4. `runtimeSnapshot`
+  - 真正滞后的是测试样本还把 `serverToolLoopState` 当第一输入场景。
+- 本轮动作：
+  1. 把主 Rust contract 测试改成 `executionContext.stopless` 为第一真相输入；
+  2. 额外补一个 fallback 测试，明确 `serverToolLoopState` 只在 `stopless` 缺失时兜底；
+  3. 同步更新 TS native bridge test，锁住相同优先级。
+- focused 验证：
+  - `cargo test -p servertool-core stopless_cli_projection_context_contract --lib -- --nocapture` PASS
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/servertool-cli-native-bridge.spec.ts --runInBand` PASS
