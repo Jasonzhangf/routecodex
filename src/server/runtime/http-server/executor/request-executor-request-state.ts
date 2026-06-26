@@ -4,9 +4,6 @@ import { buildRequestMetadata, cloneClientHeaders, resolveClientRequestId } from
 import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 import { bindSessionConversationSession } from './request-retry-helpers.js';
 import { writeInboundClientSnapshot } from './request-executor-core-utils.js';
-import {
-  resolveSessionStormBackoffScopes
-} from './request-executor-retry-planner.js';
 
 export type RequestExecutorInitialRequestState = {
   initialMetadata: Record<string, unknown>;
@@ -41,7 +38,6 @@ export async function initializeRequestExecutorRequestState(args: {
   const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
   const providerRequestId = args.input.requestId;
   const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
-  const sessionStormBackoffScopes = resolveSessionStormBackoffScopes(initialMetadata);
 
   args.logStage('request.received', providerRequestId, {
     endpoint: args.input.entryEndpoint,

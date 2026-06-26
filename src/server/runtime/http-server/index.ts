@@ -209,7 +209,6 @@ import {
 import {
   consumeSessionStormBackoffMs,
   isSessionStormBackoffCandidate,
-  resolveSessionStormBackoffScopes,
 } from './executor/request-executor-session-storm-backoff.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
 
@@ -1300,7 +1299,6 @@ export class RouteCodexHttpServer {
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
         && !mustRelayLocalResponsesContinuation
       ) {
-        const routerDirectStormScopes = resolveSessionStormBackoffScopes(asMetadataRecord(nextInput.metadata));
         this.logStage('router-direct.entry', input.requestId, {
           routingPolicyGroup: portConfig.routingPolicyGroup,
           sameProtocolBehavior: portConfig.sameProtocolBehavior,
