@@ -6,6 +6,9 @@
   - `src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts`
 - 已验证：
   - `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts`
+- 已补测：
+  - `npm run jest:run -- --runTestsByPath tests/providers/core/runtime/provider-failure-policy.spec.ts tests/providers/core/runtime/provider-error-classifier.spec.ts tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
 - 观察：
   - 这轮改动是把 executor 侧的 helper / wrapper 继续内联收口，验证目前通过。
 

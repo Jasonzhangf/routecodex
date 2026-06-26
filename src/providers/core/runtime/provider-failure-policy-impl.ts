@@ -46,56 +46,6 @@ function isRecoverableHostResponseContractCode(code?: string): boolean {
   return code === 'EMPTY_ASSISTANT_RESPONSE' || code === 'MISSING_REQUIRED_TOOL_CALL';
 }
 
-function isProviderBusinessStatus2013ContextOverflow(args: {
-  statusCode?: number;
-  error?: unknown;
-  errorCode?: string;
-  upstreamCode?: string;
-  reason?: string;
-  nestedMessage?: string;
-  protocolReason?: string;
-  protocolUpstreamCode?: string;
-  providerStatusCode?: number;
-}): boolean {
-  const matches2013 = (value: unknown): boolean => {
-    if (typeof value === 'number') {
-      return value === 2013;
-    }
-    if (typeof value !== 'string') {
-      return false;
-    }
-    const normalized = value.trim().toUpperCase();
-    if (!normalized) {
-      return false;
-    }
-    return normalized === '2013' || /(?:^|_)2013(?:_|$)/.test(normalized);
-  };
-  const has2013Signal =
-    matches2013(args.errorCode)
-    || matches2013(args.upstreamCode)
-    || matches2013(args.protocolUpstreamCode)
-    || matches2013(args.providerStatusCode);
-  if (!has2013Signal) {
-    return false;
-  }
-  if (args.protocolReason === 'context_length_exceeded') {
-    return true;
-  }
-  if ((args.reason ?? '').includes('context_length_exceeded')) {
-    return true;
-  }
-  if ((args.nestedMessage ?? '').includes('context_length_exceeded')) {
-    return true;
-  }
-  return isPromptTooLongLike({
-    error: args.error,
-    statusCode: args.statusCode,
-    errorCode: args.protocolUpstreamCode || args.errorCode,
-    upstreamCode: args.protocolUpstreamCode || args.upstreamCode,
-    reason: args.protocolReason || args.nestedMessage || args.reason
-  });
-}
-
 export function normalizeProviderFailureCodeKey(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -384,17 +334,19 @@ export function resolveProviderFailureClassification(args: {
   }
 
   if (
-    isProviderBusinessStatus2013ContextOverflow({
-      error: args.error,
-      statusCode,
-      errorCode,
-      upstreamCode,
-      reason,
-      nestedMessage,
-      protocolReason,
-      protocolUpstreamCode,
-      providerStatusCode: protocolDetails.providerStatusCode
-    })
+    has2013Signal
+    && (
+      protocolReason === 'context_length_exceeded'
+      || reason.includes('context_length_exceeded')
+      || nestedMessage.includes('context_length_exceeded')
+      || isPromptTooLongLike({
+        error: args.error,
+        statusCode,
+        errorCode: protocolUpstreamCode || errorCode,
+        upstreamCode: protocolUpstreamCode || upstreamCode,
+        reason: protocolReason || nestedMessage || reason
+      })
+    )
   ) {
     return 'recoverable';
   }
@@ -508,17 +460,21 @@ export function resolveProviderFailureClassification(args: {
       || matches2013(upstreamCode)
       || matches2013(nestedCode)
     )
-    && !isProviderBusinessStatus2013ContextOverflow({
-      error: args.error,
-      statusCode,
-      errorCode,
-      upstreamCode,
-      reason,
-      nestedMessage,
-      protocolReason,
-      protocolUpstreamCode,
-      providerStatusCode: protocolDetails.providerStatusCode
-    })
+    && !(
+      has2013Signal
+      && (
+        protocolReason === 'context_length_exceeded'
+        || reason.includes('context_length_exceeded')
+        || nestedMessage.includes('context_length_exceeded')
+        || isPromptTooLongLike({
+          error: args.error,
+          statusCode,
+          errorCode: protocolUpstreamCode || errorCode,
+          upstreamCode: protocolUpstreamCode || upstreamCode,
+          reason: protocolReason || nestedMessage || reason
+        })
+      )
+    )
   ) {
     return 'recoverable';
   }
