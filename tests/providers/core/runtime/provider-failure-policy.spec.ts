@@ -493,6 +493,48 @@ describe('provider failure policy ssot', () => {
     });
   });
 
+  it('does not let promptTooLong bypass unified recoverable reroute action', () => {
+    const error = Object.assign(new Error('Request input tokens exceeds the model maximum context length'), {
+      code: 'CONTEXT_LENGTH_EXCEEDED',
+      statusCode: 400
+    });
+
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'CONTEXT_LENGTH_EXCEEDED',
+      reason: 'Request input tokens exceeds the model maximum context length',
+      attempt: 1,
+      maxAttempts: 6,
+      promptTooLong: true
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: true,
+      blockingRecoverable: false,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'exclude_and_reroute'
+    }));
+
+    expect(resolveProviderFailureRetryEligibility({
+      error,
+      stage: 'provider.send',
+      statusCode: 400,
+      errorCode: 'CONTEXT_LENGTH_EXCEEDED',
+      reason: 'Request input tokens exceeds the model maximum context length',
+      attempt: 1,
+      maxAttempts: 6,
+      promptTooLong: true,
+      contextOverflowRetries: 99,
+      maxContextOverflowRetries: 1
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      blockingRecoverable: false,
+      shouldRetry: true
+    }));
+  });
+
   it('classifies sqlite busy 500 as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('database is locked (5) (SQLITE_BUSY)'), {
       code: 'new_api_error',

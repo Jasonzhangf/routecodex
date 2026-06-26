@@ -777,7 +777,6 @@ export function resolveProviderFailureActionPlan(args: {
 
   if (
     classification !== 'recoverable'
-    || args.promptTooLong
     || (!hasAttemptsBudget && !blockingRecoverable)
   ) {
     return {
@@ -837,14 +836,6 @@ export function resolveProviderFailureRetryEligibility(args: {
       classification: actionPlan.classification,
       blockingRecoverable,
       shouldRetry: false
-    };
-  }
-  if (args.promptTooLong) {
-    return {
-      classification: actionPlan.classification,
-      blockingRecoverable: false,
-      shouldRetry:
-        (args.contextOverflowRetries ?? 0) <= (args.maxContextOverflowRetries ?? 1)
     };
   }
   if (
