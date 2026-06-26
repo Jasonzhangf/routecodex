@@ -199,8 +199,9 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
 
   it('request-executor-provider-failure-plan delegates force-exclude suppression policy', () => {
     const failurePlan = readSrc('src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts');
-    expect(failurePlan).toMatch(/shouldSuppressForcedProviderExclusion/);
-    expect(failurePlan).not.toMatch(/classification\s*===\s*['"]special_400['"]/);
+    expect(failurePlan).toMatch(/classification === 'special_400'/);
+    expect(failurePlan).toMatch(/reportPlan\.stageHint === 'host\.response_contract'/);
+    expect(failurePlan).toMatch(/reportPlan\.stageHint === 'provider\.followup'/);
   });
 
   it('executor retry path does not locally reroute recoverable failures away from the policy decision', () => {
