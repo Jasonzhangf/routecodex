@@ -1905,7 +1905,6 @@ describe('HubRequestExecutor failover', () => {
       });
       expect(recordAttempt).toHaveBeenCalledWith({ error: true });
       expect(executionPlan.shouldRetry).toBe(true);
-      expect(executionPlan.retryBackoffMs).toBe(0);
       expect(executionPlan.retrySwitchPlan).toEqual(expect.objectContaining({
         switchAction: 'exclude_and_reroute',
         decisionLabel: 'exclude_and_reroute'
@@ -2011,8 +2010,6 @@ describe('HubRequestExecutor failover', () => {
         shouldRetry: false,
         blockingRecoverable: false,
         excludedCurrentProvider: true,
-        holdOnLastAvailable429: false,
-        retryBackoffMs: 0,
         });
 
       const sqliteBusyExcluded = new Set<string>();
@@ -3066,7 +3063,6 @@ describe('HubRequestExecutor failover', () => {
         providerKey: 'mimo.key1.mimo-v2.5-pro',
         nextAttempt: 2,
         reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout</body></html>',
-        backoffMs: 1000,
         statusCode: 504,
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
@@ -3081,7 +3077,6 @@ describe('HubRequestExecutor failover', () => {
         providerKey: 'mimo.key1.mimo-v2.5-pro',
         nextAttempt: 2,
         reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout again</body></html>',
-        backoffMs: 1000,
         statusCode: 504,
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
@@ -3098,7 +3093,6 @@ describe('HubRequestExecutor failover', () => {
         providerKey: 'mimo.key1.mimo-v2.5-pro',
         nextAttempt: 2,
         reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout final</body></html>',
-        backoffMs: 1000,
         statusCode: 504,
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
@@ -4001,7 +3995,6 @@ describe('HubRequestExecutor failover', () => {
         .filter((line) => line.includes('[provider-switch]') && line.includes('req-immediate-reroute-500'));
       expect(switchLines).toHaveLength(1);
       expect(switchLines[0]).toContain(`provider=${providerA}`);
-      expect(switchLines[0]).toContain('backoff=0ms');
       expect(switchLines[0]).toContain('switch=exclude_and_reroute');
       expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);

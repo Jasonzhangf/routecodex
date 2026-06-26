@@ -247,7 +247,6 @@ export function logProviderRetrySwitchCompact(args: {
   providerKey?: string;
   nextAttempt: number;
   reason: string;
-  backoffMs?: number;
   statusCode?: number;
   errorCode?: string;
   upstreamCode?: string;
@@ -314,7 +313,6 @@ export function logProviderRetrySwitchCompact(args: {
     ...(args.errorCode ? [`code=${args.errorCode}`] : []),
     ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
     ...(typeof args.upstreamStatus === 'number' ? [`upstreamStatus=${args.upstreamStatus}`] : []),
-    ...(typeof args.backoffMs === 'number' ? [`backoff=${Math.max(0, Math.round(args.backoffMs))}ms`] : []),
     ...(typeof args.runtimeScopeExcludedCount === 'number' && args.runtimeScopeExcludedCount > 0
       ? [`runtimeScopeExcluded=${args.runtimeScopeExcludedCount}`]
       : []),

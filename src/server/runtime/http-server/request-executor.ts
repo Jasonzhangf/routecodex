@@ -474,7 +474,6 @@ export class HubRequestExecutor implements RequestExecutor {
     providerKey?: string;
     nextAttempt: number;
     reason: string;
-    backoffMs?: number;
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;

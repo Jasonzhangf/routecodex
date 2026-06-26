@@ -1,3 +1,12 @@
+# 2026-06-27 executor retry switch log cleanup
+
+- 当前 `request-executor` retry 链里，`retryBackoffMs` / `holdOnLastAvailable429` 已经不再是生产契约字段，但 `request-executor.spec.ts` 里还残留旧断言。
+- `logProviderRetrySwitch` / `logProviderRetrySwitchCompact` 仍带 `backoffMs` 纯日志参数，未参与真实 retry 决策。
+- 本轮最小收口方向：
+  - 物理删除 retry switch 日志里的 `backoffMs` 形参和打印内容；
+  - 删除 `request-executor.spec.ts` 里对应的旧字段断言与旧 logger 入参；
+  - 保持现有 retry/exclusion/telemetry 决策逻辑不动。
+
 # 2026-06-27 provider error truth collapse - generic HTTP 400 catalog fallback slice
 
 - 当前 `HEAD` 已在 `743ac3d refactor(policy): drop duplicate invalid400`；本线没有新的未提交 focused 改动，工作树其余脏文件属于 quota/servertool/doc 删除面，不能混提。
