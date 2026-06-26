@@ -38,16 +38,11 @@ export type ProviderFailureAction =
   | ProviderFailureRetryAction;
 
 export type ProviderFailureBackoffScope =
-  | 'none'
-  | 'attempt'
-  | 'recoverable'
-  | 'provider';
+  | 'none';
 
 export type ProviderFailureDecisionLabel =
   | 'direct_return'
-  | 'attempt_backoff_then_reroute'
-  | 'recoverable_backoff_then_reroute'
-  | 'provider_backoff_then_reroute';
+  | 'exclude_and_reroute';
 
 export type ProviderFailureBackoffPlan = {
   scope: ProviderFailureBackoffScope;

@@ -16,19 +16,12 @@ describe('webui integration flows (feature coverage)', () => {
     'provider.delete',
     'oauth.settings_save',
     'oauth.auto_authorize',
-    'oauth.verify_open',
     'routing.group_create_copy',
     'routing.group_save',
     'routing.activate_local',
     'routing.activate_all',
     'stats.refresh',
-    'quota.pool_refresh',
-    'quota.provider_offline',
-    'quota.provider_recover',
-    'quota.provider_reset',
-    'quota.snapshot_refresh',
     'advanced.control_restart_all',
-    'advanced.control_quota_refresh',
     'auth.logout',
     'auth.login',
     'auth.change_password'
@@ -49,29 +42,6 @@ describe('webui integration flows (feature coverage)', () => {
     hasPassword: true,
     oauthBrowser: 'default',
     activeGroupId: 'default',
-    quotaProviders: [
-      {
-        providerKey: 'qwen.default.qwen-max',
-        inPool: true,
-        reason: 'ok',
-        cooldownUntil: null,
-        blacklistUntil: null,
-        consecutiveErrorCount: 0
-      },
-      {
-        providerKey: 'tab.work.gpt-4',
-        inPool: false,
-        reason: 'authVerify',
-        cooldownUntil: null,
-        blacklistUntil: null,
-        consecutiveErrorCount: 2,
-        authIssue: {
-          kind: 'google_account_verification',
-          url: 'https://verify.example.com',
-          message: 'verify required'
-        }
-      }
-    ],
     credentials: [
       {
         id: 'cred-qwen',
@@ -94,12 +64,8 @@ describe('webui integration flows (feature coverage)', () => {
     ]
   };
   const fault = {
-    quotaRefresh404: false,
     controlMutateFail: false,
     clockFetchFail: false
-  };
-  const metrics = {
-    quotaResetCalls: 0
   };
 
   const summarizeProviderV2 = (id: string, detail: JsonRecord) => {
@@ -167,30 +133,6 @@ describe('webui integration flows (feature coverage)', () => {
     state.oauthBrowser = 'default';
     state.activeGroupId = 'default';
 
-    state.quotaProviders = [
-      {
-        providerKey: 'qwen.default.qwen-max',
-        inPool: true,
-        reason: 'ok',
-        cooldownUntil: null,
-        blacklistUntil: null,
-        consecutiveErrorCount: 0
-      },
-      {
-        providerKey: 'tab.work.gpt-4',
-        inPool: false,
-        reason: 'authVerify',
-        cooldownUntil: null,
-        blacklistUntil: null,
-        consecutiveErrorCount: 2,
-        authIssue: {
-          kind: 'google_account_verification',
-          url: 'https://verify.example.com',
-          message: 'verify required'
-        }
-      }
-    ];
-
     state.credentials = [
       {
         id: 'cred-qwen',
@@ -211,10 +153,8 @@ describe('webui integration flows (feature coverage)', () => {
         secretRef: 'oauth-qwen-work'
       }
     ];
-    fault.quotaRefresh404 = false;
     fault.controlMutateFail = false;
     fault.clockFetchFail = false;
-    metrics.quotaResetCalls = 0;
 
     Object.defineProperty(window, 'confirm', {
       value: jest.fn(() => true),
@@ -435,61 +375,6 @@ describe('webui integration flows (feature coverage)', () => {
         return json({ ok: true, routing });
       }
 
-      if (path === '/daemon/modules/quota/refresh' && method === 'POST') {
-        if (fault.quotaRefresh404) {
-          return json({ error: { message: 'quota refresh endpoint missing' } }, 404);
-        }
-        return json({ ok: true });
-      }
-      if (path === '/daemon/modules/quota/reset' && method === 'POST') {
-        metrics.quotaResetCalls += 1;
-        return json({ ok: true });
-      }
-
-      if (path === '/quota/providers' && method === 'GET') {
-        return json({ ok: true, providers: state.quotaProviders });
-      }
-
-      if (path.startsWith('/quota/providers/') && path.endsWith('/disable') && method === 'POST') {
-        const key = decodeURIComponent(path.split('/')[3] || '');
-        const target = state.quotaProviders.find((x) => x.providerKey === key);
-        if (target) {
-          target.inPool = false;
-          target.reason = typeof body.mode === 'string' ? body.mode : 'cooldown';
-        }
-        return json({ ok: true });
-      }
-      if (path.startsWith('/quota/providers/') && path.endsWith('/recover') && method === 'POST') {
-        const key = decodeURIComponent(path.split('/')[3] || '');
-        const target = state.quotaProviders.find((x) => x.providerKey === key);
-        if (target) {
-          target.inPool = true;
-          target.reason = 'ok';
-        }
-        return json({ ok: true });
-      }
-      if (path.startsWith('/quota/providers/') && path.endsWith('/reset') && method === 'POST') {
-        return json({ ok: true });
-      }
-
-      if (path === '/quota/summary' && method === 'GET') {
-        return json({
-          ok: true,
-          records: [
-            {
-              key: 'tab://work/gpt-4',
-              remainingFraction: 0.42,
-              resetAt: Date.now() + 3600_000,
-              fetchedAt: Date.now()
-            }
-          ]
-        });
-      }
-
-      if (path === '/quota/refresh' && method === 'POST') {
-        return json({ ok: true, result: { refreshedAt: Date.now(), tokenCount: 1, recordCount: 1 } });
-      }
-
       if (path === '/daemon/stats' && method === 'GET') {
         return json({
           session: {
@@ -542,9 +427,6 @@ describe('webui integration flows (feature coverage)', () => {
           ok: true,
           nowMs: Date.now(),
           servers: [{ port: 3000, version: 'test', ready: true, pids: [123] }],
-          quota: {
-            providers: state.quotaProviders
-          },
           serverTool: {
             state: { enabled: true, updatedAtMs: Date.now(), updatedBy: 'test' },
             stats: { executions: 3, success: 2, failure: 1, scannedLines: 10, byTool: [], recent: [] }
@@ -572,7 +454,7 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText('Admin Login')).toBeTruthy());
     expect(screen.getByText(/Admin authentication is required before opening any daemon management page\./)).toBeTruthy();
     expect(screen.queryByText('Provider Catalog')).toBeNull();
-    expect(screen.queryByText('Routing & Capacity')).toBeNull();
+    expect(screen.queryByText('Routing')).toBeNull();
     expect(screen.queryByText('Refresh View (R)')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('password'), { target: { value: 'test-pass' } });
@@ -663,13 +545,8 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/OAuth authorize started\./)).toBeTruthy());
     hit('oauth.auto_authorize');
 
-    fireEvent.click(within(oauthPanel).getByText('Open Verify'));
-    await waitFor(() => expect(screen.getByText(/Verify URL opened\./)).toBeTruthy());
-    hit('oauth.verify_open');
-
     // Routing page
-    fireEvent.click(screen.getByText('Routing & Capacity'));
-    fireEvent.click(screen.getByText('Routing Groups'));
+    fireEvent.click(screen.getByText('Routing'));
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
 
     fireEvent.change(screen.getByPlaceholderText('new group id'), { target: { value: 'canary' } });
@@ -697,35 +574,6 @@ describe('webui integration flows (feature coverage)', () => {
     hit('stats.refresh');
 
     // Quota page
-    fireEvent.click(screen.getByText('Routing & Capacity'));
-    fireEvent.click(screen.getByText('Quota Pool'));
-    await waitFor(() => expect(screen.getByText('Quota Pool Management')).toBeTruthy());
-    const quotaPanel = panelByTitle('Quota Pool Management');
-
-    fireEvent.click(within(quotaPanel).getByText('Refresh Provider Pool'));
-    await waitFor(() => expect(within(quotaPanel).getByText(/Quota providers refreshed\./)).toBeTruthy());
-    hit('quota.pool_refresh');
-    const quotaBulkRow = within(quotaPanel).getByPlaceholderText('providerKey').closest('.row') as HTMLElement;
-    expect(quotaBulkRow).toBeTruthy();
-    fireEvent.change(within(quotaBulkRow).getByPlaceholderText('providerKey'), {
-      target: { value: 'qwen.default.qwen-max' }
-    });
-    fireEvent.click(within(quotaBulkRow).getByText('Offline'));
-    await waitFor(() => expect(screen.getByText(/disable applied\./)).toBeTruthy());
-    hit('quota.provider_offline');
-
-    fireEvent.click(within(quotaBulkRow).getByText('Recover'));
-    await waitFor(() => expect(screen.getByText(/recover applied\./)).toBeTruthy());
-    hit('quota.provider_recover');
-
-    fireEvent.click(within(quotaBulkRow).getByText('Reset'));
-    await waitFor(() => expect(screen.getByText(/reset applied\./)).toBeTruthy());
-    hit('quota.provider_reset');
-
-    fireEvent.click(within(panelByTitle('Quota Snapshot')).getByText('Refresh Upstream Snapshot'));
-    await waitFor(() => expect(screen.getByText(/Quota snapshot refreshed\./)).toBeTruthy());
-    hit('quota.snapshot_refresh');
-
     // Ops / Control Plane
     fireEvent.click(screen.getByText('Ops'));
     fireEvent.click(screen.getByText('Control Plane'));
@@ -735,11 +583,6 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(within(controlPanel).getByText('Restart All Servers'));
     await waitFor(() => expect(screen.getByText(/servers\.restart done\./)).toBeTruthy());
     hit('advanced.control_restart_all');
-
-    fireEvent.click(within(controlPanel).getByText('Refresh Quota'));
-    await waitFor(() => expect(screen.getByText(/quota\.refresh done\./)).toBeTruthy());
-    hit('advanced.control_quota_refresh');
-
 
     // Auth flows: logout + login + change password
     fireEvent.click(screen.getByText('Logout'));
@@ -762,31 +605,8 @@ describe('webui integration flows (feature coverage)', () => {
   });
 
   it('covers validation and failure branches across pages', async () => {
-    fault.quotaRefresh404 = true;
     fault.controlMutateFail = true;
     fault.clockFetchFail = true;
-    state.quotaProviders = [
-      {
-        providerKey: 'qwen.default.qwen-max',
-        inPool: true,
-        reason: 'ok',
-        cooldownUntil: null,
-        blacklistUntil: null,
-        consecutiveErrorCount: 0
-      },
-      {
-        providerKey: 'tab.work.gpt-4',
-        inPool: false,
-        reason: 'authVerify',
-        cooldownUntil: null,
-        blacklistUntil: null,
-        consecutiveErrorCount: 2,
-        authIssue: {
-          kind: 'google_account_verification',
-          message: 'verify required'
-        }
-      }
-    ];
 
     render(<App />);
     await waitFor(() => expect(screen.getByText('Provider Pool')).toBeTruthy());
@@ -820,18 +640,7 @@ describe('webui integration flows (feature coverage)', () => {
 
     fireEvent.click(screen.getByText('OAuth & Credentials'));
     await waitFor(() => expect(screen.getByText('OAuth Workbench')).toBeTruthy());
-    const oauthPanel = panelByTitle('OAuth Workbench');
-    const providerSelect = oauthPanel.querySelectorAll('select')[1] as HTMLSelectElement;
-    fireEvent.change(providerSelect, { target: { value: 'tab' } });
-    const aliasInput = oauthPanel.querySelector('input[style*="width: 180px"]') as HTMLInputElement;
-    fireEvent.change(aliasInput, { target: { value: 'work' } });
-    fireEvent.click(within(oauthPanel).getByText('Open Verify'));
-    await waitFor(() => expect(screen.getByText(/No verify URL available\./i)).toBeTruthy());
-    fireEvent.click(within(oauthPanel).getByText('Copy URL'));
-    await waitFor(() => expect(screen.getByText(/No verify URL available\./i)).toBeTruthy());
-
-    fireEvent.click(screen.getByText('Routing & Capacity'));
-    fireEvent.click(screen.getByText('Routing Groups'));
+    fireEvent.click(screen.getByText('Routing'));
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
     const routingPanel = panelByTitle('Routing Management');
     fireEvent.click(screen.getByText('Create/Copy Group'));
@@ -849,17 +658,6 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/at least one target is required|select a route first/i)).toBeTruthy());
     fireEvent.click(screen.getByText('Delete Group'));
     await waitFor(() => expect(screen.getAllByText(/cannot delete active group/i).length).toBeGreaterThan(0));
-
-    fireEvent.click(screen.getByText('Routing & Capacity'));
-    fireEvent.click(screen.getByText('Quota Pool'));
-    await waitFor(() => expect(screen.getByText('Quota Pool Management')).toBeTruthy());
-    const quotaPanel = panelByTitle('Quota Pool Management');
-    fireEvent.click(within(quotaPanel).getByText('Refresh Provider Pool'));
-    await waitFor(() => expect(metrics.quotaResetCalls).toBeGreaterThan(0));
-    const bulkRow = within(quotaPanel).getByPlaceholderText('providerKey').closest('.row') as HTMLElement;
-    fireEvent.change(within(bulkRow).getByPlaceholderText('providerKey'), { target: { value: '' } });
-    fireEvent.click(within(bulkRow).getByText('Offline'));
-    await waitFor(() => expect(screen.getByText(/providerKey required or select rows/i)).toBeTruthy());
 
     fireEvent.click(screen.getByText('Ops'));
     fireEvent.click(screen.getByText('Control Plane'));

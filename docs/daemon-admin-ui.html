@@ -789,7 +789,6 @@
           <button class="tab" data-tab="stats">Stats</button>
           <button class="tab" data-tab="tokens">Token Stats</button>
           <button class="tab" data-tab="credentials">Auth Provider Pool</button>
-          <button class="tab" data-tab="quota">Quota Pool</button>
           <button class="tab" data-tab="routing">Runtime Routing Pool</button>
         </div>
 
@@ -799,12 +798,11 @@
               <p class="section-title">Control plane (single entry)</p>
               <p class="section-sub">
                 This panel uses <span class="mono">/daemon/control/snapshot</span> and <span class="mono">/daemon/control/mutate</span>
-                to manage all local servers (broadcast restart) and quota operations from one port.
+                to manage all local servers (broadcast restart) from one port.
               </p>
               <div class="row" style="margin-bottom: 10px;">
                 <button id="controlRefreshBtn" class="primary">Refresh</button>
                 <button id="controlRestartAllBtn" class="danger">Restart all servers</button>
-                <button id="controlQuotaRefreshBtn">Refresh quota</button>
                 <span id="controlHint" class="muted" style="margin-left:auto; font-size:12px;"></span>
               </div>
               <div class="table-wrap">
@@ -836,50 +834,6 @@
             </div>
 
             <div class="card" style="box-shadow: none;">
-              <p class="section-title">Quota actions</p>
-              <p class="section-sub">
-                Offline/Recover/Reset are executed by control plane (no direct writes from UI).
-              </p>
-              <div class="row" style="margin-bottom: 10px;">
-                <label for="controlQuotaKeyInput">providerKey</label>
-                <input id="controlQuotaKeyInput" type="text" placeholder="tab.key1.gpt-5.2-codex" style="flex: 1; min-width: 320px;" />
-              </div>
-              <div class="row" style="margin-bottom: 10px;">
-                <label for="controlQuotaModeSelect">mode</label>
-                <select id="controlQuotaModeSelect" style="width: 140px;">
-                  <option value="cooldown" selected>cooldown</option>
-                  <option value="blacklist">blacklist</option>
-                </select>
-                <label for="controlQuotaDurationSelect">time</label>
-                <select id="controlQuotaDurationSelect" style="width: 160px;">
-                  <option value="5">5m</option>
-                  <option value="15">15m</option>
-                  <option value="30">30m</option>
-                  <option value="60" selected>1h</option>
-                  <option value="180">3h</option>
-                  <option value="360">6h</option>
-                  <option value="720">12h</option>
-                  <option value="1440">24h</option>
-                </select>
-                <button id="controlQuotaOfflineBtn" class="danger">Offline</button>
-                <button id="controlQuotaRecoverBtn">Recover</button>
-                <button id="controlQuotaResetBtn">Reset</button>
-              </div>
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>providerKey</th>
-                      <th>inPool</th>
-                      <th>reason</th>
-                      <th>cooldownUntil</th>
-                      <th>blacklistUntil</th>
-                    </tr>
-                  </thead>
-                  <tbody id="controlQuotaProvidersTbody"></tbody>
-                </table>
-              </div>
-
               <p class="section-title" style="margin-top: 14px;">ServerTool runtime</p>
               <p class="section-sub">
                 Toggle servertool orchestration on/off instantly for this server process.
@@ -1309,119 +1263,6 @@
           </div>
         </section>
 
-        <section id="panelQuota" data-panel="quota" style="display:none;">
-          <div class="grid">
-            <div class="card" style="box-shadow:none;">
-              <p class="section-title">Quota (daemon)</p>
-              <p class="section-sub">
-                VirtualRouter consumes this via <span class="mono">quotaView</span>. When
-                <span class="mono">inPool=false</span>, the provider is treated as removed from the route pool.
-	              </p>
-		              <div class="row" style="margin-bottom: 10px;">
-		                <label for="quotaFilterInput">filter</label>
-		                <input id="quotaFilterInput" type="text" placeholder="providerKey contains…" style="width: 320px;" />
-		                <label><input id="quotaHideOkToggle" type="checkbox" /> hide ok</label>
-		                <label><input id="quotaOnlyRoutedTargetsToggle" type="checkbox" checked disabled /> routed models only</label>
-                    <button id="quotaSelectVisibleBtn">Select visible</button>
-                    <button id="quotaClearSelectionBtn">Clear selection</button>
-                    <label><input id="quotaAutoRefreshToggle" type="checkbox" checked /> auto refresh</label>
-                    <span id="quotaSelectionHint" class="muted" style="font-size:12px;">selected 0</span>
-		                <span class="muted" style="font-size:12px;">Tip: click a row to fill the offline box.</span>
-		              </div>
-		              <div class="row" style="margin-bottom: 10px;">
-		                <label for="quotaKeyInput">providerKey</label>
-		                <input id="quotaKeyInput" type="text" placeholder="tab.key1.gpt-5.2-codex" style="width: 420px;" />
-	                <label for="quotaModeSelect">offline mode</label>
-	                <select id="quotaModeSelect" style="width: 140px;">
-	                  <option value="cooldown">cooldown</option>
-	                  <option value="blacklist">blacklist</option>
-	                </select>
-	                <label for="quotaDurationSelect">offline time</label>
-	                <select id="quotaDurationSelect" style="width: 160px;">
-	                  <option value="5">5m</option>
-	                  <option value="15">15m</option>
-	                  <option value="30">30m</option>
-	                  <option value="60" selected>1h</option>
-	                  <option value="180">3h</option>
-	                  <option value="360">6h</option>
-	                  <option value="720">12h</option>
-	                  <option value="1440">24h</option>
-	                </select>
-	                <button id="quotaApplyDisableBtn" class="danger">Offline</button>
-	                <button id="quotaApplyRecoverBtn">Recover</button>
-	                <button id="quotaApplyResetBtn">Reset</button>
-		              </div>
-                <div class="muted" style="font-size:12px; margin: -6px 0 10px;">
-                  Offline removes the provider from the route pool for the selected minutes. Recover brings it back online immediately.
-                  If selection is non-empty, actions apply to selected providerKeys.
-                </div>
-		              <div class="row" style="margin-bottom: 10px;">
-		                <button id="refreshQuotaBtn" class="primary">Refresh provider pool</button>
-		                <button id="refreshQuotaSnapshotBtn" class="primary">Refresh antigravity snapshot</button>
-		                <button id="resetQuotaBtn" class="danger">Reset provider-quota module</button>
-              </div>
-              <div class="table-wrap">
-	                <table class="table">
-	                  <thead>
-	                    <tr>
-	                      <th style="width: 34px;">
-                        <input id="quotaSelectAllVisibleToggle" type="checkbox" title="Select all visible" />
-                      </th>
-	                      <th>key</th>
-	                      <th>model</th>
-	                      <th>inPool</th>
-	                      <th>reason</th>
-	                      <th>until</th>
-                      <th>errCount</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="quotaTbody"></tbody>
-                </table>
-              </div>
-	              <div id="quotaOpLog" class="log" style="margin-top: 10px; display:none;"></div>
-	            </div>
-
-	            <div class="card" style="box-shadow:none;">
-	              <p class="section-title">Antigravity quota snapshot</p>
-	              <p class="section-sub">
-	                Snapshot fetched by <span class="mono">QuotaManagerModule</span> (antigravity quota API). Used to gate antigravity providers entering the route pool.
-	              </p>
-	              <div class="row" style="margin-bottom: 10px;">
-	                <label><input id="quotaSnapshotOnlyRoutedToggle" type="checkbox" checked /> only routed models</label>
-	                <span class="muted" style="font-size:12px;">(filters by current provider pool keys)</span>
-	              </div>
-	              <div class="table-wrap">
-	                <table class="table">
-	                  <thead>
-	                    <tr>
-	                      <th>alias</th>
-	                      <th>model</th>
-	                      <th>remaining</th>
-	                      <th>resetAt</th>
-	                      <th>fetchedAt</th>
-	                    </tr>
-	                  </thead>
-	                  <tbody id="quotaSnapshotTbody"></tbody>
-	                </table>
-	              </div>
-	              <div id="quotaSnapshotLog" class="log" style="margin-top: 10px; display:none;"></div>
-	            </div>
-	
-	            <div class="card" style="box-shadow:none;">
-	              <p class="section-title">Notes</p>
-	              <div class="notice">
-                <div style="margin-bottom: 6px;">
-                  Use this view to confirm 429/backoff/blacklist decisions and whether a provider is currently eligible.
-	                </div>
-	                <div>
-	                  If a provider looks stuck, try <span class="mono">Reset provider-quota module</span>, then <span class="mono">Restart runtime</span>.
-	                </div>
-	              </div>
-	            </div>
-          </div>
-        </section>
-
 	        <section id="panelRouting" data-panel="routing" style="display:none;">
 	          <div class="grid grid-one">
 	            <div class="card" style="box-shadow:none;">
@@ -1442,24 +1283,6 @@
                   <button id="deleteRoutingGroupBtn" class="danger">Delete group</button>
                   <span id="routingActiveGroupHint" class="mono muted" style="margin-left:auto;"></span>
                 </div>
-	              <div class="row" style="margin-bottom: 10px;">
-	                <label for="routingQuotaModeSelect">mode</label>
-	                <select id="routingQuotaModeSelect" style="width: 160px;">
-	                  <option value="cooldown" selected>cooldown</option>
-	                  <option value="blacklist">blacklist</option>
-	                </select>
-	                <label for="routingQuotaDurationSelect">offline time</label>
-	                <select id="routingQuotaDurationSelect" style="width: 160px;">
-	                  <option value="5">5m</option>
-	                  <option value="15">15m</option>
-	                  <option value="30">30m</option>
-	                  <option value="60" selected>1h</option>
-	                  <option value="180">3h</option>
-	                  <option value="360">6h</option>
-	                  <option value="720">12h</option>
-	                  <option value="1440">24h</option>
-	                </select>
-	              </div>
 	              <div class="row" style="margin-bottom: 10px;">
 	                <button id="loadRoutingBtn" class="primary">Load</button>
 	                <button id="saveRoutingBtn" class="primary">Save group</button>
@@ -1494,9 +1317,6 @@
               quotaProviders: [],
               quotaProvidersUpdatedAt: 0,
               quotaProviderMap: null,
-              quotaSelection: new Set(),
-              quotaRenderedVisibleKeys: [],
-              quotaRenderedGroups: new Map(),
               routingTargets: null,
               routingTargetsUpdatedAt: 0,
               routingSources: [],
@@ -1611,7 +1431,6 @@
           { name: "stats", el: $("panelStats") },
           { name: "tokens", el: $("panelTokens") },
           { name: "credentials", el: $("panelCredentials") },
-          { name: "quota", el: $("panelQuota") },
           { name: "routing", el: $("panelRouting") }
         ];
         for (const p of panels) p.el.style.display = p.name === name ? "block" : "none";
@@ -1633,7 +1452,6 @@
         stats: 0,
         tokens: 0,
         credentials: 0,
-        quota: 0,
         routing: 0,
         clock: 0
       };
@@ -1651,10 +1469,6 @@
           else if (key === "stats") await refreshStats();
           else if (key === "tokens") await refreshTokens();
           else if (key === "credentials") await refreshCredentials();
-	          else if (key === "quota") {
-	            await refreshQuota();
-	            await refreshQuotaSnapshot();
-	          }
           else if (key === "routing") {
             await refreshRuntimes();
             await refreshRoutingSources();
@@ -2384,7 +2198,6 @@
         const snap = UI.controlSnapshot;
         const serversBody = $("controlServersTbody");
         const hitsBody = $("controlHitsTbody");
-        const quotaBody = $("controlQuotaProvidersTbody");
         const serverToolBody = $("controlServerToolToolsTbody");
         const serverToolStatus = $("controlServerToolStatus");
         const serverToolUpdatedAt = $("controlServerToolUpdatedAt");
@@ -2392,12 +2205,10 @@
         const serverToolToggleBtn = $("controlServerToolToggleBtn");
         if (serversBody) serversBody.replaceChildren();
         if (hitsBody) hitsBody.replaceChildren();
-        if (quotaBody) quotaBody.replaceChildren();
         if (serverToolBody) serverToolBody.replaceChildren();
         if (!snap || typeof snap !== "object") {
           if (serversBody) serversBody.appendChild(createErrorRow(4, "No snapshot"));
           if (hitsBody) hitsBody.appendChild(createErrorRow(2, "No snapshot"));
-          if (quotaBody) quotaBody.appendChild(createErrorRow(5, "No snapshot"));
           if (serverToolBody) serverToolBody.appendChild(createErrorRow(5, "No snapshot"));
           if (serverToolStatus) serverToolStatus.textContent = "state: —";
           if (serverToolUpdatedAt) serverToolUpdatedAt.textContent = "updated: —";
@@ -2440,43 +2251,6 @@
           }
         } catch {
           if (hitsBody) hitsBody.appendChild(createErrorRow(2, "Failed to read routing hits"));
-        }
-
-        const quota = snap.quota && typeof snap.quota === "object" ? snap.quota : null;
-        const providers = quota && Array.isArray(quota.providers) ? quota.providers : [];
-        const list = providers
-          .map((p) => ({
-            providerKey: textOf(p.providerKey),
-            inPool: Boolean(p.inPool),
-            reason: textOf(p.reason),
-            cooldownUntil: p.cooldownUntil ?? null,
-            blacklistUntil: p.blacklistUntil ?? null
-          }))
-          .filter((p) => p.providerKey);
-        list.sort((a, b) => a.providerKey.localeCompare(b.providerKey));
-        const max = 60;
-        const visible = list.slice(0, max);
-        if (!visible.length) {
-          if (quotaBody) quotaBody.appendChild(createErrorRow(5, "No quota providers"));
-        } else if (quotaBody) {
-          for (const p of visible) {
-            const tr = document.createElement("tr");
-            tr.appendChild(createCell("td", p.providerKey, "mono truncate", { title: true }));
-            tr.appendChild(createCell("td", p.inPool ? "true" : "false", p.inPool ? "" : "danger"));
-            tr.appendChild(createCell("td", p.reason || "—", "mono truncate", { title: true }));
-            tr.appendChild(createCell("td", formatTs(p.cooldownUntil), "mono"));
-            tr.appendChild(createCell("td", formatTs(p.blacklistUntil), "mono"));
-            quotaBody.appendChild(tr);
-          }
-          if (list.length > max) {
-            const tr = document.createElement("tr");
-            const td = document.createElement("td");
-            td.colSpan = 5;
-            td.className = "muted";
-            td.textContent = `… ${list.length - max} more hidden`;
-            tr.appendChild(td);
-            quotaBody.appendChild(tr);
-          }
         }
 
         try {
@@ -3136,10 +2910,6 @@
             try {
               await recoverAntigravityAliasIfAuthVerify(alias);
             } catch {}
-            try {
-              await refreshQuota();
-              await refreshCredentials();
-            } catch {}
           }
         } catch (e) {
           setLog("credentialOpLog", `[${safeMode}] Authorize failed: ${e.message}`);
@@ -3281,14 +3051,6 @@
           });
           appendLog("credentialOpLog", "[step2] auto oauth ok: tokenFile=" + textOf(out && out.tokenFile ? out.tokenFile : "—"));
           await refreshCredentials();
-          if (provider === "antigravity") {
-            try {
-              await refreshQuota();
-              await refreshCredentials();
-            } catch {
-              // ignore quota refresh errors in recovery path
-            }
-          }
           const latest = findCredentialForSelection(provider, alias);
           const latestStatus = textOf(latest && latest.status ? latest.status : "").trim().toLowerCase();
           if (latestStatus === "valid") {
@@ -3480,43 +3242,7 @@
         return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
       }
 
-      function getQuotaStateByProviderKey(providerKey) {
-	        const map = UI.quotaProviderMap instanceof Map ? UI.quotaProviderMap : null;
-	        if (map && map.has(providerKey)) return map.get(providerKey);
-	        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
-	        return list.find((p) => textOf(p && p.providerKey ? p.providerKey : "") === providerKey) || null;
-	      }
-
-	      async function routingQuotaAction(kind, providerKey) {
-	        if (!providerKey) return;
-	        if (!UI.adminAuth || !UI.adminAuth.authenticated) {
-	          notifyUnauthorizedOnce("routing quota action");
-	          return;
-	        }
-	        try {
-	          if (kind === "recover") {
-	            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/recover`, { method: "POST" });
-	          } else if (kind === "disable") {
-	            const minutes = Number.parseFloat(textOf($("routingQuotaDurationSelect").value || "60"));
-	            if (!Number.isFinite(minutes) || minutes <= 0) throw new Error("Invalid minutes");
-	            const modeRaw = (textOf($("routingQuotaModeSelect").value) || "cooldown").trim().toLowerCase();
-	            const mode = modeRaw === "blacklist" ? "blacklist" : "cooldown";
-	            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/disable`, {
-	              method: "POST",
-	              body: JSON.stringify({ mode, durationMinutes: minutes })
-	            });
-	          } else {
-	            return;
-	          }
-	          await refreshRuntimes();
-	          routingEditorRender();
-	        } catch (e) {
-	          if (e && e.status === 401) notifyUnauthorizedOnce("routing quota action");
-	          toast(`Action failed: ${e && e.message ? e.message : String(e)}`);
-	        }
-	      }
-
-	      function routingEditorRenderTargetActions(target) {
+      function routingEditorRenderTargetActions(target) {
 	        const providerKeys = resolveTargetToProviderKeys(target);
 	        if (!providerKeys.length) return null;
 
@@ -3531,41 +3257,7 @@
 	          key.className = "routing-target-key mono";
 	          key.textContent = providerKey;
 
-	          const state = getQuotaStateByProviderKey(providerKey);
-	          const inPool = state ? Boolean(state.inPool) : null;
-	          const untilMs = state ? Math.max(Number(state.blacklistUntil || 0), Number(state.cooldownUntil || 0)) : 0;
-	          const meta = document.createElement("span");
-	          meta.className = "routing-target-meta";
-	          meta.textContent =
-	            inPool === null
-	              ? "unknown"
-	              : inPool
-	                ? "online"
-	                : untilMs
-	                  ? `offline ${formatEpochWithDelta(untilMs)}`
-	                  : "offline";
-
-	          const offBtn = document.createElement("button");
-	          offBtn.textContent = "Offline";
-	          offBtn.className = "danger";
-	          offBtn.addEventListener("click", (e) => {
-	            e.preventDefault();
-	            e.stopPropagation();
-	            void routingQuotaAction("disable", providerKey);
-	          });
-
-	          const recBtn = document.createElement("button");
-	          recBtn.textContent = "Recover";
-	          recBtn.addEventListener("click", (e) => {
-	            e.preventDefault();
-	            e.stopPropagation();
-	            void routingQuotaAction("recover", providerKey);
-	          });
-
 	          row.appendChild(key);
-	          row.appendChild(meta);
-	          row.appendChild(offBtn);
-	          row.appendChild(recBtn);
 	          box.appendChild(row);
 	        }
 
@@ -4050,8 +3742,6 @@
           await refreshStatus();
           await refreshProviders();
           await refreshCredentials();
-          await refreshQuota();
-          await refreshQuotaSnapshot();
           await refreshRuntimes();
           await refreshControl();
         } catch (e) {
@@ -4328,413 +4018,10 @@
         }
       }
 
-	      async function refreshQuota() {
-	        const body = $("quotaTbody");
-	        body.replaceChildren();
-	        setLog("quotaOpLog", "");
-          clearQuotaRenderedGroups();
-	        try {
-	          // Load routing targets so we can filter out providers not referenced by routing pools.
-	          await refreshRoutingTargets();
-          // Force refresh quota first so UI doesn't show stale pool state.
-          try {
-            await apiFetch("/daemon/modules/quota/refresh", { method: "POST" });
-          } catch (e) {
-            // Backwards compatibility: older servers may only support reset.
-            if (e && e.status === 404) {
-              try {
-                await apiFetch("/daemon/modules/quota/reset", { method: "POST" });
-              } catch (e2) {
-                throw e2;
-              }
-            } else {
-              throw e;
-            }
-          }
-          const out = await apiFetch("/quota/providers");
-          UI.quotaProviders = Array.isArray(out.providers) ? out.providers : [];
-          UI.quotaProvidersUpdatedAt = Date.now();
-	          UI.quotaProviderMap = new Map(UI.quotaProviders.map((q) => [textOf(q.providerKey), q]));
-	          updateOauthAuthIssueHint();
-	          renderQuotaProviders();
-            updateQuotaSelectionSummary();
-	        } catch (e) {
-	          if (e && e.status === 401) notifyUnauthorizedOnce("quota");
-	          else toast(e && e.message ? e.message : String(e || "quota refresh failed"));
-	          body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
-	        }
-	      }
-
-        function normalizeProviderKeyList(value) {
-          if (Array.isArray(value)) {
-            return value.map((k) => textOf(k)).map((k) => k.trim()).filter(Boolean);
-          }
-          const single = textOf(value || "").trim();
-          return single ? [single] : [];
-        }
-
-        function clearQuotaRenderedGroups() {
-          UI.quotaRenderedVisibleKeys = [];
-          UI.quotaRenderedGroups = new Map();
-        }
-
-        function computeSelectionState(keys) {
-          const sel = UI.quotaSelection instanceof Set ? UI.quotaSelection : new Set();
-          let any = false;
-          let all = true;
-          for (const k of keys) {
-            const hit = sel.has(k);
-            if (hit) any = true;
-            else all = false;
-          }
-          return { any, all };
-        }
-
-        function setGroupCheckboxState(checkbox, keys) {
-          if (!checkbox) return;
-          const { any, all } = computeSelectionState(keys);
-          checkbox.indeterminate = Boolean(any && !all);
-          checkbox.checked = Boolean(all && keys.length > 0);
-        }
-
-        function syncQuotaRowCheckboxes() {
-          const sel = UI.quotaSelection instanceof Set ? UI.quotaSelection : new Set();
-          const body = $("quotaTbody");
-          if (!body) return;
-          body.querySelectorAll("input[data-select-key]").forEach((el) => {
-            const key = el.getAttribute("data-select-key");
-            if (!key) return;
-            el.checked = sel.has(key);
-          });
-        }
-
-        function updateQuotaSelectionSummary() {
-          syncQuotaRowCheckboxes();
-          const hint = $("quotaSelectionHint");
-          if (hint) {
-            const n = UI.quotaSelection instanceof Set ? UI.quotaSelection.size : 0;
-            hint.textContent = `selected ${n}`;
-          }
-          const master = $("quotaSelectAllVisibleToggle");
-          if (master) {
-            setGroupCheckboxState(master, Array.isArray(UI.quotaRenderedVisibleKeys) ? UI.quotaRenderedVisibleKeys : []);
-          }
-          if (UI.quotaRenderedGroups instanceof Map) {
-            for (const entry of UI.quotaRenderedGroups.values()) {
-              if (!entry || !entry.checkbox || !Array.isArray(entry.keys)) continue;
-              setGroupCheckboxState(entry.checkbox, entry.keys);
-            }
-          }
-        }
-
-        function setQuotaSelection(keys, selected) {
-          if (!(UI.quotaSelection instanceof Set)) UI.quotaSelection = new Set();
-          for (const k of keys) {
-            if (!k) continue;
-            if (selected) UI.quotaSelection.add(k);
-            else UI.quotaSelection.delete(k);
-          }
-          updateQuotaSelectionSummary();
-        }
-
-        function clearQuotaSelection() {
-          if (UI.quotaSelection instanceof Set) UI.quotaSelection.clear();
-          updateQuotaSelectionSummary();
-        }
-
-        function resolveQuotaActionTargets() {
-          const selected = UI.quotaSelection instanceof Set ? Array.from(UI.quotaSelection) : [];
-          if (selected.length) return selected;
-          return normalizeProviderKeyList($("quotaKeyInput")?.value);
-        }
-
-        let quotaRefreshTimer = null;
-        function scheduleQuotaRefresh() {
-          const auto = $("quotaAutoRefreshToggle");
-          if (auto && auto.checked === false) return;
-          if (quotaRefreshTimer) clearTimeout(quotaRefreshTimer);
-          quotaRefreshTimer = setTimeout(() => {
-            quotaRefreshTimer = null;
-            void refreshQuota();
-          }, 550);
-        }
-
-	      function renderQuotaProviders() {
-	        const body = $("quotaTbody");
-	        body.replaceChildren();
-          clearQuotaRenderedGroups();
-
-	        const filter = textOf($("quotaFilterInput").value || "").trim().toLowerCase();
-	        const hideOk = Boolean($("quotaHideOkToggle").checked);
-        const routedProviderKeys = resolveRoutedProviderKeys(UI.routingTargets, UI.quotaProviders);
-
-        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
-        const next = list
-          .filter((q) => {
-            const keyRaw = textOf(q && q.providerKey ? q.providerKey : "");
-            const key = keyRaw.toLowerCase();
-            if (filter && !key.includes(filter)) return false;
-            if (hideOk && q && q.inPool === true) return false;
-            if (!routedProviderKeys.has(keyRaw)) return false;
-            return true;
-          })
-          .slice();
-
-        // Keep order stable across polling refreshes: avoid health-based sorting which makes the table jump.
-        next.sort((a, b) => textOf(a?.providerKey).localeCompare(textOf(b?.providerKey)));
-
-	        if (!next.length) {
-	          body.appendChild(createErrorRow(8, "No providers matched filter."));
-	          return;
-	        }
-
-        function splitProviderKey(providerKey) {
-          const raw = textOf(providerKey || "");
-          const parts = raw.split(".");
-          if (parts.length >= 3) {
-            return { providerId: parts[0], authAlias: parts[1], model: parts.slice(2).join(".") };
-          }
-          if (parts.length === 2) {
-            return { providerId: parts[0], authAlias: "", model: parts[1] };
-          }
-          return { providerId: raw, authAlias: "", model: "" };
-        }
-
-        const byProvider = new Map();
-        for (const q of next) {
-          const pk = textOf(q && q.providerKey ? q.providerKey : "");
-          const { providerId, authAlias, model } = splitProviderKey(pk);
-          if (!byProvider.has(providerId)) byProvider.set(providerId, new Map());
-          const byAlias = byProvider.get(providerId);
-          if (!byAlias.has(authAlias)) byAlias.set(authAlias, []);
-          byAlias.get(authAlias).push({ q, pk, providerId, authAlias, model });
-        }
-
-	        const providerIds = Array.from(byProvider.keys()).sort((a, b) => a.localeCompare(b));
-	        const groupCols = 8;
-
-	        const appendGroupRow = (label, opts = {}) => {
-	          const tr = document.createElement("tr");
-	          tr.className = "group-row";
-            const keys = Array.isArray(opts.keys) ? opts.keys : [];
-            const canSelect = Boolean(keys.length);
-            const td0 = document.createElement("td");
-            td0.className = "check-cell";
-            if (canSelect) {
-              const cb = document.createElement("input");
-              cb.type = "checkbox";
-              cb.title = "Select group";
-              cb.addEventListener("change", () => setQuotaSelection(keys, cb.checked));
-              td0.appendChild(cb);
-              if (UI.quotaRenderedGroups instanceof Map && typeof opts.groupId === "string" && opts.groupId) {
-                UI.quotaRenderedGroups.set(opts.groupId, { checkbox: cb, keys });
-              }
-              setGroupCheckboxState(cb, keys);
-            }
-            tr.appendChild(td0);
-
-	          const td = document.createElement("td");
-	          td.colSpan = groupCols - 1;
-	          td.textContent = label;
-	          if (opts.indent) td.className = "indent";
-	          tr.appendChild(td);
-	          body.appendChild(tr);
-	        };
-
-	        for (const providerId of providerIds) {
-	          const byAlias = byProvider.get(providerId);
-	          let modelsCount = 0;
-	          for (const v of byAlias.values()) modelsCount += v.length;
-            const providerKeys = Array.from(byAlias.values()).flatMap((items) => items.map((it) => it.pk));
-	          appendGroupRow(`${providerId} (${modelsCount})`, { keys: providerKeys, groupId: `provider:${providerId}` });
-
-	          const aliases = Array.from(byAlias.keys()).sort((a, b) => a.localeCompare(b));
-	          for (const alias of aliases) {
-	            const items = byAlias.get(alias);
-            const fpSuffix = (() => {
-              if (providerId !== "antigravity") return "";
-              if (!items || !items.length) return "";
-              const q0 = items[0] && items[0].q ? items[0].q : null;
-              const suffix = textOf(q0 && (q0.fpSuffix || q0.fingerprintSuffix) ? (q0.fpSuffix || q0.fingerprintSuffix) : "");
-              return suffix;
-	            })();
-	            const fpTag = fpSuffix ? ` · fp=${fpSuffix}` : "";
-              const aliasKeys = Array.isArray(items) ? items.map((it) => it.pk) : [];
-	            appendGroupRow(`${alias || "(no-key)"} (${items.length})${fpTag}`, {
-                indent: true,
-                keys: aliasKeys,
-                groupId: `alias:${providerId}.${alias || "(no-key)"}`
-              });
-
-	            for (const item of items) {
-	              const q = item.q;
-	              const tr = document.createElement("tr");
-	              tr.className = "provider-row";
-	              tr.setAttribute("data-provider-key", item.pk);
-
-                const selTd = document.createElement("td");
-                selTd.className = "check-cell";
-                const cb = document.createElement("input");
-                cb.type = "checkbox";
-                cb.setAttribute("data-select-key", item.pk);
-                cb.checked = UI.quotaSelection instanceof Set ? UI.quotaSelection.has(item.pk) : false;
-                cb.addEventListener("change", () => {
-                  setQuotaSelection([item.pk], cb.checked);
-                });
-                selTd.appendChild(cb);
-                tr.appendChild(selTd);
-	              tr.appendChild(createCell("td", "", "mono"));
-	              tr.appendChild(createCell("td", item.model || item.pk, "mono indent", { title: true }));
-                UI.quotaRenderedVisibleKeys.push(item.pk);
-
-	              const inPool = Boolean(q.inPool);
-	              const inTd = document.createElement("td");
-	              inTd.appendChild(pill(inPool ? "true" : "false", inPool ? "ok" : "bad"));
-              tr.appendChild(inTd);
-
-              const reason = textOf(q.reason || "");
-              const reasonKind =
-                reason === "ok" ? "ok" :
-                reason === "authVerify" ? "bad" :
-                reason === "cooldown" ? "warn" :
-                reason === "blacklist" || reason === "fatal" || reason === "quotaDepleted" ? "bad" : "warn";
-              const reasonTd = document.createElement("td");
-              reasonTd.appendChild(pill(reason || "—", reasonKind));
-              const issue = q && q.authIssue && typeof q.authIssue === "object" ? q.authIssue : null;
-              if (issue && issue.kind === "google_account_verification") {
-                const url = textOf(issue.url || "");
-                if (url) {
-                  reasonTd.appendChild(document.createTextNode(" "));
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.target = "_blank";
-                  a.rel = "noreferrer";
-                  a.textContent = "verify";
-                  a.className = "mono";
-                  reasonTd.appendChild(a);
-                }
-              }
-              tr.appendChild(reasonTd);
-
-              const cooldown = formatEpochWithDelta(q.cooldownUntil);
-              const blacklist = formatEpochWithDelta(q.blacklistUntil);
-              const until = `cooldown=${cooldown || "—"} blacklist=${blacklist || "—"}`;
-              tr.appendChild(createCell("td", until, "mono", { title: true }));
-
-              tr.appendChild(createCell("td", q.consecutiveErrorCount ?? 0, "mono"));
-
-              const actionsTd = document.createElement("td");
-              actionsTd.className = "actions-cell";
-              const box = document.createElement("div");
-              box.className = "actions";
-              const recover = document.createElement("button");
-              recover.textContent = "Recover";
-              recover.setAttribute("data-action", "quota-recover");
-              recover.setAttribute("data-key", item.pk);
-              const reset = document.createElement("button");
-              reset.textContent = "Reset";
-              reset.setAttribute("data-action", "quota-reset");
-              reset.setAttribute("data-key", item.pk);
-              const disable = document.createElement("button");
-              disable.textContent = "Offline…";
-              disable.className = "danger";
-              disable.setAttribute("data-action", "quota-disable");
-              disable.setAttribute("data-key", item.pk);
-              box.appendChild(recover);
-              box.appendChild(reset);
-              box.appendChild(disable);
-              actionsTd.appendChild(box);
-              tr.appendChild(actionsTd);
-
-	              body.appendChild(tr);
-	            }
-	          }
-	        }
-          updateQuotaSelectionSummary();
-	      }
-
       function formatRemainingFraction(v) {
         if (typeof v !== "number" || !Number.isFinite(v)) return "—";
         const pct = Math.max(0, Math.min(1, v)) * 100;
         return `${pct.toFixed(1)}%`;
-      }
-
-      async function refreshQuotaSnapshot() {
-        const body = $("quotaSnapshotTbody");
-        body.replaceChildren();
-        setLog("quotaSnapshotLog", "");
-        try {
-          // Ensure routing + provider pool snapshots exist so we can filter routed models.
-          await refreshRoutingTargets();
-          if (!Array.isArray(UI.quotaProviders) || UI.quotaProviders.length === 0) {
-            try {
-              const outProviders = await apiFetch("/quota/providers");
-              UI.quotaProviders = Array.isArray(outProviders.providers) ? outProviders.providers : [];
-              UI.quotaProvidersUpdatedAt = Date.now();
-            } catch {
-              // ignore: snapshot view can still render unfiltered
-            }
-          }
-          const out = await apiFetch("/quota/summary");
-          let list = Array.isArray(out.records) ? out.records : [];
-
-          const onlyRouted = Boolean($("quotaSnapshotOnlyRoutedToggle").checked);
-          if (onlyRouted) {
-            const routedProviderKeys = resolveRoutedProviderKeys(UI.routingTargets, UI.quotaProviders);
-            const allowedSnapshotKeys = new Set();
-            for (const providerKey of routedProviderKeys) {
-              if (!providerKey.toLowerCase().startsWith("antigravity.")) continue;
-              const parts = providerKey.split(".");
-              if (parts.length < 3) continue;
-              const alias = parts[1];
-              const modelId = parts.slice(2).join(".");
-              if (!alias || !modelId) continue;
-              allowedSnapshotKeys.add(`antigravity://${alias}/${modelId}`);
-            }
-            list = list.filter((r) => allowedSnapshotKeys.has(textOf(r && r.key ? r.key : "")));
-          }
-
-          list.sort((a, b) => String(a.key || "").localeCompare(String(b.key || "")));
-          for (const r of list) {
-            const raw = textOf(r && r.key ? r.key : "");
-            const prefix = "antigravity://";
-            const rest = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
-            const parts = rest.split("/");
-            const alias = parts.length >= 2 ? parts[0] : "";
-            const model = parts.length >= 2 ? parts.slice(1).join("/") : rest;
-            const tr = document.createElement("tr");
-            tr.appendChild(createCell("td", alias || "—", "mono", { title: true }));
-            tr.appendChild(createCell("td", model || "—", "mono", { title: true }));
-            tr.appendChild(createCell("td", formatRemainingFraction(r.remainingFraction), "mono"));
-            tr.appendChild(createCell("td", formatEpochWithDelta(r.resetAt), "mono", { title: true }));
-            tr.appendChild(createCell("td", formatEpochMs(r.fetchedAt), "mono", { title: true }));
-            body.appendChild(tr);
-          }
-          if (!list.length) {
-            body.appendChild(createErrorRow(5, "No quota records to show (check filter or click Refresh antigravity snapshot)."));
-          }
-        } catch (e) {
-          if (e && e.status === 401) notifyUnauthorizedOnce("quota snapshot");
-          body.appendChild(createErrorRow(5, e && e.message ? e.message : e));
-        }
-      }
-
-      async function refreshQuotaSnapshotNow() {
-        setLog("quotaSnapshotLog", "");
-        try {
-          const out = await apiFetch("/quota/refresh", { method: "POST" });
-          const result = out && out.result ? out.result : null;
-          setLog(
-            "quotaSnapshotLog",
-            `OK. refreshedAt=${result && result.refreshedAt ? formatEpochMs(result.refreshedAt) : "—"} tokenCount=${result && typeof result.tokenCount === "number" ? result.tokenCount : "—"} records=${result && typeof result.recordCount === "number" ? result.recordCount : "—"}`
-          );
-          await refreshQuotaSnapshot();
-          toast("Quota snapshot refreshed.", "ok");
-        } catch (e) {
-          if (e && e.status === 401) notifyUnauthorizedOnce("quota refresh");
-          setLog("quotaSnapshotLog", `Refresh failed: ${e && e.message ? e.message : e}`);
-          toast(`Refresh failed: ${e && e.message ? e.message : String(e)}`);
-        }
       }
 
       function formatInt(n) {
@@ -5012,75 +4299,6 @@
         }
       }
 
-	      async function quotaAction(kind, providerKeys) {
-	        setLog("quotaOpLog", "");
-          const keys = normalizeProviderKeyList(providerKeys);
-	        if (!keys.length) {
-	          setLog("quotaOpLog", "providerKey required (or select rows)");
-	          toast("providerKey required (or select rows)");
-	          return;
-	        }
-	        try {
-            const many = keys.length > 1;
-            if (many) {
-              const ok = confirm(`${kind} on ${keys.length} providerKeys?`);
-              if (!ok) return;
-            }
-	          if (kind === "recover") {
-              for (const key of keys) {
-	              await apiFetch(`/quota/providers/${encodeURIComponent(key)}/recover`, { method: "POST" });
-              }
-	            scheduleQuotaRefresh();
-	            toast(many ? `Recovered (${keys.length}).` : "Recovered.", "ok");
-	            return;
-	          }
-	          if (kind === "reset") {
-              for (const key of keys) {
-	              await apiFetch(`/quota/providers/${encodeURIComponent(key)}/reset`, { method: "POST" });
-              }
-	            scheduleQuotaRefresh();
-	            toast(many ? `Reset (${keys.length}).` : "Reset.", "ok");
-	            return;
-	          }
-	          if (kind === "disable") {
-	            const minutes = Number.parseFloat(textOf($("quotaDurationSelect").value || "60"));
-	            if (!Number.isFinite(minutes) || minutes <= 0) {
-	              throw new Error("Invalid minutes");
-	            }
-	            const modeRaw = (textOf($("quotaModeSelect").value) || "cooldown").trim().toLowerCase();
-	            const mode = modeRaw === "blacklist" ? "blacklist" : "cooldown";
-              for (const key of keys) {
-	              await apiFetch(`/quota/providers/${encodeURIComponent(key)}/disable`, {
-	                method: "POST",
-	                body: JSON.stringify({ mode, durationMinutes: minutes })
-	              });
-              }
-	            scheduleQuotaRefresh();
-	            toast(many ? `Applied (${keys.length}).` : "Applied.", "ok");
-	            return;
-	          }
-	        } catch (e) {
-	          if (e && e.status === 401) notifyUnauthorizedOnce("quota action");
-	          setLog("quotaOpLog", `Action failed: ${e && e.message ? e.message : e}`);
-	          toast(`Action failed: ${e && e.message ? e.message : String(e)}`);
-	        }
-	      }
-
-      async function resetQuotaModule() {
-        setLog("quotaOpLog", "");
-        if (!confirm("Reset provider-quota module now? This clears cooldown/blacklist state.")) return;
-        try {
-          const out = await apiFetch("/daemon/modules/provider-quota/reset", { method: "POST" });
-          setLog("quotaOpLog", `OK. resetAt=${out.resetAt || "—"}`);
-          await refreshQuota();
-          toast("Quota module reset.", "ok");
-        } catch (e) {
-          if (e && e.status === 401) notifyUnauthorizedOnce("quota reset");
-          setLog("quotaOpLog", `Reset failed: ${e.message}`);
-          toast(`Reset failed: ${e.message}`);
-        }
-      }
-
       // Bind events
       document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
         btn.addEventListener("click", () => selectTab(btn.getAttribute("data-tab")));
@@ -5130,8 +4348,6 @@
           await refreshStatus();
           await refreshProviders();
           await refreshCredentials();
-          await refreshQuota();
-          await refreshQuotaSnapshot();
           await refreshRuntimes();
           await refreshRoutingSources();
           await loadRouting();
@@ -5155,7 +4371,6 @@
           await refreshStatus();
           await refreshProviders();
           await refreshCredentials();
-          await refreshQuota();
           await refreshRuntimes();
           await refreshRoutingSources();
           await loadRouting();
@@ -5229,8 +4444,6 @@
 	          await refreshStatus();
 	          await refreshProviders();
 	          await refreshCredentials();
-	          await refreshQuota();
-	          await refreshQuotaSnapshot();
 	          await refreshRuntimes();
 	        } catch (e) {
 	          setLog("providerOpLog", `Restart failed: ${e.message}`);
@@ -5250,16 +4463,6 @@
           setLog("controlOpLog", `Restart failed: ${e.message || e}`);
         }
       });
-      $("controlQuotaRefreshBtn").addEventListener("click", async () => {
-        setLog("controlOpLog", "");
-        try {
-          const out = await controlMutate("quota.refresh", {});
-          setLog("controlOpLog", `Quota refresh requested.\n${JSON.stringify(out, null, 2)}`);
-          await refreshControl();
-        } catch (e) {
-          setLog("controlOpLog", `Quota refresh failed: ${e.message || e}`);
-        }
-      });
       $("controlServerToolToggleBtn").addEventListener("click", async () => {
         setLog("controlOpLog", "");
         try {
@@ -5274,46 +4477,6 @@
           await refreshControl();
         } catch (e) {
           setLog("controlOpLog", `ServerTool toggle failed: ${e.message || e}`);
-        }
-      });
-      $("controlQuotaOfflineBtn").addEventListener("click", async () => {
-        setLog("controlOpLog", "");
-        const providerKey = ($("controlQuotaKeyInput").value || "").trim();
-        if (!providerKey) return toast("providerKey required");
-        const mode = $("controlQuotaModeSelect").value === "blacklist" ? "blacklist" : "cooldown";
-        const minutes = Number($("controlQuotaDurationSelect").value || 0);
-        const durationMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : 0;
-        if (!durationMs) return toast("duration required");
-        try {
-          const out = await controlMutate("quota.disable", { providerKey, mode, durationMs });
-          setLog("controlOpLog", `Offline requested.\n${JSON.stringify(out, null, 2)}`);
-          await refreshControl();
-        } catch (e) {
-          setLog("controlOpLog", `Offline failed: ${e.message || e}`);
-        }
-      });
-      $("controlQuotaRecoverBtn").addEventListener("click", async () => {
-        setLog("controlOpLog", "");
-        const providerKey = ($("controlQuotaKeyInput").value || "").trim();
-        if (!providerKey) return toast("providerKey required");
-        try {
-          const out = await controlMutate("quota.recover", { providerKey });
-          setLog("controlOpLog", `Recover requested.\n${JSON.stringify(out, null, 2)}`);
-          await refreshControl();
-        } catch (e) {
-          setLog("controlOpLog", `Recover failed: ${e.message || e}`);
-        }
-      });
-      $("controlQuotaResetBtn").addEventListener("click", async () => {
-        setLog("controlOpLog", "");
-        const providerKey = ($("controlQuotaKeyInput").value || "").trim();
-        if (!providerKey) return toast("providerKey required");
-        try {
-          const out = await controlMutate("quota.reset", { providerKey });
-          setLog("controlOpLog", `Reset requested.\n${JSON.stringify(out, null, 2)}`);
-          await refreshControl();
-        } catch (e) {
-          setLog("controlOpLog", `Reset failed: ${e.message || e}`);
         }
       });
 
@@ -5401,9 +4564,8 @@
       $("oauthVerifyCopyBtn").addEventListener("click", () => void copySelectedVerifyUrl());
       $("oauthVerifyRecheckBtn").addEventListener("click", async () => {
         try {
-          await refreshQuota();
           await refreshCredentials();
-          setLog("credentialOpLog", "Rechecked quota/credential state.");
+          setLog("credentialOpLog", "Rechecked credential state.");
         } catch (e) {
           setLog("credentialOpLog", `Recheck failed: ${e && e.message ? e.message : String(e)}`);
         }
@@ -5411,41 +4573,6 @@
       $("oauthProviderSelect").addEventListener("change", updateOauthAuthIssueHint);
       $("oauthAuthAliasInput").addEventListener("input", updateOauthAuthIssueHint);
       setOauthMode("manual");
-
-	      $("refreshQuotaBtn").addEventListener("click", refreshQuota);
-	      $("refreshQuotaSnapshotBtn").addEventListener("click", refreshQuotaSnapshotNow);
-	      $("quotaFilterInput").addEventListener("input", renderQuotaProviders);
-	      $("quotaHideOkToggle").addEventListener("change", renderQuotaProviders);
-	      $("quotaOnlyRoutedTargetsToggle").addEventListener("change", renderQuotaProviders);
-        $("quotaSelectVisibleBtn").addEventListener("click", () => {
-          const keys = Array.isArray(UI.quotaRenderedVisibleKeys) ? UI.quotaRenderedVisibleKeys : [];
-          setQuotaSelection(keys, true);
-        });
-        $("quotaClearSelectionBtn").addEventListener("click", clearQuotaSelection);
-        $("quotaSelectAllVisibleToggle").addEventListener("change", () => {
-          const master = $("quotaSelectAllVisibleToggle");
-          const keys = Array.isArray(UI.quotaRenderedVisibleKeys) ? UI.quotaRenderedVisibleKeys : [];
-          setQuotaSelection(keys, Boolean(master && master.checked));
-        });
-	      $("quotaApplyDisableBtn").addEventListener("click", () => void quotaAction("disable", resolveQuotaActionTargets()));
-	      $("quotaApplyRecoverBtn").addEventListener("click", () => void quotaAction("recover", resolveQuotaActionTargets()));
-	      $("quotaApplyResetBtn").addEventListener("click", () => void quotaAction("reset", resolveQuotaActionTargets()));
-	      $("quotaTbody").addEventListener("click", (ev) => {
-	        const tr = ev.target.closest("tr");
-	        if (tr && tr.getAttribute) {
-	          const pk = tr.getAttribute("data-provider-key");
-          if (pk) $("quotaKeyInput").value = pk;
-        }
-        const el = ev.target.closest("button");
-        if (!el) return;
-	        const action = el.getAttribute("data-action");
-	        const key = el.getAttribute("data-key");
-	        if (key) $("quotaKeyInput").value = key;
-	        if (action === "quota-recover") void quotaAction("recover", [key]);
-	        else if (action === "quota-reset") void quotaAction("reset", [key]);
-	        else if (action === "quota-disable") void quotaAction("disable", [key]);
-	      });
-      $("resetQuotaBtn").addEventListener("click", resetQuotaModule);
 
       $("loadRoutingBtn").addEventListener("click", loadRouting);
       $("saveRoutingBtn").addEventListener("click", saveRouting);
@@ -5495,7 +4622,6 @@
         await refreshStatus();
         await refreshProviders();
         await refreshCredentials();
-        await refreshQuota();
         await refreshRuntimes();
         if (auth && auth.authenticated) {
           await refreshRoutingSources();

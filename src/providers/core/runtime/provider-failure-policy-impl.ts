@@ -725,18 +725,12 @@ export function isBlockingRecoverableProviderFailure(args: {
 
 export function describeProviderFailureDecision(args: {
   action: ProviderFailureAction;
-  backoffScope: Exclude<ProviderFailureBackoffScope, 'none'>;
+  backoffScope?: ProviderFailureBackoffScope;
 }): Exclude<ProviderFailureDecisionLabel, 'direct_return'> {
   if (args.action !== 'reroute_explicit_alternative') {
     throw new Error(`unsupported provider failure retry action: ${String(args.action)}`);
   }
-  if (args.backoffScope === 'provider') {
-    return 'provider_backoff_then_reroute';
-  }
-  if (args.backoffScope === 'recoverable') {
-    return 'recoverable_backoff_then_reroute';
-  }
-  return 'attempt_backoff_then_reroute';
+  return 'exclude_and_reroute';
 }
 
 export function resolveProviderFailureBackoffPlan(args: {
@@ -748,7 +742,7 @@ export function resolveProviderFailureBackoffPlan(args: {
 }
 
 export function computeProviderFailureBackoffDelayMs(args: {
-  scope: Exclude<ProviderFailureBackoffScope, 'none'>;
+  scope: ProviderFailureBackoffScope;
   error?: unknown;
   statusCode?: number;
   attempt?: number;
@@ -824,15 +818,6 @@ export function resolveProviderFailureActionPlan(args: {
   }
 
   const action = args.retryAction ?? 'reroute_explicit_alternative';
-  const backoffScope =
-    args.forceAttemptScopedBackoff
-      ? 'attempt'
-      : args.forceProviderScopedBackoff
-        ? 'provider'
-        : blockingRecoverable
-          ? 'recoverable'
-          : 'attempt';
-
   return {
     classification,
     affectsHealth,
@@ -840,13 +825,12 @@ export function resolveProviderFailureActionPlan(args: {
     shouldRetry: true,
     action,
     backoff: resolveProviderFailureBackoffPlan({
-      scope: backoffScope,
+      scope: 'none',
       error: args.error,
       statusCode: args.statusCode
     }),
     decisionLabel: describeProviderFailureDecision({
-      action,
-      backoffScope
+      action
     })
   };
 }

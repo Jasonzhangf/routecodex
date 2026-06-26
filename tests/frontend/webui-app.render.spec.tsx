@@ -5,7 +5,6 @@ import {
   App,
   OAuthPage,
   ProviderPage,
-  QuotaPage,
   RoutingPage,
   StatsPage
 } from '../../webui/src/App';
@@ -38,9 +37,6 @@ describe('webui render smoke', () => {
 
     const stats = renderToString(<StatsPage {...common} />);
     expect(stats).toContain('Stats Management');
-
-    const quota = renderToString(<QuotaPage {...common} />);
-    expect(quota).toContain('Quota Pool Management');
 
     const advancedControl = renderToString(<AdvancedPage {...common} tab="control" />);
     expect(advancedControl).toContain('Control Plane');

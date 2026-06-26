@@ -261,12 +261,9 @@ export function buildProviderRetrySwitchPlan(args: {
   const runtimeScopeExcluded: string[] = [];
   return {
     switchAction,
-    decisionLabel: args.backoffScope
-      ? describeProviderFailureDecision({
-          action: 'reroute_explicit_alternative',
-          backoffScope: args.backoffScope
-        })
-      : 'exclude_and_reroute',
+    decisionLabel: describeProviderFailureDecision({
+      action: 'reroute_explicit_alternative'
+    }),
     runtimeScopeExcluded,
     runtimeScopeExcludedCount: runtimeScopeExcluded.length
   };

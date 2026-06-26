@@ -23,7 +23,7 @@ export type ProviderRetryBackoffPlan = {
   blockingRecoverable: boolean;
   retryBackoffMs: number;
   recoverableBackoffMs: number;
-  backoffScope: 'provider' | 'recoverable' | 'attempt';
+  backoffScope: 'none';
 };
 
 export type ProviderRetrySwitchAction = 'exclude_and_reroute';

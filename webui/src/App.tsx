@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-type MainTab = 'providers' | 'routing_capacity' | 'ops';
+type MainTab = 'providers' | 'routing' | 'ops';
 type ProvidersTab = 'catalog' | 'oauth';
-type RoutingCapacityTab = 'routing' | 'quota';
 type OpsTab = 'stats' | 'control';
 type DensityMode = 'compact' | 'comfortable';
 type AdvancedTab = 'control';
@@ -67,28 +66,6 @@ export type PeriodStatsRow = {
   totalOutputTokens?: number;
 };
 
-export type QuotaProvider = {
-  providerKey?: string;
-  inPool?: boolean;
-  reason?: string;
-  cooldownUntil?: number;
-  blacklistUntil?: number;
-  consecutiveErrorCount?: number;
-  authIssue?: {
-    kind?: string;
-    url?: string;
-    message?: string;
-  };
-  fpSuffix?: string;
-  fingerprintSuffix?: string;
-};
-
-export type QuotaSnapshotRecord = {
-  key?: string;
-  remainingFraction?: number;
-  resetAt?: number;
-  fetchedAt?: number;
-};
 
 export async function apiFetch<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers = new Headers(opts.headers || {});
@@ -401,7 +378,6 @@ function AdminAuthPanel({
 export function App() {
   const [mainTab, setMainTab] = useState<MainTab>('providers');
   const [providersTab, setProvidersTab] = useState<ProvidersTab>('catalog');
-  const [routingCapacityTab, setRoutingCapacityTab] = useState<RoutingCapacityTab>('routing');
   const [opsTab, setOpsTab] = useState<OpsTab>('stats');
   const [densityMode, setDensityMode] = useState<DensityMode>(() => {
     const cached = readSessionValue('routecodex:webui:density').trim().toLowerCase();
@@ -554,8 +530,8 @@ export function App() {
     if (mainTab === 'providers') {
       return providersTab === 'catalog' ? 'Providers / Catalog' : 'Providers / OAuth';
     }
-    if (mainTab === 'routing_capacity') {
-      return routingCapacityTab === 'routing' ? 'Routing & Capacity / Routing Groups' : 'Routing & Capacity / Quota Pool';
+    if (mainTab === 'routing') {
+      return 'Routing / Routing Groups';
     }
     if (opsTab === 'stats') {
       return 'Ops / Stats';
@@ -564,7 +540,7 @@ export function App() {
       return 'Ops / Control Plane';
     }
     return 'Ops / Control Plane';
-  }, [mainTab, providersTab, routingCapacityTab, opsTab]);
+  }, [mainTab, providersTab, opsTab]);
 
   const refreshCurrentView = () => {
     setViewEpoch((v) => v + 1);
@@ -596,7 +572,7 @@ export function App() {
       <div className="topbar">
         <div>
           <h1 className="title">RouteCodex WebUI V2</h1>
-          <p className="subtitle">Task-oriented workspace: Providers / Routing & Capacity / Ops</p>
+          <p className="subtitle">Task-oriented workspace: Providers / Routing / Ops</p>
         </div>
         <div className="pill-row">
           <span className={`pill ${statusClass(serverStatus)}`}>status: {serverStatus}</span>
@@ -669,8 +645,8 @@ export function App() {
             <button className={mainTab === 'providers' ? 'active' : ''} onClick={() => setMainTab('providers')}>
               Providers
             </button>
-            <button className={mainTab === 'routing_capacity' ? 'active' : ''} onClick={() => setMainTab('routing_capacity')}>
-              Routing & Capacity
+            <button className={mainTab === 'routing' ? 'active' : ''} onClick={() => setMainTab('routing')}>
+              Routing
             </button>
             <button className={mainTab === 'ops' ? 'active' : ''} onClick={() => setMainTab('ops')}>
               Ops
@@ -685,15 +661,10 @@ export function App() {
                 </button>
               </>
             ) : null}
-            {mainTab === 'routing_capacity' ? (
-              <>
-                <button className={routingCapacityTab === 'routing' ? 'active' : ''} onClick={() => setRoutingCapacityTab('routing')}>
-                  Routing Groups
-                </button>
-                <button className={routingCapacityTab === 'quota' ? 'active' : ''} onClick={() => setRoutingCapacityTab('quota')}>
-                  Quota Pool
-                </button>
-              </>
+            {mainTab === 'routing' ? (
+              <button className="active">
+                Routing Groups
+              </button>
             ) : null}
             {mainTab === 'ops' ? (
               <>
@@ -732,11 +703,8 @@ export function App() {
             {mainTab === 'providers' && providersTab === 'oauth' ? (
               <OAuthPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
             ) : null}
-            {mainTab === 'routing_capacity' && routingCapacityTab === 'routing' ? (
+            {mainTab === 'routing' ? (
               <RoutingPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
-            ) : null}
-            {mainTab === 'routing_capacity' && routingCapacityTab === 'quota' ? (
-              <QuotaPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
             ) : null}
             {mainTab === 'ops' && opsTab === 'stats'
               ? <StatsPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
@@ -1413,7 +1381,6 @@ export function OAuthPage({
   onToast: (message: string, kind?: 'ok' | 'err') => void;
 }) {
   const [credentials, setCredentials] = useState<CredentialItem[]>([]);
-  const [quotaProviders, setQuotaProviders] = useState<QuotaProvider[]>([]);
   const [oauthBrowser, setOauthBrowser] = useState<'default' | 'camoufox'>('default');
 
   const [provider, setProvider] = useState('qwen');
@@ -1428,13 +1395,11 @@ export function OAuthPage({
   const refreshData = async () => {
     if (!authenticated) return;
     try {
-      const [items, quota, settings] = await Promise.all([
+      const [items, settings] = await Promise.all([
         apiFetch<CredentialItem[]>('/daemon/credentials'),
-        apiFetch<{ providers?: QuotaProvider[] }>('/quota/providers').catch(() => ({ providers: [] })),
         apiFetch<{ oauthBrowser?: string }>('/config/settings').catch(() => ({ oauthBrowser: 'default' }))
       ]);
       setCredentials(Array.isArray(items) ? items : []);
-      setQuotaProviders(Array.isArray(quota?.providers) ? quota.providers : []);
       const ob = textOf(settings?.oauthBrowser || 'default').toLowerCase();
       setOauthBrowser(ob === 'camoufox' ? 'camoufox' : 'default');
     } catch (error) {
@@ -1455,22 +1420,6 @@ export function OAuthPage({
     }
     return Array.from(out).sort();
   }, [credentials]);
-
-  const issueFor = (providerRaw: string, aliasRaw: string) => {
-    const p = providerRaw.trim().toLowerCase();
-    const a = aliasRaw.trim().toLowerCase();
-    if (!p || !a) return null;
-    for (const qp of quotaProviders) {
-      const key = textOf(qp.providerKey).trim().toLowerCase();
-      if (!key.startsWith(`${p}.${a}.`)) continue;
-      if (qp.authIssue?.kind === 'google_account_verification') {
-        return qp.authIssue;
-      }
-    }
-    return null;
-  };
-
-  const selectedIssue = issueFor(provider, alias || 'default');
 
   const saveSettings = async () => {
     if (!authenticated) return;
@@ -1530,42 +1479,6 @@ export function OAuthPage({
     }
   };
 
-  const openVerify = async (providerRaw: string, aliasRaw: string, urlRaw?: string) => {
-    if (!authenticated) return;
-    const url = textOf(urlRaw).trim();
-    if (!url) {
-      onToast('No verify URL available.');
-      return;
-    }
-    try {
-      await apiFetch('/daemon/oauth/open', {
-        method: 'POST',
-        body: JSON.stringify({ provider: providerRaw, alias: aliasRaw, url })
-      });
-      setLog(`Opened verify URL in Camoufox for ${providerRaw}.${aliasRaw}`);
-      onToast('Verify URL opened.', 'ok');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`Open verify failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  const copyVerify = async (urlRaw?: string) => {
-    const url = textOf(urlRaw).trim();
-    if (!url) {
-      onToast('No verify URL available.');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(url);
-      setLog('Verify URL copied.');
-      onToast('Verify URL copied.', 'ok');
-    } catch (error) {
-      onToast(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   const formatExpires = (secRaw: unknown) => {
     const sec = Number(secRaw);
     if (!Number.isFinite(sec)) return '—';
@@ -1602,7 +1515,6 @@ export function OAuthPage({
               {credentials.map((item) => {
                 const p = textOf(item.provider).trim().toLowerCase();
                 const a = textOf(item.alias || 'default').trim().toLowerCase();
-                const issue = issueFor(p, a);
                 return (
                   <tr key={`${item.id || p}.${a}`}>
                     <td>{textOf(item.kind || '—')}</td>
@@ -1610,7 +1522,6 @@ export function OAuthPage({
                     <td className="mono">{textOf(item.alias || '—')}</td>
                     <td>
                       <span className={`pill ${statusClass(textOf(item.status || 'unknown'))}`}>{textOf(item.status || '—')}</span>
-                      {issue ? <span className="pill err">verify required</span> : null}
                     </td>
                     <td className="mono">{formatExpires(item.expiresInSec)}</td>
                     <td className="mono">{textOf(item.secretRef || '—')}</td>
@@ -1619,11 +1530,6 @@ export function OAuthPage({
                         <button onClick={() => void refreshCredential(item)} disabled={!authenticated || item.kind !== 'oauth'}>
                           Refresh
                         </button>
-                        {issue?.url ? (
-                          <button onClick={() => void openVerify(p, a, issue.url)} disabled={!authenticated}>
-                            Open Verify
-                          </button>
-                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -1642,7 +1548,7 @@ export function OAuthPage({
       </div>
 
       <div className="panel">
-        <SectionHeader title="OAuth Workbench" sub="Manual/Auto auth and verify-center actions." />
+        <SectionHeader title="OAuth Workbench" sub="Manual/Auto auth controls." />
 
         <div className="row" style={{ marginBottom: 8 }}>
           <label>oauthBrowser</label>
@@ -1697,22 +1603,7 @@ export function OAuthPage({
           </button>
         </div>
 
-        {selectedIssue ? (
-          <AppNotice>
-            <div>verify required: {textOf(selectedIssue.message || 'google account verification required')}</div>
-            <div className="mono" style={{ marginTop: 6, wordBreak: 'break-all' }}>
-              {textOf(selectedIssue.url || '—')}
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <button onClick={() => void openVerify(provider, alias, selectedIssue.url)} disabled={!authenticated}>
-                Open Verify
-              </button>
-              <button onClick={() => void copyVerify(selectedIssue.url)}>Copy URL</button>
-            </div>
-          </AppNotice>
-        ) : (
-          <AppNotice>No verify issue detected for current provider/alias.</AppNotice>
-        )}
+        <AppNotice>Choose provider + alias, then run manual or auto auth.</AppNotice>
 
         <div style={{ marginTop: 8 }}>
           <LogBox value={log} />
@@ -1750,8 +1641,6 @@ export function RoutingPage({
   const [newRouteName, setNewRouteName] = useState('');
   const [poolRoute, setPoolRoute] = useState('');
   const [poolTargetsText, setPoolTargetsText] = useState('');
-
-  const [pool, setPool] = useState<QuotaProvider[]>([]);
 
   const currentSourceQuery = () => {
     const path = sourcePath.trim();
@@ -1868,21 +1757,10 @@ export function RoutingPage({
     }
   };
 
-  const refreshPool = async () => {
-    if (!authenticated) return;
-    try {
-      const out = await apiFetch<{ providers?: QuotaProvider[] }>('/quota/providers');
-      setPool(Array.isArray(out?.providers) ? out.providers : []);
-    } catch {
-      setPool([]);
-    }
-  };
-
   useEffect(() => {
     void (async () => {
       await refreshSources();
       await loadGroups();
-      await refreshPool();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, authEpoch]);
@@ -2030,7 +1908,6 @@ export function RoutingPage({
       setActiveGroupId(textOf(out?.activeGroupId || groupId).trim());
       setLog(`Activated local group ${groupId}. path=${out?.path || sourcePath || '—'}`);
       onToast('Routing group activated locally.', 'ok');
-      await refreshPool();
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setLog(`Activate local failed: ${msg}`);
@@ -2299,44 +2176,6 @@ export function RoutingPage({
       </div>
 
       <div className="grid">
-        <div className="panel">
-          <SectionHeader title="Runtime Pool Snapshot" sub="Read from /quota/providers for routing-related pool status." />
-          <div className="row" style={{ marginBottom: 8 }}>
-            <button onClick={() => void refreshPool()} disabled={!authenticated}>
-              Refresh Pool
-            </button>
-          </div>
-          <div className="table-wrap short">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>providerKey</th>
-                  <th>inPool</th>
-                  <th>reason</th>
-                  <th>until</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pool
-                  .slice()
-                  .sort((a, b) => textOf(a.providerKey).localeCompare(textOf(b.providerKey)))
-                  .map((item) => (
-                    <tr key={textOf(item.providerKey)}>
-                      <td className="mono">{textOf(item.providerKey || '—')}</td>
-                      <td>
-                        <span className={`pill ${item.inPool ? 'ok' : 'err'}`}>{String(Boolean(item.inPool))}</span>
-                      </td>
-                      <td>{textOf(item.reason || '—')}</td>
-                      <td className="mono">
-                        cooldown={formatEpochWithDelta(item.cooldownUntil)} blacklist={formatEpochWithDelta(item.blacklistUntil)}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         <div className="panel">
           <SectionHeader title="Routing Log" sub="Operation output and API responses." />
           <LogBox value={log} />
@@ -2742,428 +2581,6 @@ export function StatsPage({
   );
 }
 
-export function QuotaPage({
-  authenticated,
-  authEpoch,
-  onToast
-}: {
-  authenticated: boolean;
-  authEpoch: number;
-  onToast: (message: string, kind?: 'ok' | 'err') => void;
-}) {
-  const [providers, setProviders] = useState<QuotaProvider[]>([]);
-  const [routingTargets, setRoutingTargets] = useState<Set<string>>(new Set());
-
-  const [snapshot, setSnapshot] = useState<QuotaSnapshotRecord[]>([]);
-  const [onlyRoutedSnapshot, setOnlyRoutedSnapshot] = useState(true);
-
-  const [filter, setFilter] = useState('');
-  const [hideOk, setHideOk] = useState(false);
-  const [mode, setMode] = useState<'cooldown' | 'blacklist'>('cooldown');
-  const [duration, setDuration] = useState(60);
-  const [providerKeyInput, setProviderKeyInput] = useState('');
-  const [selection, setSelection] = useState<Set<string>>(new Set());
-
-  const [log, setLog] = useState('');
-  const [snapshotLog, setSnapshotLog] = useState('');
-
-  const refreshRouting = async () => {
-    try {
-      const out = await apiFetch<{ routing?: unknown }>('/config/routing');
-      setRoutingTargets(extractRoutingTargets(out?.routing || {}));
-    } catch {
-      setRoutingTargets(new Set());
-    }
-  };
-
-  const refreshQuota = async () => {
-    if (!authenticated) return;
-    try {
-      try {
-        await apiFetch('/daemon/modules/quota/refresh', { method: 'POST' });
-      } catch (error) {
-        const err = error as ApiError;
-        if (err?.status === 404) {
-          await apiFetch('/daemon/modules/quota/reset', { method: 'POST' });
-        } else {
-          throw error;
-        }
-      }
-
-      const out = await apiFetch<{ providers?: QuotaProvider[] }>('/quota/providers');
-      const next = Array.isArray(out?.providers) ? out.providers : [];
-      setProviders(next);
-      setSelection(new Set());
-      setLog(`Quota providers refreshed. count=${next.length}`);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`Refresh quota failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  const refreshSnapshot = async () => {
-    if (!authenticated) return;
-    try {
-      const out = await apiFetch<{ records?: QuotaSnapshotRecord[] }>('/quota/summary');
-      setSnapshot(Array.isArray(out?.records) ? out.records : []);
-      setSnapshotLog(`Snapshot loaded. records=${Array.isArray(out?.records) ? out.records.length : 0}`);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setSnapshotLog(`Snapshot failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  const refreshSnapshotNow = async () => {
-    if (!authenticated) return;
-    try {
-      const out = await apiFetch<{ result?: { refreshedAt?: number; tokenCount?: number; recordCount?: number } }>('/quota/refresh', {
-        method: 'POST'
-      });
-      setSnapshotLog(
-        `Snapshot refreshed. refreshedAt=${formatTs(out?.result?.refreshedAt)} tokenCount=${formatInt(
-          out?.result?.tokenCount
-        )} records=${formatInt(out?.result?.recordCount)}`
-      );
-      await refreshSnapshot();
-      onToast('Quota snapshot refreshed.', 'ok');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setSnapshotLog(`Snapshot refresh failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  useEffect(() => {
-    void (async () => {
-      await refreshRouting();
-      await refreshQuota();
-      await refreshSnapshot();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, authEpoch]);
-
-  const routedProviderKeys = useMemo(() => resolveRoutedProviderKeys(routingTargets, providers), [routingTargets, providers]);
-
-  const visibleProviders = useMemo(() => {
-    return providers
-      .filter((item) => {
-        const key = textOf(item.providerKey).trim();
-        if (!key) return false;
-        if (filter.trim() && !key.toLowerCase().includes(filter.trim().toLowerCase())) return false;
-        if (hideOk && item.inPool === true) return false;
-        if (routedProviderKeys.size > 0 && !routedProviderKeys.has(key)) return false;
-        return true;
-      })
-      .sort((a, b) => textOf(a.providerKey).localeCompare(textOf(b.providerKey)));
-  }, [providers, filter, hideOk, routedProviderKeys]);
-
-  const groupedVisibleProviders = useMemo(() => {
-    const groups = new Map<string, { providerId: string; alias: string; items: QuotaProvider[] }>();
-    for (const item of visibleProviders) {
-      const key = textOf(item.providerKey).trim();
-      if (!key) continue;
-      const parts = key.split('.');
-      const providerId = parts[0] || 'unknown';
-      const alias = parts[1] || 'default';
-      const groupKey = `${providerId}.${alias}`;
-      const current = groups.get(groupKey) || { providerId, alias, items: [] };
-      current.items.push(item);
-      groups.set(groupKey, current);
-    }
-    return Array.from(groups.values())
-      .map((group) => ({
-        ...group,
-        items: group.items.slice().sort((a, b) => textOf(a.providerKey).localeCompare(textOf(b.providerKey)))
-      }))
-      .sort((a, b) => `${a.providerId}.${a.alias}`.localeCompare(`${b.providerId}.${b.alias}`));
-  }, [visibleProviders]);
-
-  const actionTargets = () => {
-    if (selection.size > 0) return Array.from(selection);
-    const key = providerKeyInput.trim();
-    return key ? [key] : [];
-  };
-
-  const quotaAction = async (kind: 'disable' | 'recover' | 'reset', forcedKeys?: string[]) => {
-    if (!authenticated) return;
-    const keys = (forcedKeys && forcedKeys.length ? forcedKeys : actionTargets()).filter(Boolean);
-    if (!keys.length) {
-      onToast('providerKey required or select rows');
-      return;
-    }
-
-    try {
-      if (kind === 'recover') {
-        for (const key of keys) {
-          await apiFetch(`/quota/providers/${encodeURIComponent(key)}/recover`, { method: 'POST' });
-        }
-      } else if (kind === 'reset') {
-        for (const key of keys) {
-          await apiFetch(`/quota/providers/${encodeURIComponent(key)}/reset`, { method: 'POST' });
-        }
-      } else {
-        for (const key of keys) {
-          await apiFetch(`/quota/providers/${encodeURIComponent(key)}/disable`, {
-            method: 'POST',
-            body: JSON.stringify({ mode, durationMinutes: duration })
-          });
-        }
-      }
-
-      setLog(`${kind} applied to ${keys.length} providerKey(s).`);
-      onToast(`${kind} applied.`, 'ok');
-      await refreshQuota();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`Action failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  const toggleSelection = (key: string, checked: boolean) => {
-    setSelection((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(key);
-      else next.delete(key);
-      return next;
-    });
-  };
-
-  const selectVisible = () => {
-    setSelection(new Set(visibleProviders.map((item) => textOf(item.providerKey).trim()).filter(Boolean)));
-  };
-
-  const filteredSnapshot = useMemo(() => {
-    if (!onlyRoutedSnapshot) return snapshot;
-    if (!routedProviderKeys.size) return [] as QuotaSnapshotRecord[];
-    return snapshot.filter((item) => {
-      const providerKey = quotaSnapshotKeyToProviderKey(textOf(item.key));
-      return providerKey ? routedProviderKeys.has(providerKey) : false;
-    });
-  }, [snapshot, onlyRoutedSnapshot, routedProviderKeys]);
-
-  return (
-    <div className="grid grid-wide-left">
-      <div className="panel">
-        <SectionHeader title="Quota Pool Management" sub="Offline/Recover/Reset + batch selection with routed target filter." />
-        <div className="row" style={{ marginBottom: 8 }}>
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="filter providerKey"
-            style={{ width: 260 }}
-          />
-          <label>
-            <input type="checkbox" checked={hideOk} onChange={(e) => setHideOk(e.target.checked)} /> hide ok
-          </label>
-          <button onClick={selectVisible}>Select Visible</button>
-          <button onClick={() => setSelection(new Set())}>Clear Selection</button>
-          <span className="pill mono">selected {selection.size}</span>
-        </div>
-
-        <div className="row" style={{ marginBottom: 8 }}>
-          <input
-            value={providerKeyInput}
-            onChange={(e) => setProviderKeyInput(e.target.value)}
-            placeholder="providerKey"
-            style={{ minWidth: 320, flex: 1 }}
-          />
-          <select value={mode} onChange={(e) => setMode(e.target.value === 'blacklist' ? 'blacklist' : 'cooldown')}>
-            <option value="cooldown">cooldown</option>
-            <option value="blacklist">blacklist</option>
-          </select>
-          <select value={duration} onChange={(e) => setDuration(Number(e.target.value || 60))}>
-            <option value={5}>5m</option>
-            <option value={15}>15m</option>
-            <option value={30}>30m</option>
-            <option value={60}>1h</option>
-            <option value={180}>3h</option>
-            <option value={360}>6h</option>
-            <option value={720}>12h</option>
-            <option value={1440}>24h</option>
-          </select>
-          <button className="danger" onClick={() => void quotaAction('disable')} disabled={!authenticated}>
-            Offline
-          </button>
-          <button onClick={() => void quotaAction('recover')} disabled={!authenticated}>
-            Recover
-          </button>
-          <button onClick={() => void quotaAction('reset')} disabled={!authenticated}>
-            Reset
-          </button>
-        </div>
-
-        <div className="row" style={{ marginBottom: 8 }}>
-          <button className="primary" onClick={() => void refreshQuota()} disabled={!authenticated}>
-            Refresh Provider Pool
-          </button>
-          <button onClick={() => void refreshRouting()} disabled={!authenticated}>
-            Refresh Routing Targets
-          </button>
-          <span className="pill mono">routed keys: {routedProviderKeys.size}</span>
-        </div>
-
-        <div className="grid">
-          {groupedVisibleProviders.map((group) => {
-            const groupKeys = group.items.map((item) => textOf(item.providerKey).trim()).filter(Boolean);
-            const selectGroup = () => setSelection((prev) => new Set([...prev, ...groupKeys]));
-            const clearGroup = () =>
-              setSelection((prev) => {
-                const next = new Set(prev);
-                for (const key of groupKeys) next.delete(key);
-                return next;
-              });
-
-            return (
-              <div key={`${group.providerId}.${group.alias}`} className="panel" style={{ padding: 10 }}>
-                <div className="row" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
-                  <div className="row">
-                    <span className="pill mono">{group.providerId}</span>
-                    <span className="pill mono">alias={group.alias}</span>
-                    <span className="pill mono">models={group.items.length}</span>
-                  </div>
-                  <div className="row">
-                    <button onClick={selectGroup}>Select Group</button>
-                    <button onClick={clearGroup}>Clear Group</button>
-                  </div>
-                </div>
-
-                <div className="table-wrap short">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: 40 }}></th>
-                        <th>model</th>
-                        <th>inPool</th>
-                        <th>reason</th>
-                        <th>until</th>
-                        <th>errCount</th>
-                        <th>action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {group.items.map((item) => {
-                        const key = textOf(item.providerKey).trim();
-                        const model = key.split('.').slice(2).join('.') || key;
-                        return (
-                          <tr key={key}>
-                            <td>
-                              <input
-                                type="checkbox"
-                                checked={selection.has(key)}
-                                onChange={(e) => toggleSelection(key, e.target.checked)}
-                              />
-                            </td>
-                            <td className="mono">{model}</td>
-                            <td>
-                              <span className={`pill ${item.inPool ? 'ok' : 'err'}`}>{String(Boolean(item.inPool))}</span>
-                            </td>
-                            <td>
-                              <span className={`pill ${statusClass(textOf(item.reason || 'warn'))}`}>{textOf(item.reason || '—')}</span>
-                              {item.authIssue?.kind === 'google_account_verification' ? <span className="pill err">verify</span> : null}
-                            </td>
-                            <td className="mono">
-                              cooldown={formatEpochWithDelta(item.cooldownUntil)} blacklist={formatEpochWithDelta(item.blacklistUntil)}
-                            </td>
-                            <td className="mono">{formatInt(item.consecutiveErrorCount || 0)}</td>
-                            <td>
-                              <div className="row">
-                                <button onClick={() => void quotaAction('recover', [key])}>Recover</button>
-                                <button onClick={() => void quotaAction('reset', [key])}>Reset</button>
-                                <button className="danger" onClick={() => void quotaAction('disable', [key])}>
-                                  Offline
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })}
-          {!groupedVisibleProviders.length ? <AppNotice>No providers matched filter.</AppNotice> : null}
-        </div>
-
-        <div style={{ marginTop: 8 }}>
-          <LogBox value={log} />
-        </div>
-      </div>
-
-      <div className="grid">
-        <div className="panel">
-          <SectionHeader title="Quota Snapshot" sub="Provider alias/model remaining fractions used by quota manager." />
-          <div className="row" style={{ marginBottom: 8 }}>
-            <label>
-              <input
-                type="checkbox"
-                checked={onlyRoutedSnapshot}
-                onChange={(e) => setOnlyRoutedSnapshot(e.target.checked)}
-              />{' '}
-              only routed models
-            </label>
-            <button onClick={() => void refreshSnapshot()} disabled={!authenticated}>
-              Refresh Snapshot
-            </button>
-            <button className="primary" onClick={() => void refreshSnapshotNow()} disabled={!authenticated}>
-              Refresh Upstream Snapshot
-            </button>
-          </div>
-          <div className="table-wrap short">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>alias</th>
-                  <th>model</th>
-                  <th>remaining</th>
-                  <th>resetAt</th>
-                  <th>fetchedAt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSnapshot
-                  .slice()
-                  .sort((a, b) => textOf(a.key).localeCompare(textOf(b.key)))
-                  .map((item) => {
-                    const raw = textOf(item.key).trim();
-                    const providerKey = quotaSnapshotKeyToProviderKey(raw);
-                    const parts = providerKey ? providerKey.split('.') : [];
-                    const aliasPart = parts.length >= 3 ? parts[1] : '';
-                    const modelPart = parts.length >= 3 ? parts.slice(2).join('.') : raw;
-                    const remaining = Number(item.remainingFraction);
-                    const pct = Number.isFinite(remaining) ? `${(Math.max(0, Math.min(1, remaining)) * 100).toFixed(1)}%` : '—';
-                    return (
-                      <tr key={raw}>
-                        <td className="mono">{aliasPart || '—'}</td>
-                        <td className="mono">{modelPart || '—'}</td>
-                        <td className="mono">{pct}</td>
-                        <td className="mono">{formatEpochWithDelta(item.resetAt)}</td>
-                        <td className="mono">{formatTs(item.fetchedAt)}</td>
-                      </tr>
-                    );
-                  })}
-                {!filteredSnapshot.length ? (
-                  <tr>
-                    <td colSpan={5} className="muted">
-                      No snapshot records.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <LogBox value={snapshotLog} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function AdvancedPage({
   authenticated,
@@ -3230,21 +2647,16 @@ export function ControlPage({
   };
 
   const servers = Array.isArray(snapshot?.servers) ? snapshot.servers : [];
-  const quotaProviders = Array.isArray(snapshot?.quota?.providers) ? snapshot.quota.providers : [];
-
   return (
     <div className="grid grid-wide-left">
       <div className="panel">
-        <SectionHeader title="Control Plane" sub="Single entry for server restart and quota operations." />
+        <SectionHeader title="Control Plane" sub="Single entry for control snapshot and server restart operations." />
         <div className="row" style={{ marginBottom: 8 }}>
           <button className="primary" onClick={() => void refresh()} disabled={!authenticated}>
             Refresh
           </button>
           <button className="danger" onClick={() => void mutate('servers.restart')} disabled={!authenticated}>
             Restart All Servers
-          </button>
-          <button onClick={() => void mutate('quota.refresh')} disabled={!authenticated}>
-            Refresh Quota
           </button>
         </div>
 
@@ -3277,11 +2689,6 @@ export function ControlPage({
             </tbody>
           </table>
         </div>
-
-        <AppNotice>
-          Quota actions have moved to the Quota Pool page (Routing &amp; Capacity -&gt; Quota Pool).
-          Use that page for provider offline/recover/reset operations.
-        </AppNotice>
       </div>
 
       <div className="panel">

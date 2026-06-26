@@ -8,13 +8,12 @@
 
 - **HTTP Server 仍然是唯一入口**
   - 继续使用 `src/server/runtime/http-server/index.ts` + `routes.ts` 注册所有 HTTP 路径。
-  - 新的管理类 API（daemon/token/health/quota/providers/config-v2）作为一组「管理接口」，挂在 HTTP server 之下。
+  - 新的管理类 API（daemon/token/health/providers/config-v2）作为一组「管理接口」，挂在 HTTP server 之下。
 
 - **ManagerDaemon 继续作为状态聚合点**
   - 已有的 `src/manager` 模块负责：
     - token 刷新（`TokenManagerModule`）
     - health 持久化（`HealthManagerModule`）
-    - quota 追踪（`QuotaManagerModule`）
     - routing 指令状态（`RoutingStateManagerModule`）
   - 新的管理 API 只“读”这些模块暴露的状态或执行低风险动作（例如触发一次 verify），不直接操作 llmswitch-core 的内部路由逻辑。
 
@@ -65,7 +64,7 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
   - 依赖：
     - `ManagerDaemon`（读取当前是否为 leader、运行模块列表）
     - `TokenManagerModule`（token Daemon 运行状态）
-    - `HealthManagerModule` / `QuotaManagerModule`（用于统计摘要）
+    - `HealthManagerModule`（用于统计摘要）
 
 - `daemon-admin/credentials-handler.ts`
   - 对应 API：
@@ -79,20 +78,11 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
       - `token-daemon/token-utils` 中的 `readTokenFile` / `evaluateTokenState`
     - 必须避免返回敏感字段（access_token / refresh_token 等），只返回文件路径、issuer、project_id 等非敏感信息。
 
-- `daemon-admin/quota-handler.ts`
-  - 对应 API：
-    - `GET /quota/summary`
-    - `GET /quota/runtime`（按 runtimeKey / providerKey 过滤）
-    - `GET /quota/cooldowns`（暴露当前 429 冷却相关信息）
-  - 依赖：
-    - `QuotaManagerModule` 的 `getRawSnapshot()`。
-    - 虚拟路由 cooldown 状态（通过 llmswitch-core 暴露的只读接口，或已有的 series cooldown 统计）。
-
 - `daemon-admin/providers-runtime-handler.ts`
   - 对应 API：`GET /providers/runtimes`
   - 依赖：
     - `RouteCodexHttpServer` 内部已维护的 `providerHandles` / `providerKeyToRuntimeKey` 映射。
-    - `HealthManagerModule` / `QuotaManagerModule` 的统计，用于补充 runtime 健康/配额状态。
+    - `HealthManagerModule` 的统计，用于补充 runtime 健康状态。
 
 - `daemon-admin/config-providers-v2-handler.ts`
   - 对应 API：
@@ -111,7 +101,7 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
 - `RouteCodexHttpServer` 构造时已经创建并启动了 `ManagerDaemon`：
   - 在 `src/server/runtime/http-server/index.ts` 中：
     - 创建 `ManagerDaemon`；
-    - 注册 `HealthManagerModule` / `RoutingStateManagerModule` / `TokenManagerModule` / `QuotaManagerModule`；
+    - 注册 `HealthManagerModule` / `RoutingStateManagerModule` / `TokenManagerModule`；
     - 持有一个 `managerDaemon` 字段。
 
 - 新的 `registerDaemonAdminRoutes` 需要能够访问这个实例：
@@ -161,9 +151,7 @@ registerDaemonAdminRoutes({
 
 - 管理 UI 相关路径建议统一在以下空间之内：
   - `/daemon/*`：daemon 自身状态、tokens、credentials。
-  - `/quota/*`：配额快照与 429 冷却视图。
   - `/providers/*`：runtime 级别的 provider 运行状态。
   - `/config/providers/v2*`：Config V2 声明性配置视图。
 
 > 本文档仅定义结构与边界，实际实现将严格参考本结构，并在实现前再与现有代码和运行约束对齐。实现阶段需同时更新对应的 API 设计文档。
-

@@ -253,7 +253,7 @@ export function logProviderRetrySwitchCompact(args: {
   upstreamCode?: string;
   upstreamStatus?: number;
   switchAction: 'exclude_and_reroute' | 'retry_same_provider_once';
-  backoffScope?: 'provider' | 'recoverable' | 'attempt';
+  backoffScope?: 'none' | 'provider' | 'recoverable' | 'attempt';
   decisionLabel?: string;
   retryExecutionPolicyReason?: string;
   stage?: 'provider.runtime_resolve' | 'provider.send';

@@ -6,7 +6,6 @@ import {
   ControlPage,
   OAuthPage,
   ProviderPage,
-  QuotaPage,
   RoutingPage,
   StatsPage
 } from '../../webui/src/App';
@@ -133,33 +132,6 @@ function installPageFetchMock() {
         }
       ]);
     }
-    if (path === '/quota/providers' && method === 'GET') {
-      return json({
-        providers: [
-          {
-            providerKey: 'qwen.default.qwen-max',
-            inPool: true,
-            reason: 'ok',
-            cooldownUntil: null,
-            blacklistUntil: null,
-            consecutiveErrorCount: 0
-          },
-          {
-            providerKey: 'tab.work.gpt-4',
-            inPool: false,
-            reason: 'authVerify',
-            cooldownUntil: null,
-            blacklistUntil: null,
-            consecutiveErrorCount: 2,
-            authIssue: {
-              kind: 'google_account_verification',
-              url: 'https://verify.example.com',
-              message: 'verify required'
-            }
-          }
-        ]
-      });
-    }
     if (path === '/config/settings' && method === 'GET') {
       return json({ oauthBrowser: 'default' });
     }
@@ -260,27 +232,6 @@ function installPageFetchMock() {
       });
     }
 
-    if (path === '/daemon/modules/quota/refresh' && method === 'POST') return json({ ok: true });
-    if (path === '/daemon/modules/quota/reset' && method === 'POST') return json({ ok: true });
-    if (path === '/quota/summary' && method === 'GET') {
-      return json({
-        records: [
-          {
-            key: 'tab://work/gpt-4',
-            remainingFraction: 0.42,
-            resetAt: Date.now() + 3600_000,
-            fetchedAt: Date.now()
-          }
-        ]
-      });
-    }
-    if (path === '/quota/refresh' && method === 'POST') {
-      return json({ ok: true, result: { refreshedAt: Date.now(), tokenCount: 1, recordCount: 1 } });
-    }
-    if (path.startsWith('/quota/providers/') && path.endsWith('/disable') && method === 'POST') return json({ ok: true });
-    if (path.startsWith('/quota/providers/') && path.endsWith('/recover') && method === 'POST') return json({ ok: true });
-    if (path.startsWith('/quota/providers/') && path.endsWith('/reset') && method === 'POST') return json({ ok: true });
-
     if (path === '/daemon/control/snapshot' && method === 'GET') {
       return json({
         ok: true,
@@ -347,13 +298,6 @@ describe('webui page-level coverage', () => {
     onToast.mockClear();
     fireEvent.click(screen.getByText('Save'));
     await waitFor(() => expect(hasToast('OAuth settings saved.')).toBe(true));
-    const providerSelect = oauthPanel.querySelectorAll('select')[1] as HTMLSelectElement;
-    fireEvent.change(providerSelect, { target: { value: 'tab' } });
-    const aliasInput = oauthPanel.querySelector('input[style*="width: 180px"]') as HTMLInputElement;
-    fireEvent.change(aliasInput, { target: { value: 'work' } });
-    onToast.mockClear();
-    fireEvent.click(within(oauthPanel).getByText('Open Verify'));
-    await waitFor(() => expect(hasToast('Verify URL opened.')).toBe(true));
     oauthView.unmount();
 
     const routingView = render(<RoutingPage authenticated authEpoch={1} onToast={onToast} />);
@@ -361,27 +305,12 @@ describe('webui page-level coverage', () => {
     routingView.unmount();
   });
 
-  it('renders and interacts with stats/quota/control/clock pages', async () => {
+  it('renders and interacts with stats/control pages', async () => {
     const hasToast = (needle: string) => onToast.mock.calls.some(([msg]) => String(msg).includes(needle));
     const statsView = render(<StatsPage authenticated authEpoch={1} onToast={onToast} />);
     await waitFor(() => expect(screen.getByText('Stats Management')).toBeTruthy());
     expect(screen.getByText('Token Usage (Session + Historical)')).toBeTruthy();
     statsView.unmount();
-
-    const quotaView = render(<QuotaPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('Quota Pool Management')).toBeTruthy());
-    const quotaPanel = screen.getByText('Quota Pool Management').closest('.panel') as HTMLElement;
-    fireEvent.change(within(quotaPanel).getByPlaceholderText('providerKey'), {
-      target: { value: 'qwen.default.qwen-max' }
-    });
-    const quotaBulkRow = within(quotaPanel).getByPlaceholderText('providerKey').closest('.row') as HTMLElement;
-    onToast.mockClear();
-    fireEvent.click(within(quotaBulkRow).getByText('Offline'));
-    await waitFor(() => expect(hasToast('disable applied.')).toBe(true));
-    onToast.mockClear();
-    fireEvent.click(within(screen.getByText('Quota Snapshot').closest('.panel') as HTMLElement).getByText('Refresh Upstream Snapshot'));
-    await waitFor(() => expect(hasToast('Quota snapshot refreshed.')).toBe(true));
-    quotaView.unmount();
 
     const controlView = render(<ControlPage authenticated authEpoch={1} onToast={onToast} />);
     await waitFor(() => expect(screen.getByText('Control Plane')).toBeTruthy());

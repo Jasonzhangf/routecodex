@@ -143,7 +143,7 @@ export function computeRetryDelayMs(error: unknown, options?: WaitBeforeRetryOpt
   const attemptRaw = typeof options?.attempt === 'number' && Number.isFinite(options.attempt) ? options.attempt : 1;
   const attempt = Math.max(1, Math.floor(attemptRaw));
   return computeProviderFailureBackoffDelayMs({
-    scope: 'attempt',
+    scope: 'none',
     error,
     statusCode: status,
     attempt

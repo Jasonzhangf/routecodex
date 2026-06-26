@@ -1,4 +1,4 @@
-# Daemon / Token / Quota / Providers / Config V2 管理 API 设计
+# Daemon / Token / Providers / Config V2 管理 API 设计
 
 > 目标：为 Daemon 管理 UI 和基于 Config V2 的 Provider 管理视图提供一组 **只读或低风险** 的 HTTP JSON API。  
 > 所有 API 均由 HTTP server 提供，数据来源于 ManagerDaemon、虚拟路由和 Config V2，禁止在此层做路由/工具语义决策。
@@ -35,7 +35,6 @@
     "active": true,
     "modules": [
       { "id": "token", "status": "leader", "details": { "intervalSec": 60 } },
-      { "id": "quota", "status": "running" },
       { "id": "health", "status": "running" },
       { "id": "routing", "status": "running", "stickyEnabled": true }
     ]
@@ -143,78 +142,9 @@
 
 ---
 
-## 4. Quota & 429 冷却 API
+## 4. Providers 运行时视图 API
 
-### 4.1 `GET /quota/summary`
-
-- 用途：展示所有受管配额（目前主要是 Antigravity）的摘要。
-- 响应示例：
-
-```jsonc
-{
-  "updatedAt": 1736500000000,
-  "records": [
-    {
-      "key": "antigravity://jasonqueque/gemini-3-pro-low",
-      "alias": "jasonqueque",
-      "modelId": "gemini-3-pro-low",
-      "remainingFraction": 0.42,
-      "resetAt": 1736503600000
-    }
-  ]
-}
-```
-
-- 数据来源：
-  - `QuotaManagerModule.getRawSnapshot()`。
-
-### 4.2 `GET /quota/runtime`
-
-- 用途：按 runtimeKey 或 providerKey 过滤配额状态。
-- 查询参数：
-  - `runtimeKey?: string`
-  - `providerKey?: string`
-- 响应示例：
-
-```jsonc
-{
-  "runtimeKey": "antigravity.jasonqueque",
-  "items": [
-    {
-      "providerKey": "antigravity.jasonqueque.gemini-3-pro-low",
-      "modelId": "gemini-3-pro-low",
-      "remainingFraction": 0.42,
-      "resetAt": 1736503600000
-    }
-  ]
-}
-```
-
-### 4.3 `GET /quota/cooldowns`
-
-- 用途：展示当前虚拟路由层面的 series cooldown 状态（与 429 相关）。
-- 响应示例（形态示意）：
-
-```jsonc
-[
-  {
-    "providerId": "antigravity.jasonqueque",
-    "providerKey": "antigravity.jasonqueque.gemini-3-pro-low",
-    "series": "gemini-pro",
-    "cooldownMs": 300000,
-    "until": 1736500200000
-  }
-]
-```
-
-- 数据来源：
-  - llmswitch-core virtual router 暴露的 cooldown 只读视图（或内部缓存）。
-
----
-
-## 5. Providers 运行时视图 API
-
-### 5.1 `GET /providers/runtimes`
+### 4.1 `GET /providers/runtimes`
 
 - 用途：展示当前 virtual router 中实际存在的 provider runtimes 及其状态。
 - 响应示例：
@@ -240,16 +170,16 @@
 
 - 数据来源：
   - `RouteCodexHttpServer` 中的 provider runtime 映射。
-  - Health/quota manager 模块。
+  - Health manager 模块。
   - Credential 绑定信息从 Config 解析（不直接读取密钥）。
 
 ---
 
-## 6. Config V2 Provider 视图 API
+## 5. Config V2 Provider 视图 API
 
 > 与 `docs/provider-config-v2-ui-design.md` 对应，只读展示 Config V2 中声明的 provider 定义，并与 runtime/credentials 形成弱关联。
 
-### 6.1 `GET /config/providers/v2`
+### 5.1 `GET /config/providers/v2`
 
 - 用途：列出 Config V2 中声明的 provider 定义摘要。
 
@@ -270,7 +200,7 @@
 ]
 ```
 
-### 6.2 `GET /config/providers/v2/:id`
+### 5.2 `GET /config/providers/v2/:id`
 
 - 用途：查看单个 provider 的详细 Config V2 配置。
 - 在 6.1 的基础上，增加：
@@ -292,10 +222,6 @@
     "low": "gemini-3-pro-low"
   },
   "credentialsRef": "antigravity-oauth-2-jasonqueque.json",
-  "quota": {
-    "perMinuteLimit": 60,
-    "perHourLimit": 2000
-  },
   "flags": {
     "beta": false,
     "internalOnly": false
@@ -347,4 +273,3 @@
   - 在 HTTP server 中新增 `daemon-admin-routes` 与各 handler。
   - 在前端 UI 中按本 API 规范对接数据。
   - 最终做一轮端到端集成测试（含 429 冷却/配额展示/credential 状态联动）。
-

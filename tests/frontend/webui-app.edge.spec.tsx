@@ -7,7 +7,6 @@ import {
   ControlPage,
   OAuthPage,
   ProviderPage,
-  QuotaPage,
   RoutingPage,
   StatsPage
 } from '../../webui/src/App';
@@ -116,7 +115,7 @@ describe('webui edge coverage', () => {
 
     await waitFor(() => expect(screen.getByText('Setup')).toBeTruthy());
     expect(screen.queryByText('Provider Catalog')).toBeNull();
-    expect(screen.queryByText('Routing & Capacity')).toBeNull();
+    expect(screen.queryByText('Routing')).toBeNull();
     expect(screen.queryByText('Refresh View (R)')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('password'), { target: { value: 'setup-pass-123' } });
@@ -244,26 +243,6 @@ describe('webui edge coverage', () => {
             secretRef: 'oauth-qwen-default'
           }
         ]);
-      }
-      if (path === '/quota/providers' && method === 'GET') {
-        oauthQuotaCalls += 1;
-        if (oauthQuotaCalls === 1) {
-          return responseJson({ error: { message: 'quota temporary unavailable' } }, 500);
-        }
-        return responseJson({
-          providers: [
-            {
-              providerKey: 'qwen.default.qwen-max',
-              inPool: false,
-              reason: 'authVerify',
-              authIssue: {
-                kind: 'google_account_verification',
-                url: 'https://verify.example.com',
-                message: 'verify now'
-              }
-            }
-          ]
-        });
       }
       if (path === '/config/settings' && method === 'GET') {
         oauthSettingsCalls += 1;
@@ -393,14 +372,6 @@ describe('webui edge coverage', () => {
     fireEvent.click(refreshButton);
     await waitFor(() => expect(hasToast('refresh failed')).toBe(true));
 
-    await waitFor(() => expect(screen.getByText(/verify required:/)).toBeTruthy());
-    onToast.mockClear();
-    fireEvent.click(within(oauthPanel).getByText('Open Verify'));
-    await waitFor(() => expect(hasToast('open verify failed')).toBe(true));
-
-    onToast.mockClear();
-    fireEvent.click(within(oauthPanel).getByText('Copy URL'));
-    await waitFor(() => expect(hasToast('clipboard denied')).toBe(true));
     oauthView.unmount();
 
     const routingView = render(<RoutingPage authenticated authEpoch={1} onToast={onToast} />);
@@ -441,7 +412,7 @@ describe('webui edge coverage', () => {
     routingView.unmount();
   });
 
-  it('covers stats/quota/control/clock edge rendering and control branches', async () => {
+  it('covers stats/control edge rendering and control branches', async () => {
     const onToast = jest.fn();
     const hasToast = (needle: string) => onToast.mock.calls.some(([msg]) => String(msg).includes(needle));
 
@@ -464,62 +435,6 @@ describe('webui edge coverage', () => {
         });
       }
 
-      if (path === '/config/routing' && method === 'GET') {
-        return responseJson({
-          routing: {
-            default: [{ targets: ['qwen.default.qwen-max', 'tab.work.gpt-4'] }]
-          }
-        });
-      }
-      if (path === '/daemon/modules/quota/refresh' && method === 'POST') return responseJson({ ok: true });
-      if (path === '/daemon/modules/quota/reset' && method === 'POST') return responseJson({ ok: true });
-      if (path === '/quota/providers' && method === 'GET') {
-        return responseJson({
-          providers: [
-            {
-              providerKey: 'qwen.default.qwen-max',
-              inPool: true,
-              reason: 'ok',
-              cooldownUntil: null,
-              blacklistUntil: null,
-              consecutiveErrorCount: 0
-            },
-            {
-              providerKey: 'tab.work.gpt-4',
-              inPool: false,
-              reason: 'authVerify',
-              cooldownUntil: null,
-              blacklistUntil: null,
-              consecutiveErrorCount: 2,
-              authIssue: {
-                kind: 'google_account_verification',
-                message: 'verify required'
-              }
-            }
-          ]
-        });
-      }
-      if (path === '/quota/summary' && method === 'GET') {
-        return responseJson({
-          records: [
-            { key: 'tab://work/gpt-4', remainingFraction: 0.42, resetAt: Date.now() + 300000, fetchedAt: Date.now() },
-            { key: 'tab://lab/gpt-5', remainingFraction: 0.73, resetAt: Date.now() + 600000, fetchedAt: Date.now() }
-          ]
-        });
-      }
-      if (path === '/quota/refresh' && method === 'POST') {
-        return responseJson({ ok: true, result: { refreshedAt: Date.now(), tokenCount: 2, recordCount: 2 } });
-      }
-      if (path.startsWith('/quota/providers/') && path.endsWith('/disable') && method === 'POST') {
-        quotaDisableCalls += 1;
-        if (quotaDisableCalls === 1) {
-          return responseJson({ error: { message: 'disable failed' } }, 500);
-        }
-        return responseJson({ ok: true, mode: body.mode || 'cooldown' });
-      }
-      if (path.startsWith('/quota/providers/') && path.endsWith('/recover') && method === 'POST') return responseJson({ ok: true });
-      if (path.startsWith('/quota/providers/') && path.endsWith('/reset') && method === 'POST') return responseJson({ ok: true });
-
       if (path === '/daemon/control/snapshot' && method === 'GET') {
         return responseJson({ ok: true, nowMs: Date.now(), servers: [], quota: { providers: [] } });
       }
@@ -537,55 +452,14 @@ describe('webui edge coverage', () => {
     fireEvent.click(screen.getByLabelText(/auto refresh/i));
     statsView.unmount();
 
-    const quotaView = render(<QuotaPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('Quota Pool Management')).toBeTruthy());
-    const quotaPanel = screen.getByText('Quota Pool Management').closest('.panel') as HTMLElement;
-
-    fireEvent.click(within(quotaPanel).getByText('Select Visible'));
-    const firstRowCheckbox = quotaPanel.querySelector('tbody input[type="checkbox"]') as HTMLInputElement;
-    fireEvent.click(firstRowCheckbox);
-    fireEvent.click(firstRowCheckbox);
-
-    const bulkRow = within(quotaPanel).getByPlaceholderText('providerKey').closest('.row') as HTMLElement;
-    fireEvent.change(within(bulkRow).getByPlaceholderText('providerKey'), { target: { value: 'qwen.default.qwen-max' } });
-
-    const bulkSelects = bulkRow.querySelectorAll('select');
-    fireEvent.change(bulkSelects[0], { target: { value: 'blacklist' } });
-    fireEvent.change(bulkSelects[1], { target: { value: '5' } });
-
-    onToast.mockClear();
-    fireEvent.click(within(bulkRow).getByText('Offline'));
-    await waitFor(() => expect(hasToast('disable failed')).toBe(true));
-
-    onToast.mockClear();
-    fireEvent.click(within(bulkRow).getByText('Recover'));
-    await waitFor(() => expect(hasToast('recover applied.')).toBe(true));
-
-    onToast.mockClear();
-    fireEvent.click(within(bulkRow).getByText('Reset'));
-    await waitFor(() => expect(hasToast('reset applied.')).toBe(true));
-
-    fireEvent.click(within(quotaPanel).getByText('Refresh Routing Targets'));
-
-    const snapshotPanel = screen.getByText('Quota Snapshot').closest('.panel') as HTMLElement;
-    const routedOnlyCheckbox = snapshotPanel.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    fireEvent.click(routedOnlyCheckbox);
-    await waitFor(() => expect(within(snapshotPanel).getByText('work')).toBeTruthy());
-    quotaView.unmount();
-
     const controlView = render(<ControlPage authenticated authEpoch={1} onToast={onToast} />);
     await waitFor(() => expect(screen.getByText('Control Plane')).toBeTruthy());
 
     const controlPanel = screen.getByText('Control Plane').closest('.panel') as HTMLElement;
-    expect(within(controlPanel).getByText(/Quota actions have moved to the Quota Pool page/i)).toBeTruthy();
 
     onToast.mockClear();
     fireEvent.click(within(controlPanel).getByText('Refresh'));
     await waitFor(() => expect(screen.getByText('Control snapshot refreshed.')).toBeTruthy());
-
-    onToast.mockClear();
-    fireEvent.click(within(controlPanel).getByText('Refresh Quota'));
-    await waitFor(() => expect(hasToast('quota.refresh done.')).toBe(true));
 
     onToast.mockClear();
     fireEvent.click(within(controlPanel).getByText('Restart All Servers'));

@@ -490,9 +490,9 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'recoverable_backoff_then_reroute',
+      decisionLabel: 'exclude_and_reroute',
       backoff: expect.objectContaining({
-        scope: 'recoverable'
+        scope: 'none'
       })
     }));
   });
@@ -527,9 +527,9 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'recoverable_backoff_then_reroute',
+      decisionLabel: 'exclude_and_reroute',
       backoff: expect.objectContaining({
-        scope: 'recoverable'
+        scope: 'none'
       })
     }));
   });
@@ -554,9 +554,9 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'recoverable_backoff_then_reroute',
+      decisionLabel: 'exclude_and_reroute',
       backoff: expect.objectContaining({
-        scope: 'recoverable'
+        scope: 'none'
       })
     }));
   });
@@ -582,9 +582,9 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'recoverable_backoff_then_reroute',
+      decisionLabel: 'exclude_and_reroute',
       backoff: expect.objectContaining({
-        scope: 'recoverable'
+        scope: 'none'
       })
     }));
   });
@@ -652,9 +652,9 @@ describe('provider failure policy ssot', () => {
       blockingRecoverable: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
-      decisionLabel: 'recoverable_backoff_then_reroute',
+      decisionLabel: 'exclude_and_reroute',
       backoff: expect.objectContaining({
-        scope: 'recoverable'
+        scope: 'none'
       })
     }));
   });
@@ -704,8 +704,8 @@ describe('provider failure policy ssot', () => {
   it('supports provider-scoped reroute decision labels from the shared policy', () => {
     expect(describeProviderFailureDecision({
       action: 'reroute_explicit_alternative',
-      backoffScope: 'provider'
-    })).toBe('provider_backoff_then_reroute');
+      backoffScope: 'none'
+    })).toBe('exclude_and_reroute');
   });
 
   it('keeps host/followup stages outside provider policy classification', () => {
