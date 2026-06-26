@@ -158,7 +158,6 @@ describe('HubPipeline preselected route ownership', () => {
     expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
       request: expect.objectContaining({
         metadata: expect.objectContaining({
-          stopMessageEnabled: true,
           runtime_control: expect.objectContaining({
             preselectedRoute,
             stopMessageEnabled: true,

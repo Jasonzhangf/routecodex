@@ -17438,3 +17438,25 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
   2. `read_servertool_followup_flow_id(...)` 同步改成 stopless flowId first；
   3. 补冲突测试，锁住 canonical stopless 会压过 legacy `stopMessageState/serverToolLoopState`；
   4. 补 `stopless_orchestration_contract` 测试，锁住 budget 判定优先用 canonical stopless。
+
+# 2026-06-26 request-stage stop-message top-level projection closeout slice 10
+
+- 本轮开始物理删 top-level `stopMessage*` projection，但只动 request-stage pipeline 这一层：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+- 现状核对：
+  - 这层之前会把 `runtime_control.stopMessageEnabled/ExcludeDirect`
+    再投回 `metadata.stopMessageEnabled/ExcludeDirect`；
+  - 现在 Rust req/direct reader 已能优先读 `metadataCenterSnapshot/runtime_control`，
+    所以这里继续保留 top-level projection 只会制造冗余真源。
+- 本轮动作：
+  1. 删除 request-stage pipeline 对 top-level `stopMessageEnabled/stopMessageExcludeDirect`
+     的投影；
+  2. 保留 `runtime_control` 与 `metadataCenterSnapshot` 出站；
+  3. 同步更新 request-stage focused tests，不再把 top-level `stopMessageEnabled`
+     当必需 contract。
+ - 验证口径收窄说明：
+   - `tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts`
+     在当前本地环境会因为 `HubPipeline` 初始化阶段缺 routing configuration 失败，
+     这不是本轮 projection 变更引入的 focused 语义红点；
+   - 本轮只用 request-stage focused tests 证明删除 top-level projection 后，
+     native request 仍保留 `runtime_control` / `metadataCenterSnapshot` 真相。

@@ -151,12 +151,6 @@ function readContinuationContextFromMetadataCenter(metadata: Record<string, unkn
 
 function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
-    out.stopMessageEnabled = runtimeControl.stopMessageEnabled;
-  }
-  if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
-    out.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
-  }
   if (runtimeControl.stopless && typeof runtimeControl.stopless === 'object' && !Array.isArray(runtimeControl.stopless)) {
     out.stopless = runtimeControl.stopless;
   }
