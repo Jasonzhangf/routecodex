@@ -1,6 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
 import {
-  describeProviderFailureDecision,
   isProviderFailureHealthNeutral,
   resolveProviderFailureActionPlan,
   resolveProviderFailureClassification,
@@ -1054,9 +1053,21 @@ describe('provider failure policy ssot', () => {
   });
 
   it('supports provider-scoped reroute decision labels from the shared policy', () => {
-    expect(describeProviderFailureDecision({
-      action: 'reroute_explicit_alternative'
-    })).toBe('exclude_and_reroute');
+    expect(resolveProviderFailureActionPlan({
+      error: Object.assign(new Error('HTTP 502: upstream temporary unavailable'), {
+        code: 'HTTP_502',
+        statusCode: 502
+      }),
+      stage: 'provider.send',
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
+      reason: 'HTTP 502: upstream temporary unavailable',
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      decisionLabel: 'exclude_and_reroute'
+    }));
   });
 
   it('keeps host/followup stages outside provider policy classification', () => {

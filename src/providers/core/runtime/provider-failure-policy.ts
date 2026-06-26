@@ -6,7 +6,6 @@ export {
   resolveProviderFailureClassification,
   resolveProviderFailureOutcome,
   isBlockingRecoverableProviderFailure,
-  describeProviderFailureDecision,
   resolveProviderFailureActionPlan,
   resolveProviderFailureRetryEligibility,
   resolveProviderFailureExclusionDecision,

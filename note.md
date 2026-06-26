@@ -1,3 +1,21 @@
+# 2026-06-27 provider failure decision-label wrapper cleanup
+
+- 已物理删除的薄壳：
+  - `describeProviderFailureDecision`
+- 已同步修改：
+  - `src/providers/core/runtime/provider-failure-policy-impl.ts`
+  - `src/providers/core/runtime/provider-failure-policy.ts`
+  - `src/server/runtime/http-server/request-executor.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+- 已验证：
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - `describeProviderFailureDecision` 只是 action plan 的 label 转发壳，已删除并把唯一测试改为检查 `resolveProviderFailureActionPlan` 的结果。
+  - `request-executor.ts` 原有导入已清理，编译恢复通过。
+
 # 2026-06-27 provider error classifier thin shell cleanup
 
 - 已物理删除的薄壳：

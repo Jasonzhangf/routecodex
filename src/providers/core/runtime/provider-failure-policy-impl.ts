@@ -752,15 +752,6 @@ export function isBlockingRecoverableProviderFailure(args: {
   return false;
 }
 
-export function describeProviderFailureDecision(args: {
-  action: ProviderFailureAction;
-}): Exclude<ProviderFailureDecisionLabel, 'direct_return'> {
-  if (args.action !== 'reroute_explicit_alternative') {
-    throw new Error(`unsupported provider failure retry action: ${String(args.action)}`);
-  }
-  return 'exclude_and_reroute';
-}
-
 export function resolveProviderFailureActionPlan(args: {
   error: unknown;
   stage?: string;
@@ -834,9 +825,7 @@ export function resolveProviderFailureActionPlan(args: {
     blockingRecoverable,
     shouldRetry: true,
     action,
-    decisionLabel: describeProviderFailureDecision({
-      action
-    })
+    decisionLabel: 'exclude_and_reroute'
   };
 }
 

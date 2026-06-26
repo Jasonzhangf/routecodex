@@ -3,7 +3,6 @@ import type { PipelineExecutionInput, PipelineExecutionResult } from '../../hand
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
-  describeProviderFailureDecision,
   resolveProviderFailureExclusionDecision,
   normalizeProviderFailureCodeKey,
   resolveProviderFailureRetryEligibility,
