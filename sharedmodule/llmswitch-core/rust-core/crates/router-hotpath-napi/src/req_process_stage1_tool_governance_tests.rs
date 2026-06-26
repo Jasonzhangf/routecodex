@@ -16,6 +16,7 @@ fn test_apply_tool_governance_basic() {
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_123".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
     let result = apply_req_process_tool_governance(input).unwrap();
     assert!(result.node_result["success"].as_bool().unwrap());
@@ -38,12 +39,12 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
         metadata: serde_json::json!({
           "entryEndpoint": "/v1/responses",
           "clientInjectReady": true,
-          "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true
+          "stopMessageEnabled": true
         }),
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_instruction".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -62,6 +63,92 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
             .and_then(|name| name.as_str())
             == Some("reasoningStop")
     }));
+}
+
+#[test]
+fn test_req_process_prefers_metadata_center_snapshot_for_stop_message_injection() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{"type": "input_text", "text": "继续排查"}]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses",
+          "clientInjectReady": true
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_stopless_snapshot_injection".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let instructions = result.processed_request["instructions"]
+        .as_str()
+        .expect("responses instructions");
+    assert!(instructions.contains("必须使用唯一 stop schema 合同"));
+    assert!(result.processed_request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(|name| name.as_str())
+                == Some("reasoningStop")
+        }));
+}
+
+#[test]
+fn test_req_process_does_not_inject_stopless_from_legacy_rt_residue() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{"type": "input_text", "text": "继续排查"}]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses",
+          "clientInjectReady": true,
+          "__rt": {
+            "stopMessageEnabled": true
+          }
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_stopless_legacy_rt_residue".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    assert!(result.processed_request.get("instructions").is_none());
+    assert!(result
+        .processed_request
+        .get("tools")
+        .map(|value| value
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(false))
+        .unwrap_or(true));
 }
 
 #[test]
@@ -89,6 +176,7 @@ fn test_req_process_does_not_duplicate_stopless_responses_instructions() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_instruction_dedup".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -121,6 +209,7 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_input".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -134,7 +223,8 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
 }
 
 #[test]
-fn test_req_process_responses_input_materializes_stopless_instructions_without_client_inject_ready() {
+fn test_req_process_responses_input_materializes_stopless_instructions_without_client_inject_ready()
+{
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-5.5",
@@ -157,6 +247,7 @@ fn test_req_process_responses_input_materializes_stopless_instructions_without_c
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_stopless_responses_no_tmux_inject".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -194,6 +285,7 @@ fn test_anthropic_alias_semantics() {
         entry_endpoint: "/v1/messages".to_string(),
         request_id: "req_456".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
     let result = apply_req_process_tool_governance(input).unwrap();
     let processed = result.processed_request.as_object().unwrap();
@@ -218,6 +310,7 @@ fn test_processed_request_shape_and_node_metadata() {
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_789".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
     let result = apply_req_process_tool_governance(input).unwrap();
     let processed = result.processed_request.as_object().unwrap();
@@ -255,6 +348,7 @@ fn test_chat_process_filters_namespace_mcp_aggregator_tools() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_filter_namespace_mcp".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
     let result = apply_req_process_tool_governance(input).unwrap();
     let messages = result.processed_request["messages"].as_array().unwrap();
@@ -290,6 +384,7 @@ fn test_chat_process_merges_consecutive_assistant_tool_call_messages() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_merge_tool_calls".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
     let result = apply_req_process_tool_governance(input).unwrap();
     let messages = result.processed_request["messages"].as_array().unwrap();
@@ -352,6 +447,7 @@ fn test_post_governed_media_cleanup_preserves_followup_messages_and_context() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_media_followup".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -404,6 +500,7 @@ fn test_post_governed_media_cleanup_preserves_latest_user_media_turn() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_media_current_turn".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -450,6 +547,7 @@ fn test_servertool_orchestration_keeps_removed_clock_absent_and_continue_hidden(
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_tools".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -495,6 +593,7 @@ fn test_tool_governance_preserves_top_level_tool_choice_and_stream() {
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_tool_choice_preserve".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -536,6 +635,7 @@ fn test_servertool_orchestration_skips_direct_web_search_tool_injection() {
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_tools_direct_search".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -585,6 +685,7 @@ fn test_servertool_orchestration_injects_websearch_for_servertool_engines() {
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_tools_servertool_search".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -638,6 +739,7 @@ fn test_servertool_orchestration_skips_websearch_when_direct_and_servertool_both
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_tools_both_search_modes".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -681,6 +783,7 @@ fn test_servertool_orchestration_uses_explicit_stop_message_flag_instead_of_runt
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_explicit_stop_flag".to_string(),
         has_active_stop_message_for_continue_execution: Some(false),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -721,12 +824,12 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
         raw_payload: serde_json::json!({}),
         metadata: serde_json::json!({
           "clientInjectReady": true,
-          "stopMessageEnabled": true,
-          "routecodexPortStopMessageEnabled": true
+          "stopMessageEnabled": true
         }),
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_reasoning_stop_tool_schema".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -755,22 +858,54 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
     let properties = parameters["properties"].as_object().expect("properties");
     let required = parameters["required"].as_array().expect("required");
 
-    assert!(description.contains("stopreason"), "description={description}");
-    assert!(description.contains("0=finished"), "description={description}");
-    assert!(description.contains("<rcc_stop_schema>"), "description={description}");
-    assert!(description.contains("Schema means the structured JSON contract"), "description={description}");
-    assert!(description.contains("Field meanings"), "description={description}");
-    assert!(description.contains("\"stopreason\":0"), "description={description}");
+    assert!(
+        description.contains("stopreason"),
+        "description={description}"
+    );
+    assert!(
+        description.contains("0=finished"),
+        "description={description}"
+    );
+    assert!(
+        description.contains("<rcc_stop_schema>"),
+        "description={description}"
+    );
+    assert!(
+        description.contains("Schema means the structured JSON contract"),
+        "description={description}"
+    );
+    assert!(
+        description.contains("Field meanings"),
+        "description={description}"
+    );
+    assert!(
+        description.contains("\"stopreason\":0"),
+        "description={description}"
+    );
     assert!(properties.contains_key("stopreason"));
     assert!(properties.contains_key("reason"));
     assert!(properties.contains_key("next_step"));
     assert!(properties.contains_key("learned"));
-    assert!(required.iter().any(|value| value.as_str() == Some("stopreason")));
-    assert!(required.iter().any(|value| value.as_str() == Some("reason")));
-    assert!(required.iter().any(|value| value.as_str() == Some("has_evidence")));
-    assert!(required.iter().any(|value| value.as_str() == Some("next_step")));
-    assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"), "instructions={instructions}");
-    assert!(instructions.contains("不要输出或执行 exec_command(cmd=\"reasoningStop\")"), "instructions={instructions}");
+    assert!(required
+        .iter()
+        .any(|value| value.as_str() == Some("stopreason")));
+    assert!(required
+        .iter()
+        .any(|value| value.as_str() == Some("reason")));
+    assert!(required
+        .iter()
+        .any(|value| value.as_str() == Some("has_evidence")));
+    assert!(required
+        .iter()
+        .any(|value| value.as_str() == Some("next_step")));
+    assert!(
+        instructions.contains("直接调用名为 reasoningStop 的 function tool"),
+        "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("不要输出或执行 exec_command(cmd=\"reasoningStop\")"),
+        "instructions={instructions}"
+    );
 }
 
 #[test]
@@ -813,10 +948,14 @@ fn test_terminal_budget_exhausted_stopless_turn_strips_reasoning_stop_controls()
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_budget_terminal".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let processed = result.processed_request.as_object().expect("processed request");
+    let processed = result
+        .processed_request
+        .as_object()
+        .expect("processed request");
     assert!(
         processed.get("instructions").is_none(),
         "budget exhausted terminal turn must drop prior stopless instructions"
@@ -826,10 +965,7 @@ fn test_terminal_budget_exhausted_stopless_turn_strips_reasoning_stop_controls()
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    let tool_names: HashSet<String> = tools
-        .iter()
-        .filter_map(resolve_tool_name)
-        .collect();
+    let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
         !tool_names.contains("reasoningStop"),
         "budget exhausted terminal turn must not expose reasoningStop again"
@@ -869,10 +1005,14 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_retry".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let processed = result.processed_request.as_object().expect("processed request");
+    let processed = result
+        .processed_request
+        .as_object()
+        .expect("processed request");
     let instructions = processed
         .get("instructions")
         .and_then(|value| value.as_str())
@@ -886,10 +1026,7 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    let tool_names: HashSet<String> = tools
-        .iter()
-        .filter_map(resolve_tool_name)
-        .collect();
+    let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
         tool_names.contains("reasoningStop"),
         "non-terminal feedback must still expose reasoningStop"
@@ -928,20 +1065,21 @@ fn test_terminal_schema_pass_stopless_turn_strips_reasoning_stop_controls() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let processed = result.processed_request.as_object().expect("processed request");
+    let processed = result
+        .processed_request
+        .as_object()
+        .expect("processed request");
     assert!(processed.get("instructions").is_none());
     let tools = processed
         .get("tools")
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    let tool_names: HashSet<String> = tools
-        .iter()
-        .filter_map(resolve_tool_name)
-        .collect();
+    let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
         !tool_names.contains("reasoningStop"),
         "terminal schema_pass turn must not expose reasoningStop again"
@@ -980,20 +1118,21 @@ fn test_terminal_schema_pass_input_trigger_only_still_strips_reasoning_stop_cont
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass_input_only".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let processed = result.processed_request.as_object().expect("processed request");
+    let processed = result
+        .processed_request
+        .as_object()
+        .expect("processed request");
     assert!(processed.get("instructions").is_none());
     let tools = processed
         .get("tools")
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    let tool_names: HashSet<String> = tools
-        .iter()
-        .filter_map(resolve_tool_name)
-        .collect();
+    let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
         !tool_names.contains("reasoningStop"),
         "terminal schema_pass input trigger must not expose reasoningStop again"
@@ -1047,20 +1186,21 @@ fn test_terminal_schema_pass_metadata_center_runtime_control_still_strip_reasoni
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass_metadata_center".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let processed = result.processed_request.as_object().expect("processed request");
+    let processed = result
+        .processed_request
+        .as_object()
+        .expect("processed request");
     assert!(processed.get("instructions").is_none());
     let tools = processed
         .get("tools")
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    let tool_names: HashSet<String> = tools
-        .iter()
-        .filter_map(resolve_tool_name)
-        .collect();
+    let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
         !tool_names.contains("reasoningStop"),
         "metadata-center terminal schema_pass must strip reasoningStop without leaking into direct payload"
@@ -1068,8 +1208,8 @@ fn test_terminal_schema_pass_metadata_center_runtime_control_still_strip_reasoni
 }
 
 #[test]
-fn test_terminal_budget_exhausted_reason_code_in_metadata_center_still_strips_reasoning_stop_controls()
-{
+fn test_terminal_budget_exhausted_reason_code_in_metadata_center_still_strips_reasoning_stop_controls(
+) {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-4o-mini",
@@ -1115,20 +1255,21 @@ fn test_terminal_budget_exhausted_reason_code_in_metadata_center_still_strips_re
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_budget_exhausted_reason_code_metadata_center".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let processed = result.processed_request.as_object().expect("processed request");
+    let processed = result
+        .processed_request
+        .as_object()
+        .expect("processed request");
     assert!(processed.get("instructions").is_none());
     let tools = processed
         .get("tools")
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    let tool_names: HashSet<String> = tools
-        .iter()
-        .filter_map(resolve_tool_name)
-        .collect();
+    let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
         !tool_names.contains("reasoningStop"),
         "metadata-center budget-exhausted reason code must still strip reasoningStop"
@@ -1167,10 +1308,14 @@ fn test_captured_tool_results_alone_no_longer_strip_reasoning_stop_controls() {
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_reasoning_stop_schema_pass_captured_legacy_only".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let processed = result.processed_request.as_object().expect("processed request");
+    let processed = result
+        .processed_request
+        .as_object()
+        .expect("processed request");
     let instructions = processed
         .get("instructions")
         .and_then(|value| value.as_str())
@@ -1184,10 +1329,7 @@ fn test_captured_tool_results_alone_no_longer_strip_reasoning_stop_controls() {
         .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    let tool_names: HashSet<String> = tools
-        .iter()
-        .filter_map(resolve_tool_name)
-        .collect();
+    let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
         tool_names.contains("reasoningStop"),
         "legacy captured tool results alone must not strip reasoningStop"
@@ -1256,6 +1398,7 @@ fn test_chat_process_apply_patch_declared_legacy_fields_projects_custom_freeform
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_apply_patch_no_rewrite_servertool_mode".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1296,6 +1439,7 @@ fn test_chat_process_apply_patch_without_internal_fields_projects_custom_freefor
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_apply_patch_canonical_contract".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1303,8 +1447,7 @@ fn test_chat_process_apply_patch_without_internal_fields_projects_custom_freefor
 }
 
 #[test]
-fn test_chat_process_apply_patch_direct_responses_tool_shape_projects_custom_freeform_tool()
-{
+fn test_chat_process_apply_patch_direct_responses_tool_shape_projects_custom_freeform_tool() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "glm-4.7",
@@ -1348,6 +1491,7 @@ fn test_chat_process_apply_patch_direct_responses_tool_shape_projects_custom_fre
         entry_endpoint: "/v1/responses".to_string(),
         request_id: "req_apply_patch_direct_shape_no_rewrite".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
@@ -1366,6 +1510,7 @@ fn test_apply_req_process_tool_governance_json_matches_core_shape() {
         entry_endpoint: "/v1/chat/completions".to_string(),
         request_id: "req_equiv_req".to_string(),
         has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
     };
     let input_json = serde_json::to_string(&input).unwrap();
     let core_input: ToolGovernanceInput = serde_json::from_str(&input_json).unwrap();

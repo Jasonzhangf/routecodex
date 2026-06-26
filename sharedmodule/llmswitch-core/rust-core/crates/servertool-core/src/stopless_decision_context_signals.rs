@@ -46,12 +46,9 @@ fn has_disabled_port_signal(
 ) -> bool {
     [
         adapter_context.get("stopMessageEnabled"),
-        adapter_context.get("routecodexPortStopMessageEnabled"),
         metadata.and_then(|row| row.get("stopMessageEnabled")),
-        metadata.and_then(|row| row.get("routecodexPortStopMessageEnabled")),
         runtime_metadata.and_then(|row| row.get("stopMessagePortEnabled")),
         runtime_metadata.and_then(|row| row.get("stopMessageEnabled")),
-        runtime_metadata.and_then(|row| row.get("routecodexPortStopMessageEnabled")),
     ]
     .into_iter()
     .flatten()
@@ -104,7 +101,7 @@ mod tests {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
             adapter_context: json!({
                 "metadata": {
-                    "routecodexPortStopMessageEnabled": false,
+                    "stopMessageEnabled": false,
                     "responsesResume": {
                         "toolOutputsDetailed": [{ "tool_call_id": "call_1" }]
                     }

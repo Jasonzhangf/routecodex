@@ -239,8 +239,7 @@ describe('req_process servertool bundle contract', () => {
         entryEndpoint: '/v1/responses',
         clientInjectReady: false,
         clientInjectReason: 'tmux_session_missing',
-        stopMessageEnabled: true,
-        routecodexPortStopMessageEnabled: true
+        stopMessageEnabled: true
       },
       entryEndpoint: '/v1/responses',
       requestId: 'req-process-stopless-relay-no-tmux',

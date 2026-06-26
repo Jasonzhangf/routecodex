@@ -53,7 +53,12 @@ export function prepareRequestExecutorAttemptState(args: {
   args.throwIfClientAbortSignalAborted(clientAbortSignal);
 
   if (args.forcedRouteHint) {
-    metadataForAttempt.routeHint = args.forcedRouteHint;
+    metadataCenter.writeRuntimeControl(
+      'routeHint',
+      args.forcedRouteHint,
+      ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
+      'request executor forced route hint'
+    );
   }
   if (Object.prototype.hasOwnProperty.call(metadataForAttempt, '__routecodexRetryProviderKey')) {
     delete metadataForAttempt.__routecodexRetryProviderKey;
@@ -129,48 +134,18 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
     pipelineMetadata && typeof pipelineMetadata === 'object' && !Array.isArray(pipelineMetadata)
       ? MetadataCenter.read(pipelineMetadata as Record<string, unknown>)
       : undefined;
+  if (
+    requestMetadataCenter
+    && pipelineMetadataCenter
+    && requestMetadataCenter !== pipelineMetadataCenter
+  ) {
+    throw new Error(
+      'request-executor attempt metadata violated single-center contract: pipeline result returned a second MetadataCenter'
+    );
+  }
   const metadataCenter = requestMetadataCenter ?? pipelineMetadataCenter;
   if (metadataCenter) {
     MetadataCenter.bind(mergedMetadata, metadataCenter);
-    if (requestMetadataCenter && pipelineMetadataCenter && requestMetadataCenter !== pipelineMetadataCenter) {
-      const mergedCenter = MetadataCenter.read(mergedMetadata);
-      const continuationSnapshot = pipelineMetadataCenter.snapshot().continuationContext;
-      for (const [key, slot] of Object.entries(continuationSnapshot)) {
-        if (!slot) {
-          continue;
-        }
-        mergedCenter?.writeContinuationContext(
-          key as keyof ReturnType<typeof pipelineMetadataCenter.readContinuationContext>,
-          slot.value as Record<string, unknown> | unknown[] | string | undefined,
-          slot.writtenBy,
-          'merged from pipeline result metadata center'
-        );
-      }
-      const runtimeControlSnapshot = pipelineMetadataCenter.snapshot().runtimeControl;
-      for (const [key, slot] of Object.entries(runtimeControlSnapshot)) {
-        if (!slot) {
-          continue;
-        }
-        mergedCenter?.writeRuntimeControl(
-          key as keyof ReturnType<typeof pipelineMetadataCenter.readRuntimeControl>,
-          slot.value as Record<string, unknown> | boolean | string | undefined,
-          slot.writtenBy,
-          'merged from pipeline result metadata center'
-        );
-      }
-      const providerObservationSnapshot = pipelineMetadataCenter.snapshot().providerObservation;
-      for (const [key, slot] of Object.entries(providerObservationSnapshot)) {
-        if (!slot) {
-          continue;
-        }
-        mergedCenter?.writeProviderObservation(
-          key as keyof ReturnType<typeof pipelineMetadataCenter.readProviderObservation>,
-          slot.value as Record<string, unknown> | string | undefined,
-          slot.writtenBy,
-          'merged from pipeline result metadata center'
-        );
-      }
-    }
     const requestTruth = metadataCenter.readRequestTruth();
     if (requestTruth.requestId) {
       mergedMetadata.requestId = requestTruth.requestId;

@@ -144,9 +144,11 @@
         <h2>Main Rule</h2>
         <ul>
           <li>Metadata must converge into one request-scoped center, not continue as free-floating <code>Record&lt;string, unknown&gt;</code> merges.</li>
+          <li>The same request-scoped <code>MetadataCenter</code> must be created at server request entry and then carried through <code>server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</code>; later stages must not spawn a second center and merge it back.</li>
           <li>The center must store both value and provenance.</li>
           <li>Request truth, continuation context, runtime control, provider observation, client attachment scope, and debug snapshot are different families and must not share the same flat namespace.</li>
           <li>stopless/servertool must read request truth from the center, not guess from continuation context, tmux scope, or scattered runtime fields.</li>
+          <li>The center is request-scoped, not session-scoped. <code>sessionId/conversationId</code> are write-once <code>request_truth</code> fields, not MetadataCenter instance keys and not legal restoration targets from continuation history.</li>
         </ul>
         <h2>Metadata Center Mainline</h2>
         <pre class="mermaid">flowchart LR
@@ -175,13 +177,35 @@
         <tr><td><code>mtc-01</code></td><td>inbound seed -&gt; request truth</td><td><code>ServerReqInbound01ClientRaw</code> / <code>HubReqInbound02Standardized</code></td><td><code>request_truth</code> seed only</td><td>handler + req_inbound capture</td></tr>
         <tr><td><code>mtc-02</code></td><td>request truth fixed -&gt; continuation attached</td><td><code>HubReqChatProcess03Governed</code></td><td><code>continuation_context</code></td><td>responses/chat continuation semantics</td></tr>
         <tr><td><code>mtc-02-result</code></td><td>request truth fixed -&gt; result continuation attached</td><td><code>HubReqChatProcess03Governed</code> / host result bridge</td><td><code>continuation_context</code></td><td><code>attachResponsesRequestContextToResultForHttp -&gt; MetadataCenter.writeContinuationContext</code>; result metadata 现在也只把 <code>responsesRequestContext</code> 写进 center continuation family</td></tr>
-        <tr><td><code>mtc-03</code></td><td>continuation attached -&gt; runtime control bound</td><td><code>HubReqChatProcess03Governed</code> / <code>VrRoute04SelectedTarget</code></td><td><code>runtime_control</code></td><td>route hint / stream / servertool followup / stop-message controls</td></tr>
+        <tr><td><code>mtc-03</code></td><td>continuation attached -&gt; runtime control bound</td><td><code>HubReqChatProcess03Governed</code> / request-route owner / <code>VrRoute04SelectedTarget</code></td><td><code>runtime_control</code></td><td>route hint / stream / servertool followup / stop-message controls; relay <code>/v1/responses</code> restore may carry <code>responsesResume</code> + <code>routeHint</code> at handler/bridge entry, while effective <code>retryProviderKey</code> is finalized later by request-executor request-route owner before Hub execution</td></tr>
         <tr><td><code>mtc-04</code></td><td>runtime control -&gt; provider observation</td><td><code>VrRoute04SelectedTarget</code> / <code>HubReqOutbound05ProviderSemantic</code></td><td><code>provider_observation</code></td><td><code>request-executor-pipeline-attempt.ts::resolveRequestExecutorPipelineAttempt -&gt; MetadataCenter.writeProviderObservation</code>; target / providerKey / assignedModelId / compatibilityProfile now enter center instead of reviving flat <code>metadata.target</code></td></tr>
-        <tr><td><code>mtc-05</code></td><td>provider observation -&gt; response observed</td><td><code>HubRespInbound02Parsed</code></td><td><code>provider_observation</code> append + <code>response_observation</code></td><td><code>resolveResponsesConversationPersistInputsForHttp -&gt; readRuntimeRequestTruthIdentifiers</code>; closeout still derives <code>finishReason</code> locally, but request-truth persistence edge is now concrete</td></tr>
+        <tr><td><code>mtc-05</code></td><td>provider observation -&gt; response observed</td><td><code>HubRespInbound02Parsed</code></td><td><code>provider_observation</code> append + <code>response_observation</code></td><td><code>persistResponsesConversationLifecycleAtChatProcessExitWithinCore -&gt; readMetadataCenterRequestTruth</code>; response-side continuation save owner is core Chat Process closeout</td></tr>
         <tr><td><code>mtc-06</code></td><td>response observed -&gt; servertool context projection</td><td><code>HubRespChatProcess03Governed</code></td><td>read-only projection from center; no new request truth</td><td><code>buildServerToolAdapterContext -&gt; readRuntimeServerToolProjection</code>; session/conversation/model/compatibility projection now goes through one MetadataCenter-backed helper</td></tr>
         <tr><td><code>mtc-07</code></td><td>projected -&gt; closeout released</td><td><code>HubRespOutbound04ClientSemantic</code> / <code>ServerRespOutbound05ClientFrame</code></td><td><code>status/provenance</code> closeout only</td><td><code>metadata-center.ts::releaseMetadataCenterForHttpResponse -&gt; MetadataCenter.markReleased</code>; JSON closeout、SSE finish/close、SSE bridge-error 现已共用真实 handler closeout owner</td></tr>
         </tbody>
         </table>
+        <h2>Write-Point Lock Table</h2>
+        <p>This is the contract that must be mirrored into <code>function-map</code>, <code>mainline-call-map</code>, and gate scripts. Each family has exactly one stage owner for initial write, and only the same owner family may legally replace/append fields later.</p>
+        <table>
+        <thead><tr><th>family</th><th>initial write owner</th><th>legal fields</th><th>write policy</th><th>forbidden rewrites</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>request_truth</code></td><td><code>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized</code></td><td><code>requestId</code>, <code>pipelineId</code>, <code>entryEndpoint</code>, <code>sessionId</code>, <code>conversationId</code>, <code>clientRequestId</code>, <code>portScope</code></td><td><code>write_once</code></td><td>continuation restore, stopless/servertool, tmux/client attachment, provider response, SSE/handler closeout</td></tr>
+        <tr><td><code>continuation_context</code></td><td><code>HubReqChatProcess03Governed</code> continuation owner</td><td><code>responsesRequestContext</code>, <code>responsesResume</code>, <code>previousResponseId</code>, <code>responseId</code>, <code>toolOutputs</code>, <code>continuationOwner</code>, <code>resumeFrom</code>, <code>chainId</code>, <code>stickyScope</code></td><td><code>replaceable_by_owner_only</code></td><td>upgrading any field into <code>request_truth</code>; stopless using it as session truth</td></tr>
+        <tr><td><code>runtime_control</code></td><td><code>HubReqChatProcess03Governed</code> then request-route owner</td><td><code>routeHint</code>, <code>routeName</code>, <code>routeId</code>, <code>providerProtocol</code>, <code>retryProviderKey</code>, <code>preselectedRoute</code>, <code>serverToolFollowup</code>, <code>serverToolFollowupSource</code>, <code>stopless</code>, <code>stopMessage*</code>, <code>streamIntent</code>, <code>clientAbort</code></td><td><code>replaceable_by_owner_only</code></td><td>flat top-level metadata mirrors, <code>__rt</code>, SSE/JSON projection repair; relay continuation fields becoming handler-owned retry pin truth</td></tr>
+        <tr><td><code>provider_observation</code></td><td><code>VrRoute04SelectedTarget / HubReqOutbound05ProviderSemantic</code> then <code>HubRespInbound02Parsed</code> append</td><td><code>target</code>, <code>providerKey</code>, <code>assignedModelId</code>, <code>compatibilityProfile</code>, <code>responseSemantics</code>, <code>finishReason</code></td><td><code>append_only</code> or owner-replaceable documented slot-by-slot</td><td>writing back into <code>request_truth</code> or reviving flat <code>metadata.target</code> / <code>metadata.compatibilityProfile</code></td></tr>
+        <tr><td><code>response_observation</code></td><td><code>HubRespInbound02Parsed</code></td><td>response status / finish-reason / protocol-observed facts</td><td><code>append_only</code></td><td>request-side identity/control rewrites</td></tr>
+        <tr><td><code>closeout_status</code></td><td><code>HubRespOutbound04ClientSemantic / ServerRespOutbound05ClientFrame</code></td><td>release/finalized status and provenance only</td><td><code>finalize_only</code></td><td>semantic repair, continuation save/restore, request-truth mutation</td></tr>
+        <tr><td><code>debug_snapshot</code></td><td>observability-only owners</td><td>snapshot ids, replay/debug markers</td><td><code>append_only</code></td><td>any runtime decision input</td></tr>
+        </tbody>
+        </table>
+        <h2>Same-Center Requirement</h2>
+        <ul>
+          <li>The center must be attached once per request and then passed through every stage of that request lifecycle.</li>
+          <li><code>server</code>, <code>Hub Pipeline</code>, and <code>provider/runtime</code> must all read/write the same bound center for that request, not parallel centers later merged by plain-object spread.</li>
+          <li><code>sessionId</code> may help describe the request, but it must not be used to reopen, reuse, or re-key a prior request's center.</li>
+          <li>If a later stage needs new fields such as <code>requestId</code>, <code>providerKey</code>, or <code>routeHint</code>, it must write them into its own family on the same center rather than creating side-channel metadata residue.</li>
+        </ul>
         <h2>Family Definitions</h2>
         <h3><code>request_truth</code></h3>
         <p>These are identity facts of the current request. Later stages may read them, but must not redefine them:</p>
@@ -207,6 +231,13 @@
           <li><code>chainId</code></li>
           <li><code>stickyScope</code></li>
         </ul>
+        <p>Contract lock:</p>
+        <ul>
+          <li>this family only drives protocol-specific continuation owners such as <code>/v1/responses</code></li>
+          <li>chat/messages/non-responses paths must not pseudo-reuse <code>continuation_context</code> as if they had entered the Responses continuation block</li>
+          <li>stopless/servertool may consume current-turn continuation-restored truth, but they must not read <code>continuation_context</code> as session truth or as an owner decision surface</li>
+          <li>continuation fields must not be promoted back into request identity</li>
+        </ul>
         <h3><code>runtime_control</code></h3>
         <p>These are internal control semantics:</p>
         <ul>
@@ -224,8 +255,23 @@
           <li>the center now implements first-class <code>runtimeControl</code> state/read/write/release plus a host-side projection reader, so the family is no longer &quot;manifest/type only&quot;</li>
           <li>the current repo already exposes a narrower first-batch runtime-control contract that is stronger than the generic manifest wording:</li>
           <li>request-route control: <code>routeHint</code>, <code>routeName</code>, <code>routeId</code>, <code>providerProtocol</code>, <code>retryProviderKey</code>, <code>preselectedRoute</code></li>
-          <li>followup / stopless control: <code>serverToolFollowup</code>, <code>serverToolFollowupSource</code>, <code>stoplessGoalStatus</code></li>
+          <li>followup / stopless control: <code>serverToolFollowup</code>, <code>serverToolFollowupSource</code>, <code>stopless</code></li>
           <li>stop-message control: <code>stopMessageEnabled</code>, <code>stopMessageExcludeDirect</code></li>
+          <li>current request-path owner split for relay <code>/v1/responses</code> continuation must stay explicit:</li>
+          <li>handler/bridge entry may bind <code>continuation_context.responsesResume</code> plus <code>runtime_control.routeHint</code></li>
+          <li>relay <code>resumeMeta.providerKey</code> does not become effective retry-pin truth at the handler boundary</li>
+          <li>effective <code>runtime_control.retryProviderKey</code> must be proven on the request-executor path before Hub execution, not inferred from the earlier bridge shell alone</li>
+          <li>current request-route owner split for the remaining first-batch runtime-control fields must also stay explicit:</li>
+          <li><code>preselectedRoute</code></li>
+          <li>current write owner is router-direct relay handoff in <code>src/server/runtime/http-server/index.ts</code></li>
+          <li>current release owner is retry-attempt preparation in <code>src/server/runtime/http-server/executor-metadata.ts</code></li>
+          <li>request-stage Hub TS shell may transport it, but must not invent or extend its meaning</li>
+          <li><code>stopMessageEnabled</code> / <code>stopMessageExcludeDirect</code></li>
+          <li>current write owners are request/runtime entry shells (<code>src/server/runtime/http-server/index.ts</code>) plus the narrow stopless-directive request capture in <code>src/server/runtime/http-server/executor-metadata.ts</code></li>
+          <li>top-level <code>metadata.stopMessageEnabled</code> / <code>routecodexPortStopMessageEnabled</code> mirrors are transitional compatibility projections only; they are not authoritative write points</li>
+          <li><code>providerProtocol</code></li>
+          <li>current repo still carries this mainly as protocol-shell transport on top-level metadata / normalized request, not as a completed runtime-control-first write path</li>
+          <li>until that migration lands, docs and gates must not overclaim <code>runtime_control.providerProtocol</code> as fully anchored owner truth</li>
           <li>this first batch is not speculative. It is directly evidenced by current writers/readers:</li>
           <li><code>src/server/runtime/http-server/executor/request-executor-attempt-state.ts</code></li>
           <li><code>src/server/runtime/http-server/index.ts</code></li>
@@ -298,6 +344,19 @@
           <li><code>src/server/runtime/http-server/executor/servertool-adapter-context.ts</code> now reads request truth only from <code>MetadataCenter</code></li>
         </ul>
         <p>The remaining problem is now narrower: broader runtime families still pass through flat metadata containers, but provider observation no longer relies on flat <code>target</code> / <code>compatibilityProfile</code> revival.</p>
+        <p>Additional current runtime-control residue that is still intentional and must not be mis-described as owner truth:</p>
+        <ul>
+          <li><code>stopMessageEnabled</code> / <code>stopMessageExcludeDirect</code> still project to top-level metadata because current Rust req-process / stopless decision readers consume those compatibility fields</li>
+          <li><code>providerProtocol</code> still survives as protocol-shell transport metadata in TS/host bridges and diagnostics; it is not yet a center-first-only field</li>
+          <li><code>preselectedRoute</code> already has a center-backed write/release path, but some tests and bridge shells still assert its top-level relay transport around the same bound request metadata</li>
+        </ul>
+        <p>Chat Process owner rule:</p>
+        <ul>
+          <li>request-side continuation restore happens before request-side stopless/servertool hook restore and before normal <code>HubReqChatProcess03Governed</code></li>
+          <li>response-side stopless/servertool schema judgment + CLI/terminal normalization happens before response-side continuation save and before <code>HubRespOutbound04ClientSemantic</code></li>
+          <li><code>ServerRespOutbound05ClientFrame</code> / SSE may only transport finalized client semantic truth and must never repair metadata, continuation, or stopless semantics</li>
+          <li>closeout may mark release/finalized status only; it must not repair or backfill prior families</li>
+        </ul>
         <h3>2. Multi-source Session Backfill Residue</h3>
         <p>Historical bad sources were:</p>
         <ul>
@@ -334,11 +393,11 @@
         <p>Completed:</p>
         <p>1. center-facing docs and source map landed 2. <code>request_truth</code> and <code>continuation_context</code> landed 3. stopless/servertool consumers moved to center reads 4. live replay proved request truth <code>sessionId</code> now appears in runtime logs instead of <code>session=unknown</code></p>
         <p>Still open:</p>
-        <p>1. delete remaining scattered flat merge/projection surfaces 2. promote <code>response_observation</code> and remaining runtime-control projections so the remaining <code>mtc-03</code> partial edge can move toward fully anchored family ownership 3. migrate the narrow request-attempt/runtime-entry writers onto the landed runtime-control family:</p>
+        <p>1. delete remaining scattered flat merge/projection surfaces 2. promote <code>response_observation</code> and remaining runtime-control projections so the remaining <code>mtc-03</code> partial edge can move toward fully anchored family ownership; response-side continuation save owner is already core Chat Process closeout 3. migrate the narrow request-attempt/runtime-entry writers onto the landed runtime-control family:</p>
         <ul>
           <li><code>routeHint</code>, <code>routeName</code>, <code>routeId</code>, <code>providerProtocol</code></li>
           <li><code>retryProviderKey</code>, <code>preselectedRoute</code></li>
-          <li><code>serverToolFollowup</code>, <code>serverToolFollowupSource</code>, <code>stoplessGoalStatus</code></li>
+          <li><code>serverToolFollowup</code>, <code>serverToolFollowupSource</code>, <code>stopless</code></li>
           <li><code>stopMessageEnabled</code>, <code>stopMessageExcludeDirect</code></li>
         </ul>
         <p>4. move remaining followup/control readers to center-backed runtime-control projection 5. continue replay closeout for the remaining upstream <code>/v1/messages</code> <code>HTTP_400</code> that is no longer a session-truth bug</p>
@@ -374,7 +433,7 @@
         <p>What is not done yet:</p>
         <ul>
           <li><code>mtc-03</code> is still <code>partial</code>: broader runtime-control merge/write semantics have not yet become a first-class MetadataCenter family</li>
-          <li><code>mtc-05</code> / <code>mtc-06</code> now have concrete MetadataCenter-backed reader edges, but response observation itself is still not a first-class MetadataCenter family</li>
+          <li><code>mtc-05</code> / <code>mtc-06</code> now have concrete MetadataCenter-backed reader edges, and response-side continuation save no longer goes through handler/SSE bridge; response observation itself is still not a first-class MetadataCenter family</li>
           <li>remaining flat merge/projection surfaces are not fully replaced</li>
           <li>manifest/wiki/mainline core sync gates are wired; remaining work is semantic migration depth, not missing sync gate plumbing</li>
         </ul>

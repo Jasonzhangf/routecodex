@@ -3,6 +3,9 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::metadata_center::{
+    build_metadata_center_from_snapshot, MetadataCenter, MetadataCenterReader,
+};
 use crate::req_process_stage1_tool_governance_blocks::request_result::{
     apply_chat_process_request_sanitizer, build_governed_filter_payload, build_node_result,
     build_processed_request, now_millis,
@@ -26,6 +29,8 @@ pub struct ToolGovernanceInput {
     pub request_id: String,
     #[serde(default)]
     pub has_active_stop_message_for_continue_execution: Option<bool>,
+    #[serde(default)]
+    pub metadata_center_snapshot: Value,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,9 +64,7 @@ fn request_already_has_stopless_system_instruction(request: &Map<String, Value>)
     request
         .get("instructions")
         .and_then(Value::as_str)
-        .map(|content| {
-            content.contains("<rcc_stop_schema>")
-        })
+        .map(|content| content.contains("<rcc_stop_schema>"))
         .unwrap_or(false)
 }
 
@@ -86,13 +89,13 @@ fn inject_stopless_system_instruction(request: &mut Map<String, Value>) {
     );
 }
 
-fn should_inject_stopless_system_instruction(metadata: &Map<String, Value>) -> bool {
-    metadata
-        .get("stopMessageEnabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+fn should_inject_stopless_system_instruction(
+    center: &MetadataCenter,
+    metadata: &Map<String, Value>,
+) -> bool {
+    center.stop_message_enabled().unwrap_or(false)
         || metadata
-            .get("routecodexPortStopMessageEnabled")
+            .get("stopMessageEnabled")
             .and_then(Value::as_bool)
             .unwrap_or(false)
 }
@@ -128,12 +131,20 @@ fn output_has_terminal_stopless_trigger(output: &Value) -> bool {
     row.get("schemaGuidance")
         .or_else(|| row.get("schema_guidance"))
         .and_then(Value::as_object)
-        .and_then(|schema| schema.get("triggerHint").or_else(|| schema.get("trigger_hint")))
+        .and_then(|schema| {
+            schema
+                .get("triggerHint")
+                .or_else(|| schema.get("trigger_hint"))
+        })
         .or_else(|| {
             row.get("input")
                 .or_else(|| row.get("input_json"))
                 .and_then(Value::as_object)
-                .and_then(|input| input.get("triggerHint").or_else(|| input.get("trigger_hint")))
+                .and_then(|input| {
+                    input
+                        .get("triggerHint")
+                        .or_else(|| input.get("trigger_hint"))
+                })
         })
         .and_then(Value::as_str)
         .map(is_terminal_stopless_trigger)
@@ -377,6 +388,7 @@ pub fn apply_req_process_tool_governance(
     let ctx = resolve_governance_context(&input.metadata, &input.entry_endpoint);
 
     let metadata = normalize_record(input.metadata);
+    let metadata_center = build_metadata_center_from_snapshot(&input.metadata_center_snapshot);
     let request_metadata = Value::Object(metadata.clone());
     let mut request = normalize_record(input.request);
     apply_chat_process_request_sanitizer(&mut request);
@@ -385,7 +397,9 @@ pub fn apply_req_process_tool_governance(
     if has_terminal_stopless_turn {
         strip_stopless_terminal_controls(&mut request);
     }
-    if should_inject_stopless_system_instruction(&metadata) && !has_terminal_stopless_turn {
+    if should_inject_stopless_system_instruction(&metadata_center, &metadata)
+        && !has_terminal_stopless_turn
+    {
         inject_stopless_system_instruction(&mut request);
         inject_reasoning_stop_tool(&mut request);
     }
@@ -451,10 +465,7 @@ eof_line: "*** End of File" LF
             .and_then(|function| function.get("name"))
             .and_then(Value::as_str);
         let direct_name = tool_obj.get("name").and_then(Value::as_str);
-        let name = function_name
-            .or(direct_name)
-            .unwrap_or("")
-            .trim();
+        let name = function_name.or(direct_name).unwrap_or("").trim();
         if name != "apply_patch" {
             continue;
         }
@@ -485,7 +496,10 @@ eof_line: "*** End of File" LF
 
 #[cfg(test)]
 mod apply_patch_tool_schema_tests {
-    use super::{apply_req_process_tool_governance, normalize_apply_patch_freeform_tool_schema, ToolGovernanceInput};
+    use super::{
+        apply_req_process_tool_governance, normalize_apply_patch_freeform_tool_schema,
+        ToolGovernanceInput,
+    };
     use serde_json::{json, Map, Value};
 
     fn normalize_tools(input: Value) -> Value {
@@ -575,6 +589,7 @@ mod apply_patch_tool_schema_tests {
             entry_endpoint: "/v1/chat/completions".to_string(),
             request_id: "req-apply-patch-freeform-prod".to_string(),
             has_active_stop_message_for_continue_execution: Some(false),
+            metadata_center_snapshot: Value::Null,
         })
         .expect("governed request");
 

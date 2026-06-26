@@ -67,6 +67,11 @@ Canonical references:
 - `chainId`
 - `stickyScope`
 
+Clarification:
+
+- `stickyScope` is continuation narrowing metadata, not request truth and not stopless identity;
+- `responsesRequestContext.sessionId/conversationId` must stay in this family and must not be promoted into request `sessionId` or stopless state keys.
+
 ### 3. Runtime Control
 
 这些字段用于内部控制、servertool、route、stream、followup，不应混入 provider/client payload：
@@ -87,6 +92,13 @@ Canonical references:
 - `outboundStream`
 - `clientAbortSignal`
 - `clientConnectionState`
+
+Clarification:
+
+- canonical stopless control is `MetadataCenter.runtime_control.stopless`;
+- `stopMessageEnabled` / `stopMessageExcludeDirect` are active runtime-control slots;
+- top-level `routecodexPortStopMessageEnabled` and top-level `metadata.stopMessageEnabled` are compatibility projections, not first truth;
+- `serverToolLoopState` / `stopMessageState` are still active runtime mirrors used by Rust servertool-core contracts, but they are not canonical `runtime_control` slots.
 
 ### 4. Provider / Routing Observation
 
@@ -197,6 +209,26 @@ Canonical references:
 - `stopMessageClientInjectSessionScope`
 
 实际都不应直接定义 request `sessionId`。
+
+### E. Canonical vs Mirror Drift
+
+当前最容易误判的不是“字段还在不在”，而是“它是不是 canonical truth”：
+
+- `MetadataCenter.runtime_control.stopless`
+  - canonical stopless control
+- `stopMessageEnabled` / `stopMessageExcludeDirect`
+  - active runtime-control fields
+- top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled`
+  - compatibility projections only
+- `serverToolLoopState` / `stopMessageState`
+  - active runtime mirrors consumed by Rust contracts
+  - not `MetadataCenter.runtime_control` canonical slots
+
+因此 closeout 顺序必须是：
+
+1. 先迁 reader/writer owner；
+2. 再删 projection / mirror；
+3. 不能因为字段仍有 consumer 就把它们误记成 canonical center slot。
 
 ## Metadata Center Slot Proposal
 

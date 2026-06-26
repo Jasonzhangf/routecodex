@@ -384,9 +384,9 @@ describe('executor metadata session daemon extraction', () => {
       stopMessageEnabled: true
     });
     expect(metadata).toMatchObject({
-      stopMessageEnabled: true,
-      routecodexPortStopMessageEnabled: true
+      stopMessageEnabled: true
     });
+    expect(metadata.routecodexPortStopMessageEnabled).toBeUndefined();
   });
 
   it('materializes request truth from factual Codex session headers', () => {
@@ -436,7 +436,10 @@ describe('executor metadata session daemon extraction', () => {
       sessionId: 'sess-relay-should-not-win',
       conversationId: 'conv-relay-should-not-win',
     };
-    const relayCenter = MetadataCenter.attach(relayPipelineMetadata);
+    const requestCenter = MetadataCenter.read(metadataForAttempt);
+    expect(requestCenter).toBeDefined();
+    MetadataCenter.bind(relayPipelineMetadata, requestCenter!);
+    const relayCenter = MetadataCenter.read(relayPipelineMetadata)!;
     relayCenter.writeContinuationContext(
       'responsesRequestContext',
       {
@@ -533,7 +536,10 @@ describe('executor metadata session daemon extraction', () => {
     } as any);
 
     const pipelineMetadata: Record<string, unknown> = {};
-    const pipelineCenter = MetadataCenter.attach(pipelineMetadata);
+    const requestCenter = MetadataCenter.read(metadata);
+    expect(requestCenter).toBeDefined();
+    MetadataCenter.bind(pipelineMetadata, requestCenter!);
+    const pipelineCenter = MetadataCenter.read(pipelineMetadata)!;
     pipelineCenter.writeProviderObservation(
       'target',
       {
@@ -596,7 +602,10 @@ describe('executor metadata session daemon extraction', () => {
     } as any);
 
     const pipelineMetadata: Record<string, unknown> = {};
-    const pipelineCenter = MetadataCenter.attach(pipelineMetadata);
+    const requestCenter = MetadataCenter.read(metadata);
+    expect(requestCenter).toBeDefined();
+    MetadataCenter.bind(pipelineMetadata, requestCenter!);
+    const pipelineCenter = MetadataCenter.read(pipelineMetadata)!;
     pipelineCenter.writeRuntimeControl(
       'retryProviderKey',
       'provider.key.model',
@@ -722,7 +731,7 @@ describe('executor metadata session daemon extraction', () => {
     });
   });
 
-  it('projects resume routeHint and providerKey into flat metadata for submit_tool_outputs replay requests', () => {
+  it('writes resume routeHint and providerKey into runtime_control for submit_tool_outputs replay requests', () => {
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/responses.submit_tool_outputs',
       method: 'POST',
@@ -805,15 +814,19 @@ describe('executor metadata session daemon extraction', () => {
       }
     } as any);
 
-    expect(metadata.routeHint).toBe('search/gateway-priority-5555-priority-search');
-    expect(metadata.retryProviderKey).toBe('minimonth.key1.MiniMax-M2.7');
+    expect(metadata.routeHint).toBeUndefined();
+    expect(metadata.retryProviderKey).toBeUndefined();
     expect(metadata.responsesResume).toMatchObject({
       routeHint: 'search/gateway-priority-5555-priority-search',
       providerKey: 'minimonth.key1.MiniMax-M2.7'
     });
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl()).toMatchObject({
+      routeHint: 'search/gateway-priority-5555-priority-search',
+      retryProviderKey: 'minimonth.key1.MiniMax-M2.7'
+    });
   });
 
-  it('keeps responsesResume session scope out of request truth while preserving route pin projection', () => {
+  it('keeps responsesResume session scope out of request truth while preserving runtime_control route pin', () => {
     const requestMetadata: Record<string, unknown> = {};
     const requestCenter = MetadataCenter.attach(requestMetadata);
     requestCenter.writeContinuationContext(
@@ -863,8 +876,8 @@ describe('executor metadata session daemon extraction', () => {
 
     expect(metadata.sessionId).toBeUndefined();
     expect(metadata.conversationId).toBeUndefined();
-    expect(metadata.routeHint).toBe('search/gateway-priority-5555-priority-search');
-    expect(metadata.retryProviderKey).toBe('minimonth.key1.MiniMax-M2.7');
+    expect(metadata.routeHint).toBeUndefined();
+    expect(metadata.retryProviderKey).toBeUndefined();
     expect(metadata.responsesResume).toMatchObject({
       routeHint: 'search/gateway-priority-5555-priority-search',
       providerKey: 'minimonth.key1.MiniMax-M2.7',
@@ -872,6 +885,10 @@ describe('executor metadata session daemon extraction', () => {
       conversationId: 'conv-submit-resume-center-1'
     });
     expect(MetadataCenter.read(metadata)?.readRequestTruth()).toEqual({});
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl()).toMatchObject({
+      routeHint: 'search/gateway-priority-5555-priority-search',
+      retryProviderKey: 'minimonth.key1.MiniMax-M2.7'
+    });
   });
 
   it('preserves request truth in metadata center even if legacy top-level session field is later overwritten', () => {
@@ -1234,7 +1251,8 @@ describe('executor metadata route hint extraction', () => {
       metadata: { routeHint: 'search' }
     } as any);
 
-    expect(metadata.routeHint).toBe('search');
+    expect(metadata.routeHint).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl().routeHint).toBeUndefined();
   });
 
   it('uses body metadata routeHint when no header or input metadata routeHint is present', () => {
@@ -1248,7 +1266,8 @@ describe('executor metadata route hint extraction', () => {
       metadata: {}
     } as any);
 
-    expect(metadata.routeHint).toBe('tools');
+    expect(metadata.routeHint).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl().routeHint).toBe('tools');
   });
 
   it('uses servertool web_search CLI result routeHint from submitted tool output', () => {
@@ -1271,7 +1290,8 @@ describe('executor metadata route hint extraction', () => {
       metadata: {}
     } as any);
 
-    expect(metadata.routeHint).toBe('web_search');
+    expect(metadata.routeHint).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl().routeHint).toBe('web_search');
   });
 
   it('uses servertool vision CLI result routeHint from responses input output item', () => {
@@ -1295,6 +1315,7 @@ describe('executor metadata route hint extraction', () => {
       metadata: {}
     } as any);
 
-    expect(metadata.routeHint).toBe('multimodal');
+    expect(metadata.routeHint).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl().routeHint).toBe('multimodal');
   });
 });

@@ -159,7 +159,6 @@ describe('HubPipeline preselected route ownership', () => {
       request: expect.objectContaining({
         metadata: expect.objectContaining({
           stopMessageEnabled: true,
-          routecodexPortStopMessageEnabled: true,
           runtime_control: expect.objectContaining({
             preselectedRoute,
             stopMessageEnabled: true,
@@ -473,7 +472,6 @@ describe('HubPipeline preselected route ownership', () => {
         metadata: expect.objectContaining({
           sessionId: 'sess-resume-1',
           conversationId: 'conv-resume-1',
-          routeHint: 'search/gateway-priority-5555-priority-search',
           responsesResume: expect.objectContaining({
             responseId: 'resp-resume-1',
             providerKey: 'minimonth.key1.MiniMax-M2.7',
@@ -489,6 +487,8 @@ describe('HubPipeline preselected route ownership', () => {
         }),
       }),
     }));
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.routeHint)
+      .toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.retryProviderKey)
       .toBeUndefined();
   });
@@ -643,7 +643,7 @@ describe('HubPipeline preselected route ownership', () => {
     expect(routedMetadataSnapshots[0]).toEqual(expect.objectContaining({
       sessionId: 'sess-route-1',
       conversationId: 'conv-route-1',
-      routeHint: 'search/gateway-priority-5555-priority-search',
+      retryProviderKey: 'minimonth.key1.MiniMax-M2.7',
       responsesResume: expect.objectContaining({
         responseId: 'resp-route-1',
         providerKey: 'minimonth.key1.MiniMax-M2.7',
@@ -652,5 +652,11 @@ describe('HubPipeline preselected route ownership', () => {
         continuationOwner: 'relay'
       })
     }));
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.runtimeControl).toEqual(
+      expect.objectContaining({
+        routeHint: 'search/gateway-priority-5555-priority-search',
+        retryProviderKey: 'minimonth.key1.MiniMax-M2.7'
+      })
+    );
   });
 });

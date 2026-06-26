@@ -575,7 +575,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     processMode,
     direction: 'request',
     stage: 'inbound',
-    routeHint,
     stream: userMeta.stream === true,
     ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
     ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {}),
@@ -617,6 +616,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     clientInjectReady,
     clientInjectReason
   };
+  delete metadata.routeHint;
   delete metadata.responsesRequestContext;
   if (metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)) {
     const rt = { ...(metadata.__rt as Record<string, unknown>) };
@@ -629,6 +629,18 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   }
 
   const center = MetadataCenter.attach(metadata);
+  if (routeHint) {
+    center.writeRuntimeControl(
+      'routeHint',
+      routeHint,
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'ServerReqInbound01ClientRaw'
+      },
+      'request route hint'
+    );
+  }
 
   const requestTruthSource: Record<string, unknown> = {
     ...bodyMeta,
@@ -705,8 +717,17 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         : typeof responsesResumeSource.routeHint === 'string' && responsesResumeSource.routeHint.trim()
           ? responsesResumeSource.routeHint.trim()
           : undefined;
-    if (projectedRouteHint) {
-      metadata.routeHint = projectedRouteHint;
+    if (projectedRouteHint && !runtimeControl.routeHint) {
+      center.writeRuntimeControl(
+        'routeHint',
+        projectedRouteHint,
+        {
+          module: 'src/server/runtime/http-server/executor-metadata.ts',
+          symbol: 'buildRequestMetadata',
+          stage: 'HubReqInbound02Standardized'
+        },
+        'responses resume route hint'
+      );
     }
     const projectedRetryProviderKey =
       typeof runtimeControl.retryProviderKey === 'string' && runtimeControl.retryProviderKey.trim()
@@ -714,8 +735,17 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         : typeof responsesResumeSource.providerKey === 'string' && responsesResumeSource.providerKey.trim()
           ? responsesResumeSource.providerKey.trim()
           : undefined;
-    if (projectedRetryProviderKey) {
-      metadata.retryProviderKey = projectedRetryProviderKey;
+    if (projectedRetryProviderKey && !runtimeControl.retryProviderKey) {
+      center.writeRuntimeControl(
+        'retryProviderKey',
+        projectedRetryProviderKey,
+        {
+          module: 'src/server/runtime/http-server/executor-metadata.ts',
+          symbol: 'buildRequestMetadata',
+          stage: 'HubReqInbound02Standardized'
+        },
+        'responses resume retry provider pin'
+      );
     }
   }
   const continuationIdentifiers = extractContinuationContextSessionIdentifiersFromMetadata({
@@ -784,7 +814,6 @@ function projectNativeTopLevelRuntimeControl(
 ): void {
   if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
     target.stopMessageEnabled = runtimeControl.stopMessageEnabled;
-    target.routecodexPortStopMessageEnabled = runtimeControl.stopMessageEnabled;
   }
   if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
     target.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
@@ -858,7 +887,7 @@ function extractRouteHint(input: PipelineExecutionInput): string | undefined {
   if (Array.isArray(header) && header[0]) {
     return String(header[0]);
   }
-  const metadataRouteHint = normalizeToken(asRecord(input.metadata)?.routeHint);
+  const metadataRouteHint = readRuntimeControlProjection(asRecord(input.metadata)).routeHint;
   if (metadataRouteHint) {
     return metadataRouteHint;
   }

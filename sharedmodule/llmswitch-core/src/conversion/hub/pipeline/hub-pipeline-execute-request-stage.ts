@@ -153,7 +153,6 @@ function projectNativeTopLevelRuntimeControl(runtimeControl: Record<string, unkn
   const out: Record<string, unknown> = {};
   if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
     out.stopMessageEnabled = runtimeControl.stopMessageEnabled;
-    out.routecodexPortStopMessageEnabled = runtimeControl.stopMessageEnabled;
   }
   if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
     out.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
@@ -174,18 +173,6 @@ function projectRouterInputMetadata(args: {
   const requestTruth = args.requestTruth;
   const runtimeControl = args.runtimeControl;
   const continuationContext = args.continuationContext;
-  const routeHint = typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
-    ? runtimeControl.routeHint.trim()
-    : typeof continuationContext.responsesResume === 'object'
-      && continuationContext.responsesResume !== null
-      && !Array.isArray(continuationContext.responsesResume)
-      && typeof (continuationContext.responsesResume as Record<string, unknown>).routeHint === 'string'
-      && String((continuationContext.responsesResume as Record<string, unknown>).routeHint).trim()
-        ? String((continuationContext.responsesResume as Record<string, unknown>).routeHint).trim()
-        : undefined;
-  if (routeHint) {
-    metadata.routeHint = routeHint;
-  }
   const responsesResume =
     continuationContext.responsesResume
     && typeof continuationContext.responsesResume === 'object'
@@ -269,9 +256,6 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
       : {}),
     ...(typeof requestTruthPayload.conversationId === 'string' && requestTruthPayload.conversationId.trim()
       ? { conversationId: requestTruthPayload.conversationId.trim() }
-      : {}),
-    ...(typeof mergedRuntimeControl.routeHint === 'string' && mergedRuntimeControl.routeHint.trim()
-      ? { routeHint: mergedRuntimeControl.routeHint.trim() }
       : {}),
     ...(continuationContextPayload.responsesResume
       && typeof continuationContextPayload.responsesResume === 'object'

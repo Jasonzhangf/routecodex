@@ -744,7 +744,6 @@ function projectNativeTopLevelRuntimeControl(
 ): void {
   if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
     target.stopMessageEnabled = runtimeControl.stopMessageEnabled;
-    target.routecodexPortStopMessageEnabled = runtimeControl.stopMessageEnabled;
   }
   if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
     target.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;

@@ -216,14 +216,14 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>followup runtime</td><td>internal servertool needs local execution + reenter</td><td>server-side runtime shell under Rust plan</td><td>rebuild standard request and reenter Hub request chain</td><td>只能 relay 复入完整 Hub Pipeline</td></tr>
         <tr><td>generic CLI projection</td><td>tool should run through normal client tool loop</td><td>client executes <code>exec_command</code></td><td>client returns ordinary tool result next turn</td><td>不得 server-side reenter</td></tr>
-        <tr><td>stopless CLI continuation</td><td><code>stop_message_auto</code> / <code>reasoning_stop</code> loop</td><td>client executes <code>exec_command</code></td><td>next turn model consumes current request <code>tool_outputs</code> / runtime metadata truth</td><td>不得再触发 server-side followup，也不得依赖 file writeback</td></tr>
+        <tr><td>stopless CLI continuation</td><td><code>stop_message_auto</code> / <code>reasoningStop</code> loop</td><td>client executes <code>exec_command</code></td><td>next turn model consumes current request <code>tool_outputs</code> / runtime metadata truth</td><td>不得再触发 server-side followup，也不得依赖 file writeback</td></tr>
         </tbody>
         </table>
         <h2>Stopless Branch</h2>
         <pre class="mermaid">flowchart TD
           A[&quot;finish_reason=stop or stop hook condition&quot;] --&gt; B[&quot;hub.servertool_stopless_cli_continuation&quot;]
           B --&gt; C[&quot;ServertoolCliProjection01Planned&lt;br/&gt;tool=exec_command&quot;]
-          C --&gt; D[&quot;Client executes routecodex hook run reasoning_stop ...&quot;]
+          C --&gt; D[&quot;Client executes routecodex hook run reasoningStop ...&quot;]
           D --&gt; E[&quot;stdout JSON tool result&quot;]
           E --&gt; F[&quot;HubReqInbound02Standardized&quot;]
           F --&gt; G[&quot;next normal model turn&quot;]

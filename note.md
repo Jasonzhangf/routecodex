@@ -1,3 +1,730 @@
+# 2026-06-26 active metadata-center goal reusability audit
+
+- Jason 要求先判断当前 active goal
+  `/Users/fanzhang/.codex/attachments/5e9487b8-30ba-4b6b-a816-f32202d1325f/pasted-text-1.txt`
+  是否还能继续作为执行真源。
+- 本轮重新按 goal 本文 + `function-map / verification-map / mainline/wiki` 做了文件级核对，不依赖聊天记忆。
+- 结论收敛为两条同时成立的事实：
+  1. 该 goal 仍可继续使用，但范围仅限 `MetadataCenter` contract/gate 收口：
+     - 单 request-scoped `MetadataCenter`
+     - family 唯一写点/合法改写点
+     - 禁止 flat metadata / `__rt` / top-level control residue 复活
+     - 先锁文档与 gate，再推进实现收口
+  2. 该 goal 不能单独代表当前最终方向，因为 repo 仍把 stopless/servertool/stop-message family 当 active owner 维护，尚未完成“无用残留物理删除”。
+- 文件级证据：
+  - `docs/architecture/function-map.yml`
+    - `hub.metadata_center_registry` / `hub.metadata_center_dualwrite_api` / `hub.metadata_center_request_capture`
+      等 feature 仍明确要求单 request-scoped center、family writer policy、runtime_control 收口。
+    - 同时仍明写：
+      - `Stopless canonical control is runtime_control.stopless`
+      - `hasStoplessDirectiveInRequestPayload(...) -> runtime_control.stopMessageEnabled`
+      - `hub.servertool_stopless_cli_continuation` 为 active feature。
+  - `docs/architecture/verification-map.yml`
+    - 仍要求验证：
+      - 单 request 一个 bound `MetadataCenter`
+      - `request_truth.sessionId/conversationId` inbound-only
+      - stopless CLI projection/CLI execution 使用 active request metadata truth
+      - narrow stopless-directive entry write 落 `runtime_control.stopMessageEnabled`
+  - `docs/architecture/wiki/servertool-ownership-map.md`
+    - 仍列出一整组 `hub.servertool_*` active feature，包括
+      `hub.servertool_stopless_cli_continuation`、
+      `hub.servertool_stopless_cli_projection_context`、
+      `hub.servertool_loop_warning`。
+  - `docs/architecture/wiki/stopless-session-mainline-source.md`
+    - 仍把 stopless request/response lifecycle、3-round guard、CLI projection、runtime snapshot、
+      req-side schema contract rebound 作为 canonical review surface 维护。
+- 因此当前 active goal 的正确定位：
+  - 可继续驱动 metadata center 边界与 gate 收口；
+  - 不能直接当作“stopless/goal/servertool 残留已可一并删除”的完成标准。
+- 下一步需要并行维护第二份 closeout plan：
+  - 专门审计哪些 stopless/servertool/goal-state 文档、feature、gate 仍是 active runtime truth；
+  - 哪些只是兼容镜像或已无 consumer，可物理删除；
+  - 删除顺序必须先改 owner/gate，再删实现和 wiki，避免 function-map / verification-map / gate 打架。
+
+# 2026-06-26 stopMessage / stopless / goal-state field audit slice 1
+
+- 本轮先按代码级 reader/writer 审 `stopMessageEnabled` / `stopMessageExcludeDirect` /
+  `routecodexPortStopMessageEnabled` / `stoplessGoalStatus` / `stopMessageCompareContext`，
+  目的是先分出 active / transitional / dead，再决定下一步删哪层。
+- 结论先收敛为三类：
+
+1. active runtime truth / still-live decision inputs
+
+- `runtime_control.stopMessageEnabled`
+  - 仍是 live owner 字段，不是死代码。
+  - 证据：
+    - `src/server/runtime/http-server/index.ts`
+      - 端口入口会写 `MetadataCenter.runtime_control.stopMessageEnabled`
+      - router-direct path 也会写同字段
+    - `src/server/runtime/http-server/executor-metadata.ts`
+      - request entry 在 `hasStoplessDirectiveInRequestPayload(...)` 时会写
+        `runtime_control.stopMessageEnabled=true`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+      - `should_inject_stopless_system_instruction(...)` 仍会读：
+        - `center.stop_message_enabled()`
+        - top-level `metadata.stopMessageEnabled`
+        - top-level `routecodexPortStopMessageEnabled`
+    - `src/server/runtime/http-server/request-executor.ts`
+      - `runtimeControl.stopMessageEnabled === false` 仍会直接影响
+        `serverToolsEnabled`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_decision_context_signals.rs`
+      - 仍会从 adapter_context / metadata / runtime_metadata 读
+        `stopMessageEnabled` 和 `routecodexPortStopMessageEnabled`
+- `runtime_control.stopMessageExcludeDirect`
+  - 仍是 live owner 字段。
+  - 证据：
+    - `src/server/runtime/http-server/index.ts`
+      - 端口入口与 router-direct path 都会写
+        `MetadataCenter.runtime_control.stopMessageExcludeDirect`
+    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
+      - `stop_message_excludes_direct(...)` 仍直接读 top-level
+        `stopMessageEnabled` / `stopMessageExcludeDirect`
+      - 说明 direct route 决策仍依赖该语义
+- `runtime_control.stopless`
+  - 仍是 active owner 族，不在本轮删除面内。
+  - 证据：
+    - `sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts`
+    - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+    - Rust metadata-center builder/reader 与 stopless runtime tests 仍在使用。
+
+2. transitional compatibility projection / mirror residue
+
+- top-level `metadata.stopMessageEnabled`
+- top-level `routecodexPortStopMessageEnabled`
+- top-level `metadata.stopMessageExcludeDirect`
+  - 当前判断：仍是 compatibility projection，不是第一真源，但也还不能直接删。
+  - 证据：
+    - `src/server/runtime/http-server/executor-metadata.ts::projectNativeTopLevelRuntimeControl(...)`
+      - 会把 center-backed runtime_control 投影到 top-level：
+        - `stopMessageEnabled`
+        - `routecodexPortStopMessageEnabled`
+        - `stopMessageExcludeDirect`
+    - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+      - request-stage projection 仍会把 runtime_control 同步为 top-level 字段
+    - `src/server/handlers/handler-utils.ts`
+      - handler pipeline metadata 仍继续做同类 top-level projection
+    - Rust request-stage / direct-route 决策仍读 top-level mirror：
+      - `req_process_stage1_tool_governance_blocks/orchestrator.rs`
+      - `hub_pipeline_blocks/napi_bindings.rs`
+      - `stopless_decision_context_signals.rs`
+  - 因此当前真相不是“可直接物理删除”，而是：
+    - center-backed writer 已存在
+    - Rust/TS 决策层仍有 top-level mirror reader
+    - 下一步要先迁 reader，再删 mirror
+
+3. dead or doc-plan-only residue
+
+- `stoplessGoalStatus`
+  - 当前代码面 `src/ + sharedmodule/ + tests/` 的 `rg` 为 0 命中；
+    没有 TS runtime、Rust runtime、测试 consumer。
+  - 现存命中只在各类 `docs/goals/*.md` 计划文档里。
+  - 当前判断：这是“文档/计划残留”，不是活 runtime 字段。
+  - 这意味着：
+    - 本轮不需要改 function-map / verification-map，因为 architecture 真源当前并未把它声明成 active owner；
+    - 下一轮可以优先清理 goal/plan 中对 `stoplessGoalStatus` 的过期叙述。
+
+4. active but not first-priority deletion candidate
+
+- `runtime_control.stopMessageCompareContext`
+  - 不是死字段。
+  - 证据：
+    - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+      - stop-message auto handler finalize 时会写入
+        `runtime_control.stopMessageCompareContext`
+    - `src/server/runtime/http-server/executor/provider-response-converter.ts`
+      - adapterCenter -> pipelineCenter sync 时会同步该字段
+    - `sharedmodule/llmswitch-core/src/servertool/stop-message-compare-context.ts`
+      - 仍有读写 helper
+    - `tests/servertool/stop-message-compare-context.spec.ts`
+      - 仍有 contract 测试
+  - 当前分类：active runtime observation/control context，暂不判死。
+
+- `serverToolLoopState` / `stopMessageState`
+  - 从 grep 看仍大量存在于 Rust/servertool-core contract、persisted lookup、backend route、
+    loop-state contract 和 tests 中。
+  - 本轮尚未逐个 owner 审完，因此不下删除结论。
+
+- 这一轮没有直接修改 `function-map.yml` / `verification-map.yml`：
+  - 因为对 `stopMessageEnabled` 的现状描述目前基本和代码一致：
+    - `runtime_control.stopMessageEnabled` 是 owner truth
+    - top-level `metadata.stopMessageEnabled` /
+      `routecodexPortStopMessageEnabled` 仍是 transitional projection
+  - 真正已经明显失真的，是 `stoplessGoalStatus` 仍出现在多份 goal/plan，
+    但代码面已死。
+
+- 下一步最小正确动作：
+  1. 先清 `docs/goals/*` 里对 `stoplessGoalStatus` 的过期计划/closeout 条目；
+  2. 再审 `serverToolLoopState` / `stopMessageState` 哪些是 active runtime owner、
+     哪些只是旧 persisted/runtime 影子；
+  3. 只有在 Rust reader 不再读 top-level stopMessage mirror 后，才删
+     `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` /
+     `stopMessageExcludeDirect` 的 projection 壳。
+
+- 本轮已执行第 1 步的一部分：
+  - 已从下列旧 goal/迁移计划中物理删除把 `stoplessGoalStatus` 当 active migration field 的叙述：
+    - `docs/goals/hub-pipeline-architecture-review-surface-cleanup-plan.md`
+    - `docs/goals/hub-pipeline-slimming-no-function-loss-plan.md`
+    - `docs/goals/internal-metadata-center-migration-plan.md`
+    - `docs/goals/metadata-center-dualwrite-dualread-closeout-checklist.md`
+    - `docs/goals/metadata-center-rust-js-dualwrite-execution-plan.md`
+  - 删除标准：
+    - 仅删除“把它当活字段/迁移槽位/白名单字段”的旧计划叙述；
+    - 保留 `docs/goals/stopless-goal-servertool-residue-closeout-plan.md` 中把它作为
+      “待审计残留对象” 的引用，因为这仍符合当前 closeout 目的。
+  - 删除后再次 `rg -n "stoplessGoalStatus" docs/goals -g'*.md'`：
+    - 只剩 `docs/goals/stopless-goal-servertool-residue-closeout-plan.md` 3 处
+    - 说明旧迁移计划里把它当 active field 的叙事已清完
+
+# 2026-06-26 serverToolLoopState / stopMessageState field audit slice 2
+
+- 本轮继续按代码级 reader/writer 审 `serverToolLoopState` / `stopMessageState`，
+  目标是回答两件事：
+  1. 它们是不是已死残留；
+  2. 它们是不是 `MetadataCenter.runtime_control` 下应该保留/迁移的 canonical slot。
+
+- 结论先收敛：
+  - `serverToolLoopState`：active compatibility/runtime state，不是死代码；
+  - `stopMessageState`：active compatibility/runtime state，不是死代码；
+  - 两者当前都不是 `MetadataCenter.runtime_control` 的 canonical truth；
+  - 当前 repo 真相更接近：
+    - canonical stopless control 是 `runtime_control.stopless`
+    - `serverToolLoopState` / `stopMessageState` 仍作为 Rust servertool-core contract 直接消费的 runtime/execution mirror 存在
+    - 因此这一轮不能删它们，也不能把它们误记成“已迁完的 center slot”。
+
+1. `serverToolLoopState` active 证据
+
+- Rust servertool-core 仍直接读取/规划它：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/loop_state_contract.rs`
+    - `read_servertool_loop_state(runtime_metadata)` 直接读 `runtime_metadata["serverToolLoopState"]`
+    - `plan_servertool_loop_state(...)` 仍生成 loop-state snapshot
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
+    - CLI projection context 仍把 `execution_context.serverToolLoopState` 当 repeat/max fallback 输入
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`
+    - `is_stop_message_budget_exhausted(...)` 仍直接读
+      `context.serverToolLoopState.repeatCount/maxRepeats`
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`
+    - runtime_set 仍会 merge / retain `serverToolLoopState`
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`
+    - `read_servertool_followup_flow_id(...)` 仍从 runtime 读 `serverToolLoopState.flowId`
+    - stop-message runtime state fallback 仍依赖 `serverToolLoopState.maxRepeats`
+- TS 薄壳仍只是在给 Rust contract 准备 execution context：
+  - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+    - 仍从 bound MetadataCenter 的 `stopless` control 组装出
+      `execution.context.serverToolLoopState`
+  - 这说明 `serverToolLoopState` 当前是“活的 execution/runtime 兼容镜像”，不是 dead residue。
+
+2. `stopMessageState` active 证据
+
+- Rust servertool-core 仍直接读取/解析它：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`
+    - `resolve_runtime_stop_message_state(...)` 先看 `runtime["stopMessageState"]`
+    - `read_runtime_stop_message_stage_mode(...)` / `has_armed_stop_message_state(...)`
+      仍直接依赖该 record
+    - `plan_stop_message_routing_state_apply(...)` 仍在围绕 stop-message state snapshot 工作
+- Rust hub/servertool contract 仍把它列为 meta write surface：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs`
+    - 仍含 `stopMessageState`
+- 黑盒与 contract tests 仍覆盖它：
+  - `tests/servertool/stop-message-runtime-utils.continuation.spec.ts`
+  - `tests/servertool/stopless-metadata-writer-ownership.spec.ts`
+  - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+  - `tests/sharedmodule/chat-semantics-stage1.spec.ts`
+- 这说明 `stopMessageState` 也不是可直接删的死字段。
+
+3. 它们不是 MetadataCenter canonical slot 的证据
+
+- `tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts`
+  - 明确断言：
+    - `MetadataCenter.read(target)?.readRuntimeControl().serverToolLoopState` 是 `undefined`
+    - Rust snapshot 的 `runtimeControl.serverToolLoopState` 是 `undefined`
+    - Rust snapshot 的 `runtimeControl.stopMessageState` 是 `undefined`
+- 这和当前代码真相一致：
+  - `MetadataCenter.runtime_control` 的 canonical stopless truth 在 `runtime_control.stopless`
+  - `serverToolLoopState` / `stopMessageState` 仍在 runtime metadata / execution context / Rust contract 层被单独消费
+  - 所以当前不能把这两者误写成“metadata-center 已收口字段”
+
+4. 当前正确分类
+
+- `runtime_control.stopless`
+  - active canonical truth
+- `serverToolLoopState`
+  - active compatibility/runtime mirror
+- `stopMessageState`
+  - active compatibility/runtime mirror
+- `stoplessGoalStatus`
+  - dead doc-plan residue
+
+5. 下一步最小正确动作
+
+- 先不删 `serverToolLoopState` / `stopMessageState`
+- 先清旧文档/旧计划里若把它们写成“已迁入 MetadataCenter canonical slot”的失真叙述
+
+# 2026-06-26 architecture wiki drift closeout slice 1
+
+- 本轮继续按 active metadata-center goal 收口 review surface，但只处理文档真源漂移，不改 runtime。
+- 目标是把以下三类语义明确拆开，避免后续按错口径删实现：
+  1. canonical truth
+  2. active mirror / compatibility projection
+  3. generic runtime namespace / historical background
+
+- 已更新：
+  - `docs/architecture/wiki/metadata-boundary-map.md`
+  - `docs/architecture/wiki/metadata-center-audit.md`
+
+- 本轮收紧点：
+  - `metadata-boundary-map.md`
+    - `sessionId` 改写为 request-truth session identity，不再写成泛化“session 控制索引”
+    - `conversationId` 改写为 narrowing key，明确不能替代 request `sessionId`
+    - `ROUTECODEX_SESSION_DIR` 下的 `session:* / conversation:* / tmux:*` 明确标注为 generic runtime snapshot namespace，不是 stopless 合法身份源
+    - 新增 stopless-specific clarification：
+      - stopless 当前真相仍是 request-local `MetadataCenter.runtime_control.stopless` + current-turn tool-output truth
+      - `conversation:* / tmux:*` 在本页只允许作为 generic runtime namespace background 被提及
+    - 新增 stop-message / stopless control clarification：
+      - canonical stopless control = `runtime_control.stopless`
+      - `stopMessageEnabled` / `stopMessageExcludeDirect` = active runtime-control fields
+      - top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` = compatibility projections only
+      - `serverToolLoopState` / `stopMessageState` = active runtime mirrors, not MetadataCenter canonical slots
+    - `virtual_router` 读取 `stickyScope` 的说明加严为：continuation narrowing only，不是 stopless identity
+
+  - `metadata-center-audit.md`
+    - continuation context 段新增说明：
+      - `stickyScope` 只是 continuation narrowing metadata
+      - `responsesRequestContext.sessionId/conversationId` 不得升级成 request `sessionId` 或 stopless key
+    - runtime control 段新增说明：
+      - stopless canonical control / stopMessage active control / top-level projection / runtime mirrors 四类分离
+    - 新增 `Canonical vs Mirror Drift` 小节：
+      - 明确 closeout 顺序必须是先迁 owner，再删 projection / mirror
+      - 明确不能因为字段仍有 consumer 就把它们误写成 canonical center slot
+
+- 本轮文件级验证：
+  - `rg -n "session:\\*|conversation:\\*|tmux:\\*|routecodexPortStopMessageEnabled|serverToolLoopState|stopMessageState|stickyScope|stopMessageEnabled" docs/architecture/wiki/metadata-boundary-map.md docs/architecture/wiki/metadata-center-audit.md docs/architecture/wiki/stopless-session-mainline-source.md docs/architecture/wiki/metadata-center-mainline-source.md`
+  - 结果显示：
+    - `metadata-boundary-map.md` 现在只把 `session:* / conversation:* / tmux:*` 作为 generic runtime namespace background 描述
+    - `metadata-center-audit.md` 现在显式区分 canonical stopless control、active stop-message control、compatibility projections、runtime mirrors
+    - `metadata-center-mainline-source.md` 现有口径与本轮补充不冲突，仍保持：
+      - `continuation_context.stickyScope` 只是 continuation family
+      - `stopMessageEnabled` / `stopMessageExcludeDirect` 为 active runtime-control
+      - top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` 为 transitional projections
+
+- 当前结论：
+  - active goal 仍可继续用于 metadata-center contract/gate 收口。
+  - 但 repo review surface 现在也更明确地证明：
+    - stopless/servertool 还不是“可整体删除”的单纯残留；
+    - `serverToolLoopState` / `stopMessageState` 也还不是可误判为 canonical center slot 的字段。
+- 本轮未跑 architecture gate；只完成文档真源对齐 + grep 级一致性复核。
+
+# 2026-06-26 architecture wiki + gate closeout slice 2
+
+- 本轮继续沿 active metadata-center goal 推进，目标从“文档页局部收口”推进到“wiki/html/gate 同步验证”。
+
+- 继续修正的文档漂移：
+  - `docs/architecture/wiki/servertool-followup-call-graph.md`
+    - 将 stopless CLI continuation 的公开别名从旧写法 `reasoning_stop` 改成当前真源 `reasoningStop`
+    - 包括：
+      - branch split 表格
+      - stopless branch Mermaid 节点文案
+  - 这一步的原因：
+    - `docs/architecture/wiki/servertool-ownership-map.md`
+    - `docs/architecture/wiki/stopless-session-mainline-source.md`
+    - `docs/architecture/wiki/responses-continuation-mainline-source.md`
+    - 已经统一以 `reasoningStop` 作为当前 public CLI alias / internal model-facing tool 名称
+    - 如果 followup call graph 继续保留 `reasoning_stop`，后续实现/审计会被误导成当前 contract 仍兼容旧公开别名
+
+- 本轮定向 grep 结论：
+  - `rg -n "reasoning_stop" docs/architecture/wiki docs/stop-message-auto.md -g'*.md'`
+  - 当前 architecture/wiki 主 review 面中，`reasoning_stop` 只剩 legacy pollution/removal 语境：
+    - `servertool-ownership-map.md`
+    - `stopless-session-mainline-source.md`
+  - 不再有任何页面把 `reasoning_stop` 写成当前 stopless CLI continuation 的公开别名
+
+- 本轮 gate 验证结果：
+  1. `npm run verify:function-map-compile-gate`
+     - PASS
+     - 关键子项全部绿：
+       - `verify:architecture-function-map-parseable`
+       - `verify:architecture-feature-id-anchors`
+       - `verify:architecture-feature-anchor-coverage`
+       - `verify:architecture-feature-map-growth-discipline`
+       - `verify:architecture-owner-queryability`
+       - `verify:function-map-coverage`
+       - `verify:function-map-paths`
+       - `verify:function-map-boundary-mentions`
+       - `verify:function-map-owner-uniqueness`
+       - `verify:function-map-canonical-builder-definitions`
+       - `verify:function-map-forbidden-mentions`
+       - `verify:function-map-required-tests`
+       - `verify:function-map-build-wiring`
+
+  2. `npm run verify:architecture-mainline-call-map`
+     - PASS
+     - `chains: 10`
+     - `edges: 67`
+     - `shared functions: 12`
+
+  3. `npm run verify:architecture-metadata-center-manifest-code-sync`
+     - PASS
+     - `manifest: docs/architecture/metadata-center-manifest.yml`
+     - `families: 8`
+
+  4. `npm run verify:architecture-review-surface-light`
+     - 初次失败原因：
+       - `docs/architecture/wiki/html/*.html` 未与本轮 markdown 改动同步
+       - 失败页：
+         - `metadata-boundary-map.html`
+         - `metadata-center-mainline-source.html`
+         - `servertool-followup-call-graph.html`
+     - 处理：
+       - 执行 `npm run render:architecture-wiki-html`
+       - 再跑：
+         - `npm run verify:architecture-wiki-html-sync`
+         - `npm run verify:architecture-review-surface-light`
+     - 复跑后 PASS
+     - 关键子项：
+       - `verify-no-custom-payload-carriers` PASS
+       - `verify:architecture-mainline-node-id-consistency` PASS
+       - `verify:architecture-mainline-binding-pending-gate` PASS
+       - `verify:architecture-wiki-sync` PASS
+       - `verify:architecture-wiki-html-sync` PASS
+       - `verify:architecture-manifest-sync` PASS
+       - `verify:architecture-metadata-center-write-boundaries` PASS
+       - `verify:architecture-mainline-manifest-sync` PASS
+       - `verify:architecture-topology-doc-sync` PASS
+
+- 本轮额外证据：
+  - HTML render artifact 已带上新口径：
+    - `docs/architecture/wiki/html/metadata-boundary-map.html`
+      - 含 `request truth session identity`
+      - 含 `generic runtime snapshot keys`
+      - 含 `canonical stopless control lives in MetadataCenter.runtime_control.stopless`
+    - `docs/architecture/wiki/html/servertool-followup-call-graph.html`
+      - 含 `reasoningStop`
+      - 含 `routecodex hook run reasoningStop ...`
+
+- 当前阶段性结论：
+  - active goal 中“先锁文档真源和 gate，再按锁定结果推进代码收口”这一步又向前走了一段：
+    - markdown wiki 已对齐
+    - html review artifact 已同步
+    - function-map / mainline / metadata-center manifest / review-surface-light gate 全部已绿
+  - 但目标尚未完成，因为：
+    - 还没有完成更大范围的 implementation closeout
+    - `serverToolLoopState` / `stopMessageState` / top-level stopMessage projections 仍是 active mirror/projection，不可宣称已删除
+    - active goal 要求的“按 gate 结果推进代码收口”还没开始实质 runtime 移除
+
+# 2026-06-26 metadata-center implementation closeout slice 1
+
+- 本轮开始进入 active goal 的实现收口阶段，先查 live writer/reader，再改最直接违反 contract 的实现。
+
+- 审核结果先锁定两个事实：
+
+1. top-level `stopMessageEnabled` / `routecodexPortStopMessageEnabled` projection 仍有大量 live writer/reader
+   - 当前不能直接删
+   - 证据：
+     - writer/projection:
+       - `src/server/runtime/http-server/executor-metadata.ts::projectNativeTopLevelRuntimeControl`
+       - `src/server/handlers/handler-utils.ts::projectNativeTopLevelRuntimeControl`
+       - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts::projectNativeTopLevelRuntimeControl`
+     - Rust/TS reader:
+       - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+       - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+       - `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+   - 因此 closeout 顺序仍然必须是“先迁 reader，再删 projection”。
+
+2. `request-executor-attempt-state.ts` 里仍有第二个 MetadataCenter merge 回主链的实现
+   - 这比 top-level projection 更直接违反 active goal
+   - active goal 明写：
+     - 禁止创建第二个 MetadataCenter 再 merge
+     - 同一个 request 只有一个 MetadataCenter，从 server inbound 创建并贯穿全链路
+   - 文件级证据：
+     - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+       - 原实现存在：
+         - `const pipelineMetadataCenter = ...`
+         - `if (requestMetadataCenter && pipelineMetadataCenter && requestMetadataCenter !== pipelineMetadataCenter) { ... mergedCenter?.writeContinuationContext/...writeRuntimeControl/...writeProviderObservation(...) }`
+       - 这就是“第二个 center 再 merge”。
+
+- 本轮已做实现修改：
+  - 文件：
+    - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+  - 改动：
+    - 删除第二个 MetadataCenter snapshot merge 回主链的逻辑
+    - 若 `metadataForAttempt` 与 `pipelineResult.metadata` 绑定的是两个不同 center，直接 fail-fast：
+      - `request-executor attempt metadata violated single-center contract: pipeline result returned a second MetadataCenter`
+  - 这一步的设计理由：
+    - 根据 active goal，单 request-scoped center 是 contract，不允许以“合并两个 center”补偿
+    - 真源应该是：pipeline 入口就传同一个 center，下游必须继续用同一个 center，而不是事后 merge
+
+- 同步修改测试：
+  - 文件：
+    - `tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts`
+  - 改动：
+    - 新增 runtime case：
+      - `fails fast when pipeline result returns a second MetadataCenter`
+    - 更新源码 contract case：
+      - 不再允许 `pipelineMetadataCenter.snapshot().runtimeControl`
+      - 不再允许 `merged from pipeline result metadata center`
+      - 不再允许 `mergedCenter?.writeRuntimeControl(`
+      - 改为要求出现 single-center fail-fast error 文案
+
+- 本轮验证：
+
+1. focused contract test
+   - `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts --runInBand`
+   - PASS
+   - 7/7 通过，包括：
+     - `fails fast when pipeline result returns a second MetadataCenter`
+     - `does not reintroduce second-center merge logic into finalizeRequestExecutorAttemptMetadata`
+
+2. metadata-center 专项 gate
+   - `npm run verify:architecture-metadata-center-write-boundaries`
+   - PASS
+   - `verified families: 7`
+   - `verified policies: write_once, replaceable, append_only, finalize_only`
+
+3. review-surface gate 回归
+   - `npm run verify:architecture-review-surface-light`
+   - PASS
+   - 说明本轮实现修改没有把 architecture review surface / manifest / sync gate 弄坏
+
+- 当前阶段性结论：
+  - active goal 的“single request-scoped MetadataCenter”在实现层第一次落下了硬约束：
+    - 不再允许 host attempt finalize 阶段把第二个 center merge 回来
+  - 这是真实实现收口，不是只改文档
+  - 但 stopMessage top-level projections 和 `serverToolLoopState` / `stopMessageState` 仍未收完；下一刀应继续按 reader migration 顺序推进
+
+# 2026-06-26 stopMessage projection reader closeout slice 2
+
+- 本轮继续按“先迁 reader，再删 projection writer”推进，优先收 `routecodexPortStopMessageEnabled` 这种纯重复 top-level reader/projection。
+
+- 文件级审核结论：
+
+1. Rust req-side stopless injection owner 已有 center truth，可不再读 `routecodexPortStopMessageEnabled`
+   - 证据：
+     - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+       - `should_inject_stopless_system_instruction(...)` 已可读：
+         - `center.stop_message_enabled()`
+         - top-level `metadata.stopMessageEnabled`
+       - 原先额外再读 top-level `metadata.routecodexPortStopMessageEnabled`
+     - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/metadata_center/reader.rs`
+       - 已有 `stop_message_enabled()` / `stop_message_exclude_direct()` center reader
+     - `ToolGovernanceInput` 已携带 `metadata_center_snapshot`
+   - 因此这里的 `routecodexPortStopMessageEnabled` 是重复 compatibility residue，不是独立语义。
+
+2. TS request-stage native projection 仍把 `runtimeControl.stopMessageEnabled` 再复制成 `routecodexPortStopMessageEnabled`
+   - 证据：
+     - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+       - `projectNativeTopLevelRuntimeControl(...)` 原先会输出：
+         - `stopMessageEnabled`
+         - `routecodexPortStopMessageEnabled = stopMessageEnabled`
+   - 因为 Rust req governance 这一轮已不再读取 `routecodexPortStopMessageEnabled`，这里可以先删除这层重复投影。
+
+- 本轮实现修改：
+
+1. Rust req governance reader 收缩
+   - 文件：
+     - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs`
+   - 改动：
+     - `should_inject_stopless_system_instruction(...)` 删除：
+       - `metadata.get("routecodexPortStopMessageEnabled")`
+     - 现在只认：
+       - center snapshot `stop_message_enabled()`
+       - top-level `stopMessageEnabled`
+
+2. TS request-stage native projection 收缩
+   - 文件：
+     - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+   - 改动：
+     - `projectNativeTopLevelRuntimeControl(...)` 删除：
+       - `out.routecodexPortStopMessageEnabled = runtimeControl.stopMessageEnabled;`
+     - 保留：
+       - `out.stopMessageEnabled`
+       - `out.stopMessageExcludeDirect`
+
+3. 同步测试样本/断言
+   - Rust:
+     - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs`
+       - 两个 focused case 去掉 `routecodexPortStopMessageEnabled`
+   - TS:
+     - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts`
+       - 删除对 `routecodexPortStopMessageEnabled: true` 的断言
+     - `tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts`
+       - 删除对 `routecodexPortStopMessageEnabled: true` 的断言
+     - `tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts`
+       - 输入样本去掉 `routecodexPortStopMessageEnabled: true`
+
+- 本轮验证：
+
+1. Rust focused tests
+   - `cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture`
+   - PASS
+   - `38 passed, 1815 filtered out`
+
+2. metadata-center 专项 gate
+   - `npm run verify:architecture-metadata-center-write-boundaries`
+   - PASS
+
+3. sharedmodule focused Jest
+   - `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/hub-pipeline-preselected-route.spec.ts tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts --runInBand`
+   - 结果：
+     - `hub-pipeline-preselected-route.spec.ts` PASS
+     - `req-process-servertool-bundle-contract.spec.ts` PASS
+     - `hub-pipeline-normalize-request-sse-protocol.spec.ts` FAIL
+   - 当前失败判断：
+     - 失败点是 `VirtualRouterEngine.initialize` 报 `routing configuration missing`
+     - 堆栈停在 pipeline 初始化，不在这轮删掉的断言或 stopMessage projection 读写点
+     - 因此当前更像环境/fixture 初始化问题，而不是本轮 `routecodexPortStopMessageEnabled` reader/projection 收缩导致的语义回归
+
+- 当前阶段性结论：
+  - `routecodexPortStopMessageEnabled` 已从一条 Rust req-governance reader 路径和一条 TS request-stage projection 路径被真实收缩
+  - 这说明 top-level stopMessage family 已开始从“重复 compatibility control”向“只保留必要过渡层”收口
+  - 但 `stopMessageEnabled` 本身仍有多处 live reader；`routecodexPortStopMessageEnabled` 也仍存在于其它测试样本和 host/provider response plan 测试中，尚不能宣称已物理删除
+- 然后继续审：
+  - 哪些 Rust contract 仍真正需要这两者；
+  - 哪些只是旧 fallback / persisted compatibility；
+  - 最后再决定是否能把其中一部分收窄成仅 stopless contract 层可见，而不是更广的 runtime surface。
+
+- 本轮已先收一层“mirror 当真源”的旧叙述：
+  - `docs/goals/stopless-client-invisible-route-plan.md`
+    - `__rt.serverToolLoopState.flowId == "stop_message_flow"` 改为
+      `runtime_control.stopless.flowId == "stop_message_flow"`
+  - `docs/goals/stopless-closed-loop-plan.md`
+    - 触发条件不再写成“session 有 `stopMessageState`”
+    - 改成：
+      - 当前请求闭环的 `MetadataCenter.runtime_control.stopless.active=true`
+      - stop-message runtime snapshot `stageMode=on`
+  - `docs/goals/stopless-session-id-closure-and-client-invisible-2026-06-15.md`
+    - classifier 的 stopless followup 信号改为来自 `runtime_control.stopless.flowId`
+  - `docs/agent-routing/30-servertool-lifecycle-routing.md`
+    - 明确补写：`serverToolLoopState` 只是 execution/runtime mirror，不是 canonical budget truth
+- 这轮没有改 runtime 代码：
+  - 因为当前 active goal 仍要求先锁 contract/文档真源，再按证据收实现；
+  - 上述修改是把旧 plan / routing 文档收回到当前代码真相，不是发明新语义。
+
+# 2026-06-26 TS outer-surface audit for serverToolLoopState / stopMessageState
+
+- 本轮继续看最外围 TS surface，目的是确认：
+  - 是否还有 TS 层在继续把 `serverToolLoopState` / `stopMessageState` 暴露成更广 runtime truth；
+  - 还是说 TS 外围已经在主动剥离这两族字段，只给 Rust contract 留最小兼容输入。
+
+- 结论：
+  - 当前最外围 TS surface 没有继续把这两族字段向外扩散；
+  - 相反，host/servertool adapter 与 followup metadata surface 正在显式 strip 它们；
+  - 因此下一刀不该打这些 TS 薄壳，而应继续收旧文档/旧计划里的错误 owner 叙述。
+
+1. `servertool-adapter-context.ts` 结论
+
+- `src/server/runtime/http-server/executor/servertool-adapter-context.ts`
+  - `SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS` 明确包含 `serverToolLoopState`
+  - `stripServertoolRuntimeControlMetadataFields(...)` 会把它从 `baseContext` 和继承的 `__rt` 里删掉
+  - 实际写回 `MetadataCenter.runtime_control` 的只有：
+    - `serverToolFollowup`
+    - `stopMessageEnabled`
+    - `stopMessageClientInject`
+  - 没有把 `serverToolLoopState` / `stopMessageState` 再注入 adapter context runtime control
+- 配套测试：
+  - `tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts`
+    - 明确断言：
+      - `runtime?.serverToolLoopState === undefined`
+      - `runtime?.stopMessageState === undefined`
+  - 这证明该 TS surface 是“剥离 legacy mirror”，不是“扩散 legacy mirror”。
+
+2. `provider-response-converter` sync 结论
+
+- `tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts`
+  - 明确断言 pipeline center 里：
+    - `serverToolLoopState === undefined`
+    - `stopMessageState === undefined`
+  - 同时只保留：
+    - `runtime_control.stopless`
+    - `runtime_control.stopMessageCompareContext`
+- 这说明 response sync surface 也没有把这两族字段提升为 center canonical truth。
+
+3. `servertool-followup-metadata.ts` 结论
+
+- `src/server/runtime/http-server/executor/servertool-followup-metadata.ts`
+  - 仍在 `SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS` 中列 `serverToolLoopState`
+  - 但从文件角色与 strip key 清单看，这更像“清理/隔离面”而不是 owner 写点。
+- 当前没有证据表明它在新增 `serverToolLoopState` / `stopMessageState` 的广域暴露。
+
+4. 当前最合理的下一步
+
+- 不优先改：
+  - `servertool-adapter-context.ts`
+  - `servertool-followup-metadata.ts`
+- 继续改：
+  - 旧 goal / old stopless plan / 旧执行说明中把
+    `serverToolLoopState` / `stopMessageState` 当 canonical control 的叙述
+- 理由：
+  - 这些 TS 薄壳当前已经更接近“收口器”而不是“扩散器”；
+  - 错误最大、收益最高的残留仍在旧文档真相层。
+
+# 2026-06-26 metadata center closeout slice: followup nested routeHint stop writing flat metadata
+
+- 本轮继续按 `function-map + mainline-call-map + metadata-center wiki` 收 `mtc-03 runtime_control` 平铺残留。
+- 新确认 owner residue：
+  - `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts`
+    - nested followup input 仍会从 `baseMetadata.routeHint` / `nestedMetadata.routeHint` 读 route hint，
+    - 并在 router 模式下回写 `nestedMetadata.routeHint = routeNameCandidate`
+    - 这会把 followup request 的 route control 再物化回 flat metadata，违背 `runtime_control.routeHint` 唯一族。
+  - `tests/server/runtime/http-server/request-executor.spec.ts`
+    - `prompt-too-long retry` 仍把 mock pipeline 的行为建立在 `input.metadata.routeHint` 上，继续固化旧 contract。
+- 已修改：
+  - `servertool-followup-dispatch.ts`
+    - route hint candidate 现在优先读：
+      1. `baseMetadata.routeName`
+      2. `readRuntimeControlProjection(baseMetadata).routeHint`
+      3. `readRuntimeControlProjection(nestedMetadata).routeHint`
+    - router 模式缺 route hint 时，改写 `MetadataCenter.runtime_control.routeHint`
+    - 不再回写 `nestedMetadata.routeHint`
+  - `request-executor.spec.ts`
+    - retry mock pipeline 改为读取 `MetadataCenter.read(input.metadata)?.readRuntimeControl().routeHint`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+    - `projectRouterInputMetadata(...)` 不再把 `runtime_control/continuation` 推导出的 `routeHint` 镜像回 flat `metadata.routeHint`
+    - router request 继续携带 `responsesResume` / `retryProviderKey`，而 `routeHint` 由 `metadataCenterSnapshot.runtimeControl.routeHint` 走 Rust reader
+  - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+    - `prepareRequestExecutorAttemptState(...)` 不再把 retry 强制路由写成 `metadataForAttempt.routeHint`
+    - 改为写 `MetadataCenter.runtime_control.routeHint`
+    - 这条是 request-executor retry path 的真实 owner，解释了 `prompt-too-long -> longcontext` focused case 为什么之前仍在混用 flat metadata
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts`
+    - 物理删除 `buildMaterializedRequest(...)` 对 flat `args.metadata.routeHint` 的读取与 `NormalizedRequest.routeHint` 投影
+    - 同步删除 `HubPipelineRequestMetadata.routeHint` / `NormalizedRequest.routeHint` 类型壳
+    - 结论：HubPipeline materialize 层不再保留 route hint 顶层壳；request route control 继续只走 metadata center / snapshot / runtime_control
+  - `src/server/runtime/http-server/index.ts`
+    - `executePortAwarePipeline(...)` 不再把 `x-route-hint` header 平铺写入 `metadata.routeHint`
+    - 改为写 `MetadataCenter.runtime_control.routeHint`
+    - 这条是 server entry bridge 的 flat routeHint 残留 owner
+  - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`
+    - submit_tool_outputs e2e 不再断言 `pipelineInput.metadata.routeHint`
+    - 改以 `readRuntimeControl(...)` 作为唯一真相
+    - 同时补齐 `mockNativeExportsModule()` 缺失的 `extractServertoolCliResultRouteHintFromRequestNative`
+    - 这是该 focused e2e 的既有 mock/export 基建红点，不是 runtime 语义红点
+  - `src/server/runtime/http-server/executor-metadata.ts`
+    - `buildRequestMetadata(...)` 不再把 request-side route hint 平铺写入 `metadata.routeHint`
+    - 改为在 inbound owner 直接写 `MetadataCenter.runtime_control.routeHint`
+  - `tests/server/http-server/executor-metadata.spec.ts`
+    - route hint extraction focused cases 不再断言 flat `metadata.routeHint`
+    - 改断言 `MetadataCenter.read(metadata)?.readRuntimeControl().routeHint`
+  - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`
+    - resumed relay session/provider pin case 改对齐 `/goal` 真相：`responsesResume.sessionId/conversationId` 不升级为 `request_truth`
+    - ordinary `/v1/responses` case 不再看 flat `metadata.session_id`，改看 `readRequestTruth(...)`
+  - `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts`
+    - submit_tool_outputs request-path tests 不再直读 `pipelineInput.metadata.responsesResume`
+    - 改为统一读 `MetadataCenter.read(...).readContinuationContext().responsesResume`
+    - relay resume 的 `sessionId/conversationId` 不再要求进入 `request_truth`
+    - provider pin 真相改为 `MetadataCenter.runtime_control.retryProviderKey`
+- 本轮目标只是继续缩小 `mtc-03` 平铺读写面，不宣称整个 metadata center closeout 已完成。
+
+# 2026-06-26 metadata center /goal prompt prep
+
+- Jason 当前要求：把 metadata 改造过程收敛成可直接执行的 `/goal`，并先落实现文档再给 prompt。
+- 本轮新增实现文档：
+  - `docs/goals/metadata-center-request-scoped-closeout-plan.md`
+- 该 plan 只覆盖 contract/gate 先行的 metadata center 收口：
+  - 单 request-scoped `MetadataCenter`
+  - `request_truth.sessionId/conversationId` inbound-only write_once
+  - continuation/context/runtime/provider/response/closeout families 的唯一写点与合法改写点
+  - 禁止第二个 center merge、禁止 flat metadata / `__rt` 复活、禁止 SSE/handler/outbound 越权写 family
+- 本轮目标不是 runtime 完成，而是给 Jason 一个可直接复用的 `/goal` 文本，后续实现按该 plan 执行。
+
 # 2026-06-25 responses continuation save owner收口：删 handler/SSE 旧保存链
 
 - Jason 本轮 goal 真源再次确认：
@@ -189,6 +916,37 @@
 - 已落地最小协议与首个 Rust reader：
   - TS/native request 协议新增可选 `metadataCenterSnapshot`
   - `executeRequestStagePipeline(...)` 统一构造 snapshot，只从 `requestTruthPayload` / `continuationContextPayload` / `metadataCenterRuntimeControl` 取值
+
+# 2026-06-26 stop-message-auto strict session truth doc correction
+
+- 本轮额外纠正 `docs/stop-message-auto.md` 的会话真相漂移：
+  - 旧文案写成：缺 `sessionId/requestId` 时 CLI/runtime 可以自己补齐
+  - 当前代码与前面已锁的真相不是这样：
+    - stopless 状态 key 只能是 `session:<sessionId>`
+    - 缺稳定 `sessionId` 时应 fail-fast
+    - 不能靠“自己补会话身份”伪造后续闭环
+  - 已改为：
+    - 缺稳定 `sessionId` 时 stopless/CLI/runtime 必须 fail-fast
+    - CLI stdout 中的 `continuationPrompt/schemaGuidance` 只是 tool result，
+      不能承担会话身份或 fallback scope 作用
+
+# 2026-06-26 stopless scope/fallback doc correction
+
+- 本轮继续收 `tmux:` / `conversation:` / sticky fallback 的旧文档叙事，目标不是改历史审计事实，
+  而是避免这些历史快照继续冒充当前 stopless 执行契约。
+- 已修改：
+  - `docs/goals/stopless-session-id-closure-and-client-invisible-2026-06-15.md`
+    - 把 `is_persistent_sticky_key` 仍接受 `tmux:/session:/conversation:` 的表述改成
+      “审计背景/过期快照”，不再写成当前 stopless 契约
+    - 把 `persist_keys / state_update` 的目标表述收紧为
+      `session:<sessionId>` 唯一真源
+    - 把“保留非 stopless flow 的旧 sticky key”改成必须与 stopless 契约显式隔离
+  - `docs/goals/servertool-rust-only-fallback-ssot-audit-plan.md`
+    - 在示例 JSON 前增加说明：
+      - 该输出只是旧 sticky/fallback family 的审计样例
+      - 不代表当前 stopless 执行真相
+      - 当前 stopless 应收口到 `session:<sessionId>` 唯一路径
+- 这轮仍未改 runtime 代码；只是继续把旧审计/旧计划和当前执行真相分开，避免后续维护者误把历史示例当成现行契约。
   - Rust `router_metadata_input.rs` 对 `retryProviderKey` 改为 snapshot-first
 - focused 证据：
   - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts` PASS
@@ -16336,3 +17094,223 @@ reasonix config schema: [[providers]] toml with base_url+api_key_env; api key mu
   - `cargo test -p router-hotpath-napi rcc_fence --lib -- --nocapture` PASS, 10 tests.
   - `cargo test -p servertool-core persisted_lookup --lib -- --nocapture` PASS, 45 tests.
   - `cargo test -p servertool-core followup_execution_mode --lib -- --nocapture` PASS, 3 tests.
+# 2026-06-25 responses continuation save owner第二层物理删除完成
+
+- Jason 本轮继续按“response-side continuation save only in core Chat Process closeout；SSE transport-only”收口。
+- 已物理删除的旧 owner：
+  - `src/modules/llmswitch/bridge/responses-response-bridge.ts`
+    - 删除 `attachResponsesConversationLifecycleStreamForHttp(...)`
+    - 删除 `persistResponsesConversationLifecycleForHttp(...)`
+    - 删除 `persistResponsesConversationLifecycleAtChatProcessExitForHttp(...)`
+    - 删除仅为其服务的 `captureResponsesRequestContextForHttpProjection / clearResponsesConversationByRequestIdForHttpProjection / recordResponsesResponseForHttpProjection / finalizeResponsesConversationRequestRetentionForHttp`
+  - `src/modules/llmswitch/bridge.ts`
+  - `src/modules/llmswitch/bridge/index.ts`
+    - 同步移除上述旧 persist facade re-export
+  - 旧测试物理删除：
+    - `tests/server/handlers/handler-response-utils.responses-conversation.spec.ts`
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.request-truth.spec.ts`
+    - `tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts`
+- 同步收口的文档/地图：
+  - `docs/architecture/mainline-call-map.yml`
+    - `rct-06` 改到 `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts::persistResponsesConversationLifecycleAtChatProcessExitWithinCore`
+    - `mtc-05` 改到 core closeout 内的 MetadataCenter reader
+  - `docs/architecture/function-map.yml`
+    - `server.responses_response_handler_bridge_surface` 改为“只剩 transport-facing close/clear helpers，不再拥有 continuation save”
+  - `docs/architecture/wiki/responses-continuation-mainline-source.md`
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`
+- 本轮验证证据：
+  - `./node_modules/.bin/tsc -p tsconfig.json --noEmit` PASS
+  - `npm run verify:architecture-mainline-call-map` PASS
+  - `node scripts/verify-servertool-rust-only.mjs` PASS
+- 本轮暴露出的独立后续红点：
+  1. focused Jest 中 `responses-handler.submit-tool-outputs.responses-provider.spec.ts` 仍因旧 native mock/export 基建红：
+     - `projectResponsesSseFrameForClientNative` mock 缺失
+     - 这是 handoff 里已存在的“native export / ESM mock surface 不一致”类红点，不是本轮删除继续保存 owner 引入的新语义红
+  2. `handler-response-utils.force-sse-json-responses.spec.ts` 多个 direct SSE 断言现在只收到 keepalive/comment frame，未见旧预期的 event payload
+     - 需要下一轮区分：
+       - 这是 transport contract 变化
+       - 还是该 spec 自身还在假设旧 SSE semantic repair / old mock stream surface
+     - 当前不能把它当成“continuation save 删除导致 stopless/continuation 回归”的证据
+# 2026-06-26 responses-handler submit_tool_outputs metadata-center owner correction
+
+- 本轮继续按 `metadata-center-request-scoped-closeout-plan` 收 request-path handler 侧的 MetadataCenter 写点。
+- 先用 focused 红测锁定分歧：
+  - `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts`
+    - 旧断言要求：relay `resumeMeta.providerKey` 必须在 `handleResponses -> executePipeline` 边界前就进入 `MetadataCenter.runtime_control.retryProviderKey`
+  - 但更贴近真实主线的 focused e2e 已经证明：
+    - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`
+    - resumed relay provider pin 会在 `request executor before hub pipeline` 阶段成立
+    - 这条证据面比 isolated handler spec 更接近真 runtime 主线
+- 代码核对结论：
+  - `src/modules/llmswitch/bridge/responses-request-bridge.ts::buildResponsesPipelineMetadataForHttp`
+    - relay resume 只把 `responsesResume` 写入 continuation_context
+    - 只把 `routeHint` 写入 runtime_control
+    - 对 `providerKey` 明确保留 `continuationOwner !== 'relay'` 条件，说明 handler 边界当前并不是 relay retry pin owner
+  - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
+    - 仍保留“不要从 relay `responsesResume.providerKey` 二次升级 retry pin”的防线
+    - 因此如果强行把 handler 边界改成 relay retry pin owner，会让 isolated handler 语义和 attempt-state 旧 contract 发生新的 owner 冲突
+- 本轮动作：
+  - 评估后未保留对 `responses-request-bridge.ts` 的 runtime 改动；避免把 handler 入口长成第二个 relay retry pin owner
+  - 改测试对齐真实边界：
+    - `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts`
+    - 现在只要求：
+      1. relay `responsesResume` 留在 continuation_context
+      2. relay `routeHint` 已进入 runtime_control
+      3. `retryProviderKey` 在 handler 边界仍为 `undefined`
+    - relay provider pin 的有效闭环继续由 request-executor focused e2e 证明
+- 本轮验证证据：
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts -t "submit_tool_outputs|preserves resumed relay session scope and provider pin through request executor before hub pipeline|keeps ordinary /v1/responses payload untouched at handler boundary"` PASS
+- 当前收口后的真相：
+  - handler request 边界 owner：
+    - relay resume -> continuation_context.responsesResume
+    - relay route hint -> runtime_control.routeHint
+  - request-executor 主线 owner：
+    - “provider pin through request executor before hub pipeline” 仍由真实 request-path e2e 锁定
+  - 因此本轮不宣称整个 relay retry pin owner 已最终定案，只宣称：
+    - isolated handler spec 已改回当前真实边界
+    - 当前 request-path 主线 focused evidence 保持绿
+
+# 2026-06-26 metadata-center docs/gate closeout for relay retryProviderKey owner
+
+- 本轮继续沿同一条 gap，把 relay `retryProviderKey` owner 口径补进文档真源和验证映射，避免 handler/request-executor 双口径复活。
+- 新补的文档真相：
+  - `docs/architecture/wiki/metadata-center-mainline-source.md`
+    - `mtc-03` 明确改成：
+      - handler/bridge entry 可写 `continuation_context.responsesResume`
+      - handler/bridge entry 可写 `runtime_control.routeHint`
+      - relay `resumeMeta.providerKey` 不在该边界形成 effective `retryProviderKey`
+      - effective retry pin 必须在 request-executor request-route owner、进入 Hub 之前被证明
+  - `docs/architecture/function-map.yml`
+    - `hub.metadata_center_request_capture`
+      - 新增 `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts`
+      - notes 明确：relay bridge entry 不拥有 effective retry pin
+    - `hub.metadata_center_attempt_merge`
+      - 新增 `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`
+      - notes 明确：effective relay provider pin 必须在 request-executor path before Hub execution 被证明
+  - `docs/architecture/verification-map.yml`
+    - `hub.metadata_center_request_capture`
+      - notes 明确 bridge entry 只需证明 `responsesResume + routeHint`
+    - `hub.metadata_center_attempt_merge`
+      - integration 新增 `handler-request-executor.unified-semantics.e2e.spec.ts`
+      - notes 明确 effective retry pin 的验证层级在 request-executor path
+- 同步收口的 focused 测试：
+  - `tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts`
+    - 删除旧错误预期：`responsesResume` 继续保留 `sessionId/conversationId`
+    - 现对齐 `sanitizeResponsesResumeForContinuationContextForHttp(...)` 真相：
+      - continuation_context 里的 `responsesResume` 不再保留 session/conversation identity
+      - request truth 只能来自 requestContext/inbound owner
+- 本轮验证证据：
+  - `npm run verify:architecture-metadata-center-manifest-code-sync` PASS
+  - `npm run verify:function-map-compile-gate` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts tests/server/http-server/executor-metadata.spec.ts tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts -t "relay|submit_tool_outputs|provider pin|routeHint|retryProviderKey"` PASS
+- 这轮的收敛结果：
+  - `retryProviderKey` 不再停留在“runtime_control 的一个模糊字段”
+  - 而是被明确成：
+    - bridge/request-capture 阶段：不 claim effective owner
+    - request-executor path：effective owner evidence
+  - 这一步是 metadata-center closeout 的 contract/gate 收口，不是最终 Rust-only 完成声明
+
+# 2026-06-26 runtime_control remaining owner audit: preselectedRoute / stopMessage* / providerProtocol
+
+- 本轮继续按 goal 收 `runtime_control` 里还模糊的三个字段族：
+  - `preselectedRoute`
+  - `stopMessageEnabled` / `stopMessageExcludeDirect`
+  - `providerProtocol`
+- 代码真相重新核对后确认：
+  1. `preselectedRoute`
+     - 当前写 owner：
+       - `src/server/runtime/http-server/index.ts`
+       - router-direct relay path 用 `writeMetadataCenterRuntimeControl('preselectedRoute', ...)`
+     - 当前 release owner：
+       - `src/server/runtime/http-server/executor-metadata.ts::decorateMetadataForAttempt`
+       - retry attempt 时 `releaseRuntimeControl('preselectedRoute', ...)`
+     - request-stage TS shell：
+       - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
+       - 只 transport / materialize，不能成为 semantic owner
+  2. `stopMessageEnabled` / `stopMessageExcludeDirect`
+     - 当前 entry/runtime 写 owner：
+       - `src/server/runtime/http-server/index.ts`
+       - 端口 stop-message enablement / direct exclusion
+     - 当前 narrow request-capture exception：
+       - `src/server/runtime/http-server/executor-metadata.ts`
+       - 仅 `hasStoplessDirectiveInRequestPayload(...) -> stopMessageEnabled=true`
+     - 顶层 `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` 仍有真实消费：
+       - Rust req-process / stopless decision 仍会读这些 compatibility mirrors
+       - 因此当前不能误删，也不能把顶层 mirror 误记成 owner 真源
+  3. `providerProtocol`
+     - 当前并未看到明确的 `writeRuntimeControl('providerProtocol', ...)` 活写点
+     - 仓库真相仍以 top-level protocol-shell transport 为主：
+       - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts`
+       - 多处 host/provider bridge 仍直接读 `metadata.providerProtocol`
+     - 因此当前不能在文档里过度宣称 `runtime_control.providerProtocol` 已 fully anchored
+- 本轮动作：
+  - 不硬删上述 top-level projections；证据不支持
+  - 只把真实 owner / transitional mirror 状态补进文档：
+    - `docs/architecture/wiki/metadata-center-mainline-source.md`
+    - `docs/architecture/function-map.yml`
+    - `docs/architecture/verification-map.yml`
+  - 新文档口径明确：
+    - `preselectedRoute` = router-direct relay write + attempt retry release
+    - `stopMessage*` 顶层字段 = compatibility projection，不是第二真源 owner
+    - `providerProtocol` 仍处于 protocol-shell transport 过渡态，不能假装已完成 center-first 收口
+- 本轮验证证据：
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-metadata-center-manifest-code-sync` PASS
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/sharedmodule/hub-pipeline-preselected-route.spec.ts tests/server/http-server/executor-metadata.spec.ts tests/server/http-server/request-executor-preselected-route.blackbox.spec.ts -t "preselectedRoute|stopMessageEnabled|routecodexPortStopMessageEnabled|providerProtocol"` PASS
+- 这轮收敛结果：
+  - 当前 `runtime_control` 的剩余模糊字段不再被文档写成“已经 fully anchored”
+  - 而是被明确区分：
+    - 真写点 owner
+    - retry/release owner
+    - transitional mirror / transport residue
+  - 这使下一轮可以继续按 gate 推进物理删除或 Rust-only closeout，而不是在错误前提下删字段
+
+# 2026-06-26 providerProtocol contract de-overclaim
+
+- 本轮继续沿 `runtime_control` 模糊字段收口，单独下钻 `providerProtocol`。
+- 代码真相核对结果：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts`
+    - `readProviderProtocol(metadata)` 仍直接读 top-level `metadata.providerProtocol`
+    - `buildMaterializedRequest(...)` / `materializeHubPipelineRequest(...)` 也继续把它作为 normalized request 的 protocol-shell transport 字段
+  - `src/server/runtime/http-server/executor-pipeline.ts`
+    - stage recorder protocol 来自 `resolveEntryProtocolFromEndpoint(...)`
+    - 不是 MetadataCenter `runtime_control.providerProtocol` writer
+  - 全仓未找到对应的活写点：
+    - 没有 `writeRuntimeControl('providerProtocol', ...)`
+  - 因此当前仓库真相不是“`providerProtocol` 已经 center-first”
+    - 而是“仍以 top-level protocol transport / normalized request field 为主”
+- 本轮动作：
+  - 不改 runtime
+  - 只收文档，避免 overclaim：
+    - `docs/architecture/function-map.yml`
+      - `server.responses_request_handler_bridge_surface` notes 明确：
+        - 当前 bridge/request metadata 仍主要 transport top-level `providerProtocol`
+        - 不能把它记成 `runtime_control.providerProtocol` owner
+    - `docs/architecture/verification-map.yml`
+      - request-bridge 验证口径明确：
+        - 现阶段只能证明 top-level protocol-shell transport
+        - 不能拿现有测试冒充 center-backed runtime_control owner 证据
+- 本轮验证证据：
+  - `npm run verify:function-map-compile-gate` PASS
+  - `npm run verify:architecture-metadata-center-manifest-code-sync` PASS
+- 当前收敛结果：
+  - `providerProtocol` 不再被文档暗示成“已经属于 runtime_control 的已完成字段”
+  - 后续如果要继续收它，必须先落真实 `writeRuntimeControl('providerProtocol', ...)` owner，再补 map/gate，而不是先写文档冒充完成
+# 2026-06-26 metadata top-level projection closeout slice 3
+
+- 本轮继续收 `routecodexPortStopMessageEnabled` 兼容残留，范围只限 server handler / request metadata 边界与对应测试。
+- 文件级结论：
+  - `src/server/handlers/handler-utils.ts`
+    - 仍存在 active top-level writer：
+      - `target.routecodexPortStopMessageEnabled = runtimeControl.stopMessageEnabled`
+    - 这和当前收敛方向冲突：`stopMessageEnabled` 仍允许作为窄兼容 top-level 投影，但 `routecodexPortStopMessageEnabled` 不再需要由 handler 边界继续散写。
+  - `src/server/runtime/http-server/executor-metadata.ts`
+    - 当前工作树里已经移除同类 writer，仅保留 `stopMessageEnabled` 顶层兼容投影，并把 `routeHint/retryProviderKey` 收回 `runtime_control`。
+- 因此本轮最小修改：
+  1. 物理删除 `handler-utils.ts` 中的 `routecodexPortStopMessageEnabled` writer；
+  2. 同步把以下测试改为：
+     - 只断言 `MetadataCenter.runtime_control.stopMessageEnabled`
+     - 允许 `metadata.stopMessageEnabled`
+     - 明确断言 `routecodexPortStopMessageEnabled === undefined`
+  3. 不扩散到黑盒 fixture 批量改写，先锁住真实边界 writer 已消失。

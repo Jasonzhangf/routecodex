@@ -142,7 +142,7 @@ describe('handler metadata boundary', () => {
       const runtimeControl = MetadataCenter.read(input.metadata)?.readRuntimeControl();
       expect(runtimeControl?.stopMessageEnabled).toBe(true);
       expect(input.metadata.stopMessageEnabled).toBe(true);
-      expect(input.metadata.routecodexPortStopMessageEnabled).toBe(true);
+      expect(input.metadata.routecodexPortStopMessageEnabled).toBeUndefined();
     } finally {
       await closeServer(server);
     }

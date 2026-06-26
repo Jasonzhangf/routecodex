@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
-import { prepareRequestExecutorAttemptState } from '../../../../../src/server/runtime/http-server/executor/request-executor-attempt-state.js';
+import {
+  finalizeRequestExecutorAttemptMetadata,
+  prepareRequestExecutorAttemptState
+} from '../../../../../src/server/runtime/http-server/executor/request-executor-attempt-state.js';
 
 const ROOT = process.cwd();
 const ATTEMPT_STATE_PATH = path.join(
@@ -189,7 +192,51 @@ describe('request-executor attempt-state contract', () => {
     expect(source).not.toContain('__routecodexPreselectedRoute');
   });
 
-  it('merges runtime-control carrier state without reviving flat route-control backfill on merged metadata', () => {
+  it('fails fast when pipeline result returns a second MetadataCenter', () => {
+    const attemptMetadata: Record<string, unknown> = {};
+    const pipelineMetadata: Record<string, unknown> = {};
+    MetadataCenter.attach(attemptMetadata).writeRuntimeControl(
+      'stopMessageEnabled',
+      true,
+      {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'fails fast when pipeline result returns a second MetadataCenter',
+        stage: 'test_setup_request'
+      }
+    );
+    MetadataCenter.attach(pipelineMetadata).writeRuntimeControl(
+      'stopMessageEnabled',
+      false,
+      {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'fails fast when pipeline result returns a second MetadataCenter',
+        stage: 'test_setup_pipeline'
+      }
+    );
+
+    expect(() =>
+      finalizeRequestExecutorAttemptMetadata({
+        requestId: 'req-second-center',
+        metadataForAttempt: attemptMetadata,
+        pipelineResult: {
+          providerPayload: {},
+          target: {
+            providerKey: 'provider.test',
+            providerType: 'openai',
+            outboundProfile: 'default',
+          },
+          processMode: 'chat',
+          metadata: pipelineMetadata,
+        },
+        clientHeadersForAttempt: undefined,
+        clientRequestId: 'client-second-center',
+      })
+    ).toThrow(
+      'request-executor attempt metadata violated single-center contract: pipeline result returned a second MetadataCenter'
+    );
+  });
+
+  it('does not reintroduce second-center merge logic into finalizeRequestExecutorAttemptMetadata', () => {
     const source = fs.readFileSync(ATTEMPT_STATE_PATH, 'utf8');
     const finalizeBlock = sliceBetween(
       source,
@@ -197,9 +244,11 @@ describe('request-executor attempt-state contract', () => {
     );
 
     expect(finalizeBlock).toContain(
-      'const runtimeControlSnapshot = pipelineMetadataCenter.snapshot().runtimeControl;'
+      'request-executor attempt metadata violated single-center contract: pipeline result returned a second MetadataCenter'
     );
-    expect(finalizeBlock).toContain('mergedCenter?.writeRuntimeControl(');
+    expect(finalizeBlock).not.toContain('pipelineMetadataCenter.snapshot().runtimeControl');
+    expect(finalizeBlock).not.toContain('merged from pipeline result metadata center');
+    expect(finalizeBlock).not.toContain('mergedCenter?.writeRuntimeControl(');
     expect(finalizeBlock).not.toContain('mergedMetadata.__routecodexRetryProviderKey');
     expect(finalizeBlock).not.toContain('mergedMetadata.__routecodexPreselectedRoute');
   });

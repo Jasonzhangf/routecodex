@@ -151,8 +151,8 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>requestId</code></td><td>当前请求闭环主键</td><td>request + response 当前闭环</td><td>provider body field / client response field</td></tr>
         <tr><td><code>pipelineId</code></td><td>当前 pipeline 实例主键</td><td>request + response 当前闭环</td><td>provider body field / client response field</td></tr>
-        <tr><td><code>sessionId</code></td><td>当前 session 控制索引</td><td>metadata carrier / continuation scope / stopless scope</td><td>provider payload semantic shortcut</td></tr>
-        <tr><td><code>conversationId</code></td><td>当前 conversation 控制索引</td><td>metadata carrier / continuation scope</td><td>provider payload semantic shortcut</td></tr>
+        <tr><td><code>sessionId</code></td><td>当前 request truth session identity</td><td>metadata carrier / continuation scope / stopless request key</td><td>provider payload semantic shortcut</td></tr>
+        <tr><td><code>conversationId</code></td><td>当前 conversation narrowing key</td><td>metadata carrier / continuation scope</td><td>request <code>sessionId</code> replacement or provider payload semantic shortcut</td></tr>
         <tr><td><code>entryEndpoint</code></td><td>入口协议边界</td><td>req_inbound / req_chatprocess / resp_outbound</td><td>provider metadata fallback</td></tr>
         <tr><td><code>continuationOwner</code></td><td><code>direct</code> vs <code>relay</code> 恢复归属</td><td>continuation store / restore / route pin</td><td>普通 create 自动续接条件</td></tr>
         <tr><td><code>port</code> / <code>serverId</code> / <code>group</code></td><td>端口与实例隔离</td><td>runtime metadata / snapshot root / restore scope</td><td>cross-port shared metadata</td></tr>
@@ -162,12 +162,18 @@
         <h2>Session Dir Clarification</h2>
         <p><code>ROUTECODEX_SESSION_DIR</code> is not a semantic session id. It is a runtime filesystem root that may host several unrelated state families at once:</p>
         <ul>
-          <li>routing state snapshots (<code>session:*</code>, <code>conversation:*</code>, <code>tmux:*</code>)</li>
+          <li>generic routing/runtime state snapshots (<code>session:*</code>, <code>conversation:*</code>, <code>tmux:*</code>)</li>
           <li><code>session-bindings.json</code></li>
           <li><code>provider-health.json</code></li>
           <li><code>servertool-pending/*</code></li>
         </ul>
         <p>This means <code>sessionId</code> / <code>tmuxSessionId</code> / <code>conversationId</code> are not the same key, but the directory itself is already a shared runtime workdir. When reading or writing stopless/session data, prefer explicit metadata scope + explicit owner path. Do not infer ownership from the directory name alone.</p>
+        <p>Stopless-specific clarification:</p>
+        <ul>
+          <li>generic runtime snapshot keys such as <code>session:*</code>, <code>conversation:*</code>, or <code>tmux:*</code> are not legal stopless identity sources just because they coexist in the workdir;</li>
+          <li>current stopless counting/control truth remains request-local <code>MetadataCenter.runtime_control.stopless</code> plus current-turn tool-output truth, keyed by the active request <code>sessionId</code>;</li>
+          <li>mentions of <code>conversation:*</code> / <code>tmux:*</code> on this page are generic runtime namespace background only, not stopless contract.</li>
+        </ul>
         <p>Persistence rule now stays explicit:</p>
         <ul>
           <li>protocol-independent continuation state may be persisted/file-backed, because it must survive protocol boundaries and later restore with owner/scope validation;</li>
@@ -181,6 +187,13 @@
           <li>request <code>sessionId</code>: request/continuation scope only</li>
           <li><code>session-bindings.json</code> may bind <code>conversationSessionId -&gt; tmuxSessionId</code> for runtime injection lookup, but it must not redefine any of these namespaces as one identity</li>
           <li><code>session-bindings.json</code> production path is now runtime-bootstrap-owned: the HTTP server injects the bindings store path into <code>SessionClientRegistry</code>; the registry must not infer current-instance scope from feature-chain metadata, session ids, or <code>ROUTECODEX_SESSION_DIR</code>.</li>
+        </ul>
+        <p>Stop-message / stopless control clarification:</p>
+        <ul>
+          <li>canonical stopless control lives in <code>MetadataCenter.runtime_control.stopless</code>;</li>
+          <li><code>stopMessageEnabled</code> / <code>stopMessageExcludeDirect</code> are still active runtime-control fields;</li>
+          <li>top-level <code>metadata.stopMessageEnabled</code> / <code>routecodexPortStopMessageEnabled</code> remain compatibility projections only;</li>
+          <li><code>serverToolLoopState</code> / <code>stopMessageState</code> are active runtime mirrors consumed by Rust servertool-core contracts, but they are not <code>MetadataCenter.runtime_control</code> canonical slots.</li>
         </ul>
         <h2>State Family Matrix</h2>
         <table>
@@ -271,7 +284,7 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>req_inbound</td><td><code>entryEndpoint</code>, request scope ids, client metadata</td><td>capture current request context</td><td>leave metadata in normal payload</td></tr>
         <tr><td>req_chatprocess</td><td><code>responsesResume</code>, continuation hints, tools presence, stopless control</td><td>unify continuation / chat semantics</td><td>keep mappable semantics in metadata</td></tr>
-        <tr><td>virtual_router</td><td><code>chainId</code>, <code>stickyScope</code>, <code>resumeFrom</code>, route hints</td><td>continuity and route decision</td><td>direct-read protocol-specific scattered keys forever</td></tr>
+        <tr><td>virtual_router</td><td><code>chainId</code>, <code>stickyScope</code>, <code>resumeFrom</code>, route hints</td><td>continuity and route decision; <code>stickyScope</code> is continuation narrowing only, not stopless identity</td><td>direct-read protocol-specific scattered keys forever</td></tr>
         <tr><td>req_outbound / provider runtime</td><td>runtime carrier only</td><td>auth/transport/runtime observability</td><td>rebuild provider payload from metadata</td></tr>
         <tr><td>resp_chatprocess</td><td>same closed-loop ids + continuation/servertool hints</td><td>followup / tool governance / result restore</td><td>inject metadata to client semantic payload</td></tr>
         <tr><td>snapshot / diagnostics</td><td>metadata root field</td><td>observability only</td><td>replay into normal live path without replay scope</td></tr>

@@ -101,7 +101,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | followup runtime | internal servertool needs local execution + reenter | server-side runtime shell under Rust plan | rebuild standard request and reenter Hub request chain | 只能 relay 复入完整 Hub Pipeline |
 | generic CLI projection | tool should run through normal client tool loop | client executes `exec_command` | client returns ordinary tool result next turn | 不得 server-side reenter |
-| stopless CLI continuation | `stop_message_auto` / `reasoning_stop` loop | client executes `exec_command` | next turn model consumes current request `tool_outputs` / runtime metadata truth | 不得再触发 server-side followup，也不得依赖 file writeback |
+| stopless CLI continuation | `stop_message_auto` / `reasoningStop` loop | client executes `exec_command` | next turn model consumes current request `tool_outputs` / runtime metadata truth | 不得再触发 server-side followup，也不得依赖 file writeback |
 
 ## Stopless Branch
 
@@ -109,7 +109,7 @@ flowchart LR
 flowchart TD
   A["finish_reason=stop or stop hook condition"] --> B["hub.servertool_stopless_cli_continuation"]
   B --> C["ServertoolCliProjection01Planned<br/>tool=exec_command"]
-  C --> D["Client executes routecodex hook run reasoning_stop ..."]
+  C --> D["Client executes routecodex hook run reasoningStop ..."]
   D --> E["stdout JSON tool result"]
   E --> F["HubReqInbound02Standardized"]
   F --> G["next normal model turn"]
