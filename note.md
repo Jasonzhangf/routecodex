@@ -218,6 +218,24 @@
   - `request-executor-error-action-queue.ts`
     删除了已死的 `provider_traffic_saturated` action 队列分支。
   - 两个 red tests 改为对齐新的 metadata center / servertool 边界引用。
+
+# 2026-06-27 provider failure policy impl whitespace slice
+
+- 当前在做的最小变更：
+  - `src/providers/core/runtime/provider-failure-policy-impl.ts`
+  - 仅删除了 `type ProviderFailureDecisionLabel` 和后续常量之间的一行空白
+- 处置策略：
+  - 只提交这一个文件，避免把其他人留下的 `servertool` / quota / docs 脏改混入本次提交
+
+# 2026-06-27 quota residual doc-map cleanup slice
+
+- 已定位的死路径残留：
+  - `docs/architecture/function-map.yml` 中多处 `src/manager/modules/quota`
+  - `docs/architecture/wiki/virtual-router-ownership-map.md` 中 `src/manager/modules/quota`
+  - `docs/architecture/no-fallback-diff-rules.json` 中已删的 `src/server/runtime/http-server/daemon-admin/quota-handler.ts`
+- 当前动作：
+  - 只清理这三个真源文档/规则文件里的已删除路径引用
+  - 不动 `servertool` 生命周期文档和实现面
 - 已知事实：
   - 当前工作区仍有大量与这轮无关的 quota / servertool / docs 脏改，未纳入本次提交。
   - `provider-failure-policy-impl.ts` 里仍有活的本地 contract / 业务样本分支，暂时没有足够证据再删。
