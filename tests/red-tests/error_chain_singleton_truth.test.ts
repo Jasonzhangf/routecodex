@@ -103,10 +103,9 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(policy).toMatch(/isBlockingRecoverableProviderFailure/);
   });
 
-  it('request-executor-retry-decision.ts delegates to provider-failure-policy for network-transport detection', () => {
+  it('request-executor-retry-decision.ts does not redefine network-transport detection locally', () => {
     const decision = readSrc(EXECUTOR_RETRY_DECISION);
-    // Must import from policy, not define locally
-    expect(decision).toMatch(/isProviderFailureNetworkTransportLike/);
+    expect(decision).not.toMatch(/isProviderFailureNetworkTransportLike/);
     expect(decision).not.toMatch(/function\s+isNetworkTransportLikeError/);
   });
 

@@ -1,6 +1,5 @@
 import {
   describeProviderFailureDecision,
-  isProviderFailureNetworkTransportLike,
   resolveProviderFailureExclusionDecision,
   resolveProviderFailureRetryEligibility
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
@@ -70,33 +69,6 @@ export function applyRetryExclusionForCurrentProvider(args: {
   return true;
 }
 
-function isProviderTrafficSaturatedRetryError(args: {
-  status?: number;
-  error: unknown;
-}): boolean {
-  const code = normalizeCodeKey((args.error as { code?: unknown } | undefined)?.code);
-  const upstreamCode = normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode);
-  if (code === 'PROVIDER_TRAFFIC_SATURATED' || upstreamCode === 'PROVIDER_TRAFFIC_SATURATED') {
-    return true;
-  }
-  return args.status === 429 && code === 'PROVIDER_TRAFFIC_SATURATED';
-}
-
-function isImmediateProviderSwitchRecoverableError(args: {
-  status?: number;
-  error: unknown;
-}): boolean {
-  const code = normalizeCodeKey((args.error as { code?: unknown } | undefined)?.code);
-  const upstreamCode = normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode);
-  return args.status === 429
-    || code === 'HTTP_429'
-    || upstreamCode === 'HTTP_429'
-    || args.status === 503
-    || code === 'HTTP_503'
-    || upstreamCode === 'HTTP_503'
-    || isProviderTrafficSaturatedRetryError(args);
-}
-
 export function resolveProviderRetryExclusionPlan(args: {
   providerKey?: string;
   status?: number;
@@ -121,30 +93,8 @@ export function resolveProviderRetryExclusionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys
   });
   const hasExplicitRoutePool = Array.isArray(args.routePool) && args.routePool.length > 0;
-
-  if (
-    args.classification === 'recoverable'
-    && hasAlternativeCandidate
-    && !args.promptTooLong
-  ) {
-    return {
-      excludedCurrentProvider: applyRetryExclusionForCurrentProvider({
-        providerKey,
-        excludedProviderKeys: args.excludedProviderKeys
-      })
-    };
-  }
-
   const exclusionDecision = resolveProviderFailureExclusionDecision({
-    promptTooLong: args.promptTooLong,
-    classification: args.classification,
-    statusCode: args.status,
-    errorCode: normalizeCodeKey((args.error as { code?: unknown } | undefined)?.code),
-    upstreamCode: normalizeCodeKey((args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode),
-    isProviderTrafficSaturated: isProviderTrafficSaturatedRetryError({ status: args.status, error: args.error }),
-    isNetworkTransport: isProviderFailureNetworkTransportLike(args.error),
     hasAlternativeCandidate,
-    is429
   });
   if (exclusionDecision.excludeCurrentProvider && hasExplicitRoutePool) {
     return {
