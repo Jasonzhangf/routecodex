@@ -4,16 +4,13 @@ This document describes how RouteCodex/llmswitch-core selects a `providerKey` fr
 
 - `mode: "priority"` pools (strict priority, failover only when needed)
 - `mode: "round-robin"` pools (health-weighted AWRR)
-- How quota/health signals affect selection order and weights
+- How health signals affect selection order and weights
 
 ## Terms
 
 - **providerKey**: `providerId.<keyAlias>.<modelId>` (example: `antigravity.gbplasu1.claude-sonnet-4-5-thinking`)
 - **pool**: A `RoutePoolTier` (`routing.<routeName>[]`), containing `targets` and a `mode`
-- **quotaView**: Host-injected view (`ProviderQuotaView`) that provides:
-  - `inPool`, `cooldownUntil`, `blacklistUntil`
-  - `priorityTier` (static)
-  - `selectionPenalty`, `lastErrorAtMs`, `consecutiveErrorCount` (soft health signals)
+- **quotaView**: Shadow regression input used by tests to prove TS quota data cannot override Rust route truth. It is not a selection source of truth.
 
 ## Selection Engine I/O (for API/WebUI alignment)
 
@@ -26,7 +23,6 @@ input: {
   request features (tokens/tools/attachments),
   metadata (sessionId/conversationId/antigravitySessionId, excludedProviderKeys, instructions),
   provider registry,
-  quotaView? (optional),
   health state
 }
 
@@ -51,17 +47,13 @@ Continuation handling is separate:
 - direct/remote Responses continuation restores the recorded provider key because upstream owns the context;
 - local/relay continuation restores local context only and does not pin a provider.
 
-## quotaView Gating Principle
+## Shadow Regression Principle
 
-`quotaView` is the source of truth when injected:
+`quotaView` is retained only as a shadow regression surface in tests.
 
-- Router availability uses `quotaView` (`inPool`, `cooldownUntil`, `blacklistUntil`).
-- Router-local cooldown TTLs are bypassed in quotaView mode.
-- Health/series cooldown signals are still recorded, but final selectability is gated by quotaView.
-
-If `quotaView` is absent:
-
-- router falls back to local health/cooldown state for availability decisions.
+- Rust route truth remains authoritative.
+- TS `quotaView` may be poisoned in tests to prove it cannot override Rust decisions.
+- `quotaView` must not be treated as the primary selection source in docs or runtime wiring.
 
 ## Config Example (WebUI field names)
 
@@ -89,7 +81,7 @@ Use the same field names in JSON and WebUI forms:
 - Legacy sticky-first behavior:
   - moved to explicit routing instructions and session-binding policy.
 - Legacy router-local health dominance:
-  - in quota mode, replaced by `quotaView` gating to avoid split-brain decisions.
+  - replaced by Rust route truth; TS shadow inputs are only used to prove they cannot override it.
 - Legacy implicit alias stickiness:
   - removed. Use normal pool priority/weighted routing plus shared health cooldown.
 
@@ -108,27 +100,11 @@ When targets do not carry explicit per-target priority metadata at runtime, the 
 
 This makes it difficult for a single transient failure to instantly flip priority to the next target, while still allowing repeated errors to degrade a key.
 
-### Error priority penalty (soft)
-
-If `quotaView` provides `selectionPenalty` for a key, priority selection subtracts it from the derived base score:
-
-```
-effectivePriority = basePriority - selectionPenalty
-```
-
-`selectionPenalty` is produced by the host quota daemon:
-
-- `selectionPenalty = consecutiveErrorCount` when the last error is within `ROUTECODEX_QUOTA_ERROR_PRIORITY_WINDOW_MS` (default `10min`)
-- Resets to `0` on a successful response
-
-This is a *soft* preference signal (it does not exclude the key); exclusion is controlled by `inPool/cooldownUntil/blacklistUntil`.
-
 ### What “exhausted” means
 
 In priority mode, a higher-priority key is considered exhausted only when it is **not selectable** due to:
 
 - health manager unavailable (tripped/cooldown)
-- quotaView exclusion (`inPool=false` / active `cooldownUntil` / active `blacklistUntil`)
 - routing instructions / user exclusions
 
 Only then will routing advance to the next candidate in priority order.
@@ -141,10 +117,10 @@ Implementation: deterministic smooth weighted round-robin (no randomness).
 
 ### Health-weighted weights (AWRR)
 
-If enabled (`loadBalancing.healthWeighted.enabled=true`) and `quotaView` provides error metadata, the router computes:
+If enabled (`loadBalancing.healthWeighted.enabled=true`) and Rust health metadata is available, the router computes:
 
 - `weight = baseWeight * multiplier`
-- `multiplier` decreases with `consecutiveErrorCount`
+- `multiplier` decreases with recent error signals
 - `multiplier` recovers over time using exponential decay (half-life)
 - `multiplier` is floored by `minMultiplier` (prevents starvation)
 
@@ -158,20 +134,6 @@ Key knobs (configurable under `loadBalancing.healthWeighted`):
 - `minMultiplier` (default `0.5`)
 - `beta` (default `0.1`) — one error reduces weight by ~10%
 - `halfLifeMs` (default `10min`)
-
-## Model-capacity 429 handling (host quota)
-
-Some upstreams report `HTTP 429` with capacity semantics (e.g. “No capacity available for model …”).
-This is not “quota depleted” locally; switching keys often does not help.
-
-RouteCodex treats this as a *model-series* cooldown:
-
-- On capacity-exhausted 429, host applies an immediate cooldown to the entire `${providerId}.${modelId}` series
-- Default cooldown: `60s`
-
-Implementation:
-
-- `src/manager/modules/quota/provider-quota-daemon.model-backoff.ts`
 
 ## Context-weighted selection (preserve large windows)
 
