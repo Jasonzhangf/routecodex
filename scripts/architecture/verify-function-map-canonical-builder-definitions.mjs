@@ -97,7 +97,7 @@ function findDefinitionHits(relPath, builder) {
     new RegExp(`\\bpub\\(super\\)\\s+fn\\s+${escaped}\\b`),
     new RegExp(`\\bexport\\s+const\\s+${escaped}\\s*=`),
     new RegExp(`\\bconst\\s+${escaped}\\s*=`),
-    new RegExp(`^\\s*(?:(?:public|private|protected)\\s+)?${escaped}(?:<[^>]+>)?\\s*\\([^)]*\\)\\s*[:{]`),
+    new RegExp(`^\\s*(?:(?:public|private|protected)\\s+)?(?:async\\s+)?${escaped}(?:<[^>]+>)?\\s*\\([^)]*\\)\\s*[:{]`),
   ];
 
   for (const file of files) {
@@ -114,15 +114,35 @@ function findDefinitionHits(relPath, builder) {
 
 function collapseTsJsSiblingHits(hits) {
   const grouped = new Map();
+  const extensionRank = new Map([
+    ['.rs', 0],
+    ['.ts', 1],
+    ['.tsx', 2],
+    ['.js', 3],
+    ['.mjs', 4],
+    ['.cjs', 5],
+  ]);
   for (const hit of hits) {
     const [file, line] = hit.split(':');
-    const normalizedFile = file.replace(/\.(ts|js|tsx|mjs|cjs)$/, '');
-    const key = `${normalizedFile}:${line}`;
+    const ext = path.extname(file);
+    const normalizedFile = file.replace(/\.(ts|tsx|js|mjs|cjs)$/, '');
+    const key = normalizedFile;
     const arr = grouped.get(key) || [];
-    arr.push(hit);
+    arr.push({
+      hit,
+      line: Number(line),
+      rank: extensionRank.get(ext) ?? 99,
+    });
     grouped.set(key, arr);
   }
-  return Array.from(grouped.values()).map((group) => group.sort()[0]);
+  return Array.from(grouped.values()).map((group) => {
+    group.sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (a.line !== b.line) return a.line - b.line;
+      return a.hit.localeCompare(b.hit);
+    });
+    return group[0].hit;
+  });
 }
 
 const owners = parseOwners(mapText);

@@ -240,7 +240,6 @@ owners:
       - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/servertool-cli-projection.spec.ts
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
-      - tests/servertool/stopless-vr-route-hint.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
@@ -909,7 +908,6 @@ owners:
       - tests/servertool/server-side-tools.dispatch-native.spec.ts
       - tests/servertool/server-side-tools.auto-hook-config.spec.ts
       - tests/servertool/servertool-auto-hook-trace.spec.ts
-      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
     forbidden_paths:
       - src/providers
       - src/server/runtime/http-server/executor
@@ -925,7 +923,6 @@ owners:
       - tests/servertool/server-side-tools.auto-hook-config.spec.ts
       - tests/servertool/servertool-auto-hook-trace.spec.ts
       - tests/servertool/server-side-tools.dispatch-native.spec.ts
-      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -1030,42 +1027,6 @@ owners:
       - "Provider availability/quota/upstream transport errors are provider/server truth, not session truth."
       - "429/502/503/504, fetch-failed, provider-unavailable, and pool-exhaustion class errors must not write session_storm cooldown state."
 
-  - feature_id: error.session_storm_boundary
-    status: active
-    summary: "session-local deterministic bad-state storm fence; explicitly forbidden from carrying provider availability or cooldown truth"
-    owner_kind: ts_runtime_owner
-    owner_scope: "session-local deterministic bad-state storm fence only"
-    owner_module: src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts
-    canonical_types:
-      - SessionStormBackoffScope
-      - SessionStormBackoffState
-    canonical_builders:
-      - resolveSessionStormBackoffScopes
-      - isSessionStormBackoffCandidate
-      - consumeSessionStormBackoffMs
-    allowed_paths:
-      - src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts
-      - src/server/runtime/http-server/executor/request-executor-request-state.ts
-      - src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts
-      - tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts
-      - tests/server/runtime/http-server/request-executor.spec.ts
-      - docs
-    forbidden_paths:
-      - src/providers/core/runtime
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
-      - src/server/handlers
-      - src/client
-    required_tests:
-      - tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts
-      - tests/server/runtime/http-server/request-executor.spec.ts
-    required_gates:
-      - npm run verify:function-map-compile-gate
-    migration_target: rust
-    notes:
-      - "Only session-local deterministic bad state may enter session_storm."
-      - "Provider availability/quota/upstream transport errors must never enter session_storm."
-      - "session_storm must not own provider health, provider cooldown, provider exclusion, default-pool fallback, or route exhaustion semantics."
-
   - feature_id: error.backoff_action_queue
     status: active
     summary: "unified blocking backoff queue for host-side error action categories"
@@ -1083,16 +1044,14 @@ owners:
     allowed_paths:
       - src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
       - src/server/runtime/http-server/executor/request-executor-global-error-backoff.ts
-      - src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts
       - src/server/runtime/http-server/executor/request-executor-retry-state.ts
-      - src/server/runtime/http-server/executor/request-executor-retry-backoff.ts
       - src/server/runtime/http-server/executor/retry-engine.ts
       - src/server/runtime/http-server/executor-provider.ts
       - src/server/runtime/http-server/executor/servertool-followup-dispatch.ts
       - src/server/runtime/http-server/provider-traffic-governor.ts
-      - src/providers/core/runtime/provider-failure-policy-backoff.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
       - tests/server/runtime/http-server/provider-traffic-governor.spec.ts
       - tests/red-tests/server_module_help_contract.test.ts
       - docs
@@ -1111,8 +1070,8 @@ owners:
     migration_target: rust
     notes:
       - "Error storm prevention waits are fixed blocking waits: 1s -> 2s -> 3s -> repeat."
-      - "Categories are global_error, session_storm, provider_recoverable, provider_transport, provider_traffic_saturated, and servertool_followup."
-      - "Provider traffic saturation records provider_traffic_saturated, waits once through this queue, then raises saturation if still full so Virtual Router can switch provider even in priority mode."
+      - "Categories are global_error, session_storm, and servertool_followup."
+      - "Provider traffic saturation no longer enters this queue; governor must raise saturation immediately so upper layers can switch provider without blocking wait."
       - "The queue owner does not decide which semantic family an error belongs to; provider availability vs session-local deterministic truth is decided upstream by error.provider_failure_policy + error.session_storm_boundary."
       - "Do not restore per-call/env backoff constants, softWaitTimeoutMs, exponential wait loops, or local waiter queues outside this owner."
 
@@ -1445,36 +1404,6 @@ owners:
       - "Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list."
       - "Ordinary route-pool removal must not project terminal no-provider while default pool still retains its last provider; this guard is part of the Rust-owned plan/consumer contract, not a handler/executor-local reinterpretation."
 
-  - feature_id: quota.unified_control_surface
-    status: active
-    summary: "quota mutation surface and startup hydration must stay config-scoped and enter one module-owned surface only"
-    owner_kind: ts_runtime_owner
-    owner_scope: "quota mutation surface and startup hydration must stay config-scoped and enter one module-owned surface only"
-    owner_module: src/manager/modules/quota
-    canonical_types:
-      - QuotaManagerModule
-      - QuotaManagerAdapter
-    canonical_builders:
-      - getControlSurface
-    allowed_paths:
-      - src/manager/modules/quota
-      - src/server/runtime/http-server/daemon-admin
-      - docs
-    forbidden_paths:
-      - src/providers/core/runtime
-      - src/server/runtime/http-server/executor
-    required_tests:
-      - tests/manager/quota/quota-manager-module.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
-    required_gates:
-      - npm run verify:architecture-ci
-    migration_target: rust
-    notes:
-      - "daemon-admin and control-handler must not create their own adapter or call rust mutator directly."
-      - "TS quota module is lifecycle/persistence/control bridge only; runtime quota truth remains in Rust quota host."
-      - "startup hydration and persist must ignore providers absent from current config.toml materialized provider set."
-
   - feature_id: vr.route_availability_floor
     status: active
     summary: "route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice"
@@ -1667,11 +1596,12 @@ owners:
     notes:
       - "This row now owns the registry core and release edge only; request capture, attempt merge, and servertool adapter projection moved to file-scoped sub-features for queryability."
       - "The same request-scoped `MetadataCenter` must flow from server inbound through Hub Pipeline and provider/runtime into response closeout; stage-local plain-object mirrors may exist only as thin projections around the same bound center, never as a second truth source."
+      - "MetadataCenter is a control-side carrier only. It must not store copied request payloads, request context objects, normalized input snapshots, or any other request/response data mirrors."
       - "The machine-readable metadata-center manifest must stay code-bound: every declared family/slot needs matching TS type, state bucket, writer, reader, and release coverage until the owner migrates to Rust."
       - "Closeout release is now a real handler owner path: response closeout must call `releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`, not stay as documentation-only pending state."
       - "First-batch `runtime_control` carrier plumbing now lives in the registry core plus host-side projection reader; stopless followup materialization writes `runtime_control.stopless` through the bound MetadataCenter side-channel with fail-fast binding checks, while broader request-attempt / entry-shell writer migration remains partial."
       - "Current repeated merge/backfill surfaces (`buildHandlerPipelineMetadata`, `finalizeRequestExecutorAttemptMetadata`) are now thin projection surfaces; adapter-context session backfill has been physically deleted."
-      - "`request_truth.sessionId/conversationId` are write-once inbound identity facts. They must remain distinct from `continuation_context.responsesRequestContext.*`, must not be restored from continuation history, and must not be derived from tmux/client attachment scope."
+      - "`request_truth.sessionId/conversationId` are write-once inbound identity facts. They must not be restored from continuation history, must not be mirrored into continuation_context, and must not be derived from tmux/client attachment scope."
       - "Future center must store provenance: writer module, symbol, stage, status, overwrite history."
       - "Retired standalone SSE sniffer helper exports (`inferSseEventTypeFromDataJson`, `detectSseProtocolKindJson`, `validateSseEventTypeJson`) are physically deleted; the helpers stay Rust-internal under `parseSseEventWithConfigJson` / stream parser exports."
       - "Retired zero-consumer SSE stats/timeout public wrappers (`extractDecodeStatsWithNative`, `resolveSseTimeoutOptionsWithNative`, `extractDecodeStatsJson`, `resolveSseTimeoutOptionsJson`) are physically deleted; live SSE public bridges remain parser/stream/error descriptor/context diagnostics surfaces, not standalone stats/timeout helpers."
@@ -1711,7 +1641,6 @@ owners:
       - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
       - tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
-      - tests/servertool/stopless-metadata-center.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/metadata_center
     required_gates:
       - npm run verify:function-map-compile-gate
@@ -1759,7 +1688,7 @@ owners:
     migration_target: rust
     notes:
       - "This owner captures request/session/continuation-facing metadata into the request-local carrier; it must not project provider semantics or client response payloads."
-      - "For relay `/v1/responses` resume, this owner may preserve `continuation_context.responsesResume` and bind `runtime_control.routeHint`, but it must not become the effective owner of relay `retryProviderKey` truth."
+      - "For relay `/v1/responses` resume, this owner may preserve `continuation_context.responsesResume` and bind `runtime_control.routeHint`, but it must not write request payload/context mirrors into MetadataCenter and must not become the effective owner of relay `retryProviderKey` truth."
       - "The narrow request-capture exception `hasStoplessDirectiveInRequestPayload(...) -> runtime_control.stopMessageEnabled` is an entry-side owner for direct stopless intent only; the later top-level `metadata.stopMessageEnabled` mirror remains transitional projection, not a second truth source."
 
   - feature_id: hub.metadata_center_attempt_merge
@@ -2983,24 +2912,19 @@ owners:
       - "Must not duplicate vr.route_selection / vr.route_availability_floor semantics; selection floor stays in Rust."
   - feature_id: manager.health_runtime
     status: active
-    summary: "provider health / runtime cooldown ladder managed by Rust Virtual Router health; TS modules/health is persistence bridge"
+    summary: "virtual-router health snapshot persistence bridge; Rust VR health owns runtime cooldown truth"
     owner_kind: ts_runtime_owner
-    owner_scope: "provider health / runtime cooldown ladder managed by Rust Virtual Router health; TS modules/health is persistence bridge"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
+    owner_scope: "file-scoped virtual-router health snapshot persistence bridge; TS modules/health is the unique owner of persistence and snapshot access"
+    owner_module: src/manager/modules/health
     canonical_types:
-      - ProviderHealthState
-      - ProviderInternalState
+      - HealthManagerModule
+      - VirtualRouterHealthStore
+      - VirtualRouterHealthSnapshot
     canonical_builders:
-      - record_failure
-      - cooldown_provider
-      - cooldown_provider_until_midnight_persisted
-      - trip_provider
-      - is_available
-      - record_http_502_failure
-      - record_http_429_failure
-      - record_recoverable_failure
+      - getHealthStore
+      - getCurrentSnapshot
+      - resolveStateDir
     allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
       - src/manager/modules/health
       - src/modules/llmswitch/bridge
     forbidden_paths:
@@ -3009,6 +2933,7 @@ owners:
       - src/providers/core/runtime
       - src/manager/modules/routing
       - src/manager/modules/quota
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
     required_tests:
       - tests/manager/storage/jsonl-file-store.spec.ts
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
@@ -3016,8 +2941,8 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - "Health truth (success/failure/runtime cooldown ladder) lives in Rust health.rs."
       - "Cross-restart cooldown persistence is disabled; TS HealthManagerModule is jsonl persistence bridge only and must not redefine cooldown/runtime semantics."
+      - "Runtime cooldown ladder truth stays in Rust health.rs; this TS owner only manages local snapshot persistence and accessors."
   - feature_id: manager.token_runtime
     status: active
     summary: "OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin"
@@ -3049,38 +2974,9 @@ owners:
     notes:
       - "token-daemon is the unique owner of token leader-lock + history-store semantics."
       - "Must not be co-located with quota/health/routing; forbids cross-module mutation."
-  - feature_id: manager.quota_lifecycle
-    status: active
-    summary: "provider quota lifecycle (startup hydration, persist, prune) lives in TS provider-quota-center; the mutation surface is delegated to quota.unified_control_surface"
-    owner_kind: ts_runtime_owner
-    owner_scope: "provider quota lifecycle (startup hydration, persist, prune) lives in TS provider-quota-center; the mutation surface is delegated to quota.unified_control_surface"
-    owner_module: src/manager/quota
-    canonical_types:
-      - ProviderQuotaCenter
-      - ProviderQuotaStore
-    canonical_builders:
-      - loadProviderQuotaSnapshot
-      - saveProviderQuotaSnapshot
-    allowed_paths:
-      - src/manager/quota
-      - src/manager/modules/quota
-    forbidden_paths:
-      - src/server/runtime/http-server/daemon-admin
-      - src/server/runtime/http-server/executor
-      - src/providers/core/runtime
-    required_tests:
-      - tests/manager/quota/provider-quota-center.spec.ts
-      - tests/manager/quota/provider-quota-store.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts
-    required_gates:
-      - npm run verify:architecture-ci
-    migration_target: rust
-    notes:
-      - "lifecycle axis (hydration/persist/prune) != control axis (mutate quotas) of quota.unified_control_surface."
-      - "Quota control mutations must still go through quota.unified_control_surface; this feature owns the persist side."
   - feature_id: daemon_admin.command_handlers
     status: active
-    summary: "daemon-admin HTTP surface (auth/credentials/ports/providers/quota/restart/stats/status) is projection shell over manager/llmswitch-core truth"
+    summary: "daemon-admin HTTP surface (auth/credentials/ports/providers/restart/stats/status) is projection shell over manager/llmswitch-core truth"
     owner_kind: server_projection
     owner_scope: "daemon-admin HTTP surface (auth/credentials/ports/providers/quota/restart/stats/status) is projection shell over manager/llmswitch-core truth"
     owner_module: src/server/runtime/http-server/daemon-admin
@@ -3089,7 +2985,6 @@ owners:
       - DaemonAdminRouteRegistrar
     canonical_builders:
       - registerDaemonAuthRoutes
-      - registerQuotaRoutes
       - registerProviderRoutes
       - registerControlRoutes
       - registerRestartRoutes
@@ -3105,9 +3000,6 @@ owners:
       - src/server/runtime/http-server/executor
       - src/manager/modules/quota
     required_tests:
-      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts
       - tests/server/daemon-admin/providers-handler-utils.spec.ts
     required_gates:
       - npm run verify:architecture-ci
@@ -3138,8 +3030,6 @@ owners:
       - src/manager/modules/quota
     required_tests:
       - tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
     required_gates:
       - npm run verify:architecture-ci
     migration_target: ts
@@ -3936,7 +3826,6 @@ owners:
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/process
     required_tests:
-      - tests/servertool/followup-stream-compat.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary

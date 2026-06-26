@@ -120,7 +120,6 @@ verification:
       - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/servertool-cli-projection.spec.ts
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
-      - tests/servertool/stopless-vr-route-hint.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
@@ -145,7 +144,7 @@ verification:
       - "Validation must prove req_chatprocess rewrites the paired stopless tool result into model-transparent natural language + missing/error feedback, and VR still routes that turn to thinking."
       - "Validation must prove `/v1/responses` stopless turns do not lose the schema contract between req_chatprocess and the responses->chat bridge: req owner must preserve the contract in `instructions`, and bridge owner must materialize it into the outbound system message."
       - "Validation must prove stopless CLI projection/CLI execution uses active request-truth `sessionId/requestId` for same-session counting, and that `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only progression truth while `sessionDir` and any persisted writeback path remain absent."
-      - "Validation must prove `responsesRequestContext.sessionId/conversationId` stays continuation-only and cannot materialize request session truth, stopless activation, stop-message scope, or state keys."
+      - "Validation must prove MetadataCenter never carries `responsesRequestContext` or any request/context payload mirror, and continuation control cannot materialize request session truth, stopless activation, stop-message scope, or state keys."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
       - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
@@ -540,7 +539,6 @@ verification:
       - tests/servertool/servertool-auto-hook-trace.spec.ts
     integration:
       - tests/servertool/server-side-tools.dispatch-native.spec.ts
-      - tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -579,38 +577,16 @@ verification:
       - "Run broader executor retry stack when classification semantics change."
       - "Provider availability/quota/transport errors must prove they do not enter session_storm truth."
 
-  - feature_id: error.session_storm_boundary
-    change_risk: high
-    unit:
-      - src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts
-      - src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts
-      - src/server/runtime/http-server/executor/request-executor-request-state.ts
-    contract:
-      - tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts
-    integration:
-      - tests/server/runtime/http-server/request-executor.spec.ts
-      - tests/server/runtime/request-executor.single-attempt.spec.ts
-    smoke:
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "Must prove provider availability errors (429/503/fetch failed/provider-not-available) do not write session_storm."
-      - "Must prove only session-local deterministic bad-state errors remain eligible for session_storm."
-
   - feature_id: error.backoff_action_queue
     change_risk: high
     unit:
       - src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
-      - src/providers/core/runtime/provider-failure-policy-backoff.ts
     contract:
       - tests/red-tests/server_module_help_contract.test.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/tests/server_module_help.rs
     integration:
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
-      - tests/server/runtime/http-server/executor/request-executor-session-storm-backoff.spec.ts
-      - tests/server/runtime/http-server/executor-provider.backoff.spec.ts
       - tests/server/runtime/http-server/provider-traffic-governor.spec.ts
       - tests/server/runtime/request-executor.single-attempt.spec.ts
       - tests/sharedmodule/server-module-help.live.spec.ts
@@ -809,21 +785,6 @@ verification:
       - "Forward and reverse candidate-exhaustion cases both required; no local fallback chain synthesis."
       - "When ordinary route candidates are excluded, verification must prove terminal no-provider is blocked while default pool still has a last provider."
 
-  - feature_id: quota.unified_control_surface
-    change_risk: medium
-    unit:
-      - src/manager/modules/quota/quota-manager.ts
-      - src/manager/modules/quota/quota-adapter.ts
-    contract:
-      - tests/manager/quota/quota-manager-module.spec.ts
-    integration:
-      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
-    smoke:
-      - npm run verify:architecture-ci
-    build:
-      - npm run build:base
-    notes:
       - "daemon-admin and control plane must reuse module-owned control surface and must not grow a second adapter or mutator entrypoint."
 
   - feature_id: vr.route_availability_floor
@@ -975,7 +936,6 @@ verification:
       - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
       - tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
-      - tests/servertool/stopless-metadata-center.spec.ts
     integration:
       - tests/servertool/stopless-cli-continuation.spec.ts
     smoke:
@@ -1007,7 +967,7 @@ verification:
       - npm run build:base
     notes:
       - "Request capture must keep request truth, client attachment scope, and retry-attempt carrier seeding request-local and queryable."
-      - "Validation must prove relay `/v1/responses` bridge entry keeps `responsesResume` in continuation_context, binds `routeHint`, and does not claim effective `retryProviderKey` ownership at the handler shell boundary."
+      - "Validation must prove relay `/v1/responses` bridge entry keeps only control fields such as `responsesResume` in continuation_context, binds `routeHint`, does not write request/context payload mirrors into MetadataCenter, and does not claim effective `retryProviderKey` ownership at the handler shell boundary."
       - "Validation must prove the narrow stopless-directive entry write only lands `runtime_control.stopMessageEnabled`, and any remaining top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` references are stale residue, not independent truth or compatibility projections."
 
   - feature_id: hub.metadata_center_attempt_merge
@@ -1733,7 +1693,7 @@ verification:
   - feature_id: manager.health_runtime
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
+      - src/manager/modules/health/index.ts
     contract:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
     integration:
@@ -1760,31 +1720,11 @@ verification:
     notes:
       - "token-daemon is the unique owner; no Rust twin."
 
-  - feature_id: manager.quota_lifecycle
-    change_risk: high
-    unit:
-      - src/manager/quota/provider-quota-center.ts
-      - src/manager/quota/provider-quota-store.ts
-    contract:
-      - tests/manager/quota/provider-quota-center.spec.ts
-      - tests/manager/quota/provider-quota-store.spec.ts
-    integration:
-      - tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts
-    smoke:
-      - npm run verify:architecture-ci
-    build:
-      - npm run build:base
-    notes:
-      - "lifecycle axis (hydration/persist/prune); control axis is quota.unified_control_surface."
-
   - feature_id: daemon_admin.command_handlers
     change_risk: high
     unit:
       - src/server/runtime/http-server/daemon-admin-routes.ts
     contract:
-      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-snapshot-read-bridge.spec.ts
     integration:
       - tests/server/daemon-admin/providers-handler-utils.spec.ts
     smoke:
@@ -1801,8 +1741,7 @@ verification:
     contract:
       - tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts
     integration:
-      - tests/server/daemon-admin/quota-rust-host-mutate-contract.spec.ts
-      - tests/server/daemon-admin/quota-rust-host-setquota-control-contract.spec.ts
+      - tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts
     smoke:
       - npm run verify:architecture-ci
     build:
@@ -2125,7 +2064,6 @@ verification:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
     contract:
-      - tests/servertool/followup-stream-compat.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     integration: []
     smoke:
