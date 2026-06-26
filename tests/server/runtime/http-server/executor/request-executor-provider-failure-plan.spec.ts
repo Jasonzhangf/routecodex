@@ -117,6 +117,45 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
   });
 
+  test('special_400 provider.send failures reroute when route pool still has alternatives', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const plan = await resolveRequestExecutorProviderFailurePlan({
+      error: Object.assign(
+        new Error('Converted provider tool call has invalid client arguments'),
+        {
+          code: 'CLIENT_TOOL_ARGS_INVALID',
+          upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
+          statusCode: 502
+        }
+      ),
+      retryError: {
+        statusCode: 502,
+        errorCode: 'CLIENT_TOOL_ARGS_INVALID',
+        upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
+        reason: 'Converted provider tool call has invalid client arguments'
+      },
+      requestId: 'req-special-400-reroute',
+      providerKey: 'mini27.key1.MiniMax-M2.7',
+      runtimeKey: 'runtime:mini27',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'logical-special-400-reroute',
+      logicalChainRetryLimitStageRequestId: 'logical-special-400-reroute',
+      routePool: ['mini27.key1.MiniMax-M2.7', 'minimax.key1.MiniMax-M3'],
+      excludedProviderKeys,
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
+    expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(excludedProviderKeys.has('mini27.key1.MiniMax-M2.7')).toBe(true);
+  });
+
   test('RED: defaultTierAvailable true must flow into ErrorErr05 and block client projection when route pool is exhausted', async () => {
     const excludedProviderKeys = new Set<string>(['p1']);
     const plan = await resolveRequestExecutorProviderFailurePlan({

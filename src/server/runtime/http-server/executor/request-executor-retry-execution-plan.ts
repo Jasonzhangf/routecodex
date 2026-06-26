@@ -4,9 +4,6 @@ import {
   shouldApplyProviderTransportBackoff,
 } from './request-executor-provider-failure.js';
 import {
-  shouldCancelUnrecoverableRerouteWithoutAlternative,
-  shouldDirectReturnUnrecoverableWithoutForcedExclusion,
-  shouldRerouteTerminalUnrecoverableProviderFailure,
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
   resolveRequestExecutorNativeRetryPolicy,
@@ -230,16 +227,12 @@ export async function resolveProviderRetryExecutionPlan(args: {
       exclusionPlan.excludedCurrentProvider
       || classification === 'unrecoverable'
     );
-  const terminalUnrecoverablePolicyDecision =
-    shouldRerouteTerminalUnrecoverableProviderFailure({
-      classification,
-      shouldRetry: eligibilityPlan.shouldRetry,
-      hasTerminalAlternativeCandidate,
-      statusCode: args.retryError.statusCode,
-      errorCode: args.retryError.errorCode,
-      upstreamCode: args.retryError.upstreamCode
-    });
-  if (!eligibilityPlan.shouldRetry && !terminalUnrecoverablePolicyDecision) {
+  const shouldRerouteExcludedFailure =
+    !hostContractFailure
+    && !eligibilityPlan.shouldRetry
+    && retryExcludedCurrentProvider
+    && hasTerminalAlternativeCandidate;
+  if (!eligibilityPlan.shouldRetry && !shouldRerouteExcludedFailure) {
     const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
     return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
@@ -250,7 +243,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
-  if (terminalUnrecoverablePolicyDecision) {
+  if (shouldRerouteExcludedFailure) {
   const retrySwitchPlan = buildProviderRetrySwitchPlan({
     runtimeKey: args.runtimeKey,
     routePool: args.routePool,
@@ -281,22 +274,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
-  if (
-    shouldDirectReturnUnrecoverableWithoutForcedExclusion({
-      classification,
-      excludedCurrentProvider: exclusionPlan.excludedCurrentProvider,
-      retryable: (args.error as { retryable?: boolean } | undefined)?.retryable
-    })
-  ) {
-    return attachErrorErr05ExhaustionGate({
-      shouldRetry: false,
-      blockingRecoverable: eligibilityPlan.blockingRecoverable,
-      excludedCurrentProvider: false,
-      holdOnLastAvailable429,
-      retryBackoffMs: 0
-    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
-  }
-
   const retrySwitchPlan = buildProviderRetrySwitchPlan({
     runtimeKey: args.runtimeKey,
     routePool: args.routePool,
@@ -308,21 +285,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     retryError: args.retryError
   });
   if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
-    return attachErrorErr05ExhaustionGate({
-      shouldRetry: false,
-      blockingRecoverable: eligibilityPlan.blockingRecoverable,
-      excludedCurrentProvider: retryExcludedCurrentProvider,
-      holdOnLastAvailable429,
-      retryBackoffMs: 0
-    }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
-  }
-  if (
-    shouldCancelUnrecoverableRerouteWithoutAlternative({
-      classification,
-      switchAction: 'reroute_explicit_alternative',
-      hasAlternativeCandidate
-    })
-  ) {
     return attachErrorErr05ExhaustionGate({
       shouldRetry: false,
       blockingRecoverable: eligibilityPlan.blockingRecoverable,
