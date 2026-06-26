@@ -135,23 +135,6 @@ impl ProviderHealthManager {
         }
     }
 
-    pub(crate) fn cooldown_provider(
-        &mut self,
-        provider_key: &str,
-        reason: Option<String>,
-        override_ms: Option<i64>,
-        now_ms: i64,
-    ) {
-        let cooldown_ms = override_ms.unwrap_or(self.config.cooldown_ms).max(1);
-        let threshold = self.config.failure_threshold;
-        let state = self.get_state_mut(provider_key);
-        state.failure_count = state.failure_count.max(threshold);
-        state.state = "tripped".to_string();
-        state.cooldown_expires_at = Some(now_ms + cooldown_ms);
-        state.last_failure_at = Some(now_ms);
-        state.reason = reason;
-    }
-
     pub(crate) fn record_success(&mut self, provider_key: &str) {
         let state = self.get_state_mut(provider_key);
         state.failure_count = 0;
@@ -159,16 +142,6 @@ impl ProviderHealthManager {
         state.cooldown_expires_at = None;
         state.last_failure_at = None;
         state.reason = None;
-    }
-
-    pub(crate) fn trip_provider(
-        &mut self,
-        provider_key: &str,
-        reason: Option<String>,
-        cooldown_override_ms: Option<i64>,
-        now_ms: i64,
-    ) {
-        self.cooldown_provider(provider_key, reason, cooldown_override_ms, now_ms);
     }
 
     pub(crate) fn is_available(&mut self, provider_key: &str, now_ms: i64) -> bool {
@@ -350,17 +323,19 @@ mod tests {
     }
 
     #[test]
-    fn cooldown_provider_marks_unavailable_until_expiry() {
+    fn record_failure_third_strike_marks_unavailable_until_expiry() {
         let mut manager = ProviderHealthManager::new();
         manager.register_providers(&["test-provider".to_string()]);
 
-        manager.cooldown_provider("test-provider", Some("manual".to_string()), Some(5_000), 1_000);
+        manager.record_failure("test-provider", Some("err-1".to_string()), 1_000);
+        manager.record_failure("test-provider", Some("err-2".to_string()), 2_000);
+        manager.record_failure("test-provider", Some("err-3".to_string()), 3_000);
         let state = state_for(&manager, "test-provider");
         assert_eq!(state.state, "tripped");
         assert!(state.failure_count >= 3);
-        assert_eq!(state.cooldown_expires_at, Some(6_000));
-        assert!(!manager.is_available("test-provider", 5_999));
-        assert!(manager.is_available("test-provider", 6_001));
+        assert_eq!(state.cooldown_expires_at, Some(3_000 + DEFAULT_COOLDOWN_MS));
+        assert!(!manager.is_available("test-provider", 3_000 + DEFAULT_COOLDOWN_MS - 1));
+        assert!(manager.is_available("test-provider", 3_000 + DEFAULT_COOLDOWN_MS + 1));
     }
 
     #[test]

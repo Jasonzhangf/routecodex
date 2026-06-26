@@ -2178,11 +2178,45 @@ mod tests {
     }
 
     #[test]
-    fn priority_pool_falls_back_to_backup_when_primary_in_health_cooldown() {
+    fn priority_pool_falls_back_to_backup_when_primary_hits_third_failure() {
         let mut core = build_priority_test_core();
-        let now = now_ms();
-        core.health_manager
-            .cooldown_provider("sdfv.key1.gpt-5.4", Some("HTTP_503".to_string()), Some(60_000), now);
+        let provider_key = "sdfv.key1.gpt-5.4";
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "first failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "priority-first",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "second failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "priority-second",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "third failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "priority-third",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
 
         let classification = ClassificationResult {
             route_name: "thinking".to_string(),
@@ -2750,9 +2784,42 @@ mod tests {
         core.routing = parse_routing(&routing);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        let now = now_ms();
-        core.health_manager
-            .cooldown_provider(provider_key, Some("HTTP_503".to_string()), Some(60_000), now);
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "first failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "gateway-first",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "second failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "gateway-second",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "third failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "gateway-third",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
 
         assert_eq!(
             core.apply_standard_filters(
@@ -2914,12 +2981,43 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.health_manager.cooldown_provider(
-            "primary.key1.model",
-            Some("HTTP_502".to_string()),
-            Some(30 * 60_000),
-            now_ms(),
-        );
+        let provider_key = "primary.key1.model";
+        core.handle_provider_error(&json!({
+            "code": "HTTP_502",
+            "message": "first failure",
+            "stage": "provider.send",
+            "status": 502,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "primary-route-first",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_502",
+            "message": "second failure",
+            "stage": "provider.send",
+            "status": 502,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "primary-route-second",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_502",
+            "message": "third failure",
+            "stage": "provider.send",
+            "status": 502,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "primary-route-third",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
 
         let routing = Map::from_iter([(
             "thinking".to_string(),
@@ -3021,7 +3119,7 @@ mod tests {
     }
 
     #[test]
-    fn select_provider_falls_to_default_route_when_requested_route_is_exhausted() {
+    fn select_provider_falls_to_default_route_when_requested_route_hits_third_failure() {
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
         for key in ["thinking.key1.model", "default.key1.model"] {
@@ -3038,12 +3136,43 @@ mod tests {
         core.provider_registry.load(&providers);
         let keys = core.provider_registry.list_keys();
         core.health_manager.register_providers(&keys);
-        core.health_manager.cooldown_provider(
-            "thinking.key1.model",
-            Some("HTTP_502".to_string()),
-            Some(30 * 60_000),
-            now_ms(),
-        );
+        let provider_key = "thinking.key1.model";
+        core.handle_provider_error(&json!({
+            "code": "HTTP_502",
+            "message": "first failure",
+            "stage": "provider.send",
+            "status": 502,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "default-route-first",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_502",
+            "message": "second failure",
+            "stage": "provider.send",
+            "status": 502,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "default-route-second",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_502",
+            "message": "third failure",
+            "stage": "provider.send",
+            "status": 502,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "default-route-third",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            }
+        }));
 
         let routing = Map::from_iter([
             (

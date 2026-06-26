@@ -158,29 +158,6 @@ impl VirtualRouterEngineProxy {
     }
 
     #[napi]
-    pub fn mark_provider_cooldown(
-        &self,
-        provider_key: String,
-        cooldown_ms: Option<i64>,
-    ) -> NapiResult<()> {
-        let mut core = self.core.write().expect("core write lock");
-        core.health_manager.cooldown_provider(
-            &provider_key,
-            None,
-            cooldown_ms,
-            super::time_utils::now_ms(),
-        );
-        Ok(())
-    }
-
-    #[napi]
-    pub fn clear_provider_cooldown(&self, provider_key: String) -> NapiResult<()> {
-        let mut core = self.core.write().expect("core write lock");
-        core.health_manager.record_success(&provider_key);
-        Ok(())
-    }
-
-    #[napi]
     pub fn mark_concurrency_scope_busy(&self, scope_key: String) -> NapiResult<()> {
         let mut core = self.core.write().expect("core write lock");
         core.mark_concurrency_scope_busy(&scope_key);

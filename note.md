@@ -256,6 +256,53 @@
 - 独立非本刀问题：
   - `tests/sharedmodule/virtual-router-health-last-provider.spec.ts`
     - 当前失败原因为 `metadataCenterSnapshot is required for virtual router metadata reads`，不是 `cooldownOverrideMs` 语义回归；本次提交不带这个文件。
+
+# 2026-06-27 cooldownOverrideMs residue check
+
+- 当前全局 `rg -n "cooldownOverrideMs"` 在 focused 源/测试范围内只剩：
+  - `tests/sharedmodule/provider-runtime-ingress.spec.ts`
+    - 这是对 `returned.cooldownOverrideMs` 为 `undefined` 的正向断言，不是输入/透传残留。
+- 运行时验证结果：
+  - `tests/providers/core/utils/provider-error-reporter.spec.ts` PASS
+  - `tests/sharedmodule/provider-runtime-ingress.spec.ts` PASS
+  - `tests/sharedmodule/virtual-router-error-classification-top-level-native.spec.ts` PASS
+  - `tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts` FAIL，但失败点是 `metadataCenterSnapshot is required for virtual router metadata reads`，与 `cooldownOverrideMs` 无关。
+
+# 2026-06-27 retryBackoffMs / holdOnLastAvailable429 contract trim
+
+- 已物理删除 `ProviderRetryExecutionPlan` / telemetry / hold-state 上的死字段：
+  - `holdOnLastAvailable429`
+  - `retryBackoffMs`
+  - `backoffMs` telemetry 字段
+- 已同步收掉调用点：
+  - `request-executor-provider-resolve-failure.ts`
+  - `request-executor-provider-send-failure.ts`
+- 已同步收掉断言：
+  - `tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts`
+  - `tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts`
+- 验证：
+  - focused Jest pass
+  - `rg` 后这两个字段在 executor/tests 里只剩 `request-executor-retry-execution-plan.ts` 的内部局部变量判定，不再出现在输出契约里
+
+# 2026-06-27 Rust health override removal slice
+
+- 当前 focused 目标：删除 Rust VR health 的手动 cooldown / override 入口，只保留真实 provider error -> strike 计数 -> 第 3 次进入 30m cooldown。
+- 本轮已改：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs`
+    - 删除 `cooldown_provider(...)`
+    - 删除 `trip_provider(...)`
+    - 将 health 单测改为真实 `record_failure` 三连击触发 cooldown
+  - `.../virtual_router_engine/napi_proxy.rs`
+    - 删除 `mark_provider_cooldown(...)`
+    - 删除 `clear_provider_cooldown(...)`
+  - `.../virtual_router_engine/engine/events.rs`
+    - `provider_success_clears_runtime_failure_window` 改为先走真实三次 `handle_provider_error(...)`，再验证 success 清理
+  - `.../virtual_router_engine/engine/selection.rs`
+    - 3 处手动 `cooldown_provider(...)` 测试样本已改成真实 `handle_provider_error(...)` 三连击
+- 验证：
+  - `rg -n "cooldown_provider\\(|trip_provider\\(" .../virtual_router_engine` 结果为 0
+  - `cargo test -p router-hotpath-napi record_failure_third_strike_marks_unavailable_until_expiry --lib -- --nocapture` PASS
+  - `cargo test -p router-hotpath-napi priority_pool_falls_back_to_backup_when_primary_hits_third_failure --lib -- --nocapture` PASS
   - 已从 `request-executor-error-types.ts` / retry execution plan / telemetry / compact log / provider resolve+send failure 签名中删除 `recoverableBackoffMs` 与 `backoffScope`。
   - 已删除空壳 helper `src/server/runtime/http-server/executor/request-executor-retry-backoff.ts`，不再保留“固定返回 0ms/none”的第二层语义外壳。
   - focused jest 已通过，剩余下一层应继续审 `request-executor-provider-failure` / `provider-failure-policy` 是否还有“backoff”命名只剩文案壳。

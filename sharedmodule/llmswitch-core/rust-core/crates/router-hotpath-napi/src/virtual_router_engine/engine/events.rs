@@ -596,16 +596,52 @@ mod tests {
     }
 
     #[test]
-    fn provider_success_clears_runtime_cooldown() {
+    fn provider_success_clears_runtime_failure_window() {
         let provider_key = "sdfv.key1.gpt-5.5";
         let mut core = build_test_core_with_providers(&[
             (provider_key, "gpt-5.5"),
             ("cc.key1.gpt-5.5", "gpt-5.5"),
         ]);
 
-        // Trip with persisted 503 cooldown
-        core.health_manager
-            .trip_provider(provider_key, None, Some(86_400_000), now_ms());
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "first failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "first-failure",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            },
+            "timestamp": now_ms()
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "second failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "second-failure",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            },
+            "timestamp": now_ms()
+        }));
+        core.handle_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": "third failure",
+            "stage": "provider.send",
+            "status": 503,
+            "errorClassification": "recoverable",
+            "runtime": {
+                "requestId": "third-failure",
+                "providerKey": provider_key,
+                "runtimeKey": provider_key
+            },
+            "timestamp": now_ms()
+        }));
         let tripped = provider_state(&core, provider_key);
         assert_eq!(tripped.state, "tripped");
 
