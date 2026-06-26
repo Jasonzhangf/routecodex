@@ -1,3 +1,18 @@
+# 2026-06-27 provider failure policy impl-local type cleanup
+
+- 已收缩：
+  - `ProviderFailureAction` / `ProviderFailureDecisionLabel` 已从 `provider-failure-policy-impl.ts` 的外部导入改为本地私有类型
+- 已同步修改：
+  - `src/providers/core/runtime/provider-failure-policy.ts`
+  - `src/providers/core/runtime/provider-failure-policy-impl.ts`
+- 已验证：
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - 这两个 shape type 仍需要作为 plan 结构存在，但 impl 不必从 facade 依赖它们；现在 impl 自己拥有这两个本地类型。
+
 # 2026-06-27 provider error classification type cleanup
 
 - 已收缩：

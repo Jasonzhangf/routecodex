@@ -21,11 +21,11 @@ export type ProviderFailureClassification =
 export type ProviderFailureRetryAction =
   | 'reroute_explicit_alternative';
 
-export type ProviderFailureAction =
+type ProviderFailureAction =
   | 'direct_return'
   | ProviderFailureRetryAction;
 
-export type ProviderFailureDecisionLabel =
+type ProviderFailureDecisionLabel =
   | 'direct_return'
   | 'exclude_and_reroute';
 

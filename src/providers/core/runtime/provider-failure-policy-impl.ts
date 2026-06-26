@@ -9,8 +9,6 @@
 import type {
   ProviderFailureClassification,
   ProviderFailureRetryAction,
-  ProviderFailureAction,
-  ProviderFailureDecisionLabel,
   ProviderFailureActionPlan,
   ProviderFailureRetryEligibilityPlan,
   ProviderFailureOutcome,
@@ -27,6 +25,13 @@ import {
 } from './provider-error-catalog.js';
 import { DEEPSEEK_UNRECOVERABLE_CODES } from '../contracts/deepseek-provider-contract.js';
 
+type ProviderFailureAction =
+  | 'direct_return'
+  | ProviderFailureRetryAction;
+
+type ProviderFailureDecisionLabel =
+  | 'direct_return'
+  | 'exclude_and_reroute';
 
 
 // Phase 2: SSOT composition - provider-agnostic catalog + provider-specific contracts.
