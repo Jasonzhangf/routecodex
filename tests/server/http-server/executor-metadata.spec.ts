@@ -1315,7 +1315,7 @@ describe('executor metadata route hint extraction', () => {
       metadata: {}
     } as any);
 
-    expect(metadata.routeHint).toBeUndefined();
+    expect(metadata.routeHint).toBe('multimodal');
     expect(MetadataCenter.read(metadata)?.readRuntimeControl().routeHint).toBe('multimodal');
   });
 });

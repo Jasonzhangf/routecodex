@@ -812,12 +812,26 @@ function projectNativeTopLevelRuntimeControl(
   target: Record<string, unknown>,
   runtimeControl: ReturnType<typeof readRuntimeControlProjection>
 ): void {
+  const routeHint =
+    typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
+      ? runtimeControl.routeHint.trim()
+      : undefined;
+  if (shouldProjectRouteHintToTopLevel(routeHint)) {
+    target.routeHint = routeHint;
+  }
   if (typeof runtimeControl.stopMessageEnabled === 'boolean') {
     target.stopMessageEnabled = runtimeControl.stopMessageEnabled;
   }
   if (typeof runtimeControl.stopMessageExcludeDirect === 'boolean') {
     target.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect;
   }
+}
+
+function shouldProjectRouteHintToTopLevel(routeHint: string | undefined): boolean {
+  if (!routeHint) {
+    return false;
+  }
+  return routeHint === 'longcontext' || routeHint === 'multimodal';
 }
 
 export function decorateMetadataForAttempt(
