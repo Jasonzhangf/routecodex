@@ -142,7 +142,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies context overflow as special_400', () => {
+  it('classifies context overflow as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('Request input tokens exceeds the model maximum context length'), {
       code: 'CONTEXT_LENGTH_EXCEEDED',
       statusCode: 400
@@ -155,13 +155,13 @@ describe('provider failure policy ssot', () => {
       reason: 'Request input tokens exceeds the model maximum context length'
     });
 
-    expect(classification).toBe('special_400');
+    expect(classification).toBe('recoverable');
     expect(isProviderFailureHealthNeutral({
       stage: 'provider.send',
       errorCode: 'CONTEXT_LENGTH_EXCEEDED',
       statusCode: 400,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -171,11 +171,12 @@ describe('provider failure policy ssot', () => {
       attempt: 1,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
-      classification: 'special_400',
-      affectsHealth: false,
-      shouldRetry: false,
-      action: 'direct_return',
-      decisionLabel: 'direct_return'
+      classification: 'recoverable',
+      affectsHealth: true,
+      blockingRecoverable: false,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'exclude_and_reroute'
     }));
   });
 
@@ -264,7 +265,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies provider business error 2013 context overflow as special_400 (no pool exclusion)', () => {
+  it('classifies provider business error 2013 context overflow as recoverable and health-affecting', () => {
     const error = Object.assign(new Error('provider business error: context_length_exceeded'), {
       code: 'MALFORMED_RESPONSE',
       statusCode: 400,
@@ -283,13 +284,13 @@ describe('provider failure policy ssot', () => {
       reason: 'provider business error: context_length_exceeded'
     });
 
-    expect(classification).toBe('special_400');
+    expect(classification).toBe('recoverable');
     expect(isProviderFailureHealthNeutral({
       stage: 'provider.send',
       errorCode: 'MALFORMED_RESPONSE',
       statusCode: 400,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -299,11 +300,12 @@ describe('provider failure policy ssot', () => {
       attempt: 1,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
-      classification: 'special_400',
-      affectsHealth: false,
-      shouldRetry: false,
-      action: 'direct_return',
-      decisionLabel: 'direct_return'
+      classification: 'recoverable',
+      affectsHealth: true,
+      blockingRecoverable: false,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'exclude_and_reroute'
     }));
   });
 

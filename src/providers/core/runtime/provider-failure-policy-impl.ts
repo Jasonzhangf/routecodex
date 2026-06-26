@@ -349,7 +349,7 @@ export function resolveProviderFailureClassification(args: {
       providerStatusCode: protocolDetails.providerStatusCode
     })
   ) {
-    return 'special_400';
+    return 'recoverable';
   }
 
   const isHttp429Business2013 =
@@ -505,7 +505,7 @@ export function resolveProviderFailureClassification(args: {
       })
     )
   ) {
-    return 'special_400';
+    return 'recoverable';
   }
 
   if (
@@ -516,7 +516,7 @@ export function resolveProviderFailureClassification(args: {
     return 'unrecoverable';
   }
   if (errorCode === 'CONTEXT_LENGTH_EXCEEDED' || upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
-    return 'special_400';
+    return 'recoverable';
   }
   if (
     nestedParam.startsWith('tools.')
