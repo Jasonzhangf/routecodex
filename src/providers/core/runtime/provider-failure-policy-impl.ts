@@ -977,10 +977,9 @@ export function resolveProviderFailureExclusionDecision(args: {
 }
 
 export function shouldKeepProviderExcludedForNextAttempt(args: {
-  classification?: ProviderFailureClassification;
   hasAlternativeCandidate: boolean;
 }): boolean {
-  return args.classification === 'unrecoverable' || args.hasAlternativeCandidate;
+  return args.hasAlternativeCandidate;
 }
 
 export function shouldRerouteTerminalUnrecoverableProviderFailure(args: {

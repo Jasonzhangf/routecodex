@@ -1,7 +1,4 @@
 import {
-  resolveRequestExecutorProviderErrorClassification,
-} from './request-executor-provider-failure.js';
-import {
   shouldKeepProviderExcludedForNextAttempt,
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
@@ -24,25 +21,9 @@ export function resolveExcludedProviderReselectionPlan(args: {
     routePool: args.routePool,
     excludedProviderKeys: args.excludedProviderKeys
   });
-  const classification =
-    args.lastError
-      ? resolveRequestExecutorProviderErrorClassification({
-        error: args.lastError,
-        retryError:
-          args.extractRetryErrorSnapshot?.(args.lastError)
-          ?? {
-            statusCode: undefined,
-            errorCode: undefined,
-            upstreamCode: undefined,
-            reason: args.lastError instanceof Error ? args.lastError.message : String(args.lastError ?? '')
-          },
-        stage: 'provider.send'
-      })
-      : undefined;
   return {
     hasAlternativeCandidate,
     keepExcludedForNextAttempt: shouldKeepProviderExcludedForNextAttempt({
-      classification,
       hasAlternativeCandidate
     })
   };
