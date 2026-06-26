@@ -1,3 +1,36 @@
+# 2026-06-27: provider-error-classifier thin shell cleanup
+
+- 已验证 `provider-error-classifier.ts` 已收缩为薄适配器：仅保留状态提取 + policy outcome，不再携带 daily-limit 特例分叉。
+- 已删除：
+  - `forceFatalRateLimit`
+  - `isDailyLimitRateLimit`
+  - `detectDailyLimit`
+  - `ProviderErrorClassifierOptions.context`
+  - `ProviderErrorClassifierOptions.authMode`
+- 已验证：
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 可复用规则：
+  - 若 classifier 只是在替 policy outcome 转字段，就不要再保留独立特例状态面；
+  - base-provider 只应消费统一 policy outcome，不应再注入 daily-limit 检测。
+
+# 2026-06-27: provider failure policy backoff/helper cleanup
+
+- 已提交切片 `a2c7627 refactor(executor): drop transport backoff helpers`。
+- 已验证：
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+  - `tests/server/runtime/http-server/executor/request-executor-provider-response.stopless-contract-removal.spec.ts`
+  - `tests/server/runtime/http-server/executor/request-executor-provider-response.usage.spec.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `tests/providers/core/runtime/provider-auto-retry-business-error.spec.ts`
+- 已确认的长期事实：
+  - `shouldApplyProviderTransportBackoff` / `clearProviderTransportBackoff` 已从 executor 主链清理；
+  - `provider-error-catalog` 只保留真实账号/配额/网络/上游业务码，generic HTTP 400 不再被 catalog 强行收成独立 400 桶；
+  - `provider-failure-policy-impl.ts` 当前保留分支仍在服务真实本地合同保护或业务样本，暂未发现需要物理删除的旧 backoff 壳。
+- 可复用规则：
+  - 删 helper 后先验证 executor / policy / catalog 的最小闭环，再决定是否继续删 policy 分支；
+  - 若要继续收缩分类，先补 red sample，再改唯一 owner。
+
 # 2026-06-26: providerProtocol metadata-center no-fallback closeout
 
 - 已验证 `providerProtocol` 收口到 metadata center 的关键 contract spec 全绿：

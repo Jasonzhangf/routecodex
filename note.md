@@ -1,3 +1,37 @@
+# 2026-06-27 provider-error-classifier thin shell cleanup
+
+- 已继续收口：
+  - 删除 `provider-error-classifier.ts` 里的 `forceFatalRateLimit` / `isDailyLimitRateLimit` / `detectDailyLimit`
+  - 删除 `base-provider.ts` 对 daily-limit 检测的注入
+  - 删除 `ProviderErrorClassifierOptions` 里无实际消费的 `context` / `authMode`
+- 已验证：
+  - `rg -n "forceFatalRateLimit|isDailyLimitRateLimit|detectDailyLimit|isDailyLimitRateLimitMessage" src tests`
+  - `tests/providers/core/runtime/provider-error-classifier.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - provider error classifier 已收缩成薄适配器，只保留状态提取 + policy outcome；
+  - daily-limit 特例不再单独影响 provider 健康 / 冷却 / 选路真相；
+  - base-provider 仍通过同一 policy outcome 上报 provider.http 错误。
+- 下一步：
+  - 继续审 `provider-failure-policy-impl.ts` 剩余分类分叉，判断是否还有可物理删除的旧机制。
+
+# 2026-06-27 provider failure policy backoff/helper cleanup
+
+- 已提交：`a2c7627 refactor(executor): drop transport backoff helpers`
+- 已验证：
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+  - `tests/server/runtime/http-server/executor/request-executor-provider-response.stopless-contract-removal.spec.ts`
+  - `tests/server/runtime/http-server/executor/request-executor-provider-response.usage.spec.ts`
+  - `tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `tests/providers/core/runtime/provider-auto-retry-business-error.spec.ts`
+- 结论：
+  - `shouldApplyProviderTransportBackoff` / `clearProviderTransportBackoff` 这批旧 helper 已从 executor 主链和成功路径里删净；
+  - `provider-error-catalog` 仍只承载真实账号/配额/网络/上游业务码，generic HTTP 400 不再被 catalog 强行归成独立 400 桶；
+  - `provider-failure-policy-impl.ts` 里保留的分支仍对应真实本地合同保护或业务样本，不是刚删掉的 backoff 机制。
+- 下一步：
+  - 继续审 `provider-failure-policy-impl.ts` 是否还有可物理删除的旧分类壳；
+  - 若再删分支，先补对应 red sample，再回到唯一 owner。
+
 # 2026-06-27 rate-limit-manager dead file removal slice
 
 - 已物理删除：`src/providers/core/runtime/rate-limit-manager.ts`

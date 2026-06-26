@@ -24,32 +24,6 @@ import {
   reattachRuntimeMetadata,
   truncateLogMessage
 } from './base-provider-runtime-helpers.js';
-function isDailyLimitRateLimitMessage(messageLower: string, upstreamLower?: string): boolean {
-  const haystack = `${messageLower} ${upstreamLower ?? ''}`;
-  if (
-    haystack.includes('no capacity available')
-    || haystack.includes('model_capacity_exhausted')
-    || haystack.includes('model capacity exhausted')
-  ) {
-    return false;
-  }
-  return (
-    haystack.includes('daily cost limit')
-    || haystack.includes('daily quota')
-    || haystack.includes('weekly usage quota has been exhausted')
-    || haystack.includes('weekly quota has been exhausted')
-    || haystack.includes('weekly usage quota exhausted')
-    || haystack.includes('quota has been exhausted')
-    || haystack.includes('quota exceeded')
-    || haystack.includes('resource has been exhausted')
-    || haystack.includes('resource exhausted')
-    || haystack.includes('resource_exhausted')
-    || haystack.includes('费用限制')
-    || haystack.includes('每日费用限制')
-    || haystack.includes('余额不足')
-    || haystack.includes('无可用资源包')
-  );
-}
 
 type StatsCenterLike = {
   recordProviderUsage(ev: ProviderUsageEvent): void;
@@ -347,10 +321,7 @@ export abstract class BaseProvider implements IProviderV2 {
     const now = Date.now();
     const runtimeProfile = this.getRuntimeProfile();
     const classification = classifyProviderError({
-      error,
-      context: _context,
-      detectDailyLimit: (messageLower, upstreamLower) => isDailyLimitRateLimitMessage(messageLower, upstreamLower),
-      authMode: this.authMode
+      error
     });
     const augmentedError = classification.error;
     const msg = classification.message;

@@ -11,7 +11,7 @@ describe('Provider error classifier - 429 handling', () => {
     model: 'gemini-3-pro-high'
   } as any;
 
-  it('marks daily-limit 429 as unrecoverable and fatal', () => {
+  it('treats 429 as recoverable via shared policy outcome', () => {
     const classification = classifyProviderError({
       error: Object.assign(new Error('HTTP 429: quota has been exhausted'), {
         response: {
@@ -19,16 +19,12 @@ describe('Provider error classifier - 429 handling', () => {
           data: { error: { status: 429, message: 'quota has been exhausted' } }
         }
       }),
-      context: baseContext,
-      detectDailyLimit: () => true,
-      authMode: 'apikey'
+      context: baseContext
     });
 
     expect(classification.isRateLimit).toBe(true);
-    expect(classification.isDailyLimitRateLimit).toBe(true);
-    expect(classification.classification).toBe('unrecoverable');
-    expect(classification.recoverable).toBe(false);
-    expect(classification.forceFatalRateLimit).toBe(true);
+    expect(classification.classification).toBe('recoverable');
+    expect(classification.recoverable).toBe(true);
     expect(classification.affectsHealth).toBe(true);
   });
 });
@@ -47,9 +43,7 @@ describe('Provider error classifier - internal conversion errors', () => {
     const error = Object.assign(new Error('SSE_TO_JSON_ERROR: terminated'), { code: 'SSE_TO_JSON_ERROR' });
     const classification = classifyProviderError({
       error,
-      context: baseContext,
-      detectDailyLimit: () => false,
-      authMode: 'apikey'
+      context: baseContext
     });
 
     expect(classification.recoverable).toBe(true);
@@ -65,9 +59,7 @@ describe('Provider error classifier - internal conversion errors', () => {
     });
     const classification = classifyProviderError({
       error,
-      context: baseContext,
-      detectDailyLimit: () => false,
-      authMode: 'apikey'
+      context: baseContext
     });
 
     expect(classification.recoverable).toBe(false);
@@ -93,9 +85,7 @@ describe('Provider error classifier - internal conversion errors', () => {
     );
     const classification = classifyProviderError({
       error,
-      context: baseContext,
-      detectDailyLimit: () => false,
-      authMode: 'oauth'
+      context: baseContext
     });
 
     expect(classification.statusCode).toBe(434);

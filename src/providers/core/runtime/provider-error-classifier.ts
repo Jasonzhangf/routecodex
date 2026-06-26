@@ -1,4 +1,3 @@
-import type { ProviderContext } from '../api/provider-types.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import {
   extractProviderFailureStatusCode,
@@ -16,16 +15,11 @@ export type ProviderErrorClassification = {
   classification?: ProviderFailureClassification;
   recoverable: boolean;
   affectsHealth: boolean;
-  forceFatalRateLimit: boolean;
   isRateLimit: boolean;
-  isDailyLimitRateLimit: boolean;
 };
 
 export type ProviderErrorClassifierOptions = {
   error: unknown;
-  context: ProviderContext;
-  detectDailyLimit(messageLower: string, upstreamLower?: string): boolean;
-  authMode?: 'apikey' | 'oauth';
 };
 
 export function classifyProviderError(options: ProviderErrorClassifierOptions): ProviderErrorClassification {
@@ -45,18 +39,11 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   const upstream = err.response?.data;
   const upstreamCode = err.code || upstream?.error?.code;
   const upstreamMessage = upstream?.error?.message;
-  const upstreamMessageLower = typeof upstreamMessage === 'string' ? upstreamMessage.toLowerCase() : '';
 
   const statusText = String(statusCode ?? '');
   const msgLower = message.toLowerCase();
 
   const isRateLimit = statusText.includes('429') || msgLower.includes('429');
-  const isDailyLimit429 = isRateLimit && options.detectDailyLimit(msgLower, upstreamMessageLower);
-  let forceFatalRateLimit = false;
-
-  if (isRateLimit) {
-    forceFatalRateLimit = Boolean(isDailyLimit429);
-  }
   const outcome = resolveProviderFailureOutcome({
     error: err,
     stage: 'provider.http',
@@ -64,7 +51,6 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
     errorCode: typeof err.code === 'string' ? err.code : undefined,
     upstreamCode: typeof upstreamCode === 'string' ? upstreamCode : undefined,
     reason: message,
-    classification: isDailyLimit429 ? 'unrecoverable' : undefined
   });
   return {
     error: err,
@@ -75,9 +61,7 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
     classification: outcome.classification,
     recoverable: outcome.recoverable,
     affectsHealth: outcome.affectsHealth,
-    forceFatalRateLimit,
     isRateLimit,
-    isDailyLimitRateLimit: isDailyLimit429
   };
 }
 
