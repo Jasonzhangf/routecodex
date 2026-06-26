@@ -860,13 +860,6 @@ export function resolveProviderFailureRetryEligibility(args: {
       shouldRetry: false
     };
   }
-  if (blockingRecoverable) {
-    return {
-      classification: actionPlan.classification,
-      blockingRecoverable,
-      shouldRetry: actionPlan.shouldRetry
-    };
-  }
   if (!(args.attempt < args.maxAttempts)) {
     return {
       classification: actionPlan.classification,
