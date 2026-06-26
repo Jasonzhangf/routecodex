@@ -18,8 +18,7 @@ export {
 
 export type ProviderFailureClassification =
   | 'unrecoverable'
-  | 'recoverable'
-  | 'special_400';
+  | 'recoverable';
 
 export type ProviderFailureRetryAction =
   | 'reroute_explicit_alternative';

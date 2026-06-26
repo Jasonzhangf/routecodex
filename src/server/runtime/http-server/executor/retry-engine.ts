@@ -65,7 +65,7 @@ export function isRetryableSseWrapperError(
     if (known.class === 'recoverable') {
       return true;
     }
-    if (known.class === 'unrecoverable' || known.class === 'special_400') {
+    if (known.class === 'unrecoverable') {
       return false;
     }
   }

@@ -33,8 +33,6 @@ const BLOCKING_RECOVERABLE_CODES: &[&str] = &[
 pub enum FailureClassification {
     Unrecoverable,
     Recoverable,
-    #[serde(rename = "special_400")]
-    Special400,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,9 +90,6 @@ pub fn classify_failure(
     if let Some(status) = status_code {
         if matches!(status, 429 | 500 | 502 | 503 | 504) {
             return FailureClassification::Recoverable;
-        }
-        if status == 400 {
-            return FailureClassification::Special400;
         }
         if status >= 500 {
             return FailureClassification::Recoverable;

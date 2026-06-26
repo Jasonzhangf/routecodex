@@ -578,9 +578,6 @@ export function resolveProviderFailureClassification(args: {
   ) {
     return 'unrecoverable';
   }
-  if (statusCode === 400 && !isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason })) {
-    return 'special_400';
-  }
   if (
     typeof statusCode === 'number'
     && (statusCode === 401 || statusCode === 402 || statusCode === 403)
@@ -634,9 +631,6 @@ export function resolveProviderFailureClassification(args: {
   if (known?.class === 'unrecoverable') {
     return 'unrecoverable';
   }
-  if (known?.class === 'special_400') {
-    return 'special_400';
-  }
   if (known?.class === 'recoverable') {
     return 'recoverable';
   }
@@ -650,7 +644,6 @@ export function resolveProviderFailureClassification(args: {
       if (
         nativeResult === 'unrecoverable'
         || nativeResult === 'recoverable'
-        || nativeResult === 'special_400'
       ) {
         return nativeResult;
       }
@@ -714,7 +707,6 @@ export function classify_error_err_03_runtime_from_error_err_02_host(
     classification:
       captured.errorClassification === 'recoverable'
         || captured.errorClassification === 'unrecoverable'
-        || captured.errorClassification === 'special_400'
         ? captured.errorClassification
         : undefined,
   });
@@ -794,10 +786,7 @@ export function resolveProviderFailureActionPlan(args: {
     });
   const classification =
     args.promptTooLong === true
-    && (
-      resolvedClassification === undefined
-      || resolvedClassification === 'special_400'
-    )
+    && resolvedClassification === undefined
       ? 'recoverable'
       : resolvedClassification;
   const affectsHealth = !isProviderFailureHealthNeutral({
@@ -887,10 +876,7 @@ export function resolveProviderFailureRetryEligibility(args: {
       shouldRetry: false
     };
   }
-  if (
-    actionPlan.classification === 'special_400'
-    || actionPlan.classification === 'unrecoverable'
-  ) {
+  if (actionPlan.classification === 'unrecoverable') {
     return {
       classification: actionPlan.classification,
       blockingRecoverable: false,
@@ -976,9 +962,6 @@ export function isProviderFailureHealthNeutral(args: {
     upstreamCode,
     reason
   })) {
-    return true;
-  }
-  if (args.classification === 'special_400') {
     return true;
   }
   if (errorCode === 'CLIENT_DISCONNECTED' || upstreamCode === 'CLIENT_DISCONNECTED') {

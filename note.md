@@ -60,6 +60,25 @@
   - `invalid params, tool call result does not follow tool call (2013)`
   这些样本当前都能直接收敛到已有 policy 语义，不支持在本轮把 `special_400` 作为孤立 dead code 删除。
 
+# 2026-06-27 special_400 closeout slice
+
+- 已物理删除 `special_400` 分支/壳面：
+  - Rust `FailureClassification::Special400`
+  - Rust `VirtualRouterEngineCore` 里的 `special_400` 事件分类入口
+  - TS provider failure policy / native bridge / error catalog 的 `special_400` 三分类声明
+  - executor 里的 `special_400` 早退比较
+- 已验证：
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+  - `cargo test -p router-hotpath-napi unknown_http_400_records_single_strike_like_other_real_provider_errors --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi three_failures_trigger_30m_cooldown_for_provider_error_entrypoint --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi cooldown_expiry_restores_provider_and_same_three_failures_trip_again --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi provider_failure_entrypoint_uses_same_three_strike_contract --lib -- --nocapture`
+  - `npx jest tests/providers/core/runtime/provider-failure-policy.spec.ts tests/red-tests/error_chain_singleton_truth.test.ts tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts --runInBand`
+- 结论：
+  - 裸 `HTTP 400` 不再保留独立 `special_400` 保守桶；
+  - provider 错误真相现在只剩普通 recoverable / unrecoverable 两类，未知裸 400 会进入普通 provider failure 路径并由现有 strike / cooldown / switch 规则处理；
+  - 3 strike + 30m 冷却 + 恢复后再触发的 Rust health 合同已通过 focused 回归锁住。
+
 # 2026-06-27 provider error truth collapse - generic HTTP 400 catalog fallback slice
 
 - 当前 `HEAD` 已在 `743ac3d refactor(policy): drop duplicate invalid400`；本线没有新的未提交 focused 改动，工作树其余脏文件属于 quota/servertool/doc 删除面，不能混提。

@@ -1,4 +1,4 @@
-export type ProviderErrorClass = 'unrecoverable' | 'recoverable' | 'special_400' | 'route_runtime';
+export type ProviderErrorClass = 'unrecoverable' | 'recoverable' | 'route_runtime';
 
 export type ProviderErrorCatalogEntry = {
   code: string; // numeric-ish canonical code e.g. 429.2000
@@ -84,7 +84,7 @@ export function normalizeKnownProviderError(input: {
   // request validation error, so it must be normalised to the same quota class as
   // 429 INSUFFICIENT_QUOTA. Generic HTTP 400 does not belong to this catalog truth:
   // unknown/local contract 400s must stay undefined here and be classified by the
-  // provider failure policy owner instead of being force-collapsed into special_400.
+  // provider failure policy owner instead of being force-collapsed into a separate 400 bucket.
   if (
     status === 400
     && (

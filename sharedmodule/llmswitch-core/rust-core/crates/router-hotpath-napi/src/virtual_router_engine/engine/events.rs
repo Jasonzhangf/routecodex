@@ -7,9 +7,7 @@ use crate::virtual_router_engine::routing_state_store::{
 use crate::virtual_router_engine::time_utils::now_ms;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProviderErrorClassification {
-    Special400,
-}
+enum ProviderErrorClassification {}
 
 impl VirtualRouterEngineCore {
     pub(crate) fn handle_provider_success(&mut self, event: &Value) {
@@ -216,21 +214,8 @@ fn extract_error_reason(event: &Value) -> Option<String> {
 }
 
 fn extract_provider_error_classification(event: &Value) -> Option<ProviderErrorClassification> {
-    let value = event
-        .get("errorClassification")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_lowercase())
-        .or_else(|| {
-            event
-                .get("details")
-                .and_then(|v| v.get("errorClassification"))
-                .and_then(|v| v.as_str())
-                .map(|v| v.trim().to_lowercase())
-        })?;
-    match value.as_str() {
-        "special_400" => Some(ProviderErrorClassification::Special400),
-        _ => None,
-    }
+    let _ = event;
+    None
 }
 
 #[cfg(test)]
@@ -366,11 +351,11 @@ mod tests {
     }
 
     #[test]
-    fn special_400_records_single_strike_like_other_real_provider_errors() {
+    fn unknown_http_400_records_single_strike_like_other_real_provider_errors() {
         let provider_key = "test.key1.model";
         let mut core = build_test_core(provider_key, "gpt-test");
 
-        core.handle_provider_error(&build_error_event(provider_key, "special_400"));
+        core.handle_provider_error(&build_error_event(provider_key, "recoverable"));
 
         let state = provider_state(&core, provider_key);
         assert_eq!(state.state, "healthy");
@@ -468,7 +453,7 @@ mod tests {
         let provider_key = "test.key1.model";
         let mut core = build_test_core(provider_key, "gpt-test");
 
-        core.handle_provider_error(&build_top_level_error_event(provider_key, "special_400"));
+        core.handle_provider_error(&build_top_level_error_event(provider_key, "recoverable"));
 
         let state = provider_state(&core, provider_key);
         assert_eq!(state.state, "healthy");

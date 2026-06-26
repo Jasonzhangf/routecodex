@@ -447,7 +447,7 @@ export function isRetryableNetworkSseWrapperError(message: string, upstreamCode?
   if (known?.class === 'recoverable') {
     return true;
   }
-  if (known?.class === 'unrecoverable' || known?.class === 'special_400') {
+  if (known?.class === 'unrecoverable') {
     return false;
   }
   if (typeof statusCode === 'number' && Number.isFinite(statusCode)) {

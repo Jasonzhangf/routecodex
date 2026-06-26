@@ -1,7 +1,7 @@
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
-  test('local CLIENT_TOOL_ARGS_INVALID conversion failures no longer classify as special_400 but still suppress force-exclude', async () => {
+  test('local CLIENT_TOOL_ARGS_INVALID conversion failures remain recoverable only when they affect health', async () => {
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(
         new Error('Converted provider tool call has invalid client arguments'),
@@ -17,15 +17,15 @@ describe('request-executor-provider-failure-plan', () => {
         upstreamCode: 'CLIENT_TOOL_ARGS_INVALID',
         reason: 'Converted provider tool call has invalid client arguments'
       },
-      requestId: 'req-special-400-force-exclude',
+      requestId: 'req-provider-failure-force-exclude',
       providerKey: 'mini27.key1.MiniMax-M2.7',
       runtimeKey: 'runtime:mini27',
       dependencies: {} as any,
       attempt: 1,
       maxAttempts: 6,
       stage: 'provider.send',
-      logicalRequestChainKey: 'logical-special-400',
-      logicalChainRetryLimitStageRequestId: 'logical-special-400',
+      logicalRequestChainKey: 'logical-provider-failure-force-exclude',
+      logicalChainRetryLimitStageRequestId: 'logical-provider-failure-force-exclude',
       routePool: [],
       forceExcludeCurrentProviderOnRetry: true,
       excludedProviderKeys: new Set<string>(),
@@ -140,15 +140,15 @@ describe('request-executor-provider-failure-plan', () => {
         upstreamCode: 'PROVIDER_STATUS_2013',
         reason: 'Token Plan 当前请求量较高，请稍后重试'
       },
-      requestId: 'req-special-400-reroute',
+      requestId: 'req-provider-failure-reroute',
       providerKey: 'mini27.key1.MiniMax-M2.7',
       runtimeKey: 'runtime:mini27',
       dependencies: {} as any,
       attempt: 1,
       maxAttempts: 6,
       stage: 'provider.send',
-      logicalRequestChainKey: 'logical-special-400-reroute',
-      logicalChainRetryLimitStageRequestId: 'logical-special-400-reroute',
+      logicalRequestChainKey: 'logical-provider-failure-reroute',
+      logicalChainRetryLimitStageRequestId: 'logical-provider-failure-reroute',
       routePool: ['mini27.key1.MiniMax-M2.7', 'minimax.key1.MiniMax-M3'],
       excludedProviderKeys,
       recordAttempt: () => undefined,

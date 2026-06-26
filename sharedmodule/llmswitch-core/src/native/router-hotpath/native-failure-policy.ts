@@ -20,7 +20,7 @@ function getBindingOrThrow(): NativeBinding {
   return binding;
 }
 
-export type FailureClassification = 'unrecoverable' | 'recoverable' | 'special_400';
+export type FailureClassification = 'unrecoverable' | 'recoverable';
 
 export function classifyProviderFailure(
   statusCode: number | undefined,

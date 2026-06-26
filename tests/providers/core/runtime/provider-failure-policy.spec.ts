@@ -445,7 +445,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('keeps unknown bare HTTP_400 payload errors in special_400 until a deterministic contract signal exists', () => {
+  it('classifies unknown bare HTTP_400 payload errors as recoverable provider failures', () => {
     const error = Object.assign(new Error('HTTP 400: upstream rejected request for unknown reason'), {
       statusCode: 400,
       code: 'HTTP_400'
@@ -458,7 +458,7 @@ describe('provider failure policy ssot', () => {
       reason: error.message
     });
 
-    expect(classification).toBe('special_400');
+    expect(classification).toBe('recoverable');
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -468,11 +468,11 @@ describe('provider failure policy ssot', () => {
       attempt: 1,
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
-      classification: 'special_400',
-      affectsHealth: false,
-      shouldRetry: false,
-      action: 'direct_return',
-      decisionLabel: 'direct_return'
+      classification: 'recoverable',
+      affectsHealth: true,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'exclude_and_reroute'
     }));
   });
 
@@ -669,7 +669,7 @@ describe('provider failure policy ssot', () => {
     expect(classification).toBe('recoverable');
   });
 
-  it('RED: classifies provider business error 2013 traffic saturation as recoverable instead of special_400', () => {
+  it('RED: classifies provider business error 2013 traffic saturation as recoverable', () => {
     const error = Object.assign(
       new Error('Token Plan 当前请求量较高，请稍后重试'),
       {
@@ -741,7 +741,7 @@ describe('provider failure policy ssot', () => {
       })
     ];
     for (const classification of samples) {
-      expect(['recoverable', 'unrecoverable', 'special_400']).toContain(classification);
+      expect(['recoverable', 'unrecoverable']).toContain(classification);
     }
   });
 
@@ -765,7 +765,7 @@ describe('provider failure policy ssot', () => {
 
     expect(resolveProviderFailureExclusionDecision({
       hasAlternativeCandidate: true,
-      classification: 'special_400',
+      classification: 'recoverable',
       statusCode: 503,
       errorCode: 'ERR_HTTP2_STREAM_CANCEL',
       upstreamCode: 'HTTP_503',

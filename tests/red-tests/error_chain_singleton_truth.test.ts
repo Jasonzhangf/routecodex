@@ -171,7 +171,6 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
     expect(pf).not.toMatch(/isProviderFailureHealthNeutral/);
     expect(pf).not.toMatch(/function\s+isHealthNeutralProviderError/);
     expect(pf).not.toMatch(/function\s+resolveReportedProviderErrorRecoverable/);
-    expect(pf).not.toMatch(/classification\s*===\s*['"]special_400['"][\s\S]{0,180}return\s+false/);
     expect(pf).not.toMatch(/classification\s*===\s*['"]recoverable['"][\s\S]{0,180}return\s+true/);
   });
 
@@ -198,7 +197,6 @@ describe('Error chain singleton truth — no executor-layer redefinition', () =>
 
   it('request-executor-provider-failure-plan delegates force-exclude suppression policy', () => {
     const failurePlan = readSrc('src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts');
-    expect(failurePlan).toMatch(/classification === 'special_400'/);
     expect(failurePlan).toMatch(/reportPlan\.stageHint === 'host\.response_contract'/);
     expect(failurePlan).toMatch(/reportPlan\.stageHint === 'provider\.followup'/);
   });
