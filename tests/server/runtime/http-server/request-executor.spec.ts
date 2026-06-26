@@ -1826,7 +1826,7 @@ describe('HubRequestExecutor failover', () => {
         reason: 'tool history contract violated'
       },
       stage: 'provider.send'
-    })).toBe('special_400');
+    })).toBe('unrecoverable');
 
     expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
       error: Object.assign(new Error('tool_call missing required id'), {
@@ -2087,6 +2087,35 @@ describe('HubRequestExecutor failover', () => {
       status: 401
     })).rejects.toThrow('[request-executor] provider failure classification missing');
 
+  });
+
+  test('classifies MALFORMED_REQUEST as unrecoverable local contract error', () => {
+    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
+      error: Object.assign(new Error('tool history contract violated'), {
+        code: 'MALFORMED_REQUEST'
+      }),
+      retryError: {
+        errorCode: 'MALFORMED_REQUEST',
+        reason: 'tool history contract violated'
+      },
+      stage: 'provider.send'
+    })).toBe('unrecoverable');
+
+    expect(__requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+      error: Object.assign(new Error('tool history contract violated'), {
+        code: 'MALFORMED_REQUEST'
+      }),
+      retryError: {
+        errorCode: 'MALFORMED_REQUEST',
+        reason: 'tool history contract violated'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      providerKey: 'mimo.key1.mimo-v2.5-pro'
+    })).toEqual({
+      shouldRetry: false,
+      blockingRecoverable: false
+    });
   });
 
   test('retries when runtime resolution fails before provider send and then succeeds', async () => {

@@ -415,7 +415,7 @@ export function resolveProviderFailureClassification(args: {
     || upstreamCode === 'MALFORMED_REQUEST'
     || nestedCode === 'MALFORMED_REQUEST'
   ) {
-    return 'special_400';
+    return 'unrecoverable';
   }
 
   if (
