@@ -31,16 +31,25 @@ if (!functionMap.includes('feature_id: hub.metadata_center_dualwrite_api')) {
 if (!verificationMap.includes('feature_id: hub.metadata_center_dualwrite_api')) {
   fail('verification-map missing hub.metadata_center_dualwrite_api');
 }
-if (!mainlineMap.includes('metadata-center-dualwrite-dualread-closeout-checklist.md')) {
-  fail('mainline-call-map missing dualwrite closeout checklist binding');
+if (!mainlineMap.includes('metadata.center.mainline')) {
+  fail('mainline-call-map missing metadata.center.mainline chain');
+}
+if (!mainlineMap.includes('owner_feature_id: hub.metadata_center_mainline')) {
+  fail('mainline-call-map missing hub.metadata_center_mainline owner binding');
 }
 if (!manifest.includes('npm run verify:metadata-center-dualwrite-api')) {
   fail('metadata.center manifest missing dualwrite gate');
 }
 
-const checklistPath = 'docs/goals/metadata-center-dualwrite-dualread-closeout-checklist.md';
-if (!fs.existsSync(path.join(root, checklistPath))) {
-  fail(`missing ${checklistPath}`);
+const closeoutPlanPath = 'docs/goals/metadata-center-request-scoped-closeout-plan.md';
+if (!fs.existsSync(path.join(root, closeoutPlanPath))) {
+  fail(`missing ${closeoutPlanPath}`);
+}
+if (!functionMap.includes(closeoutPlanPath)) {
+  fail(`function-map missing closeout plan reference: ${closeoutPlanPath}`);
+}
+if (!verificationMap.includes(closeoutPlanPath)) {
+  fail(`verification-map missing closeout plan reference: ${closeoutPlanPath}`);
 }
 
 const requiredPlannedTests = [
