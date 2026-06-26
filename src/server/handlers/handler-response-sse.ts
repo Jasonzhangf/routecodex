@@ -23,6 +23,8 @@ import { extractUsageFromResult } from '../runtime/http-server/executor/usage-ag
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
+import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
+import { readRuntimeProviderObservationProjection } from '../runtime/http-server/metadata-center/request-truth-readers.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp,
@@ -40,7 +42,10 @@ import {
   normalizeClientVisibleResponsesSseFrameForHttp,
   type ResponsesSseClientProjectionStateForHttp,
 } from '../../modules/llmswitch/bridge/responses-client-projection.js';
-import { inspectResponsesTerminalStateFromSseChunkForHttp } from '../../modules/llmswitch/bridge/responses-stream-semantics.js';
+import {
+  attachResponsesStreamSemanticsForHttp,
+  inspectResponsesTerminalStateFromSseChunkForHttp,
+} from '../../modules/llmswitch/bridge/responses-stream-semantics.js';
 import {
   createChatJsonToSseConverterForHttp,
 } from '../../modules/llmswitch/bridge/responses-response-bridge.js';
@@ -370,6 +375,123 @@ function createDirectPassthroughSseGuardStream(stream: Readable, requestId: stri
   return stream.pipe(transform);
 }
 
+type ChatCompletionSseWireState = {
+  id?: string;
+  created?: number;
+  model?: string;
+  clientModelId?: string;
+};
+
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+function hasObjectUsage(value: unknown): boolean {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function readChatClientModelForSseRestore(metadata?: Record<string, unknown>): string | undefined {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return undefined;
+  }
+  const providerObservation = readRuntimeProviderObservationProjection(metadata);
+  const candidates = [
+    providerObservation.clientModelId,
+    metadata.clientModelId,
+    metadata.originalModelId,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
+function normalizeChatCompletionSseFrameForClient(
+  frame: string,
+  state: ChatCompletionSseWireState,
+  requestLabel: string,
+  metadata?: Record<string, unknown>
+): string {
+  const lineBreak = frame.includes('\r\n') ? '\r\n' : '\n';
+  const lines = frame.replace(/\r?\n\r?\n$/, '').split(/\r?\n/);
+  const dataLineIndex = lines.findIndex((line) => line.startsWith('data:'));
+  if (dataLineIndex < 0) {
+    return frame;
+  }
+  const dataText = lines[dataLineIndex].slice('data:'.length).trim();
+  if (!dataText || dataText === '[DONE]') {
+    return frame;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(dataText);
+  } catch {
+    return frame;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return frame;
+  }
+  const record = parsed as Record<string, unknown>;
+  const choices = Array.isArray(record.choices) ? record.choices : undefined;
+  const object = typeof record.object === 'string' ? record.object : undefined;
+  const isChatChunk = object === 'chat.completion.chunk' || choices !== undefined;
+  if (!isChatChunk) {
+    return frame;
+  }
+
+  const usagePresent = hasObjectUsage(record.usage);
+  if ((object === undefined || object === '') && choices?.length === 0 && !usagePresent) {
+    return '';
+  }
+
+  const nextId = readNonEmptyString(record.id);
+  if (nextId) {
+    state.id = nextId;
+  } else if (state.id) {
+    record.id = state.id;
+  } else {
+    throw new Error(`[server.response_projection] chat SSE chunk missing stable id (requestId=${requestLabel})`);
+  }
+
+  const nextCreated = readPositiveInteger(record.created);
+  if (nextCreated !== undefined) {
+    state.created = nextCreated;
+  } else if (state.created !== undefined) {
+    record.created = state.created;
+  } else {
+    throw new Error(`[server.response_projection] chat SSE chunk missing stable created timestamp (requestId=${requestLabel})`);
+  }
+
+  const nextModel = readNonEmptyString(record.model);
+  if (nextModel) {
+    state.model = nextModel;
+  } else if (state.model) {
+    record.model = state.model;
+  }
+
+  if (!state.clientModelId) {
+    state.clientModelId = readChatClientModelForSseRestore(metadata);
+  }
+  if (state.clientModelId) {
+    record.model = state.clientModelId;
+  }
+
+  if (object !== 'chat.completion.chunk') {
+    record.object = 'chat.completion.chunk';
+  }
+
+  lines[dataLineIndex] = `data: ${JSON.stringify(record)}`;
+  return `${lines.join(lineBreak)}${lineBreak}${lineBreak}`;
+}
+
 function sendSseBridgeError(
   res: Response,
   requestLabel: string,
@@ -584,17 +706,18 @@ async function streamResponsesJsonAsSse(
         return;
       }
       cleanupLogged = true;
-      if (trigger === 'close' && !streamEnded) {
+      const responseClosedBeforeStreamEnd = !streamEnded;
+      try {
+        stream.unpipe(args.res);
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.json_bridge.unpipe:${args.requestLabel}`, error);
+      }
+      if (responseClosedBeforeStreamEnd) {
         recordSseTransportClientClose(args.requestLabel, {
           finishReason: undefined,
           terminal: false,
           closeBeforeStreamEnd: true,
         });
-        try {
-          stream.unpipe(args.res);
-        } catch (error) {
-          logResponseNonBlockingError(`response.sse.json_bridge.unpipe:${args.requestLabel}`, error);
-        }
         try {
           stream.destroy(createSseClientResponseClosedError());
         } catch (error) {
@@ -696,17 +819,18 @@ async function streamChatCompletionsJsonAsSse(
         return;
       }
       cleanupLogged = true;
-      if (trigger === 'close' && !streamEnded) {
+      const responseClosedBeforeStreamEnd = !streamEnded;
+      try {
+        stream.unpipe(args.res);
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.chat_json_bridge.unpipe:${args.requestLabel}`, error);
+      }
+      if (responseClosedBeforeStreamEnd) {
         recordSseTransportClientClose(args.requestLabel, {
           finishReason: undefined,
           terminal: false,
           closeBeforeStreamEnd: true,
         });
-        try {
-          stream.unpipe(args.res);
-        } catch (error) {
-          logResponseNonBlockingError(`response.sse.chat_json_bridge.unpipe:${args.requestLabel}`, error);
-        }
         try {
           stream.destroy(createSseClientResponseClosedError());
         } catch (error) {
@@ -863,6 +987,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ...(result.metadata ?? {}),
     requestId: requestLabel
   } as Record<string, unknown>;
+  const resultMetadataCenter = resultMetadata ? MetadataCenter.read(resultMetadata) : undefined;
+  if (resultMetadataCenter) {
+    MetadataCenter.bind(responseProjectionMetadata, resultMetadataCenter);
+  }
   const clientConnectionState =
     responseProjectionMetadata.clientConnectionState
     && typeof responseProjectionMetadata.clientConnectionState === 'object'
@@ -903,9 +1031,22 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     );
     return true;
   }
+  try {
+    stream.pause?.();
+  } catch (error) {
+    logResponseNonBlockingError(`response.sse.pause_source:${requestLabel}`, error);
+  }
+  const semanticsStream = !isDirectPassthrough
+    ? attachResponsesStreamSemanticsForHttp({
+      stream,
+      entryEndpoint,
+      requestLabel,
+      onNonBlockingError: logResponseNonBlockingError,
+    })
+    : stream;
   const restoredStream = isDirectPassthrough
-    ? createDirectPassthroughSseGuardStream(stream, requestLabel)
-    : createClientVisibleSseProjectionStream(stream, requestLabel);
+    ? createDirectPassthroughSseGuardStream(semanticsStream, requestLabel)
+    : createClientVisibleSseProjectionStream(semanticsStream, requestLabel);
   const clientSseSnapshotRecorder = shouldCaptureClientResponseSnapshotStage('client-response')
     ? createClientSseSnapshotRecorder(restoredStream, res, {
       requestId: requestLabel,
@@ -921,6 +1062,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   const outboundStream = shouldCaptureClientResponseSnapshotStage('client-response')
     ? maybeAttachClientSseSnapshotStream(restoredStream, clientSseSnapshotRecorder)
     : restoredStream;
+  const clientConnectionDisconnected = clientConnectionState?.disconnected === true;
   logPipelineStage('response.sse.prestart.inspect', requestLabel, {
     status,
     entryEndpoint,
@@ -935,12 +1077,15 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     resDestroyed: res.destroyed === true,
     resWritableEnded: (res as unknown as { writableEnded?: boolean }).writableEnded === true,
     resWritableFinished: (res as unknown as { writableFinished?: boolean }).writableFinished === true,
-    clientConnectionDisconnected: clientConnectionState?.disconnected === true,
+    clientConnectionDisconnected,
   });
   const preStartClientClosed =
-    res.destroyed
-    || (res as unknown as { writableEnded?: boolean }).writableEnded === true
-    || (res as unknown as { writableFinished?: boolean }).writableFinished === true;
+    clientConnectionDisconnected
+    && (
+      res.destroyed
+      || (res as unknown as { writableEnded?: boolean }).writableEnded === true
+      || (res as unknown as { writableFinished?: boolean }).writableFinished === true
+    );
   if (preStartClientClosed) {
     const details = {
       status,
@@ -974,7 +1119,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
             ? 'array'
             : typeof streamSource,
       directPassthrough: isDirectPassthrough,
-      clientConnectionDisconnected: clientConnectionState?.disconnected === true,
+      clientConnectionDisconnected,
       }
     );
     try {
@@ -1213,13 +1358,20 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     keepaliveTimer.unref?.();
   }
 
-  const cleanup = (trigger: 'close' | 'finish') => {
+  const cleanup = async (trigger: 'close' | 'finish') => {
     if (cleanupLogged) {
       return;
     }
     cleanupLogged = true;
     if (trigger === 'close') {
       ended = true;
+    }
+    if (trigger === 'finish') {
+      try {
+        await clientWriteQueue;
+      } catch (error) {
+        logResponseNonBlockingError(`response.sse.cleanup.flush_queue:${requestLabel}`, error);
+      }
     }
     clearTimers();
     detachOutboundStream();
@@ -1276,22 +1428,35 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     applyPatchCallIds: [],
     emittedApplyPatchDoneCallIds: [],
   };
-  const projectClientSseFrame = (frame: string, stage: string): Promise<string> =>
-    withSseClientProjectionTimeout(
-      normalizeResponsesSseFrameForClient({
-        frame,
-        entryEndpoint,
-        requestContext: args.responsesRequestContext,
-        metadata: responseProjectionMetadata,
-        projectionState: responsesSseProjectionState,
-        requestLabel,
-      }),
+  const chatSseWireState: ChatCompletionSseWireState = {};
+  const projectClientSseFrame = (frame: string, stage: string): Promise<string> => {
+    const work =
+      !isDirectPassthrough
+      && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
+        ? normalizeResponsesSseFrameForClient({
+          frame,
+          entryEndpoint,
+          requestContext: args.responsesRequestContext,
+          metadata: responseProjectionMetadata,
+          projectionState: responsesSseProjectionState,
+          requestLabel,
+        })
+        : Promise.resolve(
+          entryEndpoint === '/v1/chat/completions'
+            ? normalizeChatCompletionSseFrameForClient(frame, chatSseWireState, requestLabel, responseProjectionMetadata)
+            : frame
+        );
+    return withSseClientProjectionTimeout(
+      work,
       projectionTimeoutMs,
       requestLabel,
       stage
     );
+  };
   const enqueueClientSseFrame = (frame: string, errorLabel: string) => {
-    assertClientSseFrameHasNoInternalCarriers(frame, requestLabel);
+    if (!isDirectPassthrough) {
+      assertClientSseFrameHasNoInternalCarriers(frame, requestLabel);
+    }
     clientWriteQueue = clientWriteQueue
       .then(async () => projectClientSseFrame(frame, errorLabel))
       .then((normalizedFrame) => {
@@ -1363,7 +1528,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       logPipelineStage('response.sse.stream.error_after_end', requestLabel, { message: error.message });
       return;
     }
-    ended = true;
     clearTimers();
     detachOutboundStream();
     const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
@@ -1411,6 +1575,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     } catch (writeError) {
       logResponseNonBlockingError(`response.sse.stream_error.write_error_event:${requestLabel}`, writeError);
     }
+    ended = true;
     try {
       res.end();
     } catch (endError) {
@@ -1420,7 +1585,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   });
 
   outboundStream.on('end', async () => {
-    ended = true;
     streamEnded = true;
     clearTimers();
     const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
@@ -1439,6 +1603,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     } catch (error) {
       logResponseNonBlockingError(`response.sse.stream.end.flush_queue:${requestLabel}`, error);
     }
+    ended = true;
     if (!res.writableEnded && !res.destroyed) {
       try {
         res.end();
@@ -1459,8 +1624,15 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         closeBeforeStreamEnd: true
       });
     }
-    cleanup('close');
+    void cleanup('close');
   });
-  res.on('finish', () => cleanup('finish'));
+  res.on('finish', () => {
+    void cleanup('finish');
+  });
+  try {
+    stream.resume?.();
+  } catch (error) {
+    logResponseNonBlockingError(`response.sse.resume_source:${requestLabel}`, error);
+  }
   return true;
 }

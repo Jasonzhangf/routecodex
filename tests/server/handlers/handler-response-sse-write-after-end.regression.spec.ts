@@ -30,6 +30,8 @@ function createMockCoreDistProjectionModule() {
   };
 }
 
+let mockJsonToSseConverterImpl: (() => Promise<PassThrough>) | undefined;
+
 describe('handler-response SSE write-after-end regression', () => {
   const originalVerbose = process.env.ROUTECODEX_HTTP_LOG_VERBOSE;
   const originalStageLog = process.env.ROUTECODEX_STAGE_LOG;
@@ -188,7 +190,7 @@ describe('handler-response SSE write-after-end regression', () => {
     }
   });
 
-  it('does not fabricate missing responses terminal frames before outbound SSE ends', async () => {
+  it('emits repaired responses terminal frames only after outbound SSE end flush', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -311,8 +313,144 @@ describe('handler-response SSE write-after-end regression', () => {
 
     await new Promise<void>((resolve) => setTimeout(resolve, 120));
 
-    expect(output).toContain('event: response.output_item.done');
-    expect(output).not.toContain('event: response.completed');
-    expect(output).not.toContain('event: response.done');
+    const outputItemDoneIndex = output.indexOf('event: response.output_item.done');
+    const responseCompletedIndex = output.indexOf('event: response.completed');
+    const responseDoneIndex = output.indexOf('event: response.done');
+
+    expect(outputItemDoneIndex).toBeGreaterThanOrEqual(0);
+    expect(responseCompletedIndex).toBeGreaterThan(outputItemDoneIndex);
+    expect(responseDoneIndex).toBeGreaterThan(responseCompletedIndex);
+  });
+
+  it('does not raise uncaughtException when chat json->sse bridge client closes and converter writes late', async () => {
+    const converterStream = new PassThrough();
+    mockJsonToSseConverterImpl = async () => converterStream;
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      createResponsesJsonToSseConverter: async () => ({
+        convertResponseToJsonToSse: async () => {
+          throw new Error('json_to_sse_not_expected_in_this_test');
+        }
+      }),
+      createChatJsonToSseConverterForHttp: async () => ({
+        convertResponseToJsonToSse: async () => {
+          if (!mockJsonToSseConverterImpl) {
+            throw new Error('missing mockJsonToSseConverterImpl');
+          }
+          return mockJsonToSseConverterImpl();
+        }
+      }),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
+        probe && typeof probe === 'object' && !Array.isArray(probe)
+          ? probe as Record<string, unknown>
+          : {}
+      ),
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    let output = '';
+    let uncaught: Error | undefined;
+    const onUncaught = (error: Error) => {
+      uncaught = error;
+    };
+    process.prependOnceListener('uncaughtException', onUncaught);
+    res.on('data', (chunk) => {
+      output += String(chunk);
+      if (output.includes('hello bridge')) {
+        res.destroy();
+      }
+    });
+
+    try {
+      void sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          body: {
+            id: 'chat_json_bridge_resp',
+            object: 'chat.completion',
+            model: 'test-model',
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: 'hello bridge'
+                },
+                finish_reason: 'stop'
+              }
+            ]
+          },
+          metadata: {
+            outboundStream: true,
+            stream: true,
+          },
+          usageLogInfo: {
+            providerKey: 'XLC.key1.glm-5.2',
+            finishReason: 'stop',
+          }
+        } as any,
+        'req_chat_json_bridge_late_write_no_uncaught',
+        { forceSSE: true, entryEndpoint: '/v1/chat/completions' }
+      );
+
+      converterStream.write(
+        `data: ${JSON.stringify({
+          id: 'chat_json_bridge_resp',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'test-model',
+          choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
+        })}\n\n`
+      );
+      converterStream.write(
+        `data: ${JSON.stringify({
+          id: 'chat_json_bridge_resp',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'test-model',
+          choices: [{ index: 0, delta: { content: 'hello bridge' }, finish_reason: 'stop' }]
+        })}\n\n`
+      );
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+      converterStream.write(
+        `data: ${JSON.stringify({
+          id: 'chat_json_bridge_resp',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'test-model',
+          choices: [{ index: 0, delta: { content: 'late after end' }, finish_reason: null }]
+        })}\n\n`
+      );
+      converterStream.end();
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 80));
+
+      expect(output).toContain('hello bridge');
+      expect(uncaught?.message ?? '').not.toContain('write after end');
+    } finally {
+      process.removeListener('uncaughtException', onUncaught);
+      mockJsonToSseConverterImpl = undefined;
+      converterStream.destroy();
+      res.destroy();
+    }
   });
 });
