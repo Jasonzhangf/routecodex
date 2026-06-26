@@ -304,7 +304,7 @@ impl VirtualRouterEngineCore {
     ) -> Result<Value, String> {
         // Keep health selection state scoped to the current runtime override context
         // (sessionDir/rccUserDir). This prevents cross-port/session pollution.
-        self.refresh_provider_health_from_store(false);
+        self.refresh_provider_health_from_store();
         let metadata_center_snapshot = metadata
             .get("metadataCenterSnapshot")
             .and_then(|value| value.as_object())

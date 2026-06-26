@@ -218,12 +218,7 @@ impl ProviderHealthManager {
         })
     }
 
-    pub(crate) fn import_persistable_state(
-        &mut self,
-        _raw: &Value,
-        _now_ms: i64,
-        _allow_persisted_reprobe: bool,
-    ) {
+    pub(crate) fn import_persistable_state(&mut self, _raw: &Value, _now_ms: i64) {
     }
 
     fn get_state_mut(&mut self, provider_key: &str) -> &mut ProviderInternalState {
@@ -357,7 +352,7 @@ mod tests {
 
         let mut restored = ProviderHealthManager::new();
         restored.register_providers(&["test-provider".to_string()]);
-        restored.import_persistable_state(&exported, 4_000, true);
+        restored.import_persistable_state(&exported, 4_000);
 
         let state = state_for(&restored, "test-provider");
         assert_eq!(state.state, "healthy");

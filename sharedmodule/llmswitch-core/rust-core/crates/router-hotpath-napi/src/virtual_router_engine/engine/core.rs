@@ -84,7 +84,7 @@ impl VirtualRouterEngineCore {
         self.health_manager.configure(health_config);
         let provider_keys = self.provider_registry.list_keys();
         self.health_manager.register_providers(&provider_keys);
-        self.refresh_provider_health_from_store(true);
+        self.refresh_provider_health_from_store();
         let load_balancing = config
             .get("loadBalancing")
             .cloned()
@@ -118,13 +118,10 @@ impl VirtualRouterEngineCore {
         Ok(())
     }
 
-    pub(crate) fn refresh_provider_health_from_store(&mut self, allow_persisted_reprobe: bool) {
-        if allow_persisted_reprobe {
-            self.health_manager.clear_imported_persisted_state();
-        }
+    pub(crate) fn refresh_provider_health_from_store(&mut self) {
         if let Some(raw) = load_provider_health_state() {
             self.health_manager
-                .import_persistable_state(&raw, now_ms(), allow_persisted_reprobe);
+                .import_persistable_state(&raw, now_ms());
         }
     }
 

@@ -23,7 +23,7 @@ impl VirtualRouterEngineCore {
     }
 
     fn handle_provider_success_scoped(&mut self, event: &Value) {
-        self.refresh_provider_health_from_store(false);
+        self.refresh_provider_health_from_store();
         let provider_key = event
             .get("runtime")
             .and_then(|v| v.get("providerKey"))
@@ -62,7 +62,7 @@ impl VirtualRouterEngineCore {
     }
 
     fn handle_provider_failure_scoped(&mut self, event: &Value) {
-        self.refresh_provider_health_from_store(false);
+        self.refresh_provider_health_from_store();
         if !event_affects_health(event) {
             return;
         }
@@ -95,7 +95,7 @@ impl VirtualRouterEngineCore {
     }
 
     fn handle_provider_error_scoped(&mut self, event: &Value) {
-        self.refresh_provider_health_from_store(false);
+        self.refresh_provider_health_from_store();
         if !event_affects_health(event) {
             return;
         }

@@ -79,6 +79,24 @@
   - provider 错误真相现在只剩普通 recoverable / unrecoverable 两类，未知裸 400 会进入普通 provider failure 路径并由现有 strike / cooldown / switch 规则处理；
   - 3 strike + 30m 冷却 + 恢复后再触发的 Rust health 合同已通过 focused 回归锁住。
 
+# 2026-06-27 persisted-reprobe noop closeout slice
+
+- 已删除 Rust VR health 导入里的 `allow_persisted_reprobe` 参数壳和对应 startup reprobe 测试预期。
+- 当前事实：
+  - `ProviderHealthManager::import_persistable_state(...)` 仍是 noop；
+  - `export_persistable_state(...)` 仍固定导出空 `providerCooldowns`；
+  - 启动时不再保留“persisted cooldown provider 首次请求可重探测”这套旧测试契约。
+- 已验证：
+  - `cargo test -p router-hotpath-napi record_failure_only_trips_on_third_strike --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi cooldown_expiry_restores_health_and_resets_strikes --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi success_clears_partial_failure_window --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi record_failure_third_strike_marks_unavailable_until_expiry --lib -- --nocapture`
+  - `cargo test -p router-hotpath-napi export_and_import_persisted_state_are_noop --lib -- --nocapture`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - provider 冷却恢复继续只由运行时 30m 到期恢复负责，不再保留 startup reprobe 契约壳；
+  - persisted `providerCooldowns` 目前不再拥有选路真相。
+
 # 2026-06-27 provider error truth collapse - generic HTTP 400 catalog fallback slice
 
 - 当前 `HEAD` 已在 `743ac3d refactor(policy): drop duplicate invalid400`；本线没有新的未提交 focused 改动，工作树其余脏文件属于 quota/servertool/doc 删除面，不能混提。
