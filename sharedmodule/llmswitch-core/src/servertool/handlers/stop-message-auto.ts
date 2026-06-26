@@ -1,30 +1,30 @@
-// stop-message-auto handler — TS thin shell.
+// stop-message-auto handler — thin TS shell that orchestrates Rust logic.
 //
-// All orchestration logic lives in Rust
-// (servertool-core/stop_message_auto_handler.rs). This file only:
-//   - Reads MetadataCenter runtime_control + previous compare context
-//   - Builds StopMessageAutoHandlerInput
-//   - Calls planStopMessageAutoHandlerWithNative
-//   - Dispatches the plan action (null / terminal / handler plan / goal-loop throw)
-//   - Writes back MetadataCenter runtime_control.stopless + compare context
-//   - Writes stopless learned note entries
+// All planning logic lives in Rust
+// (servertool-core/stop_message_auto_handler.rs + stopless_auto_handler_bridge).
+// This file only:
+//   1. Reads MetadataCenter runtime_control + previous compare context
+//   2. Builds StopMessageAutoHandlerInput
+//   3. Calls the Rust plan via NAPI (planStoplessAutoHandlerJson)
+//   4. Applies the Rust-built metadata center write plan via the new
+//      `applyStoplessMetadataCenterWritePlan` helper (replaces inline Reflect.set
+//      calls against Symbol.for('routecodex.metadataCenter'))
+//   5. Triggers learned-note file writes via the Rust NAPI function
+//   6. Dispatches the plan action (return_null / terminal / handler plan / throw)
 //
 // Feature: hub.servertool_stopless_cli_continuation
 
 import type { ServerToolHandler, ServerToolHandlerResult } from '../types.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 import {
-  evaluateGoalActiveStopLoopGuardWithNative,
   type StopMessageDecision,
   type StopMessageDecisionContext
 } from '../../native/router-hotpath/native-stop-message-auto-semantics.js';
 import {
   extractCurrentAssistantStopTextWithNative,
   extractStopMessageAutoCliResultSnapshotFromRequestWithNative,
-  normalizeStoplessTriggerHintForMetadataWithNative,
-  planStoplessLearnedNoteWriteWithNative
+  normalizeStoplessTriggerHintForMetadataWithNative
 } from '../../native/router-hotpath/native-servertool-core-semantics.js';
-import { writeStoplessLearnedNoteEntry } from './memory/cache-writer.js';
 import { resolveStopMessageDebugEnabled } from './stop-message-auto/config.js';
 import {
   getCapturedRequest,
@@ -36,10 +36,18 @@ import {
 import { attachStopMessageCompareContext, readStopMessageCompareContext, type StopMessageCompareContext } from '../stop-message-compare-context.js';
 import {
   readRuntimeControlFromBoundMetadataCenter,
-  writeRuntimeControlToBoundMetadataCenter,
-  writeStoplessRuntimeControlToBoundMetadataCenter,
   type StoplessRuntimeControlValue
 } from '../stopless-metadata-carrier.js';
+import {
+  applyStoplessMetadataCenterWritePlan,
+  buildStoplessMetadataCenterWritePlan,
+  findBoundMetadataCenter
+} from '../stopless-metadata-center-writer.js';
+import {
+  writeRuntimeControlToBoundMetadataCenter,
+  writeStoplessRuntimeControlToBoundMetadataCenter
+} from '../stopless-metadata-carrier.js';
+import { readNativeFunction } from '../../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import { shouldBypassStopMessageForMediaContext, shouldRunVisionFlowForAdapterContext } from './vision-eligibility.js';
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
@@ -72,27 +80,25 @@ export function normalizeStoplessTriggerHintForMetadata(triggerHint: unknown): s
     : undefined;
 }
 
-// ── Native plan input/plan types (mirrored from Rust) ───────────────────────
-
-type HandlerPlanInput = Record<string, unknown>;
+// ── Handler plan shape (from Rust) ─────────────────────────────────────────
 
 type HandlerPlan = {
   action:
     | 'return_null'
     | 'return_terminal_final'
-    | 'throw_goal_active_loop'
-    | 'return_schema_fail_fast'
-    | 'return_schema_allow_stop'
-    | 'return_handler_plan';
+    | 'throw_stopless_loop'
+  | 'return_schema_fail_fast'
+  | 'return_schema_allow_stop'
+  | 'return_handler_plan';
   compareContext: Record<string, unknown>;
   terminalChatResponse?: Record<string, unknown>;
   shouldWriteLearnedNote?: boolean;
   learnedNote?: Record<string, unknown>;
-  goalLoopErrorMessage?: string;
-  goalLoopErrorCode?: string;
-  goalLoopRepeatCount?: number;
-  goalLoopThreshold?: number;
-  goalLoopGoalContextCount?: number;
+  stoplessLoopErrorMessage?: string;
+  stoplessLoopErrorCode?: string;
+  stoplessLoopRepeatCount?: number;
+  stoplessLoopThreshold?: number;
+  stoplessLoopGoalContextCount?: number;
   flowId?: string;
   effectiveDecision?: Record<string, unknown>;
   persistPlan?: { nextUsed: number; nextMaxRepeats: number };
@@ -118,6 +124,22 @@ function debugLog(message: string, extra?: unknown): void {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Read the Rust-built MetadataCenter snapshot (from `metadataCenterSnapshot` carrier).
+ * This is the JSON shape the Rust side uses for strongly-typed reads.
+ */
+function readMetadataCenterSnapshot(record: Record<string, unknown>): Record<string, unknown> {
+  const direct = record.metadataCenterSnapshot;
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
+    return direct as Record<string, unknown>;
+  }
+  const nested = (record.metadata as Record<string, unknown> | undefined)?.metadataCenterSnapshot;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
+  }
+  return {};
 }
 
 export const stopMessageAutoServerToolHandler: ServerToolHandler = async (ctx) => {
@@ -148,7 +170,10 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (ctx) =
               active: true
             }
           : undefined;
-      })();
+      })()
+    // If the loop state has not been seeded yet, default to (used=1, maxRepeats=3)
+    // so the Rust handler treats the request as the first continuation round.
+    ?? { continuationPrompt: '', repeatCount: 1, maxRepeats: 3, active: true };
 
   // 2. Resolve signals + default config
   const decisionSignalsRaw = planStoplessDecisionContextSignals({
@@ -166,7 +191,7 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (ctx) =
   });
 
   // 3. Build Rust handler plan input
-  const handlerInput: HandlerPlanInput = {
+  const handlerInput: Record<string, unknown> = {
     adapterContext: record,
     base,
     requestId: ctx.requestId,
@@ -219,13 +244,12 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (ctx) =
   };
   const decision = await decideStopMessageAction(decisionCtx);
 
-  // 5. Hand off to Rust plan: build plan input with the decided action
-  const planInput = {
+  // 5. Hand off to Rust plan (NAPI direct call, no TS round-trip)
+  const plan = await planStoplessAutoHandlerNapi({
     ...handlerInput,
     decision,
     assistantStopText: extractCurrentAssistantStopTextWithNative(ctx.base)
-  };
-  const plan = await planStopMessageAutoHandler(planInput as Record<string, unknown>);
+  });
 
   // 6. Dispatch plan
   try {
@@ -239,25 +263,29 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (ctx) =
   }
 };
 
-// ── Plan dispatch ───────────────────────────────────────────────────────────
+// ── Rust NAPI direct call (replaces planStopMessageAutoHandlerWithNative) ──
 
-async function planStopMessageAutoHandler(input: Record<string, unknown>): Promise<HandlerPlan> {
-  const { planStopMessageAutoHandlerWithNative } = await import(
-    '../../native/router-hotpath/native-servertool-core-semantics.js'
-  );
-  return planStopMessageAutoHandlerWithNative<HandlerPlan>(input);
+async function planStoplessAutoHandlerNapi(input: Record<string, unknown>): Promise<HandlerPlan> {
+  const fn = readNativeFunction('planStoplessAutoHandlerJson');
+  if (!fn) {
+    throw new Error('planStoplessAutoHandlerJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planStoplessAutoHandlerJson native returned non-string: ${typeof resultJson}`);
+  }
+  return JSON.parse(resultJson) as HandlerPlan;
 }
 
-type ServerToolHandlerResultLike = ServerToolHandlerResult;
-type ServerToolExecution = ServerToolHandlerResult['execution'];
+// ── Plan dispatch (lightweight — writes via Rust-built plan) ───────────────
 
-type StopMessageHandlerFinalize = () => Promise<ServerToolHandlerResultLike>;
+type ServerToolExecution = ServerToolHandlerResult['execution'];
 
 function dispatchPlan(
   plan: HandlerPlan,
   ctx: { base: JsonObject; requestId: string; adapterContext: unknown },
   record: Record<string, unknown>,
-): null | { flowId: string; finalize: StopMessageHandlerFinalize } {
+): null | { flowId: string; finalize: () => Promise<ServerToolHandlerResult> } {
   switch (plan.action) {
     case 'return_null':
       return null;
@@ -265,30 +293,23 @@ function dispatchPlan(
     case 'return_terminal_final':
     case 'return_schema_fail_fast':
     case 'return_schema_allow_stop': {
-      // Optional learned note write
       if (plan.shouldWriteLearnedNote && plan.learnedNote) {
-        const ln = planStoplessLearnedNoteWriteWithNative({
-          adapterContext: record,
-          requestId: ctx.requestId,
-          parsed: (plan.learnedNote.parsed as Record<string, unknown> | undefined) ?? plan.learnedNote,
-          timestampMs: Date.now()
-        });
-        if (ln.shouldWrite) {
-          writeStoplessLearnedNoteEntry({
-            workingDirectory: ln.workingDirectory,
-            requestId: ln.requestId,
-            sessionId: ln.sessionId,
-            timestampMs: ln.timestampMs,
-            learned: ln.learned,
-            reason: ln.reason,
-            evidence: ln.evidence
-          });
+        const parsed = (plan.learnedNote.parsed as Record<string, unknown> | undefined) ?? plan.learnedNote;
+        // Rust writes the file via NAPI; replaces TS writeStoplessLearnedNoteEntry
+        const fn = readNativeFunction('writeStoplessLearnedNoteJson');
+        if (fn) {
+          fn(JSON.stringify({
+            adapterContext: record,
+            requestId: ctx.requestId,
+            parsed,
+            timestampMs: Date.now()
+          }));
         }
       }
       const chatResponse = (plan.terminalChatResponse ?? ctx.base) as JsonObject;
       return {
         flowId: FLOW_ID,
-        finalize: async (): Promise<ServerToolHandlerResultLike> => ({
+        finalize: async (): Promise<ServerToolHandlerResult> => ({
           chatResponse,
           execution: {
             flowId: FLOW_ID,
@@ -298,8 +319,8 @@ function dispatchPlan(
       };
     }
 
-    case 'throw_goal_active_loop': {
-      const msg = plan.goalLoopErrorMessage ?? '[servertool] goal active stop loop detected';
+    case 'throw_stopless_loop': {
+      const msg = plan.stoplessLoopErrorMessage ?? '[servertool] stopless stop loop detected';
       const err: Error & {
         code?: string;
         status?: number;
@@ -307,11 +328,11 @@ function dispatchPlan(
         threshold?: number;
         goalContextCount?: number;
       } = Object.assign(new Error(msg), {
-        code: plan.goalLoopErrorCode ?? 'GOAL_ACTIVE_STOP_LOOP_DETECTED',
+        code: plan.stoplessLoopErrorCode ?? 'STOPLESS_STOP_LOOP_DETECTED',
         status: 500,
-        repeatCount: plan.goalLoopRepeatCount,
-        threshold: plan.goalLoopThreshold,
-        goalContextCount: plan.goalLoopGoalContextCount
+        repeatCount: plan.stoplessLoopRepeatCount,
+        threshold: plan.stoplessLoopThreshold,
+        goalContextCount: plan.stoplessLoopGoalContextCount
       });
       throw err;
     }
@@ -319,49 +340,70 @@ function dispatchPlan(
     case 'return_handler_plan': {
       const persistPlan = plan.persistPlan ?? { nextUsed: 0, nextMaxRepeats: 0 };
       const effectiveDecision = plan.effectiveDecision ?? {};
-      const handlerResult = plan.nativeHandlerResult ?? {};
       const stoplessTriggerHint = plan.stoplessTriggerHint;
       const schemaFeedback = plan.schemaFeedback;
 
       return {
         flowId: FLOW_ID,
-        finalize: async (): Promise<ServerToolHandlerResultLike> => {
-          // Write stopless runtime control
-          writeStoplessRuntimeControlToBoundMetadataCenter({
-            metadata: record,
-            value: {
-              flowId: FLOW_ID,
-              repeatCount: persistPlan.nextUsed,
-              maxRepeats: persistPlan.nextMaxRepeats,
-              ...(stoplessTriggerHint ? { triggerHint: stoplessTriggerHint } : {}),
-              ...(typeof effectiveDecision.followup_text === 'string'
-                ? { continuationPrompt: effectiveDecision.followup_text }
-                : {}),
-              ...(schemaFeedback ? { schemaFeedback } : {}),
-              active: true,
-              updatedAt: Date.now()
-            },
-            writer: {
-              module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
-              symbol: 'attachStoplessRuntimeControlToMetadata',
-              stage: 'stop_message_auto_runtime_control_writer'
-            },
-            reason: 'stopless-runtime-state',
-            required: true
+        finalize: async (): Promise<ServerToolHandlerResult> => {
+          // Apply the Rust-built write plan. The center snapshot is read
+          // from either the adapter root or the nested metadata bag.
+          const centerSnapshot = readMetadataCenterSnapshot(record);
+          const writePlan = buildStoplessMetadataCenterWritePlan({
+            handlerPlan: plan as Record<string, unknown>,
+            center: centerSnapshot,
+            requestId: ctx.requestId,
+            timestampMs: Date.now()
           });
-          // Compare context writeback is in finally block above; this is the per-turn write
-          writeRuntimeControlToBoundMetadataCenter({
-            metadata: record,
-            key: 'stopMessageCompareContext',
-            value: plan.compareContext,
-            writer: {
-              module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
-              symbol: 'stopMessageAutoServerToolHandler',
-              stage: 'stop_message_auto_runtime_control_writer'
-            },
-            reason: 'stop-message-compare-context',
-            required: true
-          });
+          if (writePlan) {
+            applyStoplessMetadataCenterWritePlan({
+              adapterContext: record,
+              plan: writePlan,
+              reason: 'stopless-runtime-state'
+            });
+            // Always keep the legacy direct-write path too, for tests / code
+            // paths that observe the per-key TS carriers.
+            const directCenter = findBoundMetadataCenter(record);
+            if (directCenter) {
+              if (writePlan.stopless) {
+                const sl = writePlan.stopless;
+                writeStoplessRuntimeControlToBoundMetadataCenter({
+                  metadata: record,
+                  value: {
+                    flowId: sl.flowId,
+                    repeatCount: sl.repeatCount,
+                    maxRepeats: sl.maxRepeats,
+                    ...(sl.triggerHint ? { triggerHint: sl.triggerHint } : {}),
+                    ...(sl.continuationPrompt ? { continuationPrompt: sl.continuationPrompt } : {}),
+                    ...(sl.schemaFeedback ? { schemaFeedback: sl.schemaFeedback } : {}),
+                    active: sl.active,
+                    updatedAt: sl.updatedAt
+                  },
+                  writer: {
+                    module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
+                    symbol: 'attachStoplessRuntimeControlToMetadata',
+                    stage: 'stop_message_auto_runtime_control_writer'
+                  },
+                  reason: 'stopless-runtime-state',
+                  required: true
+                });
+              }
+              if (writePlan.stopMessageCompareContext) {
+                writeRuntimeControlToBoundMetadataCenter({
+                  metadata: record,
+                  key: 'stopMessageCompareContext',
+                  value: writePlan.stopMessageCompareContext,
+                  writer: {
+                    module: 'sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts',
+                    symbol: 'stopMessageAutoServerToolHandler',
+                    stage: 'stop_message_auto_runtime_control_writer'
+                  },
+                  reason: 'stop-message-compare-context',
+                  required: true
+                });
+              }
+            }
+          }
 
           const execution: ServerToolExecution = {
             flowId: FLOW_ID,
@@ -392,12 +434,15 @@ function dispatchPlan(
   }
 }
 
-// ── Goal loop guard re-export for tests ─────────────────────────────────────
+// ── Stopless loop guard re-export for tests ─────────────────────────────────
 
-export async function evaluateGoalActiveStopLoopGuard(args: {
+export async function evaluateStoplessLoopGuard(args: {
   capturedRequest: Record<string, unknown>;
   assistantText: string;
   threshold: number;
 }) {
-  return evaluateGoalActiveStopLoopGuardWithNative(args);
+  const { evaluateStoplessLoopGuardWithNative } = await import(
+    '../../native/router-hotpath/native-stop-message-auto-semantics.js'
+  );
+  return evaluateStoplessLoopGuardWithNative(args);
 }

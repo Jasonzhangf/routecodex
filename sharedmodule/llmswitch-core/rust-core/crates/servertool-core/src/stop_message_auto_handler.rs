@@ -46,7 +46,7 @@ pub struct StopMessageAutoHandlerInput {
 pub enum StopMessageAutoPlanAction {
     ReturnNull,
     ReturnTerminalFinal,
-    ThrowGoalActiveLoop,
+    ThrowStoplessLoop,
     ReturnSchemaFailFast,
     ReturnSchemaAllowStop,
     ReturnHandlerPlan,
@@ -64,15 +64,15 @@ pub struct StopMessageAutoHandlerPlan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub learned_note: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_loop_error_message: Option<String>,
+    pub stopless_loop_error_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_loop_error_code: Option<String>,
+    pub stopless_loop_error_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_loop_repeat_count: Option<i64>,
+    pub stopless_loop_repeat_count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_loop_threshold: Option<i64>,
+    pub stopless_loop_threshold: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_loop_goal_context_count: Option<i64>,
+    pub stopless_loop_goal_context_count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flow_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,11 +110,11 @@ impl Default for StopMessageAutoHandlerPlan {
             terminal_chat_response: None,
             should_write_learned_note: None,
             learned_note: None,
-            goal_loop_error_message: None,
-            goal_loop_error_code: None,
-            goal_loop_repeat_count: None,
-            goal_loop_threshold: None,
-            goal_loop_goal_context_count: None,
+            stopless_loop_error_message: None,
+            stopless_loop_error_code: None,
+            stopless_loop_repeat_count: None,
+            stopless_loop_threshold: None,
+            stopless_loop_goal_context_count: None,
             flow_id: None,
             effective_decision: None,
             schema_gate: None,
@@ -164,7 +164,7 @@ struct SchemaGateResult {
 }
 
 #[derive(Debug, Clone)]
-struct GoalLoopResult {
+struct StoplessLoopResult {
     loop_detected: bool,
     repeat_count: i64,
     threshold: i64,
@@ -303,24 +303,24 @@ fn handle_skip(
     ) {
         if !assistant_stop_text.is_empty() {
             if let Some(captured_req) = captured {
-                let goal_loop = evaluate_goal_loop_guard(captured_req, assistant_stop_text, 3);
-                if goal_loop.loop_detected {
-                    compare.reason = goal_loop
+                let stopless_loop = evaluate_stopless_loop_guard(captured_req, assistant_stop_text, 3);
+                if stopless_loop.loop_detected {
+                    compare.reason = stopless_loop
                         .reason_code
                         .clone()
-                        .unwrap_or_else(|| "goal_active_repeated_stop".to_string());
+                        .unwrap_or_else(|| "stopless_repeated_stop".to_string());
                     let short_text: String = assistant_stop_text.chars().take(160).collect();
                     return StopMessageAutoHandlerPlan {
-                        action: StopMessageAutoPlanAction::ThrowGoalActiveLoop,
+            action: StopMessageAutoPlanAction::ThrowStoplessLoop,
                         compare_context: compare.clone(),
-                        goal_loop_error_message: Some(format!(
-                            "[servertool] goal active stop loop detected: repeat={}/{}; assistant repeatedly stopped without tool progress: {short_text}",
-                            goal_loop.repeat_count, goal_loop.threshold
+                        stopless_loop_error_message: Some(format!(
+                            "[servertool] stopless stop loop detected: repeat={}/{}; assistant repeatedly stopped without tool progress: {short_text}",
+                            stopless_loop.repeat_count, stopless_loop.threshold
                         )),
-                        goal_loop_error_code: Some("GOAL_ACTIVE_STOP_LOOP_DETECTED".to_string()),
-                        goal_loop_repeat_count: Some(goal_loop.repeat_count),
-                        goal_loop_threshold: Some(goal_loop.threshold),
-                        goal_loop_goal_context_count: Some(goal_loop.goal_context_count),
+                        stopless_loop_error_code: Some("STOPLESS_STOP_LOOP_DETECTED".to_string()),
+                        stopless_loop_repeat_count: Some(stopless_loop.repeat_count),
+                        stopless_loop_threshold: Some(stopless_loop.threshold),
+                        stopless_loop_goal_context_count: Some(stopless_loop.goal_context_count),
                         ..Default::default()
                     };
                 }
@@ -810,13 +810,17 @@ fn schema_guidance_text(used: u32, max_repeats: u32) -> String {
     )
 }
 
-// ── Goal loop guard (local) ─────────────────────────────────────────────────
+// ── Stopless loop guard (local) ─────────────────────────────────────────────
 
-fn evaluate_goal_loop_guard(_captured: &Value, _assistant_text: &str, threshold: i64) -> GoalLoopResult {
+fn evaluate_stopless_loop_guard(
+    _captured: &Value,
+    _assistant_text: &str,
+    threshold: i64,
+) -> StoplessLoopResult {
     // Simplified: the full implementation delegates to stop_message_core.
     // For the handler plan, no-detected is the safe default.
     // The NAPI path handles the real evaluation.
-    GoalLoopResult {
+    StoplessLoopResult {
         loop_detected: false,
         repeat_count: 0,
         threshold,
@@ -1094,11 +1098,11 @@ fn empty_plan() -> StopMessageAutoHandlerPlan {
         terminal_chat_response: None,
         should_write_learned_note: Some(false),
         learned_note: None,
-        goal_loop_error_message: None,
-        goal_loop_error_code: None,
-        goal_loop_repeat_count: None,
-        goal_loop_threshold: None,
-        goal_loop_goal_context_count: None,
+        stopless_loop_error_message: None,
+        stopless_loop_error_code: None,
+        stopless_loop_repeat_count: None,
+        stopless_loop_threshold: None,
+        stopless_loop_goal_context_count: None,
         flow_id: None,
         effective_decision: None,
         schema_gate: None,

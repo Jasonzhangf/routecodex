@@ -56,11 +56,11 @@
 | 3 | `stop-message-auto.ts:138-150` | `followupFlowId` 判定 + `attachStopMessageCompareContext(off)` 早退 | `resolve_followup_flow_action(adapter_context, runtime_control)` → `{ kind: 'off_compare' | 'continue', reason }` | 返回 `kind=off_compare` 时 plan 携带 `attach_compare_context` 指令 |
 | 4 | `stop-message-auto.ts:153-162` | `decisionSignals` + `defaultConfig` 构建 | `build_stop_message_decision_context(adapter_context, captured_request)` | 包含 `planStoplessDecisionContextSignals` + `planStopMessageDefaultConfig` 现有逻辑 |
 | 5 | `stop-message-auto.ts:163-184` | `runtimeSnap` 构造 + `assistantStopText` 抽取 | 同上，合并到 `build_stop_message_decision_context` | 包含 `extract_current_assistant_stop_text` |
-| 6 | `stop-message-auto.ts:185-191` | `goalLoopContext` 评估 | `evaluate_goal_active_stop_loop_with_native(adapter_context, captured_request, assistant_text)` | 复用现有 `evaluate_goal_active_stop_loop_guard` |
+| 6 | `stop-message-auto.ts:185-191` | `stoplessLoopContext` 评估 | `evaluate_stopless_loop_with_native(adapter_context, captured_request, assistant_text)` | 复用现有 `evaluate_stopless_loop_guard` |
 | 7 | `stop-message-auto.ts:192-203` | 构造 `decisionCtx` + `decideStopMessageAction` 调用 | `decide_stop_message_action_with_native(decision_context)` 内部调用 `stop_message_core::decide` | context 构造由 Rust 完成，调用现有 napi 入口 |
 | 8 | `stop-message-auto.ts:205-221` | 构造 `compare` 对象（`armed/mode/textLength/...`） | `build_stop_message_compare_context(decision, stop_gateway, captured_request, ...)` | 全部字段在 Rust 拼装，TS 只负责写 metadata |
 | 9 | `stop-message-auto.ts:224-228` | `skip_reached_max_repeats` → `buildStopSchemaFinalPlan('')` | `plan_stop_message_skip_with_budget_exhausted()` | 返回 `{ kind: 'budget_exhausted', chat_response }` |
-| 10 | `stop-message-auto.ts:230-252` | `skip_no_stopmessage_snapshot` / `skip_goal_active` → goal loop 重检 → 抛出 `GOAL_ACTIVE_STOP_LOOP_DETECTED` | `plan_stop_message_skip_with_goal_loop_check()` | 返回 `{ kind: 'goal_loop_error', error_plan }` |
+| 10 | `stop-message-auto.ts:230-252` | `skip_no_stopmessage_snapshot` / `skip_goal_active` → stopless loop 重检 → 抛出 `STOPLESS_STOP_LOOP_DETECTED` | `plan_stop_message_skip_with_stopless_loop_check()` | 返回 `{ kind: 'stopless_loop_error', error_plan }` |
 | 11 | `stop-message-auto.ts:255-269` | 构造 `prevObservationHash` / `prevNoChangeCount` + `evaluateStopSchemaGateWithNative` | `evaluate_stop_schema_gate_with_native(ctx)` | 包含所有 native 字段 |
 | 12 | `stop-message-auto.ts:271-292` | schema gate action 三种分支 (`fail_fast` / `allow_stop` / `followup`) | `plan_stop_message_schema_gate_action(schema_gate, base, ...)` | 返回 `{ kind, chat_response, attach_metadata, attach_compare, ... }` |
 | 13 | `stop-message-auto.ts:294-315` | `effectiveMaxRepeats` 合并 + `effectiveDecision` 拼装 | `merge_schema_gate_decision_with_decision(decision, schema_gate, decision_used)` | 输出 `effective_decision` |
@@ -148,7 +148,7 @@ pub struct StopMessageAutoWriter {
 - `build_decision_context(input) -> StopMessageDecisionContext`
 - `build_compare_context(decision, stop_gateway, captured, runtime) -> CompareContextPlan`
 - `plan_skip_with_budget_exhausted(input) -> StopMessageAutoHandlerPlan`
-- `plan_skip_with_goal_loop_check(input) -> StopMessageAutoHandlerPlan`
+- `plan_skip_with_stopless_loop_check(input) -> StopMessageAutoHandlerPlan`
 - `plan_schema_gate_action(schema_gate, base, decision, ...) -> StopMessageAutoHandlerPlan`
 - `plan_budget_terminal_after_current_turn(input) -> StopMessageAutoHandlerPlan`
 - `plan_finalize(decision, schema_gate, persist, handler_result, input) -> StopMessageAutoFinalizePlan`
@@ -159,7 +159,7 @@ pub struct StopMessageAutoWriter {
 2. `media_context_bypass_returns_early_return`
 3. `servertool_followup_hop_returns_early_return_with_off_compare`
 4. `skip_reached_max_repeats_returns_budget_exhausted_terminal`
-5. `goal_loop_detected_returns_goal_loop_error`
+5. `stopless_loop_detected_returns_stopless_loop_error`
 6. `schema_gate_fail_fast_returns_budget_exhausted_terminal_with_summary_prefix`
 7. `schema_gate_allow_stop_returns_finalize_with_stop_summary`
 8. `schema_gate_followup_returns_finalize_with_persist_plan_and_compare`
@@ -345,7 +345,7 @@ export const stopMessageAutoServerToolHandler: ServerToolHandler = async (ctx) =
       debugLog('stop_message_auto early_return', { reason: plan.reason });
       return null;
     }
-    case 'goal_loop_error': {
+    case 'stopless_loop_error': {
       const e = plan.error;
       throw Object.assign(new Error(e.message), {
         code: e.code,
@@ -431,7 +431,7 @@ npx tsc --noEmit --pretty false
 ['stop-message-auto-handler-plan-rust-owner', STOP_MESSAGE_AUTO_HANDLER, stopMessageAuto, 'WRITER'],
 ['stop-message-auto-handler-plan-rust-owner', STOP_MESSAGE_AUTO_HANDLER, stopMessageAuto, "'early_return'"],
 ['stop-message-auto-handler-plan-rust-owner', STOP_MESSAGE_AUTO_HANDLER, stopMessageAuto, "'budget_exhausted_terminal'"],
-['stop-message-auto-handler-plan-rust-owner', STOP_MESSAGE_AUTO_HANDLER, stopMessageAuto, "'goal_loop_error'"],
+['stop-message-auto-handler-plan-rust-owner', STOP_MESSAGE_AUTO_HANDLER, stopMessageAuto, "'stopless_loop_error'"],
 ['stop-message-auto-handler-plan-rust-owner', STOP_MESSAGE_AUTO_HANDLER, stopMessageAuto, "'finalize'"],
 
 // 2. 新增 must-not-contain 标记（防止 TS 业务语义复活）
@@ -480,7 +480,7 @@ npm run verify:function-map-compile-gate
 2. media context bypass → `null` 返回
 3. `serverToolFollowup=true` → `null` 返回 + compare context 写为 off
 4. `decision.skip_reached_max_repeats` → `{ flowId, finalize: ... stopMessageTerminalFinal }`
-5. goal loop detected → throws `GOAL_ACTIVE_STOP_LOOP_DETECTED`
+5. stopless loop detected → throws `STOPLESS_STOP_LOOP_DETECTED`
 6. 完整 trigger 路径 → finalize 返回 chatResponse + execution + metadata 写回
 7. schema gate `fail_fast` → budget exhausted terminal with summary prefix
 
