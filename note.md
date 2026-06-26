@@ -12,6 +12,7 @@
 - 观察：
   - 这轮改动是把 executor 侧的 helper / wrapper 继续内联收口，验证目前通过。
   - `readNestedProviderErrorDetails` 也被物理删除，nested error 读取已改为分类/healthNeutral 处的本地内联逻辑。
+  - `isRecoverableHostResponseContractCode` 已物理删除，host response contract recoverable 判定已直接展开到唯一调用点。
 
 # 2026-06-27 retry reselection helper commit slice
 

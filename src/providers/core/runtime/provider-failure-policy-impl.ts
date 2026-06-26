@@ -42,10 +42,6 @@ function isHostFailureStage(stage?: string): boolean {
   return stage === 'host.response_contract';
 }
 
-function isRecoverableHostResponseContractCode(code?: string): boolean {
-  return code === 'EMPTY_ASSISTANT_RESPONSE' || code === 'MISSING_REQUIRED_TOOL_CALL';
-}
-
 export function normalizeProviderFailureCodeKey(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -223,7 +219,10 @@ export function resolveProviderFailureClassification(args: {
     return undefined;
   }
   if (isHostFailureStage(args.stage)) {
-    if (isRecoverableHostResponseContractCode(errorCode) || isRecoverableHostResponseContractCode(upstreamCode)) {
+    if (errorCode === 'EMPTY_ASSISTANT_RESPONSE'
+      || errorCode === 'MISSING_REQUIRED_TOOL_CALL'
+      || upstreamCode === 'EMPTY_ASSISTANT_RESPONSE'
+      || upstreamCode === 'MISSING_REQUIRED_TOOL_CALL') {
       return 'recoverable';
     }
     return undefined;
