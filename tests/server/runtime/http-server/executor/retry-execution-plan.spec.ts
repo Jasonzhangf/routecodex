@@ -322,7 +322,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
-  it('keeps excluding current provider for repeated recoverable HTTP 502 when alternatives exist', async () => {
+  it('excludes current provider for recoverable HTTP 502 as soon as alternatives exist', async () => {
     const excludedProviderKeys = new Set<string>();
     const transientRetryTracker = createRequestLocalTransientRetryTracker();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {
@@ -359,18 +359,8 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
 
     expect(firstPlan.shouldRetry).toBe(true);
     expect(firstPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(firstPlan.retrySwitchPlan?.runtimeScopeExcluded).toEqual([]);
     expect(firstPlan.excludedCurrentProvider).toBe(true);
-    expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
-
-    const repeatPlan = await resolveProviderRetryExecutionPlan({
-      ...commonArgs,
-      attempt: 2
-    });
-
-    expect(repeatPlan.shouldRetry).toBe(true);
-    expect(repeatPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(repeatPlan.retrySwitchPlan?.runtimeScopeExcluded).toEqual([]);
-    expect(repeatPlan.excludedCurrentProvider).toBe(true);
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 

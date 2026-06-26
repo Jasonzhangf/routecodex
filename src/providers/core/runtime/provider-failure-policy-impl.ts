@@ -907,6 +907,12 @@ export function resolveProviderFailureExclusionDecision(args: {
   isVerify?: boolean;
   isReauth?: boolean;
 }): ProviderFailureExclusionDecision {
+  if (!args.hasAlternativeCandidate) {
+    return {
+      excludeCurrentProvider: false,
+      retryAction: 'reroute_explicit_alternative'
+    };
+  }
   const normalizedErrorCode = normalizeProviderFailureCodeKey(args.errorCode);
   const normalizedUpstreamCode = normalizeProviderFailureCodeKey(args.upstreamCode);
   const isStreamCanceled =
@@ -953,12 +959,6 @@ export function resolveProviderFailureExclusionDecision(args: {
     };
   }
   if (args.isProviderTrafficSaturated || args.isNetworkTransport) {
-    return {
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative'
-    };
-  }
-  if (!args.hasAlternativeCandidate) {
     return {
       excludeCurrentProvider: true,
       retryAction: 'reroute_explicit_alternative'

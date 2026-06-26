@@ -137,25 +137,6 @@ export function resolveProviderRetryExclusionPlan(args: {
     };
   }
 
-  const isImmediateSwitchError = isImmediateProviderSwitchRecoverableError({ status: args.status, error: args.error });
-  if (
-    args.classification === 'recoverable'
-    && !args.promptTooLong
-    && !isImmediateSwitchError
-    && args.retryError
-    && args.transientRetryTracker
-  ) {
-    const sameProviderErrorCount = args.transientRetryTracker.observe({
-      providerKey,
-      retryError: args.retryError
-    });
-    if (sameProviderErrorCount <= 1) {
-      return {
-        excludedCurrentProvider: false
-      };
-    }
-  }
-
   const exclusionDecision = resolveProviderFailureExclusionDecision({
     promptTooLong: args.promptTooLong,
     classification: args.classification,
@@ -255,7 +236,6 @@ export function buildProviderRetrySwitchPlan(args: {
   promptTooLong?: boolean;
   error?: unknown;
   retryError?: RetryErrorSnapshot;
-  backoffScope: ProviderRetryExecutionPlan['backoffScope'];
 }): ProviderRetrySwitchPlan {
   const switchAction: ProviderRetrySwitchAction = 'exclude_and_reroute';
   const runtimeScopeExcluded: string[] = [];
