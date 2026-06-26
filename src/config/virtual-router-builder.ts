@@ -373,9 +373,6 @@ function resolveForwarderTargetProviderKeys(options: {
     return [providerKey];
   }
 
-  if (pickString(options.target.modelId) || pickString(options.target.model)) {
-    throw new Error(`[forwarder-config] ${options.forwarderId} target must not declare modelId/model; use forwarder.model and split different models into separate forwarders`);
-  }
   if (pickString(options.target.provider)) {
     throw new Error(`[forwarder-config] ${options.forwarderId} target must declare providerId`);
   }
@@ -388,9 +385,13 @@ function resolveForwarderTargetProviderKeys(options: {
   if (!providerConfig) {
     throw new Error(`[forwarder-config] ${options.forwarderId} target providerId '${providerId}' is not configured`);
   }
+  const targetModelId = pickString(options.target.modelId) ?? pickString(options.target.model);
   const modelId = options.forwarderModelId;
   if (!modelId) {
     throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' requires forwarder.model`);
+  }
+  if (targetModelId && targetModelId !== modelId) {
+    throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' model '${targetModelId}' must match forwarder.model '${modelId}'`);
   }
   if (!providerDeclaresModel(providerConfig.provider, modelId)) {
     throw new Error(`[forwarder-config] ${options.forwarderId} target '${providerId}' does not declare model '${modelId}'`);

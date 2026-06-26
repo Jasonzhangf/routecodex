@@ -172,7 +172,7 @@ describe('virtual-router-builder: provider model alias contract', () => {
     }
   });
 
-  it('rejects target-level modelId override even when the provider declares that model', async () => {
+  it('accepts target-level modelId when it matches the forwarder model', async () => {
     const root = await createTempProviderRoot();
     try {
       await writeProvider(root, 'canonical-provider', {
@@ -189,13 +189,42 @@ describe('virtual-router-builder: provider model alias contract', () => {
         stickyKey: 'none',
         targets: [{ providerId: 'canonical-provider', modelId: 'DeepSeek-V4-Pro', priority: 1 }],
       };
+      const input = await buildVirtualRouterInputV2(
+        buildConfig('fwd.alias-contract', forwarder, 'fwd.alias-contract') as unknown as Record<string, unknown>,
+        root,
+        { routingPolicyGroup: 'group_alias_contract' },
+      );
+      expect(input).toBeTruthy();
+      expect(input.forwarders).toBeTruthy();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects target-level modelId override when it conflicts with the forwarder model', async () => {
+    const root = await createTempProviderRoot();
+    try {
+      await writeProvider(root, 'canonical-provider', {
+        'DeepSeek-V4-Pro': {
+          aliases: ['deepseek-v4-pro'],
+          supportsStreaming: true,
+        },
+      });
+      const forwarder = {
+        protocol: 'openai',
+        model: 'DeepSeek-V4-Pro',
+        resolutionMode: 'model-first',
+        strategy: 'priority',
+        stickyKey: 'none',
+        targets: [{ providerId: 'canonical-provider', modelId: 'DeepSeek-V4-Pro-Alt', priority: 1 }],
+      };
       await expect(
         buildVirtualRouterInputV2(
           buildConfig('fwd.alias-contract', forwarder, 'fwd.alias-contract') as unknown as Record<string, unknown>,
           root,
           { routingPolicyGroup: 'group_alias_contract' },
         ),
-      ).rejects.toThrow(/target must not declare modelId\/model/);
+      ).rejects.toThrow(/must match forwarder\.model/);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
