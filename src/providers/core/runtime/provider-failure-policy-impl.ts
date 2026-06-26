@@ -207,36 +207,6 @@ function isLocalRequestContractValidationError(args: {
   );
 }
 
-function readNestedProviderErrorDetails(error: unknown): {
-  code?: string;
-  type?: string;
-  param?: string;
-  message?: string;
-} {
-  if (!error || typeof error !== 'object') {
-    return {};
-  }
-  const response = (error as { response?: unknown }).response;
-  if (!response || typeof response !== 'object') {
-    return {};
-  }
-  const data = (response as { data?: unknown }).data;
-  if (!data || typeof data !== 'object') {
-    return {};
-  }
-  const nested = (data as { error?: unknown }).error;
-  if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
-    return {};
-  }
-  const record = nested as Record<string, unknown>;
-  return {
-    code: typeof record.code === 'string' ? record.code : undefined,
-    type: typeof record.type === 'string' ? record.type : undefined,
-    param: typeof record.param === 'string' ? record.param : undefined,
-    message: typeof record.message === 'string' ? record.message : undefined
-  };
-}
-
 export function resolveProviderFailureClassification(args: {
   error: unknown;
   stage?: string;
@@ -265,13 +235,56 @@ export function resolveProviderFailureClassification(args: {
     typeof args.statusCode === 'number'
       ? args.statusCode
       : extractProviderFailureStatusCode(args.error);
-  const nested = readNestedProviderErrorDetails(args.error);
-  const nestedCode = normalizeProviderFailureCodeKey(nested.code);
-  const nestedType = normalizeProviderFailureCodeKey(nested.type);
-  const nestedParam = typeof nested.param === 'string' ? nested.param.trim().toLowerCase() : '';
   const reason = String(args.reason || (args.error as { message?: unknown } | undefined)?.message || '')
     .trim()
     .toLowerCase();
+  const nested = (() => {
+    if (!args.error || typeof args.error !== 'object') {
+      return {} as {
+        code?: string;
+        type?: string;
+        param?: string;
+        message?: string;
+      };
+    }
+    const response = (args.error as { response?: unknown }).response;
+    if (!response || typeof response !== 'object') {
+      return {} as {
+        code?: string;
+        type?: string;
+        param?: string;
+        message?: string;
+      };
+    }
+    const data = (response as { data?: unknown }).data;
+    if (!data || typeof data !== 'object') {
+      return {} as {
+        code?: string;
+        type?: string;
+        param?: string;
+        message?: string;
+      };
+    }
+    const nestedError = (data as { error?: unknown }).error;
+    if (!nestedError || typeof nestedError !== 'object' || Array.isArray(nestedError)) {
+      return {} as {
+        code?: string;
+        type?: string;
+        param?: string;
+        message?: string;
+      };
+    }
+    const record = nestedError as Record<string, unknown>;
+    return {
+      code: typeof record.code === 'string' ? record.code : undefined,
+      type: typeof record.type === 'string' ? record.type : undefined,
+      param: typeof record.param === 'string' ? record.param : undefined,
+      message: typeof record.message === 'string' ? record.message : undefined
+    };
+  })();
+  const nestedCode = normalizeProviderFailureCodeKey(nested.code);
+  const nestedType = normalizeProviderFailureCodeKey(nested.type);
+  const nestedParam = typeof nested.param === 'string' ? nested.param.trim().toLowerCase() : '';
   const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
   const protocolDetails = (() => {
     if (!args.error || typeof args.error !== 'object' || Array.isArray(args.error)) {
@@ -823,7 +836,50 @@ export function isProviderFailureHealthNeutral(args: {
   if (isLocalResponseContractValidationError(reason)) {
     return true;
   }
-  const nested = readNestedProviderErrorDetails(args.error);
+  const nested = (() => {
+    if (!args.error || typeof args.error !== 'object') {
+      return {} as {
+        code?: string;
+        type?: string;
+        param?: string;
+        message?: string;
+      };
+    }
+    const response = (args.error as { response?: unknown }).response;
+    if (!response || typeof response !== 'object') {
+      return {} as {
+        code?: string;
+        type?: string;
+        param?: string;
+        message?: string;
+      };
+    }
+    const data = (response as { data?: unknown }).data;
+    if (!data || typeof data !== 'object') {
+      return {} as {
+        code?: string;
+        type?: string;
+        param?: string;
+        message?: string;
+      };
+    }
+    const nestedError = (data as { error?: unknown }).error;
+    if (!nestedError || typeof nestedError !== 'object' || Array.isArray(nestedError)) {
+      return {} as {
+        code?: string;
+        type?: string;
+        param?: string;
+        message?: string;
+      };
+    }
+    const record = nestedError as Record<string, unknown>;
+    return {
+      code: typeof record.code === 'string' ? record.code : undefined,
+      type: typeof record.type === 'string' ? record.type : undefined,
+      param: typeof record.param === 'string' ? record.param : undefined,
+      message: typeof record.message === 'string' ? record.message : undefined
+    };
+  })();
   if (isLocalRequestContractValidationError({
     statusCode,
     nestedParam: typeof nested.param === 'string' ? nested.param.trim().toLowerCase() : '',
