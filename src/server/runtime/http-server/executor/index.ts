@@ -15,7 +15,6 @@ export {
 // Retry engine
 export {
   describeRetryReason,
-  shouldRetryProviderError,
   RETRYABLE_SSE_ERROR_CODE_HINTS,
   RETRYABLE_SSE_MESSAGE_HINTS,
   isRetryableSseWrapperError,

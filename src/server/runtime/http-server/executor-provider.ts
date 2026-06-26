@@ -1,8 +1,3 @@
-import type { ProviderError } from '../../../providers/core/api/provider-types.js';
-import {
-  resolveProviderFailureRetryEligibility
-} from '../../../providers/core/runtime/provider-failure-policy.js';
-
 const NETWORK_ERROR_CODE_SET = new Set([
   'ECONNRESET',
   'ECONNREFUSED',
@@ -73,30 +68,6 @@ export function isNetworkTransportError(error: unknown): boolean {
   return hints.some((hint) => message.includes(hint));
 }
 
-export function shouldRetryProviderError(error: unknown): boolean {
-  if (isPromptTooLongError(error)) {
-    return false;
-  }
-  const status = extractErrorStatusCode(error);
-  const providerError = error as ProviderError;
-  const upstreamCode =
-    typeof (providerError as ProviderError & { upstreamCode?: unknown }).upstreamCode === 'string'
-      ? ((providerError as ProviderError & { upstreamCode?: string }).upstreamCode)
-      : undefined;
-  return resolveProviderFailureRetryEligibility({
-    error,
-    stage: 'provider.send',
-    statusCode: status,
-    errorCode: typeof providerError.code === 'string' ? providerError.code : undefined,
-    upstreamCode,
-    reason: typeof providerError.message === 'string' ? providerError.message : undefined,
-    attempt: 1,
-    maxAttempts: 2,
-    promptTooLong: false,
-    contextOverflowRetries: 0,
-    maxContextOverflowRetries: 0
-  }).shouldRetry;
-}
 export function isPromptTooLongError(error: unknown): boolean {
   const status = extractErrorStatusCode(error);
   // Most upstreams return 400 for context overflow; keep this narrow to avoid retries on generic 400s.

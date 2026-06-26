@@ -6,16 +6,14 @@
 
 import {
   describeRetryReason,
-  isPromptTooLongError,
-  shouldRetryProviderError
+  isPromptTooLongError
 } from '../executor-provider.js';
 import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 
 // Re-export for backward compatibility
 export {
   describeRetryReason,
-  isPromptTooLongError,
-  shouldRetryProviderError
+  isPromptTooLongError
 };
 
 // Retryable error detection for SSE responses
