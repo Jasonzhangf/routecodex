@@ -55,7 +55,6 @@ export function buildProviderRetryTelemetryPlan(args: {
     upstreamCode: args.retryError.upstreamCode,
     upstreamStatus: args.retryError.upstreamStatus,
     switchAction: retrySwitchPlan.switchAction,
-    ...(args.retryExecutionPlan.backoffScope ? { backoffScope: args.retryExecutionPlan.backoffScope } : {}),
     decisionLabel: retrySwitchPlan.decisionLabel,
     retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
     stage: args.stage,
@@ -74,8 +73,6 @@ export function buildProviderRetryTelemetryPlan(args: {
     ...(args.retryError.upstreamCode ? { upstreamCode: args.retryError.upstreamCode } : {}),
     ...(typeof args.retryError.upstreamStatus === 'number' ? { upstreamStatus: args.retryError.upstreamStatus } : {}),
     retryBackoffMs: args.retryExecutionPlan.retryBackoffMs,
-    recoverableBackoffMs: args.retryExecutionPlan.recoverableBackoffMs,
-    ...(args.retryExecutionPlan.backoffScope ? { backoffScope: args.retryExecutionPlan.backoffScope } : {}),
     decisionLabel: retrySwitchPlan.decisionLabel,
     retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
     ...(retrySwitchPlan.runtimeScopeExcludedCount > 0

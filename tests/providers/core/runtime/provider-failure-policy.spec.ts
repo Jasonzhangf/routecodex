@@ -703,8 +703,7 @@ describe('provider failure policy ssot', () => {
 
   it('supports provider-scoped reroute decision labels from the shared policy', () => {
     expect(describeProviderFailureDecision({
-      action: 'reroute_explicit_alternative',
-      backoffScope: 'none'
+      action: 'reroute_explicit_alternative'
     })).toBe('exclude_and_reroute');
   });
 

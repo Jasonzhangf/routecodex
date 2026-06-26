@@ -44,7 +44,6 @@ type RequestExecutorProviderResolveFailureArgs = {
     errorCode?: string;
     upstreamCode?: string;
     switchAction: 'exclude_and_reroute';
-  backoffScope?: 'none' | 'provider' | 'recoverable' | 'attempt';
     decisionLabel?: string;
     retryExecutionPolicyReason?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';

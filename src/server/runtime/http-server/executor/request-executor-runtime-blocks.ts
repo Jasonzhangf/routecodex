@@ -253,7 +253,6 @@ export function logProviderRetrySwitchCompact(args: {
   upstreamCode?: string;
   upstreamStatus?: number;
   switchAction: 'exclude_and_reroute';
-  backoffScope?: 'none' | 'provider' | 'recoverable' | 'attempt';
   decisionLabel?: string;
   retryExecutionPolicyReason?: string;
   stage?: 'provider.runtime_resolve' | 'provider.send';
@@ -310,7 +309,6 @@ export function logProviderRetrySwitchCompact(args: {
     `switch=${args.switchAction}`,
     ...(args.decisionLabel ? [`decision=${args.decisionLabel}`] : []),
     ...(args.retryExecutionPolicyReason ? [`policy=${args.retryExecutionPolicyReason}`] : []),
-    ...(args.backoffScope ? [`backoffScope=${args.backoffScope}`] : []),
     ...(args.stage ? [`stage=${args.stage}`] : []),
     ...(typeof args.statusCode === 'number' ? [`status=${args.statusCode}`] : []),
     ...(args.errorCode ? [`code=${args.errorCode}`] : []),

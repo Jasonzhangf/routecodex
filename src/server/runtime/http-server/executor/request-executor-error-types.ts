@@ -19,16 +19,7 @@ export type RequestExecutorProviderErrorStage =
 
 export type RequestExecutorProviderErrorClassification = ProviderFailureClassification;
 
-export type ProviderRetryBackoffPlan = {
-  blockingRecoverable: boolean;
-  retryBackoffMs: number;
-  recoverableBackoffMs: number;
-  backoffScope: 'none';
-};
-
 export type ProviderRetrySwitchAction = 'exclude_and_reroute';
-
-export type ProviderRetryBackoffScope = ProviderRetryBackoffPlan['backoffScope'];
 
 export type ProviderRetrySwitchPlan = {
   switchAction: ProviderRetrySwitchAction;
@@ -60,8 +51,6 @@ export type ProviderRetryExecutionPlan = {
   requestLocalTransient: boolean;
   holdOnLastAvailable429: boolean;
   retryBackoffMs: number;
-  recoverableBackoffMs: number;
-  backoffScope?: ProviderRetryBackoffScope;
   retrySwitchPlan?: ProviderRetrySwitchPlan;
   retryExecutionPolicyReason?: string;
   /**
@@ -90,7 +79,6 @@ export type ProviderRetryTelemetryPlan = {
     upstreamCode?: string;
     upstreamStatus?: number;
     switchAction: ProviderRetrySwitchAction;
-    backoffScope?: ProviderRetryBackoffScope;
     decisionLabel?: string;
     retryExecutionPolicyReason?: string;
     stage?: 'provider.runtime_resolve' | 'provider.send';

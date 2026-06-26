@@ -1905,7 +1905,6 @@ describe('HubRequestExecutor failover', () => {
       });
       expect(recordAttempt).toHaveBeenCalledWith({ error: true });
       expect(executionPlan.shouldRetry).toBe(true);
-      expect(executionPlan.backoffScope).toBe('none');
       expect(executionPlan.retryBackoffMs).toBe(0);
       expect(executionPlan.retrySwitchPlan).toEqual(expect.objectContaining({
         switchAction: 'exclude_and_reroute',
@@ -1928,7 +1927,6 @@ describe('HubRequestExecutor failover', () => {
       expect(telemetryPlan.switchLogArgs).toEqual(expect.objectContaining({
         requestId: 'req-helper',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'none',
         decisionLabel: 'exclude_and_reroute',
         stage: 'provider.send'
       }));
@@ -1936,7 +1934,6 @@ describe('HubRequestExecutor failover', () => {
         providerKey: 'gemini.primary.gemini-2.5-pro',
         routeHint: 'thinking',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'none',
         decisionLabel: 'exclude_and_reroute'
       }));
 
@@ -2017,7 +2014,6 @@ describe('HubRequestExecutor failover', () => {
         requestLocalTransient: false,
         holdOnLastAvailable429: false,
         retryBackoffMs: 0,
-        recoverableBackoffMs: 0,
         });
 
       const sqliteBusyExcluded = new Set<string>();
@@ -2056,7 +2052,6 @@ describe('HubRequestExecutor failover', () => {
         shouldRetry: true,
         blockingRecoverable: true,
         excludedCurrentProvider: true,
-        backoffScope: 'none',
         retrySwitchPlan: expect.objectContaining({
           switchAction: 'exclude_and_reroute',
           decisionLabel: 'exclude_and_reroute'
@@ -2862,7 +2857,6 @@ describe('HubRequestExecutor failover', () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=rate_limit_error'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=exclude_and_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('backoffScope=none'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('provider=crs.key2.gpt-5.3-codex'));
       expect(successProcess).toHaveBeenCalledTimes(1);
     } finally {
@@ -3020,7 +3014,6 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'none',
         decisionLabel: 'exclude_and_reroute',
         stage: 'provider.send'
       });
@@ -3036,7 +3029,6 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'none',
         decisionLabel: 'exclude_and_reroute',
         stage: 'provider.send'
       });
@@ -3054,7 +3046,6 @@ describe('HubRequestExecutor failover', () => {
         errorCode: 'HTTP_504',
         upstreamCode: 'HTTP_504',
         switchAction: 'exclude_and_reroute',
-        backoffScope: 'none',
         decisionLabel: 'exclude_and_reroute',
         stage: 'provider.send'
       });
@@ -3854,7 +3845,6 @@ describe('HubRequestExecutor failover', () => {
         line.includes(`provider=${providerA}`)
         && line.includes('switch=exclude_and_reroute')
         && line.includes('decision=exclude_and_reroute')
-        && line.includes('backoffScope=none')
         && line.includes('status=503')
       ))).toBe(true);
     } finally {
@@ -3956,7 +3946,6 @@ describe('HubRequestExecutor failover', () => {
       expect(switchLines[0]).toContain(`provider=${providerA}`);
       expect(switchLines[0]).toContain('backoff=0ms');
       expect(switchLines[0]).toContain('switch=exclude_and_reroute');
-      expect(switchLines[0]).toContain('backoffScope=none');
       expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);
       expect(processC).toHaveBeenCalledTimes(0);

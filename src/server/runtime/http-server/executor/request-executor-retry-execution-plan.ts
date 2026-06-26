@@ -19,9 +19,6 @@ import {
   resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan
 } from './request-executor-retry-decision.js';
-import {
-  resolveProviderRetryBackoffPlan
-} from './request-executor-retry-backoff.js';
 import type {
   ProviderRetryExecutionPlan,
   RequestExecutorProviderErrorStage,
@@ -256,23 +253,21 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedCurrentProvider: keepTerminalExclusion,
       requestLocalTransient,
       holdOnLastAvailable429,
-      retryBackoffMs: 0,
-      recoverableBackoffMs: 0
+      retryBackoffMs: 0
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
   if (terminalUnrecoverablePolicyDecision) {
-    const retrySwitchPlan = buildProviderRetrySwitchPlan({
-      runtimeKey: args.runtimeKey,
-      routePool: args.routePool,
-      runtimeManager: args.runtimeManager,
-      excludedProviderKeys: args.excludedProviderKeys,
-      excludedCurrentProvider: true,
-      promptTooLong: args.promptTooLong,
-      error: args.error,
-      retryError: args.retryError,
-      backoffScope: undefined
-    });
+  const retrySwitchPlan = buildProviderRetrySwitchPlan({
+    runtimeKey: args.runtimeKey,
+    routePool: args.routePool,
+    runtimeManager: args.runtimeManager,
+    excludedProviderKeys: args.excludedProviderKeys,
+    excludedCurrentProvider: true,
+    promptTooLong: args.promptTooLong,
+    error: args.error,
+    retryError: args.retryError
+  });
     if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
       return attachErrorErr05ExhaustionGate({
         shouldRetry: false,
@@ -280,8 +275,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
         excludedCurrentProvider: true,
         requestLocalTransient,
         holdOnLastAvailable429,
-        retryBackoffMs: 0,
-        recoverableBackoffMs: 0
+        retryBackoffMs: 0
       }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
     }
     return attachErrorErr05ExhaustionGate({
@@ -291,7 +285,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
       requestLocalTransient,
       holdOnLastAvailable429,
       retryBackoffMs: 0,
-      recoverableBackoffMs: 0,
       retrySwitchPlan,
       retryExecutionPolicyReason: nativeExecutionPolicy.reason
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
@@ -310,8 +303,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedCurrentProvider: false,
       requestLocalTransient,
       holdOnLastAvailable429,
-      retryBackoffMs: 0,
-      recoverableBackoffMs: 0
+      retryBackoffMs: 0
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
 
@@ -323,8 +315,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     excludedCurrentProvider: retryExcludedCurrentProvider,
     promptTooLong: args.promptTooLong,
     error: args.error,
-    retryError: args.retryError,
-    backoffScope: undefined
+    retryError: args.retryError
   });
   if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
     return attachErrorErr05ExhaustionGate({
@@ -333,8 +324,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedCurrentProvider: retryExcludedCurrentProvider,
       requestLocalTransient,
       holdOnLastAvailable429,
-      retryBackoffMs: 0,
-      recoverableBackoffMs: 0
+      retryBackoffMs: 0
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
   if (
@@ -350,8 +340,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       excludedCurrentProvider: retryExcludedCurrentProvider,
       requestLocalTransient,
       holdOnLastAvailable429,
-      retryBackoffMs: 0,
-      recoverableBackoffMs: 0
+      retryBackoffMs: 0
     }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
   }
   return attachErrorErr05ExhaustionGate({
@@ -361,7 +350,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     requestLocalTransient,
     holdOnLastAvailable429,
     retryBackoffMs: 0,
-    recoverableBackoffMs: 0,
     retrySwitchPlan,
     retryExecutionPolicyReason: nativeExecutionPolicy.reason
   }, args.routePool, args.excludedProviderKeys, args.defaultTierAvailable);
