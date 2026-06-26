@@ -654,30 +654,6 @@ export function resolveProviderFailureOutcome(args: {
   };
 }
 
-export function classify_error_err_03_runtime_from_error_err_02_host(
-  captured: ErrorErr02HostCaptured
-): ProviderFailureOutcome {
-  return resolveProviderFailureOutcome({
-    error: {
-      message: captured.message,
-      code: captured.code,
-      status: captured.status,
-      statusCode: captured.status,
-      upstreamCode: captured.details?.upstreamCode,
-    },
-    stage: captured.stage,
-    statusCode: captured.status,
-    errorCode: captured.code,
-    upstreamCode: typeof captured.details?.upstreamCode === 'string' ? captured.details.upstreamCode : undefined,
-    reason: captured.message,
-    classification:
-      captured.errorClassification === 'recoverable'
-        || captured.errorClassification === 'unrecoverable'
-        ? captured.errorClassification
-        : undefined,
-  });
-}
-
 export function resolveProviderFailureActionPlan(args: {
   error: unknown;
   stage?: string;

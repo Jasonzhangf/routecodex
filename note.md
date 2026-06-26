@@ -17,6 +17,7 @@
   - `ProviderFailureAction` 和 `BLOCKING_RECOVERABLE_CODE_SET` 已删除，属于 provider-failure-policy-impl 里的纯死残留。
   - `parseStatusCandidate` 已物理删除，status code 解析直接内联到 `extractProviderFailureStatusCode`。
   - `ProviderFailureStage` 已从 `provider-failure-policy-impl.ts` 的 import 面删除。
+  - `classify_error_err_03_runtime_from_error_err_02_host` 已物理删除，Error Pipeline contract 测试同步去掉该 owner 断言。
 
 # 2026-06-27 retry reselection helper commit slice
 

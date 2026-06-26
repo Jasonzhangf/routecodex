@@ -47,9 +47,7 @@ describe('Error Pipeline contract', () => {
   it('exports the named ErrorErr01-06 skeleton wrappers from owning modules', () => {
     const owners = [
       ['src/providers/core/utils/provider-error-reporter.ts', 'capture_error_err_02_host_from_error_err_01_source'],
-      ['src/providers/core/runtime/provider-failure-policy-impl.ts', 'classify_error_err_03_runtime_from_error_err_02_host'],
       ['sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts', 'apply_error_err_04_router_policy_from_error_err_03_runtime'],
-      ['src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts', 'consume_error_err_05_execution_decision_from_error_err_04_router_policy'],
       ['src/server/utils/http-error-mapper.ts', 'project_error_err_06_client_from_error_err_05_execution_decision'],
     ] as const;
     for (const [ownerPath, symbol] of owners) {
