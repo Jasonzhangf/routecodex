@@ -464,19 +464,16 @@ describe('servertool active orchestration audit', () => {
   }
 });
 
-// ── stop-message-auto handler thin-shell audit ────────────────────────────────
+// ── stop-message-auto native-catalog audit ───────────────────────────────────
 
-describe('stop-message-auto handler thin-shell audit', () => {
-  test('stop-message-auto.ts delegates to Rust-owned handler plan', () => {
-    const source = fs.readFileSync(repoPath('sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts'), 'utf8');
+describe('stop-message-auto native-catalog audit', () => {
+  test('builtin-handler-catalog delegates stop-message-auto execution to Rust-owned native runtime', () => {
+    const source = fs.readFileSync(repoPath('sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts'), 'utf8');
 
-    // Must call the new Rust handler plan
     expect(source).toContain('planStopMessageAutoHandlerWithNative');
-    // Must consume Rust-owned decision signals plan
-    expect(source).toContain('planStoplessDecisionContextSignals');
-    // Must consume Rust-owned default config plan
-    expect(source).toContain('planStopMessageDefaultConfig');
-    // Must NOT contain TS-owned orchestration logic that was migrated
+    expect(source).toContain('function runBuiltinHandler(');
+    expect(source).toContain("case 'stop_message_auto'");
+
     const forbidden = [
       'readPersistedStopMessageSnapshotFromCandidateKeys',
       'readPersistedStopMessageStageModeFromCandidateKeys',

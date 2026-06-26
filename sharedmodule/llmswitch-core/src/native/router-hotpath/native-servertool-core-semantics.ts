@@ -1558,11 +1558,14 @@ export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string
   if (!fn) {
     throw new Error('planStopMessageAutoHandlerJson native unavailable');
   }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessageAutoHandlerJson native returned non-string: ${typeof resultJson}`);
+  const raw = fn(JSON.stringify(input));
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as TPlan;
   }
-  return JSON.parse(resultJson) as TPlan;
+  if (typeof raw !== 'string') {
+    throw new Error(`planStopMessageAutoHandlerJson native returned non-string: ${typeof raw}`);
+  }
+  return JSON.parse(raw) as TPlan;
 }
 
 export function planStoplessOrchestrationActionWithNative(

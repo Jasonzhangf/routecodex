@@ -1,11 +1,22 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { buildMetadataCenterRustSnapshot } from '../../src/server/runtime/http-server/metadata-center/dualwrite-api.ts';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { writeStoplessRuntimeControl } from '../../src/server/runtime/http-server/metadata-center/request-truth-readers.ts';
 import { writeStoplessRuntimeControlToBoundMetadataCenter } from '../../sharedmodule/llmswitch-core/src/servertool/stopless-metadata-carrier.ts';
-import { normalizeStoplessTriggerHintForMetadata } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts';
+import { normalizeStoplessTriggerHintForMetadataWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+
+function writeProviderProtocol(center: MetadataCenter, symbol: string, protocol = 'openai-responses'): void {
+  center.writeRuntimeControl(
+    'providerProtocol',
+    protocol,
+    {
+      module: 'tests/servertool/stopless-metadata-center.spec.ts',
+      symbol,
+      stage: 'test'
+    }
+  );
+}
 
 describe('stopless metadata center helper', () => {
   it('writes stopless runtime control into MetadataCenter as the request-local control truth', () => {
@@ -35,13 +46,6 @@ describe('stopless metadata center helper', () => {
         maxRepeats: 3,
         continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
         active: true
-      })
-    );
-    expect(buildMetadataCenterRustSnapshot(metadata).runtimeControl?.stopless).toEqual(
-      expect.objectContaining({
-        flowId: 'stop_message_flow',
-        repeatCount: 2,
-        maxRepeats: 3
       })
     );
     expect(center?.readRuntimeControl().stopless).not.toHaveProperty('sessionId');
@@ -78,13 +82,6 @@ describe('stopless metadata center helper', () => {
         active: true
       })
     );
-    expect(buildMetadataCenterRustSnapshot(metadata).runtimeControl?.stopless).toEqual(
-      expect.objectContaining({
-        flowId: 'stop_message_flow',
-        repeatCount: 1,
-        maxRepeats: 3
-      })
-    );
     expect(center?.readRuntimeControl().stopless).not.toHaveProperty('sessionId');
   });
 
@@ -114,15 +111,12 @@ describe('stopless metadata center helper', () => {
 
   it('preserves stopless MetadataCenter binding when adapter root lacks the symbol but metadata bag already owns it', async () => {
     const metadata: Record<string, unknown> = {
-      __rt: {
-        stopMessageState: {
-          stopMessageText: '继续推进当前任务。',
-          stopMessageMaxRepeats: 3,
-          stopMessageUsed: 1
-        }
-      }
     };
     const center = MetadataCenter.attach(metadata);
+    writeProviderProtocol(
+      center,
+      'preserves stopless MetadataCenter binding when adapter root lacks the symbol but metadata bag already owns it'
+    );
 
     const adapterContext: Record<string, unknown> = {
       requestId: 'req-stopless-rootless-center',
@@ -173,19 +167,16 @@ describe('stopless metadata center helper', () => {
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
       sessionId: 'sess-stopless-root-center',
-      __rt: {
-        stopMessageState: {
-          stopMessageText: '继续推进当前任务。',
-          stopMessageMaxRepeats: 3,
-          stopMessageUsed: 1
-        }
-      },
       capturedChatRequest: {
         model: 'gpt-test',
         messages: [{ role: 'user', content: '继续执行' }]
       }
     };
     const center = MetadataCenter.attach(adapterContext);
+    writeProviderProtocol(
+      center,
+      'inherits stopless MetadataCenter binding from adapter root when metadata bag is created during finalize'
+    );
 
     await runServerSideToolEngine({
       chatResponse: {
@@ -209,7 +200,6 @@ describe('stopless metadata center helper', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(adapterContext.metadata).toEqual(expect.any(Object));
     expect(center.readRuntimeControl().stopless).toEqual(
       expect.objectContaining({
         flowId: 'stop_message_flow',
@@ -217,29 +207,40 @@ describe('stopless metadata center helper', () => {
       })
     );
     expect(center.readRuntimeControl().stopless).not.toHaveProperty('sessionId');
-    expect(MetadataCenter.read(adapterContext.metadata as Record<string, unknown>)).toBe(center);
+    expect(adapterContext).not.toHaveProperty('metadata');
   });
 
-  it('persists next visible repeatCount from existing stop state when no current CLI output is present', async () => {
+  it('persists next visible repeatCount from MetadataCenter stopless state when no current CLI output is present', async () => {
     const adapterContext: Record<string, unknown> = {
       requestId: 'req-stopless-repeatcount-persist',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
       sessionId: 'sess-stopless-repeatcount-persist',
-      __rt: {
-        stopMessageState: {
-          stopMessageText: '继续推进当前任务。',
-          stopMessageMaxRepeats: 3,
-          stopMessageUsed: 1,
-          stopMessageStageMode: 'on'
-        }
-      },
       capturedChatRequest: {
         model: 'gpt-test',
         messages: [{ role: 'user', content: '继续执行' }]
       }
     };
     const center = MetadataCenter.attach(adapterContext);
+    writeProviderProtocol(
+      center,
+      'persists next visible repeatCount from MetadataCenter stopless state when no current CLI output is present'
+    );
+    center.writeRuntimeControl(
+      'stopless',
+      {
+        flowId: 'stop_message_flow',
+        repeatCount: 1,
+        maxRepeats: 3,
+        continuationPrompt: '继续推进当前任务。',
+        active: true
+      },
+      {
+        module: 'tests/servertool/stopless-metadata-center.spec.ts',
+        symbol: 'persists next visible repeatCount from MetadataCenter stopless state when no current CLI output is present',
+        stage: 'test'
+      }
+    );
 
     const result = await runServerSideToolEngine({
       chatResponse: {
@@ -271,13 +272,15 @@ describe('stopless metadata center helper', () => {
         active: true
       })
     );
-    expect((result.execution?.context as any)?.serverToolLoopState).toEqual(
+    expect((result.execution?.context as any)?.stopless).toEqual(
       expect.objectContaining({
         flowId: 'stop_message_flow',
         repeatCount: 2,
         maxRepeats: 3
       })
     );
+    expect(center.readRuntimeControl().stopMessageState).toBeUndefined();
+    expect(center.readRuntimeControl().serverToolLoopState).toBeUndefined();
   });
 
   it('persists stop-message compare context into MetadataCenter after projection finalize', async () => {
@@ -286,20 +289,31 @@ describe('stopless metadata center helper', () => {
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
       sessionId: 'sess-stopless-compare-context-persist',
-      __rt: {
-        stopMessageState: {
-          stopMessageText: '请补齐 stop schema 后继续。',
-          stopMessageMaxRepeats: 3,
-          stopMessageUsed: 1,
-          stopMessageStageMode: 'on'
-        }
-      },
       capturedChatRequest: {
         model: 'gpt-test',
         messages: [{ role: 'user', content: '继续执行' }]
       }
     };
     const center = MetadataCenter.attach(adapterContext);
+    writeProviderProtocol(
+      center,
+      'persists stop-message compare context into MetadataCenter after projection finalize'
+    );
+    center.writeRuntimeControl(
+      'stopless',
+      {
+        flowId: 'stop_message_flow',
+        repeatCount: 1,
+        maxRepeats: 3,
+        continuationPrompt: '请补齐 stop schema 后继续。',
+        active: true
+      },
+      {
+        module: 'tests/servertool/stopless-metadata-center.spec.ts',
+        symbol: 'persists stop-message compare context into MetadataCenter after projection finalize',
+        stage: 'test'
+      }
+    );
 
     const result = await runServerSideToolEngine({
       chatResponse: {
@@ -327,17 +341,18 @@ describe('stopless metadata center helper', () => {
       expect.objectContaining({
         decision: 'trigger',
         reason: expect.any(String),
-        used: 1,
-        observationStableCount: expect.any(Number)
+        used: 1
       })
     );
     expect((result.execution?.context as any)?.stopSchemaFeedback).toBeDefined();
+    expect(center.readRuntimeControl().stopMessageState).toBeUndefined();
+    expect(center.readRuntimeControl().serverToolLoopState).toBeUndefined();
   });
 
   it('normalizes stop schema reason codes into MetadataCenter triggerHint tokens', () => {
-    expect(normalizeStoplessTriggerHintForMetadata('stop_schema_budget_exhausted')).toBe('budget_exhausted');
-    expect(normalizeStoplessTriggerHintForMetadata('stop_schema_finished')).toBe('schema_pass');
-    expect(normalizeStoplessTriggerHintForMetadata('stop_schema_next_step_missing')).toBe('invalid_schema');
-    expect(normalizeStoplessTriggerHintForMetadata('stop_schema_missing')).toBe('no_schema');
+    expect(normalizeStoplessTriggerHintForMetadataWithNative('stop_schema_budget_exhausted')).toBe('budget_exhausted');
+    expect(normalizeStoplessTriggerHintForMetadataWithNative('stop_schema_finished')).toBe('schema_pass');
+    expect(normalizeStoplessTriggerHintForMetadataWithNative('stop_schema_next_step_missing')).toBe('invalid_schema');
+    expect(normalizeStoplessTriggerHintForMetadataWithNative('stop_schema_missing')).toBe('no_schema');
   });
 });
