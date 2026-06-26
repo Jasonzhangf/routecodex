@@ -177,7 +177,7 @@
 - `is_available`（L273）
 - `cooldown_remaining_ms`（L311）
 - `is_persisted_503_daily_cooldown_active`（L321）
-- `consume_persisted_503_reprobe_if_available`（L339）
+- `consume_persisted_503_reprobe_if_available`（L339，历史残留，已废弃）
 - `record_http_502_failure`（L504）
 - `record_http_429_failure`（L527）
 - `record_recoverable_failure`（L580）

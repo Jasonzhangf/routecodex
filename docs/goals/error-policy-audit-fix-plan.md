@@ -11,7 +11,7 @@
 | 3b default 保底池 | 已确认 | default 池仍由 Rust Virtual Router selection 作为最后保底；本目标不改 selection |
 | 3c 切候选不上报 | 已修复 | 同 3a，切候选时不 mutate VR health |
 | 3d 瞬态/非瞬态 cooldown | 已修复 | 429 ladder 从 `10m -> 30m -> 5h` 改为 `30m -> 3h -> 3h` |
-| 3e 重启 reprobe 后直接 3h | 已修复 | persisted 503 reprobe 消费后预置 recoverable ladder；首次失败直接 3h |
+| 3e 重启 reprobe 后直接 3h | 历史计划，已废弃 | 旧 persisted 503 reprobe 方案不再是当前真源 |
 
 ## 验收标准
 - 3a/3c：pool 有替代候选时，error 不 mutate VR health state。
@@ -26,7 +26,7 @@
 ### In Scope
 - executor 层 `affectsHealth` 覆盖。
 - Rust `health.rs` 429 ladder 统一。
-- Rust `health.rs` persisted 503 reprobe cooldown 预置。
+- Rust `health.rs` persisted 503 reprobe cooldown 预置（历史残留，已废弃）。
 
 ### Out of Scope
 - provider-failure-policy-impl.ts 分类逻辑。
@@ -92,7 +92,7 @@ fn next_ladder_cooldown_ms(cycles: i64) -> i64 {
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs`
 
 ### 方案
-`consume_persisted_503_reprobe_if_available` 消费 reprobe 时预置：
+`consume_persisted_503_reprobe_if_available`（历史残留，已废弃）曾消费 reprobe 时预置：
 
 ```rust
 state.consecutive_recoverable_failures = self.config.failure_threshold - 1;
@@ -102,8 +102,8 @@ state.recoverable_cooldown_cycles = 1;
 reprobe 后首次 recoverable failure 会立即 trip，并使用 cycle 1 的 3h cooldown。
 
 ### 红测
-- persisted 503 reprobe 成功：provider 保持 healthy。
-- persisted 503 reprobe 失败：单次 recoverable failure 直接 3h cooldown。
+- persisted 503 reprobe 成功：provider 保持 healthy。（历史旧方案）
+- persisted 503 reprobe 失败：单次 recoverable failure 直接 3h cooldown。（历史旧方案）
 
 ## 验证矩阵
 

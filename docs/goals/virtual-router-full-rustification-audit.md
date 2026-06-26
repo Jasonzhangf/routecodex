@@ -223,7 +223,7 @@
 | `snapshot` | 299 | facade | 读状态 |
 | `cooldown_remaining_ms` | 311 | policy | 读 cooldown |
 | `is_persisted_503_daily_cooldown_active` | 321 | policy | 读 503 cooldown |
-| `consume_persisted_503_reprobe_if_available` | 339 | policy | 写 503 状态 |
+| `consume_persisted_503_reprobe_if_available` | 339 | policy | 历史残留；当前已废弃，不再作为活路由真源 |
 | `describe_state` | 378 | facade | 读状态 |
 | `config` | 394 | facade | 读 config |
 | `clear_runtime_state` | 398 | state_store | 清运行时状态 |
@@ -239,7 +239,7 @@
 | 目标层 | 包含方法 | 说明 |
 |---|---|---|
 | health_state_store | configure, register_providers, clear_runtime_state, clear_imported_persisted_state, export_persistable_state, import_persistable_state | 状态持久化 |
-| health_policy | record_failure, cooldown_provider, cooldown_provider_until_midnight_persisted, record_success, persisted 503 family cleanup, trip_provider, is_available, cooldown_remaining_ms, is_persisted_503_daily_cooldown_active, consume_persisted_503_reprobe_if_available, record_http_502_failure, record_http_429_failure, record_recoverable_failure | 策略判定 |
+| health_policy | record_failure, cooldown_provider, cooldown_provider_until_midnight_persisted, record_success, persisted 503 family cleanup, trip_provider, is_available, cooldown_remaining_ms, is_persisted_503_daily_cooldown_active, consume_persisted_503_reprobe_if_available(历史残留, 已废弃), record_http_502_failure, record_http_429_failure, record_recoverable_failure | 策略判定 |
 | health_facade | new, snapshot, describe_state, config | 对外接口 |
 
 ---

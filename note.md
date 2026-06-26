@@ -59,6 +59,13 @@
   - startup reprobe / persisted_503_reprobe_available 旧设计稿属于过时方案，不应继续被当作活文档引用；
   - 后续只保留“不再使用 startup reprobe”的红测和已废弃引用残影，避免把旧设计误读成真源。
 
+# 2026-06-27 goal docs reprobe cleanup
+
+- 已收口：`docs/goals/virtual-router-full-rustification-audit.md`、`docs/goals/error-policy-audit-fix-plan.md`、`docs/goals/virtual-router-replacement-steps.md`
+- 结论：
+  - `consume_persisted_503_reprobe_if_available` 只保留为历史残留，不再作为正向设计或步骤描述；
+  - goal 文档里的 reprobe 语义已压成废弃引用，避免以后再被读成活策略。
+
 # 2026-06-27 special_400 audit gate
 
 - 结论：`special_400` 目前不是单点死语义，不能直接物理删除。
