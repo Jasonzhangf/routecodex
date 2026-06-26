@@ -78,8 +78,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     stage: reportPlan.stageHint as RequestExecutorProviderErrorStage
   });
   const suppressForceExclude =
-    classification === 'special_400'
-    || reportPlan.stageHint === 'host.response_contract'
+    reportPlan.stageHint === 'host.response_contract'
     || reportPlan.stageHint === 'provider.followup';
   const forceExcludeCurrentProviderOnRetry =
     suppressForceExclude

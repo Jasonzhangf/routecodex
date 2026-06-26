@@ -11,7 +11,6 @@ export {
   resolveProviderFailureRetryEligibility,
   resolveProviderFailureExclusionDecision,
   shouldKeepProviderExcludedForNextAttempt,
-  shouldSuppressForcedProviderExclusion,
   isProviderFailureHealthNeutral,
   extractProviderFailureStatusCode,
   classify_error_err_03_runtime_from_error_err_02_host,

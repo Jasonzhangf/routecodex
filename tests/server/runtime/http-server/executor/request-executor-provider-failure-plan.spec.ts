@@ -1,7 +1,7 @@
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
-  test('does not force exclude current provider for special_400 provider.send failures when route pool is empty', async () => {
+  test('special_400 no longer suppresses explicit force-exclude when caller requests it', async () => {
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(
         new Error('Converted provider tool call has invalid client arguments'),
@@ -27,13 +27,14 @@ describe('request-executor-provider-failure-plan', () => {
       logicalRequestChainKey: 'logical-special-400',
       logicalChainRetryLimitStageRequestId: 'logical-special-400',
       routePool: [],
+      forceExcludeCurrentProviderOnRetry: true,
       excludedProviderKeys: new Set<string>(),
       recordAttempt: () => undefined,
       logStage: () => undefined,
       logNonBlockingError: () => undefined
     });
 
-    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
     expect(plan.retryExecutionPlan.shouldRetry).toBe(false);
   });
 

@@ -887,15 +887,6 @@ export function shouldKeepProviderExcludedForNextAttempt(args: {
   return args.hasAlternativeCandidate;
 }
 
-export function shouldSuppressForcedProviderExclusion(args: {
-  classification?: ProviderFailureClassification;
-  stage?: string;
-}): boolean {
-  return args.classification === 'special_400'
-    || args.stage === 'host.response_contract'
-    || args.stage === 'provider.followup';
-}
-
 export function isProviderFailureHealthNeutral(args: {
   stage?: string;
   error?: unknown;
