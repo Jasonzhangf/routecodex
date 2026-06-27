@@ -381,6 +381,8 @@ fn build_stop_message_auto_run_output(
         .or_else(|| read_u32(&input.input, "maxRepeats"))
         .unwrap_or(3)
         .max(1);
+    let visible_repeat_count = current_repeat_count;
+
     let derived_schema_feedback = if invoked_public_reasoning_stop {
         derive_stopless_feedback_from_raw_reasoning_stop_input(
             &input.input,
@@ -434,7 +436,7 @@ fn build_stop_message_auto_run_output(
         .or_else(|| read_stopless_schema_feedback(&input.input));
     let canonical_input = serde_json::json!({
         "flowId": flow_id,
-        "repeatCount": current_repeat_count,
+        "repeatCount": visible_repeat_count,
         "maxRepeats": current_max_repeats,
         "triggerHint": stopless_trigger_hint(trigger)
     });
@@ -455,7 +457,7 @@ fn build_stop_message_auto_run_output(
         flow_id,
         route_hint: Some("thinking".to_string()),
         continuation_prompt,
-        repeat_count: current_repeat_count,
+        repeat_count: visible_repeat_count,
         max_repeats: current_max_repeats,
         session_id,
         request_id,

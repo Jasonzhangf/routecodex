@@ -65,48 +65,49 @@ pub fn plan_stopless_cli_projection_context(
     let stopless_control = input.stopless_control.as_ref().and_then(Value::as_object);
     let runtime_snapshot = input.runtime_snapshot.as_ref();
 
-    let repeat_count = execution_stopless
+    let execution_stopless_repeat_count = execution_stopless
         .and_then(|row| row.get("repeatCount"))
-        .and_then(read_u32)
-        .or_else(|| {
-            stopless_control
-                .and_then(|row| row.get("repeatCount"))
-                .and_then(read_u32)
-        })
-        .or_else(|| {
-            loop_state
-                .and_then(|row| row.get("repeatCount"))
-                .and_then(read_u32)
-        })
+        .and_then(read_u32);
+    let stopless_control_repeat_count = stopless_control
+        .and_then(|row| row.get("repeatCount"))
+        .and_then(read_u32);
+    let loop_state_repeat_count = loop_state
+        .and_then(|row| row.get("repeatCount"))
+        .and_then(read_u32);
+    let explicit_repeat_count = execution_stopless_repeat_count
+        .or(stopless_control_repeat_count)
+        .or(loop_state_repeat_count);
+    let runtime_repeat_count = runtime_snapshot
+        .and_then(|snapshot| snapshot.used)
+        .map(|used| used.saturating_add(1));
+    let repeat_count = match (explicit_repeat_count, runtime_repeat_count) {
+        (_, _) if execution_stopless_repeat_count.is_some() => execution_stopless_repeat_count,
+        (Some(explicit), Some(runtime)) if runtime > explicit && stopless_control_repeat_count.is_some() => {
+            Some(runtime)
+        }
+        (Some(explicit), _) => Some(explicit),
+        (None, Some(runtime)) => Some(runtime),
+        (None, None) => None,
+    }
         .map(|count| count.max(1))
-        .or_else(|| {
-            runtime_snapshot
-                .and_then(|snapshot| snapshot.used)
-                .map(|used| used.saturating_add(1).max(1))
-        })
         .unwrap_or(1);
 
-    let max_repeats = execution_stopless
+    let explicit_max_repeats = execution_stopless
         .and_then(|row| row.get("maxRepeats"))
         .and_then(read_u32)
-        .filter(|value| *value > 0)
         .or_else(|| {
             stopless_control
                 .and_then(|row| row.get("maxRepeats"))
                 .and_then(read_u32)
-                .filter(|value| *value > 0)
         })
         .or_else(|| {
             loop_state
                 .and_then(|row| row.get("maxRepeats"))
                 .and_then(read_u32)
-                .filter(|value| *value > 0)
         })
-        .or_else(|| {
-            runtime_snapshot
-                .and_then(|snapshot| snapshot.max_repeats)
-                .filter(|value| *value > 0)
-        })
+        .filter(|value| *value > 0);
+    let max_repeats = explicit_max_repeats
+        .or_else(|| runtime_snapshot.and_then(|snapshot| snapshot.max_repeats).filter(|value| *value > 0))
         .unwrap_or_else(|| repeat_count.max(1));
 
     let trigger_hint = first_non_empty_string([
@@ -280,6 +281,32 @@ mod tests {
     }
 
     #[test]
+    fn explicit_repeat_count_beats_advanced_runtime_snapshot() {
+        let plan = plan_stopless_cli_projection_context(StoplessCliProjectionContextInput {
+            execution_context: Some(json!({
+                "stopless": {
+                    "repeatCount": 2,
+                    "maxRepeats": 3
+                }
+            })),
+            stopless_control: None,
+            runtime_snapshot: Some(StoplessCliProjectionRuntimeSnapshotInput {
+                used: Some(2),
+                max_repeats: Some(3),
+                trigger_hint: None,
+                schema_feedback: None,
+            }),
+            chat_stop_text: Some("stop text".to_string()),
+            adapter_stop_text: None,
+            session_id: None,
+            request_id: None,
+        });
+
+        assert_eq!(plan.repeat_count, 2);
+        assert_eq!(plan.max_repeats, 3);
+    }
+
+    #[test]
     fn uses_persisted_runtime_snapshot_when_current_loop_state_is_absent() {
         let plan = plan_stopless_cli_projection_context(StoplessCliProjectionContextInput {
             execution_context: Some(json!({})),
@@ -308,6 +335,36 @@ mod tests {
             }))
         );
     }
+
+    #[test]
+    fn explicit_execution_stopless_repeat_count_stays_current_turn_even_if_runtime_snapshot_is_higher() {
+        let plan = plan_stopless_cli_projection_context(StoplessCliProjectionContextInput {
+            execution_context: Some(json!({
+                "stopless": {
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                }
+            })),
+            stopless_control: Some(json!({
+                "repeatCount": 1,
+                "maxRepeats": 3
+            })),
+            runtime_snapshot: Some(StoplessCliProjectionRuntimeSnapshotInput {
+                used: Some(1),
+                max_repeats: Some(3),
+                trigger_hint: None,
+                schema_feedback: None,
+            }),
+            chat_stop_text: Some("stop text".to_string()),
+            adapter_stop_text: None,
+            session_id: None,
+            request_id: None,
+        });
+
+        assert_eq!(plan.repeat_count, 1);
+        assert_eq!(plan.max_repeats, 3);
+    }
+
 
     #[test]
     fn prefers_canonical_stopless_budget_over_legacy_loop_budget() {

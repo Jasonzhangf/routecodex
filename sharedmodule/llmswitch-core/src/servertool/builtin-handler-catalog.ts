@@ -16,6 +16,7 @@ import {
   buildStoplessMetadataCenterWritePlan
 } from './stopless-metadata-center-writer.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
+import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 type StopMessageHandlerPlan = {
   action:
@@ -40,7 +41,12 @@ type StopMessageHandlerPlan = {
   stoplessTriggerHint?: string;
   schemaFeedback?: { reasonCode: string; missingFields: string[] };
   assistantStopText?: string;
-  nativeHandlerResult?: { followup?: unknown; chatResponse?: unknown };
+  nativeHandlerResult?: {
+    followup?: unknown;
+    chatResponse?: unknown;
+    stoplessRuntimeState?: unknown;
+  };
+  finalizeStopless?: Record<string, unknown>;
 } & Record<string, unknown>;
 
 function isBuiltinRuntimeSupported(name: string): boolean {
@@ -67,6 +73,28 @@ function readMetadataCenterSnapshot(record: Record<string, unknown>): Record<str
   return {};
 }
 
+function buildRuntimeMetadataCarrier(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const center = MetadataCenter.read(record)
+    ?? MetadataCenter.read((record.metadata as Record<string, unknown> | undefined));
+  if (!center) {
+    return undefined;
+  }
+  const continuationContext = center.readContinuationContext();
+  const runtimeControl = center.readRuntimeControl();
+  const carrier: Record<string, unknown> = {};
+  if (Object.keys(continuationContext).length > 0) {
+    if (continuationContext.responsesResume) {
+      carrier.responsesResume = continuationContext.responsesResume;
+    }
+  }
+  if (Object.keys(runtimeControl).length > 0) {
+    carrier.metadataCenterSnapshot = {
+      runtimeControl,
+    };
+  }
+  return Object.keys(carrier).length > 0 ? carrier : undefined;
+}
+
 function readStopMessageCompareContextFromRuntimeControl(
   record: Record<string, unknown>
 ): Record<string, unknown> | undefined {
@@ -77,13 +105,98 @@ function readStopMessageCompareContextFromRuntimeControl(
     : undefined;
 }
 
+function normalizeStoplessRuntimeLoopState(
+  snapshot: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!snapshot) {
+    return undefined;
+  }
+
+  const repeatCount =
+    typeof snapshot.repeatCount === 'number' && Number.isFinite(snapshot.repeatCount)
+      ? Math.max(1, Math.floor(snapshot.repeatCount))
+      : undefined;
+  const maxRepeats =
+    typeof snapshot.maxRepeats === 'number' && Number.isFinite(snapshot.maxRepeats)
+      ? Math.max(1, Math.floor(snapshot.maxRepeats))
+      : undefined;
+  const continuationPrompt =
+    typeof snapshot.continuationPrompt === 'string' && snapshot.continuationPrompt.trim()
+      ? snapshot.continuationPrompt.trim()
+      : undefined;
+  const triggerHint =
+    typeof snapshot.triggerHint === 'string' && snapshot.triggerHint.trim()
+      ? snapshot.triggerHint.trim()
+      : undefined;
+  const schemaFeedback =
+    snapshot.schemaFeedback && typeof snapshot.schemaFeedback === 'object' && !Array.isArray(snapshot.schemaFeedback)
+      ? snapshot.schemaFeedback
+      : undefined;
+
+  if (repeatCount === undefined && maxRepeats === undefined && !continuationPrompt && !triggerHint && !schemaFeedback) {
+    return snapshot;
+  }
+
+  return {
+    ...(typeof snapshot === 'object' ? snapshot : {}),
+    ...(repeatCount !== undefined ? { used: repeatCount } : {}),
+    ...(maxRepeats !== undefined ? { maxRepeats } : {}),
+    ...(continuationPrompt ? { continuationPrompt } : {}),
+    ...(triggerHint ? { triggerHint } : {}),
+    ...(schemaFeedback ? { schemaFeedback } : {})
+  };
+}
+
+function normalizePersistedStoplessControlState(
+  snapshot: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!snapshot) {
+    return undefined;
+  }
+
+  const repeatCount =
+    typeof snapshot.repeatCount === 'number' && Number.isFinite(snapshot.repeatCount)
+      ? Math.max(0, Math.floor(snapshot.repeatCount))
+      : undefined;
+  const maxRepeats =
+    typeof snapshot.maxRepeats === 'number' && Number.isFinite(snapshot.maxRepeats)
+      ? Math.max(1, Math.floor(snapshot.maxRepeats))
+      : undefined;
+  const continuationPrompt =
+    typeof snapshot.continuationPrompt === 'string' && snapshot.continuationPrompt.trim()
+      ? snapshot.continuationPrompt.trim()
+      : undefined;
+  const triggerHint =
+    typeof snapshot.triggerHint === 'string' && snapshot.triggerHint.trim()
+      ? snapshot.triggerHint.trim()
+      : undefined;
+  const schemaFeedback =
+    snapshot.schemaFeedback && typeof snapshot.schemaFeedback === 'object' && !Array.isArray(snapshot.schemaFeedback)
+      ? snapshot.schemaFeedback
+      : undefined;
+
+  if (repeatCount === undefined && maxRepeats === undefined && !continuationPrompt && !triggerHint && !schemaFeedback) {
+    return snapshot;
+  }
+
+  return {
+    ...(typeof snapshot === 'object' ? snapshot : {}),
+    ...(repeatCount !== undefined ? { used: repeatCount } : {}),
+    ...(maxRepeats !== undefined ? { maxRepeats } : {}),
+    ...(continuationPrompt ? { continuationPrompt } : {}),
+    ...(triggerHint ? { triggerHint } : {}),
+    ...(schemaFeedback ? { schemaFeedback } : {})
+  };
+}
+
 function buildStoplessAutoHandlerInput(ctx: ServerToolHandlerContext): Record<string, unknown> {
   const adapterContext = ctx.adapterContext as Record<string, unknown>;
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext);
+  const runtimeMetadataCarrier = buildRuntimeMetadataCarrier(adapterContext);
   const capturedRequest = getCapturedRequestWithNative(adapterContext);
   const currentToolOutputSnapshot = extractStopMessageAutoCliResultSnapshotFromRequestWithNative({
     adapterContext,
-    runtimeMetadata: runtimeControl,
+    runtimeMetadata: runtimeMetadataCarrier,
   });
   const defaultConfig = planStopMessageDefaultConfigWithNative({
     tombstoneCleared: false,
@@ -98,10 +211,14 @@ function buildStoplessAutoHandlerInput(ctx: ServerToolHandlerContext): Record<st
     runtimeMetadata: runtimeControl,
     capturedRequest,
   });
-  const effectiveRuntimeLoopState = resolveRuntimeStopMessageStateFromAdapterContextWithNative({
+  const normalizedCurrentToolOutputSnapshot = normalizeStoplessRuntimeLoopState(currentToolOutputSnapshot);
+  const resolvedRuntimeLoopState = resolveRuntimeStopMessageStateFromAdapterContextWithNative({
     adapterContext,
-    runtimeMetadata: runtimeControl,
+    runtimeMetadata: runtimeMetadataCarrier,
   });
+  const effectiveRuntimeLoopState =
+    normalizedCurrentToolOutputSnapshot
+    ?? normalizePersistedStoplessControlState(resolvedRuntimeLoopState);
   return {
     adapterContext,
     base: ctx.base,
@@ -114,27 +231,61 @@ function buildStoplessAutoHandlerInput(ctx: ServerToolHandlerContext): Record<st
     defaultConfig,
     decisionSignals,
     capturedRequest,
-    effectiveRuntimeLoopState: currentToolOutputSnapshot ?? effectiveRuntimeLoopState,
+    effectiveRuntimeLoopState,
     providerKey: undefined,
   };
 }
 
 function buildStoplessRuntimeExecutionContext(
-  ctx: ServerToolHandlerContext,
   plan: StopMessageHandlerPlan
 ): JsonObject | undefined {
   if (plan.action !== 'return_handler_plan') return undefined;
-  const persistPlan = plan.persistPlan;
-  if (!persistPlan) return undefined;
-  return {
-    stopless: {
+  const runtimeContext: JsonObject = {};
+  const effectiveDecision =
+    plan.effectiveDecision && typeof plan.effectiveDecision === 'object' && !Array.isArray(plan.effectiveDecision)
+      ? plan.effectiveDecision as JsonObject
+      : undefined;
+  const stoplessRuntimeState =
+    plan.nativeHandlerResult?.stoplessRuntimeState
+    && typeof plan.nativeHandlerResult.stoplessRuntimeState === 'object'
+    && !Array.isArray(plan.nativeHandlerResult.stoplessRuntimeState)
+      ? plan.nativeHandlerResult.stoplessRuntimeState as JsonObject
+      : undefined;
+  const finalizeStopless =
+    plan.finalizeStopless
+    && typeof plan.finalizeStopless === 'object'
+    && !Array.isArray(plan.finalizeStopless)
+      ? plan.finalizeStopless as JsonObject
+      : undefined;
+
+  const currentRepeatCount =
+    typeof finalizeStopless?.repeatCount === 'number'
+      ? Math.max(1, Math.floor(finalizeStopless.repeatCount))
+      : typeof effectiveDecision?.used === 'number'
+        ? Math.max(1, Math.floor(effectiveDecision.used) + 1)
+        : undefined;
+  const currentMaxRepeats =
+    typeof finalizeStopless?.maxRepeats === 'number'
+      ? Math.max(1, Math.floor(finalizeStopless.maxRepeats))
+      : typeof effectiveDecision?.maxRepeats === 'number'
+        ? Math.max(1, Math.floor(effectiveDecision.maxRepeats))
+        : typeof effectiveDecision?.max_repeats === 'number'
+          ? Math.max(1, Math.floor(effectiveDecision.max_repeats))
+          : undefined;
+  if (currentRepeatCount !== undefined && currentMaxRepeats !== undefined) {
+    runtimeContext.stopless = {
       flowId: plan.flowId ?? 'stop_message_flow',
-      repeatCount: persistPlan.nextUsed,
-      maxRepeats: persistPlan.nextMaxRepeats,
+      repeatCount: currentRepeatCount,
+      maxRepeats: currentMaxRepeats,
       ...(typeof plan.stoplessTriggerHint === 'string' ? { triggerHint: plan.stoplessTriggerHint } : {}),
-      ...(plan.schemaFeedback ? { schemaFeedback: plan.schemaFeedback as unknown as JsonObject } : {})
-    }
-  };
+      ...(plan.schemaFeedback ? { schemaFeedback: plan.schemaFeedback } : {}),
+    } as JsonObject;
+  }
+  if (stoplessRuntimeState) {
+    runtimeContext.stoplessRuntimeState = stoplessRuntimeState;
+  }
+
+  return Object.keys(runtimeContext).length > 0 ? runtimeContext : undefined;
 }
 
 async function planStoplessAutoHandlerNapi(input: Record<string, unknown>): Promise<StopMessageHandlerPlan> {
@@ -245,7 +396,7 @@ async function runBuiltinStopMessageAutoHandler(
                 ? { stopSchemaTriggerHint: plan.stoplessTriggerHint }
                 : {}),
               ...(plan.schemaFeedback ? { stopSchemaFeedback: plan.schemaFeedback } : {}),
-              ...(buildStoplessRuntimeExecutionContext(ctx, plan) ?? {})
+              ...(buildStoplessRuntimeExecutionContext(plan) ?? {})
             }
           }
         })

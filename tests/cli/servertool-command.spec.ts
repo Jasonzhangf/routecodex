@@ -18,8 +18,6 @@ describe('servertool CLI command', () => {
     '"restorationStore"',
     'reenterPipeline',
     'providerInvoker',
-    'serverToolFollowup',
-    'serverToolFollowupSource',
     '--ticket',
     'stcli_',
     'rcc_cli_',
@@ -109,25 +107,15 @@ describe('servertool CLI command', () => {
     expect(payload).toMatchObject({
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow',
-      repeatCount: 3,
+      repeatCount: 2,
       maxRepeats: 3
     });
     expect(payload.sessionId).toBe(sessionId);
     expect(payload.requestId).toBe(requestId);
     expect(typeof payload.continuationPrompt).toBe('string');
     expect(payload.continuationPrompt.length).toBeGreaterThan(0);
-    expect(typeof payload.modelGuidance).toBe('string');
-    expect(payload.modelGuidance).toContain('继续推进');
-    expect(payload.schemaGuidance).toBeDefined();
-    expect(Array.isArray(payload.schemaGuidance.requiredFields)).toBe(true);
-    expect(payload.schemaGuidance.requiredFields).toContain('stopreason');
-    expect(payload.schemaGuidance.stopreasonValues.finished).toBe(0);
-    expect(payload.schemaGuidance.decisionRules).toContain(
-      'If there is still a concrete next_step, unfinished gate, pending verification, or more implementation work, use stopreason=2 instead of 0.'
-    );
-    expect(payload.schemaGuidance.invalidExamples).toContain(
-      'Invalid: stopreason=0 with next_step saying continue writing remaining gates/manifests/package wiring.'
-    );
+    expect(payload.modelGuidance).toBeUndefined();
+    expect(payload.schemaGuidance).toBeUndefined();
     for (const forbidden of [
       'schema',
       'hook',
@@ -176,7 +164,7 @@ describe('servertool CLI command', () => {
 
     expect(errors).toEqual([]);
     const payload = JSON.parse(output[0] ?? '{}');
-    expect(payload.repeatCount).toBe(2);
+    expect(payload.repeatCount).toBe(1);
     expect(payload.sessionId).toBe(sessionId);
     expect(payload.requestId).toBe(requestId);
   });
@@ -219,10 +207,10 @@ describe('servertool CLI command', () => {
     expect(payload).toMatchObject({
       toolName: 'stop_message_auto',
       flowId: 'stop_message_flow',
-      repeatCount: 3,
+      repeatCount: 2,
       maxRepeats: 5,
       input: {
-        repeatCount: 3,
+        repeatCount: 2,
         maxRepeats: 5
       }
     });
@@ -230,14 +218,8 @@ describe('servertool CLI command', () => {
     expect(payload.requestId).toBe(requestId);
     expect(typeof payload.continuationPrompt).toBe('string');
     expect(payload.continuationPrompt.length).toBeGreaterThan(0);
-    expect(typeof payload.modelGuidance).toBe('string');
-    expect(payload.schemaGuidance).toBeDefined();
-    expect(Array.isArray(payload.schemaGuidance.requiredFields)).toBe(true);
-    expect(payload.schemaGuidance.requiredFields).toContain('next_step');
-    expect(payload.schemaGuidance.stopreasonValues.blocked).toBe(1);
-    expect(payload.schemaGuidance.decisionRules).toContain(
-      'Only use stopreason=0 when the task is actually finished and there is no remaining next_step to execute.'
-    );
+    expect(payload.modelGuidance).toBeUndefined();
+    expect(payload.schemaGuidance).toBeUndefined();
     for (const forbidden of [
       'schema',
       'hook',
@@ -289,11 +271,8 @@ describe('servertool CLI command', () => {
 
     expect(errors).toEqual([]);
     const payload = JSON.parse(output[0] ?? '{}');
-    expect(payload.modelGuidance).toContain('如果任务已经完成，补齐 stop schema');
-    expect(payload.modelGuidance).toContain('如果任务还没完成，不要停，继续执行当前任务');
-    expect(payload.modelGuidance).toContain('stopreason：必填数字；0=finished，1=blocked，2=continue_needed');
-    expect(payload.modelGuidance).toContain('next_step：如果 stopreason=2，必须写下一步要执行的具体动作');
-    expect(payload.modelGuidance).toContain('reason：用一句具体的话写清当前状态');
+    expect(payload.modelGuidance).toBeUndefined();
+    expect(payload.schemaGuidance).toBeUndefined();
   });
 
   it('expands terminal missing fields into per-field repair guidance', async () => {
@@ -345,13 +324,7 @@ describe('servertool CLI command', () => {
       'diagnostic_order',
       'done_steps'
     ]));
-    expect(payload.modelGuidance).toContain('终态 stop schema 要求更严格');
-    expect(payload.modelGuidance).toContain('has_evidence：只能填 0 或 1');
-    expect(payload.modelGuidance).toContain('evidence：写真正支撑结论的证据');
-    expect(payload.modelGuidance).toContain('issue_cause：写根因或当前卡点');
-    expect(payload.modelGuidance).toContain('excluded_factors：写已经排除掉的错误方向');
-    expect(payload.modelGuidance).toContain('diagnostic_order：按顺序写本轮排查路径');
-    expect(payload.modelGuidance).toContain('done_steps：列出已经实际完成的动作');
+    expect(payload.modelGuidance).toBeUndefined();
   });
 
   it.each([
@@ -701,7 +674,7 @@ describe('servertool CLI command', () => {
     expect(exitCode).toBe(0);
     expect(errors).toEqual([]);
     const payload = JSON.parse(output[0] ?? '{}');
-    expect(payload.repeatCount).toBe(2);
+    expect(payload.repeatCount).toBe(1);
     expect(payload.sessionId).toBeUndefined();
     expect(payload.requestId).toBeUndefined();
   });

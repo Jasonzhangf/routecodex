@@ -96,35 +96,7 @@ fn stop_message_auto_outputs_rust_owned_schema() {
             "prompt must not contain forbidden token {forbidden}: {prompt}"
         );
     }
-    assert!(value.get("schemaGuidance").is_some());
-    assert!(value["schemaGuidance"]["schemaOverview"]
-        .as_str()
-        .expect("schema overview")
-        .contains("收尾报告"));
-    assert!(value["schemaGuidance"]["schemaPurpose"]
-        .as_str()
-        .expect("schema purpose")
-        .contains("避免模型只写泛泛的总结"));
-    assert_eq!(value["schemaGuidance"]["stopreasonValues"]["finished"], 0);
-    assert_eq!(value["schemaGuidance"]["stopreasonValues"]["blocked"], 1);
-    assert_eq!(
-        value["schemaGuidance"]["stopreasonValues"]["continueNeeded"],
-        2
-    );
-    assert!(value["schemaGuidance"]["requiredFields"]
-        .as_array()
-        .expect("required fields")
-        .iter()
-        .any(|field| field.as_str() == Some("stopreason")));
-    assert!(value["schemaGuidance"]["fieldDescriptions"]
-        .as_array()
-        .expect("field descriptions")
-        .iter()
-        .any(|field| field["field"].as_str() == Some("next_step")));
-    assert!(value["schemaGuidance"]["sample"]
-        .as_str()
-        .expect("sample")
-        .contains("\"stopreason\":2"));
+    assert!(value.get("schemaGuidance").is_none());
     assert!(value.get("injectedPromptPreview").is_none());
     assert!(value["input"].get("continuationPrompt").is_none());
     assert!(value["input"].get("schemaGuidance").is_none());
@@ -157,9 +129,9 @@ fn stop_message_auto_explicit_repeat_args_override_input_json() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["repeatCount"], 3);
+    assert_eq!(value["repeatCount"], 2);
     assert_eq!(value["maxRepeats"], 5);
-    assert_eq!(value["input"]["repeatCount"], 3);
+    assert_eq!(value["input"]["repeatCount"], 2);
     assert_eq!(value["input"]["maxRepeats"], 5);
     assert_no_internal_or_restoration_carrier(&value);
 }
@@ -265,7 +237,7 @@ fn stopless_repeat_count_depends_only_on_current_input() {
     );
     let first_value: serde_json::Value =
         serde_json::from_slice(&first.stdout).expect("json stdout");
-    assert_eq!(first_value["repeatCount"], 2);
+    assert_eq!(first_value["repeatCount"], 1);
 
     let (second_session_id, second_request_id) = unique_identity("repeat-second");
     let second = Command::new(bin())
@@ -288,7 +260,7 @@ fn stopless_repeat_count_depends_only_on_current_input() {
     );
     let second_value: serde_json::Value =
         serde_json::from_slice(&second.stdout).expect("json stdout");
-    assert_eq!(second_value["repeatCount"], 3);
+    assert_eq!(second_value["repeatCount"], 2);
 }
 
 #[test]
@@ -336,7 +308,7 @@ fn reasoning_stop_full_terminal_schema_at_budget_edge_must_not_downgrade_to_budg
     let output = Command::new(bin())
         .args([
             "run",
-            "reasoning_stop",
+            "reasoningStop",
             "--session-id",
             &session_id,
             "--request-id",
@@ -362,9 +334,10 @@ fn reasoning_stop_full_terminal_schema_at_budget_edge_must_not_downgrade_to_budg
         "full terminal schema at budget edge must not be downgraded to budget exhausted: {}",
         value
     );
-    assert_eq!(value["schemaGuidance"]["triggerHint"], "schema_pass");
     assert_eq!(value["input"]["triggerHint"], "schema_pass");
     assert_eq!(value["repeatCount"], 3);
+    assert!(value.get("schemaGuidance").is_none());
+    assert!(value.get("continuationPrompt").is_none());
     assert_no_internal_or_restoration_carrier(&value);
 }
 
@@ -486,7 +459,7 @@ fn exhausted_explicit_repeat_args_return_terminal_summary() {
 
 #[test]
 fn non_client_exec_servertools_fail_fast() {
-    for tool_name in ["web_search", "vision_auto", "memory_cache_auto"] {
+    for tool_name in ["memory_cache_auto"] {
         let output = Command::new(bin())
             .args([
                 "run",
@@ -510,6 +483,35 @@ fn non_client_exec_servertools_fail_fast() {
             stderr.contains(&format!("SERVERTOOL_UNSUPPORTED_TOOL: {tool_name}")),
             "stderr={stderr}"
         );
+    }
+}
+
+#[test]
+fn web_search_and_vision_auto_are_client_exec_cli_tools() {
+    for (tool_name, expected_route_hint) in
+        [("web_search", "web_search"), ("vision_auto", "multimodal")]
+    {
+        let output = Command::new(bin())
+            .args([
+                "run",
+                tool_name,
+                "--input-json",
+                r#"{"query":"x","count":3,"image":"data","prompt":"x"}"#,
+            ])
+            .output()
+            .expect("run routecodex-servertool");
+        assert!(
+            output.status.success(),
+            "{tool_name} must be executable through client CLI stdout: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("json stdout");
+        assert_eq!(value["toolName"], tool_name);
+        assert_eq!(value["kind"], tool_name);
+        assert_eq!(value["flowId"], "servertool_cli_projection");
+        assert_eq!(value["routeHint"], expected_route_hint);
+        assert_no_internal_or_restoration_carrier(&value);
     }
 }
 
@@ -732,7 +734,7 @@ fn reasoning_stop_no_schema_reports_missing_schema_fields() {
     let output = Command::new(bin())
         .args([
             "run",
-            "reasoning_stop",
+            "reasoningStop",
             "--session-id",
             &session_id,
             "--request-id",
@@ -741,34 +743,27 @@ fn reasoning_stop_no_schema_reports_missing_schema_fields() {
             r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3,"triggerHint":"no_schema","schemaFeedback":{"reasonCode":"stop_schema_missing","missingFields":["stopreason","reason","has_evidence","evidence","issue_cause","excluded_factors","diagnostic_order","done_steps","next_step","next_suggested_path","needs_user_input","learned"]}}"#,
         ])
         .output()
-        .expect("run routecodex-servertool reasoning_stop");
+        .expect("run routecodex-servertool reasoningStop");
     assert!(
         output.status.success(),
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    let guidance = value["modelGuidance"].as_str().expect("model guidance");
-    assert!(guidance.contains("缺少 stop schema 必填字段"));
-    assert!(guidance.contains("stopreason"));
-    assert!(guidance.contains("reason"));
-    assert!(guidance.contains("evidence"));
-    assert!(guidance.contains("这是什么："));
-    assert!(guidance.contains("为什么要填："));
-    assert!(guidance.contains("怎么理解这个 schema："));
-    assert!(guidance.contains("怎么填："));
-    assert!(guidance.contains("最小可复制样本："));
+    let prompt = value["continuationPrompt"]
+        .as_str()
+        .expect("continuation prompt");
+    assert!(!prompt.is_empty());
     assert_eq!(value["schemaFeedback"]["reasonCode"], "stop_schema_missing");
-    assert!(value["schemaGuidance"]["requiredFields"]
+    assert_eq!(value["input"]["triggerHint"], "no_schema");
+    assert!(value["schemaFeedback"]["missingFields"]
         .as_array()
-        .expect("required fields")
+        .expect("missing fields")
         .iter()
         .any(|field| field.as_str() == Some("stopreason")));
-    assert!(value["schemaGuidance"]["fieldDescriptions"]
-        .as_array()
-        .expect("field descriptions")
-        .iter()
-        .any(|field| field["field"].as_str() == Some("reason")));
+    assert!(value.get("modelGuidance").is_none());
+    assert!(value.get("schemaGuidance").is_none());
+    assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
@@ -777,7 +772,7 @@ fn reasoning_stop_raw_partial_schema_derives_missing_schema_feedback() {
     let output = Command::new(bin())
         .args([
             "run",
-            "reasoning_stop",
+            "reasoningStop",
             "--session-id",
             &session_id,
             "--request-id",
@@ -786,7 +781,7 @@ fn reasoning_stop_raw_partial_schema_derives_missing_schema_feedback() {
             r#"{"stopreason":2,"reason":"第一轮故意缺 schema"}"#,
         ])
         .output()
-        .expect("run routecodex-servertool reasoning_stop");
+        .expect("run routecodex-servertool reasoningStop");
     assert!(
         output.status.success(),
         "stderr={}",
@@ -799,19 +794,19 @@ fn reasoning_stop_raw_partial_schema_derives_missing_schema_feedback() {
         .as_str()
         .expect("schema reason code");
     assert!(!reason_code.is_empty());
-    assert_ne!(value["input"]["triggerHint"], "budget_exhausted");
+    assert_eq!(value["input"]["triggerHint"], "invalid_schema");
     assert!(value["schemaFeedback"]["missingFields"]
         .as_array()
         .expect("missing fields")
         .iter()
         .any(|field| field.as_str() == Some("next_step")));
-    let guidance = value["modelGuidance"].as_str().expect("model guidance");
-    assert!(guidance.contains("next_step") || guidance.contains("缺少 stop schema 必填字段"));
-    assert!(guidance.contains("字段怎么写："));
-    assert!(guidance.contains("怎么理解这个 schema："));
-    assert!(guidance.contains("怎么填："));
-    assert!(guidance.contains("stopreason 取值："));
-    assert!(guidance.contains("最小可复制样本："));
+    let prompt = value["continuationPrompt"]
+        .as_str()
+        .expect("continuation prompt");
+    assert!(!prompt.is_empty());
+    assert!(value.get("modelGuidance").is_none());
+    assert!(value.get("schemaGuidance").is_none());
+    assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
@@ -820,7 +815,7 @@ fn reasoning_stop_control_envelope_keeps_invalid_schema_feedback() {
     let output = Command::new(bin())
         .args([
             "run",
-            "reasoning_stop",
+            "reasoningStop",
             "--session-id",
             &session_id,
             "--request-id",
@@ -829,7 +824,7 @@ fn reasoning_stop_control_envelope_keeps_invalid_schema_feedback() {
             r#"{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3,"stopreason":2,"reason":"还没完成","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_suggested_path":"","needs_user_input":false,"learned":""}"#,
         ])
         .output()
-        .expect("run routecodex-servertool reasoning_stop");
+        .expect("run routecodex-servertool reasoningStop");
     assert!(
         output.status.success(),
         "stderr={}",
@@ -837,7 +832,6 @@ fn reasoning_stop_control_envelope_keeps_invalid_schema_feedback() {
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["input"]["triggerHint"], "invalid_schema");
-    assert_eq!(value["schemaGuidance"]["triggerHint"], "invalid_schema");
     assert_eq!(
         value["schemaFeedback"]["reasonCode"],
         "stop_schema_next_step_missing"
@@ -847,6 +841,13 @@ fn reasoning_stop_control_envelope_keeps_invalid_schema_feedback() {
         .expect("missing fields")
         .iter()
         .any(|field| field.as_str() == Some("next_step")));
+    let prompt = value["continuationPrompt"]
+        .as_str()
+        .expect("continuation prompt");
+    assert!(!prompt.is_empty());
+    assert!(value.get("modelGuidance").is_none());
+    assert!(value.get("schemaGuidance").is_none());
+    assert_no_internal_or_restoration_carrier(&value);
 }
 
 #[test]
@@ -855,7 +856,7 @@ fn reasoning_stop_third_invalid_schema_stops_terminally() {
     let output = Command::new(bin())
         .args([
             "run",
-            "reasoning_stop",
+            "reasoningStop",
             "--session-id",
             &session_id,
             "--request-id",
@@ -868,7 +869,7 @@ fn reasoning_stop_third_invalid_schema_stops_terminally() {
             r#"{"flowId":"stop_message_flow","repeatCount":3,"maxRepeats":3,"triggerHint":"invalid_schema","schemaFeedback":{"reasonCode":"stop_schema_stopreason_missing_or_non_numeric","missingFields":["stopreason"]}}"#,
         ])
         .output()
-        .expect("run routecodex-servertool reasoning_stop");
+        .expect("run routecodex-servertool reasoningStop");
     assert!(
         output.status.success(),
         "stderr={}",

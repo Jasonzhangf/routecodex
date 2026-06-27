@@ -246,6 +246,86 @@ describe('stopless CLI continuation', () => {
     expect(cliStdout.modelGuidance).toBeUndefined();
   });
 
+  test('responses resume in metadata center reprojects second-round repeatCount via builtin stopless handler', async () => {
+    const adapterContext = buildAdapterContext({
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      providerProtocol: 'openai-responses',
+      capturedChatRequest: {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: '继续执行' }]
+      },
+      __raw_request_body: {
+        tool_outputs: [
+          {
+            tool_call_id: 'call_servertool_cli',
+            output: JSON.stringify({
+              ok: true,
+              kind: 'stop_message_auto',
+              tool: 'stop_message_auto',
+              toolName: 'stop_message_auto',
+              flowId: 'stop_message_flow',
+              continuationPrompt: '继续执行原任务',
+              repeatCount: 1,
+              maxRepeats: 3
+            })
+          }
+        ]
+      }
+    });
+    bindRequestTruth(adapterContext, adapterContext.requestId, adapterContext.sessionId);
+    const center = MetadataCenter.read(adapterContext)!;
+    center.writeContinuationContext(
+      'responsesResume',
+      {
+        continuationOwner: 'relay',
+        toolOutputsDetailed: [
+          {
+            callId: 'call_servertool_cli',
+            originalId: 'call_servertool_cli',
+            outputText: JSON.stringify({
+              ok: true,
+              kind: 'stop_message_auto',
+              tool: 'stop_message_auto',
+              toolName: 'stop_message_auto',
+              flowId: 'stop_message_flow',
+              continuationPrompt: '继续执行原任务',
+              repeatCount: 2,
+              maxRepeats: 3
+            })
+          }
+        ],
+        fullInput: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: '上一轮执行结果：repeatCount=2/3。' }]
+          }
+        ]
+      },
+      {
+        module: 'tests/servertool/stopless-cli-continuation.spec.ts',
+        symbol: 'responses_resume_repeat_count_reproject',
+        stage: 'test'
+      }
+    );
+
+    const result = await runServerToolOrchestration({
+      chat: buildStopChatResponse('stopless continuation ready'),
+      adapterContext,
+      requestId: adapterContext.requestId,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless CLI projection must not reenter');
+      }
+    });
+
+    expect(result.executed).toBe(true);
+    const command = extractExecCommand(result.chat);
+    expect(command).toContain('routecodex hook run reasoningStop');
+    expect(extractInput(command).repeatCount).toBe(2);
+  });
+
   test('missing request truth sessionId keeps stopless terminal', async () => {
     const adapterContext = buildAdapterContext({
       entryEndpoint: '/v1/responses',

@@ -361,7 +361,7 @@ fn resolve_runtime_stopless_control_snapshot(
     if max_repeats <= 0 {
         return None;
     }
-    let repeat_count = read_js_nonnegative_integer(stopless.get("repeatCount")).unwrap_or(1);
+    let repeat_count = read_js_nonnegative_integer(stopless.get("repeatCount")).unwrap_or(0);
     let text = read_trimmed_string(stopless.get("continuationPrompt"))
         .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
 
@@ -369,7 +369,7 @@ fn resolve_runtime_stopless_control_snapshot(
         text,
         provider_key: None,
         max_repeats,
-        used: repeat_count.saturating_sub(1),
+        used: repeat_count,
         trigger_hint: read_trimmed_string(stopless.get("triggerHint")),
         schema_feedback: stopless
             .get("schemaFeedback")
@@ -528,7 +528,7 @@ fn read_stopless_cli_result_snapshot_from_output_text(
         text,
         provider_key: None,
         max_repeats,
-        used: repeat_count.saturating_sub(1),
+        used: repeat_count,
         trigger_hint: read_trimmed_string(
             row.get("triggerHint")
                 .or_else(|| row.get("trigger_hint"))
