@@ -249,6 +249,25 @@ function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retry
   );
 }
 
+function buildMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
+  const center = MetadataCenter.read(metadata);
+  if (!center) {
+    return {};
+  }
+  const snapshot = center.snapshot();
+  const requestTruth = snapshot.requestTruth ?? {};
+  const continuationContext = snapshot.continuationContext ?? {};
+  const runtimeControl = snapshot.runtimeControl ?? {};
+  const hasRequestTruth = Object.keys(requestTruth).length > 0;
+  const hasContinuationContext = Object.keys(continuationContext).length > 0;
+  const hasRuntimeControl = Object.keys(runtimeControl).length > 0;
+  return {
+    ...(hasRequestTruth ? { requestTruth } : {}),
+    ...(hasContinuationContext ? { continuationContext } : {}),
+    ...(hasRuntimeControl ? { runtimeControl } : {})
+  };
+}
+
 function readRoutingDecisionProviderPool(
   routingDecision: unknown,
   currentProviderKey: string
@@ -1418,6 +1437,8 @@ export class RouteCodexHttpServer {
         sessionDir: portSessionDir,
       };
     }
+    const metadataCenterSnapshot = buildMetadataCenterSnapshot(metadataForHub);
+    metadataForHub.metadataCenterSnapshot = metadataCenterSnapshot;
     if (retryState.retryProviderKey) {
       writeMetadataCenterRuntimeControl(
         metadataForHub,
