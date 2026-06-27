@@ -1,0 +1,48 @@
+lifecycle_id: vr.route_availability.mainline
+summary: Virtual Router ordinary-route filtering, default-pool availability
+  floor, and primary_exhausted planning remain Rust-owned; TS may only consume
+  the floor/plan output and must not locally re-decide terminal no-provider.
+owner_feature_id: vr.provider_forwarder_runtime
+entrypoint:
+  node_id: VrAvail01RouteCandidates
+  wiki_page: null
+  call_map_chain_id: vr.route_availability.mainline
+node_ids:
+  - ErrorErr05ExecutionDecision
+  - VrAvail01RouteCandidates
+  - VrAvail02PoolFiltered
+  - VrAvail03DefaultFloorEvaluated
+  - VrAvail04PrimaryExhaustedPlanned
+edges:
+  - step_id: vra-01
+    from_node: VrAvail01RouteCandidates
+    to_node: VrAvail02PoolFiltered
+    status: anchored
+    owner_feature_id: vr.provider_forwarder_runtime
+    binding_pending: null
+    split_binding_id: null
+  - step_id: vra-02
+    from_node: VrAvail02PoolFiltered
+    to_node: VrAvail03DefaultFloorEvaluated
+    status: anchored
+    owner_feature_id: vr.route_availability_floor
+    binding_pending: null
+    split_binding_id: null
+  - step_id: vra-03
+    from_node: VrAvail03DefaultFloorEvaluated
+    to_node: VrAvail04PrimaryExhaustedPlanned
+    status: anchored
+    owner_feature_id: virtual_router.primary_exhausted_to_default_pool
+    binding_pending: null
+    split_binding_id: null
+  - step_id: vra-04
+    from_node: VrAvail04PrimaryExhaustedPlanned
+    to_node: ErrorErr05ExecutionDecision
+    status: partial
+    owner_feature_id: error.execution_decision_consumer
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

@@ -57,6 +57,19 @@ describe('responses stream semantics wrapper', () => {
     expect(output).not.toContain('event: response.completed');
   });
 
+  it('treats response.completed as terminal without requiring response.done', async () => {
+    const output = await collectWrappedStreamOutput({
+      chunks: [
+        'event: response.completed\n'
+        + 'data: {"type":"response.completed","response":{"id":"resp_completed_only","object":"response","status":"completed","model":"gpt-5.4-mini","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}\n\n'
+      ],
+    });
+
+    expect(output).toContain('event: response.completed');
+    expect(output).not.toContain('stream closed before response.completed');
+    expect(output).not.toContain('event: error');
+  });
+
   it('auto-closes assistant output_item.done by appending response.completed and response.done', async () => {
     const output = await collectWrappedStreamOutput({
       chunks: [
@@ -73,6 +86,20 @@ describe('responses stream semantics wrapper', () => {
     expect(output).toContain('event: response.done');
     expect(output).toContain('"id":"resp_terminal_only_message"');
     expect(output).not.toContain('upstream_stream_incomplete');
+  });
+
+  it('projects upstream_stream_incomplete when stream ends without any response terminal', async () => {
+    const output = await collectWrappedStreamOutput({
+      chunks: [
+        ': keepalive\n\n',
+        'event: response.output_text.delta\n'
+        + 'data: {"type":"response.output_text.delta","delta":"partial"}\n\n'
+      ],
+    });
+
+    expect(output).toContain('event: error');
+    expect(output).toContain('"code":"upstream_stream_incomplete"');
+    expect(output).toContain('stream closed before response.completed');
   });
 
   it('does not emit write-after-end when upstream writes after assistant auto-close', async () => {

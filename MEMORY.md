@@ -3538,3 +3538,13 @@ Tags: startupExcludedProviderKeys, virtual-router-config, direct_model, ecodev, 
   - `docs/architecture/topology-sync-manifest.yml` 删除已被引用的 `MetaRoute03RouteCarrier` allowlist 残留，并把 referenced count 对齐为 18。
 - 已确认 `hub.metadata_center_dualwrite_api` 仍是 planned migration feature，不再作为当前冲突项；当前 contract 闭环不依赖它作为活 owner。
 - 旧样本 replay 的 404 只证明 anthropic replay 入口未挂载，不影响本次 metadata-center contract/gate closeout 结论。
+- 2026-06-27: inbound/outbound bridge layers are semantic mappers only. Do not move business logic or error policy into request/response mapping code; provider errors must be handled by the provider-switch / retry owner, not by continuation bridge heuristics. When a relay `submit_tool_outputs` case stays pinned to `primary` on 429, inspect the provider retry owner and its input contract first, not the mapping layer.
+# 2026-06-27: responses SSE terminal semantics correction
+
+- 已验证：`src/modules/llmswitch/bridge/responses-stream-semantics.ts` 的 SSE 终态判定必须把 `response.completed` 与 `response.done` 都视为 terminal。
+- 已修正：不再把仅有 `response.completed` 的正常流误判为 `stream closed before response.completed` 并上升为内部 502。
+- 已补回归：`tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts` 覆盖 `response.completed` 单独终止与无任何 terminal 时的 `upstream_stream_incomplete` 两条路径。
+- 已验证命令：
+  - `npm run jest:run -- --runTestsByPath tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 约束：这台机器上未找到 5520 旧样本的实际落盘目录，尚未完成那条旧样本 live replay。

@@ -217,20 +217,20 @@ export function inspectResponsesTerminalStateFromSseChunkForHttp(input: {
         continue;
       }
       result.finishReason = derived;
-      if (parsedType === 'response.completed') {
-        result.sawResponsesCompletedChunk = true;
-      }
-      if (parsedType === 'response.done') {
-        result.sawResponsesDoneEvent = true;
-      }
-      const trueTerminal =
-        parsedType === 'response.completed'
-        || parsedType === 'response.done'
-        || parsedType === 'response.error'
-        || parsedType === 'response.cancelled'
-        || parsedType === 'response.failed'
-        || parsedType === 'message_stop';
-      if (trueTerminal) {
+    if (parsedType === 'response.completed') {
+      result.sawResponsesCompletedChunk = true;
+    }
+    if (parsedType === 'response.done') {
+      result.sawResponsesDoneEvent = true;
+    }
+    const trueTerminal =
+      parsedType === 'response.completed'
+      || parsedType === 'response.done'
+      || parsedType === 'response.error'
+      || parsedType === 'response.cancelled'
+      || parsedType === 'response.failed'
+      || parsedType === 'message_stop';
+    if (trueTerminal) {
         result.seenTerminalEvent = true;
         result.sawTerminalChunk = true;
         result.terminalSource = result.terminalSource ?? eventName ?? parsedType;
