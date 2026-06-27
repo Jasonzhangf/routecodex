@@ -218,6 +218,17 @@
   - `npx tsc -p tsconfig.json --noEmit --pretty false`
 - 结论：
   - reselection plan 的同义字段已物理删除，接口面更小。
+
+# 2026-06-27 provider-failure-policy executor bridge slice
+
+- 已收口：
+  - `request-executor-provider-failure-plan.ts` 已改为直接消费 `resolveProviderFailureClassification`
+  - `tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts` 已改为直接绑定 `provider-failure-policy` 的公开 API
+- 已验证：
+  - `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - executor 侧对 provider failure 分类的桥接继续收口，测试仍全绿。
   - 目前没有证据支持继续删 `resolveProviderFailureExclusionDecision` 或主 policy retry/classification 逻辑。
 
 # 2026-06-27 reselection wrapper closeout slice

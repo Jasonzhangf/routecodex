@@ -11,40 +11,18 @@ import {
   buildProviderRetryTelemetryPlan
 } from './request-executor-retry-telemetry.js';
 import {
+  cloneErrorForReporting
+} from './request-executor-error-report.js';
+import {
+  resolveProviderFailureClassification
+} from '../../../../providers/core/runtime/provider-failure-policy.js';
+import {
   reportRequestExecutorProviderError,
   resolveRequestExecutorProviderErrorReportPlan
 } from './request-executor-provider-failure.js';
 import {
   resolveProviderRetryExecutionPlan
 } from './request-executor-retry-execution-plan.js';
-import {
-  cloneErrorForReporting
-} from './request-executor-error-report.js';
-import {
-  resolveRequestExecutorProviderErrorClassification
-} from './request-executor-provider-failure.js';
-
-function isLocalConversionContractError(args: {
-  retryError: RetryErrorSnapshot;
-  error: unknown;
-}): boolean {
-  const topCode = typeof (args.error as { code?: unknown } | undefined)?.code === 'string'
-    ? String((args.error as { code: string }).code).trim().toUpperCase()
-    : undefined;
-  const topUpstreamCode = typeof (args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode === 'string'
-    ? String((args.error as { upstreamCode: string }).upstreamCode).trim().toUpperCase()
-    : undefined;
-  const errorCode = typeof args.retryError.errorCode === 'string'
-    ? args.retryError.errorCode.trim().toUpperCase()
-    : undefined;
-  const upstreamCode = typeof args.retryError.upstreamCode === 'string'
-    ? args.retryError.upstreamCode.trim().toUpperCase()
-    : undefined;
-  return topCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || topUpstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || errorCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID';
-}
 
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
@@ -94,17 +72,31 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     retryError: args.retryError,
     stage: args.stage
   });
-  const classification = resolveRequestExecutorProviderErrorClassification({
+  const topCode = typeof (args.error as { code?: unknown } | undefined)?.code === 'string'
+    ? String((args.error as { code: string }).code).trim().toUpperCase()
+    : undefined;
+  const topUpstreamCode = typeof (args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode === 'string'
+    ? String((args.error as { upstreamCode: string }).upstreamCode).trim().toUpperCase()
+    : undefined;
+  const errorCode = typeof args.retryError.errorCode === 'string'
+    ? args.retryError.errorCode.trim().toUpperCase()
+    : undefined;
+  const upstreamCode = typeof args.retryError.upstreamCode === 'string'
+    ? args.retryError.upstreamCode.trim().toUpperCase()
+    : undefined;
+  const classification = resolveProviderFailureClassification({
     error: args.error,
-    retryError: args.retryError,
-    stage: reportPlan.stageHint as RequestExecutorProviderErrorStage
-  });
-  const localConversionContractError = isLocalConversionContractError({
-    error: args.error,
-    retryError: args.retryError
+    stage: reportPlan.stageHint,
+    statusCode: reportPlan.statusCode,
+    errorCode: reportPlan.errorCode,
+    upstreamCode: reportPlan.upstreamCode,
+    reason: args.retryError.reason
   });
   const suppressForceExclude =
-    localConversionContractError
+    topCode === 'CLIENT_TOOL_ARGS_INVALID'
+    || topUpstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
+    || errorCode === 'CLIENT_TOOL_ARGS_INVALID'
+    || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
     || reportPlan.stageHint === 'host.response_contract'
     || reportPlan.stageHint === 'provider.followup';
   const forceExcludeCurrentProviderOnRetry =

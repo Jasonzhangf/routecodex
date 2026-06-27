@@ -6,9 +6,11 @@
 
 import { isProviderFailureNetworkTransportLike } from '../../../../../src/providers/core/runtime/provider-failure-policy.js';
 import {
-  resolveRequestExecutorProviderErrorClassification,
-  resolveRequestExecutorProviderFailureOutcome
-} from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure.js';
+  resolveProviderFailureOutcome
+} from '../../../../../src/providers/core/runtime/provider-failure-policy.js';
+import {
+  resolveProviderFailureClassification
+} from '../../../../../src/providers/core/runtime/provider-failure-policy.js';
 import { resolveProviderRetryExecutionPlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-execution-plan.js';
 
 describe('Error chain singleton — runtime binding', () => {
@@ -27,21 +29,27 @@ describe('Error chain singleton — runtime binding', () => {
     expect(isProviderFailureNetworkTransportLike(undefined)).toBe(false);
   });
 
-  it('resolveRequestExecutorProviderErrorClassification delegates to provider-failure-policy', () => {
+  it('resolveProviderFailureClassification delegates to provider-failure-policy', () => {
     const err = Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' });
-    const result = resolveRequestExecutorProviderErrorClassification({
+    const result = resolveProviderFailureClassification({
       error: err,
-      retryError: { statusCode: undefined, errorCode: undefined, upstreamCode: undefined, reason: 'connection refused' },
+      statusCode: undefined,
+      errorCode: undefined,
+      upstreamCode: undefined,
+      reason: 'connection refused',
       stage: 'provider.send'
     });
     // 503 / ECONNREFUSED is recoverable; executor must surface that via policy
     expect(result === 'recoverable' || result === undefined).toBe(true);
   });
 
-  it('resolveRequestExecutorProviderFailureOutcome exposes policy recoverable and affectsHealth fields', () => {
-    expect(resolveRequestExecutorProviderFailureOutcome({
+  it('resolveProviderFailureOutcome exposes policy recoverable and affectsHealth fields', () => {
+    expect(resolveProviderFailureOutcome({
       error: Object.assign(new Error('HTTP 502: temporary'), { code: 'HTTP_502', statusCode: 502 }),
-      retryError: { statusCode: 502, errorCode: 'HTTP_502', upstreamCode: undefined, reason: 'HTTP 502: temporary' },
+      statusCode: 502,
+      errorCode: 'HTTP_502',
+      upstreamCode: undefined,
+      reason: 'HTTP 502: temporary',
       stage: 'provider.send'
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
@@ -49,9 +57,12 @@ describe('Error chain singleton — runtime binding', () => {
       affectsHealth: true
     }));
 
-    expect(resolveRequestExecutorProviderFailureOutcome({
+    expect(resolveProviderFailureOutcome({
       error: Object.assign(new Error('followup failed'), { code: 'SERVERTOOL_FOLLOWUP_FAILED', statusCode: 502 }),
-      retryError: { statusCode: 502, errorCode: 'SERVERTOOL_FOLLOWUP_FAILED', upstreamCode: undefined, reason: 'followup failed' },
+      statusCode: 502,
+      errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
+      upstreamCode: undefined,
+      reason: 'followup failed',
       stage: 'provider.followup'
     })).toEqual(expect.objectContaining({
       classification: undefined,
