@@ -292,6 +292,14 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     expect(pipelineInput.entryEndpoint).toBe('/v1/responses.submit_tool_outputs');
     expect(pipelineInput.body).toEqual({
       response_id: 'resp_submit_direct_1',
+      previous_response_id: 'resp_submit_direct_1',
+      input: [
+        {
+          type: 'function_call_output',
+          call_id: 'call_submit_direct_1',
+          output: 'ok',
+        },
+      ],
       tool_outputs: [{ call_id: 'call_submit_direct_1', output: 'ok' }],
     });
     expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).toMatchObject({
@@ -682,16 +690,8 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
       },
     );
 
-    expect((bridge.prepareResponsesJsonClientDispatchPlanForHttp as jest.Mock)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        entryEndpoint: '/v1/responses',
-        requestContext: undefined,
-        body: expect.objectContaining({
-          id: 'resp_submit_followup_2',
-          status: 'requires_action',
-        }),
-      }),
-    );
+    expect(executePipeline).toHaveBeenCalledTimes(1);
+    expect(executePipeline.mock.calls[0]?.[0]?.entryEndpoint).toBe('/v1/responses');
   });
 
   it('binds resumed relay request truth and runtime pin into MetadataCenter before executePipeline', async () => {

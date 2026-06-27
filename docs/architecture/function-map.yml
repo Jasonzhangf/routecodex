@@ -3489,15 +3489,13 @@ owners:
 
   - feature_id: server.responses_sse_bridge_surface
     status: active
-    summary: "/v1/responses SSE path is a locked business module boundary: independent transport-only SSE surface; no lifecycle bridge or protocol semantics owner is allowed here"
+    summary: "/v1/responses SSE path is a locked transport-only boundary: frame write, keepalive, timeout, closeout, and JSON->SSE framing only"
     owner_kind: ts_bridge
-    owner_scope: "/v1/responses SSE path is an independent transport-only SSE surface: writes frames, manages stream transport, and enforces metadata isolation only"
+    owner_scope: "/v1/responses SSE path is an independent transport-only SSE surface: writes frames, manages stream transport, and performs no schema/tool/metadata/terminal business semantics"
     owner_module: src/modules/llmswitch/bridge/responses-sse-bridge.ts
     canonical_types:
-      - ResponsesSseClientProjectionState
+      - ServerRespOutbound05ClientFrame
     canonical_builders:
-      - assertDirectPassthroughResponsesSseFrameForHttp
-      - assertDirectPassthroughResponsesSseMetadataIsolationForHttp
       - buildClientSseKeepaliveFrameForHttp
       - buildResponsesMissingSseBridgeErrorPayloadForHttp
       - buildResponsesPayloadFromChatForHttp
@@ -3505,10 +3503,8 @@ owners:
       - buildResponsesSseErrorPayloadForHttp
       - buildResponsesStructuredSseErrorPayloadForHttp
       - importResponsesHandlerCoreDist
-      - isDirectPassthroughTransportKeepaliveFrameForHttp
       - normalizeChatUsagePayloadForHttp
       - requireResponsesHandlerCoreDist
-      - shouldDispatchResponsesSseToClientForHttp
       - shouldDropClientSseFrameForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-sse-bridge.ts
@@ -3536,6 +3532,8 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
+      - "SSE is transport-only. No schema strip, stopless interception, metadata inspection, required_action detection, terminal repair, tool projection, or semantic normalization may live here."
+      - "All request/response business semantics must complete in Chat Process before RespOutbound."
       - "locked business module: the SSE surface is an independent transport-only module and may pass opaque SSE/body handoff state and request ids only."
       - "Server handler SSE transport code must stay physically isolated in `handler-response-sse.ts`; shared non-protocol helpers live in `handler-response-common.ts`; `handler-response-utils.ts` is dispatcher + JSON path only."
       - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, protocol projection, or nested response normalization in TS."

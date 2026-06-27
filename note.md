@@ -258,6 +258,49 @@
 
 - 用户要求：给 `5520` 上使用 `gpt-5-mini` 的路由追加更低 priority 的 `fwd.glm.glm-5.2` 备份。
 - 真配置入口已确认是 `~/.rcc/config.toml`，不是仓库内 authoring 文件。
+
+# 2026-06-27 hub pipeline职责只读审计
+
+- 结论：`req_inbound` / `req_outbound` / `resp_inbound` / `resp_outbound` 的职责都被文档定义为相邻节点间的语义标准化与投影，不是业务逻辑转换层。
+- 证据：`docs/design/pipeline-type-topology-and-module-boundaries.md` 明确写了
+  - `HubReqInbound02Standardized` 只做协议解析、形状标准化、原始语义保留；
+  - `HubReqOutbound05ProviderSemantic` 只把 governed Hub request 定型为 provider-neutral outbound semantic；
+  - `HubRespInbound02Parsed` 只把 provider raw response 解析回 Hub 规范响应；
+  - `HubRespOutbound04ClientSemantic` 只把 Hub 响应投影回客户端入口协议。
+- 证据：`docs/architecture/mainline-call-map.yml` 和 `docs/architecture/manifests/response.mainline.yml` 把 `HubRespChatProcess03Governed -> HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` 标成相邻投影链，`ServerRespOutbound05ClientFrame` 只负责 JSON/SSE frame 写出。
+- 结论：SSE 在 server handler / bridge 侧是 transport-only surface；`docs/architecture/wiki/server-responses-sse-bridge-map.md` 明确要求 `handler-response-sse.ts` 只做 frame/transport，不得修语义、补 tool-call、重建 `required_action`。
+- 重要边界：SSE 不是“整个系统都只是传输工具”。`docs/architecture/wiki/server-responses-sse-bridge-map.md` 同时要求 Rust 负责 client-visible Responses JSON body 和 SSE frame semantics，JSON 与 SSE 必须对同一响应语义等价。
+- 额外结论：provider raw SSE/materialization 仍有语义 owner，属于 `hub.response_provider_sse_materialization`；因此“只是一层 transport”只适用于 server bridge / handler，不适用于 provider raw materialization 这段。
+
+# 2026-06-27 SSE transport-only closeout slice
+
+- 用户再次锁定真相：`SSE` 是纯传输层，不允许拦截 stopless/schema/metadata/tool/terminal 语义。
+- 本轮已物理删除的错误 owner：
+  - `src/modules/llmswitch/bridge/responses-client-projection.ts`
+  - `src/modules/llmswitch/bridge/responses-stream-semantics.ts`
+  - `tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts`
+- 新真源收口：
+  - `src/server/handlers/handler-response-sse.ts` 只保留 stream transport、keepalive、timeout、closeout、JSON->SSE framing 产物转发
+  - `src/modules/llmswitch/bridge/responses-sse-bridge.ts` 只保留 transport-facing facade
+  - `src/modules/llmswitch/bridge/responses-sse-transport.ts` 新增最小 transport helper，只承载 `buildClientSseKeepaliveFrameForHttp` 和 `shouldDropClientSseFrameForHttp`，以及 JSON->SSE converter 入口
+- 已删除/禁止的 SSE 语义：
+  - frame JSON parse / metadata inspection
+  - direct passthrough SSE protocol guard
+  - required_action / reasoning / tool frame rewrite
+  - terminal event inspect / stream end repair
+  - chat SSE chunk stable-id/model rewrite
+  - client projection timeout / projection state
+- 红测与 function map 已同步改成新规则：
+  - `tests/red-tests/server_responses_sse_business_module_contract.test.ts`
+  - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts`
+  - `docs/architecture/function-map.yml`
+- focused 验证已通过：
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/red-tests/server_responses_sse_business_module_contract.test.ts tests/red-tests/server_responses_sse_surface_single_owner.test.ts --runInBand`
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts --runInBand`
+- 当前待做：
+  - build/install/restart
+  - live replay `5520/10000/5555` 样本，确认旧错误不再由 SSE owner 误判/误改写
 - 当前 `gateway_priority_5520` 中 `coding/tools/search/web_search/multimodal/longcontext` 均指向 `fwd.paid.gpt-5.4-mini`。
 - 已把这些路由的 `targets` 改为 `["fwd.paid.gpt-5.4-mini", "fwd.glm.glm-5.2"]`，保持主目标不变，GLM 仅作后备。
 - 待验证：读回配置，并确认 `5520 /health` 仍正常；本轮未重启端口，是否生效取决于现有热加载机制。

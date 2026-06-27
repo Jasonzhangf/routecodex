@@ -1,10 +1,9 @@
-import { Readable, Transform } from 'node:stream';
+import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import type { PipelineExecutionResult } from './types.js';
 import {
   applyHeaders,
-  assertClientResponseHasNoInternalCarriers,
   createClientSseSnapshotRecorder,
   finalizeSseTransportCloseout,
   logResponseNonBlockingError,
@@ -22,31 +21,18 @@ import { logPipelineStage } from '../utils/stage-logger.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
-import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
-import { readRuntimeProviderObservationProjection } from '../runtime/http-server/metadata-center/request-truth-readers.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
-  assertDirectPassthroughResponsesSseMetadataIsolationForHttp,
-  assertDirectPassthroughResponsesSseFrameForHttp,
-  sanitizeDirectPassthroughResponsesSseFrameForHttp,
   buildClientSseKeepaliveFrameForHttp,
   buildResponsesMissingSseBridgeErrorPayloadForHttp,
   buildResponsesSseErrorPayloadForHttp,
   buildResponsesStructuredSseErrorPayloadForHttp,
   createResponsesJsonToSseConverterForHttp,
-  isDirectPassthroughTransportKeepaliveFrameForHttp,
   shouldDropClientSseFrameForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
 import {
-  normalizeClientVisibleResponsesSseFrameForHttp,
-  type ResponsesSseClientProjectionStateForHttp,
-} from '../../modules/llmswitch/bridge/responses-client-projection.js';
-import {
-  attachResponsesStreamSemanticsForHttp,
-  inspectResponsesTerminalStateFromSseChunkForHttp,
-} from '../../modules/llmswitch/bridge/responses-stream-semantics.js';
-import {
   createChatJsonToSseConverterForHttp,
+  buildResponsesPayloadFromChatForHttp,
 } from '../../modules/llmswitch/bridge/responses-response-bridge.js';
 
 type FlushableResponse = Response & {
@@ -67,9 +53,6 @@ type SendSsePipelineResponseArgs = {
   snapshotGroupRequestId?: string;
   snapshotEntryPort?: number;
   sseTotalTimeoutMs?: number;
-  preparedResponsesJsonSseDispatch?: {
-    responsesPayload: Record<string, unknown>;
-  };
   responsesRequestContext?: ResponsesRequestContext;
   logResponseCompleted: (details?: Record<string, unknown>) => void;
 };
@@ -80,9 +63,6 @@ type ResponsesJsonSseDispatchArgs = {
   result: PipelineExecutionResult;
   status: number;
   entryEndpoint?: string;
-  preparedResponsesJsonSseDispatch?: {
-    responsesPayload: Record<string, unknown>;
-  };
   responsesRequestContext?: DispatchOptions['responsesRequestContext'];
   logResponseCompleted: (details?: Record<string, unknown>) => void;
 };
@@ -90,26 +70,6 @@ type ResponsesJsonSseDispatchArgs = {
 const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
   && process.env.RCC_HTTP_LOG_DISABLE !== '1';
 const DEFAULT_SSE_TOTAL_TIMEOUT_MS = 300_000;
-const DEFAULT_SSE_PROJECTION_TIMEOUT_MS = 5_000;
-
-function assertClientSseFrameHasNoInternalCarriers(frame: string, requestId: string): void {
-  for (const line of frame.split(/\r?\n/)) {
-    if (!line.startsWith('data:')) {
-      continue;
-    }
-    const dataText = line.slice(5).trim();
-    if (!dataText || dataText === '[DONE]') {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(dataText);
-    } catch {
-      continue;
-    }
-    assertClientResponseHasNoInternalCarriers(parsed, requestId);
-  }
-}
 
 function readErrorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') {
@@ -117,32 +77,6 @@ function readErrorCode(error: unknown): string | undefined {
   }
   const code = (error as { code?: unknown }).code;
   return typeof code === 'string' && code.trim() ? code.trim() : undefined;
-}
-
-function withSseClientProjectionTimeout<T>(
-  work: Promise<T>,
-  timeoutMs: number,
-  requestLabel: string,
-  stage: string
-): Promise<T> {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return work;
-  }
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(Object.assign(
-        new Error(`[server.response_projection] SSE client projection timed out after ${timeoutMs}ms (${stage}, requestId=${requestLabel})`),
-        { code: 'SSE_CLIENT_PROJECTION_TIMEOUT' }
-      ));
-    }, timeoutMs);
-    timer.unref?.();
-  });
-  return Promise.race([work, timeout]).finally(() => {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  });
 }
 
 function logSseClientCloseDiagnosis(requestLabel: string, details: Record<string, unknown>): void {
@@ -211,234 +145,6 @@ function createSseClientResponseClosedError(): Error & { code: string; name: str
   });
 }
 
-function createClientVisibleSseProjectionStream(stream: Readable, requestId: string): Readable {
-  let pending = '';
-  const transform = new Transform({
-    transform(chunk, _encoding, callback) {
-      try {
-        pending +=
-          typeof chunk === 'string'
-            ? chunk
-            : Buffer.isBuffer(chunk)
-              ? chunk.toString('utf8')
-              : chunk instanceof Uint8Array
-                ? Buffer.from(chunk).toString('utf8')
-                : String(chunk ?? '');
-        const parts = pending.split(/\n\n/);
-        pending = parts.pop() ?? '';
-        for (const part of parts) {
-          const frame = part + '\n\n';
-          const normalized = frame.replace(/\n\n$/, '');
-          const lines = normalized.split('\n');
-          const dataLineIndex = lines.findIndex((line) => line.startsWith('data: '));
-          if (dataLineIndex < 0) {
-            this.push(frame);
-            continue;
-          }
-          const dataText = lines[dataLineIndex].slice('data: '.length);
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(dataText);
-          } catch {
-            this.push(frame);
-            continue;
-          }
-          assertClientResponseHasNoInternalCarriers(parsed, requestId);
-          this.push(frame);
-        }
-        callback();
-      } catch (error) {
-        callback(error as Error);
-      }
-    },
-    flush(callback) {
-      try {
-        if (pending) {
-          this.push(pending);
-          pending = '';
-        }
-        callback();
-      } catch (error) {
-        callback(error as Error);
-      }
-    }
-  });
-  return stream.pipe(transform);
-}
-
-function createDirectPassthroughSseGuardStream(stream: Readable, requestId: string): Readable {
-  let pending = '';
-  const pushReadyFrames = (target: Transform) => {
-    let boundary = /\r?\n\r?\n/.exec(pending);
-    while (boundary) {
-      const frameEnd = boundary.index + boundary[0].length;
-      const frame = pending.slice(0, frameEnd);
-      pending = pending.slice(frameEnd);
-      if (isDirectPassthroughTransportKeepaliveFrameForHttp(frame)) {
-        boundary = /\r?\n\r?\n/.exec(pending);
-        continue;
-      }
-      const sanitized = sanitizeDirectPassthroughResponsesSseFrameForHttp(frame, requestId);
-      assertDirectPassthroughResponsesSseMetadataIsolationForHttp(sanitized, requestId);
-      target.push(sanitized);
-      boundary = /\r?\n\r?\n/.exec(pending);
-    }
-  };
-  const transform = new Transform({
-    transform(chunk, _encoding, callback) {
-      try {
-        pending +=
-          typeof chunk === 'string'
-            ? chunk
-            : Buffer.isBuffer(chunk)
-              ? chunk.toString('utf8')
-              : chunk instanceof Uint8Array
-                ? Buffer.from(chunk).toString('utf8')
-                : String(chunk ?? '');
-        pushReadyFrames(this);
-        callback();
-      } catch (error) {
-        callback(error as Error);
-      }
-    },
-    flush(callback) {
-      try {
-        if (pending) {
-          if (isDirectPassthroughTransportKeepaliveFrameForHttp(pending)) {
-            pending = '';
-            callback();
-            return;
-          }
-          const sanitized = sanitizeDirectPassthroughResponsesSseFrameForHttp(pending, requestId);
-          assertDirectPassthroughResponsesSseMetadataIsolationForHttp(sanitized, requestId);
-          this.push(sanitized);
-          pending = '';
-        }
-        callback();
-      } catch (error) {
-        callback(error as Error);
-      }
-    }
-  });
-  return stream.pipe(transform);
-}
-
-type ChatCompletionSseWireState = {
-  id?: string;
-  created?: number;
-  model?: string;
-  clientModelId?: string;
-};
-
-function readNonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function readPositiveInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : undefined;
-}
-
-function hasObjectUsage(value: unknown): boolean {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-function readChatClientModelForSseRestore(metadata?: Record<string, unknown>): string | undefined {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-    return undefined;
-  }
-  const providerObservation = readRuntimeProviderObservationProjection(metadata);
-  const candidates = [
-    providerObservation.clientModelId,
-    metadata.clientModelId,
-    metadata.originalModelId,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  return undefined;
-}
-
-function normalizeChatCompletionSseFrameForClient(
-  frame: string,
-  state: ChatCompletionSseWireState,
-  requestLabel: string,
-  metadata?: Record<string, unknown>
-): string {
-  const lineBreak = frame.includes('\r\n') ? '\r\n' : '\n';
-  const lines = frame.replace(/\r?\n\r?\n$/, '').split(/\r?\n/);
-  const dataLineIndex = lines.findIndex((line) => line.startsWith('data:'));
-  if (dataLineIndex < 0) {
-    return frame;
-  }
-  const dataText = lines[dataLineIndex].slice('data:'.length).trim();
-  if (!dataText || dataText === '[DONE]') {
-    return frame;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(dataText);
-  } catch {
-    return frame;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return frame;
-  }
-  const record = parsed as Record<string, unknown>;
-  const choices = Array.isArray(record.choices) ? record.choices : undefined;
-  const object = typeof record.object === 'string' ? record.object : undefined;
-  const isChatChunk = object === 'chat.completion.chunk' || choices !== undefined;
-  if (!isChatChunk) {
-    return frame;
-  }
-
-  const usagePresent = hasObjectUsage(record.usage);
-  if ((object === undefined || object === '') && choices?.length === 0 && !usagePresent) {
-    return '';
-  }
-
-  const nextId = readNonEmptyString(record.id);
-  if (nextId) {
-    state.id = nextId;
-  } else if (state.id) {
-    record.id = state.id;
-  } else {
-    throw new Error(`[server.response_projection] chat SSE chunk missing stable id (requestId=${requestLabel})`);
-  }
-
-  const nextCreated = readPositiveInteger(record.created);
-  if (nextCreated !== undefined) {
-    state.created = nextCreated;
-  } else if (state.created !== undefined) {
-    record.created = state.created;
-  } else {
-    throw new Error(`[server.response_projection] chat SSE chunk missing stable created timestamp (requestId=${requestLabel})`);
-  }
-
-  const nextModel = readNonEmptyString(record.model);
-  if (nextModel) {
-    state.model = nextModel;
-  } else if (state.model) {
-    record.model = state.model;
-  }
-
-  if (!state.clientModelId) {
-    state.clientModelId = readChatClientModelForSseRestore(metadata);
-  }
-  if (state.clientModelId) {
-    record.model = state.clientModelId;
-  }
-
-  if (object !== 'chat.completion.chunk') {
-    record.object = 'chat.completion.chunk';
-  }
-
-  lines[dataLineIndex] = `data: ${JSON.stringify(record)}`;
-  return `${lines.join(lineBreak)}${lineBreak}${lineBreak}`;
-}
 
 function sendSseBridgeError(
   res: Response,
@@ -509,103 +215,6 @@ function sendStructuredSseError(
   });
 }
 
-async function normalizeResponsesSseFrameForClient(args: {
-  frame: string;
-  entryEndpoint?: string;
-  requestContext?: DispatchOptions['responsesRequestContext'];
-  metadata?: Record<string, unknown>;
-  projectionState?: ResponsesSseClientProjectionStateForHttp;
-  requestLabel?: string;
-}): Promise<string> {
-  return await normalizeClientVisibleResponsesSseFrameForHttp({
-    frame: args.frame,
-    entryEndpoint: args.entryEndpoint,
-    requestContext: args.requestContext,
-    metadata: args.metadata,
-    projectionState: args.projectionState,
-    requestLabel: args.requestLabel,
-  });
-}
-
-function createResponsesClientProjectionStream(args: {
-  stream: Readable;
-  entryEndpoint?: string;
-  requestContext?: DispatchOptions['responsesRequestContext'];
-  metadata?: Record<string, unknown>;
-  requestLabel: string;
-}): Readable {
-  let pending = '';
-  const projectionState: ResponsesSseClientProjectionStateForHttp = {
-    pendingApplyPatchArgumentDeltas: {},
-    applyPatchCallIds: [],
-    emittedApplyPatchDoneCallIds: [],
-  };
-  const pushReadyFrames = async (target: Transform) => {
-    let boundary = /\r?\n\r?\n/.exec(pending);
-    while (boundary) {
-      const frameEnd = boundary.index + boundary[0].length;
-      const frame = pending.slice(0, frameEnd);
-      pending = pending.slice(frameEnd);
-      if (shouldDropClientSseFrameForHttp(frame, args.entryEndpoint)) {
-        boundary = /\r?\n\r?\n/.exec(pending);
-        continue;
-      }
-      const normalizedFrame = await normalizeResponsesSseFrameForClient({
-        frame,
-        entryEndpoint: args.entryEndpoint,
-        requestContext: args.requestContext,
-        metadata: args.metadata,
-        projectionState,
-        requestLabel: args.requestLabel,
-      });
-      if (!normalizedFrame) {
-        boundary = /\r?\n\r?\n/.exec(pending);
-        continue;
-      }
-      assertClientSseFrameHasNoInternalCarriers(normalizedFrame, args.requestLabel);
-      target.push(normalizedFrame);
-      boundary = /\r?\n\r?\n/.exec(pending);
-    }
-  };
-  const transform = new Transform({
-    transform(chunk, _encoding, callback) {
-      pending +=
-        typeof chunk === 'string'
-          ? chunk
-          : Buffer.isBuffer(chunk)
-            ? chunk.toString('utf8')
-            : chunk instanceof Uint8Array
-              ? Buffer.from(chunk).toString('utf8')
-              : String(chunk ?? '');
-      void pushReadyFrames(this)
-        .then(() => callback())
-        .catch((error) => callback(error as Error));
-    },
-    flush(callback) {
-      if (!pending) {
-        callback();
-        return;
-      }
-      void (async () => {
-        const normalizedFrame = await normalizeResponsesSseFrameForClient({
-          frame: pending,
-          entryEndpoint: args.entryEndpoint,
-          requestContext: args.requestContext,
-          metadata: args.metadata,
-          projectionState,
-          requestLabel: args.requestLabel,
-        });
-        pending = '';
-        if (normalizedFrame) {
-          assertClientSseFrameHasNoInternalCarriers(normalizedFrame, args.requestLabel);
-          this.push(normalizedFrame);
-        }
-      })().then(() => callback()).catch((error) => callback(error as Error));
-    }
-  });
-  return args.stream.pipe(transform);
-}
-
 async function streamResponsesJsonAsSse(
   args: ResponsesJsonSseDispatchArgs & { responsesPayload: Record<string, unknown> }
 ): Promise<boolean> {
@@ -626,19 +235,7 @@ async function streamResponsesJsonAsSse(
     const sse = await converter.convertResponseToJsonToSse(args.responsesPayload, {
       requestId: args.requestLabel
     });
-    const rawStream = toNodeReadable(sse);
-    const stream = rawStream
-      ? createResponsesClientProjectionStream({
-        stream: rawStream,
-        entryEndpoint: args.entryEndpoint,
-        requestContext: args.responsesRequestContext,
-        metadata:
-          args.result.metadata && typeof args.result.metadata === 'object' && !Array.isArray(args.result.metadata)
-            ? args.result.metadata as Record<string, unknown>
-            : undefined,
-        requestLabel: args.requestLabel,
-      })
-      : null;
+    const stream = toNodeReadable(sse);
     if (!stream) {
       sendSseBridgeError(
         args.res,
@@ -834,7 +431,22 @@ async function streamChatCompletionsJsonAsSse(
 }
 
 async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): Promise<boolean> {
-  const responsesPayload = args.preparedResponsesJsonSseDispatch?.responsesPayload;
+  const body = args.result.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return false;
+  }
+  const record = body as Record<string, unknown>;
+  const responsesPayload =
+    record.object === 'response'
+      ? record
+      : (
+        args.entryEndpoint === '/v1/responses'
+        && record.object === 'chat.completion'
+          ? await buildResponsesPayloadFromChatForHttp(body, {
+            requestId: args.requestLabel,
+          }) as Record<string, unknown>
+          : undefined
+      );
   if (!responsesPayload) {
     return false;
   }
@@ -865,7 +477,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       result,
       status,
       entryEndpoint,
-      preparedResponsesJsonSseDispatch: args.preparedResponsesJsonSseDispatch,
       responsesRequestContext: args.responsesRequestContext,
       logResponseCompleted: args.logResponseCompleted
     })) {
@@ -931,19 +542,11 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       : undefined;
   const continuationOwner = result.continuationOwner ?? 'relay';
   const isDirectPassthrough = continuationOwner === 'direct';
-  const responseProjectionMetadata = {
-    ...(result.metadata ?? {}),
-    requestId: requestLabel
-  } as Record<string, unknown>;
-  const resultMetadataCenter = resultMetadata ? MetadataCenter.read(resultMetadata) : undefined;
-  if (resultMetadataCenter) {
-    MetadataCenter.bind(responseProjectionMetadata, resultMetadataCenter);
-  }
   const clientConnectionState =
-    responseProjectionMetadata.clientConnectionState
-    && typeof responseProjectionMetadata.clientConnectionState === 'object'
-    && !Array.isArray(responseProjectionMetadata.clientConnectionState)
-      ? responseProjectionMetadata.clientConnectionState as { disconnected?: unknown }
+    resultMetadata?.clientConnectionState
+    && typeof resultMetadata.clientConnectionState === 'object'
+    && !Array.isArray(resultMetadata.clientConnectionState)
+      ? resultMetadata.clientConnectionState as { disconnected?: unknown }
       : undefined;
   if (!stream) {
     const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
@@ -984,19 +587,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   } catch (error) {
     logResponseNonBlockingError(`response.sse.pause_source:${requestLabel}`, error);
   }
-  const semanticsStream = !isDirectPassthrough
-    ? attachResponsesStreamSemanticsForHttp({
-      stream,
-      entryEndpoint,
-      requestLabel,
-      onNonBlockingError: logResponseNonBlockingError,
-    })
-    : stream;
-  const restoredStream = isDirectPassthrough
-    ? createDirectPassthroughSseGuardStream(semanticsStream, requestLabel)
-    : createClientVisibleSseProjectionStream(semanticsStream, requestLabel);
   const clientSseSnapshotRecorder = shouldCaptureClientResponseSnapshotStage('client-response')
-    ? createClientSseSnapshotRecorder(restoredStream, res, {
+    ? createClientSseSnapshotRecorder(stream, res, {
       requestId: requestLabel,
       groupRequestId: args.snapshotGroupRequestId,
       entryEndpoint,
@@ -1008,8 +600,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     })
     : undefined;
   const outboundStream = shouldCaptureClientResponseSnapshotStage('client-response')
-    ? maybeAttachClientSseSnapshotStream(restoredStream, clientSseSnapshotRecorder)
-    : restoredStream;
+    ? maybeAttachClientSseSnapshotStream(stream, clientSseSnapshotRecorder)
+    : stream;
   const clientConnectionDisconnected = clientConnectionState?.disconnected === true;
   logPipelineStage('response.sse.prestart.inspect', requestLabel, {
     status,
@@ -1192,10 +784,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ['ROUTECODEX_HTTP_SSE_KEEPALIVE_MS', 'RCC_HTTP_SSE_KEEPALIVE_MS'],
     3_000
   );
-  const projectionTimeoutMs = readTimeoutMs(
-    ['ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS', 'RCC_HTTP_SSE_PROJECTION_TIMEOUT_MS'],
-    DEFAULT_SSE_PROJECTION_TIMEOUT_MS
-  );
   const detachOutboundStream = () => {
     try {
       outboundStream.unpipe(res);
@@ -1357,97 +945,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         mode: 'sse',
       },
     });
-    if (trigger === 'finish') {
-      try {
-        await clientWriteQueue;
-      } catch (error) {
-        logResponseNonBlockingError(`response.sse.cleanup.flush_queue:${requestLabel}`, error);
-      }
-    }
-  };
-
-  let ssePending = '';
-  let sseTerminalState:
-    | ReturnType<typeof inspectResponsesTerminalStateFromSseChunkForHttp>
-    | undefined;
-  let clientWriteQueue = Promise.resolve();
-  const responsesSseProjectionState: ResponsesSseClientProjectionStateForHttp = {
-    pendingApplyPatchArgumentDeltas: {},
-    applyPatchCallIds: [],
-    emittedApplyPatchDoneCallIds: [],
-  };
-  const chatSseWireState: ChatCompletionSseWireState = {};
-  const projectClientSseFrame = (frame: string, stage: string): Promise<string> => {
-    const work =
-      !isDirectPassthrough
-      && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
-        ? normalizeResponsesSseFrameForClient({
-          frame,
-          entryEndpoint,
-          requestContext: args.responsesRequestContext,
-          metadata: responseProjectionMetadata,
-          projectionState: responsesSseProjectionState,
-          requestLabel,
-        })
-        : Promise.resolve(
-          entryEndpoint === '/v1/chat/completions'
-            ? normalizeChatCompletionSseFrameForClient(frame, chatSseWireState, requestLabel, responseProjectionMetadata)
-            : frame
-        );
-    return withSseClientProjectionTimeout(
-      work,
-      projectionTimeoutMs,
-      requestLabel,
-      stage
-    );
-  };
-  const enqueueClientSseFrame = (frame: string, errorLabel: string) => {
-    if (!isDirectPassthrough) {
-      assertClientSseFrameHasNoInternalCarriers(frame, requestLabel);
-    }
-    clientWriteQueue = clientWriteQueue
-      .then(async () => projectClientSseFrame(frame, errorLabel))
-      .then((normalizedFrame) => {
-        if (!normalizedFrame) {
-          logPipelineStage('response.sse.project_frame', requestLabel, {
-            emit: false
-          });
-          return;
-        }
-        logPipelineStage('response.sse.project_frame', requestLabel, {
-          emit: true
-        });
-        writeClientSseFrame(normalizedFrame, errorLabel, { recordSnapshot: false });
-      })
-      .catch((error) => {
-        const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-        const sourceCode = readErrorCode(error);
-        if (res.destroyed || (res as unknown as { writableEnded?: boolean }).writableEnded === true) {
-          logPipelineStage('response.sse.projection.cancelled_after_client_close', requestLabel, {
-            reason,
-            sourceCode,
-          });
-          return;
-        }
-        const isProjectionTimeout =
-          sourceCode === 'SSE_CLIENT_PROJECTION_TIMEOUT'
-          || reason.includes('SSE client projection timed out');
-        const projectionError = Object.assign(
-          new Error(`[server.response_projection] SSE client projection failed: ${reason}`),
-          { code: isProjectionTimeout ? 'SSE_CLIENT_PROJECTION_TIMEOUT' : 'SSE_CLIENT_PROJECTION_FAILED' }
-        );
-        logPipelineStage('response.sse.projection.error', requestLabel, {
-          message: projectionError.message,
-          reason,
-          sourceCode,
-        });
-        endWithSseError(
-          readErrorCode(projectionError) ?? 'SSE_CLIENT_PROJECTION_FAILED',
-          'SSE stream response projection failed',
-          500,
-          'response.sse.projection.error'
-        );
-      });
   };
 
   outboundStream.on('data', (chunk: unknown) => {
@@ -1456,27 +953,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       : chunk instanceof Uint8Array ? Buffer.from(chunk).toString('utf8')
       : '';
     if (!text) return;
-    ssePending += text;
-    const parts = ssePending.split(/\n\n/);
-    ssePending = parts.pop() ?? '';
-    for (const part of parts) {
-      if (!part.trim()) continue;
-      const frame = `${part}\n\n`;
-      sseTerminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
-        chunk: frame,
-        probe: sseTerminalState?.probe,
-        finishReason: sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason,
-        seenTerminalEvent: sseTerminalState?.seenTerminalEvent,
-        sawTerminalChunk: sseTerminalState?.sawTerminalChunk,
-        sawResponsesCompletedChunk: sseTerminalState?.sawResponsesCompletedChunk,
-        sawResponsesDoneEvent: sseTerminalState?.sawResponsesDoneEvent,
-        sawAssistantMessageDoneTerminal: sseTerminalState?.sawAssistantMessageDoneTerminal,
-        requiresResponsesTerminalEvent: sseTerminalState?.requiresResponsesTerminalEvent ?? true,
-        terminalSource: sseTerminalState?.terminalSource,
-        pendingTerminalEvent: sseTerminalState?.pendingTerminalEvent,
-      }) ?? sseTerminalState;
-      enqueueClientSseFrame(frame, 'response.sse.stream.write_frame');
-    }
+    writeClientSseFrame(text, 'response.sse.stream.write_frame', { recordSnapshot: false });
   });
 
   outboundStream.on('error', (error: Error) => {
@@ -1490,10 +967,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
     clearTimers();
     detachOutboundStream();
-    const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
     recordSseTransportClientClose(requestLabel, {
-      finishReason: observedFinishReason,
-      terminal: sseTerminalState?.seenTerminalEvent === true,
+      finishReason: result.usageLogInfo?.finishReason,
+      terminal: false,
       closeBeforeStreamEnd: !streamEnded
     });
     logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
@@ -1521,15 +997,11 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       },
     });
     try {
-      const clientVisibleMessage = error.message.startsWith('[server.response_projection]')
-        ? 'SSE stream response projection failed'
-        : error.message;
-      const clientVisibleCode = readErrorCode(error) ?? 'sse_stream_error';
       const payload = buildResponsesSseErrorPayloadForHttp({
         requestLabel,
         status: 500,
-        message: clientVisibleMessage,
-        code: clientVisibleCode,
+        message: error.message,
+        code: readErrorCode(error) ?? 'sse_stream_error',
       });
       writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.stream_error.write_error_event');
     } catch (writeError) {
@@ -1547,34 +1019,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   outboundStream.on('end', async () => {
     streamEnded = true;
     clearTimers();
-    const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
     recordSseTransportStreamEnd(requestLabel, {
-      finishReason: observedFinishReason,
-      terminal: sseTerminalState?.seenTerminalEvent === true
+      finishReason: result.usageLogInfo?.finishReason,
+      terminal: false
     });
-    if (ssePending.trim()) {
-      const pendingFrame = `${ssePending}\n\n`;
-      sseTerminalState = inspectResponsesTerminalStateFromSseChunkForHttp({
-        chunk: pendingFrame,
-        probe: sseTerminalState?.probe,
-        finishReason: sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason,
-        seenTerminalEvent: sseTerminalState?.seenTerminalEvent,
-        sawTerminalChunk: sseTerminalState?.sawTerminalChunk,
-        sawResponsesCompletedChunk: sseTerminalState?.sawResponsesCompletedChunk,
-        sawResponsesDoneEvent: sseTerminalState?.sawResponsesDoneEvent,
-        sawAssistantMessageDoneTerminal: sseTerminalState?.sawAssistantMessageDoneTerminal,
-        requiresResponsesTerminalEvent: sseTerminalState?.requiresResponsesTerminalEvent ?? true,
-        terminalSource: sseTerminalState?.terminalSource,
-        pendingTerminalEvent: sseTerminalState?.pendingTerminalEvent,
-      }) ?? sseTerminalState;
-      enqueueClientSseFrame(pendingFrame, 'response.sse.stream.write_pending_frame');
-      ssePending = '';
-    }
-    try {
-      await clientWriteQueue;
-    } catch (error) {
-      logResponseNonBlockingError(`response.sse.stream.end.flush_queue:${requestLabel}`, error);
-    }
     ended = true;
     if (!res.writableEnded && !res.destroyed) {
       try {
@@ -1589,10 +1037,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   res.on('close', () => {
     if (!ended && !streamEnded) {
       abortSourceStreamForClientClose();
-      const observedFinishReason = sseTerminalState?.finishReason ?? result.usageLogInfo?.finishReason;
       recordSseTransportClientClose(requestLabel, {
-        finishReason: observedFinishReason,
-        terminal: sseTerminalState?.seenTerminalEvent === true,
+        finishReason: result.usageLogInfo?.finishReason,
+        terminal: false,
         closeBeforeStreamEnd: true
       });
       void cleanup('close');

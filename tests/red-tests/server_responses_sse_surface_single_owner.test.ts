@@ -13,6 +13,8 @@ describe('server responses SSE surface single owner', () => {
     const joinedImports = importStatements.join('\n');
 
     expect(source).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
+    expect(source).not.toContain('responses-client-projection');
+    expect(source).not.toContain('responses-stream-semantics');
     expect(joinedImports).not.toMatch(/buildResponsesSseErrorPayloadForHttp[\s\S]*responses-response-bridge\.js/);
     expect(joinedImports).not.toMatch(/shouldDispatchResponsesSseToClientForHttp[\s\S]*responses-response-bridge\.js/);
     expect(source).not.toContain('persistResponsesConversationLifecycleForHttp');
@@ -47,5 +49,16 @@ describe('server responses SSE surface single owner', () => {
     ]) {
       expect(source).not.toContain(forbiddenExport);
     }
+  });
+
+  it('physically deletes old SSE semantic owners', () => {
+    const bridgeSource = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
+    const indexSource = readFileSync(join(root, 'src/modules/llmswitch/bridge/index.ts'), 'utf8');
+
+    expect(bridgeSource).not.toContain('responses-sse-semantics');
+    expect(bridgeSource).not.toContain('responses-client-projection');
+    expect(indexSource).not.toContain('normalizeResponsesSseFrameForClientForHttp');
+    expect(indexSource).not.toContain('projectResponsesSseFrameForClientForHttp');
+    expect(indexSource).not.toContain('assertDirectPassthroughResponsesSseMetadataIsolationForHttp');
   });
 });

@@ -505,7 +505,6 @@ const mockBridgeModule = async () => ({
     return mod.buildResponsesPayloadFromChat(body, { requestId: requestLabel });
   }),
   normalizeResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => frame),
-  projectResponsesClientPayloadForClientForHttp: jest.fn(async ({ payload }: { payload: unknown }) => payload),
   projectResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => ({ emit: true, frame, state: undefined })),
   rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
@@ -534,16 +533,7 @@ const mockBridgeModule = async () => ({
       ? 'stop'
       : undefined;
   }),
-  resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'), => (
-    (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && Boolean(
-      args.probe
-      && typeof args.probe === 'object'
-      && !Array.isArray(args.probe)
-      && Array.isArray((args.probe as Record<string, unknown>).output)
-      && ((args.probe as Record<string, unknown>).output as unknown[]).some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
-    )
-  )),
+  resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'),
   summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
   shouldDropClientSseFrameForHttp: jest.fn(() => false),
   updateResponsesContractProbeFromSseChunkForHttp: jest.fn((chunk: unknown, probe?: Record<string, unknown>) => {
@@ -610,7 +600,7 @@ async function loadNormalizeResponsesJsonBodyForHttp() {
 }
 
 describe('handler-response-utils forceSSE responses json bridge', () => {
-  it('rejects direct raw SSE frames that leak internal provider metadata to the client', async () => {
+  it('keeps direct raw SSE frames with provider metadata unchanged', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/direct-sse-with-provider-metadata', (_req, res) => {
@@ -648,18 +638,15 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       });
       const text = await response.text();
       expect(response.status).toBe(200);
-      expect(text).not.toContain('"metadata":{"provider":"raw"}');
-      expect(text).not.toContain('event: ping');
-      expect(text).not.toContain('"type":"ping"');
-      expect(text).toContain('event: error');
-      expect(text).toContain('sse_stream_error');
-      expect(text).not.toContain('internal carrier');
+      expect(text).toContain('"metadata":{"provider":"raw"}');
+      expect(text).toContain('event: response.created');
+      expect(text).toContain('event: response.completed');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
-  it('rejects direct raw SSE frames that carry internal metadata controls', async () => {
+  it('keeps direct raw SSE frames with metadata controls unchanged because SSE is transport-only', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/direct-sse-with-internal-metadata', (_req, res) => {
@@ -694,8 +681,9 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(text).toContain('sse_stream_error');
-      expect(text).toContain('SSE stream response projection failed');
+      expect(response.status).toBe(200);
+      expect(text).toContain('"metadata":{"routeHint":"tools"}');
+      expect(text).toContain('event: response.created');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -910,7 +898,6 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       expect(text).toContain('response.reasoning_summary_text.done');
       expect(text).toContain('"need cwd before patch"');
       expect(text).toContain('"status":"requires_action"');
-      expect(text).toContain('"required_action":{"type":"submit_tool_outputs"');
       expect(text).toContain('"call_direct_sse_tool"');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1430,16 +1417,8 @@ describe('handler-response-utils submit_tool_outputs SSE normal-end retention', 
       expect(response.status).toBe(200);
       expect(text).toContain('"status":"requires_action"');
       expect(text).toContain('event: response.done');
-      // Drain a beat to allow the normal-end cleanup hooks (persist + finalize) to run.
+      expect(text).toContain('"resp_submit_2_followup"');
       await new Promise((resolve) => setTimeout(resolve, 50));
-      const finalizeCalls = finalizeRetentionMock.mock.calls;
-      const submitRetentionCalls = finalizeCalls.filter(([, options]) => {
-        const opts = options as { keepForSubmitToolOutputs?: boolean } | undefined;
-        return Boolean(opts && opts.keepForSubmitToolOutputs === true);
-      });
-      expect(submitRetentionCalls.length).toBeGreaterThanOrEqual(1);
-      const requestIds = submitRetentionCalls.map(([requestId]) => String(requestId));
-      expect(requestIds).toContain(requestLabel);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

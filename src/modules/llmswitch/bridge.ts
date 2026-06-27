@@ -54,8 +54,6 @@ export {
   clearResponsesConversationOnHandlerFailureForHttp
 } from './bridge/responses-request-bridge.js';
 export {
-  assertDirectPassthroughResponsesSseFrameForHttp,
-  assertDirectPassthroughResponsesSseMetadataIsolationForHttp,
   buildClientSseKeepaliveFrameForHttp,
   buildResponsesMissingSseBridgeErrorPayloadForHttp,
   buildResponsesPayloadFromChatForHttp,
@@ -65,22 +63,17 @@ export {
   createResponsesJsonToSseConverterForHttp,
   reprojectDirectChatToolCallStreamForHttp,
   importResponsesHandlerCoreDist,
-  isDirectPassthroughTransportKeepaliveFrameForHttp,
   normalizeChatUsagePayloadForHttp,
-  normalizeResponsesSseFrameForClientForHttp,
   prepareResponsesJsonBodyForSseBridgeForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
   prepareResponsesJsonSseDispatchPlanForHttp,
-  projectResponsesSseFrameForClientForHttp,
   requireResponsesHandlerCoreDist,
   resolveRelayResponsesClientSseStreamForHttp,
   resolveResponsesClientPayloadFinishReasonForHttp,
-  resolveResponsesProviderProtocolHintFromSseFrameForHttp,
   resolveResponsesRequestContextForHttp,
   shouldDispatchResponsesSseToClientForHttp,
   shouldDropClientSseFrameForHttp,
   shouldReprojectRelayResponsesSseForHttp,
-  summarizeResponsesSseFrameForLogForHttp,
 } from './bridge/responses-sse-bridge.js';
 export {
   resolveResponsesConversationClearReasonForHttp,
@@ -116,7 +109,6 @@ export {
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync,
   extractSessionIdentifiersFromMetadata,
-  extractContinuationContextSessionIdentifiersFromMetadata,
   getStatsCenterSafe,
   getLlmsStatsSnapshot
 } from './bridge/state-integrations.js';
