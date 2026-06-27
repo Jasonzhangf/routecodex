@@ -5,8 +5,98 @@ use crate::hub_pipeline_blocks::process_mode::resolve_active_process_mode;
 use crate::hub_pipeline_blocks::protocol::{normalize_endpoint, resolve_provider_protocol};
 use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use chrono;
+use napi::bindgen_prelude::Result as NapiResult;
+use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+// ---------------------------------------------------------------------------
+// Entry protocol resolver — pure function, no I/O
+// Mirrors TS `resolveEntryProtocolFromEndpoint` in executor-pipeline.ts
+// ---------------------------------------------------------------------------
+
+pub fn resolve_entry_protocol_from_endpoint(entry_endpoint: &str) -> Result<String, String> {
+    let normalized = entry_endpoint.trim().to_lowercase();
+    if normalized.contains("/v1/responses") {
+        Ok("openai-responses".to_string())
+    } else if normalized.contains("/v1/messages") {
+        Ok("anthropic-messages".to_string())
+    } else if normalized.contains("/v1/chat/completions") {
+        Ok("openai-chat".to_string())
+    } else {
+        Err(format!("Unsupported hub pipeline entry endpoint: {}", entry_endpoint))
+    }
+}
+
+#[napi(js_name = "resolveEntryProtocolFromEndpointJson")]
+pub fn resolve_entry_protocol_from_endpoint_json(entry_endpoint: String) -> NapiResult<String> {
+    resolve_entry_protocol_from_endpoint(&entry_endpoint)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[cfg(test)]
+mod entry_protocol_tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_openai_responses() {
+        assert_eq!(
+            resolve_entry_protocol_from_endpoint("/v1/responses").unwrap(),
+            "openai-responses"
+        );
+    }
+
+    #[test]
+    fn test_resolve_anthropic_messages() {
+        assert_eq!(
+            resolve_entry_protocol_from_endpoint("/v1/messages").unwrap(),
+            "anthropic-messages"
+        );
+    }
+
+    #[test]
+    fn test_resolve_openai_chat() {
+        assert_eq!(
+            resolve_entry_protocol_from_endpoint("/v1/chat/completions").unwrap(),
+            "openai-chat"
+        );
+    }
+
+    #[test]
+    fn test_resolve_with_trailing_slash() {
+        assert_eq!(
+            resolve_entry_protocol_from_endpoint("/v1/responses/").unwrap(),
+            "openai-responses"
+        );
+    }
+
+    #[test]
+    fn test_resolve_full_url() {
+        assert_eq!(
+            resolve_entry_protocol_from_endpoint("http://localhost:8080/v1/chat/completions").unwrap(),
+            "openai-chat"
+        );
+    }
+
+    #[test]
+    fn test_resolve_anthropic_with_query() {
+        assert_eq!(
+            resolve_entry_protocol_from_endpoint("/v1/messages?model=claude").unwrap(),
+            "anthropic-messages"
+        );
+    }
+
+    #[test]
+    fn test_resolve_unsupported_endpoint() {
+        assert!(
+            resolve_entry_protocol_from_endpoint("/v1/completions").is_err()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hub Pipeline types and main entry
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
