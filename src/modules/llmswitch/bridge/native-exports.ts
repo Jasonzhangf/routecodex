@@ -145,6 +145,10 @@ type NativeHubBridgePolicySemantics = {
 };
 
 type NativeRouterHotpathJsonBinding = {
+  // -- req_executor_pipeline_attempt batch #1 --
+  normalizeExplicitRoutePoolJson?: (inputJson: string) => string;
+  mergeObservedRoutePoolChainJson?: (existingJson: string | null, observedJson: string) => string | null;
+
   classifyProviderFailureJson?: (
     statusCode: number | undefined,
     errorCode: string | undefined,
@@ -1049,40 +1053,6 @@ export function extractServertoolCliResultRouteHintFromRequestNative(input: {
   return undefined;
 }
 
-export function isBlockingRecoverableNative(
-  classification: NativeFailureClassification,
-  stage: string | undefined
-): boolean {
-  const fn = getFailurePolicyModule().isBlockingRecoverableNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] isBlockingRecoverableNative not available');
-  }
-  return fn(classification, stage);
-}
-
-export function shouldRetryNative(
-  classification: NativeFailureClassification,
-  attempt: number,
-  maxAttempts: number
-): boolean {
-  const fn = getFailurePolicyModule().shouldRetryNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] shouldRetryNative not available');
-  }
-  return fn(classification, attempt, maxAttempts);
-}
-
-export function computeBackoffMsNative(
-  classification: NativeFailureClassification,
-  attempt: number
-): number {
-  const fn = getFailurePolicyModule().computeBackoffMsNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] computeBackoffMsNative not available');
-  }
-  return fn(classification, attempt);
-}
-
 export function resolveProviderRetryExecutionPolicyNative(input: {
   classification: NativeFailureClassification;
   isStreamingRequest?: boolean;
@@ -1108,4 +1078,36 @@ export function getNetworkErrorCodes(): string[] {
     throw new Error('[llmswitch-bridge] getNetworkErrorCodes not available');
   }
   return fn();
+}
+
+// ---------------------------------------------------------------------------
+// req_executor_pipeline_attempt — Rust migration batch #1
+// ---------------------------------------------------------------------------
+
+export function normalizeExplicitRoutePoolNative(value: unknown): string[] {
+  const parsed = invokeRouterHotpathJsonCapability('normalizeExplicitRoutePoolJson', [value]);
+  const result = assertNativeObject('normalizeExplicitRoutePoolJson', parsed);
+  return Array.isArray(result.pool) ? result.pool as string[] : [];
+}
+
+export function mergeObservedRoutePoolChainNative(
+  existing: string[] | null,
+  observed: string[]
+): string[] | null {
+  const existingJson = existing !== null ? JSON.stringify(existing) : null;
+  const observedJson = JSON.stringify(observed);
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.mergeObservedRoutePoolChainJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] mergeObservedRoutePoolChainJson not available');
+  }
+  const raw = fn(existingJson, observedJson);
+  if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as string[];
+  } catch {
+    return null;
+  }
 }

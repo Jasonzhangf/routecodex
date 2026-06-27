@@ -5,6 +5,10 @@ import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import {
   hasAlternativeRouteCandidate
 } from './request-executor-retry-decision.js';
+import {
+  normalizeExplicitRoutePoolNative,
+  mergeObservedRoutePoolChainNative
+} from '../../../../modules/llmswitch/bridge/native-exports.js';
 
 type PipelineAttemptTarget = HubPipelineResult['target'];
 
@@ -14,47 +18,8 @@ const PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER = {
   stage: 'request_executor_pipeline_target_observation',
 } as const;
 
-function normalizeExplicitRoutePool(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of value) {
-    if (typeof entry !== 'string') {
-      continue;
-    }
-    const normalized = entry.trim();
-    if (!normalized || seen.has(normalized)) {
-      continue;
-    }
-    seen.add(normalized);
-    out.push(normalized);
-  }
-  return out;
-}
-
-function mergeObservedRoutePoolChain(
-  existing: string[] | null,
-  observed: string[]
-): string[] | null {
-  if (observed.length === 0) {
-    return existing;
-  }
-  if (!existing || existing.length === 0) {
-    return [...observed];
-  }
-  const merged = [...existing];
-  const seen = new Set(existing);
-  for (const candidate of observed) {
-    if (seen.has(candidate)) {
-      continue;
-    }
-    seen.add(candidate);
-    merged.push(candidate);
-  }
-  return merged;
-}
+// normalizeExplicitRoutePool and mergeObservedRoutePoolChain are now Rust-native.
+// See: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_executor_pipeline_attempt/route_pool.rs
 
 export type ResolvedRequestExecutorPipelineAttempt =
   | {
@@ -106,10 +71,10 @@ export function resolveRequestExecutorPipelineAttempt(args: {
 
   let initialRoutePool = args.initialRoutePool;
   const routingDecision = args.pipelineResult.routingDecision as Record<string, unknown> | undefined;
-  const explicitRoutePool = normalizeExplicitRoutePool(
+  const explicitRoutePool = normalizeExplicitRoutePoolNative(
     Array.isArray(routingDecision?.routePool) ? routingDecision?.routePool : routingDecision?.pool
   );
-  initialRoutePool = mergeObservedRoutePoolChain(initialRoutePool, explicitRoutePool);
+  initialRoutePool = mergeObservedRoutePoolChainNative(initialRoutePool, explicitRoutePool);
   const routePoolForAttempt = initialRoutePool && initialRoutePool.length > 0
     ? [...initialRoutePool]
     : [...explicitRoutePool];
