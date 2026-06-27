@@ -174,6 +174,12 @@ export async function runServertoolEnginePostflight(args: {
       typeof executionContext?.assistantStopText === 'string' && executionContext.assistantStopText.trim()
         ? executionContext.assistantStopText.trim()
         : undefined;
+    const runtimeSnapshot =
+      executionContext?.stoplessRuntimeState
+      && typeof executionContext.stoplessRuntimeState === 'object'
+      && !Array.isArray(executionContext.stoplessRuntimeState)
+        ? executionContext.stoplessRuntimeState as Record<string, unknown>
+        : null;
 
     // Call Rust-native build_stopless_auto_cli_projection_json (single NAPI call).
     // Replaces the previous three-call TS sequence:
@@ -187,7 +193,7 @@ export async function runServertoolEnginePostflight(args: {
         adapterContext: options.adapterContext as Record<string, unknown>,
         executionContext: executionContext ?? null,
         stoplessControl: stoplessControl ?? null,
-        runtimeSnapshot: null,
+        runtimeSnapshot,
         chatStopText: chatStopText ?? null,
         sessionId: sessionId ?? null,
         requestId: options.requestId ?? null

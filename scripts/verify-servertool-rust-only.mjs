@@ -175,14 +175,7 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
     'tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts',
     'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
   ],
-  'hub.servertool_backend_route_runtime': [
-    'tests/servertool/servertool-mixed-tools.spec.ts',
-    'tests/servertool/server-side-tools.dispatch-native.spec.ts',
-    'tests/servertool/execution-shell.backend-failfast.spec.ts',
-    'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
-  ],
   'hub.servertool_rust_only_closeout': [
-    'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
     'tests/servertool/server-side-tools.dispatch-native.spec.ts',
     'tests/servertool/server-side-tools.auto-hook-config.spec.ts',
     'tests/servertool/servertool-auto-hook-trace.spec.ts',
@@ -470,13 +463,13 @@ function assertStoplessSchemaFeedbackLock() {
     'stopless-schema-feedback-lock',
     `${ROOT}/tests/cli/servertool-command.spec.ts`,
     readRequired(`${ROOT}/tests/cli/servertool-command.spec.ts`),
-    'payload.schemaGuidance.requiredFields).toContain(\'stopreason\')'
+    "missingFields: ['stopreason', 'reason', 'next_step']"
   );
   assertContains(
     'stopless-schema-feedback-lock',
     `${ROOT}/tests/cli/servertool-command.spec.ts`,
     readRequired(`${ROOT}/tests/cli/servertool-command.spec.ts`),
-    'payload.schemaGuidance.requiredFields).toContain(\'next_step\')'
+    'expect(payload.schemaGuidance).toBeUndefined();'
   );
   assertContains(
     'stopless-schema-feedback-lock',
@@ -1162,7 +1155,7 @@ function checkStandaloneServertoolBinary() {
     'fn malformed_input_json_fails_fast',
     'assert!(value["input"].get("continuationPrompt").is_none());',
     'assert!(value["input"].get("schemaGuidance").is_none());',
-    'assert!(value.get("schemaGuidance").is_some());',
+    'assert!(value.get("schemaGuidance").is_none());',
     'SERVERTOOL_CLI_INVALID_FIELD: flowId',
     'stopless budget exhausted',
     'SERVERTOOL_CLI_INVALID_FIELD: inputJson',

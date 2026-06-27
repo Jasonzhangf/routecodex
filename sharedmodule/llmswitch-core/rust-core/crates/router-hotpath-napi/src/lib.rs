@@ -1906,6 +1906,20 @@ pub fn plan_stopless_auto_handler_json_bridge(input_json: String) -> NapiResult<
     stopless_auto_handler_bridge::plan_stopless_auto_handler_json(input_json)
 }
 
+/// Build stopless auto handler input — Rust-native.
+/// Replaces TS-side stopless handler input assembly and loop-state normalization.
+#[napi(js_name = "buildStoplessAutoHandlerInputJson")]
+pub fn build_stopless_auto_handler_input_json_bridge(input_json: String) -> NapiResult<String> {
+    stopless_auto_handler_bridge::build_stopless_auto_handler_input_json(input_json)
+}
+
+/// Run complete stopless auto handler runtime — Rust-native.
+/// Replaces TS handler input assembly + plan interpretation + learned-note trigger.
+#[napi(js_name = "runStoplessAutoHandlerRuntimeJson")]
+pub fn run_stopless_auto_handler_runtime_json_bridge(input_json: String) -> NapiResult<String> {
+    stopless_auto_handler_bridge::run_stopless_auto_handler_runtime_json(input_json)
+}
+
 /// Build complete stopless auto CLI projection — Rust-native.
 /// Replaces TS `buildServertoolCliProjectionForAutoFlow` + three Native calls.
 #[napi(js_name = "buildStoplessAutoCliProjectionJson")]

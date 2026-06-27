@@ -1,12 +1,5 @@
-// metadata-center-carrier.ts
-//
-// Apply a Rust-built StoplessMetadataCenterWritePlan to the TS-side MetadataCenter
-// (the global symbol-injected singleton). This is the single TS writer entry
-// point — all stopless metadata mutations must go through `applyStoplessMetadataCenterWritePlan`.
-//
-// Feature: hub.servertool_stopless_cli_continuation
-
-import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
+// Apply a Rust-built StoplessMetadataCenterWritePlan to the TS-side MetadataCenter.
+// This is the single TS stopless metadata writer entry point.
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
@@ -128,35 +121,4 @@ export function applyStoplessMetadataCenterWritePlan(args: {
   }
 
   return true;
-}
-
-/**
- * Build a StoplessMetadataCenterWritePlan by calling the Rust NAPI function.
- * Returns null if the native function is unavailable.
- */
-export function buildStoplessMetadataCenterWritePlan(args: {
-  handlerPlan: Record<string, unknown>;
-  center: Record<string, unknown>;
-  requestId: string;
-  timestampMs: number;
-}): StoplessMetadataCenterWritePlan | null {
-  const fn = readNativeFunction('buildStoplessMetadataCenterWritePlanJson');
-  if (!fn) {
-    return null;
-  }
-  const inputJson = JSON.stringify({
-    handlerPlan: args.handlerPlan,
-    center: args.center,
-    requestId: args.requestId,
-    timestampMs: args.timestampMs
-  });
-  const raw = fn(inputJson);
-  if (typeof raw !== 'string') {
-    return null;
-  }
-  try {
-    return JSON.parse(raw) as StoplessMetadataCenterWritePlan;
-  } catch {
-    return null;
-  }
 }

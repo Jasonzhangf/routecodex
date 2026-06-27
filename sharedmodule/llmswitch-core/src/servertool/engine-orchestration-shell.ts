@@ -266,17 +266,20 @@ export async function runServerToolOrchestrationShell(
       ...(executionContext ?? {}),
       ...(requestTruthSessionId ? { sessionId: requestTruthSessionId } : {}),
       ...(requestTruthSessionId ? { requestTruth: { sessionId: requestTruthSessionId } } : {}),
-      ...(stoplessControl
+      ...((stoplessControl || (executionContext?.stopless && typeof executionContext.stopless === 'object' && !Array.isArray(executionContext.stopless)))
         ? {
             stopless: {
-              ...(typeof stoplessControl.flowId === 'string' ? { flowId: stoplessControl.flowId } : {}),
-              ...(flowId ? { flowId } : {}),
-              ...(typeof stoplessControl.repeatCount === 'number' ? { repeatCount: stoplessControl.repeatCount } : {}),
-              ...(typeof stoplessControl.maxRepeats === 'number' ? { maxRepeats: stoplessControl.maxRepeats } : {}),
-              ...(typeof stoplessControl.triggerHint === 'string' ? { triggerHint: stoplessControl.triggerHint } : {}),
-              ...(stoplessControl.schemaFeedback && typeof stoplessControl.schemaFeedback === 'object'
+              ...(stoplessControl && typeof stoplessControl.flowId === 'string' ? { flowId: stoplessControl.flowId } : {}),
+              ...(stoplessControl && typeof stoplessControl.repeatCount === 'number' ? { repeatCount: stoplessControl.repeatCount } : {}),
+              ...(stoplessControl && typeof stoplessControl.maxRepeats === 'number' ? { maxRepeats: stoplessControl.maxRepeats } : {}),
+              ...(stoplessControl && typeof stoplessControl.triggerHint === 'string' ? { triggerHint: stoplessControl.triggerHint } : {}),
+              ...(stoplessControl?.schemaFeedback && typeof stoplessControl.schemaFeedback === 'object'
                 ? { schemaFeedback: stoplessControl.schemaFeedback }
                 : {}),
+              ...(flowId ? { flowId } : {}),
+              ...(executionContext?.stopless && typeof executionContext.stopless === 'object' && !Array.isArray(executionContext.stopless)
+                ? executionContext.stopless as Record<string, unknown>
+                : {})
             }
           }
         : {})
@@ -312,7 +315,10 @@ export async function runServerToolOrchestrationShell(
       requestId: options.requestId,
       adapterContext: options.adapterContext
     },
-    engineResult,
+    engineResult: {
+      ...engineResult,
+      execution: stoplessExecution as typeof engineResult.execution
+    },
     runtimeAction,
     flowId,
     totalSteps,

@@ -6,11 +6,11 @@ import { getServertoolToolSpec, listServertoolToolSpecs } from './skeleton-confi
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import {
   applyStoplessMetadataCenterWritePlan,
-  buildStoplessMetadataCenterWritePlan
 } from './stopless-metadata-center-writer.js';
 import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+import { buildMetadataCenterRustSnapshot } from '../../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js';
 
-type StopMessageHandlerPlan = {
+type StoplessAutoHandlerRuntimeOutput = {
   action:
     | 'return_null'
     | 'return_terminal_final'
@@ -18,18 +18,19 @@ type StopMessageHandlerPlan = {
     | 'return_schema_fail_fast'
     | 'return_schema_allow_stop'
     | 'return_handler_plan';
-  compareContext: Record<string, unknown>;
-  terminalChatResponse?: Record<string, unknown>;
-  shouldWriteLearnedNote?: boolean;
-  learnedNote?: Record<string, unknown>;
-  goalLoopErrorMessage?: string;
-  goalLoopErrorCode?: string;
-  goalLoopRepeatCount?: number;
-  goalLoopThreshold?: number;
-  goalLoopGoalContextCount?: number;
+  metadataWritePlan?: Record<string, unknown>;
+  learnedNoteWrite?: Record<string, unknown>;
+  error?: {
+    message: string;
+    code?: string;
+    status?: number;
+    repeatCount?: number;
+    threshold?: number;
+    goalContextCount?: number;
+  };
   flowId?: string;
-  effectiveDecision?: Record<string, unknown>;
-  finalizeContext?: Record<string, unknown>;
+  chatResponse?: Record<string, unknown>;
+  execution?: Record<string, unknown>;
 } & Record<string, unknown>;
 
 function isBuiltinRuntimeSupported(name: string): boolean {
@@ -41,127 +42,50 @@ function isBuiltinRuntimeSupported(name: string): boolean {
   }
 }
 
-/**
- * Read the Rust-built MetadataCenter snapshot (from `metadataCenterSnapshot` carrier).
- */
-function readMetadataCenterSnapshot(record: Record<string, unknown>): Record<string, unknown> {
-  const direct = record.metadataCenterSnapshot;
-  if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
-    return direct as Record<string, unknown>;
-  }
-  const nested = (record.metadata as Record<string, unknown> | undefined)?.metadataCenterSnapshot;
-  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-    return nested as Record<string, unknown>;
-  }
-  return {};
-}
-
-function buildRuntimeMetadataCarrier(record: Record<string, unknown>): Record<string, unknown> | undefined {
-  const center = MetadataCenter.read(record)
-    ?? MetadataCenter.read((record.metadata as Record<string, unknown> | undefined));
-  if (!center) {
-    return undefined;
-  }
-  const continuationContext = center.readContinuationContext();
-  const runtimeControl = center.readRuntimeControl();
-  const carrier: Record<string, unknown> = {};
-  if (Object.keys(continuationContext).length > 0) {
-    if (continuationContext.responsesResume) {
-      carrier.responsesResume = continuationContext.responsesResume;
-    }
-  }
-  if (Object.keys(runtimeControl).length > 0) {
-    carrier.metadataCenterSnapshot = {
-      runtimeControl,
-    };
-  }
-  return Object.keys(carrier).length > 0 ? carrier : undefined;
-}
-
-async function planStoplessAutoHandlerNapi(input: Record<string, unknown>): Promise<StopMessageHandlerPlan> {
-  const fn = readNativeFunction('planStoplessAutoHandlerJson');
-  if (!fn) {
-    throw new Error('planStoplessAutoHandlerJson native unavailable');
-  }
-  const raw = fn(JSON.stringify(input));
-  if (typeof raw === 'string') {
-    return JSON.parse(raw) as StopMessageHandlerPlan;
-  }
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as StopMessageHandlerPlan;
-  }
-  throw new Error(`planStoplessAutoHandlerJson native returned unsupported payload: ${typeof raw}`);
-}
-
-async function buildStoplessAutoHandlerInputNapi(
+async function runStoplessAutoHandlerRuntimeNapi(
   ctx: ServerToolHandlerContext
-): Promise<Record<string, unknown>> {
-  const fn = readNativeFunction('buildStoplessAutoHandlerInputJson');
+): Promise<StoplessAutoHandlerRuntimeOutput> {
+  const fn = readNativeFunction('runStoplessAutoHandlerRuntimeJson');
   if (!fn) {
-    throw new Error('buildStoplessAutoHandlerInputJson native unavailable');
+    throw new Error('runStoplessAutoHandlerRuntimeJson native unavailable');
   }
-  const adapterContext = ctx.adapterContext as Record<string, unknown>;
-  const runtimeMetadataCarrier = buildRuntimeMetadataCarrier(adapterContext);
+  const center = MetadataCenter.read(ctx.adapterContext as Record<string, unknown>)
+    ?? MetadataCenter.read(((ctx.adapterContext as Record<string, unknown>).metadata as Record<string, unknown> | undefined));
+  const runtimeMetadata = center
+    ? {
+        metadataCenterSnapshot: buildMetadataCenterRustSnapshot(ctx.adapterContext as Record<string, unknown>)
+      }
+    : null;
   const raw = fn(JSON.stringify({
-    adapterContext,
+    adapterContext: ctx.adapterContext,
     base: ctx.base,
     requestId: ctx.requestId,
-    runtimeMetadata: runtimeMetadataCarrier ?? null,
+    runtimeMetadata,
   }));
   if (typeof raw === 'string') {
-    return JSON.parse(raw) as Record<string, unknown>;
+    return JSON.parse(raw) as StoplessAutoHandlerRuntimeOutput;
   }
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, unknown>;
+    return raw as StoplessAutoHandlerRuntimeOutput;
   }
-  throw new Error(`buildStoplessAutoHandlerInputJson native returned unsupported payload: ${typeof raw}`);
-}
-
-async function writeStoplessLearnedNoteNapi(args: {
-  adapterContext: Record<string, unknown>;
-  requestId: string;
-  parsed: Record<string, unknown>;
-  timestampMs: number;
-}): Promise<void> {
-  const fn = readNativeFunction('writeStoplessLearnedNoteJson');
-  if (!fn) return;
-  fn(JSON.stringify(args));
+  throw new Error(`runStoplessAutoHandlerRuntimeJson native returned unsupported payload: ${typeof raw}`);
 }
 
 async function runBuiltinStopMessageAutoHandler(
   ctx: ServerToolHandlerContext
 ): Promise<{ flowId: string; finalize: () => Promise<ServerToolHandlerResult> } | null> {
   const record = ctx.adapterContext as Record<string, unknown>;
-  const plan = await planStoplessAutoHandlerNapi(await buildStoplessAutoHandlerInputNapi(ctx));
+  const runtime = await runStoplessAutoHandlerRuntimeNapi(ctx);
 
-  if (plan.compareContext) {
-    const centerSnapshot = readMetadataCenterSnapshot(record);
-    const writePlan = buildStoplessMetadataCenterWritePlan({
-      handlerPlan: plan as unknown as Record<string, unknown>,
-      center: centerSnapshot,
-      requestId: ctx.requestId,
-      timestampMs: Date.now()
-    });
-    if (writePlan) {
-      applyStoplessMetadataCenterWritePlan({
-        adapterContext: record,
-        plan: writePlan,
-        reason: 'stop-message-compare-context'
-      });
-    }
-  }
-
-  if (plan.shouldWriteLearnedNote && plan.learnedNote) {
-    const parsed = (plan.learnedNote.parsed as Record<string, unknown> | undefined) ?? plan.learnedNote;
-    await writeStoplessLearnedNoteNapi({
+  if (runtime.metadataWritePlan && typeof runtime.metadataWritePlan === 'object' && !Array.isArray(runtime.metadataWritePlan)) {
+    applyStoplessMetadataCenterWritePlan({
       adapterContext: record,
-      requestId: ctx.requestId,
-      parsed,
-      timestampMs: Date.now()
+      plan: runtime.metadataWritePlan,
+      reason: 'stop-message-runtime'
     });
   }
 
-  switch (plan.action) {
+  switch (runtime.action) {
     case 'return_null':
       return null;
     case 'throw_goal_active_loop': {
@@ -172,13 +96,13 @@ async function runBuiltinStopMessageAutoHandler(
         threshold?: number;
         goalContextCount?: number;
       } = Object.assign(
-        new Error(plan.goalLoopErrorMessage ?? '[servertool] goal active stop loop detected'),
+        new Error(runtime.error?.message ?? '[servertool] goal active stop loop detected'),
         {
-          code: plan.goalLoopErrorCode ?? 'GOAL_ACTIVE_STOP_LOOP_DETECTED',
-          status: 500,
-          repeatCount: plan.goalLoopRepeatCount,
-          threshold: plan.goalLoopThreshold,
-          goalContextCount: plan.goalLoopGoalContextCount
+          code: runtime.error?.code ?? 'GOAL_ACTIVE_STOP_LOOP_DETECTED',
+          status: runtime.error?.status ?? 500,
+          repeatCount: runtime.error?.repeatCount,
+          threshold: runtime.error?.threshold,
+          goalContextCount: runtime.error?.goalContextCount
         }
       );
       throw err;
@@ -187,31 +111,24 @@ async function runBuiltinStopMessageAutoHandler(
     case 'return_schema_fail_fast':
     case 'return_schema_allow_stop':
       return {
-        flowId: plan.flowId ?? 'stop_message_flow',
+        flowId: runtime.flowId ?? 'stop_message_flow',
         finalize: async (): Promise<ServerToolHandlerResult> => ({
-          chatResponse: (plan.terminalChatResponse ?? ctx.base) as JsonObject,
-          execution: {
-            flowId: plan.flowId ?? 'stop_message_flow',
+          chatResponse: (runtime.chatResponse ?? ctx.base) as JsonObject,
+          execution: (runtime.execution ?? {
+            flowId: runtime.flowId ?? 'stop_message_flow',
             context: { stopMessageTerminalFinal: true }
-          }
+          }) as any
         })
       };
     case 'return_handler_plan':
-      const finalizeContext =
-        plan.finalizeContext && typeof plan.finalizeContext === 'object' && !Array.isArray(plan.finalizeContext)
-          ? plan.finalizeContext as JsonObject
-          : undefined;
       return {
-        flowId: plan.flowId ?? 'stop_message_flow',
+        flowId: runtime.flowId ?? 'stop_message_flow',
         finalize: async (): Promise<ServerToolHandlerResult> => ({
-          chatResponse: ctx.base as JsonObject,
-          execution: {
-            flowId: plan.flowId ?? 'stop_message_flow',
-            context: finalizeContext ?? ({
-              decision: (plan.effectiveDecision ?? {}) as JsonObject,
-              assistantStopText: plan.assistantStopText ?? '',
-            } as JsonObject)
-          }
+          chatResponse: (runtime.chatResponse ?? ctx.base) as JsonObject,
+          execution: (runtime.execution ?? {
+            flowId: runtime.flowId ?? 'stop_message_flow',
+            context: {}
+          }) as any
         })
       };
     default:

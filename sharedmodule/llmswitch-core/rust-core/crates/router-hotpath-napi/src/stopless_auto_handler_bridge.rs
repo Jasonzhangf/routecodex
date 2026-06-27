@@ -23,6 +23,10 @@ use servertool_core::stop_message_auto_handler::{self, StopMessageAutoHandlerInp
 use servertool_core::stopless_decision_context_signals::{self, StoplessDecisionContextSignalsInput};
 use servertool_core::stopless_cli_projection_context_contract;
 use servertool_core::stopless_learned_note_contract;
+use crate::metadata_center::{
+    build_metadata_center_from_snapshot, build_stopless_metadata_center_write_plan,
+};
+use crate::metadata_center::write_plan::{LearnedNoteWrite, StoplessMetadataCenterWritePlan};
 
 fn build_stopless_exec_command(
     repeat_count: u32,
@@ -133,7 +137,70 @@ pub fn build_stopless_auto_handler_input_json(input_json: String) -> NapiResult<
         .and_then(|snapshot| serde_json::to_value(snapshot).ok())
     });
 
-    let output = serde_json::json!({
+    let output = build_stopless_auto_handler_input_value(&input);
+
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageAutoHandlerInput: {e}")))
+}
+
+fn build_stopless_auto_handler_input_value(
+    input: &StoplessAutoHandlerRuntimeInput,
+) -> Value {
+    let metadata_runtime_control = input
+        .runtime_metadata
+        .as_ref()
+        .and_then(|value| value.get("metadataCenterSnapshot"))
+        .and_then(|value| value.get("runtimeControl"))
+        .cloned()
+        .or_else(|| {
+            input
+                .adapter_context
+                .get("metadataCenterSnapshot")
+                .and_then(|value| value.get("runtimeControl"))
+                .cloned()
+        });
+
+    let metadata_previous_compare = metadata_runtime_control
+        .as_ref()
+        .and_then(|value| value.get("stopMessageCompareContext"))
+        .cloned();
+
+    let captured_request = persisted_lookup::get_captured_request(&input.adapter_context);
+    let decision_signals =
+        stopless_decision_context_signals::plan_stopless_decision_context_signals(
+            &StoplessDecisionContextSignalsInput {
+                adapter_context: input.adapter_context.clone(),
+                runtime_metadata: input.runtime_metadata.clone(),
+                captured_request: captured_request.clone(),
+            },
+        );
+    let default_config =
+        stop_message_default_config::plan_stop_message_default_config(&StopMessageDefaultConfigInput {
+            tombstone_cleared: Some(false),
+            config_enabled: None,
+            config_text: None,
+            config_max_repeats: None,
+            env_text: None,
+            env_max_repeats: None,
+        });
+    let current_tool_output_snapshot =
+        cli_result_guard::extract_stop_message_auto_cli_result_snapshot_from_request(
+            &serde_json::json!({
+                "adapterContext": input.adapter_context,
+                "runtimeMetadata": input.runtime_metadata,
+            }),
+        );
+    let effective_runtime_loop_state = current_tool_output_snapshot.or_else(|| {
+        persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context(
+            &persisted_lookup::RuntimeStopMessageStateFromAdapterContextInput {
+                adapter_context: input.adapter_context.clone(),
+                runtime_metadata: input.runtime_metadata.clone(),
+            },
+        )
+        .and_then(|snapshot| serde_json::to_value(snapshot).ok())
+    });
+
+    serde_json::json!({
         "adapterContext": input.adapter_context,
         "base": input.base,
         "requestId": input.request_id,
@@ -147,10 +214,61 @@ pub fn build_stopless_auto_handler_input_json(input_json: String) -> NapiResult<
         "capturedRequest": captured_request,
         "effectiveRuntimeLoopState": effective_runtime_loop_state,
         "providerKey": Value::Null,
-    });
+    })
+}
 
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageAutoHandlerInput: {e}")))
+#[napi]
+pub fn run_stopless_auto_handler_runtime_json(input_json: String) -> NapiResult<String> {
+    let input: StoplessAutoHandlerRuntimeInput =
+        serde_json::from_str(&input_json).map_err(|e| {
+            napi::Error::from_reason(format!(
+                "deserialize StoplessAutoHandlerRuntimeInput: {e}"
+            ))
+        })?;
+
+    let handler_input: StopMessageAutoHandlerInput =
+        serde_json::from_value(build_stopless_auto_handler_input_value(&input)).map_err(|e| {
+            napi::Error::from_reason(format!(
+                "deserialize StopMessageAutoHandlerInput from handler input value: {e}"
+            ))
+        })?;
+    let plan = stop_message_auto_handler::plan_stop_message_auto_handler(&handler_input);
+
+    let center_snapshot = input
+        .runtime_metadata
+        .as_ref()
+        .and_then(|value| value.get("metadataCenterSnapshot"))
+        .cloned()
+        .or_else(|| {
+            input
+                .adapter_context
+                .get("metadataCenterSnapshot")
+                .cloned()
+        })
+        .unwrap_or(Value::Null);
+    let center = build_metadata_center_from_snapshot(&center_snapshot);
+    let timestamp_ms = current_timestamp_ms();
+    let metadata_write_plan = build_stopless_metadata_center_write_plan(
+        &plan,
+        &center,
+        &input.request_id,
+        timestamp_ms,
+    );
+    let learned_note_write = match metadata_write_plan.learned_note.as_ref() {
+        Some(learned_note) => Some(write_stopless_learned_note_from_plan(learned_note)?),
+        None => None,
+    };
+
+    let runtime_output = build_runtime_output(
+        &input.base,
+        &input.request_id,
+        plan,
+        metadata_write_plan,
+        learned_note_write,
+    )?;
+
+    serde_json::to_string(&runtime_output)
+        .map_err(|e| napi::Error::from_reason(format!("serialize stopless runtime output: {e}")))
 }
 
 // ── NAPI: build complete stopless auto CLI projection ──────────────────────────
@@ -309,6 +427,31 @@ pub fn write_stopless_learned_note_json(input_json: String) -> NapiResult<String
     })?;
     let plan = stopless_learned_note_contract::plan_stopless_learned_note_write(input);
 
+    write_stopless_learned_note_from_contract_plan(&plan)
+}
+
+fn write_stopless_learned_note_from_plan(
+    plan: &LearnedNoteWrite,
+) -> NapiResult<StoplessLearnedNoteWriteOutput> {
+    let contract_plan = stopless_learned_note_contract::StoplessLearnedNoteWritePlan {
+        should_write: true,
+        working_directory: plan.working_directory.clone(),
+        request_id: plan.request_id.clone(),
+        session_id: plan.session_id.clone(),
+        timestamp_ms: plan.timestamp_ms,
+        learned: plan.learned.clone(),
+        reason: plan.reason.clone(),
+        evidence: plan.evidence.clone(),
+    };
+    let raw = write_stopless_learned_note_from_contract_plan(&contract_plan)?;
+    serde_json::from_str(&raw)
+        .map_err(|e| napi::Error::from_reason(format!("deserialize learned note write output: {e}")))
+}
+
+fn write_stopless_learned_note_from_contract_plan(
+    plan: &stopless_learned_note_contract::StoplessLearnedNoteWritePlan,
+) -> NapiResult<String> {
+
     if !plan.should_write {
         let output = StoplessLearnedNoteWriteOutput {
             ok: false,
@@ -390,6 +533,113 @@ pub fn write_stopless_learned_note_json(input_json: String) -> NapiResult<String
     }
 }
 
+fn current_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn build_runtime_output(
+    base: &Value,
+    request_id: &str,
+    plan: stop_message_auto_handler::StopMessageAutoHandlerPlan,
+    metadata_write_plan: StoplessMetadataCenterWritePlan,
+    learned_note_write: Option<StoplessLearnedNoteWriteOutput>,
+) -> NapiResult<StoplessAutoHandlerRuntimeOutput> {
+    let flow_id = plan
+        .flow_id
+        .clone()
+        .unwrap_or_else(|| "stop_message_flow".to_string());
+    let action = match plan.action {
+        stop_message_auto_handler::StopMessageAutoPlanAction::ReturnNull => "return_null",
+        stop_message_auto_handler::StopMessageAutoPlanAction::ReturnTerminalFinal => "return_terminal_final",
+        stop_message_auto_handler::StopMessageAutoPlanAction::ThrowStoplessLoop => "throw_goal_active_loop",
+        stop_message_auto_handler::StopMessageAutoPlanAction::ReturnSchemaFailFast => "return_schema_fail_fast",
+        stop_message_auto_handler::StopMessageAutoPlanAction::ReturnSchemaAllowStop => "return_schema_allow_stop",
+        stop_message_auto_handler::StopMessageAutoPlanAction::ReturnHandlerPlan => "return_handler_plan",
+    }
+    .to_string();
+
+    let output = match plan.action {
+        stop_message_auto_handler::StopMessageAutoPlanAction::ReturnNull => StoplessAutoHandlerRuntimeOutput {
+            action,
+            flow_id: Some(flow_id),
+            metadata_write_plan: Some(metadata_write_plan),
+            learned_note_write,
+            ..Default::default()
+        },
+        stop_message_auto_handler::StopMessageAutoPlanAction::ThrowStoplessLoop => StoplessAutoHandlerRuntimeOutput {
+            action,
+            flow_id: Some(flow_id),
+            metadata_write_plan: Some(metadata_write_plan),
+            learned_note_write,
+            error: Some(StoplessRuntimeError {
+                message: plan
+                    .stopless_loop_error_message
+                    .clone()
+                    .unwrap_or_else(|| "[servertool] goal active stop loop detected".to_string()),
+                code: plan
+                    .stopless_loop_error_code
+                    .clone()
+                    .unwrap_or_else(|| "GOAL_ACTIVE_STOP_LOOP_DETECTED".to_string()),
+                status: 500,
+                repeat_count: plan.stopless_loop_repeat_count,
+                threshold: plan.stopless_loop_threshold,
+                goal_context_count: plan.stopless_loop_goal_context_count,
+            }),
+            ..Default::default()
+        },
+        stop_message_auto_handler::StopMessageAutoPlanAction::ReturnTerminalFinal
+        | stop_message_auto_handler::StopMessageAutoPlanAction::ReturnSchemaFailFast
+        | stop_message_auto_handler::StopMessageAutoPlanAction::ReturnSchemaAllowStop => {
+            let chat_response = plan
+                .terminal_chat_response
+                .clone()
+                .unwrap_or_else(|| base.clone());
+            StoplessAutoHandlerRuntimeOutput {
+                action,
+                flow_id: Some(flow_id.clone()),
+                chat_response: Some(chat_response),
+                execution: Some(serde_json::json!({
+                    "flowId": flow_id,
+                    "context": { "stopMessageTerminalFinal": true }
+                })),
+                metadata_write_plan: Some(metadata_write_plan),
+                learned_note_write,
+                ..Default::default()
+            }
+        }
+        stop_message_auto_handler::StopMessageAutoPlanAction::ReturnHandlerPlan => {
+            let finalize_context = plan
+                .finalize_context
+                .clone()
+                .filter(|value| value.is_object() && !value.is_array())
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "decision": plan.effective_decision.clone().unwrap_or(Value::Object(Default::default())),
+                        "assistantStopText": plan.assistant_stop_text.clone().unwrap_or_default(),
+                    })
+                });
+            StoplessAutoHandlerRuntimeOutput {
+                action,
+                flow_id: Some(flow_id.clone()),
+                chat_response: Some(base.clone()),
+                execution: Some(serde_json::json!({
+                    "flowId": flow_id,
+                    "context": finalize_context
+                })),
+                metadata_write_plan: Some(metadata_write_plan),
+                learned_note_write,
+                ..Default::default()
+            }
+        }
+    };
+
+    let _ = request_id;
+    Ok(output)
+}
+
 // ── Input / Output Types ─────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -404,7 +654,7 @@ pub struct StoplessAutoCliProjectionInput {
     pub request_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessAutoHandlerRuntimeInput {
     pub adapter_context: Value,
@@ -434,12 +684,44 @@ pub struct StoplessProjectionContextOutput {
     pub schema_feedback: Option<Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessLearnedNoteWriteOutput {
     pub ok: bool,
     pub reason: String,
     pub path: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessAutoHandlerRuntimeOutput {
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_response: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata_write_plan: Option<StoplessMetadataCenterWritePlan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub learned_note_write: Option<StoplessLearnedNoteWriteOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StoplessRuntimeError>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessRuntimeError {
+    pub message: String,
+    pub code: String,
+    pub status: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repeat_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_context_count: Option<i64>,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
