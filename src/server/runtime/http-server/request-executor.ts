@@ -169,12 +169,12 @@ import {
 } from './executor/request-executor-abort.js';
 import { resolveClientAbortSignalFromCarrier } from './executor/request-executor-client-abort-block.js';
 import {
-  peekScopedErrorBackoffWaitMs,
-  recordScopedErrorBackoff,
-  resetScopedErrorBackoffByProvider,
-  resetGlobalErrorBackoffStateForTests,
-  waitScopedErrorBackoffWithGate
-} from './executor/request-executor-global-error-backoff.js';
+  peekErrorActionBackoffWaitMs,
+  recordErrorActionBackoff,
+  resetErrorActionBackoffByScopePrefix,
+  resetErrorActionQueueStateForTests,
+  waitErrorActionBackoffWithGate
+} from './executor/request-executor-error-action-queue.js';
 import {
   detectAssistantSanitizationPlaceholder,
   detectEmptyProviderRequestPayload,
@@ -277,7 +277,7 @@ export type { SseWrapperErrorInfo };
 function resetRequestExecutorInternalStateForTests(): void {
   resetErrorReportStateForTests();
   resetRequestExecutorRetryPlannerState();
-  resetGlobalErrorBackoffStateForTests();
+  resetErrorActionQueueStateForTests();
   providerSwitchLogState.clear();
 }
 
@@ -1282,7 +1282,10 @@ export class HubRequestExecutor implements RequestExecutor {
           // direct/relay hops. Keep executor transport-only; handler owns responses store finalization.
 
           recordAttempt({ usage: aggregatedUsage, error: false });
-          resetScopedErrorBackoffByProvider(`${portScope}|${target.providerKey}|`);
+            resetErrorActionBackoffByScopePrefix({
+              category: 'global_error',
+              scopePrefix: `${portScope}|${target.providerKey}|`
+            });
           return buildProviderExecutionSuccessResult({
             converted,
             providerKey: target.providerKey,
@@ -1379,19 +1382,30 @@ export class HubRequestExecutor implements RequestExecutor {
           if (target.providerKey) {
             const scopedErrorCode = resolveScopedBackoffErrorCode(error);
             const scopedBackoffKey = buildScopedBackoffKey(target.providerKey, scopedErrorCode);
-            const pendingScopedWaitMs = peekScopedErrorBackoffWaitMs(scopedBackoffKey);
+            const pendingScopedWaitMs = peekErrorActionBackoffWaitMs({
+              category: 'global_error',
+              scopeKey: scopedBackoffKey
+            });
             if (pendingScopedWaitMs > 0 && !failureState.allowBlockingRecoverableRetryBeyondAttemptBudget) {
               logStage('server.global_error_backoff_wait', providerRequestId, {
                 waitMs: pendingScopedWaitMs,
                 scope: scopedBackoffKey
               });
-              await waitScopedErrorBackoffWithGate(scopedBackoffKey, resolveClientAbortSignalFromCarrier(input.metadata));
+              await waitErrorActionBackoffWithGate({
+                category: 'global_error',
+                scopeKey: scopedBackoffKey,
+                signal: resolveClientAbortSignalFromCarrier(input.metadata),
+                logNonBlockingError: logRequestExecutorNonBlockingError
+              });
               logStage('server.global_error_backoff_wait.completed', providerRequestId, {
                 waitMs: pendingScopedWaitMs,
                 scope: scopedBackoffKey
               });
             }
-            recordScopedErrorBackoff(scopedBackoffKey);
+            recordErrorActionBackoff({
+              category: 'global_error',
+              scopeKey: scopedBackoffKey
+            });
           }
           retryAfterProviderFailure = true;
         } finally {
@@ -1426,7 +1440,10 @@ export class HubRequestExecutor implements RequestExecutor {
       }
       const scopedErrorCode = resolveScopedBackoffErrorCode(error);
       const scopedBackoffKey = buildScopedBackoffKey('unresolved-provider', scopedErrorCode);
-      recordScopedErrorBackoff(scopedBackoffKey);
+      recordErrorActionBackoff({
+        category: 'global_error',
+        scopeKey: scopedBackoffKey
+      });
       // If we failed before selecting a provider (no bindProvider/recordAttempt),
       // at least record one error sample for this request.
       if (!recordedAnyAttempt) {
@@ -1472,9 +1489,9 @@ export const __requestExecutorTestables = {
   isToolResultFollowupTurn,
   detectRetryableEmptyAssistantResponse,
   deriveLogicalRequestChainKey,
-  peekScopedErrorBackoffWaitMs,
-  recordScopedErrorBackoff,
-  resetScopedErrorBackoffByProvider,
+  peekErrorActionBackoffWaitMs,
+  recordErrorActionBackoff,
+  resetErrorActionBackoffByScopePrefix,
   prepareRequestPayloadRetrySeed,
   resolveOriginalRequestForResponseConversion,
   resolveProviderFailureClassification,
