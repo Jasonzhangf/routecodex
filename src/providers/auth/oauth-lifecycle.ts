@@ -657,12 +657,7 @@ export async function handleUpstreamInvalidOAuthToken(
       return true;
     } catch (error) {
       const refreshMsg = error instanceof Error ? error.message : String(error);
-      logOAuthLifecycleNonBlocking(
-        'handleUpstreamInvalidOAuthToken.autoOAuthDisabled',
-        new Error('auto OAuth has been removed for this provider; manual re-auth required'),
-        { providerType, tokenFilePath, reason: refreshMsg },
-        { warn: true, throttleKey: `oauth-auto-disabled:${providerType}:${tokenFilePath || 'unknown'}` }
-      );
+      logOAuthDebug(`[OAuth] upstream invalid token refresh failed (${providerType}): ${refreshMsg}`);
       return false;
     }
   };
