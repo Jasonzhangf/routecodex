@@ -219,11 +219,6 @@ function isElementMissingAutomationFailure(message: string): boolean {
   );
 }
 
-function isAutoOAuthDisabledProvider(providerType: string): boolean {
-  const normalized = String(providerType || '').trim().toLowerCase();
-  return normalized.length > 0 && false;
-}
-
 async function runInteractiveRepairWithAutoFallback(args: {
   providerType: string;
   auth: OAuthAuth;
@@ -255,12 +250,6 @@ async function runInteractiveRepairWithAutoFallback(args: {
     }
     if (tokenFilePath) {
       closeOAuthAuthResources(providerType, tokenFilePath);
-    }
-    if (isAutoOAuthDisabledProvider(normalizedProviderType)) {
-      console.warn(
-        `[OAuth] Camoufox auto OAuth failed (${providerType}, autoMode=${autoModeAtStart}): ${msg}. Auto OAuth is disabled for this provider; manual re-auth is required.`
-      );
-      throw error;
     }
     console.warn(
       `[OAuth] Camoufox auto OAuth failed (${providerType}, autoMode=${autoModeAtStart}): ${msg}. Falling back to headful manual mode once.`
@@ -651,7 +640,6 @@ export async function handleUpstreamInvalidOAuthToken(
   const allowBlocking = options?.allowBlocking !== false;
   const ensureValid = options?.ensureValidOAuthToken ?? ensureValidOAuthToken;
   let tokenFilePath: string | undefined;
-  const autoOAuthDisabled = isAutoOAuthDisabledProvider(providerType);
 
   const attemptSilentRefreshOnly = async (
     lowerMessage: string
@@ -691,9 +679,6 @@ export async function handleUpstreamInvalidOAuthToken(
     const lower = msg.toLowerCase();
     const statusCode = extractStatusCode(upstreamError);
     tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
-    if (autoOAuthDisabled) {
-      return await attemptSilentRefreshOnly(lower);
-    }
     const repairReason =
       statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower) ? 'google_verify' : 'generic';
 
