@@ -59,6 +59,7 @@ mod hub_tool_session_compat;
 mod metadata_center;
 mod openai_openai_codec;
 mod primary_exhausted_to_default_pool_blocks;
+mod req_executor_pipeline_attempt;
 mod req_outbound_stage3_compat;
 mod req_process_stage1_tool_governance;
 mod req_process_stage1_tool_governance_blocks;
@@ -1938,7 +1939,9 @@ pub fn write_stopless_learned_note_json_bridge(input_json: String) -> NapiResult
 /// Input: { handlerPlan: StopMessageAutoHandlerPlan JSON, center: MetadataCenter JSON, requestId, timestampMs }
 /// Output: StoplessMetadataCenterWritePlan JSON
 #[napi(js_name = "buildStoplessMetadataCenterWritePlanJson")]
-pub fn build_stopless_metadata_center_write_plan_json_bridge(input_json: String) -> NapiResult<String> {
+pub fn build_stopless_metadata_center_write_plan_json_bridge(
+    input_json: String,
+) -> NapiResult<String> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct WritePlanInput {
@@ -2591,6 +2594,36 @@ pub use shared_responses_conversation_utils::{
     materialize_responses_continuation_payload_json, plan_responses_handler_entry_json,
     prepare_responses_conversation_entry_json, resume_responses_conversation_payload_json,
 };
+
+// ---------------------------------------------------------------------------
+// req_executor_pipeline_attempt NAPI exports — Rust migration batch #1
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn normalize_explicit_route_pool_json(input_json: String) -> NapiResult<String> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input JSON: {}", e)))?;
+    let output = req_executor_pipeline_attempt::route_pool::normalize_explicit_route_pool_json(raw)
+        .map_err(|e| napi::Error::from_reason(e))?;
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("serialize output: {}", e)))
+}
+
+#[napi]
+pub fn merge_observed_route_pool_chain_json(
+    existing_json: Option<String>,
+    observed_json: String,
+) -> NapiResult<Option<String>> {
+    let result = req_executor_pipeline_attempt::route_pool::merge_observed_route_pool_chain_json(
+        existing_json,
+        observed_json,
+    )
+    .map_err(|e| napi::Error::from_reason(e))?;
+    match result {
+        Some(s) if s.trim().is_empty() => Ok(None),
+        other => Ok(other),
+    }
+}
 
 #[napi(js_name = "sanitizeProviderOutboundPayloadJson")]
 pub fn sanitize_provider_outbound_payload_export_json(input_json: String) -> NapiResult<String> {
