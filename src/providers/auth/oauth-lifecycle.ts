@@ -65,13 +65,6 @@ import {
   acquireInteractiveOAuthLock,
 } from './oauth-lifecycle/interactive-oauth-lock.js';
 import {
-  buildEndpointOverrides,
-  buildClientOverrides,
-  resolveTokenPortalBaseUrl,
-  buildTokenPortalConfig,
-  buildOverrides,
-} from './oauth-lifecycle/token-overrides-builder.js';
-import {
   logTokenSnapshot,
 } from './oauth-lifecycle/token-preparation.js';
 
@@ -501,13 +494,89 @@ export async function ensureValidOAuthToken(
 
   const runPromise = (async () => {
     const defaults = getProviderOAuthConfig(providerType, {});
-    const { overrides, endpoints, client } = await buildOverrides(
-      providerType,
-      defaults,
-      auth,
-      openBrowser,
-      tokenFilePath
-    );
+    const endpoints = (() => {
+      const overridden: OAuthEndpoints = { ...(defaults.endpoints || {}) };
+      if (typeof auth.tokenUrl === 'string' && auth.tokenUrl.trim()) {
+        overridden.tokenUrl = auth.tokenUrl.trim();
+      }
+      if (typeof auth.deviceCodeUrl === 'string' && auth.deviceCodeUrl.trim()) {
+        overridden.deviceCodeUrl = auth.deviceCodeUrl.trim();
+      }
+      if (typeof auth.authorizationUrl === 'string' && auth.authorizationUrl.trim()) {
+        overridden.authorizationUrl = auth.authorizationUrl.trim();
+      }
+      if (typeof auth.userInfoUrl === 'string' && auth.userInfoUrl.trim()) {
+        overridden.userInfoUrl = auth.userInfoUrl.trim();
+      }
+      return overridden;
+    })();
+    const client = await (async () => {
+      const base: OAuthClientConfig = { ...(defaults.client || {}) };
+      if (typeof auth.clientId === 'string' && auth.clientId.trim()) {
+        base.clientId = auth.clientId.trim();
+      }
+      if (typeof auth.clientSecret === 'string' && auth.clientSecret.trim()) {
+        base.clientSecret = auth.clientSecret.trim();
+      }
+      if (Array.isArray(auth.scopes) && auth.scopes.length > 0) {
+        base.scopes = [...auth.scopes];
+      }
+      if (typeof auth.redirectUri === 'string' && auth.redirectUri.trim()) {
+        base.redirectUri = auth.redirectUri.trim();
+      }
+      return base;
+    })();
+    const headers = { ...(defaults.headers || {}) };
+    const tokenPortal = (() => {
+      if (!openBrowser) {
+        return undefined;
+      }
+      const configured = String(process.env.ROUTECODEX_TOKEN_PORTAL_BASE || '').trim();
+      const baseUrl = configured || (() => {
+        const envPort = Number(
+          process.env.ROUTECODEX_PORT ||
+          process.env.RCC_PORT ||
+          process.env.ROUTECODEX_SERVER_PORT ||
+          NaN
+        );
+        if (!Number.isFinite(envPort) || envPort <= 0) {
+          return null;
+        }
+        const host = LOCAL_HOSTS.IPV4;
+        return `${HTTP_PROTOCOLS.HTTP}${host}:${envPort}/token-auth/demo`;
+      })();
+      if (!baseUrl) {
+        return undefined;
+      }
+      const rawTokenFile = tokenFilePath ? path.basename(tokenFilePath) : '';
+      const alias = (() => {
+        if (rawTokenFile && !rawTokenFile.includes('/') && !rawTokenFile.includes('\\') && !rawTokenFile.endsWith('.json')) {
+          return rawTokenFile;
+        }
+        const base = rawTokenFile ? path.basename(rawTokenFile) : '';
+        const pt = String(providerType || '').trim().toLowerCase();
+        if (base && pt) {
+          const re = new RegExp(`^${pt}-oauth-\\d+(?:-(.+))?\\.json$`, 'i');
+          const match = base.match(re);
+          const candidate = match && match[1] ? String(match[1]).trim() : '';
+          if (candidate) {
+            return candidate;
+          }
+        }
+        return 'default';
+      })();
+      return { baseUrl, provider: providerType, alias, tokenFile: tokenFilePath } as NonNullable<OAuthFlowConfig['tokenPortal']>;
+    })();
+    const overrides: Record<string, unknown> = {
+      activationType: openBrowser ? 'auto_browser' : 'manual',
+      endpoints,
+      client,
+      tokenFile: tokenFilePath,
+      headers
+    };
+    if (tokenPortal) {
+      (overrides as any).tokenPortal = tokenPortal;
+    }
     logOAuthSetup(providerType, defaults, overrides, endpoints, client, tokenFilePath, openBrowser, forceReauth);
     const strategy = createStrategy(providerType, overrides, tokenFilePath);
     let token = await readTokenFromFile(tokenFilePath);
