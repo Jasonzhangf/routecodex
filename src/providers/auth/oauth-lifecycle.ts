@@ -310,24 +310,10 @@ async function finalizeTokenWrite(
   if (!tokenData || typeof strategy.saveToken !== 'function') {
     return;
   }
-  const enriched = await maybeEnrichToken(providerType, tokenData, tokenFilePath, options);
-  const prepared = await prepareTokenForStorage(providerType, tokenFilePath, enriched);
+  const prepared = await prepareTokenForStorage(providerType, tokenFilePath, tokenData);
   await strategy.saveToken(prepared);
   logOAuthDebug(`[OAuth] Token ${reason} saved: ${tokenFilePath}`);
 }
-
-async function maybeEnrichToken(
-  providerType: string,
-  tokenData: UnknownObject,
-  tokenFilePath?: string,
-  options?: Record<string, never>
-): Promise<UnknownObject> {
-  void providerType;
-  void tokenFilePath;
-  void options;
-  return tokenData;
-}
-
 
 function logOAuthSetup(
   providerType: string,
