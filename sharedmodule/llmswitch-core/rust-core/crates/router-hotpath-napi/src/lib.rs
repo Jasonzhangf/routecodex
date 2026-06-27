@@ -59,6 +59,7 @@ mod hub_tool_session_compat;
 mod metadata_center;
 mod openai_openai_codec;
 mod provider_response_shared_pure_blocks;
+mod direct_decision;
 mod primary_exhausted_to_default_pool_blocks;
 mod req_executor_pipeline_attempt;
 mod req_outbound_stage3_compat;
@@ -2696,6 +2697,22 @@ pub fn extract_bridge_provider_response_payload_json(input_json: String) -> Napi
         .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
     let result = payload_extraction::extract_bridge_provider_response_payload(&raw);
     Ok(result.map(|v| v.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// direct_decision NAPI exports — Rust migration batch #4
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn decide_direct_router_retry_json(input_json: String) -> NapiResult<String> {
+    direct_decision::decision::decide_direct_router_retry_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn decide_direct_provider_retry_json(input_json: String) -> NapiResult<String> {
+    direct_decision::decision::decide_direct_provider_retry_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
 }
 
 // ---------------------------------------------------------------------------
