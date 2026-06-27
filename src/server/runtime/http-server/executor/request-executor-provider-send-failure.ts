@@ -3,7 +3,7 @@ import type { ProviderProtocol } from '../types.js';
 import type { ProviderTrafficGovernorLike } from '../provider-traffic-governor.js';
 import {
   emitRequestExecutorProviderRetryTelemetry
-} from './request-executor-retry-planner.js';
+} from './request-executor-retry-telemetry.js';
 import {
   resolveRequestExecutorProviderFailurePlan
 } from './request-executor-provider-failure-plan.js';

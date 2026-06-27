@@ -1,5 +1,18 @@
 # 2026-06-27 request-executor thin-shell closeout slice
 
+- 当前追加 slice：
+  - `src/server/runtime/http-server/executor/request-executor-retry-planner.ts`
+  - `src/server/runtime/http-server/request-executor.ts`
+  - `src/server/runtime/http-server/executor/request-executor-provider-resolve-failure.ts`
+  - `src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts`
+- 当前判断：
+  - `request-executor-retry-planner.ts` 只剩 re-export + test reset 壳，没有 stateful owner 语义。
+  - `request-executor.ts` 当前 import 面已经直连 `retry-state` / `retry-execution-plan` / `retry-telemetry`，不再需要 planner facade。
+- 当前动作：
+  - 物理删除 `request-executor-retry-planner.ts`
+  - 保留 `request-executor-provider-resolve-failure.ts` / `request-executor-provider-send-failure.ts` 对 `request-executor-retry-telemetry.ts` 的直连
+  - 下一步跑 `npx tsc -p tsconfig.json --noEmit --pretty false` + retry/executor 相关最小 jest
+
 - 当前 slice：
   - `src/server/runtime/http-server/executor/request-executor-provider-failure.ts`
   - `src/server/runtime/http-server/executor/request-executor-retry-decision.ts`

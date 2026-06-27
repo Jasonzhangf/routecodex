@@ -198,11 +198,15 @@ import {
   consumeLogicalChainRecoverableRetry,
   deriveLogicalRequestChainKey,
   releaseLogicalRequestChain,
+  resetRequestExecutorRetryStateForTests,
   retainLogicalRequestChain,
-  resetRequestExecutorRetryPlannerState,
+} from './executor/request-executor-retry-state.js';
+import {
   resolveProviderRetryExecutionPlan,
-  resolveProviderRetryExclusionPlan,
-} from './executor/request-executor-retry-planner.js';
+} from './executor/request-executor-retry-execution-plan.js';
+import {
+  resolveProviderRetryExclusionPlan
+} from './executor/request-executor-retry-decision.js';
 import type {
   BlockingRecoverableRouteHoldState,
   ProviderRetryExecutionPlan,
@@ -276,7 +280,7 @@ const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
 export type { SseWrapperErrorInfo };
 function resetRequestExecutorInternalStateForTests(): void {
   resetErrorReportStateForTests();
-  resetRequestExecutorRetryPlannerState();
+  resetRequestExecutorRetryStateForTests();
   resetErrorActionQueueStateForTests();
   providerSwitchLogState.clear();
 }

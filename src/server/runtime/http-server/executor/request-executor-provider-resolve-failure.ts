@@ -2,7 +2,7 @@ import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces
 import type { ProviderProtocol } from '../types.js';
 import {
   emitRequestExecutorProviderRetryTelemetry
-} from './request-executor-retry-planner.js';
+} from './request-executor-retry-telemetry.js';
 import {
   resolveRequestExecutorProviderFailurePlan
 } from './request-executor-provider-failure-plan.js';
