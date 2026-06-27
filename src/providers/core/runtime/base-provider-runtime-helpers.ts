@@ -11,6 +11,7 @@ import {
   providerTypeToProtocol
 } from '../utils/provider-type-utils.js';
 import { resolveProviderContextExtensions } from './provider-runtime-utils.js';
+import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 type RequestEnvelope = UnknownObject & { data?: UnknownObject };
 
@@ -33,6 +34,32 @@ export function hasTools(payload: Record<string, unknown>): boolean {
   return Boolean(tools);
 }
 
+function readEntryPortTruth(metadata?: Record<string, unknown>): number | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
+  if (typeof requestTruthPortScope === 'string') {
+    const parsed = Number.parseInt(requestTruthPortScope, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+  for (const value of [
+    metadata.entryPort,
+    metadata.matchedPort,
+    metadata.routecodexLocalPort,
+    metadata.localPort,
+    metadata.portScope
+  ]) {
+    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.floor(numeric);
+    }
+  }
+  return undefined;
+}
+
 export function createProviderContext(options: {
   request: UnknownObject;
   providerType: string;
@@ -43,6 +70,31 @@ export function createProviderContext(options: {
 }): { context: ProviderContext; runtimeMetadata?: ProviderRuntimeMetadata } {
   const runtimeMetadata = extractProviderRuntimeMetadata(options.request);
   const payload = unwrapRequestPayload(options.request);
+  const payloadMetadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
+    ? payload.metadata as Record<string, unknown>
+    : undefined;
+  const runtimeMetadataRecord = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
+    ? runtimeMetadata.metadata as Record<string, unknown>
+    : undefined;
+  const mergedMetadata = {
+    ...(payloadMetadata ?? {}),
+    ...(runtimeMetadataRecord ?? {})
+  };
+  const payloadMetadataCenter = payloadMetadata ? MetadataCenter.read(payloadMetadata) : undefined;
+  const runtimeMetadataCenter = runtimeMetadataRecord ? MetadataCenter.read(runtimeMetadataRecord) : undefined;
+  const mergedMetadataCenter = payloadMetadataCenter ?? runtimeMetadataCenter;
+  const entryPort = readEntryPortTruth(mergedMetadata);
+  if (typeof entryPort === 'number') {
+    mergedMetadata.entryPort = entryPort;
+    mergedMetadata.matchedPort = entryPort;
+    if (runtimeMetadataRecord) {
+      runtimeMetadataRecord.entryPort = entryPort;
+      runtimeMetadataRecord.matchedPort = entryPort;
+    }
+  }
+  if (mergedMetadataCenter) {
+    MetadataCenter.bind(mergedMetadata, mergedMetadataCenter);
+  }
   const runtimeModel = typeof runtimeMetadata?.target?.modelId === 'string'
     ? runtimeMetadata.target.modelId
     : typeof runtimeMetadata?.target?.model === 'string'
@@ -77,7 +129,7 @@ export function createProviderContext(options: {
     startTime: Date.now(),
     model: contextModel,
     hasTools: hasTools(payload),
-    metadata: runtimeMetadata?.metadata || {},
+    metadata: mergedMetadata,
     providerId: runtimeMetadata?.providerId || runtimeMetadata?.providerKey || options.runtimeProfile?.providerId,
     providerKey: runtimeMetadata?.providerKey || options.runtimeProfile?.providerKey,
     providerProtocol,
@@ -95,6 +147,11 @@ export function createProviderContext(options: {
         ? (runtimeMetadata.abortSignal as AbortSignal)
         : undefined
   };
+  if (payloadMetadataCenter) {
+    MetadataCenter.bind(context.metadata ?? mergedMetadata, payloadMetadataCenter);
+  } else if (runtimeMetadataCenter) {
+    MetadataCenter.bind(context.metadata ?? mergedMetadata, runtimeMetadataCenter);
+  }
   return { context, runtimeMetadata };
 }
 

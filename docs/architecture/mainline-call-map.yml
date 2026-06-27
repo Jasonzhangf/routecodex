@@ -401,7 +401,7 @@ chains:
         to_node: ErrorErr05ExecutionDecision
         caller_symbol: resolveProviderRetryExecutionPlan
         caller_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
-        callee_symbol: consume_error_err_05_execution_decision_from_error_err_04_router_policy
+        callee_symbol: resolveProviderRetryExecutionPlan
         callee_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
         owner_feature_id: error.execution_decision_consumer
         semantic_input: "classified provider/runtime failure + retry/error snapshot"
@@ -682,8 +682,8 @@ chains:
       - step_id: stl-02
         from_node: StoplessResp02SchemaGateEvaluated
         to_node: StoplessState03RuntimeSnapshotResolved
-        caller_symbol: resolveRuntimeStopMessageStateFromAdapterContext
-        caller_file: sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts
+        caller_symbol: resolveRuntimeStopMessageStateFromAdapterContextWithNative
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
         callee_symbol: resolve_runtime_stop_message_state_from_adapter_context
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
@@ -786,10 +786,10 @@ chains:
         callee_symbol: writeContinuationContext
         callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
         owner_feature_id: hub.metadata_center_mainline
-        semantic_input: "request truth plus responses pipeline continuation inputs"
-        semantic_output: "responses request context and resume metadata attached as continuation context without redefining request truth"
+        semantic_input: "request truth plus responses pipeline continuation control inputs"
+        semantic_output: "responses continuation control attached without redefining request truth and without mirroring request/context payload into MetadataCenter"
         status: anchored
-        note: "Pipeline metadata write attaches `responsesRequestContext` and optional `responsesResume` into `continuation_context`; request truth remains write-once and continuation fields must not be promoted back into request identity."
+        note: "Pipeline metadata write may attach `responsesResume` and other continuation control only; request truth remains write-once and MetadataCenter must not carry `responsesRequestContext` or any request/context payload mirror."
       - step_id: mtc-02-result
         from_node: MetaReq02TruthMaterialized
         to_node: MetaReq03ContinuationAttached
@@ -798,10 +798,10 @@ chains:
         callee_symbol: writeContinuationContext
         callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
         owner_feature_id: hub.metadata_center_mainline
-        semantic_input: "request truth plus responses result continuation context"
-        semantic_output: "responses request context attached to pipeline result metadata as continuation context without redefining request truth"
+        semantic_input: "request truth plus responses result continuation control"
+        semantic_output: "result-side continuation control preserved without redefining request truth and without persisting request/context payload in MetadataCenter"
         status: anchored
-        note: "Result metadata write attaches `responsesRequestContext` into `continuation_context`; tests lock continuation-only cases cannot materialize request truth."
+        note: "Result metadata must not attach `responsesRequestContext` into `continuation_context`; tests must lock that continuation control cannot materialize request truth and cannot become a request-context transport path."
       - step_id: mtc-03
         from_node: MetaReq03ContinuationAttached
         to_node: MetaReq04RuntimeControlBound

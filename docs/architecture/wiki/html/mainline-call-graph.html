@@ -268,8 +268,8 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>resp-01</td><td><code>ProviderRespInbound01Raw -&gt; HubRespInbound02Parsed</code></td><td>anchored</td><td><code>run_hub_resp_inbound_02_parsed_entrypoint -&gt; parse_hub_resp_inbound_02_from_provider_resp_inbound_01</code></td><td></td><td><code>hub.response_provider_sse_materialization</code>&lt;br/&gt;Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry</td></tr>
         <tr><td>resp-02</td><td><code>HubRespInbound02Parsed -&gt; HubRespChatProcess03Governed</code></td><td>anchored</td><td><code>run_hub_resp_chatprocess_03_governed_entrypoint -&gt; build_hub_resp_chatprocess_03_from_hub_resp_inbound_02</code></td><td></td><td><code>hub.response_responses_chat_projection</code>&lt;br/&gt;OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers</td></tr>
-        <tr><td>resp-03</td><td><code>HubRespChatProcess03Governed -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; projectResponsesClientPayloadForClientNative</code></td><td></td><td><code>hub.response_responses_client_projection</code>&lt;br/&gt;OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore</td></tr>
-        <tr><td>resp-04</td><td><code>HubRespOutbound04ClientSemantic -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>sendPipelineResponse -&gt; sendSsePipelineResponse</code></td><td></td><td><code>server.responses_response_handler_bridge_surface</code>&lt;br/&gt;/v1/responses response lifecycle bridge uses one opaque continuation/conversation facade only; protocol semantics stay in Hub Pipeline/native owner</td></tr>
+        <tr><td>resp-03</td><td><code>HubRespChatProcess03Governed -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; projectResponsesClientPayloadForClientNative</code></td><td></td><td><code>hub.response_responses_client_projection</code>&lt;br/&gt;OpenAI Responses client-visible payload projection for JSON body and SSE frames after HubRespChatProcess03Governed normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore</td></tr>
+        <tr><td>resp-04</td><td><code>HubRespOutbound04ClientSemantic -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>sendPipelineResponse -&gt; sendSsePipelineResponse</code></td><td></td><td><code>server.responses_response_handler_bridge_surface</code>&lt;br/&gt;/v1/responses response bridge now owns only transport-facing close/clear helpers; continuation save truth lives in core Chat Process closeout</td></tr>
         </tbody>
         </table>
         <h2>responses.continuation.mainline</h2>
@@ -289,7 +289,7 @@
           ChatProcReqContinuation03CanonicalRestored --&gt;|rct-03| ChatProcReqContinuation04HookRestored
           ChatProcReqContinuation04HookRestored -.-&gt;|rct-04| ChatProcReqContinuation05Governed
           ChatProcReqContinuation05Governed -.-&gt;|rct-05| ChatProcRespContinuation06ResponseGoverned
-          ChatProcRespContinuation06ResponseGoverned -.-&gt;|rct-06| ChatProcRespContinuation07CanonicalSaved
+          ChatProcRespContinuation06ResponseGoverned --&gt;|rct-06| ChatProcRespContinuation07CanonicalSaved
           ChatProcRespContinuation07CanonicalSaved --&gt;|rct-07| ChatProcRespContinuation08Released
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
@@ -300,7 +300,7 @@
           class ChatProcReqContinuation04HookRestored pending;
           class ChatProcReqContinuation05Governed partial;
           class ChatProcRespContinuation06ResponseGoverned partial;
-          class ChatProcRespContinuation07CanonicalSaved partial;
+          class ChatProcRespContinuation07CanonicalSaved anchored;
           class ChatProcRespContinuation08Released anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
@@ -311,7 +311,7 @@
         <tr><td>rct-03</td><td><code>ChatProcReqContinuation03CanonicalRestored -&gt; ChatProcReqContinuation04HookRestored</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-04</td><td><code>ChatProcReqContinuation04HookRestored -&gt; ChatProcReqContinuation05Governed</code></td><td>partial</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-05</td><td><code>ChatProcReqContinuation05Governed -&gt; ChatProcRespContinuation06ResponseGoverned</code></td><td>partial</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; projectResponsesClientPayloadForClientNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
-        <tr><td>rct-06</td><td><code>ChatProcRespContinuation06ResponseGoverned -&gt; ChatProcRespContinuation07CanonicalSaved</code></td><td>partial</td><td><code>persistResponsesConversationLifecycleForHttp -&gt; recordResponsesResponseForHttp</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-06</td><td><code>ChatProcRespContinuation06ResponseGoverned -&gt; ChatProcRespContinuation07CanonicalSaved</code></td><td>anchored</td><td><code>persistResponsesConversationLifecycleAtChatProcessExitWithinCore -&gt; recordResponsesResponse</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-07</td><td><code>ChatProcRespContinuation07CanonicalSaved -&gt; ChatProcRespContinuation08Released</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; releaseMetadataCenterForHttpResponse</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         </tbody>
         </table>
@@ -361,8 +361,39 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>err-01</td><td><code>ErrorErr01SourceRaised -&gt; ErrorErr02HostCaptured</code></td><td>anchored</td><td><code>reportProviderErrorToRouterPolicy -&gt; reportProviderErrorToRouterPolicy</code></td><td></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td></tr>
         <tr><td>err-02</td><td><code>ErrorErr02HostCaptured -&gt; ErrorErr03RuntimeClassified</code></td><td>anchored</td><td><code>classifyProviderFailure -&gt; classifyProviderFailure</code></td><td></td><td><code>error.provider_failure_policy</code>&lt;br/&gt;provider/server error cataloging, runtime classification, router policy application, and availability/cooldown truth; session-local storm semantics are explicitly separate</td></tr>
-        <tr><td>err-03</td><td><code>ErrorErr03RuntimeClassified -&gt; ErrorErr05ExecutionDecision</code></td><td>partial</td><td><code>resolveProviderRetryExecutionPlan -&gt; consume_error_err_05_execution_decision_from_error_err_04_router_policy</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
+        <tr><td>err-03</td><td><code>ErrorErr03RuntimeClassified -&gt; ErrorErr05ExecutionDecision</code></td><td>partial</td><td><code>resolveProviderRetryExecutionPlan -&gt; resolveProviderRetryExecutionPlan</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
         <tr><td>err-04</td><td><code>ErrorErr05ExecutionDecision -&gt; ErrorErr06ClientProjected</code></td><td>anchored</td><td><code>project_error_err_06_client_from_error_err_05_execution_decision -&gt; mapErrorToHttp</code></td><td></td><td><code>error.client_projection</code>&lt;br/&gt;ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames</td></tr>
+        </tbody>
+        </table>
+        <h2>vr.route_availability.mainline</h2>
+        <p>Virtual Router ordinary-route filtering, default-pool availability floor, and primary_exhausted planning remain Rust-owned; TS may only consume the floor/plan output and must not locally re-decide terminal no-provider.</p>
+        <p>Entry contract: <code>VrAvail01RouteCandidates</code> via <code>docs/architecture/wiki/virtual-router-route-availability-mainline-source.md</code></p>
+        <pre class="mermaid">flowchart LR
+          ErrorErr05ExecutionDecision[&quot;ErrorErr05ExecutionDecision&quot;]
+          VrAvail04PrimaryExhaustedPlanned[&quot;VrAvail04PrimaryExhaustedPlanned&quot;]
+          VrAvail03DefaultFloorEvaluated[&quot;VrAvail03DefaultFloorEvaluated&quot;]
+          VrAvail02PoolFiltered[&quot;VrAvail02PoolFiltered&quot;]
+          VrAvail01RouteCandidates[&quot;VrAvail01RouteCandidates&quot;]
+          VrAvail01RouteCandidates --&gt;|vra-01| VrAvail02PoolFiltered
+          VrAvail02PoolFiltered --&gt;|vra-02| VrAvail03DefaultFloorEvaluated
+          VrAvail03DefaultFloorEvaluated --&gt;|vra-03| VrAvail04PrimaryExhaustedPlanned
+          VrAvail04PrimaryExhaustedPlanned -.-&gt;|vra-04| ErrorErr05ExecutionDecision
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class VrAvail01RouteCandidates anchored;
+          class VrAvail02PoolFiltered anchored;
+          class VrAvail03DefaultFloorEvaluated anchored;
+          class VrAvail04PrimaryExhaustedPlanned partial;
+          class ErrorErr05ExecutionDecision partial;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>vra-01</td><td><code>VrAvail01RouteCandidates -&gt; VrAvail02PoolFiltered</code></td><td>anchored</td><td><code>resolve_forwarder_candidate_for_pool -&gt; select</code></td><td></td><td><code>vr.provider_forwarder_runtime</code>&lt;br/&gt;ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</td></tr>
+        <tr><td>vra-02</td><td><code>VrAvail02PoolFiltered -&gt; VrAvail03DefaultFloorEvaluated</code></td><td>anchored</td><td><code>build_provider_not_available_error -&gt; evaluate_singleton_route_pool_exhaustion</code></td><td></td><td><code>vr.route_availability_floor</code>&lt;br/&gt;route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td></tr>
+        <tr><td>vra-03</td><td><code>VrAvail03DefaultFloorEvaluated -&gt; VrAvail04PrimaryExhaustedPlanned</code></td><td>anchored</td><td><code>resolvePrimaryExhaustedPlan -&gt; planPrimaryExhaustedToDefaultPoolNative</code></td><td></td><td><code>virtual_router.primary_exhausted_to_default_pool</code>&lt;br/&gt;primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td></tr>
+        <tr><td>vra-04</td><td><code>VrAvail04PrimaryExhaustedPlanned -&gt; ErrorErr05ExecutionDecision</code></td><td>partial</td><td><code>executeRouterDirectPipelineForPort -&gt; resolveDefaultTierAvailableForErrorErr05</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
         </tbody>
         </table>
         <h2>runtime.lifecycle.mainline</h2>
@@ -456,7 +487,7 @@
         </tbody>
         </table>
         <h2>stopless.session.mainline</h2>
-        <p>Stopless three-round contract: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop-&gt;CLI rewriting.</p>
+        <p>Stopless three-round contract inside Chat Process boundary: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop-&gt;CLI rewriting.</p>
         <p>Entry contract: <code>StoplessResp01StopDetected</code> via <code>docs/architecture/wiki/stopless-session-mainline-source.md</code></p>
         <pre class="mermaid">flowchart LR
           VrRoute04SelectedTarget[&quot;VrRoute04SelectedTarget&quot;]
@@ -492,18 +523,18 @@
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>stl-01</td><td><code>StoplessResp01StopDetected -&gt; StoplessResp02SchemaGateEvaluated</code></td><td>anchored</td><td><code>runServerToolOrchestration -&gt; runStopMessageAutoHandlerWithNative</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
-        <tr><td>stl-02</td><td><code>StoplessResp02SchemaGateEvaluated -&gt; StoplessState03RuntimeSnapshotResolved</code></td><td>anchored</td><td><code>resolveRuntimeStopMessageStateFromAdapterContext -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
-        <tr><td>stl-03</td><td><code>StoplessState03RuntimeSnapshotResolved -&gt; StoplessCli04ProjectionPlanned</code></td><td>anchored</td><td><code>buildServertoolCliProjectionForAutoFlow -&gt; plan_client_exec_cli_projection_output</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
-        <tr><td>stl-04</td><td><code>StoplessCli04ProjectionPlanned -&gt; StoplessCli06ClientExecuted</code></td><td>anchored</td><td><code>createServertoolCommand -&gt; build_servertool_cli_binary_run_command_from_client_exec_result</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
-        <tr><td>stl-05</td><td><code>StoplessCli06ClientExecuted -&gt; StoplessReq07ContinuationRestored</code></td><td>anchored</td><td><code>has_stop_message_auto_cli_result_in_request_json -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
-        <tr><td>stl-06</td><td><code>StoplessReq07ContinuationRestored -&gt; StoplessReq08GuidanceRewritten</code></td><td>anchored</td><td><code>buildChatRequestFromResponses -&gt; convertBridgeInputToChatMessages</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
-        <tr><td>stl-07</td><td><code>StoplessReq08GuidanceRewritten -&gt; StoplessReq09SchemaContractInjected</code></td><td>anchored</td><td><code>apply_req_process_tool_governance -&gt; inject_stopless_system_instruction</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
-        <tr><td>stl-08</td><td><code>StoplessReq09SchemaContractInjected -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>classify -&gt; classify</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning</td></tr>
+        <tr><td>stl-01</td><td><code>StoplessResp01StopDetected -&gt; StoplessResp02SchemaGateEvaluated</code></td><td>anchored</td><td><code>runServerToolOrchestration -&gt; runStopMessageAutoHandlerWithNative</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>stl-02</td><td><code>StoplessResp02SchemaGateEvaluated -&gt; StoplessState03RuntimeSnapshotResolved</code></td><td>anchored</td><td><code>resolveRuntimeStopMessageStateFromAdapterContextWithNative -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>stl-03</td><td><code>StoplessState03RuntimeSnapshotResolved -&gt; StoplessCli04ProjectionPlanned</code></td><td>anchored</td><td><code>buildServertoolCliProjectionForAutoFlow -&gt; plan_client_exec_cli_projection_output</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>stl-04</td><td><code>StoplessCli04ProjectionPlanned -&gt; StoplessCli06ClientExecuted</code></td><td>anchored</td><td><code>createServertoolCommand -&gt; build_servertool_cli_binary_run_command_from_client_exec_result</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>stl-05</td><td><code>StoplessCli06ClientExecuted -&gt; StoplessReq07ContinuationRestored</code></td><td>anchored</td><td><code>has_stop_message_auto_cli_result_in_request_json -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>stl-06</td><td><code>StoplessReq07ContinuationRestored -&gt; StoplessReq08GuidanceRewritten</code></td><td>anchored</td><td><code>buildChatRequestFromResponses -&gt; convertBridgeInputToChatMessages</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>stl-07</td><td><code>StoplessReq08GuidanceRewritten -&gt; StoplessReq09SchemaContractInjected</code></td><td>anchored</td><td><code>apply_req_process_tool_governance -&gt; inject_stopless_system_instruction</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>stl-08</td><td><code>StoplessReq09SchemaContractInjected -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>classify -&gt; classify</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         </tbody>
         </table>
         <h2>metadata.center.mainline</h2>
-        <p>request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release.</p>
+        <p>single request-scoped metadata center mainline: one bound center flows across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout; request truth is materialized once, continuation/runtime/provider observation attach as separate families, and later stages consume read-only projections before closeout release.</p>
         <p>Entry contract: <code>MetaReq01InboundSeeded</code> via <code>docs/architecture/wiki/metadata-center-mainline-source.md</code></p>
         <pre class="mermaid">flowchart LR
           MetaResp08CloseoutReleased[&quot;MetaResp08CloseoutReleased&quot;]
@@ -517,7 +548,7 @@
           MetaReq01InboundSeeded --&gt;|mtc-01| MetaReq02TruthMaterialized
           MetaReq02TruthMaterialized --&gt;|mtc-02| MetaReq03ContinuationAttached
           MetaReq02TruthMaterialized --&gt;|mtc-02-result| MetaReq03ContinuationAttached
-          MetaReq03ContinuationAttached -.-&gt;|mtc-03| MetaReq04RuntimeControlBound
+          MetaReq03ContinuationAttached --&gt;|mtc-03| MetaReq04RuntimeControlBound
           MetaReq04RuntimeControlBound --&gt;|mtc-04| MetaReq05ProviderObservationProjected
           MetaReq05ProviderObservationProjected --&gt;|mtc-05| MetaResp06ResponseObserved
           MetaResp06ResponseObserved --&gt;|mtc-06| MetaResp07ServertoolContextProjected
@@ -527,8 +558,8 @@
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
           class MetaReq01InboundSeeded anchored;
           class MetaReq02TruthMaterialized anchored;
-          class MetaReq03ContinuationAttached partial;
-          class MetaReq04RuntimeControlBound partial;
+          class MetaReq03ContinuationAttached anchored;
+          class MetaReq04RuntimeControlBound anchored;
           class MetaReq05ProviderObservationProjected anchored;
           class MetaResp06ResponseObserved anchored;
           class MetaResp07ServertoolContextProjected anchored;
@@ -537,14 +568,14 @@
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>mtc-01</td><td><code>MetaReq01InboundSeeded -&gt; MetaReq02TruthMaterialized</code></td><td>anchored</td><td><code>buildRequestMetadata -&gt; writeRequestTruth</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
-        <tr><td>mtc-02</td><td><code>MetaReq02TruthMaterialized -&gt; MetaReq03ContinuationAttached</code></td><td>anchored</td><td><code>buildResponsesPipelineMetadataForHttp -&gt; writeContinuationContext</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
-        <tr><td>mtc-02-result</td><td><code>MetaReq02TruthMaterialized -&gt; MetaReq03ContinuationAttached</code></td><td>anchored</td><td><code>attachResponsesRequestContextToResultForHttp -&gt; writeContinuationContext</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
-        <tr><td>mtc-03</td><td><code>MetaReq03ContinuationAttached -&gt; MetaReq04RuntimeControlBound</code></td><td>partial</td><td><code>finalizeRequestExecutorAttemptMetadata -&gt; finalizeRequestExecutorAttemptMetadata</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
-        <tr><td>mtc-04</td><td><code>MetaReq04RuntimeControlBound -&gt; MetaReq05ProviderObservationProjected</code></td><td>anchored</td><td><code>resolveRequestExecutorPipelineAttempt -&gt; resolveRequestExecutorPipelineAttempt</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
-        <tr><td>mtc-05</td><td><code>MetaReq05ProviderObservationProjected -&gt; MetaResp06ResponseObserved</code></td><td>anchored</td><td><code>resolveResponsesConversationPersistInputsForHttp -&gt; readRuntimeRequestTruthIdentifiers</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
-        <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07ServertoolContextProjected</code></td><td>anchored</td><td><code>buildServerToolAdapterContext -&gt; readRuntimeServerToolProjection</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
-        <tr><td>mtc-07</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;request-scoped metadata center registry and response closeout release remain on one request-local owner</td></tr>
+        <tr><td>mtc-01</td><td><code>MetaReq01InboundSeeded -&gt; MetaReq02TruthMaterialized</code></td><td>anchored</td><td><code>buildRequestMetadata -&gt; writeRequestTruth</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-02</td><td><code>MetaReq02TruthMaterialized -&gt; MetaReq03ContinuationAttached</code></td><td>anchored</td><td><code>buildResponsesPipelineMetadataForHttp -&gt; writeContinuationContext</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-02-result</td><td><code>MetaReq02TruthMaterialized -&gt; MetaReq03ContinuationAttached</code></td><td>anchored</td><td><code>attachResponsesRequestContextToResultForHttp -&gt; writeContinuationContext</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-03</td><td><code>MetaReq03ContinuationAttached -&gt; MetaReq04RuntimeControlBound</code></td><td>anchored</td><td><code>finalizeRequestExecutorAttemptMetadata -&gt; finalizeRequestExecutorAttemptMetadata</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-04</td><td><code>MetaReq04RuntimeControlBound -&gt; MetaReq05ProviderObservationProjected</code></td><td>anchored</td><td><code>resolveRequestExecutorPipelineAttempt -&gt; resolveRequestExecutorPipelineAttempt</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-05</td><td><code>MetaReq05ProviderObservationProjected -&gt; MetaResp06ResponseObserved</code></td><td>anchored</td><td><code>persistResponsesConversationLifecycleAtChatProcessExitWithinCore -&gt; readMetadataCenterRequestTruth</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07ServertoolContextProjected</code></td><td>anchored</td><td><code>buildServerToolAdapterContext -&gt; readRuntimeServerToolProjection</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-07</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         </tbody>
         </table>
         <h2>Shared Multi-Reference Functions</h2>
@@ -553,7 +584,7 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>native.responses_context_capture</td><td><code>captureReqInboundResponsesContextSnapshotJson</code></td><td><code>hub.req_inbound_responses_context_capture</code>&lt;br/&gt;Rust req_inbound owner captures and normalizes relay <code>/v1/responses</code> request context before any TS bridge reuse</td><td>Host/native wrapper; truth owner remains Rust hub_req_inbound_context_capture.</td></tr>
-        <tr><td>native.responses_client_projection</td><td><code>projectResponsesClientPayloadForClientNative</code></td><td><code>hub.response_responses_client_projection</code>&lt;br/&gt;OpenAI Responses client-visible payload projection for JSON body and SSE frames, including apply_patch freeform custom tool output plus client-visible model/reasoning restore</td><td>Thin host/native facade; truth owner remains Rust.</td></tr>
+        <tr><td>native.responses_client_projection</td><td><code>projectResponsesClientPayloadForClientNative</code></td><td><code>hub.response_responses_client_projection</code>&lt;br/&gt;OpenAI Responses client-visible payload projection for JSON body and SSE frames after HubRespChatProcess03Governed normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore</td><td>Thin host/native facade; truth owner remains Rust.</td></tr>
         <tr><td>error.execution_decision_consumer</td><td><code>resolveProviderRetryExecutionPlan</code></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td><td>Executor consumes classified provider failure and materializes retry/reroute/fail-fast decision.</td></tr>
         <tr><td>runtime.lifecycle.pid_cache_writer</td><td><code>writeServerPidCache</code></td><td><code>runtime.lifecycle.pid_cache</code>&lt;br/&gt;server pid cache lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/pid.cache; pid is a transient cache, not the authoritative runtime state</td><td>Writes transient pid.cache JSON under runtime-lifecycle subdir; truth remains HTTP /health + listener identity.</td></tr>
         <tr><td>runtime.lifecycle.stop_intent_signal</td><td><code>writeServerStopIntent</code></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td><td>Cross-process stop-intent signal; daemon-stop-intent.ts is a thin re-export facade.</td></tr>

@@ -1004,7 +1004,7 @@ owners:
     canonical_builders:
       - normalizeKnownProviderError
       - resolveProviderFailureOutcome
-      - shouldKeepProviderExcludedForNextAttempt
+      - resolveProviderFailureClassification
     allowed_paths:
       - src/providers/core/runtime
       - sharedmodule/llmswitch-core/src/native/router-hotpath
@@ -1015,7 +1015,7 @@ owners:
       - src/server/handlers
     required_tests:
       - tests/red-tests/error_chain_singleton_truth.test.ts
-      - tests/server/runtime/executor-provider.retryable.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
       - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts
       - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
     required_gates:
@@ -1426,7 +1426,6 @@ owners:
       - sharedmodule/llmswitch-core/src/router
       - src/server/runtime/http-server/daemon-admin
       - src/providers/core/runtime
-      - src/manager/modules/quota
     required_tests:
       - tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
@@ -1470,7 +1469,6 @@ owners:
       - sharedmodule/llmswitch-core/src/router
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
-      - src/manager/modules/quota
       - src/client
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/forwarder.rs
@@ -2899,7 +2897,6 @@ owners:
       - src/server/runtime/http-server/daemon-admin
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
-      - src/manager/modules/quota
     required_tests:
       - tests/sharedmodule/routing-state-store-observability.spec.ts
       - tests/sharedmodule/routing-state-continuation-matrix.spec.ts
@@ -2932,7 +2929,6 @@ owners:
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
       - src/manager/modules/routing
-      - src/manager/modules/quota
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/health.rs
     required_tests:
       - tests/manager/storage/jsonl-file-store.spec.ts
@@ -2964,7 +2960,6 @@ owners:
       - src/providers/core/runtime
       - src/manager/modules/routing
       - src/manager/modules/health
-      - src/manager/modules/quota
     required_tests:
       - tests/token-daemon/leader-lock.spec.ts
       - tests/token-daemon/token-daemon.refresh-ahead.spec.ts
@@ -2998,7 +2993,6 @@ owners:
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
-      - src/manager/modules/quota
     required_tests:
       - tests/server/daemon-admin/providers-handler-utils.spec.ts
     required_gates:
@@ -3027,7 +3021,6 @@ owners:
     forbidden_paths:
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
-      - src/manager/modules/quota
     required_tests:
       - tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts
     required_gates:
@@ -3199,7 +3192,6 @@ owners:
       - docs
     forbidden_paths:
       - src/providers/core/runtime
-      - src/manager/modules/quota
       - src/manager/modules/routing
     required_tests:
       - tests/server/runtime/http-server/direct-passthrough-payload.spec.ts
@@ -3619,7 +3611,6 @@ owners:
     forbidden_paths:
       - src/server/runtime/http-server/daemon-admin
       - src/providers/core/runtime
-      - src/manager/modules/quota
       - src/manager/modules/routing
     required_tests:
       - tests/cli/start-command.spec.ts
@@ -3888,7 +3879,6 @@ owners:
       - ErrorErr05ExecutionDecision
       - ProviderRetryExecutionPlan
     canonical_builders:
-      - consume_error_err_05_execution_decision_from_error_err_04_router_policy
       - resolveProviderRetryExecutionPlan
     allowed_paths:
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts

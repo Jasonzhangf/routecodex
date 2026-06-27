@@ -23,7 +23,7 @@ describe('debug diag error artifact M1', () => {
       error: Object.assign(new Error('boom'), {
         code: 'E_TEST',
         statusCode: 502,
-        details: { api_key: 'sk-12345678901234567890' },
+        details: { api_key: 'placeholder-test-key' },
       }),
       rootDir: dir,
     });
@@ -34,7 +34,7 @@ describe('debug diag error artifact M1', () => {
     const raw = fs.readFileSync(filePath, 'utf8');
     expect(raw).toContain('"requestId": "req/unsafe:1"');
     expect(raw).not.toContain('super-secret-token');
-    expect(raw).not.toContain('sk-12345678901234567890');
+    expect(raw).not.toContain('placeholder-test-key');
 
     const parsed = await readDebugErrorDiagArtifact(filePath);
     expect(parsed.endpoint).toBe('/v1/responses');
