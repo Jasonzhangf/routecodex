@@ -67,7 +67,6 @@ import {
 import {
   buildEndpointOverrides,
   buildClientOverrides,
-  buildHeaderOverrides,
   resolveTokenPortalBaseUrl,
   buildTokenPortalConfig,
   buildOverrides,

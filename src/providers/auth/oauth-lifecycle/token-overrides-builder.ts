@@ -42,10 +42,6 @@ export async function buildClientOverrides(defaults: OAuthFlowConfig, auth: Exte
   return base;
 }
 
-export function buildHeaderOverrides(defaults: OAuthFlowConfig, _providerType: string): Record<string, string> {
-  return { ...(defaults.headers || {}) };
-}
-
 export function resolveTokenPortalBaseUrl(): string | null {
   const configured = String(process.env.ROUTECODEX_TOKEN_PORTAL_BASE || '').trim();
   if (configured) {
@@ -91,7 +87,7 @@ export async function buildOverrides(
 ) {
   const endpoints = buildEndpointOverrides(defaults, auth);
   const client = await buildClientOverrides(defaults, auth, providerType);
-  const headers = buildHeaderOverrides(defaults, providerType);
+  const headers = { ...(defaults.headers || {}) };
   const tokenPortal = openBrowser ? buildTokenPortalConfig(providerType, tokenFilePath) : undefined;
   const overrides: Record<string, unknown> = {
     activationType: openBrowser ? 'auto_browser' : 'manual',
