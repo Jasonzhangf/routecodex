@@ -1,11 +1,10 @@
 import path from 'path';
 
-export type OAuthProviderId = 'deepseek-account' | 'ecodev' | 'qwen';
+export type OAuthProviderId = 'deepseek-account' | 'ecodev';
 
 export const SUPPORTED_OAUTH_PROVIDERS: OAuthProviderId[] = [
   'deepseek-account',
-  'ecodev',
-  'qwen'
+  'ecodev'
 ];
 
 export interface RawTokenPayload {

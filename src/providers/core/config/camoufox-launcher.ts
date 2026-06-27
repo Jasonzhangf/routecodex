@@ -264,7 +264,7 @@ export function shouldRepairCamoufoxFingerprintForOAuth(
   if (platform !== 'win32') {
     return false;
   }
-  return family === 'gemini' || family === 'qwen';
+  return family === 'gemini';
 }
 
 export function sanitizeCamouConfigForOAuth(
@@ -367,14 +367,6 @@ function resolvePreferredOAuthProfileId(
     return explicit;
   }
   const derived = buildProfileId(provider, alias);
-  const family = getProviderFamily(provider);
-  const normalizedAlias = String(alias || '').trim().toLowerCase();
-  if (family === 'qwen' && normalizedAlias) {
-    const sharedAuthProfileId = buildProfileId('auth', normalizedAlias);
-    if (profileDirExists(sharedAuthProfileId)) {
-      return sharedAuthProfileId;
-    }
-  }
   return derived;
 }
 
@@ -825,37 +817,6 @@ async function maybeAdvanceTokenPortal(options: {
 }
 
 
-function isQwenAuthorizeUrl(rawUrl: string): boolean {
-  if (!rawUrl || typeof rawUrl !== 'string') {
-    return false;
-  }
-  try {
-    const parsed = new URL(rawUrl);
-    return /(?:^|\.)chat\.qwen\.ai$/i.test(parsed.hostname) && parsed.pathname.startsWith('/authorize');
-  } catch {
-    return rawUrl.includes('chat.qwen.ai/authorize');
-  }
-}
-
-function isQwenLoginUrl(rawUrl: string): boolean {
-  if (!rawUrl || typeof rawUrl !== 'string') {
-    return false;
-  }
-  try {
-    const parsed = new URL(rawUrl);
-    if (!/(?:^|\.)chat\.qwen\.ai$/i.test(parsed.hostname)) {
-      return false;
-    }
-    return parsed.pathname === '/auth' || parsed.pathname.startsWith('/auth/');
-  } catch {
-    return (
-      rawUrl.includes('chat.qwen.ai/auth?') ||
-      rawUrl.includes('chat.qwen.ai/auth/') ||
-      rawUrl.endsWith('chat.qwen.ai/auth')
-    );
-  }
-}
-
 function isGoogleAuthUrl(rawUrl: string): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') {
     return false;
@@ -918,9 +879,6 @@ async function waitForOAuthRelatedPage(options: {
       if (isTokenPortalUrl(activeUrl) || isLocalOAuthCallbackUrl(activeUrl)) {
         return activeUrl;
       }
-      if (provider === 'qwen' && (isQwenAuthorizeUrl(activeUrl) || isQwenLoginUrl(activeUrl) || isGoogleAuthUrl(activeUrl))) {
-        return activeUrl;
-      }
       if (provider === 'gemini' && isGoogleAuthUrl(activeUrl)) {
         return activeUrl;
       }
@@ -929,86 +887,6 @@ async function waitForOAuthRelatedPage(options: {
   }
   return lastUrl;
 }
-
-async function maybeAdvanceQwenAuthorization(options: {
-  provider?: string | null;
-  actionContext: CamoActionContext;
-}): Promise<boolean> {
-  const provider = String(options.provider || '').trim().toLowerCase();
-  if (provider !== 'qwen') {
-    return true;
-  }
-  let activeUrl = getActiveCamoPageUrl(options.actionContext);
-  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  const autoModeEnabled = autoMode === 'qwen';
-  if (!autoModeEnabled) {
-    return true;
-  }
-  const settleTimeoutMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_SETTLE_MS, 8000);
-  const pollIntervalMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_POLL_MS, 250);
-  const deadline = Date.now() + settleTimeoutMs;
-  while (Date.now() <= deadline) {
-    const currentUrl = getActiveCamoPageUrl(options.actionContext);
-    if (currentUrl) {
-      activeUrl = currentUrl;
-      if (isQwenAuthorizeUrl(currentUrl) || isGoogleAuthUrl(currentUrl) || isQwenLoginUrl(currentUrl)) {
-        break;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-  }
-  if (!activeUrl) {
-    logOAuthDebug('[OAuth] camo-cli qwen oauth page not ready (no active url)');
-    return false;
-  }
-  if (isLocalOAuthCallbackUrl(activeUrl)) {
-    logOAuthDebug(`[OAuth] camo-cli qwen oauth callback already reached: ${activeUrl}`);
-    return true;
-  }
-  if (isGoogleAuthUrl(activeUrl)) {
-    // Google auth handled in the next stage.
-    return true;
-  }
-  if (isQwenLoginUrl(activeUrl)) {
-    logOAuthDebug(`[OAuth] camo-cli qwen login page detected; advancing with Google login: ${activeUrl}`);
-    const retryCount = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRIES, autoModeEnabled ? 12 : 2);
-    const retryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRY_DELAY_MS, 500);
-    return clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.qwenGoogleContinue, {
-      retries: retryCount,
-      retryDelayMs,
-      required: true
-    });
-  }
-  if (!isQwenAuthorizeUrl(activeUrl)) {
-    // Qwen flow can jump directly to callback/Google/other intermediate pages depending on session state.
-    // Do not hard-fail on non-qwen pages here; let subsequent steps/callback waiter continue.
-    logOAuthDebug(`[OAuth] camo-cli qwen oauth page not ready; continue without strict qwen click: ${activeUrl}`);
-    return true;
-  }
-  const readyDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CONFIRM_WAIT_MS, 1200);
-  if (readyDelayMs > 0) {
-    await new Promise((resolve) => setTimeout(resolve, readyDelayMs));
-  }
-  const retryCount = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRIES, autoModeEnabled ? 12 : 2);
-  const retryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRY_DELAY_MS, 500);
-
-  // Try direct confirm first; if not present, fall back to Google entry button.
-  const confirmClicked = await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.qwenAuthorizeConfirm, {
-    retries: retryCount,
-    retryDelayMs,
-    required: true
-  });
-  if (confirmClicked) {
-    return true;
-  }
-  const googleClicked = await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.qwenGoogleContinue, {
-    retries: retryCount,
-    retryDelayMs,
-    required: true
-  });
-  return googleClicked;
-}
-
 
 async function waitForGoogleAuthPage(options: {
   provider?: string | null;
@@ -1028,9 +906,6 @@ async function waitForGoogleAuthPage(options: {
       if (isGoogleAuthUrl(activeUrl)) {
         return activeUrl;
       }
-      if (provider === 'qwen' && (isQwenLoginUrl(activeUrl) || isQwenAuthorizeUrl(activeUrl) || isLocalOAuthCallbackUrl(activeUrl))) {
-        return activeUrl;
-      }
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
@@ -1038,9 +913,6 @@ async function waitForGoogleAuthPage(options: {
     return null;
   }
   if (isGoogleAuthUrl(lastUrl)) {
-    return lastUrl;
-  }
-  if (provider === 'qwen' && (isQwenLoginUrl(lastUrl) || isQwenAuthorizeUrl(lastUrl) || isLocalOAuthCallbackUrl(lastUrl))) {
     return lastUrl;
   }
   return null;
@@ -1080,11 +952,11 @@ async function maybeAdvanceGoogleAuth(options: {
   actionContext: CamoActionContext;
 }): Promise<boolean> {
   const provider = String(options.provider || '').trim().toLowerCase();
-  if (provider !== 'gemini' && provider !== 'qwen') {
+  if (provider !== 'gemini') {
     return true;
   }
   const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  const autoModeEnabled = autoMode === 'gemini' || autoMode === 'qwen';
+  const autoModeEnabled = autoMode === 'gemini';
   if (!autoModeEnabled) {
     return true;
   }
@@ -1092,7 +964,7 @@ async function maybeAdvanceGoogleAuth(options: {
   const needsGooglePageWait =
     !!activeUrl &&
     !isGoogleAuthUrl(activeUrl) &&
-    (isQwenAuthorizeUrl(activeUrl) || isQwenLoginUrl(activeUrl) || isTokenPortalUrl(activeUrl));
+    isTokenPortalUrl(activeUrl);
   if (needsGooglePageWait) {
     const settleTimeoutMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_SETTLE_MS, 7000);
     const pollIntervalMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS, 250);
@@ -1106,30 +978,6 @@ async function maybeAdvanceGoogleAuth(options: {
   if (activeUrl && isLocalOAuthCallbackUrl(activeUrl)) {
     logOAuthDebug(`[OAuth] camo-cli google auth stage reached local callback: ${activeUrl}`);
     return true;
-  }
-  if (provider === 'qwen' && activeUrl && isQwenLoginUrl(activeUrl)) {
-    const qwenRetryCount = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRIES, autoModeEnabled ? 12 : 2);
-    const qwenRetryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRY_DELAY_MS, 500);
-    const qwenLoginClicked = await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.qwenGoogleContinue, {
-      retries: qwenRetryCount,
-      retryDelayMs: qwenRetryDelayMs,
-      required: true
-    });
-    if (!qwenLoginClicked) {
-      return false;
-    }
-    const settleTimeoutMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_SETTLE_MS, 7000);
-    const pollIntervalMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS, 250);
-    activeUrl = await waitForGoogleAuthPage({
-      provider,
-      actionContext: options.actionContext,
-      settleTimeoutMs,
-      pollIntervalMs
-    });
-    if (activeUrl && isLocalOAuthCallbackUrl(activeUrl)) {
-      logOAuthDebug(`[OAuth] camo-cli qwen login advance reached local callback: ${activeUrl}`);
-      return true;
-    }
   }
   if (!activeUrl || !isGoogleAuthUrl(activeUrl)) {
     return true;
@@ -1340,7 +1188,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
           provider,
           launchUrl,
           actionContext,
-          settleTimeoutMs: parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOTO_SETTLE_MS, provider === 'qwen' ? 15000 : 8000),
+          settleTimeoutMs: parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOTO_SETTLE_MS, 8000),
           pollIntervalMs: parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOTO_POLL_MS, 250)
         });
         if (relatedSettled) {
@@ -1375,14 +1223,6 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       return false;
     }
 
-    const qwenAdvanced = await maybeAdvanceQwenAuthorization({
-      provider: options.provider,
-      actionContext
-    });
-    if (!qwenAdvanced) {
-      setCamoufoxLaunchFailureReason('element_not_found:qwen_authorization');
-      return false;
-    }
     const googleAdvanced = await maybeAdvanceGoogleAuth({
       provider: options.provider,
       alias: options.alias,

@@ -84,21 +84,6 @@ export function hasApiKey(token: RawTokenPayload | null): boolean {
   return typeof cand === 'string' && cand.trim().length > 0;
 }
 
-function hasStableQwenApiKey(token: RawTokenPayload | null): boolean {
-  if (!token) {
-    return false;
-  }
-  const apiKey = token.apiKey ?? token.api_key;
-  if (typeof apiKey !== 'string' || !apiKey.trim()) {
-    return false;
-  }
-  const accessToken = token.access_token ?? token.AccessToken;
-  if (typeof accessToken !== 'string' || !accessToken.trim()) {
-    return true;
-  }
-  return apiKey.trim() !== accessToken.trim();
-}
-
 export function hasRefreshToken(token: RawTokenPayload | null): boolean {
   if (!token) {
     return false;
@@ -162,13 +147,11 @@ export function evaluateTokenState(
   const msUntilExpiry = expiresAt !== null ? expiresAt - now : null;
   const rawNoRefresh =
     token !== null && (token.norefresh === true || (typeof token.noRefresh === 'boolean' && token.noRefresh));
-  const noRefresh = provider === 'qwen' ? rawNoRefresh && hasStableQwenApiKey(token) : rawNoRefresh;
+  const noRefresh = rawNoRefresh;
 
   let status: TokenState['status'] = 'invalid';
   if (!access) {
     status = 'invalid';
-  } else if (provider === 'qwen' && noRefresh && hasStableQwenApiKey(token)) {
-    status = 'valid';
   } else if (expiresAt === null) {
     status = 'valid';
   } else if (msUntilExpiry !== null && msUntilExpiry <= 0) {

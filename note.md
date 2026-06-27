@@ -17,6 +17,13 @@
 
 # 2026-06-27 providerProtocol MetadataCenter-only closeout
 
+# 2026-06-27 removed unused provider families slice
+
+- 本轮授权删除范围：qwen / iflow / antigravity / windsurf / gemini-cli 的未使用 provider family 入口；Metadata Center 保持核心功能，不删除。
+- 已收口：Rust `req_outbound_stage3_compat` qwen 模块与 qwen/qwenchat compat 测试、qwen provider bootstrap/header 注入、iflow scripts/config/sample replay、antigravity virtual-router legacy scripts、qwen token-daemon/provider-utils/oauth/camoufox 自动登录入口、CLI 示例里的 qwen provider 引导。
+- 验证：`npx tsc -p tsconfig.json --noEmit --pretty false` 通过。
+- Rust focused gate：`cargo test -p router-hotpath-napi req_outbound_stage3_compat --lib -- --nocapture` 已编译并运行，154 passed / 1 failed；失败为既有 DeepSeek web 内容断言 `test_resp_profile_chat_deepseek_web_harvests_tool_calls_from_rcc_container_only`，不是 qwen/iflow 删除路径。
+
 - 现场错误：`/v1/chat/completions` 入口选到 Anthropic upstream 后，响应解析仍按 OpenAI chat SSE 解码，报 `OpenAI chat SSE response did not contain choices array`。
 - 根因确认：旧链路曾从 client entry endpoint 写入 `runtime_control.providerProtocol=openai-chat`，VR 选中 provider 后无法覆盖，导致 provider 真协议和 response parser 使用协议不一致。
 - 本轮收口：

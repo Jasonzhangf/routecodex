@@ -15,7 +15,7 @@ export type AuthConfig = {
 
 export type ProviderInputConfig = {
   providerId: string;
-  // Provider family/type hint used for upstream calls (e.g., 'openai' | 'glm' | 'qwen')
+  // Provider family/type hint used for upstream calls (e.g., 'openai' | 'glm')
   type: string;
   baseUrl?: string;
   baseURL?: string;

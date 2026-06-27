@@ -8,10 +8,6 @@ import type {
   ProviderRuntimeProfile
 } from '../../../providers/core/api/provider-types.js';
 import { resolveRccStateDir } from '../../../config/user-data-paths.js';
-import {
-  recordErrorActionBackoff,
-  waitErrorActionBackoffWithGate
-} from './executor/request-executor-error-action-queue.js';
 
 type LockHandle = {
   release(): Promise<void>;
@@ -236,18 +232,13 @@ function isWebProviderRuntime(runtime: ProviderRuntimeProfile): boolean {
   if (providerType === 'mimoweb') {
     return true;
   }
-  if (
-    compatibilityProfile === 'chat:deepseek-web'
-    || compatibilityProfile === 'chat:qwenchat-web'
-  ) {
+  if (compatibilityProfile === 'chat:deepseek-web') {
     return true;
   }
 
   const tokens = [providerId, providerKey, providerFamily, runtimeKey, endpoint, baseUrl].filter(Boolean);
   return tokens.some((value) => (
-    value === 'qwenchat'
-    || value.startsWith('qwenchat.')
-    || value === 'mimoweb'
+    value === 'mimoweb'
     || value.startsWith('mimoweb.')
     || value === 'deepseek-web'
     || value.startsWith('deepseek-web.')
@@ -1016,24 +1007,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     };
   }
 
-  private async waitProviderTrafficSaturationBackoff(args: {
-    runtimeKey: string;
-    scopeKey?: string;
-  }): Promise<number> {
-    const scopedRuntimeKey = composeScopedRuntimeKey(args.runtimeKey, args.scopeKey);
-    const scopeKey = `runtime:${scopedRuntimeKey}`;
-    const delayMs = recordErrorActionBackoff({
-      category: 'provider_traffic_saturated',
-      scopeKey
-    });
-    await waitErrorActionBackoffWithGate({
-      category: 'provider_traffic_saturated',
-      scopeKey,
-      ms: delayMs
-    });
-    return delayMs;
-  }
-
   private buildSaturatedAcquireError(args: {
     runtimeKey: string;
     providerKey?: string;
@@ -1042,20 +1015,18 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     activeInFlight: number;
     rpmInWindow: number;
     waitedMs: number;
-    unifiedBackoffMs: number;
   }): ProviderTrafficSaturatedError {
     return new ProviderTrafficSaturatedError(
       `provider traffic saturated for runtime ${args.runtimeKey}`,
       {
-        reason: `acquire_after_backoff_${args.reason}`,
+        reason: `acquire_${args.reason}`,
         runtimeKey: args.runtimeKey,
         providerKey: args.providerKey,
         maxInFlight: args.policy.concurrency.maxInFlight,
         requestsPerMinute: args.policy.rpm.requestsPerMinute,
         activeInFlight: args.activeInFlight,
         rpmInWindow: args.rpmInWindow,
-        waitedMs: args.waitedMs,
-        unifiedBackoffMs: args.unifiedBackoffMs
+        waitedMs: args.waitedMs
       }
     );
   }
@@ -1099,8 +1070,6 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
     const stateFile = this.getStateFile(stateKey);
     const lockFile = this.getLockFile(stateKey);
     let lastReason: 'concurrency' | 'rpm' | 'mixed' = 'mixed';
-    let waitedThroughUnifiedBackoff = false;
-    let unifiedBackoffMs = 0;
     while (true) {
       const lock = await this.acquireFileLock(lockFile, Date.now() + DEFAULT_CONCURRENCY_TIMEOUT_MS);
       try {
@@ -1166,26 +1135,18 @@ export class ProviderTrafficGovernor implements ProviderTrafficGovernorLike {
 
         const nowAfterCheck = Date.now();
         const waitedMs = Math.max(0, nowAfterCheck - startedAt);
-        if (waitedThroughUnifiedBackoff) {
-          throw this.buildSaturatedAcquireError({
-            runtimeKey,
-            providerKey: options.providerKey,
-            reason: lastReason,
-            policy,
-            activeInFlight,
-            rpmInWindow,
-            waitedMs,
-            unifiedBackoffMs
-          });
-        }
+        throw this.buildSaturatedAcquireError({
+          runtimeKey,
+          providerKey: options.providerKey,
+          reason: lastReason,
+          policy,
+          activeInFlight,
+          rpmInWindow,
+          waitedMs
+        });
       } finally {
         await lock.release();
       }
-      unifiedBackoffMs = await this.waitProviderTrafficSaturationBackoff({
-        runtimeKey,
-        scopeKey
-      });
-      waitedThroughUnifiedBackoff = true;
     }
   }
 

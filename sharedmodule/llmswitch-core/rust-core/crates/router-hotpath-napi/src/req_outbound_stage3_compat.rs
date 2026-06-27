@@ -93,7 +93,6 @@ pub(crate) mod gemini;
 mod glm;
 mod lmstudio;
 mod profile;
-mod qwen;
 mod request_stage;
 mod response_stage;
 pub(crate) mod responses;

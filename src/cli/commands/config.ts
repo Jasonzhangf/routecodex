@@ -371,13 +371,13 @@ Examples:
   ${bin} config validate
   ${bin} config group-list
   ${bin} config switch-group --group default --port 5555
-  ${bin} config init --providers openai,qwen --default-provider qwen
+  ${bin} config init --providers openai,glm --default-provider glm
 `
     )
     .argument('<action>', 'Action to perform (show, edit, validate, init)')
     .option('-c, --config <config>', 'Configuration file path')
-    .option('-t, --template <template>', 'Init template provider id (e.g., openai, responses, qwen)')
-    .option('--providers <ids>', 'Init providers (comma-separated), e.g. openai,qwen')
+    .option('-t, --template <template>', 'Init template provider id (e.g., openai, responses, glm)')
+    .option('--providers <ids>', 'Init providers (comma-separated), e.g. openai,glm')
     .option('--default-provider <id>', 'Init default provider id for routing.default')
     .option('--host <host>', 'Init server host (httpserver.host)')
     .option('--port <port>', 'Init server port (httpserver.port)')

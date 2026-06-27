@@ -14,24 +14,6 @@ export const CAMO_CLICK_TARGETS: Record<string, CamoClickTarget> = {
     key: 'tokenPortalContinue',
     selectors: ['#continue-btn']
   },
-  qwenAuthorizeConfirm: {
-    key: 'qwenAuthorizeConfirm',
-    selectors: [
-      '.qwen-confirm-btn',
-      "button[class*='qwen-confirm-btn']",
-      'button.qwen-confirm-btn',
-      'button.qwen-chat-btn',
-      "button[class*='qwen-chat-btn']",
-      '.authorize-actions button'
-    ]
-  },
-  qwenGoogleContinue: {
-    key: 'qwenGoogleContinue',
-    selectors: [
-      '.qwenchat-auth-pc-other-login-button',
-      "button[class*='other-login-button']"
-    ]
-  },
   googleAccountSelect: {
     key: 'googleAccountSelect',
     selectors: [
@@ -273,9 +255,7 @@ function shouldRestartActiveSession(context: CamoActionContext): boolean {
   const profileId = String(context.profileId || '').toLowerCase();
   const autoMode = String(context.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
   if (autoMode.length > 0) {
-    const shouldReuseQwenProfile = autoMode === 'qwen' && (profileId.startsWith('rc-qwen') || profileId.startsWith('rc-auth'));
-    // Qwen auto mode should reuse the same profile session to preserve login cookies.
-    return !shouldReuseQwenProfile;
+    return true;
   }
   return false;
 }

@@ -55,7 +55,7 @@ export function createTokenDaemonCommand(): Command {
     .description('Background daemon for monitoring and refreshing OAuth tokens')
     .argument(
       '[selector]',
-      'Token selector: file basename, full path, or provider id (e.g. "qwen-oauth-1-work.json")'
+      'Token selector: file basename, full path, or provider id'
     )
     .action(async (selector?: string) => {
       if (!selector) {
@@ -136,7 +136,7 @@ export function createTokenDaemonCommand(): Command {
     .description('Trigger interactive re-auth for a specific token (opens browser)')
     .argument(
       '<selector>',
-      'Token selector: file basename, full path, or provider id (e.g. "qwen-oauth-1-work.json")'
+      'Token selector: file basename, full path, or provider id'
     )
     .action(async (selector: string) => {
       await safeInteractiveRefresh(selector, { force: true });

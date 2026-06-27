@@ -150,7 +150,7 @@ async function run() {
     for (const cfg of cfgs) {
       let ptypeRaw = String(cfg.config?.providerType || cfg.type || '').toLowerCase();
       const ptype = ptypeRaw.includes('openai') ? 'openai' : ptypeRaw;
-      if (ptype !== 'openai' && ptype !== 'iflow') continue; // limit to OpenAI-chat family + iFlow
+      if (ptype !== 'openai') continue; // limit to OpenAI-chat family
       // Prefer explicit model identifiers from provider config
       const model = (
         cfg.config?.model ||
@@ -178,8 +178,10 @@ async function run() {
         cfg.config.extensions = ext;
         if (!auth.tokenFile) {
           const fam = String(ext.oauthProviderId || '').toLowerCase();
-          if (fam === 'iflow') auth.tokenFile = path.join(os.homedir(), '.routecodex', 'auth', 'iflow-oauth.json');
-          else if (fam === 'qwen') auth.tokenFile = path.join(os.homedir(), '.routecodex', 'auth', 'qwen-oauth.json');
+          if (!auth.tokenFile) {
+            report.push({ providerId, file, status: 'skipped', reason: 'missing tokenFile' });
+            continue;
+          }
         }
         if (auth.tokenFile) {
           const expanded = auth.tokenFile.replace(/^~\//, `${os.homedir()}/`);

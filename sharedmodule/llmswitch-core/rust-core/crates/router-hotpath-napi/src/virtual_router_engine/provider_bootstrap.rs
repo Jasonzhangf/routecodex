@@ -15,11 +15,10 @@ use crate::virtual_router_engine::profile_utils::{
 
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS: i64 = 8192;
 const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
-const QWEN_DEFAULT_USER_AGENT: &str = "QwenCode/0.14.3 (darwin; arm64)";
 const CLAUDE_CODE_DEFAULT_USER_AGENT: &str = "claude-cli/2.0.76 (external, cli)";
 const CLAUDE_CODE_DEFAULT_X_APP: &str = "claude-cli";
 const CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA: &str = "claude-code";
-const MULTI_TOKEN_OAUTH_PROVIDERS: &[&str] = &["qwen"];
+const MULTI_TOKEN_OAUTH_PROVIDERS: &[&str] = &[];
 const MODEL_CAPABILITY_ALLOWLIST: &[&str] = &[
     "text",
     "reasoning",
@@ -1349,7 +1348,7 @@ fn push_auth_entry(
 
     if entry_type == "oauth" && oauth_provider_id.is_none() {
         return Err(format!(
-            "Provider {} OAuth auth entries must declare provider-specific type (e.g. \"qwen-oauth\")",
+            "Provider {} OAuth auth entries must declare provider-specific type",
             provider_id
         ));
     }
@@ -1593,47 +1592,6 @@ mod alias_tests {
         });
         let map = record.as_object().expect("record should be object");
         assert_eq!(super::read_context_tokens(Some(map)), Some(1048576));
-    }
-
-    #[test]
-    fn bootstrap_preserves_qwenchat_guest_raw_type_in_runtime_auth() {
-        let providers = json!({
-            "qwenchat": {
-                "id": "qwenchat",
-                "enabled": true,
-                "type": "openai",
-                "baseURL": "https://chat.qwen.ai",
-                "compatibilityProfile": "chat:qwenchat-web",
-                "auth": {
-                    "type": "apikey",
-                    "rawType": "qwenchat-guest",
-                    "entries": [
-                        {
-                            "alias": "key1",
-                            "type": "apikey",
-                            "rawType": "qwenchat-guest",
-                            "apiKey": "guest"
-                        }
-                    ]
-                },
-                "models": {
-                    "qwen3.6-plus": {
-                        "maxTokens": 64000,
-                        "maxContext": 256000,
-                        "supportsStreaming": true,
-                        "capabilities": ["tools", "vision"]
-                    }
-                }
-            }
-        });
-
-        let output = bootstrap_virtual_router_providers_json(providers.to_string())
-            .expect("bootstrap should succeed");
-        let parsed: Value = serde_json::from_str(&output).expect("output json should parse");
-        let auth = &parsed["runtimeEntries"]["qwenchat.key1"]["auth"];
-        assert_eq!(auth["type"], "apiKey");
-        assert_eq!(auth["rawType"], "qwenchat-guest");
-        assert_eq!(auth["value"], "guest");
     }
 
     #[test]
@@ -1893,11 +1851,7 @@ fn maybe_inject_claude_code_headers(
     compatibility_profile: &str,
     headers: Option<BTreeMap<String, String>>,
 ) -> Option<BTreeMap<String, String>> {
-    let qwen_headers =
-        maybe_inject_qwen_headers(provider_id, compatibility_profile, headers.clone());
-    if qwen_headers != headers {
-        return qwen_headers;
-    }
+    let _ = provider_id;
     let profile = compatibility_profile.trim().to_lowercase();
     if profile != "anthropic:claude-code" && profile != "chat:claude-code" {
         return headers;
@@ -1928,39 +1882,6 @@ fn maybe_inject_claude_code_headers(
         base.insert(
             "anthropic-beta".to_string(),
             CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA.to_string(),
-        );
-    }
-    Some(base)
-}
-
-fn maybe_inject_qwen_headers(
-    provider_id: &str,
-    compatibility_profile: &str,
-    headers: Option<BTreeMap<String, String>>,
-) -> Option<BTreeMap<String, String>> {
-    if compatibility_profile.trim().to_lowercase() != "chat:qwen" {
-        return headers;
-    }
-    if provider_id.trim().to_lowercase() != "qwen" {
-        return headers;
-    }
-    let mut base = headers.unwrap_or_default();
-    if !has_header(&base, "X-DashScope-UserAgent") {
-        base.insert(
-            "X-DashScope-UserAgent".to_string(),
-            QWEN_DEFAULT_USER_AGENT.to_string(),
-        );
-    }
-    if !has_header(&base, "X-DashScope-CacheControl") {
-        base.insert("X-DashScope-CacheControl".to_string(), "enable".to_string());
-    }
-    if !has_header(&base, "X-DashScope-AuthType") {
-        base.insert("X-DashScope-AuthType".to_string(), "qwen-oauth".to_string());
-    }
-    if !has_header(&base, "User-Agent") {
-        base.insert(
-            "User-Agent".to_string(),
-            QWEN_DEFAULT_USER_AGENT.to_string(),
         );
     }
     Some(base)
@@ -2149,9 +2070,6 @@ fn detect_provider_type(provider: &Map<String, Value>) -> String {
     }
     if lexicon.contains("gemini") {
         return "gemini".to_string();
-    }
-    if lexicon.contains("qwen") {
-        return "qwen".to_string();
     }
     if lexicon.contains("glm") {
         return "glm".to_string();

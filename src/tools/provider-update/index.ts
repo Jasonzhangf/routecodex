@@ -143,7 +143,7 @@ export async function updateProviderModels(options: UpdateOptions): Promise<Upda
 
   const provider: ProviderInputConfig = {
     providerId,
-    // For openai-standard configs, prefer config.providerType as the logical upstream family (e.g., 'qwen', 'glm')
+    // For openai-standard configs, prefer config.providerType as the logical upstream family (e.g., 'glm')
     type: providerType,
     baseUrl,
     baseURL,

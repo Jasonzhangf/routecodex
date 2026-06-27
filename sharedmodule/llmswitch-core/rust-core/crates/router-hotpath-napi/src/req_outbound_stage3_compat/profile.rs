@@ -65,14 +65,6 @@ pub(super) fn is_deepseek_web_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:deepseek-web")
 }
 
-pub(super) fn is_qwen_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:qwen")
-}
-
-pub(super) fn is_qwenchat_web_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:qwenchat-web")
-}
-
 pub(super) fn is_gemini_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:gemini")
 }
