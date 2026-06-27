@@ -73,7 +73,6 @@ import {
   buildOverrides,
 } from './oauth-lifecycle/token-overrides-builder.js';
 import {
-  prepareTokenForStorage,
   logTokenSnapshot,
 } from './oauth-lifecycle/token-preparation.js';
 
@@ -310,8 +309,7 @@ async function finalizeTokenWrite(
   if (!tokenData || typeof strategy.saveToken !== 'function') {
     return;
   }
-  const prepared = await prepareTokenForStorage(providerType, tokenFilePath, tokenData);
-  await strategy.saveToken(prepared);
+  await strategy.saveToken(tokenData);
   logOAuthDebug(`[OAuth] Token ${reason} saved: ${tokenFilePath}`);
 }
 

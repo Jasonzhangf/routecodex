@@ -6,22 +6,10 @@ import type { StoredOAuthToken } from './token-helpers.js';
 import type { OAuthEndpoints } from '../../core/config/oauth-flows.js';
 import { logOAuthLifecycleNonBlocking } from './oauth-lifecycle-logger.js';
 import { logOAuthDebug } from '../oauth-logger.js';
-import type { UnknownObject } from '../../../types/common-types.js';
 import {
   hasApiKeyField,
   hasAccessToken,
 } from './token-helpers.js';
-
-export async function prepareTokenForStorage(
-  providerType: string,
-  tokenFilePath: string,
-  tokenData: UnknownObject
-): Promise<UnknownObject> {
-  void providerType;
-  void tokenFilePath;
-  return tokenData;
-}
-
 export function logTokenSnapshot(providerType: string, token: StoredOAuthToken | null, endpoints: OAuthEndpoints): void {
   try {
     const hasApiKey = hasApiKeyField(token);
