@@ -189,7 +189,6 @@ import {
 } from './executor/request-executor-provider-response.js';
 import { processProviderSendFailure } from './executor/request-executor-provider-send-failure.js';
 import {
-  reportRequestExecutorProviderError,
   resolveRequestExecutorProviderErrorReportPlan
 } from './executor/request-executor-provider-failure.js';
 import { readRuntimeRequestTruthIdentifiers } from './metadata-center/request-truth-readers.js';
@@ -303,6 +302,14 @@ function readEntryServerId(metadataRecord: Record<string, unknown> | undefined):
 
 function readEntryPort(metadataRecord: Record<string, unknown> | undefined): number | undefined {
   if (!metadataRecord) return undefined;
+  const metadataCenter = MetadataCenter.read(metadataRecord);
+  const requestTruthPortScope = metadataCenter?.readRequestTruth().portScope;
+  if (typeof requestTruthPortScope === 'string') {
+    const parsed = Number.parseInt(requestTruthPortScope, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
   const runtimeControl =
     metadataRecord.__rt && typeof metadataRecord.__rt === 'object' && !Array.isArray(metadataRecord.__rt)
       ? metadataRecord.__rt as Record<string, unknown>
