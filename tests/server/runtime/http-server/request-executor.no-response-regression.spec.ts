@@ -127,7 +127,6 @@ describe('HubRequestExecutor no-response regression guard', () => {
     mockProcessProviderSendFailure.mockResolvedValue({
       lastError: undefined,
       blockingRecoverableRouteHoldState: null,
-      allowBlockingRecoverableRetryBeyondAttemptBudget: false,
       forcedRouteHint: undefined,
       contextOverflowRetries: 0,
       cumulativeExternalLatencyMs: 0
@@ -154,7 +153,6 @@ describe('HubRequestExecutor no-response regression guard', () => {
     mockProcessProviderSendFailure.mockResolvedValue({
       lastError: providerError,
       blockingRecoverableRouteHoldState: null,
-      allowBlockingRecoverableRetryBeyondAttemptBudget: false,
       forcedRouteHint: undefined,
       contextOverflowRetries: 0,
       cumulativeExternalLatencyMs: 0
@@ -187,7 +185,6 @@ describe('HubRequestExecutor no-response regression guard', () => {
     mockProcessProviderSendFailure.mockResolvedValue({
       lastError: undefined,
       blockingRecoverableRouteHoldState: null,
-      allowBlockingRecoverableRetryBeyondAttemptBudget: false,
       forcedRouteHint: undefined,
       contextOverflowRetries: 0,
       cumulativeExternalLatencyMs: 0

@@ -1,7 +1,6 @@
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import { finalizeRequestExecutorAttemptMetadata } from './request-executor-attempt-state.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
-import type { BlockingRecoverableRouteHoldState } from './request-executor-error-types.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import {
   hasAlternativeRouteCandidate
@@ -84,7 +83,6 @@ export function resolveRequestExecutorPipelineAttempt(args: {
   initialRoutePool: string[] | null;
   excludedProviderKeys: Set<string>;
   lastError: unknown;
-  blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
   throwIfClientAbortSignalAborted: (abortSignal: AbortSignal | undefined) => void;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
   extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;

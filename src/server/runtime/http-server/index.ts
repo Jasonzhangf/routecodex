@@ -1891,7 +1891,6 @@ export class RouteCodexHttpServer {
           providerKey: ctx.providerKey,
           switchAction,
           excludedCurrentProvider: retryPlan.excludedCurrentProvider,
-          blockingRecoverable: retryPlan.blockingRecoverable,
           directAttempt,
         });
         this.logStage('router-direct.retry.requested', input.requestId, {

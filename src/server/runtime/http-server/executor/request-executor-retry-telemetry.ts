@@ -76,7 +76,6 @@ export function buildProviderRetryTelemetryPlan(args: {
     ...(retrySwitchPlan.runtimeScopeExcludedCount > 0
       ? { runtimeScopeExcludedCount: retrySwitchPlan.runtimeScopeExcludedCount }
       : {}),
-    blockingRecoverable: args.retryExecutionPlan.blockingRecoverable,
     ...(args.promptTooLong
       ? {
         contextOverflowRetries: args.contextOverflowRetries,

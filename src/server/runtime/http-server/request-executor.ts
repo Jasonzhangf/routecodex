@@ -167,13 +167,9 @@ function shouldRebindResponsesConversationForEntry(entryEndpoint: string | undef
 import {
   throwIfClientAbortSignalAborted
 } from './executor/request-executor-abort.js';
-import { resolveClientAbortSignalFromCarrier } from './executor/request-executor-client-abort-block.js';
 import {
-  peekErrorActionBackoffWaitMs,
-  recordErrorActionBackoff,
   resetErrorActionBackoffByScopePrefix,
   resetErrorActionQueueStateForTests,
-  waitErrorActionBackoffWithGate
 } from './executor/request-executor-error-action-queue.js';
 import {
   detectAssistantSanitizationPlaceholder,
@@ -207,7 +203,6 @@ import {
   resolveProviderRetryExclusionPlan
 } from './executor/request-executor-retry-decision.js';
 import type {
-  BlockingRecoverableRouteHoldState,
   ProviderRetryExecutionPlan,
   ProviderRetryTelemetryPlan,
   RequestExecutorProviderFailurePlan,
@@ -528,16 +523,6 @@ export class HubRequestExecutor implements RequestExecutor {
       readString(metadataRecord?.routecodexRoutingPolicyGroup)
       || readString(metadataRecord?.routecodexPort)
       || 'unknown-port';
-    const buildScopedBackoffKey = (providerKey: string, errorCode: string): string =>
-      `${portScope}|${providerKey || 'unknown-provider'}|${errorCode || 'unknown-error'}`;
-    const resolveScopedBackoffErrorCode = (error: unknown): string => {
-      const record = asFlatRecord(error);
-      const code =
-        readString(record?.code)
-        || readString(record?.upstreamCode)
-        || (typeof extractStatusCodeFromError(error) === 'number' ? `status_${extractStatusCodeFromError(error)}` : '');
-      return normalizeCodeKey(code || 'unknown_error') || 'unknown_error';
-    };
     try {
       const hubPipeline = ensureHubPipeline(() => this.deps.getHubPipeline(readString(metadataRecord?.routecodexRoutingPolicyGroup)));
       const {
@@ -562,21 +547,17 @@ export class HubRequestExecutor implements RequestExecutor {
         const maxAttempts = resolveMaxProviderAttempts();
         const retryPayloadSeed = prepareRequestPayloadRetrySeed(input.body);
         let attempt = 0;
-        let allowBlockingRecoverableRetryBeyondAttemptBudget = false;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
         let forcedRouteHint: string | undefined;
         let contextOverflowRetries = 0;
-        let blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null = null;
         let cumulativeExternalLatencyMs = 0;
         let cumulativeTrafficWaitMs = 0;
         let cumulativeClientInjectWaitMs = 0;
         let allowPrimaryExhaustedReplayBeyondAttemptBudget = false;
 
-        while (attempt < maxAttempts || allowBlockingRecoverableRetryBeyondAttemptBudget || allowPrimaryExhaustedReplayBeyondAttemptBudget) {
+        while (attempt < maxAttempts || allowPrimaryExhaustedReplayBeyondAttemptBudget) {
         attempt += 1;
-        allowBlockingRecoverableRetryBeyondAttemptBudget = false;
-        allowPrimaryExhaustedReplayBeyondAttemptBudget = false;
         const {
           metadataForAttempt,
           clientAbortSignal,
@@ -654,7 +635,6 @@ export class HubRequestExecutor implements RequestExecutor {
           initialRoutePool,
           excludedProviderKeys,
           lastError,
-          blockingRecoverableRouteHoldState,
           throwIfClientAbortSignalAborted,
           logStage: (stage, requestId, details) => logStage(stage, requestId, details),
           extractRetryErrorSnapshot,
@@ -665,7 +645,6 @@ export class HubRequestExecutor implements RequestExecutor {
           initialRoutePool = resolvedPipelineAttempt.initialRoutePool;
           continue;
         }
-        blockingRecoverableRouteHoldState = null;
         initialRoutePool = resolvedPipelineAttempt.initialRoutePool;
         const {
           mergedMetadata,
@@ -769,16 +748,11 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const failureState = applyResolveFailureState({
             lastError,
-            blockingRecoverableRouteHoldState,
-            allowBlockingRecoverableRetryBeyondAttemptBudget,
             forcedRouteHint,
             contextOverflowRetries,
             cumulativeExternalLatencyMs
           } satisfies RequestExecutorFailureState, resolveFailure);
           lastError = failureState.lastError;
-          blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
-          allowBlockingRecoverableRetryBeyondAttemptBudget =
-            failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
           continue;
         }
         let providerProtocol: ProviderProtocol;
@@ -905,19 +879,14 @@ export class HubRequestExecutor implements RequestExecutor {
             logNonBlockingError: logRequestExecutorNonBlockingError,
             extractRetryErrorSnapshot
           });
-          const failureState = applyResolveFailureState({
-            lastError,
-            blockingRecoverableRouteHoldState,
-            allowBlockingRecoverableRetryBeyondAttemptBudget,
-            forcedRouteHint,
-            contextOverflowRetries,
-            cumulativeExternalLatencyMs
-          } satisfies RequestExecutorFailureState, resolveFailure);
-          lastError = failureState.lastError;
-          blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
-          allowBlockingRecoverableRetryBeyondAttemptBudget =
-            failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
-          continue;
+        const failureState = applyResolveFailureState({
+          lastError,
+          forcedRouteHint,
+          contextOverflowRetries,
+          cumulativeExternalLatencyMs
+        } satisfies RequestExecutorFailureState, resolveFailure);
+        lastError = failureState.lastError;
+        continue;
         }
         const emptyProviderRequestSignal = detectEmptyProviderRequestPayload(providerPayload);
         if (emptyProviderRequestSignal) {
@@ -1377,47 +1346,14 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const failureState = applySendFailureState({
             lastError,
-            blockingRecoverableRouteHoldState,
-            allowBlockingRecoverableRetryBeyondAttemptBudget,
             forcedRouteHint,
             contextOverflowRetries,
             cumulativeExternalLatencyMs
           } satisfies RequestExecutorFailureState, sendFailure);
           lastError = failureState.lastError ?? error;
-          blockingRecoverableRouteHoldState = failureState.blockingRecoverableRouteHoldState;
-          allowBlockingRecoverableRetryBeyondAttemptBudget =
-            failureState.allowBlockingRecoverableRetryBeyondAttemptBudget;
           forcedRouteHint = failureState.forcedRouteHint;
           contextOverflowRetries = failureState.contextOverflowRetries;
           cumulativeExternalLatencyMs = failureState.cumulativeExternalLatencyMs;
-          if (target.providerKey) {
-            const scopedErrorCode = resolveScopedBackoffErrorCode(error);
-            const scopedBackoffKey = buildScopedBackoffKey(target.providerKey, scopedErrorCode);
-            const pendingScopedWaitMs = peekErrorActionBackoffWaitMs({
-              category: 'global_error',
-              scopeKey: scopedBackoffKey
-            });
-            if (pendingScopedWaitMs > 0 && !failureState.allowBlockingRecoverableRetryBeyondAttemptBudget) {
-              logStage('server.global_error_backoff_wait', providerRequestId, {
-                waitMs: pendingScopedWaitMs,
-                scope: scopedBackoffKey
-              });
-              await waitErrorActionBackoffWithGate({
-                category: 'global_error',
-                scopeKey: scopedBackoffKey,
-                signal: resolveClientAbortSignalFromCarrier(input.metadata),
-                logNonBlockingError: logRequestExecutorNonBlockingError
-              });
-              logStage('server.global_error_backoff_wait.completed', providerRequestId, {
-                waitMs: pendingScopedWaitMs,
-                scope: scopedBackoffKey
-              });
-            }
-            recordErrorActionBackoff({
-              category: 'global_error',
-              scopeKey: scopedBackoffKey
-            });
-          }
           retryAfterProviderFailure = true;
         } finally {
           if (trafficPermit) {
@@ -1449,12 +1385,6 @@ export class HubRequestExecutor implements RequestExecutor {
       } catch {
         // non-blocking cleanup
       }
-      const scopedErrorCode = resolveScopedBackoffErrorCode(error);
-      const scopedBackoffKey = buildScopedBackoffKey('unresolved-provider', scopedErrorCode);
-      recordErrorActionBackoff({
-        category: 'global_error',
-        scopeKey: scopedBackoffKey
-      });
       // If we failed before selecting a provider (no bindProvider/recordAttempt),
       // at least record one error sample for this request.
       if (!recordedAnyAttempt) {
