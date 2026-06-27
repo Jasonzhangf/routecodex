@@ -13,12 +13,6 @@ import { parseTokenSequenceFromPath } from './token-scanner/index.js';
 import { logOAuthDebug } from './oauth-logger.js';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { withOAuthRepairEnv } from './oauth-repair-env.js';
-import {
-  markInteractiveOAuthRepairAttempt,
-  markInteractiveOAuthRepairSuccess,
-  shouldSkipInteractiveOAuthRepair,
-  type OAuthRepairCooldownReason
-} from './oauth-repair-cooldown.js';
 import { openAuthInCamoufox } from '../core/config/camoufox-launcher.js';
 import {
   type ExtendedOAuthAuth,
@@ -211,9 +205,6 @@ function resolveRefreshTokenForProvider(providerType: string, token: StoredOAuth
   const payload = extractEcoDevJwtPayload(token);
   const fromJwt = payload && typeof payload.refresh_token === 'string' ? payload.refresh_token.trim() : '';
   return fromJwt;
-}
-
-function applyRefreshFailureBackoff(_cacheKey: string, _providerType: string, _message: string): void {
 }
 
 function isElementMissingAutomationFailure(message: string): boolean {
@@ -589,7 +580,6 @@ export async function ensureValidOAuthToken(
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error || '');
-        applyRefreshFailureBackoff(cacheKey, providerType, message);
         if (!opts.forceReacquireIfRefreshFails) {
           throw error;
         }
@@ -676,12 +666,6 @@ export async function handleUpstreamInvalidOAuthToken(
           forceRefresh: false
         });
       });
-      if (tokenFilePath) {
-        await markInteractiveOAuthRepairSuccess({
-          providerType,
-          tokenFile: tokenFilePath
-        });
-      }
       return true;
     } catch (error) {
       const refreshMsg = error instanceof Error ? error.message : String(error);
@@ -710,34 +694,15 @@ export async function handleUpstreamInvalidOAuthToken(
     if (autoOAuthDisabled) {
       return await attemptSilentRefreshOnly(lower);
     }
-    const cooldownReason: OAuthRepairCooldownReason =
+    const repairReason =
       statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower) ? 'google_verify' : 'generic';
-    const gate = await shouldSkipInteractiveOAuthRepair({
-      providerType,
-      tokenFile: tokenFilePath,
-      reason: cooldownReason
-    });
-    if (gate.skip) {
-      const msLeft = typeof gate.msLeft === 'number' ? gate.msLeft : 0;
-      const attempts = typeof gate.record?.attemptCount === 'number' ? gate.record.attemptCount : 0;
-      console.warn(
-        `[OAuth] interactive repair skipped (provider=${providerType} status=${statusCode ?? 'unknown'} reason=${cooldownReason} attempts=${attempts} msLeft=${msLeft} tokenFile=${tokenFilePath})`
-      );
-      return false;
-    }
-    // Mark immediately so repeated auth failures don't cause infinite auth loops within a short window.
-    await markInteractiveOAuthRepairAttempt({
-      providerType,
-      tokenFile: tokenFilePath,
-      reason: cooldownReason
-    });
 
     // Non-blocking server semantics:
     // - Try silent refresh first (fast path).
     // - If refresh fails or interactive is required (e.g. 403 verify), kick off interactive flow in background.
     // - Return false so Virtual Router can failover immediately.
     if (!allowBlocking) {
-      if (statusCode === 403 && cooldownReason === 'google_verify') {
+      if (statusCode === 403 && repairReason === 'google_verify') {
         const url = extractGoogleAccountVerificationUrl(msg);
         if (url) {
           void openGoogleAccountVerificationInCamoufox({
@@ -760,10 +725,6 @@ export async function handleUpstreamInvalidOAuthToken(
             forceReauthorize: false,
             forceRefresh: false
           });
-        });
-        await markInteractiveOAuthRepairSuccess({
-          providerType,
-          tokenFile: tokenFilePath
         });
         return true;
       } catch (error) {
@@ -804,10 +765,6 @@ export async function handleUpstreamInvalidOAuthToken(
         ensureValid,
         opts
       });
-    });
-    await markInteractiveOAuthRepairSuccess({
-      providerType,
-      tokenFile: tokenFilePath
     });
     return true;
   } catch (error) {
