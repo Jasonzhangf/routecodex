@@ -159,6 +159,81 @@ describe('HubPipeline preselected route ownership', () => {
     }));
   });
 
+  it('syncs Rust request ChatProcess stopless runtime control into MetadataCenter', async () => {
+    const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
+    const metadata = withMetadataCenter({
+      requestId: 'req_preselected_route',
+    }, (center) => {
+      center.writeRuntimeControl('preselectedRoute', preselectedRoute, TEST_WRITER, 'test route pin');
+    });
+    mockRunHubPipelineLibWithNative.mockReturnValueOnce({
+      ...createNativeSuccess(),
+      metadata: {
+        target: preselectedRoute.target,
+        routingDecision: preselectedRoute.decision,
+        routingDiagnostics: preselectedRoute.diagnostics,
+        runtime_control: {
+          stopless: {
+            flowId: 'stop_message_flow',
+            repeatCount: 1,
+            maxRepeats: 3,
+            triggerHint: 'stop_schema_missing',
+            schemaFeedback: {
+              reasonCode: 'stop_schema_missing',
+              missingFields: ['stopreason'],
+            },
+            active: true,
+            updatedAt: 1782600000000,
+          },
+        },
+      },
+    });
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({ metadata }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    });
+
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl().stopless).toMatchObject({
+      flowId: 'stop_message_flow',
+      repeatCount: 1,
+      maxRepeats: 3,
+      triggerHint: 'stop_schema_missing',
+      active: true,
+    });
+  });
+
+  it('fails fast when Rust request ChatProcess returns stopless control without MetadataCenter', async () => {
+    const routerEngine = { route: jest.fn(() => preselectedRoute) };
+    mockRunHubPipelineLibWithNative.mockReturnValueOnce({
+      ...createNativeSuccess(),
+      metadata: {
+        target: preselectedRoute.target,
+        routingDecision: preselectedRoute.decision,
+        routingDiagnostics: preselectedRoute.diagnostics,
+        runtime_control: {
+          stopless: {
+            flowId: 'stop_message_flow',
+            repeatCount: 0,
+            maxRepeats: 3,
+            active: true,
+          },
+        },
+      },
+    });
+
+    await expect(executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: {
+          requestId: 'req_preselected_route',
+        },
+      }),
+      routerEngine: routerEngine as never,
+      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
+    })).rejects.toThrow('Rust request ChatProcess returned stopless runtime_control but MetadataCenter is not bound');
+  });
+
   it('builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch', async () => {
     const routerEngine = { route: jest.fn(() => preselectedRoute) };
 
@@ -202,6 +277,7 @@ describe('HubPipeline preselected route ownership', () => {
           },
           runtimeControl: {
             retryProviderKey: 'center.retry.provider',
+            providerProtocol: 'openai-responses',
           },
         },
       }),
@@ -212,6 +288,8 @@ describe('HubPipeline preselected route ownership', () => {
       .toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.runtimeControl?.stopMessageEnabled)
       .toBeUndefined();
+    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.runtimeControl?.providerProtocol)
+      .toBe('openai-responses');
   });
 
   it('reuses MetadataCenter runtime preselectedRoute without reading flat routecodex residue', async () => {

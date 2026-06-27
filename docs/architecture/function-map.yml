@@ -225,9 +225,15 @@ owners:
       - resolve_stop_message_session_scope
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/cli-projection.ts
@@ -245,6 +251,7 @@ owners:
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
     required_gates:
@@ -253,6 +260,7 @@ owners:
     migration_target: rust
     notes:
       - "Stopless is not an outbound owner and not an SSE owner. Request-side stopless belongs to the ReqChatProcess entry boundary after `/v1/responses` continuation restore and before normal request governance; response-side stopless belongs to the RespChatProcess exit boundary before continuation save and before RespOutbound."
+      - "Response-side stopless projection is a standard `ServertoolRespHook` skeleton step inside `HubRespChatProcess03Governed`, not an inline outbound/SSE patch; TS may only apply Rust effect plans such as MetadataCenter writes."
       - "servertool-core owns stopless CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline."
       - "req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts."
       - "Stopless is a dual-gate stop contract: `finish_reason=stop` is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard."
@@ -270,8 +278,10 @@ owners:
       - "Client-visible exec_command must use the public stopless alias `reasoningStop`; the client payload must not leak internal marker `__servertool_cli_projection`."
       - "NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only."
       - "NoSchema stopless progression must advance `used/repeatCount` from current request tool_output/runtime metadata truth, not through file persistence or tmux/sessionDir fallback."
+      - "Response-side stopless activation must read the current request-scoped control slot `MetadataCenter.runtime_control.stopless.active`; tests must cover this live shape, not legacy `requestTruth.runtimeControl` or top-level metadata mirrors."
       - "Once the standard `reasoningStop` tool is exposed on the request, legacy shell-projected stop history such as `exec_command(cmd=\"reasoningStop\")`, `reasoning_stop`, and their paired `command not found` tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests."
-      - "Model side must stay unaware of stopless identity, but runtime stopless CLI projection still requires active request-truth `sessionId/requestId` flags for same-session loop counting; `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only allowed progression truth, and `sessionDir`/persisted writeback are forbidden."
+      - "Model side must stay unaware of stopless identity. Stopless identity comes from write-once `request_truth.sessionId/requestId`; stopless control and progression come from Rust-produced `MetadataCenter.runtime_control.stopless` plus current request tool_output. `sessionDir`/persisted writeback and `requestTruth.runtimeControl` are forbidden."
+      - "ReqChatProcess is the standard write origin for stopless runtime control: Rust request governance emits `metadata.runtime_control.stopless`, and the TS request-stage shell may only commit that Rust plan into the bound MetadataCenter with fail-fast binding checks."
       - "TS engine orchestration may only call Rust `planStoplessExecutionJson` for stopless execution/context composition and orchestration planning; it must not build stopless context/requestTruth/session truth in TS, and it must not reenter for stopless CLI flows."
       - "Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter."
       - "`responsesRequestContext.sessionId/conversationId` is continuation-only context for `/v1/responses`; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material."

@@ -541,6 +541,24 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
         "provider payload must carry stop schema contract, got: {}",
         serialized
     );
+    assert_eq!(
+        output["metadata"]["runtime_control"]["stopless"]["repeatCount"],
+        json!(1),
+        "request ChatProcess metadata must expose current stopless used count for MetadataCenter sync: {}",
+        output["metadata"]
+    );
+    assert_eq!(
+        output["metadata"]["runtime_control"]["stopless"]["maxRepeats"],
+        json!(3),
+        "request ChatProcess metadata must expose current stopless max repeats: {}",
+        output["metadata"]
+    );
+    assert_eq!(
+        output["metadata"]["runtime_control"]["stopless"]["schemaFeedback"]["reasonCode"],
+        json!("stop_schema_missing"),
+        "request ChatProcess metadata must preserve stopless schema feedback: {}",
+        output["metadata"]
+    );
     assert!(
         serialized.contains("如果任务已经完成，就按下面 schema 补齐")
             && serialized.contains("stopreason, reason, next_step"),
@@ -878,7 +896,8 @@ fn anthropic_response_remaps_to_openai_responses_client_payload() {
             }),
             metadata: json!({
                 "clientProtocol": "openai-responses",
-                "entryEndpoint": "/v1/responses"
+                "entryEndpoint": "/v1/responses",
+                "providerProtocol": "openai-chat"
             }),
             metadata_center_snapshot: json!(null),
             stream: false,
@@ -965,7 +984,7 @@ fn response_path_missing_provider_protocol_fails_fast() {
         })
         .unwrap_err();
 
-    assert_eq!(error.code, "hub_pipeline_error");
+    assert_eq!(error.code, "hub_pipeline_missing_provider_protocol");
     assert!(error.message.contains("requires providerProtocol"));
 }
 
@@ -1004,14 +1023,109 @@ fn response_path_reads_provider_protocol_from_runtime_control_snapshot() {
         .unwrap();
 
     assert!(output.success);
-    assert_eq!(
+    assert!(
         output
             .payload
             .as_ref()
             .and_then(|payload| payload.get("id"))
-            .and_then(|value| value.as_str()),
-        Some("chatcmpl_runtime_control_protocol")
+            .and_then(|value| value.as_str())
+            .is_some_and(|id| id.starts_with("resp_")),
+        "response path should project provider chat payload to client Responses shape: {:?}",
+        output.payload
     );
+}
+
+#[test]
+fn response_chat_stop_schema_projects_stopless_cli_before_responses_outbound() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-live-schema-round2".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_live_round2",
+                "object": "chat.completion",
+                "model": "glm-5.2",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "{\"stopreason\":2,\"reason\":\"第二轮还没做完\",\"next_step\":\"基于第二轮工具结果继续最终核对\"}",
+                        "reasoning_content": "reasoning"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": {
+                    "sessionId": "stopless-live-test-session",
+                    "conversationId": "stopless-live-test-session"
+                },
+                "continuationContext": {
+                    "responsesResume": {
+                        "continuationOwner": "relay",
+                        "entryKind": "responses",
+                        "toolOutputsDetailed": [{
+                            "callId": "call_stopless_round1",
+                            "originalId": "call_stopless_round1",
+                            "outputText": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"sessionId\":\"stopless-live-test-session\",\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"non_terminal_schema\"}}"
+                        }]
+                    }
+                },
+                "runtimeControl": {
+                    "stopless": {
+                        "active": true,
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 1,
+                        "maxRepeats": 3,
+                        "triggerHint": "non_terminal_schema",
+                        "continuationPrompt": "继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。",
+                        "schemaFeedback": {
+                            "reasonCode": "non_terminal_schema",
+                            "missingFields": []
+                        }
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    assert_eq!(
+        payload["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["name"],
+        json!("exec_command")
+    );
+    let args = payload["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+        ["arguments"]
+        .as_str()
+        .expect("exec args");
+    assert!(
+        args.contains("routecodex hook run reasoningStop"),
+        "stopless must be projected as client-visible reasoningStop CLI, got: {args}"
+    );
+    assert!(
+        args.contains("\\\"repeatCount\\\":2") || args.contains("\"repeatCount\":2"),
+        "round 2 stop schema must project repeatCount=2, got: {args}"
+    );
+    assert!(output.effect_plan.effects.iter().any(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() == json!("stoplessMetadataCenterWrite")
+    }));
+    assert!(!output.effect_plan.effects.iter().any(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+            && effect.payload["action"] == json!("requireResponseHookRuntime")
+    }));
 }
 
 #[test]
@@ -1211,7 +1325,20 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
         })
         .unwrap();
 
-    assert_eq!(output.effect_plan.effects.len(), 2);
+    let stream_pipe_count = output
+        .effect_plan
+        .effects
+        .iter()
+        .filter(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("streamPipe"))
+        .count();
+    let runtime_state_write_count = output
+        .effect_plan
+        .effects
+        .iter()
+        .filter(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("runtimeStateWrite"))
+        .count();
+    assert_eq!(stream_pipe_count, 1);
+    assert_eq!(runtime_state_write_count, 1);
     let effect = output
         .effect_plan
         .effects

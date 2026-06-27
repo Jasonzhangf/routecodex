@@ -14,6 +14,12 @@ type MetadataCenterLike = {
   readRequestTruth: () => Record<string, unknown> | undefined;
   readContinuationContext: () => Record<string, unknown> | undefined;
   readRuntimeControl: () => Record<string, unknown> | undefined;
+  writeRuntimeControl?: (
+    key: string,
+    value: unknown,
+    writtenBy: { module: string; symbol: string; stage: string },
+    reason?: string
+  ) => void;
 };
 
 function isMetadataCenterLike(value: unknown): value is MetadataCenterLike {
@@ -84,6 +90,44 @@ function stripLegacyMetadataResidue(metadata: Record<string, unknown>): Record<s
   );
 }
 
+const REQUEST_STAGE_STOPLESS_RUNTIME_WRITER = {
+  module: 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
+  symbol: 'syncRequestStageStoplessRuntimeControlToMetadataCenter',
+  stage: 'HubReqChatProcess03Governed',
+} as const;
+
+function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function readBoundMetadataCenter(metadata: Record<string, unknown>): MetadataCenterLike | undefined {
+  const candidate = Reflect.get(metadata, METADATA_CENTER_SYMBOL);
+  return isMetadataCenterLike(candidate) ? candidate : undefined;
+}
+
+function syncRequestStageStoplessRuntimeControlToMetadataCenter(args: {
+  sourceMetadata: Record<string, unknown>;
+  outputMetadata: Record<string, unknown>;
+}): void {
+  const runtimeControl = asFlatRecord(args.outputMetadata.runtime_control);
+  const stopless = asFlatRecord(runtimeControl?.stopless);
+  if (!stopless) {
+    return;
+  }
+  const center = readBoundMetadataCenter(args.sourceMetadata);
+  if (!center || typeof center.writeRuntimeControl !== 'function') {
+    throw new Error('Rust request ChatProcess returned stopless runtime_control but MetadataCenter is not bound');
+  }
+  center.writeRuntimeControl(
+    'stopless',
+    stopless,
+    REQUEST_STAGE_STOPLESS_RUNTIME_WRITER,
+    'rust request chatprocess stopless runtime control'
+  );
+}
+
 function projectRouterInputMetadata(args: {
   metadata: Record<string, unknown>;
   runtimeControl: Record<string, unknown>;
@@ -120,6 +164,7 @@ function buildMetadataCenterSnapshot(args: {
   requestTruth: Record<string, unknown>;
   continuationContext: Record<string, unknown>;
   runtimeControl: Record<string, unknown>;
+  providerProtocol: string;
 }): {
   requestTruth?: Record<string, unknown>;
   continuationContext?: Record<string, unknown>;
@@ -130,13 +175,22 @@ function buildMetadataCenterSnapshot(args: {
     ? { ...args.continuationContext }
     : undefined;
   const runtimeControl = Object.keys(args.runtimeControl).length > 0 ? { ...args.runtimeControl } : undefined;
-  if (!requestTruth && !continuationContext && !runtimeControl) {
+  const providerProtocol = typeof args.providerProtocol === 'string' && args.providerProtocol.trim()
+    ? args.providerProtocol.trim()
+    : undefined;
+  const runtimeControlSnapshot = runtimeControl || providerProtocol
+    ? {
+        ...(runtimeControl ?? {}),
+        ...(providerProtocol ? { providerProtocol } : {}),
+      }
+    : undefined;
+  if (!requestTruth && !continuationContext && !runtimeControlSnapshot) {
     return undefined;
   }
   return {
     ...(requestTruth ? { requestTruth } : {}),
     ...(continuationContext ? { continuationContext } : {}),
-    ...(runtimeControl ? { runtimeControl } : {}),
+    ...(runtimeControlSnapshot ? { runtimeControl: runtimeControlSnapshot } : {}),
   };
 }
 
@@ -162,11 +216,20 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     ...metadataCenterRuntimeControl,
   };
   const metadataBase = stripLegacyMetadataResidue(normalized.metadata);
+  const metadataCenterSnapshot = buildMetadataCenterSnapshot({
+    requestTruth: requestTruthPayload,
+    continuationContext: continuationContextPayload,
+    runtimeControl: metadataCenterRuntimeControl,
+    providerProtocol: normalized.providerProtocol,
+  });
   const routerMetadata = projectRouterInputMetadata({
     metadata: metadataBase,
     runtimeControl: mergedRuntimeControl,
     continuationContext: continuationContextPayload,
   });
+  if (metadataCenterSnapshot) {
+    routerMetadata.metadataCenterSnapshot = metadataCenterSnapshot;
+  }
   const route = mergedRuntimeControl.preselectedRoute
     ?? routerEngine.route(normalized.payload as never, routerMetadata as never);
   const metadata = {
@@ -177,11 +240,6 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     },
     ...nativeTopLevelRuntimeControl,
   } as Record<string, unknown>;
-  const metadataCenterSnapshot = buildMetadataCenterSnapshot({
-    requestTruth: requestTruthPayload,
-    continuationContext: continuationContextPayload,
-    runtimeControl: metadataCenterRuntimeControl,
-  });
 
   const nativePlan = runHubPipelineLibWithNative({
     config: {
@@ -222,6 +280,10 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     throw error;
   }
   const outputMetadata = nativePlan.metadata ?? {};
+  syncRequestStageStoplessRuntimeControlToMetadataCenter({
+    sourceMetadata: normalized.metadata,
+    outputMetadata,
+  });
   const providerPayload = nativePlan.payload;
   if (!providerPayload || typeof providerPayload !== 'object' || Array.isArray(providerPayload)) {
     const fallbackMessage = entryMode === "chat_process"

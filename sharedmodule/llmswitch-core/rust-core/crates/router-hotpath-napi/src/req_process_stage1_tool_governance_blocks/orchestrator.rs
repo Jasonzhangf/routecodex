@@ -16,7 +16,7 @@ use crate::req_process_stage1_tool_governance_blocks::request_sanitizer::{
     resolve_governance_context,
 };
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::{
-    maybe_apply_servertool_orchestration, resolve_client_inject_ready,
+    maybe_apply_servertool_orchestration,
 };
 use crate::shared_json_utils::{normalize_record, normalize_record_ref};
 
@@ -277,6 +277,186 @@ fn strip_stopless_terminal_controls(request: &mut Map<String, Value>) {
     strip_tool_choice_for_terminal_stopless_turn(request);
 }
 
+fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn read_u64_field(row: &Map<String, Value>, camel: &str, snake: &str) -> Option<u64> {
+    row.get(camel)
+        .or_else(|| row.get(snake))
+        .and_then(Value::as_u64)
+}
+
+fn parse_stopless_cli_output(value: &Value) -> Option<Map<String, Value>> {
+    let parsed = match value {
+        Value::String(raw) => serde_json::from_str::<Value>(raw.trim()).ok()?,
+        Value::Object(_) => value.clone(),
+        _ => return None,
+    };
+    let row = parsed.as_object()?.clone();
+    let tool_name = read_trimmed_string(row.get("toolName"))
+        .or_else(|| read_trimmed_string(row.get("tool_name")))
+        .or_else(|| read_trimmed_string(row.get("tool")));
+    let flow_id = read_trimmed_string(row.get("flowId"))
+        .or_else(|| read_trimmed_string(row.get("flow_id")))
+        .or_else(|| read_nested_string_field(&row, "input", "flowId", "flow_id"));
+    let has_stopless_counter = read_u64_field(&row, "repeatCount", "repeat_count")
+        .or_else(|| row.get("input").and_then(Value::as_object).and_then(|input| {
+            read_u64_field(input, "repeatCount", "repeat_count")
+        }))
+        .is_some();
+    if tool_name.as_deref() != Some("stop_message_auto")
+        && !(flow_id.as_deref() == Some("stop_message_flow") && has_stopless_counter)
+    {
+        return None;
+    }
+    Some(row)
+}
+
+fn latest_stopless_cli_output_from_items(items: Option<&Value>) -> Option<Map<String, Value>> {
+    let items = items?.as_array()?;
+    for item in items.iter().rev() {
+        let Some(row) = item.as_object() else {
+            continue;
+        };
+        let item_type = row
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if matches!(
+            item_type.as_str(),
+            "function_call_output" | "tool_result" | "tool_message"
+        ) {
+            if let Some(output) = row.get("output").or_else(|| row.get("content")) {
+                if let Some(parsed) = parse_stopless_cli_output(output) {
+                    return Some(parsed);
+                }
+            }
+        }
+        let role = row
+            .get("role")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if role == "tool" {
+            if let Some(output) = row.get("content").or_else(|| row.get("output")) {
+                if let Some(parsed) = parse_stopless_cli_output(output) {
+                    return Some(parsed);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn latest_stopless_cli_output(request: &Map<String, Value>) -> Option<Map<String, Value>> {
+    latest_stopless_cli_output_from_items(request.get("input"))
+        .or_else(|| latest_stopless_cli_output_from_items(request.get("messages")))
+}
+
+fn read_nested_string_field<'a>(
+    row: &'a Map<String, Value>,
+    owner: &str,
+    camel: &str,
+    snake: &str,
+) -> Option<String> {
+    row.get(owner)
+        .and_then(Value::as_object)
+        .and_then(|nested| read_trimmed_string(nested.get(camel)).or_else(|| read_trimmed_string(nested.get(snake))))
+}
+
+fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<Value> {
+    let repeat_count = read_u64_field(row, "repeatCount", "repeat_count")
+        .or_else(|| row.get("input").and_then(Value::as_object).and_then(|input| {
+            read_u64_field(input, "repeatCount", "repeat_count")
+        }))?;
+    let max_repeats = read_u64_field(row, "maxRepeats", "max_repeats")
+        .or_else(|| row.get("input").and_then(Value::as_object).and_then(|input| {
+            read_u64_field(input, "maxRepeats", "max_repeats")
+        }))
+        .unwrap_or(3);
+    let flow_id = read_trimmed_string(row.get("flowId"))
+        .or_else(|| read_trimmed_string(row.get("flow_id")))
+        .or_else(|| read_nested_string_field(row, "input", "flowId", "flow_id"))
+        .unwrap_or_else(|| "stop_message_flow".to_string());
+    let trigger_hint = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))
+        .and_then(Value::as_object)
+        .and_then(|feedback| {
+            read_trimmed_string(feedback.get("reasonCode"))
+                .or_else(|| read_trimmed_string(feedback.get("reason_code")))
+        })
+        .or_else(|| {
+            row.get("schemaGuidance")
+                .or_else(|| row.get("schema_guidance"))
+                .and_then(Value::as_object)
+                .and_then(|guidance| {
+                    read_trimmed_string(guidance.get("triggerHint"))
+                        .or_else(|| read_trimmed_string(guidance.get("trigger_hint")))
+                })
+        })
+        .or_else(|| read_nested_string_field(row, "input", "triggerHint", "trigger_hint"))
+        .or_else(|| read_trimmed_string(row.get("triggerHint")))
+        .or_else(|| read_trimmed_string(row.get("trigger_hint")));
+    let continuation_prompt = read_trimmed_string(row.get("continuationPrompt"))
+        .or_else(|| read_trimmed_string(row.get("continuation_prompt")));
+    let schema_feedback = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))
+        .and_then(Value::as_object)
+        .map(|feedback| Value::Object(feedback.clone()));
+
+    let mut stopless = Map::new();
+    stopless.insert("flowId".to_string(), Value::String(flow_id));
+    stopless.insert("repeatCount".to_string(), Value::Number(repeat_count.into()));
+    stopless.insert("maxRepeats".to_string(), Value::Number(max_repeats.into()));
+    stopless.insert("active".to_string(), Value::Bool(true));
+    stopless.insert("updatedAt".to_string(), Value::Number(now_millis().into()));
+    if let Some(trigger_hint) = trigger_hint {
+        stopless.insert("triggerHint".to_string(), Value::String(trigger_hint));
+    }
+    if let Some(continuation_prompt) = continuation_prompt {
+        stopless.insert(
+            "continuationPrompt".to_string(),
+            Value::String(continuation_prompt),
+        );
+    }
+    if let Some(schema_feedback) = schema_feedback {
+        stopless.insert("schemaFeedback".to_string(), schema_feedback);
+    }
+    Some(Value::Object(stopless))
+}
+
+fn build_initial_stopless_runtime_control() -> Value {
+    serde_json::json!({
+        "flowId": "stop_message_flow",
+        "repeatCount": 0,
+        "maxRepeats": 3,
+        "active": true,
+        "updatedAt": now_millis()
+    })
+}
+
+fn write_stopless_runtime_control(metadata: &mut Map<String, Value>, stopless: Value) {
+    let runtime_control = metadata
+        .entry("runtime_control".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !runtime_control.is_object() {
+        *runtime_control = Value::Object(Map::new());
+    }
+    if let Some(runtime_control) = runtime_control.as_object_mut() {
+        runtime_control.insert("stopless".to_string(), stopless);
+    }
+}
+
 fn build_reasoning_stop_tool() -> Value {
     serde_json::json!({
         "type": "function",
@@ -400,13 +580,27 @@ pub fn apply_req_process_tool_governance(
         .cloned()
         .unwrap_or(input.metadata);
 
-    let metadata = normalize_record(lifted_metadata.clone());
+    let mut metadata = normalize_record(lifted_metadata.clone());
     let metadata_center = build_metadata_center_from_snapshot(&input.metadata_center_snapshot);
-    let request_metadata = Value::Object(metadata.clone());
     let mut request = normalize_record(lifted_request);
     apply_chat_process_request_sanitizer(&mut request);
     let has_terminal_stopless_turn = request_has_terminal_stopless_output(&request)
         || metadata_has_terminal_stopless_runtime_control(&metadata);
+    if let Some(stopless) = latest_stopless_cli_output(&request)
+        .as_ref()
+        .and_then(build_stopless_runtime_control_from_cli)
+    {
+        write_stopless_runtime_control(&mut metadata, stopless);
+    } else if should_inject_stopless_system_instruction(&metadata_center, &metadata)
+        && !has_terminal_stopless_turn
+        && metadata
+            .get("runtime_control")
+            .and_then(Value::as_object)
+            .and_then(|runtime_control| runtime_control.get("stopless"))
+            .is_none()
+    {
+        write_stopless_runtime_control(&mut metadata, build_initial_stopless_runtime_control());
+    }
     if has_terminal_stopless_turn {
         strip_stopless_terminal_controls(&mut request);
     }

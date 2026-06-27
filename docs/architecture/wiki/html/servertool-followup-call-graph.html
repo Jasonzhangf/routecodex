@@ -143,7 +143,6 @@
           <li><code>hub.servertool_followup</code></li>
           <li><code>hub.servertool_cli_projection</code></li>
           <li><code>hub.servertool_stopless_cli_continuation</code></li>
-          <li><code>hub.servertool_backend_route_runtime</code></li>
           <li><code>hub.servertool_orchestration_policy</code></li>
         </ul>
         <h2>Main Rule</h2>
@@ -205,7 +204,6 @@
         <tr><td><code>hub.servertool_followup</code></td><td>followup orchestration + post-followup governed truth</td><td><code>run_servertool_response_stage_json</code>, <code>plan_servertool_outcome_json</code>, <code>project_hub_resp_outbound_04_from_hub_resp_chatprocess_03</code></td><td><code>src/providers</code>, <code>src/server</code></td></tr>
         <tr><td><code>hub.servertool_cli_projection</code></td><td>generic servertool -&gt; client <code>exec_command</code> projection</td><td><code>build_servertool_cli_projection_01_from_hub_resp_chatprocess_03</code></td><td>provider runtime / executor local projection</td></tr>
         <tr><td><code>hub.servertool_stopless_cli_continuation</code></td><td>stopless runtime-metadata + current-turn tool-output continuation planning</td><td><code>plan_stopless_orchestration_action</code>, <code>resolve_runtime_stop_message_state_from_adapter_context</code>, <code>plan_client_exec_cli_projection_output</code></td><td>handler-local stopless logic / TS reenter</td></tr>
-        <tr><td><code>hub.servertool_backend_route_runtime</code></td><td>backend-route runtime target / transport shell</td><td>see function-map owner</td><td>provider/client layer second runtime owner</td></tr>
         <tr><td><code>hub.servertool_orchestration_policy</code></td><td>timeout, disconnect, provider pin, followup error policy</td><td><code>resolve_adapter_context_provider_key</code>, <code>compact_followup_error_reason</code></td><td>scattered handler/executor policy</td></tr>
         </tbody>
         </table>
@@ -251,7 +249,6 @@
         <tr><td><code>followup-gap-02</code></td><td>Split visibility</td><td>function-map 有 owner，但 followup 与 CLI 的分流边界未在单页显式对比</td><td>容易把 CLI 路径误补成 followup</td></tr>
         <tr><td><code>followup-gap-03</code></td><td>Stopless isolation</td><td>文档已写 stopless 不可 server-side reenter，但 wiki 之前没有单独标红</td><td>旧 stopless/followup 语义容易复活</td></tr>
         <tr><td><code>followup-gap-04</code></td><td>Post-followup truth</td><td>之前缺一张图强调 <code>ServertoolResp03FollowupResult -&gt; HubRespOutbound04ClientSemantic</code> 的唯一出口</td><td>容易重新用 pre-followup payload 投影 SSE/JSON</td></tr>
-        <tr><td><code>followup-gap-05</code></td><td>Backend/runtime boundary</td><td>backend-route/runtime 只应是 transport shell，但专题 review 面还不够集中</td><td>handler/runtime 最容易重新长逻辑</td></tr>
         </tbody>
         </table>
         <h2>Verification Anchors</h2>

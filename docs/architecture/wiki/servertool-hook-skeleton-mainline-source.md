@@ -22,7 +22,7 @@ Until then the mainline edges stay `binding pending`; do not invent canonical bu
 
 Current rustification direction:
 
-- Response-side stopless hook ownership is converging to Rust. The native gate must own hook-match classification for both `finish_reason=stop` and `finish_reason=tool_calls + reasoningStop`, including intercept kind, schema source, and required/optional hook status.
+- Response-side stopless hook ownership is a Rust Chat Process slice. The native gate must own hook-match classification for both `finish_reason=stop` and `finish_reason=tool_calls + reasoningStop`, including intercept kind, schema source, and required/optional hook status.
 - TS response-stage shells are transitional thin wrappers only. They may call native gate/runtime-action/materialization functions, but they must not independently decide whether `reasoningStop` matched, whether stop schema should be validated, or whether terminal vs CLI projection should be chosen.
 
 ## CLI Lifecycle Boundary
@@ -90,7 +90,10 @@ Round 2 always starts with continuation restore:
 3. pair it as internal `reasoningStop` call/result semantics, not raw
    `exec_command` model history;
 4. rewrite the CLI result into model-visible guidance;
-5. inject the same per-request stop contract and `reasoningStop` tool again for
+5. write the Rust-produced stopless control signal into
+   `MetadataCenter.runtime_control.stopless` through the bound request-stage
+   MetadataCenter IO shell;
+6. inject the same per-request stop contract and `reasoningStop` tool again for
    the new round.
 
 Per-request system/tool injection is not Round-1-only behavior. It repeats on
@@ -115,6 +118,7 @@ Hard rules:
 - The response-side pair is `ServertoolRespHook03HookResponseInjected -> client-visible exec_command`; the request-side pair is `client-visible exec_command -> ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized`.
 - The Responses continuation owner may only consume the finalized request shape after `ServertoolReqHook04RequestFinalized`; it must never be asked to reconcile a shell projection into a built-in tool result.
 - `ServertoolReqHook01ResultParsed` consumes only the tool result of the **current** request. It does not look up continuation store state, does not synthesize session identity, and must not call into `responses-conversation-store` / `responses_resume` to decide whether to restore anything. The "restore" verb here means "rewrite shell `exec_command` output into model-visible `reasoningStop -> function_call_output` for this turn", not "rehydrate prior continuation history".
+- Request-side stopless control is a MetadataCenter control signal, not request truth. Rust ReqChatProcess emits `metadata.runtime_control.stopless`; TS may only write that emitted control into the bound MetadataCenter and must not re-derive repeat count, schema feedback, or stopless state.
 - `ServertoolRespHook01Intercepted` / `ServertoolRespHook02SchemaValidated` / `ServertoolRespHook03HookResponseInjected` never read continuation store, never rewrite `previous_response_id`, and never emit `submit_tool_outputs` shells. Their client-visible shell is always `routecodex hook run <toolName> --input-json <json>`.
 - Continuation `entryKind` / `continuationOwner` / `sessionId` / `conversationId` keys may be read by hooks only as the current request's metadata context, never as a restoration trigger.
 
@@ -234,9 +238,9 @@ Negative blackbox:
 
 ## Current Status
 
-`servertool.hook_skeleton.mainline` is `binding pending`.
+`servertool.hook_skeleton.mainline` is still `binding pending`.
 
-Reason: current runtime still has TS transitional orchestration in servertool engine/server-side-tools/execution/followup dispatch surfaces. The target skeleton must not be marked anchored until Rust scheduler symbols and blackbox gates exist.
+Reason: the stopless response hook slice is anchored in Rust Chat Process, but the broader servertool hook scheduler/runtime still has transitional TS orchestration in servertool engine/server-side-tools/execution/followup dispatch surfaces. The target skeleton must not be marked anchored until Rust scheduler symbols and blackbox gates exist.
 
 ## Review Checklist
 

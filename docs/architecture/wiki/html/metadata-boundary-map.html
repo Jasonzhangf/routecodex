@@ -192,7 +192,7 @@
         <ul>
           <li>canonical stopless control lives in <code>MetadataCenter.runtime_control.stopless</code>;</li>
           <li><code>stopMessageEnabled</code> / <code>stopMessageExcludeDirect</code> are still active runtime-control fields;</li>
-          <li>top-level <code>metadata.stopMessageEnabled</code> / <code>routecodexPortStopMessageEnabled</code> remain compatibility projections only;</li>
+          <li>top-level <code>metadata.stopMessageEnabled</code> / <code>routecodexPortStopMessageEnabled</code> are stale residues and must not be treated as compatibility projections or truth sources;</li>
           <li><code>serverToolLoopState</code> / <code>stopMessageState</code> are active runtime mirrors consumed by Rust servertool-core contracts, but they are not <code>MetadataCenter.runtime_control</code> canonical slots.</li>
         </ul>
         <h2>State Family Matrix</h2>

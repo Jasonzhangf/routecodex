@@ -112,6 +112,8 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/servertool/cli-projection.ts
@@ -122,6 +124,7 @@ verification:
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+      - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
       - tests/servertool/loop-state-block.spec.ts
@@ -134,6 +137,7 @@ verification:
       - npm run build:base
     notes:
       - "Validation must prove stopless request-side restore/guidance rewrite/schema-contract reinjection happens on the Chat Process request boundary after `/v1/responses` continuation restore and before normal request governance; response-side stop/schema/reasoningStop normalization must happen on the Chat Process response boundary before continuation save and before RespOutbound."
+      - "Validation must prove the response-side stopless hook is executed as the standard `ServertoolRespHook` skeleton inside Rust Hub RespChatProcess, and that outbound/SSE layers only receive the finalized semantic payload."
       - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessExecutionPlan` must compose request-truth session/control state and expose `cli_projection` for non-terminal stop_message_flow."
       - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
       - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoningStop` CLI."
@@ -144,7 +148,9 @@ verification:
       - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while current-request restoration advances repeatCount 1 -> 2 -> 3."
       - "Validation must prove req_chatprocess rewrites the paired stopless tool result into model-transparent natural language + missing/error feedback, and VR still routes that turn to thinking."
       - "Validation must prove `/v1/responses` stopless turns do not lose the schema contract between req_chatprocess and the responses->chat bridge: req owner must preserve the contract in `instructions`, and bridge owner must materialize it into the outbound system message."
-      - "Validation must prove stopless CLI projection/CLI execution uses active request-truth `sessionId/requestId` for same-session counting, and that `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only progression truth while `sessionDir` and any persisted writeback path remain absent."
+      - "Validation must prove stopless CLI projection/CLI execution uses write-once `request_truth.sessionId/requestId` for identity, and that Rust-produced `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only progression truth while `sessionDir` and any persisted writeback path remain absent."
+      - "Validation must prove ReqChatProcess emits `metadata.runtime_control.stopless`, the TS request-stage shell only writes that Rust plan into the bound MetadataCenter, and missing binding fails fast."
+      - "Validation must prove response-side stopless activation reads the live `MetadataCenter.runtime_control.stopless.active` shape carried through the current request, so submit_tool_outputs rounds cannot bypass the response hook."
       - "Validation must prove MetadataCenter never carries `responsesRequestContext` or any request/context payload mirror, and continuation control cannot materialize request session truth, stopless activation, stop-message scope, or state keys."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."

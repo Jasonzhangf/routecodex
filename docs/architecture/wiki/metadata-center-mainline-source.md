@@ -147,6 +147,10 @@ Current schema gap:
   - relay `resumeMeta.providerKey` does not become effective retry-pin truth at the handler boundary
   - effective `runtime_control.retryProviderKey` must be proven on the request-executor path before Hub execution, not inferred from the earlier bridge shell alone
 - current request-route owner split for the remaining first-batch runtime-control fields must also stay explicit:
+  - `stopless`
+    - semantic write owner is Rust `HubReqChatProcess03Governed` request governance
+    - host TS request-stage shell may only commit Rust-emitted `metadata.runtime_control.stopless` into the bound MetadataCenter
+    - response Chat Process reads the same request-scoped slot; `requestTruth.runtimeControl` and top-level metadata mirrors are forbidden stopless control sources
   - `preselectedRoute`
     - current write owner is router-direct relay handoff in `src/server/runtime/http-server/index.ts`
     - current release owner is retry-attempt preparation in `src/server/runtime/http-server/executor-metadata.ts`

@@ -45,6 +45,10 @@ families:
       - providerProtocol
       - retryProviderKey
       - preselectedRoute
+      - stopless
+      - stopMessageCompareContext
+      - stopMessageEnabled
+      - stopMessageExcludeDirect
       - streamIntent
       - clientAbort
   provider_observation:

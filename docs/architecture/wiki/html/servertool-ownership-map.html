@@ -431,9 +431,15 @@
         <p>Allowed paths:</p>
         <ul>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/cli-projection.ts</code></li>
@@ -455,6 +461,7 @@
           <li><code>tests/servertool/stop-schema-lifecycle-contract.spec.ts</code></li>
           <li><code>tests/responses/responses-openai-bridge.spec.ts</code></li>
           <li><code>tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts</code></li>
+          <li><code>tests/sharedmodule/hub-pipeline-preselected-route.spec.ts</code></li>
           <li><code>tests/sharedmodule/native-required-exports-sse-stream.spec.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs</code></li>
         </ul>
@@ -466,6 +473,7 @@
         <p>Notes:</p>
         <ul>
           <li>Stopless is not an outbound owner and not an SSE owner. Request-side stopless belongs to the ReqChatProcess entry boundary after <code>/v1/responses</code> continuation restore and before normal request governance; response-side stopless belongs to the RespChatProcess exit boundary before continuation save and before RespOutbound.</li>
+          <li>Response-side stopless projection is a standard <code>ServertoolRespHook</code> skeleton step inside <code>HubRespChatProcess03Governed</code>, not an inline outbound/SSE patch; TS may only apply Rust effect plans such as MetadataCenter writes.</li>
           <li>servertool-core owns stopless CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline.</li>
           <li>req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts.</li>
           <li>Stopless is a dual-gate stop contract: <code>finish_reason=stop</code> is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard.</li>
@@ -483,8 +491,10 @@
           <li>Client-visible exec_command must use the public stopless alias <code>reasoningStop</code>; the client payload must not leak internal marker <code>__servertool_cli_projection</code>.</li>
           <li>NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only.</li>
           <li>NoSchema stopless progression must advance <code>used/repeatCount</code> from current request tool_output/runtime metadata truth, not through file persistence or tmux/sessionDir fallback.</li>
+          <li>Response-side stopless activation must read the current request-scoped control slot <code>MetadataCenter.runtime_control.stopless.active</code>; tests must cover this live shape, not legacy <code>requestTruth.runtimeControl</code> or top-level metadata mirrors.</li>
           <li>Once the standard <code>reasoningStop</code> tool is exposed on the request, legacy shell-projected stop history such as <code>exec_command(cmd=&quot;reasoningStop&quot;)</code>, <code>reasoning_stop</code>, and their paired <code>command not found</code> tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests.</li>
-          <li>Model side must stay unaware of stopless identity, but runtime stopless CLI projection still requires active request-truth <code>sessionId/requestId</code> flags for same-session loop counting; <code>MetadataCenter.runtime_control.stopless</code> plus current request tool_output are the only allowed progression truth, and <code>sessionDir</code>/persisted writeback are forbidden.</li>
+          <li>Model side must stay unaware of stopless identity. Stopless identity comes from write-once <code>request_truth.sessionId/requestId</code>; stopless control and progression come from Rust-produced <code>MetadataCenter.runtime_control.stopless</code> plus current request tool_output. <code>sessionDir</code>/persisted writeback and <code>requestTruth.runtimeControl</code> are forbidden.</li>
+          <li>ReqChatProcess is the standard write origin for stopless runtime control: Rust request governance emits <code>metadata.runtime_control.stopless</code>, and the TS request-stage shell may only commit that Rust plan into the bound MetadataCenter with fail-fast binding checks.</li>
           <li>TS engine orchestration may only call Rust <code>planStoplessExecutionJson</code> for stopless execution/context composition and orchestration planning; it must not build stopless context/requestTruth/session truth in TS, and it must not reenter for stopless CLI flows.</li>
           <li>Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter.</li>
           <li><code>responsesRequestContext.sessionId/conversationId</code> is continuation-only context for <code>/v1/responses</code>; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material.</li>

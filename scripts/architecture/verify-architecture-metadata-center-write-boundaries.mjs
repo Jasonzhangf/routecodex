@@ -73,6 +73,13 @@ for (const policy of requiredPolicies) {
   }
 }
 
+const runtimeControlSlots = manifest?.families?.runtime_control?.slots;
+for (const slot of ['stopless', 'stopMessageEnabled', 'stopMessageExcludeDirect']) {
+  if (!Array.isArray(runtimeControlSlots) || !runtimeControlSlots.includes(slot)) {
+    fail(`${files.manifest}: runtime_control.slots missing canonical control slot ${slot}`, failures);
+  }
+}
+
 const requiredGate = 'npm run verify:architecture-metadata-center-write-boundaries';
 const manifestRequiredGates = manifest?.verification?.required_gates;
 if (!Array.isArray(manifestRequiredGates) || !manifestRequiredGates.includes(requiredGate)) {
@@ -132,6 +139,7 @@ const verificationNeedles = [
   'one request uses one bound MetadataCenter across server -> Hub Pipeline -> provider/runtime -> response closeout',
   '`request_truth.sessionId/conversationId` are written only at inbound request capture',
   'are never restored from continuation context, tmux/client attachment scope, or response-side metadata',
+  'ReqChatProcess emits `metadata.runtime_control.stopless`',
 ];
 for (const needle of verificationNeedles) {
   if (!verificationMapSource.includes(needle)) {
