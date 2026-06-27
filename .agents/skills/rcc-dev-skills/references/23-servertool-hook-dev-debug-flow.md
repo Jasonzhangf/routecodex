@@ -263,6 +263,7 @@
 
 - allow-stop 终态若仍泄漏 `<rcc_stop_schema>` 空壳，先查 canonical strip SSOT 是否认识当前 fence，再查 responses outbound projection；不要只盯 SSE，也不要只清 JSON body。
 - stopless 黑盒若在改 Rust 后仍保持旧行为，先重编 native `.node` / standalone binary 再判 owner；旧产物假红在这条链上非常常见。
+- stopless terminal 若 nested output 已被 chatprocess 替换但 Responses 顶层 `output_text` 仍是 provider 原文，先用 NAPI 直接 probe `runStoplessAutoHandlerRuntimeJson` 切断点；若 NAPI 正确，查 Rust Responses client semantic builder 的 `__responses_output_text_meta` 是否用旧 provider meta 覆盖 finalized content，禁止去 SSE/TS handler 补投影。
 
 4. 已验证后必须升级
 - 稳定流程 -> `references/23-servertool-hook-dev-debug-flow.md`

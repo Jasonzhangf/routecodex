@@ -482,7 +482,10 @@ fn handle_trigger(
         return StopMessageAutoHandlerPlan {
             action: StopMessageAutoPlanAction::ReturnTerminalFinal,
             compare_context: compare.clone(),
-            terminal_chat_response: Some(build_terminal_visible_payload(&input.base, "")),
+            terminal_chat_response: Some(build_terminal_visible_payload_replace(
+                &input.base,
+                "stopless budget exhausted",
+            )),
             ..Default::default()
         };
     }
@@ -1647,6 +1650,97 @@ mod tests {
             Some("stop_schema_missing")
         );
         assert_eq!(plan.compare_context.reason, "stop_schema_missing");
+    }
+
+    #[test]
+    fn budget_exhausted_followup_path_replaces_provider_text_with_terminal_summary() {
+        let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
+            adapter_context: json!({}),
+            base: json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": { "role": "assistant", "content": "继续执行中" }
+                }],
+                "output_text": "继续执行中",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": "继续执行中" }]
+                }]
+            }),
+            request_id: "req-budget-terminal-visible".to_string(),
+            followup_flow_id: None,
+            should_run_vision_flow: false,
+            should_bypass_stop_message_for_media: false,
+            metadata_runtime_control: Some(json!({
+                "stopless": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 2,
+                    "maxRepeats": 3,
+                    "active": true
+                }
+            })),
+            metadata_previous_compare: None,
+            default_config: StopMessageDefaultConfigPlan {
+                enabled: true,
+                text: "continue".to_string(),
+                max_repeats: 3,
+            },
+            decision_signals: StoplessDecisionContextSignals {
+                port_stop_message_disabled: false,
+                has_responses_submit_tool_outputs_resume: true,
+                plan_mode_active: false,
+            },
+            captured_request: Some(json!({
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_stop_budget",
+                        "output": "{\"toolName\":\"stop_message_auto\",\"summary\":\"继续执行\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
+                    }
+                ]
+            })),
+            effective_runtime_loop_state: Some(json!({
+                "repeatCount": 2,
+                "maxRepeats": 3,
+                "continuationPrompt": "继续执行"
+            })),
+            provider_key: None,
+        });
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnTerminalFinal);
+        assert_eq!(plan.compare_context.reason, "stop_schema_budget_exhausted");
+        let terminal = plan
+            .terminal_chat_response
+            .as_ref()
+            .expect("terminal response");
+        let content = terminal["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            content.contains("stopless budget exhausted"),
+            "terminal budget exhausted path must replace provider text, got: {content}"
+        );
+        assert!(
+            !content.contains("继续执行中"),
+            "provider raw text must not leak through budget exhausted terminal path, got: {content}"
+        );
+        let output_text = terminal["output_text"].as_str().unwrap_or("");
+        assert!(
+            output_text.contains("stopless budget exhausted"),
+            "responses output_text must report budget exhaustion, got: {output_text}"
+        );
+        assert!(
+            !output_text.contains("继续执行中"),
+            "provider raw output_text must not leak through budget exhausted terminal path, got: {output_text}"
+        );
+        let nested_output_text = terminal["output"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            nested_output_text.contains("stopless budget exhausted"),
+            "responses nested output must report budget exhaustion, got: {nested_output_text}"
+        );
     }
 
     #[test]

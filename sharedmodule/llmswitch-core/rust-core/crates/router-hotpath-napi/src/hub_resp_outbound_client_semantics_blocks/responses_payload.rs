@@ -252,23 +252,32 @@ fn strip_tool_markup_from_output_text_parts(parts: &[Value]) -> Vec<Value> {
 }
 
 fn collect_responses_output_text(parts: &[Value], meta: Option<&Value>) -> Option<String> {
+    let content_output_text = collect_output_text_parts(parts);
     if let Some(meta_row) = meta.and_then(|v| v.as_object()) {
         let has_field = meta_row
             .get("hasField")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         if has_field {
-            return Some(
-                meta_row
-                    .get("value")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            );
+            let meta_value = meta_row
+                .get("value")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if let Some(content_value) = content_output_text {
+                if !content_value.trim().is_empty() && content_value != meta_value {
+                    return Some(content_value);
+                }
+            }
+            return Some(meta_value);
         }
         return None;
     }
 
+    content_output_text
+}
+
+fn collect_output_text_parts(parts: &[Value]) -> Option<String> {
     let mut texts: Vec<String> = Vec::new();
     let mut saw_output_text = false;
     for part in parts {
@@ -1051,6 +1060,37 @@ mod tests {
         assert_eq!(
             result["output"][0]["summary"][0]["text"],
             "**Thinking** 继续推进当前任务。"
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_prefers_finalized_content_over_stale_output_text_meta() {
+        let payload = json!({
+            "id": "chatcmpl_stopless_terminal",
+            "object": "chat.completion",
+            "model": "gpt-test",
+            "__responses_output_text_meta": {
+                "hasField": true,
+                "value": "继续执行中"
+            },
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "stopless budget exhausted"
+                }
+            }]
+        });
+
+        let result =
+            build_responses_payload_from_chat_core(&payload, Some("req-stopless"), &json!({}))
+                .expect("responses payload");
+
+        assert_eq!(result["output_text"], "stopless budget exhausted");
+        assert_eq!(
+            result["output"][0]["content"][0]["text"],
+            "stopless budget exhausted"
         );
     }
 

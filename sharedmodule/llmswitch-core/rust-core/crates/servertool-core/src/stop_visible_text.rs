@@ -640,12 +640,15 @@ fn collect_text_blocks(value: Option<&Value>, out: &mut Vec<String>) {
 }
 
 fn prefix_visible_stop_content(payload: &mut Value, prefix: &str) -> bool {
-    prefix_chat_choice_content(payload, prefix) || prefix_responses_output_content(payload, prefix)
+    let chat_changed = prefix_chat_choice_content(payload, prefix);
+    let responses_changed = prefix_responses_output_content(payload, prefix);
+    chat_changed || responses_changed
 }
 
 fn replace_visible_stop_content(payload: &mut Value, prefix: &str) -> bool {
-    replace_chat_choice_content(payload, prefix)
-        || replace_responses_output_content(payload, prefix)
+    let chat_changed = replace_chat_choice_content(payload, prefix);
+    let responses_changed = replace_responses_output_content(payload, prefix);
+    chat_changed || responses_changed
 }
 
 fn prefix_chat_choice_content(payload: &mut Value, prefix: &str) -> bool {
@@ -738,8 +741,9 @@ fn replace_responses_output_content(payload: &mut Value, prefix: &str) -> bool {
 }
 
 fn ensure_visible_stop_content(payload: &mut Value, text: &str) -> bool {
-    ensure_chat_visible_stop_content(payload, text)
-        || ensure_responses_visible_stop_content(payload, text)
+    let chat_changed = ensure_chat_visible_stop_content(payload, text);
+    let responses_changed = ensure_responses_visible_stop_content(payload, text);
+    chat_changed || responses_changed
 }
 
 fn ensure_chat_visible_stop_content(payload: &mut Value, text: &str) -> bool {
@@ -1101,6 +1105,37 @@ visible after
         assert_eq!(
             output.payload["output"][0]["content"][0]["text"],
             "needs user"
+        );
+    }
+
+    #[test]
+    fn replace_updates_chat_and_responses_visible_surfaces_without_short_circuit() {
+        let output =
+            build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+                payload: json!({
+                    "choices": [{
+                        "finish_reason": "stop",
+                        "message": { "role": "assistant", "content": "继续执行中" }
+                    }],
+                    "output_text": "继续执行中",
+                    "output": [{
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "继续执行中" }]
+                    }]
+                }),
+                mode: Some("replace".to_string()),
+                prefix: Some("stopless budget exhausted".to_string()),
+            });
+        assert!(output.changed);
+        assert_eq!(
+            output.payload["choices"][0]["message"]["content"],
+            "stopless budget exhausted"
+        );
+        assert_eq!(output.payload["output_text"], "stopless budget exhausted");
+        assert_eq!(
+            output.payload["output"][0]["content"][0]["text"],
+            "stopless budget exhausted"
         );
     }
 
