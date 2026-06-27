@@ -2596,6 +2596,40 @@ pub use shared_responses_conversation_utils::{
 };
 
 // ---------------------------------------------------------------------------
+// failure_policy NAPI exports — Rust migration batch #2
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn is_context_length_exceeded_error_json(input_json: String) -> NapiResult<String> {
+    failure_policy::is_context_length_exceeded_error_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn is_rate_limit_like_error_json(input_json: String) -> NapiResult<String> {
+    failure_policy::is_rate_limit_like_error_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn is_retryable_network_sse_wrapper_error_json(input_json: String) -> NapiResult<String> {
+    failure_policy::is_retryable_network_sse_wrapper_error_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn is_client_disconnect_like_error_json(input_json: String) -> NapiResult<String> {
+    failure_policy::is_client_disconnect_like_error_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn is_generic_bridge_response_contract_error_json(input_json: String) -> NapiResult<String> {
+    failure_policy::is_generic_bridge_response_contract_error_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+// ---------------------------------------------------------------------------
 // req_executor_pipeline_attempt NAPI exports — Rust migration batch #1
 // ---------------------------------------------------------------------------
 

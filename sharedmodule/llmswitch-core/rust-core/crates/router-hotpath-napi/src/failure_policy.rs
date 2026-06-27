@@ -28,6 +28,82 @@ const BLOCKING_RECOVERABLE_CODES: &[&str] = &[
     "UPSTREAM_EMPTY_OUTPUT",
 ];
 
+// ---------------------------------------------------------------------------
+// Error classification hint tables — migrated from TS
+// provider-response-shared-pure-blocks.ts & request-retry-helpers.ts
+// ---------------------------------------------------------------------------
+
+/// Substrings that indicate a context-length-exceeded error.
+const CONTEXT_LENGTH_MESSAGE_HINTS: &[&str] = &[
+    "context_length_exceeded",
+    "context_window_exceeded",
+    "model_context_window_exceeded",
+    "context length exceeded",
+    "context window exceeded",
+    "model's maximum context length",
+    "maximum context length",
+    "max context length",
+    "input_exceeds_limit",
+    "input exceeds limit",
+    "input tokens exceeds",
+    "input tokens exceed",
+    "内容超长",
+    "请删减后再试",
+    "对话长度上限",
+    "达到对话长度上限",
+];
+
+/// Upstream error code hints indicating rate limit.
+const RATE_LIMIT_ERROR_CODE_HINTS: &[&str] = &[
+    "429",
+    "1302",
+    "rate_limit",
+    "rate-limit",
+    "too_many_requests",
+    "too-many-requests",
+    "too many requests",
+];
+
+/// Substrings in error message indicating rate limit.
+const RATE_LIMIT_MESSAGE_HINTS: &[&str] = &[
+    "rate limit",
+    "too many requests",
+    "request limit",
+    "rate limited",
+    "quota exceeded",
+    "slow down",
+    "访问量过大",
+    "速率限制",
+    "请求频率",
+    "请求过于频繁",
+    "频率限制",
+];
+
+/// Substrings in error message indicating retryable network failure.
+const RETRYABLE_NETWORK_MESSAGE_HINTS: &[&str] = &[
+    "internal network failure",
+    "network failure",
+    "network error",
+    "api connection error",
+    "service unavailable",
+    "temporarily unavailable",
+    "temporarily unreachable",
+    "connection reset",
+    "connection closed",
+    "timed out",
+    "timeout",
+];
+
+/// Upstream error code hints indicating retryable network failure.
+const RETRYABLE_NETWORK_CODE_HINTS: &[&str] = &[
+    "internal_network_failure",
+    "network_error",
+    "api_connection_error",
+    "service_unavailable",
+    "request_timeout",
+    "timeout",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureClassification {
@@ -168,6 +244,310 @@ pub fn resolve_retry_execution_policy(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Error classification pure functions — migrated from TS batch #2
+// ---------------------------------------------------------------------------
+
+/// Check whether the error indicators suggest a context-length-exceeded error.
+/// Mirrors TS `isContextLengthExceededError`.
+pub fn is_context_length_exceeded_error(
+    message: &str,
+    upstream_code: Option<&str>,
+    detail_reason: Option<&str>,
+) -> bool {
+    let lowered_message = message.to_lowercase();
+    if let Some(code) = upstream_code {
+        let normalized = code.trim().to_lowercase();
+        if normalized.contains("context_length_exceeded")
+            || normalized.contains("context_window_exceeded")
+            || normalized.contains("model_context_window_exceeded")
+            || normalized.contains("input_exceeds_limit")
+        {
+            return true;
+        }
+    }
+    if let Some(reason) = detail_reason {
+        let normalized = reason.trim().to_lowercase();
+        if normalized == "context_length_exceeded"
+            || normalized == "context_window_exceeded"
+            || normalized == "model_context_window_exceeded"
+            || normalized == "input_exceeds_limit"
+        {
+            return true;
+        }
+    }
+    CONTEXT_LENGTH_MESSAGE_HINTS
+        .iter()
+        .any(|hint| lowered_message.contains(hint))
+}
+
+/// Check whether the error indicators suggest a rate-limit error.
+/// Mirrors TS `isRateLimitLikeError`.
+pub fn is_rate_limit_like_error(message: &str, codes: &[&str]) -> bool {
+    let lowered_message = message.to_lowercase();
+    for code in codes {
+        let normalized = code.trim().to_lowercase();
+        if !normalized.is_empty()
+            && RATE_LIMIT_ERROR_CODE_HINTS
+                .iter()
+                .any(|hint| normalized.contains(hint))
+        {
+            return true;
+        }
+    }
+    RATE_LIMIT_MESSAGE_HINTS
+        .iter()
+        .any(|hint| lowered_message.contains(hint))
+}
+
+/// Check whether the SSE wrapper error is retryable (network-level).
+/// Mirrors TS `isRetryableNetworkSseWrapperError` (pure string-matching subset).
+pub fn is_retryable_network_sse_wrapper_error(
+    message: &str,
+    upstream_code: Option<&str>,
+    status_code: Option<u16>,
+) -> bool {
+    // Status-based shortcuts
+    if let Some(status) = status_code {
+        if matches!(status, 408 | 425 | 502 | 503 | 504) {
+            return true;
+        }
+    }
+    let lowered_message = message.to_lowercase();
+    if let Some(code) = upstream_code {
+        let normalized = code.trim().to_lowercase();
+        if !normalized.is_empty()
+            && RETRYABLE_NETWORK_CODE_HINTS
+                .iter()
+                .any(|hint| normalized.contains(hint))
+        {
+            return true;
+        }
+    }
+    RETRYABLE_NETWORK_MESSAGE_HINTS
+        .iter()
+        .any(|hint| lowered_message.contains(hint))
+}
+
+/// Check whether an SSE-decoded error is a rate-limit error.
+/// Mirrors TS `isSseDecodeRateLimitError` (pure string-matching subset).
+pub fn is_sse_decode_rate_limit_error(
+    error_message: &str,
+    error_code: &str,
+    upstream_code: &str,
+    status: Option<u16>,
+) -> bool {
+    if status != Some(429) {
+        return false;
+    }
+    let lowered_message = error_message.to_lowercase();
+    let lowered_name = ""; // name field not available in this simplified version
+    let sse_like = error_code == "SSE_DECODE_ERROR"
+        || lowered_name == "providerprotocolerror"
+        || lowered_message.contains("sse");
+    sse_like && is_rate_limit_like_error(error_message, &[error_code, upstream_code])
+}
+
+/// Check whether an SSE-decoded error is a retryable network error.
+/// Mirrors TS `isSseDecodeRetryableNetworkError` (pure string-matching subset).
+pub fn is_sse_decode_retryable_network_error(
+    error_message: &str,
+    error_code: &str,
+    upstream_code: &str,
+    status: Option<u16>,
+) -> bool {
+    if status != Some(502) {
+        return false;
+    }
+    let lowered_message = error_message.to_lowercase();
+    let lowered_upstream = upstream_code.to_lowercase();
+    let sse_like = error_code == "HTTP_502"
+        || error_code == "SSE_DECODE_ERROR"
+        || lowered_message.contains("upstream sse error event")
+        || lowered_message.contains("anthropic sse error event");
+    if !sse_like {
+        return false;
+    }
+    lowered_upstream.contains("internal_network_failure")
+        || lowered_message.contains("internal network failure")
+        || lowered_message.contains("network failure")
+        || lowered_message.contains("network error")
+        || lowered_message.contains("service unavailable")
+        || lowered_message.contains("temporarily unavailable")
+        || lowered_message.contains("connection reset")
+        || lowered_message.contains("timeout")
+        || lowered_upstream.contains("upstream_stream_no_content_timeout")
+        || lowered_upstream.contains("upstream_stream_content_idle_timeout")
+}
+
+/// Check whether the error looks like a client disconnect (499 / CLIENT_DISCONNECTED).
+/// Mirrors TS `isClientDisconnectLikeError`.
+pub fn is_client_disconnect_like_error(
+    code: &str,
+    message: &str,
+    status: Option<u16>,
+    upstream_message: &str,
+) -> bool {
+    let upper_code = code.trim().to_uppercase();
+    let lower_message = message.to_lowercase();
+    let lower_upstream = upstream_message.to_lowercase();
+
+    if upper_code == "CLIENT_DISCONNECTED" {
+        return true;
+    }
+    if lower_message.contains("client_disconnected") || lower_message.contains("client disconnected") {
+        return true;
+    }
+    if status == Some(499) || upper_code == "HTTP_499" || lower_message.contains("http 499") {
+        if lower_message.contains("client abort request") || lower_message.contains("client closed request") {
+            return true;
+        }
+        if lower_upstream.contains("client abort request") || lower_upstream.contains("client closed request") {
+            return true;
+        }
+    }
+    if lower_message.contains("client abort request") || lower_message.contains("client closed request") {
+        return true;
+    }
+    if lower_message.contains("client_request_aborted") || lower_message.contains("client_response_closed") {
+        return true;
+    }
+    false
+}
+
+/// Check whether the error is a generic bridge response contract error.
+/// Mirrors TS `isGenericBridgeResponseContractError`.
+pub fn is_generic_bridge_response_contract_error(
+    error_code: &str,
+    error_name: &str,
+    message: &str,
+) -> bool {
+    if error_name.trim() != "ProviderProtocolError" {
+        return false;
+    }
+    if error_code.trim() != "MALFORMED_RESPONSE" {
+        return false;
+    }
+    let lowered = message.trim().to_lowercase();
+    lowered.contains("[hub_response] non-canonical response payload")
+        || lowered.contains("[hub_response] failed to canonicalize response payload")
+}
+
+// ---------------------------------------------------------------------------
+// NAPI JSON-boundary entry points for batch #2
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IsErrorClassificationOutput {
+    pub result: bool,
+}
+
+pub fn is_context_length_exceeded_error_json(input_json: String) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        message: String,
+        #[serde(default)]
+        upstream_code: Option<String>,
+        #[serde(default)]
+        detail_reason: Option<String>,
+    }
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| format!("parse input: {}", e))?;
+    let result = is_context_length_exceeded_error(
+        &input.message,
+        input.upstream_code.as_deref(),
+        input.detail_reason.as_deref(),
+    );
+    serde_json::to_string(&IsErrorClassificationOutput { result })
+        .map_err(|e| format!("serialize: {}", e))
+}
+
+pub fn is_rate_limit_like_error_json(input_json: String) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        message: String,
+        #[serde(default)]
+        codes: Vec<String>,
+    }
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| format!("parse input: {}", e))?;
+    let codes: Vec<&str> = input.codes.iter().map(|s| s.as_str()).collect();
+    let result = is_rate_limit_like_error(&input.message, &codes);
+    serde_json::to_string(&IsErrorClassificationOutput { result })
+        .map_err(|e| format!("serialize: {}", e))
+}
+
+pub fn is_retryable_network_sse_wrapper_error_json(input_json: String) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        message: String,
+        #[serde(default)]
+        upstream_code: Option<String>,
+        #[serde(default)]
+        status_code: Option<u16>,
+    }
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| format!("parse input: {}", e))?;
+    let result = is_retryable_network_sse_wrapper_error(
+        &input.message,
+        input.upstream_code.as_deref(),
+        input.status_code,
+    );
+    serde_json::to_string(&IsErrorClassificationOutput { result })
+        .map_err(|e| format!("serialize: {}", e))
+}
+
+pub fn is_client_disconnect_like_error_json(input_json: String) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        #[serde(default)]
+        code: String,
+        #[serde(default)]
+        message: String,
+        #[serde(default)]
+        status: Option<u16>,
+        #[serde(default)]
+        upstream_message: String,
+    }
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| format!("parse input: {}", e))?;
+    let result = is_client_disconnect_like_error(
+        &input.code,
+        &input.message,
+        input.status,
+        &input.upstream_message,
+    );
+    serde_json::to_string(&IsErrorClassificationOutput { result })
+        .map_err(|e| format!("serialize: {}", e))
+}
+
+pub fn is_generic_bridge_response_contract_error_json(input_json: String) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        #[serde(default)]
+        error_code: String,
+        #[serde(default)]
+        error_name: String,
+        #[serde(default)]
+        message: String,
+    }
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| format!("parse input: {}", e))?;
+    let result = is_generic_bridge_response_contract_error(
+        &input.error_code,
+        &input.error_name,
+        &input.message,
+    );
+    serde_json::to_string(&IsErrorClassificationOutput { result })
+        .map_err(|e| format!("serialize: {}", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +630,151 @@ mod tests {
         });
         assert!(!decision.exclude_current_provider);
         assert_eq!(decision.reason, "host_contract_failure");
+    }
+
+    // -----------------------------------------------------------------------
+    // Batch #2: Error classification pure functions
+    // -----------------------------------------------------------------------
+
+    // -- is_context_length_exceeded_error --
+
+    #[test]
+    fn context_exceeded_via_upstream_code() {
+        assert!(is_context_length_exceeded_error("some msg", Some("context_length_exceeded"), None));
+    }
+
+    #[test]
+    fn context_exceeded_via_message() {
+        assert!(is_context_length_exceeded_error("Context length exceeded for model gpt-4", None, None));
+    }
+
+    #[test]
+    fn context_exceeded_false_for_normal() {
+        assert!(!is_context_length_exceeded_error("normal error", None, None));
+    }
+
+    #[test]
+    fn context_exceeded_via_detail_reason() {
+        assert!(is_context_length_exceeded_error("msg", None, Some("context_window_exceeded")));
+    }
+
+    #[test]
+    fn context_exceeded_chinese_hint() {
+        assert!(is_context_length_exceeded_error("请删减后再试", None, None));
+    }
+
+    // -- is_rate_limit_like_error --
+
+    #[test]
+    fn rate_limit_via_code() {
+        assert!(is_rate_limit_like_error("some error", &["429"]));
+    }
+
+    #[test]
+    fn rate_limit_via_message() {
+        assert!(is_rate_limit_like_error("Rate limit exceeded", &[]));
+    }
+
+    #[test]
+    fn rate_limit_via_upstream_code() {
+        assert!(is_rate_limit_like_error("msg", &["too_many_requests"]));
+    }
+
+    #[test]
+    fn rate_limit_false_for_normal() {
+        assert!(!is_rate_limit_like_error("normal error", &["ok"]));
+    }
+
+    #[test]
+    fn rate_limit_chinese_hint() {
+        assert!(is_rate_limit_like_error("请求频率过高", &[]));
+    }
+
+    // -- is_retryable_network_sse_wrapper_error --
+
+    #[test]
+    fn retryable_network_via_status_502() {
+        assert!(is_retryable_network_sse_wrapper_error("msg", None, Some(502)));
+    }
+
+    #[test]
+    fn retryable_network_via_status_503() {
+        assert!(is_retryable_network_sse_wrapper_error("msg", None, Some(503)));
+    }
+
+    #[test]
+    fn retryable_network_via_message_timeout() {
+        assert!(is_retryable_network_sse_wrapper_error("request timed out", None, None));
+    }
+
+    #[test]
+    fn retryable_network_via_upstream_code() {
+        assert!(is_retryable_network_sse_wrapper_error("msg", Some("network_error"), None));
+    }
+
+    #[test]
+    fn retryable_network_false_for_normal() {
+        assert!(!is_retryable_network_sse_wrapper_error("normal", None, Some(200)));
+    }
+
+    // -- is_client_disconnect_like_error --
+
+    #[test]
+    fn client_disconnect_via_code() {
+        assert!(is_client_disconnect_like_error("CLIENT_DISCONNECTED", "", None, ""));
+    }
+
+    #[test]
+    fn client_disconnect_via_499_with_abort() {
+        assert!(is_client_disconnect_like_error("HTTP_499", "client abort request", None, ""));
+    }
+
+    #[test]
+    fn client_disconnect_via_message() {
+        assert!(is_client_disconnect_like_error("", "client disconnected", None, ""));
+    }
+
+    #[test]
+    fn client_disconnect_499_no_abort_returns_false() {
+        assert!(!is_client_disconnect_like_error("HTTP_499", "some other error", None, ""));
+    }
+
+    #[test]
+    fn client_disconnect_upstream_message() {
+        assert!(is_client_disconnect_like_error("", "", Some(499), "client closed request"));
+    }
+
+    #[test]
+    fn client_disconnect_false_for_normal() {
+        assert!(!is_client_disconnect_like_error("", "normal error", None, ""));
+    }
+
+    // -- is_generic_bridge_response_contract_error --
+
+    #[test]
+    fn bridge_contract_error_matches_non_canonical() {
+        assert!(is_generic_bridge_response_contract_error(
+            "MALFORMED_RESPONSE",
+            "ProviderProtocolError",
+            "[hub_response] non-canonical response payload"
+        ));
+    }
+
+    #[test]
+    fn bridge_contract_error_wrong_name_returns_false() {
+        assert!(!is_generic_bridge_response_contract_error(
+            "MALFORMED_RESPONSE",
+            "OtherError",
+            "[hub_response] non-canonical response payload"
+        ));
+    }
+
+    #[test]
+    fn bridge_contract_error_wrong_code_returns_false() {
+        assert!(!is_generic_bridge_response_contract_error(
+            "OTHER_CODE",
+            "ProviderProtocolError",
+            "[hub_response] non-canonical response payload"
+        ));
     }
 }
