@@ -6,22 +6,30 @@ import type { ModuleDependencies } from '../../../../src/modules/pipeline/interf
 import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 jest.unstable_mockModule(
-  '../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js',
-  () => ({
-    resolveRequestExecutorNativeRetryPolicy: jest.fn(() => ({
+  '../../../../src/modules/llmswitch/bridge/native-exports.js',
+  async () => {
+    const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.js');
+    return {
+      ...actual,
+      resolveProviderRetryExecutionPolicyNative: jest.fn(() => ({
       excludeCurrentProvider: true,
       reason: 'existing_exclusion'
-    }))
-  })
+      }))
+    };
+  }
 );
 jest.unstable_mockModule(
-  '../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.ts',
-  () => ({
-    resolveRequestExecutorNativeRetryPolicy: jest.fn(() => ({
+  '../../../../src/modules/llmswitch/bridge/native-exports.ts',
+  async () => {
+    const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.ts');
+    return {
+      ...actual,
+      resolveProviderRetryExecutionPolicyNative: jest.fn(() => ({
       excludeCurrentProvider: true,
       reason: 'existing_exclusion'
-    }))
-  })
+      }))
+    };
+  }
 );
 
 const mockRebindResponsesConversationRequestId = jest.fn(async () => {

@@ -2,35 +2,39 @@ import { jest } from '@jest/globals';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
 import type { ProviderTrafficGovernorLike } from '../../../../src/server/runtime/http-server/provider-traffic-governor.js';
 
-jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js', () => ({
-  resolveRequestExecutorNativeRetryPolicy: jest.fn((input: {
-    classification?: string;
-    isStreamingRequest?: boolean;
-    hostContractFailure?: boolean;
-    forceExcludeCurrentProviderOnRetry?: boolean;
-    errorCode?: string;
-    promptTooLong?: boolean;
-    existingExclusion?: boolean;
-  }) => {
-    if (
-      input.hostContractFailure
-      && input.errorCode !== 'EMPTY_ASSISTANT_RESPONSE'
-      && input.errorCode !== 'MISSING_REQUIRED_TOOL_CALL'
-    ) {
-      return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
-    }
-    if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) {
-      return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
-    }
-    if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
-      return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
-    }
-    return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
-  })
-}));
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', async () => {
+  const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.ts');
+  return {
+    ...actual,
+    resolveProviderRetryExecutionPolicyNative: jest.fn((input: {
+      classification?: string;
+      isStreamingRequest?: boolean;
+      hostContractFailure?: boolean;
+      forceExcludeCurrentProviderOnRetry?: boolean;
+      errorCode?: string;
+      promptTooLong?: boolean;
+      existingExclusion?: boolean;
+    }) => {
+      if (
+        input.hostContractFailure
+        && input.errorCode !== 'EMPTY_ASSISTANT_RESPONSE'
+        && input.errorCode !== 'MISSING_REQUIRED_TOOL_CALL'
+      ) {
+        return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
+      }
+      if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) {
+        return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
+      }
+      if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
+        return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
+      }
+      return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
+    })
+  };
+});
 
-  const { __requestExecutorTestables, createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
-  const { resolveProviderFailureActionPlan } = await import('../../../../src/providers/core/runtime/provider-failure-policy.js');
+const { __requestExecutorTestables, createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
+const { resolveProviderFailureActionPlan } = await import('../../../../src/providers/core/runtime/provider-failure-policy.js');
 const { getServerToolRuntimeState, setServerToolEnabled } = await import('../../../../src/server/runtime/http-server/servertool-admin-state');
 const { StatsManager } = await import('../../../../src/server/runtime/http-server/stats-manager');
 const { createBridgeHttpServerMock } = await import('../../../helpers/bridge-http-server-mock');

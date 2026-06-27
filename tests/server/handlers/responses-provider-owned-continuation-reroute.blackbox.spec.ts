@@ -1,22 +1,26 @@
 import { jest } from '@jest/globals';
 
-jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js', () => ({
-  resolveRequestExecutorNativeRetryPolicy: jest.fn((input: {
-    classification?: string;
-    isStreamingRequest?: boolean;
-    hostContractFailure?: boolean;
-    forceExcludeCurrentProviderOnRetry?: boolean;
-    promptTooLong?: boolean;
-    existingExclusion?: boolean;
-  }) => {
-    if (input.hostContractFailure) return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
-    if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
-    if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
-      return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
-    }
-    return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
-  })
-}));
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', async () => {
+  const actual = await import('../../../src/modules/llmswitch/bridge/native-exports.js');
+  return {
+    ...actual,
+    resolveProviderRetryExecutionPolicyNative: jest.fn((input: {
+      classification?: string;
+      isStreamingRequest?: boolean;
+      hostContractFailure?: boolean;
+      forceExcludeCurrentProviderOnRetry?: boolean;
+      promptTooLong?: boolean;
+      existingExclusion?: boolean;
+    }) => {
+      if (input.hostContractFailure) return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
+      if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
+      if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
+        return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
+      }
+      return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
+    })
+  };
+});
 
 const mockBridgeWithStoplessStateStubs = async () => {
   const routing = await import('../../../src/modules/llmswitch/bridge/routing-integrations.ts');

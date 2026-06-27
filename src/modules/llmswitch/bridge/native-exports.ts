@@ -30,6 +30,7 @@ type NativeFailurePolicyModule = {
     isStreamingRequest?: boolean;
     hostContractFailure?: boolean;
     forceExcludeCurrentProviderOnRetry?: boolean;
+    errorCode?: string;
     promptTooLong?: boolean;
     existingExclusion?: boolean;
   }) => {
@@ -1144,6 +1145,7 @@ export function resolveProviderRetryExecutionPolicyNative(input: {
   isStreamingRequest?: boolean;
   hostContractFailure?: boolean;
   forceExcludeCurrentProviderOnRetry?: boolean;
+  errorCode?: string;
   promptTooLong?: boolean;
   existingExclusion?: boolean;
 }): {

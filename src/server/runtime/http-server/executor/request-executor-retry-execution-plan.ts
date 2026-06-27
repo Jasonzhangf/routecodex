@@ -2,8 +2,8 @@ import {
   isHostRequestExecutorErrorStage,
 } from './request-executor-provider-failure.js';
 import {
-  resolveRequestExecutorNativeRetryPolicy,
-} from './request-executor-native-retry-policy.js';
+  resolveProviderRetryExecutionPolicyNative,
+} from '../../../../modules/llmswitch/bridge/native-exports.js';
 import {
   hasAlternativeRouteCandidate,
   resolveProviderRetryExclusionPlan
@@ -149,7 +149,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   if (!classification) {
     throw new Error('[request-executor] provider failure classification missing');
   }
-  const nativeExecutionPolicy = resolveRequestExecutorNativeRetryPolicy({
+  const nativeExecutionPolicy = resolveProviderRetryExecutionPolicyNative({
     classification,
     isStreamingRequest: args.isStreamingRequest === true,
     hostContractFailure,

@@ -2,9 +2,9 @@ import { jest } from '@jest/globals';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
 
 jest.unstable_mockModule(
-  '../../../../src/server/runtime/http-server/executor/request-executor-native-retry-policy.js',
+  '../../../../src/modules/llmswitch/bridge/native-exports.js',
   () => ({
-    resolveRequestExecutorNativeRetryPolicy: jest.fn((input: {
+    resolveProviderRetryExecutionPolicyNative: jest.fn((input: {
       forceExcludeCurrentProviderOnRetry?: boolean;
       existingExclusion?: boolean;
       classification?: string;

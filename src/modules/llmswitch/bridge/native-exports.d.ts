@@ -127,6 +127,7 @@ export declare function resolveProviderRetryExecutionPolicyNative(input: {
     isStreamingRequest?: boolean;
     hostContractFailure?: boolean;
     forceExcludeCurrentProviderOnRetry?: boolean;
+    errorCode?: string;
     promptTooLong?: boolean;
     existingExclusion?: boolean;
 }): {
