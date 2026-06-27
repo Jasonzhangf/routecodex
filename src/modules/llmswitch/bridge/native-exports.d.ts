@@ -119,9 +119,6 @@ export declare function extractServertoolCliResultRouteHintFromRequestNative(inp
     adapterContext?: Record<string, unknown>;
     runtimeMetadata?: Record<string, unknown>;
 }): string | undefined;
-export declare function isBlockingRecoverableNative(classification: NativeFailureClassification, stage: string | undefined): boolean;
-export declare function shouldRetryNative(classification: NativeFailureClassification, attempt: number, maxAttempts: number): boolean;
-export declare function computeBackoffMsNative(classification: NativeFailureClassification, attempt: number): number;
 export declare function resolveProviderRetryExecutionPolicyNative(input: {
     classification: NativeFailureClassification;
     isStreamingRequest?: boolean;

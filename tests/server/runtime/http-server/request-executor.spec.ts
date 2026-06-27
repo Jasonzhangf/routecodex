@@ -557,6 +557,9 @@ describe('HubRequestExecutor failover', () => {
       expect(secondPipelineInput?.target?.providerKey ?? secondPipelineInput?.providerKey).toBe(providerB);
       expect((executor as any).logStage.mock.calls.some((call: unknown[]) => call[0] === 'provider.route_pool_cooldown_wait')).toBe(false);
       expect((executor as any).logStage.mock.calls.some((call: unknown[]) => call[0] === 'server.global_error_backoff_wait')).toBe(false);
+      expect((executor as any).logStage.mock.calls.some((call: unknown[]) => (
+        call[0] === 'provider.route_pool_cooldown_wait.completed'
+      ))).toBe(false);
     } finally {
       if (previousMaxAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -1789,9 +1792,8 @@ describe('HubRequestExecutor failover', () => {
       classification: 'recoverable',
       promptTooLong: true,
     });
-    expect(promptTooLongPlan).toEqual({
-      shouldRetry: true,
-      blockingRecoverable: false
+      expect(promptTooLongPlan).toEqual({
+      shouldRetry: true
     });
 
     expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
@@ -1917,8 +1919,7 @@ describe('HubRequestExecutor failover', () => {
       errorCode: 'MALFORMED_REQUEST',
       reason: 'tool history contract violated'
     })).toEqual({
-      shouldRetry: false,
-      blockingRecoverable: false
+      shouldRetry: false
     });
 
     const followupEligibilityPlan = resolveProviderFailureActionPlan({
@@ -1935,8 +1936,7 @@ describe('HubRequestExecutor failover', () => {
       classification: undefined
     });
     expect(followupEligibilityPlan).toEqual({
-      shouldRetry: false,
-      blockingRecoverable: false
+      shouldRetry: false
     });
 
     const orchestratorExcluded = new Set<string>();
@@ -2070,7 +2070,6 @@ describe('HubRequestExecutor failover', () => {
       });
       expect(notFoundExecutionPlan).toEqual({
         shouldRetry: false,
-        blockingRecoverable: false,
         excludedCurrentProvider: true,
         });
 
@@ -2108,7 +2107,6 @@ describe('HubRequestExecutor failover', () => {
       });
       expect(sqliteBusyExecutionPlan).toEqual(expect.objectContaining({
         shouldRetry: true,
-        blockingRecoverable: true,
         excludedCurrentProvider: true,
         retrySwitchPlan: expect.objectContaining({
           switchAction: 'exclude_and_reroute',
@@ -2167,8 +2165,7 @@ describe('HubRequestExecutor failover', () => {
       errorCode: 'MALFORMED_REQUEST',
       reason: 'tool history contract violated'
     })).toEqual({
-      shouldRetry: false,
-      blockingRecoverable: false
+      shouldRetry: false
     });
   });
 
@@ -2193,8 +2190,7 @@ describe('HubRequestExecutor failover', () => {
       classification: 'recoverable',
       promptTooLong: true,
     })).toEqual({
-      shouldRetry: true,
-      blockingRecoverable: false
+      shouldRetry: true
     });
   });
 

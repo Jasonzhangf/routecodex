@@ -170,7 +170,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -544,7 +543,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -586,7 +584,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -629,7 +626,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -711,7 +707,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true
     }));
   });
@@ -760,7 +755,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -779,7 +773,6 @@ describe('provider failure policy ssot', () => {
       maxContextOverflowRetries: 1
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      blockingRecoverable: false,
       shouldRetry: true
     }));
 
@@ -795,7 +788,6 @@ describe('provider failure policy ssot', () => {
       maxContextOverflowRetries: 1
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      blockingRecoverable: false,
       shouldRetry: true
     }));
   });
@@ -835,7 +827,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -869,7 +860,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -893,7 +883,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -918,7 +907,6 @@ describe('provider failure policy ssot', () => {
     expect(plan).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -943,7 +931,6 @@ describe('provider failure policy ssot', () => {
     expect(plan).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative'
     }));
@@ -985,7 +972,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -1028,7 +1014,6 @@ describe('provider failure policy ssot', () => {
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
       affectsHealth: true,
-      blockingRecoverable: false,
       shouldRetry: true,
       action: 'reroute_explicit_alternative'
     }));

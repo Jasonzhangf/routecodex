@@ -41,53 +41,6 @@ export function classifyProviderFailure(
   return JSON.parse(fn(statusCode, errorCode, upstreamCode, isNetworkError));
 }
 
-export function isBlockingRecoverableNative(
-  classification: FailureClassification,
-  stage?: string,
-): boolean {
-  const binding = getBindingOrThrow();
-  const fn = binding.isProviderFailureBlockingRecoverableJson as (
-    classificationJson: string,
-    stage: string | undefined,
-  ) => boolean;
-  if (typeof fn !== 'function') {
-    throw failNativeRequired('isProviderFailureBlockingRecoverableJson');
-  }
-  return fn(JSON.stringify(classification), stage);
-}
-
-export function shouldRetryNative(
-  classification: FailureClassification,
-  attempt: number,
-  maxAttempts: number,
-): boolean {
-  const binding = getBindingOrThrow();
-  const fn = binding.shouldRetryProviderFailureJson as (
-    classificationJson: string,
-    attempt: number,
-    maxAttempts: number,
-  ) => boolean;
-  if (typeof fn !== 'function') {
-    throw failNativeRequired('shouldRetryProviderFailureJson');
-  }
-  return fn(JSON.stringify(classification), attempt, maxAttempts);
-}
-
-export function computeBackoffMsNative(
-  classification: FailureClassification,
-  attempt: number,
-): number {
-  const binding = getBindingOrThrow();
-  const fn = binding.computeProviderBackoffMsJson as (
-    classificationJson: string,
-    attempt: number,
-  ) => number;
-  if (typeof fn !== 'function') {
-    throw failNativeRequired('computeProviderBackoffMsJson');
-  }
-  return fn(JSON.stringify(classification), attempt);
-}
-
 export type ProviderRetryExecutionPolicyInput = {
   classification: FailureClassification;
   isStreamingRequest?: boolean;

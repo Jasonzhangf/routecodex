@@ -66,13 +66,6 @@ function buildFailurePolicyModuleFromRouterHotpathBinding(binding) {
     }
     return {
         classifyProviderFailure: (statusCode, errorCode, upstreamCode, isNetworkError) => JSON.parse(String(binding.classifyProviderFailureJson(statusCode, errorCode, upstreamCode, isNetworkError))),
-        computeBackoffMsNative: (classification, attempt) => {
-            const fn = binding.computeProviderBackoffMsJson;
-            if (typeof fn !== 'function') {
-                throw new Error('[llmswitch-bridge] computeProviderBackoffMsJson not available');
-            }
-            return Number(fn(JSON.stringify(classification), attempt));
-        },
         resolveProviderRetryExecutionPolicyNative: (input) => JSON.parse(String(binding.resolveProviderRetryExecutionPolicyJson(JSON.stringify(input)))),
         getNetworkErrorCodes: () => {
             const fn = binding.networkErrorSetJson;
@@ -80,20 +73,6 @@ function buildFailurePolicyModuleFromRouterHotpathBinding(binding) {
                 throw new Error('[llmswitch-bridge] networkErrorSetJson not available');
             }
             return JSON.parse(String(fn()));
-        },
-        isBlockingRecoverableNative: (classification, stage) => {
-            const fn = binding.isProviderFailureBlockingRecoverableJson;
-            if (typeof fn !== 'function') {
-                throw new Error('[llmswitch-bridge] isProviderFailureBlockingRecoverableJson not available');
-            }
-            return Boolean(fn(JSON.stringify(classification), stage));
-        },
-        shouldRetryNative: (classification, attempt, maxAttempts) => {
-            const fn = binding.shouldRetryProviderFailureJson;
-            if (typeof fn !== 'function') {
-                throw new Error('[llmswitch-bridge] shouldRetryProviderFailureJson not available');
-            }
-            return Boolean(fn(JSON.stringify(classification), attempt, maxAttempts));
         },
     };
 }
