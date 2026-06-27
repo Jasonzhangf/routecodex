@@ -59,6 +59,7 @@ mod hub_tool_session_compat;
 mod metadata_center;
 mod openai_openai_codec;
 mod provider_response_shared_pure_blocks;
+mod provider_response_tool_validation_blocks;
 mod direct_decision;
 mod primary_exhausted_to_default_pool_blocks;
 mod req_executor_pipeline_attempt;
@@ -2628,6 +2629,30 @@ pub fn is_client_disconnect_like_error_json(input_json: String) -> NapiResult<St
 #[napi]
 pub fn is_generic_bridge_response_contract_error_json(input_json: String) -> NapiResult<String> {
     failure_policy::is_generic_bridge_response_contract_error_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+// ---------------------------------------------------------------------------
+// provider_response_tool_validation_blocks NAPI exports — batch #5
+// ---------------------------------------------------------------------------
+
+use provider_response_tool_validation_blocks::validation;
+
+#[napi]
+pub fn validate_canonical_client_tool_call_json(input_json: String) -> NapiResult<String> {
+    validation::validate_canonical_client_tool_call_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn contains_broad_kill_command_json(input_json: String) -> NapiResult<String> {
+    validation::contains_broad_kill_command_json(input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn has_invalid_shell_wrapper_shape_json(input_json: String) -> NapiResult<String> {
+    validation::has_invalid_shell_wrapper_shape_json(input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
