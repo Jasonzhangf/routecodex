@@ -10,6 +10,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "applyClaudeThinkingToolSchemaCompatJson",
   "normalizeStoplessTriggerHintForMetadataJson",
   "buildStoplessMetadataCenterWritePlanJson",
+  "buildStoplessAutoHandlerInputJson",
   "runStopMessageAutoHandlerJson",
   "buildOpenaiChatFromAnthropicJson",
   "buildOpenaiChatResponseFromAnthropicMessageJson",

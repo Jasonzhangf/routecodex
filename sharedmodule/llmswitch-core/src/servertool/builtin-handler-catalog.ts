@@ -5,17 +5,9 @@ import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
 import { getServertoolToolSpec, listServertoolToolSpecs } from './skeleton-config.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import {
-  extractStopMessageAutoCliResultSnapshotFromRequestWithNative,
-  getCapturedRequestWithNative,
-  planStopMessageDefaultConfigWithNative,
-  planStoplessDecisionContextSignalsWithNative,
-  resolveRuntimeStopMessageStateFromAdapterContextWithNative,
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
-import {
   applyStoplessMetadataCenterWritePlan,
   buildStoplessMetadataCenterWritePlan
 } from './stopless-metadata-center-writer.js';
-import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 type StopMessageHandlerPlan = {
@@ -37,16 +29,7 @@ type StopMessageHandlerPlan = {
   goalLoopGoalContextCount?: number;
   flowId?: string;
   effectiveDecision?: Record<string, unknown>;
-  persistPlan?: { nextUsed: number; nextMaxRepeats: number };
-  stoplessTriggerHint?: string;
-  schemaFeedback?: { reasonCode: string; missingFields: string[] };
-  assistantStopText?: string;
-  nativeHandlerResult?: {
-    followup?: unknown;
-    chatResponse?: unknown;
-    stoplessRuntimeState?: unknown;
-  };
-  finalizeStopless?: Record<string, unknown>;
+  finalizeContext?: Record<string, unknown>;
 } & Record<string, unknown>;
 
 function isBuiltinRuntimeSupported(name: string): boolean {
@@ -95,199 +78,6 @@ function buildRuntimeMetadataCarrier(record: Record<string, unknown>): Record<st
   return Object.keys(carrier).length > 0 ? carrier : undefined;
 }
 
-function readStopMessageCompareContextFromRuntimeControl(
-  record: Record<string, unknown>
-): Record<string, unknown> | undefined {
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(record);
-  const compare = runtimeControl?.stopMessageCompareContext;
-  return compare && typeof compare === 'object' && !Array.isArray(compare)
-    ? compare as Record<string, unknown>
-    : undefined;
-}
-
-function normalizeStoplessRuntimeLoopState(
-  snapshot: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!snapshot) {
-    return undefined;
-  }
-
-  const repeatCount =
-    typeof snapshot.repeatCount === 'number' && Number.isFinite(snapshot.repeatCount)
-      ? Math.max(1, Math.floor(snapshot.repeatCount))
-      : undefined;
-  const maxRepeats =
-    typeof snapshot.maxRepeats === 'number' && Number.isFinite(snapshot.maxRepeats)
-      ? Math.max(1, Math.floor(snapshot.maxRepeats))
-      : undefined;
-  const continuationPrompt =
-    typeof snapshot.continuationPrompt === 'string' && snapshot.continuationPrompt.trim()
-      ? snapshot.continuationPrompt.trim()
-      : undefined;
-  const triggerHint =
-    typeof snapshot.triggerHint === 'string' && snapshot.triggerHint.trim()
-      ? snapshot.triggerHint.trim()
-      : undefined;
-  const schemaFeedback =
-    snapshot.schemaFeedback && typeof snapshot.schemaFeedback === 'object' && !Array.isArray(snapshot.schemaFeedback)
-      ? snapshot.schemaFeedback
-      : undefined;
-
-  if (repeatCount === undefined && maxRepeats === undefined && !continuationPrompt && !triggerHint && !schemaFeedback) {
-    return snapshot;
-  }
-
-  return {
-    ...(typeof snapshot === 'object' ? snapshot : {}),
-    ...(repeatCount !== undefined ? { used: repeatCount } : {}),
-    ...(maxRepeats !== undefined ? { maxRepeats } : {}),
-    ...(continuationPrompt ? { continuationPrompt } : {}),
-    ...(triggerHint ? { triggerHint } : {}),
-    ...(schemaFeedback ? { schemaFeedback } : {})
-  };
-}
-
-function normalizePersistedStoplessControlState(
-  snapshot: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!snapshot) {
-    return undefined;
-  }
-
-  const repeatCount =
-    typeof snapshot.repeatCount === 'number' && Number.isFinite(snapshot.repeatCount)
-      ? Math.max(0, Math.floor(snapshot.repeatCount))
-      : undefined;
-  const maxRepeats =
-    typeof snapshot.maxRepeats === 'number' && Number.isFinite(snapshot.maxRepeats)
-      ? Math.max(1, Math.floor(snapshot.maxRepeats))
-      : undefined;
-  const continuationPrompt =
-    typeof snapshot.continuationPrompt === 'string' && snapshot.continuationPrompt.trim()
-      ? snapshot.continuationPrompt.trim()
-      : undefined;
-  const triggerHint =
-    typeof snapshot.triggerHint === 'string' && snapshot.triggerHint.trim()
-      ? snapshot.triggerHint.trim()
-      : undefined;
-  const schemaFeedback =
-    snapshot.schemaFeedback && typeof snapshot.schemaFeedback === 'object' && !Array.isArray(snapshot.schemaFeedback)
-      ? snapshot.schemaFeedback
-      : undefined;
-
-  if (repeatCount === undefined && maxRepeats === undefined && !continuationPrompt && !triggerHint && !schemaFeedback) {
-    return snapshot;
-  }
-
-  return {
-    ...(typeof snapshot === 'object' ? snapshot : {}),
-    ...(repeatCount !== undefined ? { used: repeatCount } : {}),
-    ...(maxRepeats !== undefined ? { maxRepeats } : {}),
-    ...(continuationPrompt ? { continuationPrompt } : {}),
-    ...(triggerHint ? { triggerHint } : {}),
-    ...(schemaFeedback ? { schemaFeedback } : {})
-  };
-}
-
-function buildStoplessAutoHandlerInput(ctx: ServerToolHandlerContext): Record<string, unknown> {
-  const adapterContext = ctx.adapterContext as Record<string, unknown>;
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext);
-  const runtimeMetadataCarrier = buildRuntimeMetadataCarrier(adapterContext);
-  const capturedRequest = getCapturedRequestWithNative(adapterContext);
-  const currentToolOutputSnapshot = extractStopMessageAutoCliResultSnapshotFromRequestWithNative({
-    adapterContext,
-    runtimeMetadata: runtimeMetadataCarrier,
-  });
-  const defaultConfig = planStopMessageDefaultConfigWithNative({
-    tombstoneCleared: false,
-    configEnabled: true,
-    configText: undefined,
-    configMaxRepeats: undefined,
-    envText: undefined,
-    envMaxRepeats: undefined,
-  });
-  const decisionSignals = planStoplessDecisionContextSignalsWithNative({
-    adapterContext,
-    runtimeMetadata: runtimeControl,
-    capturedRequest,
-  });
-  const normalizedCurrentToolOutputSnapshot = normalizeStoplessRuntimeLoopState(currentToolOutputSnapshot);
-  const resolvedRuntimeLoopState = resolveRuntimeStopMessageStateFromAdapterContextWithNative({
-    adapterContext,
-    runtimeMetadata: runtimeMetadataCarrier,
-  });
-  const effectiveRuntimeLoopState =
-    normalizedCurrentToolOutputSnapshot
-    ?? normalizePersistedStoplessControlState(resolvedRuntimeLoopState);
-  return {
-    adapterContext,
-    base: ctx.base,
-    requestId: ctx.requestId,
-    followupFlowId: undefined,
-    shouldRunVisionFlow: false,
-    shouldBypassStopMessageForMedia: false,
-    metadataRuntimeControl: runtimeControl ?? null,
-    metadataPreviousCompare: readStopMessageCompareContextFromRuntimeControl(adapterContext) ?? null,
-    defaultConfig,
-    decisionSignals,
-    capturedRequest,
-    effectiveRuntimeLoopState,
-    providerKey: undefined,
-  };
-}
-
-function buildStoplessRuntimeExecutionContext(
-  plan: StopMessageHandlerPlan
-): JsonObject | undefined {
-  if (plan.action !== 'return_handler_plan') return undefined;
-  const runtimeContext: JsonObject = {};
-  const effectiveDecision =
-    plan.effectiveDecision && typeof plan.effectiveDecision === 'object' && !Array.isArray(plan.effectiveDecision)
-      ? plan.effectiveDecision as JsonObject
-      : undefined;
-  const stoplessRuntimeState =
-    plan.nativeHandlerResult?.stoplessRuntimeState
-    && typeof plan.nativeHandlerResult.stoplessRuntimeState === 'object'
-    && !Array.isArray(plan.nativeHandlerResult.stoplessRuntimeState)
-      ? plan.nativeHandlerResult.stoplessRuntimeState as JsonObject
-      : undefined;
-  const finalizeStopless =
-    plan.finalizeStopless
-    && typeof plan.finalizeStopless === 'object'
-    && !Array.isArray(plan.finalizeStopless)
-      ? plan.finalizeStopless as JsonObject
-      : undefined;
-
-  const currentRepeatCount =
-    typeof finalizeStopless?.repeatCount === 'number'
-      ? Math.max(1, Math.floor(finalizeStopless.repeatCount))
-      : typeof effectiveDecision?.used === 'number'
-        ? Math.max(1, Math.floor(effectiveDecision.used) + 1)
-        : undefined;
-  const currentMaxRepeats =
-    typeof finalizeStopless?.maxRepeats === 'number'
-      ? Math.max(1, Math.floor(finalizeStopless.maxRepeats))
-      : typeof effectiveDecision?.maxRepeats === 'number'
-        ? Math.max(1, Math.floor(effectiveDecision.maxRepeats))
-        : typeof effectiveDecision?.max_repeats === 'number'
-          ? Math.max(1, Math.floor(effectiveDecision.max_repeats))
-          : undefined;
-  if (currentRepeatCount !== undefined && currentMaxRepeats !== undefined) {
-    runtimeContext.stopless = {
-      flowId: plan.flowId ?? 'stop_message_flow',
-      repeatCount: currentRepeatCount,
-      maxRepeats: currentMaxRepeats,
-      ...(typeof plan.stoplessTriggerHint === 'string' ? { triggerHint: plan.stoplessTriggerHint } : {}),
-      ...(plan.schemaFeedback ? { schemaFeedback: plan.schemaFeedback } : {}),
-    } as JsonObject;
-  }
-  if (stoplessRuntimeState) {
-    runtimeContext.stoplessRuntimeState = stoplessRuntimeState;
-  }
-
-  return Object.keys(runtimeContext).length > 0 ? runtimeContext : undefined;
-}
-
 async function planStoplessAutoHandlerNapi(input: Record<string, unknown>): Promise<StopMessageHandlerPlan> {
   const fn = readNativeFunction('planStoplessAutoHandlerJson');
   if (!fn) {
@@ -301,6 +91,30 @@ async function planStoplessAutoHandlerNapi(input: Record<string, unknown>): Prom
     return raw as StopMessageHandlerPlan;
   }
   throw new Error(`planStoplessAutoHandlerJson native returned unsupported payload: ${typeof raw}`);
+}
+
+async function buildStoplessAutoHandlerInputNapi(
+  ctx: ServerToolHandlerContext
+): Promise<Record<string, unknown>> {
+  const fn = readNativeFunction('buildStoplessAutoHandlerInputJson');
+  if (!fn) {
+    throw new Error('buildStoplessAutoHandlerInputJson native unavailable');
+  }
+  const adapterContext = ctx.adapterContext as Record<string, unknown>;
+  const runtimeMetadataCarrier = buildRuntimeMetadataCarrier(adapterContext);
+  const raw = fn(JSON.stringify({
+    adapterContext,
+    base: ctx.base,
+    requestId: ctx.requestId,
+    runtimeMetadata: runtimeMetadataCarrier ?? null,
+  }));
+  if (typeof raw === 'string') {
+    return JSON.parse(raw) as Record<string, unknown>;
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  throw new Error(`buildStoplessAutoHandlerInputJson native returned unsupported payload: ${typeof raw}`);
 }
 
 async function writeStoplessLearnedNoteNapi(args: {
@@ -318,7 +132,7 @@ async function runBuiltinStopMessageAutoHandler(
   ctx: ServerToolHandlerContext
 ): Promise<{ flowId: string; finalize: () => Promise<ServerToolHandlerResult> } | null> {
   const record = ctx.adapterContext as Record<string, unknown>;
-  const plan = await planStoplessAutoHandlerNapi(buildStoplessAutoHandlerInput(ctx));
+  const plan = await planStoplessAutoHandlerNapi(await buildStoplessAutoHandlerInputNapi(ctx));
 
   if (plan.compareContext) {
     const centerSnapshot = readMetadataCenterSnapshot(record);
@@ -383,21 +197,20 @@ async function runBuiltinStopMessageAutoHandler(
         })
       };
     case 'return_handler_plan':
+      const finalizeContext =
+        plan.finalizeContext && typeof plan.finalizeContext === 'object' && !Array.isArray(plan.finalizeContext)
+          ? plan.finalizeContext as JsonObject
+          : undefined;
       return {
         flowId: plan.flowId ?? 'stop_message_flow',
         finalize: async (): Promise<ServerToolHandlerResult> => ({
           chatResponse: ctx.base as JsonObject,
           execution: {
             flowId: plan.flowId ?? 'stop_message_flow',
-            context: {
+            context: finalizeContext ?? ({
               decision: (plan.effectiveDecision ?? {}) as JsonObject,
               assistantStopText: plan.assistantStopText ?? '',
-              ...(typeof plan.stoplessTriggerHint === 'string'
-                ? { stopSchemaTriggerHint: plan.stoplessTriggerHint }
-                : {}),
-              ...(plan.schemaFeedback ? { stopSchemaFeedback: plan.schemaFeedback } : {}),
-              ...(buildStoplessRuntimeExecutionContext(plan) ?? {})
-            }
+            } as JsonObject)
           }
         })
       };

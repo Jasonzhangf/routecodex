@@ -16,7 +16,11 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use servertool_core::cli_contract::{self, ClientExecCliProjectionInput};
+use servertool_core::cli_result_guard;
+use servertool_core::persisted_lookup;
+use servertool_core::stop_message_default_config::{self, StopMessageDefaultConfigInput};
 use servertool_core::stop_message_auto_handler::{self, StopMessageAutoHandlerInput};
+use servertool_core::stopless_decision_context_signals::{self, StoplessDecisionContextSignalsInput};
 use servertool_core::stopless_cli_projection_context_contract;
 use servertool_core::stopless_learned_note_contract;
 
@@ -64,6 +68,89 @@ pub fn plan_stopless_auto_handler_json(input_json: String) -> NapiResult<String>
     let plan = stop_message_auto_handler::plan_stop_message_auto_handler(&input);
     serde_json::to_string(&plan)
         .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageAutoHandlerPlan: {e}")))
+}
+
+#[napi]
+pub fn build_stopless_auto_handler_input_json(input_json: String) -> NapiResult<String> {
+    let input: StoplessAutoHandlerRuntimeInput =
+        serde_json::from_str(&input_json).map_err(|e| {
+            napi::Error::from_reason(format!(
+                "deserialize StoplessAutoHandlerRuntimeInput: {e}"
+            ))
+        })?;
+
+    let metadata_runtime_control = input
+        .runtime_metadata
+        .as_ref()
+        .and_then(|value| value.get("metadataCenterSnapshot"))
+        .and_then(|value| value.get("runtimeControl"))
+        .cloned()
+        .or_else(|| {
+            input
+                .adapter_context
+                .get("metadataCenterSnapshot")
+                .and_then(|value| value.get("runtimeControl"))
+                .cloned()
+        });
+
+    let metadata_previous_compare = metadata_runtime_control
+        .as_ref()
+        .and_then(|value| value.get("stopMessageCompareContext"))
+        .cloned();
+
+    let captured_request = persisted_lookup::get_captured_request(&input.adapter_context);
+    let decision_signals =
+        stopless_decision_context_signals::plan_stopless_decision_context_signals(
+            &StoplessDecisionContextSignalsInput {
+                adapter_context: input.adapter_context.clone(),
+                runtime_metadata: input.runtime_metadata.clone(),
+                captured_request: captured_request.clone(),
+            },
+        );
+    let default_config =
+        stop_message_default_config::plan_stop_message_default_config(&StopMessageDefaultConfigInput {
+            tombstone_cleared: Some(false),
+            config_enabled: None,
+            config_text: None,
+            config_max_repeats: None,
+            env_text: None,
+            env_max_repeats: None,
+        });
+    let current_tool_output_snapshot =
+        cli_result_guard::extract_stop_message_auto_cli_result_snapshot_from_request(
+            &serde_json::json!({
+                "adapterContext": input.adapter_context,
+                "runtimeMetadata": input.runtime_metadata,
+            }),
+        );
+    let effective_runtime_loop_state = current_tool_output_snapshot.or_else(|| {
+        persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context(
+            &persisted_lookup::RuntimeStopMessageStateFromAdapterContextInput {
+                adapter_context: input.adapter_context.clone(),
+                runtime_metadata: input.runtime_metadata.clone(),
+            },
+        )
+        .and_then(|snapshot| serde_json::to_value(snapshot).ok())
+    });
+
+    let output = serde_json::json!({
+        "adapterContext": input.adapter_context,
+        "base": input.base,
+        "requestId": input.request_id,
+        "followupFlowId": Value::Null,
+        "shouldRunVisionFlow": false,
+        "shouldBypassStopMessageForMedia": false,
+        "metadataRuntimeControl": metadata_runtime_control,
+        "metadataPreviousCompare": metadata_previous_compare,
+        "defaultConfig": default_config,
+        "decisionSignals": decision_signals,
+        "capturedRequest": captured_request,
+        "effectiveRuntimeLoopState": effective_runtime_loop_state,
+        "providerKey": Value::Null,
+    });
+
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("serialize StopMessageAutoHandlerInput: {e}")))
 }
 
 // ── NAPI: build complete stopless auto CLI projection ──────────────────────────
@@ -315,6 +402,15 @@ pub struct StoplessAutoCliProjectionInput {
     pub chat_stop_text: Option<String>,
     pub session_id: Option<String>,
     pub request_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoplessAutoHandlerRuntimeInput {
+    pub adapter_context: Value,
+    pub base: Value,
+    pub request_id: String,
+    pub runtime_metadata: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]

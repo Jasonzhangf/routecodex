@@ -215,7 +215,10 @@ pub fn plan_stop_message_auto_handler(
 
     let effective_loop = input.effective_runtime_loop_state.as_ref();
     let loop_repeat = effective_loop
-        .and_then(|s| s.get("repeatCount").or_else(|| s.get("repeat_count")))
+        .and_then(|s| {
+            s.get("used")
+                .or_else(|| s.get("repeatCount").or_else(|| s.get("repeat_count")))
+        })
         .and_then(Value::as_f64)
         .map(|v| v.floor() as i64)
         .filter(|&v| v >= 0);
@@ -490,6 +493,14 @@ fn handle_trigger(
         stopless_trigger_hint.as_deref(),
         &schema_feedback,
     );
+    let finalize_context = build_finalize_context(
+        &effective_decision,
+        assistant_stop_text,
+        stopless_runtime_state,
+        stopless_trigger_hint.as_deref(),
+        &schema_feedback,
+        &finalize_stopless,
+    );
 
     StopMessageAutoHandlerPlan {
         action: StopMessageAutoPlanAction::ReturnHandlerPlan,
@@ -502,6 +513,7 @@ fn handle_trigger(
         schema_feedback,
         assistant_stop_text: Some(assistant_stop_text.to_string()),
         native_handler_result: Some(handler_result),
+        finalize_context: Some(finalize_context),
         finalize_stopless: Some(finalize_stopless),
         ..Default::default()
     }
@@ -528,11 +540,6 @@ fn decide_from_context(ctx: &Value) -> StopMessageDecision {
     // Not stop eligible
     if ctx.get("stop_eligible") != Some(&Value::Bool(true)) {
         return skip("skip_not_stop_eligible");
-    }
-
-    // Responses submit tool outputs resume
-    if ctx.get("has_responses_submit_tool_outputs_resume") == Some(&Value::Bool(true)) {
-        return skip("skip_responses_submit_tool_outputs_resume");
     }
 
     // Explicit mode off
@@ -932,6 +939,38 @@ fn build_finalize_stopless(
     m
 }
 
+fn build_finalize_context(
+    decision: &StopMessageDecision,
+    assistant_stop_text: &str,
+    stopless_runtime_state: Option<&Value>,
+    stopless_trigger_hint: Option<&str>,
+    schema_feedback: &Option<SchemaFeedback>,
+    finalize_stopless: &Value,
+) -> Value {
+    let mut context = serde_json::Map::new();
+    context.insert("decision".to_string(), serialize_decision(decision));
+    context.insert(
+        "assistantStopText".to_string(),
+        Value::String(assistant_stop_text.to_string()),
+    );
+    if let Some(hint) = stopless_trigger_hint {
+        context.insert(
+            "stopSchemaTriggerHint".to_string(),
+            Value::String(hint.to_string()),
+        );
+    }
+    if let Some(feedback) = schema_feedback {
+        context.insert("stopSchemaFeedback".to_string(), json!(feedback));
+    }
+    if let Some(runtime_state) = stopless_runtime_state.filter(|value| value.is_object()) {
+        context.insert("stoplessRuntimeState".to_string(), runtime_state.clone());
+    }
+    if finalize_stopless.is_object() {
+        context.insert("stopless".to_string(), finalize_stopless.clone());
+    }
+    Value::Object(context)
+}
+
 // ── Missing functions ──────────────────────────────────────────────────────
 
 fn build_decision_context(
@@ -965,7 +1004,8 @@ fn build_decision_context(
     let fallback_used = metadata_center_stopless
         .and_then(|mc| mc.get("repeatCount").or_else(|| mc.get("repeat_count")))
         .and_then(Value::as_i64)
-        .filter(|value| *value >= 0);
+        .filter(|value| *value >= 0)
+        .map(|value| value.max(0));
     let fallback_max = metadata_center_stopless
         .and_then(|mc| mc.get("maxRepeats").or_else(|| mc.get("max_repeats")))
         .and_then(Value::as_i64)
@@ -1706,5 +1746,60 @@ mod tests {
         let sf = plan.schema_feedback.as_ref().unwrap();
         assert_eq!(sf.reason_code, "stop_schema_continue_next_step");
         assert!(sf.missing_fields.is_empty());
+    }
+
+    #[test]
+    fn responses_submit_tool_outputs_resume_still_returns_handler_plan_for_stopless_loop() {
+        let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
+            adapter_context: json!({}),
+            base: json!({
+                "id": "resp_submit_round_2",
+                "object": "response",
+                "status": "completed",
+                "output": [{
+                    "id": "msg_submit_round_2",
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": "继续执行中" }]
+                }],
+                "output_text": "继续执行中"
+            }),
+            request_id: "req-submit-tool-outputs-stopless".to_string(),
+            followup_flow_id: None,
+            should_run_vision_flow: false,
+            should_bypass_stop_message_for_media: false,
+            metadata_runtime_control: Some(json!({
+                "stopless": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "active": true
+                }
+            })),
+            metadata_previous_compare: None,
+            default_config: StopMessageDefaultConfigPlan {
+                enabled: true,
+                text: "continue".to_string(),
+                max_repeats: 3,
+            },
+            decision_signals: StoplessDecisionContextSignals {
+                port_stop_message_disabled: false,
+                has_responses_submit_tool_outputs_resume: true,
+                plan_mode_active: false,
+            },
+            captured_request: None,
+            effective_runtime_loop_state: Some(json!({
+                "repeatCount": 1,
+                "maxRepeats": 3,
+                "continuationPrompt": "keep going"
+            })),
+            provider_key: None,
+        });
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
+        assert_eq!(plan.flow_id.as_deref(), Some("stop_message_flow"));
+        let persist_plan = plan.persist_plan.as_ref().expect("persist plan");
+        assert_eq!(persist_plan.next_used, 2);
+        assert_eq!(persist_plan.next_max_repeats, 3);
     }
 }
