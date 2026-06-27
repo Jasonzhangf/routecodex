@@ -22,9 +22,9 @@
 2. `/goal active` 时收到 `finish_reason=stop`：不自动续轮。
 3. `/goal non-active` 时收到 `finish_reason=stop`：自动注入六项排查检查提示；任一项无证据必须调用工具，已完成/阻塞必须给证据。
 4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入六项排查检查提示；任一项无证据必须调用工具，已完成/阻塞必须给证据。
-5. stopless 激活时校验当前 assistant stop schema：`stopreason` 数字 `0=finished/1=blocked/2=continue_needed`、`has_evidence` 数字 `0/1`；文本字段只判空，默认要求包含 `reason`、`evidence`、`issue_cause`、`excluded_factors`、`diagnostic_order`、`next_step`、`learned`。
-6. `stopreason=0|1` 且 `reason` 非空才允许 stop，并把 reason 加到 stop summary 开头；否则按缺失字段生成 followup。
-7. `stopreason!=0|1` 且 `next_step` 非空时不允许 stop，followup 要求执行下一步；缺 next_step 时要求继续目标或补完整 schema。
+5. stopless 激活时校验当前 assistant stop schema：字段不是全局必填，而是关系必填；`stopreason` 必须是数字 `0=finished/1=blocked/2=continue_needed`，`reason` 必须非空，`has_evidence` 必须是 `0/1`。
+6. `stopreason=0|1` 都是停止条件；必须 `has_evidence=1` 且 `evidence` 非空，诊断字段按真实情况填写但不是全局必填。`blocked + needs_user_input=true` 必须把 summary 和要用户决策的问题返回给用户，并以 `finish_reason=stop` 停止等待。
+7. `stopreason=2` 是继续条件；必须填写 `next_step`，followup 给模型的续跑文本就是 `next_step` 本身。缺 `next_step` 时按 invalid schema 返回缺失字段反馈。
 8. budget 真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。当前 Rust 真相是 provided schema 与 missing schema 都按连续 3 次 stop 收敛；非 stop 响应、工具调用或正常进展必须 reset budget。旧的“missing schema 不计数 / 10 次 missing”文档视为过期。
 9. stopless 不得走 `reenterPipeline` 普通 user 注入。非 terminal stop_message_flow 只能投影 CLI，并由 CLI stdout 提供 continuation prompt + schema guidance 闭环。
 10. stopless 的前置注入和拦截补打一律是同一个停止 hook 语义：模型若要停止，必须主动调用该 hook 并附 stop schema；若模型直接 stop 未调用，系统只能补打一轮同一 hook，并在结果中再次要求模型下一轮自己调用。

@@ -18,7 +18,7 @@ Feature scope: `hub.servertool_*`
 | `hub.servertool_pre_command_hooks` | servertool pre-command hook config and rule normalization | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_selection` | servertool primary auto-hook first pass and rerun selection planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_cli_projection` | servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run build:base`<br/>`npm run verify:architecture-ci` |
-| `hub.servertool_stopless_cli_continuation` | stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
+| `hub.servertool_stopless_cli_continuation` | stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src` | `npm run verify:stopless-invalid-schema-blackbox`<br/>`npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_auto_hook_execution` | servertool auto-hook execution decision and trace event planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_auto_hook_queue_progress` | servertool auto-hook queue progress planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_preflight_contract` | servertool engine preflight early-return planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
@@ -327,11 +327,13 @@ Required tests:
 - `tests/servertool/stop-schema-lifecycle-contract.spec.ts`
 - `tests/responses/responses-openai-bridge.spec.ts`
 - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+- `scripts/tests/stopless-invalid-schema-blackbox.mjs`
 - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts`
 - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs`
 
 Required gates:
+- `npm run verify:stopless-invalid-schema-blackbox`
 - `npm run verify:servertool-rust-only`
 - `npm run verify:function-map-compile-gate`
 
@@ -346,6 +348,8 @@ Notes:
 - Stopless must not activate on same-protocol direct/provider-direct response paths; existing runtime metadata routeName is the only allowed discriminator for this bypass.
 - If `finish_reason=stop` arrives without schema, RouteCodex must auto-project the same stop hook (internal `stop_message_auto`, public CLI alias `reasoningStop`) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop.
 - If `finish_reason=stop` arrives with schema but the schema is non-terminal, invalid, or argument-malformed, RouteCodex must auto-project the same stop hook with schema-derived input so the hook can explain why stop is denied and what must be fixed.
+- Stop schema fields are conditionally required, not globally required: `reason` and `has_evidence` are required for attempted schema, `evidence` is required when `has_evidence=1`, terminal `stopreason=0|1` requires `has_evidence=1` plus non-empty `evidence`, and `stopreason=2` requires `next_step`; diagnostic fields are optional unless a future rule explicitly makes them conditional.
+- For `stopreason=2`, the provider-facing continuation text must be the `next_step` content itself. For `blocked + needs_user_input=true`, the finalized client response must include the summary plus the user decision question and stop with `finish_reason=stop`.
 - For invalid/malformed schema, the stop hook must return concise structured feedback (`reasonCode`, `missingFields`) plus schemaGuidance, and req_chatprocess must rewrite the paired tool result into natural-language corrective guidance instead of replaying raw tool history.
 - If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook.
 - When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history.

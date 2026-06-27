@@ -46,6 +46,8 @@ fn t1_continue_with_next_step_follows_up() {
     let d = evaluate_stop_schema_gate(input, 0, 3, "", 0);
     assert_eq!(d.action, StopSchemaGateAction::Followup);
     assert_eq!(d.reason_code, "stop_schema_continue_next_step");
+    assert_eq!(d.missing_fields, Vec::<String>::new());
+    assert_eq!(d.followup_text.as_deref(), Some("运行 cargo test 验证修复"));
     assert!(d.count_budget);
 }
 
@@ -292,7 +294,57 @@ fn t6_needs_user_input_with_next_step_allows_stop() {
     let d = evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(input), 0, 3, "", 0);
     assert_eq!(d.action, StopSchemaGateAction::AllowStop);
     assert_eq!(d.reason_code, "stop_schema_needs_user_input");
+    let summary = d.summary_prefix.as_deref().unwrap_or("");
+    assert!(summary.contains("需确认"), "summary={summary}");
+    assert!(summary.contains("需要你决定"), "summary={summary}");
+    assert!(
+        summary.contains("请确认：使用哪个版本？"),
+        "summary={summary}"
+    );
     assert!(!d.count_budget);
+}
+
+#[test]
+fn t6_needs_user_input_without_next_step_reports_only_next_step() {
+    let input = r#"{"stopreason":1,"reason":"缺少用户决策","has_evidence":1,"evidence":"已有两条可选路径","needs_user_input":true}"#;
+    let d = evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(input), 0, 3, "", 0);
+    assert_eq!(d.action, StopSchemaGateAction::Followup);
+    assert_eq!(
+        d.reason_code,
+        "stop_schema_needs_user_input_missing_next_step"
+    );
+    assert_eq!(d.missing_fields, vec!["next_step".to_string()]);
+}
+
+#[test]
+fn t6_continue_with_has_evidence_one_requires_evidence_only() {
+    let input = r#"{"stopreason":2,"reason":"继续验证","has_evidence":1,"next_step":"运行下一条验证命令","needs_user_input":false}"#;
+    let d = evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(input), 0, 3, "", 0);
+    assert_eq!(d.action, StopSchemaGateAction::Followup);
+    assert_eq!(d.reason_code, "stop_schema_continue_next_step");
+    assert_eq!(d.missing_fields, vec!["evidence".to_string()]);
+}
+
+#[test]
+fn t6_finished_minimal_terminal_schema_allows_without_diagnostic_fields() {
+    let input = r#"{"stopreason":0,"reason":"已完成","has_evidence":1,"evidence":"cargo test passed","needs_user_input":false}"#;
+    let d = evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(input), 0, 3, "", 0);
+    assert_eq!(d.action, StopSchemaGateAction::AllowStop);
+    assert_eq!(d.reason_code, "stop_schema_finished");
+    assert_eq!(d.missing_fields, Vec::<String>::new());
+}
+
+#[test]
+fn t6_terminal_without_evidence_reports_only_evidence_contract_fields() {
+    let input =
+        r#"{"stopreason":1,"reason":"被外部凭证阻塞","has_evidence":0,"needs_user_input":false}"#;
+    let d = evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(input), 0, 3, "", 0);
+    assert_eq!(d.action, StopSchemaGateAction::Followup);
+    assert_eq!(d.reason_code, "stop_schema_terminal_missing_fields");
+    assert_eq!(
+        d.missing_fields,
+        vec!["has_evidence".to_string(), "evidence".to_string()]
+    );
 }
 
 #[test]

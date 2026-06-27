@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 const STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
 {"stopreason":2,"reason":"当前状态原因","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
-字段规则：stopreason 只能是数字，0=finished，1=blocked，2=continue_needed；has_evidence 只能是 0 或 1；needs_user_input=true 只用于需要问用户一个简单问题，此时 next_step 必须写问题内容。"#;
+字段规则：stopreason 只能是数字，0=finished，1=blocked，2=continue_needed；reason 必须说明当前状态；has_evidence 必须是 0 或 1；has_evidence=1 时 evidence 必须写证据；stopreason=0/1 属于停止条件，必须 has_evidence=1 且 evidence 非空；stopreason=2 必须写 next_step，下一轮只执行 next_step 的内容；needs_user_input=true 只用于需要问用户一个简单问题，此时 next_step 必须写问题内容并停止等待用户决策。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -515,12 +515,10 @@ fn evaluate_stop_schema_gate_from_parsed(
             max_repeats: provided_cap,
             action: StopSchemaGateAction::AllowStop,
             reason_code: "stop_schema_needs_user_input".to_string(),
-            summary_prefix: Some(format!(
-                "## 需要确认
-
-{}
-",
-                next_step_raw
+            summary_prefix: Some(build_needs_user_input_summary_prefix(
+                &parsed,
+                stopreason,
+                next_step_raw,
             )),
             followup_text: None,
             count_budget: false,
@@ -856,9 +854,7 @@ pub fn evaluate_stop_schema_gate_with_reasoning_stop_arguments(
         ),
     }
 }
-pub fn evaluate_stopless_loop_guard(
-    input: &StoplessLoopGuardInput,
-) -> StoplessLoopGuardDecision {
+pub fn evaluate_stopless_loop_guard(input: &StoplessLoopGuardInput) -> StoplessLoopGuardDecision {
     let threshold = input
         .threshold
         .filter(|value| *value > 0)
@@ -1189,6 +1185,22 @@ fn build_allow_stop_summary_prefix_from_parsed(
     out
 }
 
+fn build_needs_user_input_summary_prefix(
+    parsed: &StopSchemaParsed,
+    stopreason: u8,
+    question: &str,
+) -> String {
+    let mut out = build_allow_stop_summary_prefix_from_parsed(
+        parsed,
+        stopreason,
+        parsed.reason.as_deref().unwrap_or("需要用户决策"),
+    );
+    out.push_str("## 需要你决定\n\n");
+    out.push_str(question.trim());
+    out.push('\n');
+    out
+}
+
 fn build_terminal_visible_stop_text(text: &str) -> String {
     let mut visible = text.to_string();
     for (start_tag, end_tag) in [
@@ -1311,42 +1323,6 @@ fn terminal_missing_fields(parsed: &StopSchemaParsed) -> Vec<String> {
     {
         missing.push("evidence".to_string());
     }
-    if parsed
-        .done_steps
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("done_steps".to_string());
-    }
-    if parsed
-        .issue_cause
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("issue_cause".to_string());
-    }
-    if parsed
-        .excluded_factors
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("excluded_factors".to_string());
-    }
-    if parsed
-        .diagnostic_order
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("diagnostic_order".to_string());
-    }
     missing
 }
 
@@ -1367,50 +1343,15 @@ fn remaining_missing_fields(parsed: &StopSchemaParsed) -> Vec<String> {
     if parsed.has_evidence.is_none() {
         missing.push("has_evidence".to_string());
     }
-    if parsed
-        .evidence
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
+    if parsed.has_evidence == Some(1)
+        && parsed
+            .evidence
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
     {
         missing.push("evidence".to_string());
-    }
-    if parsed
-        .done_steps
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("done_steps".to_string());
-    }
-    if parsed
-        .issue_cause
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("issue_cause".to_string());
-    }
-    if parsed
-        .excluded_factors
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("excluded_factors".to_string());
-    }
-    if parsed
-        .diagnostic_order
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("diagnostic_order".to_string());
     }
     if parsed
         .next_step
@@ -1420,15 +1361,6 @@ fn remaining_missing_fields(parsed: &StopSchemaParsed) -> Vec<String> {
         .is_empty()
     {
         missing.push("next_step".to_string());
-    }
-    if parsed
-        .next_suggested_path
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        missing.push("next_suggested_path".to_string());
     }
     missing
 }

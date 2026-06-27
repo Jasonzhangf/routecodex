@@ -8,14 +8,19 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use stop_message_core::{
+    evaluate_stop_schema_gate_with_reasoning_stop_arguments, StopSchemaGateAction,
+    StopSchemaGateDecision,
+};
 
 use crate::stop_gateway_context::{self, StopGatewayContext};
 use crate::stop_message_compare_context::StopMessageCompareContext;
 use crate::stop_message_default_config::StopMessageDefaultConfigPlan;
 use crate::stop_message_persist_plan::{self, StopMessagePersistPlan};
 use crate::stop_visible_text::{
-    build_stop_message_terminal_visible_payload, extract_current_assistant_reasoning_stop_arguments,
-    extract_current_assistant_stop_text, StopMessageTerminalVisiblePayloadInput,
+    build_stop_message_terminal_visible_payload,
+    extract_current_assistant_reasoning_stop_arguments, extract_current_assistant_stop_text,
+    StopMessageTerminalVisiblePayloadInput,
 };
 use crate::stopless_decision_context_signals::StoplessDecisionContextSignals;
 
@@ -258,11 +263,7 @@ pub fn plan_stop_message_auto_handler(
     let decision = decide_from_context(&decision_ctx);
 
     // ── Phase 4: Compare ─────────────────────────────────────────────────────
-    let mut compare = build_compare_from_decision(
-        &decision,
-        &stop_gateway,
-        captured,
-    );
+    let mut compare = build_compare_from_decision(&decision, &stop_gateway, captured);
 
     // ── Phase 5: Route ───────────────────────────────────────────────────────
     match decision.action.as_str() {
@@ -274,7 +275,13 @@ pub fn plan_stop_message_auto_handler(
             captured,
             default_config,
         ),
-        _ => handle_skip(input, &decision, &mut compare, &assistant_stop_text, captured),
+        _ => handle_skip(
+            input,
+            &decision,
+            &mut compare,
+            &assistant_stop_text,
+            captured,
+        ),
     }
 }
 
@@ -306,7 +313,8 @@ fn handle_skip(
     ) {
         if !assistant_stop_text.is_empty() {
             if let Some(captured_req) = captured {
-                let stopless_loop = evaluate_stopless_loop_guard(captured_req, assistant_stop_text, 3);
+                let stopless_loop =
+                    evaluate_stopless_loop_guard(captured_req, assistant_stop_text, 3);
                 if stopless_loop.loop_detected {
                     compare.reason = stopless_loop
                         .reason_code
@@ -348,23 +356,21 @@ fn handle_trigger(
     let prev_compare = input.metadata_previous_compare.as_ref();
     let prev_observation_hash = prev_compare
         .and_then(|pc| {
-            pc.get("observationHash").or_else(|| pc.get("observation_hash"))
+            pc.get("observationHash")
+                .or_else(|| pc.get("observation_hash"))
         })
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(String::from)
-        .unwrap_or_else(|| {
-            compare.observation_hash.clone().unwrap_or_default()
-        });
+        .unwrap_or_else(|| compare.observation_hash.clone().unwrap_or_default());
     let prev_no_change_count = prev_compare
         .and_then(|pc| {
-            pc.get("observationStableCount").or_else(|| pc.get("observation_stable_count"))
+            pc.get("observationStableCount")
+                .or_else(|| pc.get("observation_stable_count"))
         })
         .and_then(Value::as_f64)
         .map(|v| v.floor() as u32)
-        .unwrap_or_else(|| {
-            compare.observation_stable_count.unwrap_or(0).max(0) as u32
-        });
+        .unwrap_or_else(|| compare.observation_stable_count.unwrap_or(0).max(0) as u32);
 
     let schema_gate = evaluate_stop_schema_gate(
         assistant_stop_text,
@@ -402,22 +408,23 @@ fn handle_trigger(
 
     // allow_stop
     if schema_gate.action == "allow_stop" {
-        let prefixed =
-            if schema_gate.reason_code.as_deref() == Some("stop_schema_needs_user_input") {
-                build_terminal_visible_payload_replace(
-                    &input.base,
-                    schema_gate.summary_prefix.as_deref().unwrap_or(""),
-                )
-            } else {
-                build_terminal_visible_payload(
-                    &input.base,
-                    schema_gate.summary_prefix.as_deref().unwrap_or(""),
-                )
-            };
+        let prefixed = if schema_gate.reason_code.as_deref() == Some("stop_schema_needs_user_input")
+        {
+            build_terminal_visible_payload_replace(
+                &input.base,
+                schema_gate.summary_prefix.as_deref().unwrap_or(""),
+            )
+        } else {
+            build_terminal_visible_payload(
+                &input.base,
+                schema_gate.summary_prefix.as_deref().unwrap_or(""),
+            )
+        };
         let should_write = schema_gate.parsed.is_some();
-        let learned_note = schema_gate.parsed.as_ref().map(|parsed| {
-            build_learned_note_plan(&input.request_id, parsed)
-        });
+        let learned_note = schema_gate
+            .parsed
+            .as_ref()
+            .map(|parsed| build_learned_note_plan(&input.request_id, parsed));
         return StopMessageAutoHandlerPlan {
             action: StopMessageAutoPlanAction::ReturnSchemaAllowStop,
             compare_context: compare.clone(),
@@ -457,7 +464,7 @@ fn handle_trigger(
     let schema_feedback = schema_gate
         .reason_code
         .as_deref()
-        .map(build_schema_feedback);
+        .map(|reason_code| build_schema_feedback(reason_code, &schema_gate.missing_fields));
 
     let persist_plan = plan_stop_message_persist_snapshot_with_input(
         &schema_gate,
@@ -473,9 +480,7 @@ fn handle_trigger(
 
     // Budget terminal check
     let should_count = schema_gate.count_budget.unwrap_or(true);
-    if should_count
-        && effective_max > 0
-        && persist_plan.next_used >= persist_plan.next_max_repeats
+    if should_count && effective_max > 0 && persist_plan.next_used >= persist_plan.next_max_repeats
     {
         compare.reason = "stop_schema_budget_exhausted".to_string();
         compare.remaining = 0;
@@ -614,8 +619,9 @@ fn skip(reason: &str) -> StopMessageDecision {
     }
 }
 
-// ── Schema gate evaluation (local) ──────────────────────────────────────────
-// Mirrors stop_message_core::evaluate_stop_schema_gate_with_reasoning_stop_arguments.
+// ── Schema gate evaluation ─────────────────────────────────────────────────
+// stop-message-core is the only owner of stop schema semantics. The handler
+// keeps only orchestration-facing serialization.
 
 fn evaluate_stop_schema_gate(
     assistant_text: &str,
@@ -625,195 +631,37 @@ fn evaluate_stop_schema_gate(
     prev_observation_hash: &str,
     prev_no_change_count: u32,
 ) -> SchemaGateResult {
-    // Try reasoningStop.arguments first
-    let schema_source = reasoning_stop_arguments.unwrap_or(assistant_text);
-    let trimmed = schema_source.trim();
-
-    if trimmed.is_empty() {
-        return SchemaGateResult {
-            action: "followup".to_string(),
-            reason_code: Some("stop_schema_missing".to_string()),
-            followup_text: Some(schema_guidance_text(used, max_repeats)),
-            ..Default::default()
-        };
-    }
-
-    // Try parse JSON
-    match serde_json::from_str::<Value>(trimmed) {
-        Ok(parsed) => evaluate_parsed_schema(parsed, used, max_repeats, prev_observation_hash, prev_no_change_count),
-        Err(_) => {
-            // Not JSON — try extract JSON from text
-            if let Some(json_str) = extract_json_from_text(trimmed) {
-                match serde_json::from_str::<Value>(&json_str) {
-                    Ok(parsed) => evaluate_parsed_schema(parsed, used, max_repeats, prev_observation_hash, prev_no_change_count),
-                    Err(_) => SchemaGateResult {
-                        action: "followup".to_string(),
-                        reason_code: Some("stop_schema_invalid_json".to_string()),
-                        followup_text: Some(schema_guidance_text(used, max_repeats)),
-                        ..Default::default()
-                    },
-                }
-            } else {
-                SchemaGateResult {
-                    action: "followup".to_string(),
-                    reason_code: Some("stop_schema_missing".to_string()),
-                    followup_text: Some(schema_guidance_text(used, max_repeats)),
-                    ..Default::default()
-                }
-            }
-        }
-    }
+    schema_gate_from_core(evaluate_stop_schema_gate_with_reasoning_stop_arguments(
+        assistant_text,
+        reasoning_stop_arguments,
+        used,
+        max_repeats,
+        prev_observation_hash,
+        prev_no_change_count,
+    ))
 }
 
-fn evaluate_parsed_schema(
-    parsed: Value,
-    used: u32,
-    max_repeats: u32,
-    prev_observation_hash: &str,
-    prev_no_change_count: u32,
-) -> SchemaGateResult {
-    let stopreason = parsed.get("stopreason").and_then(Value::as_i64);
-
-    // Missing stopreason
-    let stopreason = match stopreason {
-        Some(sr) => sr,
-        None => {
-            let missing = collect_missing_fields(&parsed);
-            return SchemaGateResult {
-                action: "followup".to_string(),
-                reason_code: Some("stop_schema_stopreason_missing_or_non_numeric".to_string()),
-                missing_fields: missing,
-                followup_text: Some(schema_guidance_text(used, max_repeats)),
-                ..Default::default()
-            };
+fn schema_gate_from_core(decision: StopSchemaGateDecision) -> SchemaGateResult {
+    SchemaGateResult {
+        action: match decision.action {
+            StopSchemaGateAction::AllowStop => "allow_stop",
+            StopSchemaGateAction::Followup => "followup",
+            StopSchemaGateAction::FailFast => "fail_fast",
         }
-    };
-
-    match stopreason {
-        0 | 1 => {
-            // Terminal — check required fields
-            let mut missing = collect_missing_fields(&parsed);
-
-            // reason field is required for terminal stop
-            let reason = parsed.get("reason").and_then(Value::as_str).unwrap_or("").trim();
-            if reason.is_empty() && !missing.contains(&"reason".to_string()) {
-                missing.push("reason".to_string());
-            }
-
-            if !missing.is_empty() {
-                return SchemaGateResult {
-                    action: "followup".to_string(),
-                    reason_code: Some("stop_schema_terminal_missing_fields".to_string()),
-                    missing_fields: missing,
-                    followup_text: Some(schema_guidance_text(used, max_repeats)),
-                    parsed: Some(parsed),
-                    ..Default::default()
-                };
-            }
-
-            // Check needs_user_input
-            if parsed.get("needs_user_input") == Some(&Value::Bool(true)) {
-                let next_step = parsed.get("next_step").and_then(Value::as_str).unwrap_or("").trim();
-                if next_step.is_empty() {
-                    return SchemaGateResult {
-                        action: "followup".to_string(),
-                        reason_code: Some("stop_schema_needs_user_input_missing_next_step".to_string()),
-                        missing_fields: vec!["next_step".to_string()],
-                        followup_text: Some(schema_guidance_text(used, max_repeats)),
-                        parsed: Some(parsed),
-                        ..Default::default()
-                    };
-                }
-                return SchemaGateResult {
-                    action: "allow_stop".to_string(),
-                    reason_code: Some("stop_schema_needs_user_input".to_string()),
-                    summary_prefix: Some(format!("需要用户输入：{next_step}")),
-                    count_budget: Some(false),
-                    parsed: Some(parsed),
-                    ..Default::default()
-                };
-            }
-
-            // Terminal stop
-            let reason_code = if stopreason == 0 {
-                "stop_schema_finished".to_string()
-            } else {
-                "stop_schema_blocked".to_string()
-            };
-
-            let summary = extract_summary_from_parsed(&parsed);
-            SchemaGateResult {
-                action: "allow_stop".to_string(),
-                reason_code: Some(reason_code),
-                summary_prefix: Some(summary),
-                parsed: Some(parsed),
-                ..Default::default()
-            }
-        }
-        2 => {
-            // continue_needed
-            let next_step = parsed.get("next_step").and_then(Value::as_str).unwrap_or("").trim();
-            let reason_code = if next_step.is_empty() {
-                "stop_schema_continue_without_next_step"
-            } else {
-                "stop_schema_continue_next_step"
-            };
-
-            // Observation hash
-            let reason_field = parsed.get("reason").and_then(Value::as_str).unwrap_or("");
-            let current_hash = simple_hash(reason_field);
-
-            let (no_change_count, obs_hash) = if current_hash == prev_observation_hash
-                && !current_hash.is_empty()
-            {
-                (prev_no_change_count.saturating_add(1), current_hash)
-            } else {
-                (0, current_hash)
-            };
-
-            // Loop guard: 3+ consecutive identical observations → fail_fast
-            if no_change_count >= 3 {
-                return SchemaGateResult {
-                    action: "fail_fast".to_string(),
-                    reason_code: Some("stop_schema_budget_exhausted".to_string()),
-                    no_change_count: Some(no_change_count as i32),
-                    observation_hash: Some(obs_hash),
-                    parsed: Some(parsed),
-                    ..Default::default()
-                };
-            }
-
-            SchemaGateResult {
-                action: "followup".to_string(),
-                reason_code: Some(reason_code.to_string()),
-                followup_text: Some(format!(
-                    "请继续执行下一步：{next_step}"
-                )),
-                no_change_count: Some(no_change_count as i32),
-                observation_hash: Some(obs_hash),
-                parsed: Some(parsed),
-                ..Default::default()
-            }
-        }
-        _ => {
-            // Invalid stopreason
-            SchemaGateResult {
-                action: "followup".to_string(),
-                reason_code: Some("stop_schema_stopreason_missing_or_non_numeric".to_string()),
-                missing_fields: vec!["stopreason".to_string()],
-                followup_text: Some(schema_guidance_text(used, max_repeats)),
-                parsed: Some(parsed),
-                ..Default::default()
-            }
-        }
+        .to_string(),
+        reason_code: Some(decision.reason_code),
+        summary_prefix: decision.summary_prefix,
+        followup_text: decision.followup_text,
+        count_budget: Some(decision.count_budget),
+        max_repeats: Some(decision.max_repeats),
+        missing_fields: decision.missing_fields,
+        no_change_count: Some(decision.no_change_count as i32),
+        observation_hash: Some(decision.observation_hash),
+        parsed: decision.parsed.map(|parsed| {
+            serde_json::to_value(parsed)
+                .expect("StopSchemaParsed must serialize for handler schema gate")
+        }),
     }
-}
-
-fn schema_guidance_text(used: u32, max_repeats: u32) -> String {
-    let remaining = max_repeats.saturating_sub(used);
-    format!(
-        "请在回复末尾附上 stop schema JSON。格式：{{\"stopreason\":0/1/2,\"reason\":\"...\",\"has_evidence\":0/1,\"evidence\":\"...\",\"issue_cause\":\"...\",\"excluded_factors\":\"...\",\"diagnostic_order\":\"...\",\"done_steps\":\"...\",\"next_step\":\"...\",\"next_suggested_path\":\"...\",\"needs_user_input\":false,\"learned\":\"...\"}}。剩余 {remaining} 次停止机会。"
-    )
 }
 
 // ── Stopless loop guard (local) ─────────────────────────────────────────────
@@ -845,7 +693,11 @@ fn build_compare_from_decision(
     let is_trigger = decision.action == "trigger";
     StopMessageCompareContext {
         armed: is_trigger,
-        mode: if is_trigger { "on".to_string() } else { "off".to_string() },
+        mode: if is_trigger {
+            "on".to_string()
+        } else {
+            "off".to_string()
+        },
         allow_mode_only: false,
         text_length: decision
             .followup_text
@@ -860,7 +712,11 @@ fn build_compare_from_decision(
         has_captured_request: captured.is_some(),
         compaction_request: false,
         has_seed: false,
-        decision: if is_trigger { "trigger".to_string() } else { "skip".to_string() },
+        decision: if is_trigger {
+            "trigger".to_string()
+        } else {
+            "skip".to_string()
+        },
         reason: decision
             .skip_reason
             .clone()
@@ -875,7 +731,11 @@ fn build_terminal_visible_payload(base: &Value, prefix: &str) -> Value {
     build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
         payload: base.clone(),
         mode: Some("prefix".to_string()),
-        prefix: if prefix.is_empty() { None } else { Some(prefix.to_string()) },
+        prefix: if prefix.is_empty() {
+            None
+        } else {
+            Some(prefix.to_string())
+        },
     })
     .payload
 }
@@ -904,10 +764,10 @@ fn normalize_trigger_hint(reason_code: Option<&str>) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn build_schema_feedback(reason_code: &str) -> SchemaFeedback {
+fn build_schema_feedback(reason_code: &str, missing_fields: &[String]) -> SchemaFeedback {
     SchemaFeedback {
         reason_code: reason_code.to_string(),
-        missing_fields: vec![],
+        missing_fields: missing_fields.to_vec(),
     }
 }
 
@@ -933,7 +793,9 @@ fn build_finalize_stopless(
         "updatedAt": 0,
     });
     if let Some(hint) = trigger_hint {
-        m.as_object_mut().unwrap().insert("triggerHint".to_string(), json!(hint));
+        m.as_object_mut()
+            .unwrap()
+            .insert("triggerHint".to_string(), json!(hint));
     }
     if let Some(fb) = feedback {
         let obj = m.as_object_mut().unwrap();
@@ -997,11 +859,15 @@ fn build_decision_context(
         "default_text": default_config.text,
     });
     if signals.plan_mode_active {
-        ctx.as_object_mut().unwrap().insert("plan_mode_active".to_string(), json!(true));
+        ctx.as_object_mut()
+            .unwrap()
+            .insert("plan_mode_active".to_string(), json!(true));
     }
     if let Some(ref mc) = metadata_center_stopless {
         if mc.get("active") == Some(&Value::Bool(false)) {
-            ctx.as_object_mut().unwrap().insert("explicit_mode".to_string(), json!("off"));
+            ctx.as_object_mut()
+                .unwrap()
+                .insert("explicit_mode".to_string(), json!("off"));
         }
     }
     let fallback_used = metadata_center_stopless
@@ -1024,16 +890,22 @@ fn build_decision_context(
     let runtime_text = fallback_text.unwrap_or(snap_text);
 
     if let Some(used) = runtime_used {
-        ctx.as_object_mut().unwrap().insert("runtime_snapshot".to_string(), json!({
-            "used": used,
-            "maxRepeats": runtime_max.unwrap_or(default_config.max_repeats as i64),
-            "text": runtime_text,
-        }));
+        ctx.as_object_mut().unwrap().insert(
+            "runtime_snapshot".to_string(),
+            json!({
+                "used": used,
+                "maxRepeats": runtime_max.unwrap_or(default_config.max_repeats as i64),
+                "text": runtime_text,
+            }),
+        );
     }
     if let Some(ref pk) = provider_key {
-        ctx.as_object_mut().unwrap().insert("provider_pin".to_string(), json!({
-            "provider_key": pk
-        }));
+        ctx.as_object_mut().unwrap().insert(
+            "provider_pin".to_string(),
+            json!({
+                "provider_key": pk
+            }),
+        );
     }
     ctx
 }
@@ -1171,111 +1043,6 @@ fn empty_plan() -> StopMessageAutoHandlerPlan {
         finalize_context: None,
         finalize_stopless: None,
     }
-}
-
-fn collect_missing_fields(parsed: &Value) -> Vec<String> {
-    // Fields that are required for terminal stop schema (stopreason 0|1).
-    // `stopreason` and `has_evidence` are checked by type, not string emptiness.
-    // `done_steps` and `needs_user_input` can legitimately be empty/missing.
-    // `next_step` is checked separately for needs_user_input & continue cases.
-    let required = [
-        "reason",
-        "evidence",
-        "issue_cause",
-        "excluded_factors",
-        "diagnostic_order",
-        "next_suggested_path",
-        "learned",
-    ];
-    let mut missing = Vec::new();
-    for field in required {
-        match parsed.get(field) {
-            None => missing.push(field.to_string()),
-            Some(Value::Null) => missing.push(field.to_string()),
-            Some(Value::String(s)) => {
-                if s.trim().is_empty() {
-                    missing.push(field.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    // stopreason must be numeric
-    if let Some(sr) = parsed.get("stopreason") {
-        if !sr.is_number() && !missing.contains(&"stopreason".to_string()) {
-            missing.push("stopreason".to_string());
-        }
-    }
-    // has_evidence must be 0 or 1
-    if let Some(he) = parsed.get("has_evidence") {
-        if he.as_i64().filter(|&v| v == 0 || v == 1).is_none()
-            && !missing.contains(&"has_evidence".to_string())
-        {
-            missing.push("has_evidence".to_string());
-        }
-    }
-    missing
-}
-
-fn extract_summary_from_parsed(parsed: &Value) -> String {
-    let reason = parsed.get("reason").and_then(Value::as_str).unwrap_or("");
-    let next_step = parsed
-        .get("next_step")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if !reason.is_empty() && !next_step.is_empty() {
-        format!("{reason}。下一步：{next_step}")
-    } else if !reason.is_empty() {
-        reason.to_string()
-    } else if !next_step.is_empty() {
-        next_step.to_string()
-    } else {
-        "已停止".to_string()
-    }
-}
-
-fn extract_json_from_text(text: &str) -> Option<String> {
-    let start = text.find('{')?;
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (offset, ch) in text[start..].char_indices() {
-        let index = start + offset;
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if ch == '\\' && in_string {
-            escaped = true;
-            continue;
-        }
-        if ch == '"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
-        if ch == '{' {
-            depth += 1;
-        } else if ch == '}' {
-            depth -= 1;
-            if depth == 0 {
-                return Some(text[start..=index].to_string());
-            }
-        }
-    }
-    None
-}
-
-fn simple_hash(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut h: u64 = 14695981039346656037;
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(1099511628211);
-    }
-    format!("{h:016x}")
 }
 
 #[cfg(test)]
@@ -1442,7 +1209,10 @@ mod tests {
             provider_key: None,
         });
         assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnNull);
-        assert_eq!(plan.compare_context.reason, "skip_port_stopmessage_disabled");
+        assert_eq!(
+            plan.compare_context.reason,
+            "skip_port_stopmessage_disabled"
+        );
     }
 
     #[test]
@@ -1491,25 +1261,19 @@ mod tests {
 
     #[test]
     fn uses_metadata_previous_compare_for_observation_loop() {
-        // Compute the same hash simple_hash("same") would produce, so the
-        // prev_observation_hash + reason_field match up. After 1 increment from
-        // prev_no_change_count=2 we cross the 3 threshold → fail_fast.
-        let prev_hash = {
-            let bytes = "same".as_bytes();
-            let mut h: u64 = 0xcbf29ce484222325;
-            for &b in bytes {
-                h ^= b as u64;
-                h = h.wrapping_mul(0x100000001b3);
-            }
-            format!("{h:016x}")
-        };
+        let schema = r#"<rcc_stop_schema>{"stopreason":2,"reason":"same","has_evidence":0,"next_step":"x","needs_user_input":false}</rcc_stop_schema>"#;
+        let first_gate = evaluate_stop_schema_gate(schema, None, 1, 3, "", 0);
+        assert_eq!(
+            first_gate.reason_code.as_deref(),
+            Some("stop_schema_continue_next_step")
+        );
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             adapter_context: json!({}),
             base: json!({
                 "choices": [{
                     "index": 0,
                     "finish_reason": "stop",
-                    "message": { "role": "assistant", "content": "blah\n{\"stopreason\":2,\"reason\":\"same\",\"has_evidence\":0,\"next_step\":\"x\",\"needs_user_input\":false}" }
+                    "message": { "role": "assistant", "content": schema }
                 }]
             }),
             request_id: "req-7".to_string(),
@@ -1525,7 +1289,7 @@ mod tests {
                 }
             })),
             metadata_previous_compare: Some(json!({
-                "observationHash": prev_hash,
+                "observationHash": first_gate.observation_hash,
                 "observationStableCount": 2
             })),
             default_config: StopMessageDefaultConfigPlan {
@@ -1546,8 +1310,9 @@ mod tests {
             })),
             provider_key: None,
         });
-        // prev_no_change_count=2 + new match → 3 → loop guard → fail_fast
-        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnSchemaFailFast);
+        // prev_no_change_count=2 + same schema reaches the stopless guard and
+        // materializes as the terminal budget response in the handler.
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnTerminalFinal);
         assert_eq!(plan.compare_context.reason, "stop_schema_budget_exhausted");
     }
 
@@ -1560,7 +1325,7 @@ mod tests {
                 "choices": [{
                     "index": 0,
                     "finish_reason": "stop",
-                    "message": { "role": "assistant", "content": "{\"stopreason\":0,\"reason\":\"\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"next_step\":\"\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}" }
+                    "message": { "role": "assistant", "content": "<rcc_stop_schema>{\"stopreason\":0,\"reason\":\"\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"next_step\":\"\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}</rcc_stop_schema>" }
                 }]
             }),
             request_id: "req-8".to_string(),
@@ -1650,6 +1415,74 @@ mod tests {
             Some("stop_schema_missing")
         );
         assert_eq!(plan.compare_context.reason, "stop_schema_missing");
+    }
+
+    #[test]
+    fn responses_completed_empty_text_is_missing_schema_followup() {
+        let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
+            adapter_context: json!({
+                "metadata": { "stopMessageEnabled": true }
+            }),
+            base: json!({
+                "status": "completed",
+                "output_text": "",
+                "output": [
+                    {
+                        "type": "reasoning",
+                        "summary": [{
+                            "type": "summary_text",
+                            "text": "I should output the stop schema JSON."
+                        }]
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [{ "type": "output_text", "text": "" }]
+                    }
+                ]
+            }),
+            request_id: "req-empty-responses".to_string(),
+            followup_flow_id: None,
+            should_run_vision_flow: false,
+            should_bypass_stop_message_for_media: false,
+            metadata_runtime_control: Some(json!({
+                "stopless": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "active": true
+                }
+            })),
+            metadata_previous_compare: None,
+            default_config: StopMessageDefaultConfigPlan {
+                enabled: true,
+                text: "continue".to_string(),
+                max_repeats: 3,
+            },
+            decision_signals: StoplessDecisionContextSignals {
+                port_stop_message_disabled: false,
+                has_responses_submit_tool_outputs_resume: true,
+                plan_mode_active: false,
+            },
+            captured_request: None,
+            effective_runtime_loop_state: Some(json!({
+                "repeatCount": 1,
+                "maxRepeats": 3,
+                "continuationPrompt": "keep going"
+            })),
+            provider_key: None,
+        });
+
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
+        assert_eq!(
+            plan.stopless_trigger_hint.as_deref(),
+            Some("stop_schema_missing")
+        );
+        assert_eq!(plan.compare_context.reason, "stop_schema_missing");
+        let persist_plan = plan.persist_plan.as_ref().expect("persist plan");
+        assert_eq!(persist_plan.next_used, 2);
+        assert_eq!(persist_plan.next_max_repeats, 3);
     }
 
     #[test]
@@ -1744,6 +1577,79 @@ mod tests {
     }
 
     #[test]
+    fn complete_responses_stop_schema_at_budget_boundary_allows_stop() {
+        let schema = r#"<rcc_stop_schema>{"stopreason":0,"reason":"已完成 invalid schema 缺失字段反馈闭环","has_evidence":1,"evidence":"provider request carried full missingFields feedback twice","issue_cause":"之前 schema 字段缺失","excluded_factors":"已排除 raw reasoningStop 泄漏和 endless CLI loop","diagnostic_order":"first invalid -> full missingFields feedback -> second invalid -> next_step feedback -> terminal schema","done_steps":"完成两轮 invalid schema 修复反馈验证","next_step":"","next_suggested_path":"无","needs_user_input":false,"learned":"invalid schema feedback must enumerate every missing field until complete"}</rcc_stop_schema>"#;
+        let base = json!({
+            "status": "completed",
+            "finish_reason": "stop",
+            "output_text": schema,
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{ "type": "output_text", "text": schema }]
+            }]
+        });
+        let extracted = extract_current_assistant_stop_text(&base);
+        let gate = evaluate_stop_schema_gate(&extracted, None, 2, 3, "", 0);
+        assert_eq!(gate.action, "allow_stop", "extracted={extracted}");
+        let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
+            adapter_context: json!({}),
+            base,
+            request_id: "req-complete-schema-budget-boundary".to_string(),
+            followup_flow_id: None,
+            should_run_vision_flow: false,
+            should_bypass_stop_message_for_media: false,
+            metadata_runtime_control: Some(json!({
+                "stopless": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 2,
+                    "maxRepeats": 3,
+                    "active": true
+                }
+            })),
+            metadata_previous_compare: None,
+            default_config: StopMessageDefaultConfigPlan {
+                enabled: true,
+                text: "continue".to_string(),
+                max_repeats: 3,
+            },
+            decision_signals: StoplessDecisionContextSignals {
+                port_stop_message_disabled: false,
+                has_responses_submit_tool_outputs_resume: true,
+                plan_mode_active: false,
+            },
+            captured_request: Some(json!({
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_stop_invalid_round2",
+                    "output": "{\"toolName\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"invalid_schema\"},\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[\"next_step\"]}}"
+                }]
+            })),
+            effective_runtime_loop_state: Some(json!({
+                "repeatCount": 2,
+                "maxRepeats": 3,
+                "continuationPrompt": "继续执行"
+            })),
+            provider_key: None,
+        });
+        assert_eq!(
+            plan.action,
+            StopMessageAutoPlanAction::ReturnSchemaAllowStop
+        );
+        assert_eq!(plan.compare_context.reason, "stop_schema_finished");
+        let terminal = plan
+            .terminal_chat_response
+            .as_ref()
+            .expect("terminal response");
+        let output_text = terminal["output_text"].as_str().unwrap_or("");
+        assert!(
+            !output_text.contains("stopless budget exhausted"),
+            "complete schema must win over budget terminal, got: {output_text}"
+        );
+    }
+
+    #[test]
     fn continue_needed_with_next_step_returns_handler_plan() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             adapter_context: json!({}),
@@ -1751,7 +1657,7 @@ mod tests {
                 "choices": [{
                     "index": 0,
                     "finish_reason": "stop",
-                    "message": { "role": "assistant", "content": "{\"stopreason\":2,\"reason\":\"working\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"verify\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}" }
+                    "message": { "role": "assistant", "content": "<rcc_stop_schema>{\"stopreason\":2,\"reason\":\"working\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"verify\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}</rcc_stop_schema>" }
                 }]
             }),
             request_id: "req-10".to_string(),
@@ -1802,7 +1708,7 @@ mod tests {
                 "choices": [{
                     "index": 0,
                     "finish_reason": "stop",
-                    "message": { "role": "assistant", "content": "{\"stopreason\":2,\"reason\":\"working\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"verify\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}" }
+                    "message": { "role": "assistant", "content": "<rcc_stop_schema>{\"stopreason\":2,\"reason\":\"working\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"verify\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}</rcc_stop_schema>" }
                 }]
             }),
             request_id: "req-11".to_string(),
@@ -1840,6 +1746,89 @@ mod tests {
         let sf = plan.schema_feedback.as_ref().unwrap();
         assert_eq!(sf.reason_code, "stop_schema_continue_next_step");
         assert!(sf.missing_fields.is_empty());
+    }
+
+    #[test]
+    fn blocked_needs_user_input_returns_terminal_summary_and_question() {
+        let schema = r#"<rcc_stop_schema>{"stopreason":1,"reason":"需要用户选择部署窗口","has_evidence":1,"evidence":"两个候选窗口都会影响线上流量","next_step":"请决定：今晚 23:00 还是明早 09:00 部署？","needs_user_input":true}</rcc_stop_schema>"#;
+        let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
+            adapter_context: json!({}),
+            base: json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": { "role": "assistant", "content": schema }
+                }],
+                "output_text": schema,
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": schema }]
+                }]
+            }),
+            request_id: "req-blocked-user-decision".to_string(),
+            followup_flow_id: None,
+            should_run_vision_flow: false,
+            should_bypass_stop_message_for_media: false,
+            metadata_runtime_control: Some(json!({
+                "stopless": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "active": true
+                }
+            })),
+            metadata_previous_compare: None,
+            default_config: StopMessageDefaultConfigPlan {
+                enabled: true,
+                text: "continue".to_string(),
+                max_repeats: 3,
+            },
+            decision_signals: StoplessDecisionContextSignals {
+                port_stop_message_disabled: false,
+                has_responses_submit_tool_outputs_resume: false,
+                plan_mode_active: false,
+            },
+            captured_request: None,
+            effective_runtime_loop_state: Some(json!({
+                "repeatCount": 1,
+                "maxRepeats": 3,
+                "continuationPrompt": "keep going"
+            })),
+            provider_key: None,
+        });
+
+        assert_eq!(
+            plan.action,
+            StopMessageAutoPlanAction::ReturnSchemaAllowStop
+        );
+        assert_eq!(plan.compare_context.reason, "stop_schema_needs_user_input");
+        let terminal = plan
+            .terminal_chat_response
+            .as_ref()
+            .expect("terminal response");
+        assert_eq!(
+            terminal["choices"][0]["finish_reason"].as_str(),
+            Some("stop")
+        );
+        let content = terminal["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert!(content.contains("当前结果"), "content={content}");
+        assert!(
+            content.contains("需要用户选择部署窗口"),
+            "content={content}"
+        );
+        assert!(content.contains("需要你决定"), "content={content}");
+        assert!(
+            content.contains("请决定：今晚 23:00 还是明早 09:00 部署？"),
+            "content={content}"
+        );
+        let output_text = terminal["output_text"].as_str().unwrap_or("");
+        assert!(
+            output_text.contains("请决定：今晚 23:00 还是明早 09:00 部署？"),
+            "output_text={output_text}"
+        );
     }
 
     #[test]

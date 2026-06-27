@@ -193,6 +193,9 @@ type NativeRouterHotpathJsonBinding = {
     payloadJson: string,
     optionsJson?: string
   ) => string;
+  validateCanonicalClientToolCallJson?: (inputJson: string) => string;
+  containsBroadKillCommandJson?: (inputJson: string) => string;
+  hasInvalidShellWrapperShapeJson?: (inputJson: string) => string;
 };
 
 type NativeHubVrNodeContracts = {
@@ -464,7 +467,7 @@ function getHubBridgePolicySemanticsSync(): NativeHubBridgePolicySemantics {
   return cachedHubBridgePolicySemanticsSync;
 }
 
-function getRouterHotpathJsonBindingSync(): NativeRouterHotpathJsonBinding {
+export function getRouterHotpathJsonBindingSync(): NativeRouterHotpathJsonBinding {
   if (cachedRouterHotpathJsonBindingSync !== undefined) {
     if (!cachedRouterHotpathJsonBindingSync) {
       throw new Error('[llmswitch-bridge] router_hotpath_napi native binding not available');

@@ -268,7 +268,7 @@ function getHubBridgePolicySemanticsSync() {
     }
     return cachedHubBridgePolicySemanticsSync;
 }
-function getRouterHotpathJsonBindingSync() {
+export function getRouterHotpathJsonBindingSync() {
     if (cachedRouterHotpathJsonBindingSync !== undefined) {
         if (!cachedRouterHotpathJsonBindingSync) {
             throw new Error('[llmswitch-bridge] router_hotpath_napi native binding not available');

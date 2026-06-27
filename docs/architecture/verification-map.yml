@@ -124,6 +124,7 @@ verification:
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+      - scripts/tests/stopless-invalid-schema-blackbox.mjs
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
@@ -131,6 +132,7 @@ verification:
       - tests/servertool/stopless-cli-continuation.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
     smoke:
+      - npm run verify:stopless-invalid-schema-blackbox
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -156,6 +158,8 @@ verification:
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
       - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
       - "For malformed/invalid schema, validation must prove the hook result includes parse/interpretation feedback plus explicit field/value/shape errors, not only a generic deny-stop message."
+      - "Validation must prove stop schema missingFields are conditional, not all-fields-required: `stopreason=2` needs `next_step`, `has_evidence=1` needs `evidence`, terminal `stopreason=0|1` needs evidence, and diagnostic fields are not globally mandatory."
+      - "Validation must prove `stopreason=2 + next_step` sends the next_step content back to the model as the continuation text, while `blocked + needs_user_input=true` returns summary plus the user decision question to the client and terminates with stop."
       - "If stop arrives with valid terminal schema, validation must prove stop is allowed even when the model did not proactively call the stop hook."
       - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
       - "Focused Rust gates: `cargo test -p servertool-core stopless --lib -- --nocapture`, `cargo test -p servertool-core cli_contract --lib -- --nocapture`, and `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`."

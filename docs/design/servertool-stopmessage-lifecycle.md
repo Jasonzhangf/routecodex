@@ -108,7 +108,7 @@ When the model tries to stop, the final text must include a stop schema object w
 - `1`: blocked
 - `2`: continue needed
 
-Missing schema, invalid schema, malformed schema arguments, or `stopreason=2` causes `cli_projection` until the Rust budget is exhausted. Valid `stopreason=0|1` with a non-empty reason becomes `terminal_final`.
+Missing schema, invalid schema, malformed schema arguments, or `stopreason=2` without `next_step` causes `cli_projection` until the Rust budget is exhausted. Valid `stopreason=2` with `next_step` continues with that exact next-step text. Valid `stopreason=0|1` with non-empty `reason`, `has_evidence=1`, and non-empty `evidence` becomes `terminal_final`; diagnostic fields are conditional context, not global required fields. `blocked + needs_user_input=true` must return the summary plus the user decision question and stop with `finish_reason=stop`.
 
 ## Validation
 

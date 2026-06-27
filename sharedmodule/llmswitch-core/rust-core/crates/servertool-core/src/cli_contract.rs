@@ -502,7 +502,10 @@ fn build_stopless_cli_model_guidance(
     parts.push(
         "字段怎么写：stopreason=0/1/2；reason 写当前状态；has_evidence 用 0/1；evidence 写证据；issue_cause 写卡点；next_step 写下一步具体动作。".to_string(),
     );
-    parts.push("怎么填：每个字段都要写具体内容；不要只写空话或只写字段名。".to_string());
+    parts.push(
+        "怎么填：按字段之间的逻辑关系填写；不是每个字段都必填，但触发条件下的字段不能留空。"
+            .to_string(),
+    );
     parts.push("stopreason 取值：0=finished，1=blocked，2=continue_needed。".to_string());
     parts.push(
         "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进，先继续执行\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"先看入口，再看链路，再看验证\",\"done_steps\":\"已完成现有排查\",\"next_step\":\"继续完成剩余验证并补最后一轮证据\",\"next_suggested_path\":\"按当前链路继续\",\"needs_user_input\":false,\"learned\":\"把真实结论写进 stop schema\"}".to_string(),
@@ -572,7 +575,7 @@ fn build_stopless_missing_field_repair_lines(feedback: &StoplessSchemaFeedback) 
     let mut lines = Vec::new();
     if feedback.reason_code == "stop_schema_terminal_missing_fields" {
         lines.push(
-            "终态 stop schema 要求更严格：当 stopreason=0/1 时，has_evidence 必须是 1，且 evidence、issue_cause、excluded_factors、diagnostic_order、done_steps 都必须给出具体内容。".to_string(),
+            "终态 stop schema 要求更严格：当 stopreason=0/1 时，has_evidence 必须是 1，且 evidence 必须给出具体证据；诊断字段按实际情况填写，不是全局必填。".to_string(),
         );
     }
     for field in &feedback.missing_fields {
@@ -1519,6 +1522,17 @@ fn validate_no_internal_carrier(value: &Value) -> Result<(), ServertoolCliError>
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn assert_missing_fields_eq(actual: &[String], expected: &[&str]) {
+        let mut actual_sorted = actual.to_vec();
+        actual_sorted.sort();
+        let mut expected_sorted = expected
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect::<Vec<_>>();
+        expected_sorted.sort();
+        assert_eq!(actual_sorted, expected_sorted);
+    }
 
     #[test]
     fn builds_stop_message_auto_cli_output() {
@@ -2541,11 +2555,7 @@ mod tests {
 
         let feedback = output.schema_feedback.expect("schema feedback");
         assert_eq!(feedback.reason_code, "stop_schema_terminal_missing_fields");
-        assert!(feedback
-            .missing_fields
-            .contains(&"has_evidence".to_string()));
-        assert!(feedback.missing_fields.contains(&"evidence".to_string()));
-        assert!(feedback.missing_fields.contains(&"done_steps".to_string()));
+        assert_missing_fields_eq(&feedback.missing_fields, &["has_evidence", "evidence"]);
 
         assert!(
             output.model_guidance.is_empty(),
@@ -2750,13 +2760,8 @@ mod tests {
             output.input["triggerHint"],
             Value::String("budget_exhausted".to_string())
         );
-        assert!(output
-            .schema_feedback
-            .as_ref()
-            .expect("schema feedback")
-            .missing_fields
-            .iter()
-            .any(|field| field == "next_step"));
+        let feedback = output.schema_feedback.as_ref().expect("schema feedback");
+        assert_missing_fields_eq(&feedback.missing_fields, &["has_evidence", "next_step"]);
         assert!(output.input.get("schemaFeedback").is_none());
         assert_eq!(
             output
@@ -2810,13 +2815,14 @@ mod tests {
                 .reason_code,
             "stop_schema_next_step_missing"
         );
-        assert!(output
-            .schema_feedback
-            .as_ref()
-            .expect("schema feedback")
-            .missing_fields
-            .iter()
-            .any(|field| field == "next_step"));
+        assert_missing_fields_eq(
+            &output
+                .schema_feedback
+                .as_ref()
+                .expect("schema feedback")
+                .missing_fields,
+            &["next_step"],
+        );
     }
 
     #[test]

@@ -6,6 +6,8 @@
 import { type AnyRecord } from './module-loader.js';
 import type { ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
 type NativeFailureClassification = unknown;
+type NativeRouterHotpathJsonBinding = Record<string, unknown>;
+export declare function getRouterHotpathJsonBindingSync(): NativeRouterHotpathJsonBinding;
 export declare function mapChatToolsToBridgeJson(rawTools: unknown): Promise<AnyRecord[]>;
 export declare function injectMcpToolsForChatJson(tools: unknown[] | undefined, discoveredServers: string[]): Promise<AnyRecord[]>;
 export declare function injectMcpToolsForResponsesJson(tools: unknown[] | undefined, discoveredServers: string[]): Promise<AnyRecord[]>;

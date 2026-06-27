@@ -76,9 +76,12 @@ Provider response
 }
 ```
 
-- `stopreason`: `0=finished`、`1=blocked`、`2=continue_needed`。
-- `has_evidence` 只能是 `0|1`。
-- `needs_user_input=true` 只用于确实需要问用户一个简单问题；否则应继续执行或最终停止。
+- `stopreason`: `0=finished`、`1=blocked`、`2=continue_needed`。`0|1` 都是停止条件，`2` 是继续条件。
+- `reason` 必填，说明当前真实状态。
+- `has_evidence` 必填且只能是 `0|1`；`has_evidence=1` 时 `evidence` 必填。
+- `stopreason=0|1` 必须 `has_evidence=1` 且 `evidence` 非空；诊断字段按真实情况填写，不是全局必填。
+- `stopreason=2` 必须填写 `next_step`；下一轮模型续跑文本必须只执行 `next_step` 的内容。
+- `needs_user_input=true` 只用于确实需要问用户一个简单问题；此时 `next_step` 必须直接写要问用户的问题，并允许以 `finish_reason=stop` 停止等待用户决策。
 
 ## 6. 真源文件
 
