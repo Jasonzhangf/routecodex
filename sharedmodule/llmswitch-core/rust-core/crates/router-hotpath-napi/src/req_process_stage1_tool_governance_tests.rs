@@ -23,6 +23,59 @@ fn test_apply_tool_governance_basic() {
 }
 
 #[test]
+fn test_req_chatprocess_entry_lifts_responses_resume_and_tombstones_metadata() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4o",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{"type": "input_text", "text": "continue"}]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses",
+          "responsesResume": {
+            "previousRequestId": "req_prev",
+            "restoredFromResponseId": "resp_prev",
+            "routeHint": "thinking",
+            "toolOutputsDetailed": [
+              {
+                "callId": "call_1",
+                "outputText": "ok"
+              }
+            ]
+          }
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_chatprocess_resume_lift".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({}),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let semantics = result.processed_request["semantics"]
+        .as_object()
+        .expect("chatprocess semantics");
+    assert_eq!(
+        semantics["responses"]["resume"]["restoredFromResponseId"].as_str(),
+        Some("resp_prev")
+    );
+    assert_eq!(
+        semantics["continuation"]["continuationScope"].as_str(),
+        Some("request_chain")
+    );
+    assert_eq!(
+        semantics["continuation"]["toolContinuation"]["submittedToolCallIds"][0].as_str(),
+        Some("call_1")
+    );
+    assert!(result.metadata["responsesResume"].is_null());
+}
+
+#[test]
 fn test_req_process_responses_input_materializes_stopless_instructions_when_client_inject_ready() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({

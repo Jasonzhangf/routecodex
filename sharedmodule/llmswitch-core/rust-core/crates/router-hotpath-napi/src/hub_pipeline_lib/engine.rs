@@ -138,6 +138,16 @@ impl HubPipelineEngine {
         let entry_endpoint = request.entry_endpoint.clone();
         let direction = request.direction.clone();
         let metadata_center_snapshot = request.metadata_center_snapshot.clone();
+        let initial_provider_protocol = if request.provider_protocol.trim().is_empty() {
+            read_entry_provider_protocol(&request.metadata, &metadata_center_snapshot).ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_provider_protocol",
+                    "Rust HubPipeline requires providerProtocol in metadataCenterSnapshot.runtimeControl, request.providerProtocol, or metadata.providerProtocol",
+                )
+            })?
+        } else {
+            request.provider_protocol.clone()
+        };
         let mut diagnostics = vec![diagnostic(
             HubPipelineStageId::NormalizeRequest,
             HubPipelineDiagnosticStatus::Started,
@@ -147,7 +157,7 @@ impl HubPipelineEngine {
             request_id: request_id.clone(),
             endpoint: request.endpoint,
             entry_endpoint: request.entry_endpoint,
-            provider_protocol: request.provider_protocol,
+            provider_protocol: initial_provider_protocol,
             payload: request.payload,
             metadata: request.metadata,
             metadata_center_snapshot: metadata_center_snapshot.clone(),
@@ -214,15 +224,6 @@ impl HubPipelineEngine {
             protocol: Some(entry_provider_protocol.clone()),
             entry_endpoint: normalized_metadata
                 .get("entryEndpoint")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            responses_resume: None,
-            session_id: normalized_metadata
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            conversation_id: normalized_metadata
-                .get("conversationId")
                 .and_then(Value::as_str)
                 .map(str::to_string),
         });
@@ -309,6 +310,7 @@ impl HubPipelineEngine {
                 "nodeResult": governed.node_result,
             })),
         ));
+        let governed_metadata = governed.metadata.clone();
         let req_chatprocess_03 = run_hub_req_chatprocess_03_governed_entrypoint(
             req_inbound_02,
             project_normal_request_payload(&governed.processed_request),
@@ -318,7 +320,7 @@ impl HubPipelineEngine {
         })?;
         let route_output = self.select_route(
             &governed.processed_request,
-            &normalized_metadata,
+            &governed_metadata,
             &metadata_center_snapshot,
         )?;
         let target = route_output.get("target").cloned().ok_or_else(|| {
@@ -353,7 +355,7 @@ impl HubPipelineEngine {
         let governed_processed_request = governed.processed_request.clone();
         let mut routed = apply_vr_route_04_selection(RouteSelectionApplyInput {
             request: governed.processed_request,
-            normalized_metadata,
+            normalized_metadata: governed_metadata,
             target,
             route_name,
             original_model: lifted_envelope
@@ -894,10 +896,7 @@ fn capture_context_snapshot(
         .map(str::to_string);
     if let Some(instructions) = governed_instructions {
         if let Some(snapshot_obj) = snapshot.as_object_mut() {
-            snapshot_obj.insert(
-                "systemInstruction".to_string(),
-                Value::String(instructions),
-            );
+            snapshot_obj.insert("systemInstruction".to_string(), Value::String(instructions));
         }
     }
     Ok(Some(snapshot))
@@ -1013,13 +1012,11 @@ fn build_adapter_context(
     let session_id = metadata
         .get("sessionId")
         .and_then(Value::as_str)
-        .map(str::to_string)
-        ;
+        .map(str::to_string);
     let conversation_id = metadata
         .get("conversationId")
         .and_then(Value::as_str)
-        .map(str::to_string)
-        ;
+        .map(str::to_string);
     AdapterContext {
         compatibility_profile: read_trimmed_metadata_string_with_target_fallback(
             metadata,
@@ -1084,7 +1081,8 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn build_adapter_context_does_not_backfill_session_identifiers_from_responses_request_context() {
+    fn build_adapter_context_does_not_backfill_session_identifiers_from_responses_request_context()
+    {
         let metadata = json!({
             "entryEndpoint": "/v1/responses",
             "responsesRequestContext": {

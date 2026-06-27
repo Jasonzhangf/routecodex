@@ -644,11 +644,14 @@ fn is_stopless_guidance_message(entry: &Value) -> bool {
     let Some(text) = content[0].get("text").and_then(Value::as_str) else {
         return false;
     };
-    text.contains("stopreason")
-        && (text.contains("finished")
-            || text.contains("blocked")
-            || text.contains("continue_needed")
-            || text.contains("收尾时至少带上这些字段"))
+    text.contains("上一轮执行结果：repeatCount=")
+        || text.contains("按下面 schema 补齐缺失字段")
+        || text.contains("收尾时至少带上这些字段")
+        || text.contains("stopreason")
+            && (text.contains("finished")
+                || text.contains("blocked")
+                || text.contains("continue_needed")
+                || text.contains("收尾时至少带上这些字段"))
 }
 
 fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
@@ -717,6 +720,7 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
     });
     let mut normalized = Vec::<Value>::with_capacity(items.len());
     let mut guidance_injected = false;
+    let mut suppressed_stop_hook_call_id: Option<String> = None;
     for item in items {
         let Some(row) = item.as_object() else {
             normalized.push(item);
@@ -736,9 +740,16 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
             if is_stop_hook_function_call(row)
                 && completed_stopless_call_ids.contains(call_id.as_str())
             {
+                suppressed_stop_hook_call_id = Some(call_id);
                 continue;
             }
             normalized.push(item);
+            continue;
+        }
+        if item_type == "message"
+            && row.get("role").and_then(Value::as_str) == Some("assistant")
+            && suppressed_stop_hook_call_id.is_some()
+        {
             continue;
         }
         if is_bridge_tool_output_item_type(item_type.as_str()) {
@@ -746,11 +757,16 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
             if is_stopless_tool_output_payload(row.get("output").unwrap_or(&Value::Null))
                 && completed_stopless_call_ids.contains(call_id.as_str())
             {
-                if !guidance_injected && latest_stopless_call_id.as_deref() == Some(call_id.as_str()) {
+                if !guidance_injected
+                    && latest_stopless_call_id.as_deref() == Some(call_id.as_str())
+                {
                     if let Some(guidance) = latest_stopless_guidance.clone() {
                         normalized.push(guidance);
                     }
                     guidance_injected = true;
+                }
+                if suppressed_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
+                    suppressed_stop_hook_call_id = None;
                 }
                 continue;
             }
@@ -762,6 +778,9 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
                     normalized.push(guidance);
                 }
                 guidance_injected = true;
+                if suppressed_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
+                    suppressed_stop_hook_call_id = None;
+                }
                 continue;
             }
         }
@@ -1373,8 +1392,9 @@ fn resume_responses_conversation_payload(
     let (normalized_items, submitted_details) =
         normalize_submitted_tool_outputs(&tool_outputs, &merged_input)?;
     merged_input.extend(normalized_items);
-    let full_input = normalize_responses_history_items(merged_input.clone());
-    payload.insert("input".to_string(), Value::Array(merged_input));
+    let full_input =
+        collapse_auto_stop_hook_pairs_in_history(normalize_responses_history_items(merged_input));
+    payload.insert("input".to_string(), Value::Array(full_input.clone()));
 
     let stream = submit_payload
         .as_object()
@@ -1427,6 +1447,7 @@ fn resume_responses_conversation_payload(
             "fullInput": full_input,
             "restoredTools": read_entry_tools_value(&entry_obj),
             "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+            "restored": true,
         }
     }))
 }
@@ -2593,31 +2614,39 @@ mod tests {
 
         let payload = resumed.get("payload").and_then(Value::as_object).unwrap();
         let input = payload.get("input").and_then(Value::as_array).unwrap();
-        assert_eq!(input.len(), 5);
+        assert_eq!(input.len(), 2);
         assert_eq!(input[0]["type"], json!("message"));
         assert_eq!(input[1]["type"], json!("message"));
-        assert_eq!(input[2]["type"], json!("function_call"));
-        assert_eq!(input[3]["type"], json!("message"));
         let serialized = serde_json::to_string(input).unwrap();
         assert!(!serialized.contains("call_third_round_1"));
-        assert_eq!(input[2]["call_id"], json!("call_third_round_2"));
-        assert_eq!(input[4]["type"], json!("function_call_output"));
-        assert_eq!(input[4]["call_id"], json!("call_third_round_2"));
-        assert!(input[4]["output"]
-            .as_str()
-            .expect("output")
-            .contains("stop_message_auto"));
+        assert!(!serialized.contains("call_third_round_2"));
+        assert!(!serialized.contains("stop_message_auto"));
+        assert!(!serialized.contains("继续执行中"));
+        let guidance = input
+            .iter()
+            .filter_map(|item| {
+                item.get("content")?
+                    .as_array()?
+                    .first()?
+                    .get("text")?
+                    .as_str()
+            })
+            .find(|text| text.contains("上一轮执行结果"))
+            .expect("guidance");
+        assert!(guidance.contains("上一轮执行结果：repeatCount=3/3。"));
+        assert!(guidance.contains("继续往下做"));
+        assert!(guidance.contains("stopreason"));
 
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
-        assert_eq!(full_input.len(), 5);
+        assert_eq!(full_input.len(), 2);
         assert_eq!(full_input[0]["type"], json!("message"));
         assert_eq!(full_input[1]["type"], json!("message"));
-        assert_eq!(full_input[2]["type"], json!("function_call"));
-        assert_eq!(full_input[3]["type"], json!("message"));
-        assert_eq!(full_input[4]["type"], json!("function_call_output"));
         let full_input_serialized = serde_json::to_string(full_input).unwrap();
         assert!(!full_input_serialized.contains("call_third_round_1"));
+        assert!(!full_input_serialized.contains("call_third_round_2"));
+        assert!(!full_input_serialized.contains("stop_message_auto"));
+        assert!(!full_input_serialized.contains("继续执行中"));
     }
 
     #[test]

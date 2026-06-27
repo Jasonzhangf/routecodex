@@ -124,7 +124,6 @@ async function main() {
   results.push(await run('matrix:coverage-responses-sse-terminated-salvage', 'scripts/tests/responses-sse-to-json-terminated-salvage.mjs'));
   results.push(await run('matrix:coverage-responses-sse-missing-terminator', 'scripts/tests/responses-sse-missing-terminator.mjs'));
   results.push(await run('matrix:coverage-compat-lmstudio-tool-call-ids', 'scripts/tests/compat-lmstudio-tool-call-ids.mjs'));
-  results.push(await run('matrix:compat-iflow-kimi-history-media-placeholder', 'scripts/tests/compat-iflow-kimi-history-media-placeholder.mjs'));
   results.push(await run('matrix:coverage-hub-req-outbound-compat', 'scripts/tests/coverage-hub-req-outbound-compat.mjs'));
   results.push(await run('matrix:deepseek-web-compat-tool-calling', 'scripts/tests/deepseek-web-compat-tool-calling.mjs'));
   results.push(await run('matrix:anthropic-usage-input-output-regression', 'scripts/tests/anthropic-usage-input-output-regression.mjs'));
@@ -189,7 +188,6 @@ async function main() {
   results.push(await run('matrix:stop-message-stage-activation-validation', 'scripts/tests/stop-message-stage-activation-validation.mjs'));
   results.push(await run('matrix:stop-message-shorthand-parse', 'scripts/tests/stop-message-shorthand-parse.mjs'));
   results.push(await run('matrix:stop-message-marker-clean-and-reactivate', 'scripts/tests/stop-message-marker-clean-and-reactivate.mjs'));
-  results.push(await run('matrix:stop-message-followup-iflow-trim', 'scripts/tests/stop-message-followup-iflow-trim.mjs'));
   results.push(await run('matrix:stop-message-ai-followup-prompt-shape', 'scripts/tests/stop-message-ai-followup-prompt-shape.mjs'));
   results.push(await run('matrix:stop-message-captured-request-context', 'scripts/tests/stop-message-captured-request-context.mjs'));
   results.push(await run('matrix:stop-message-followup-no-recursion', 'scripts/tests/stop-message-followup-no-recursion.mjs'));

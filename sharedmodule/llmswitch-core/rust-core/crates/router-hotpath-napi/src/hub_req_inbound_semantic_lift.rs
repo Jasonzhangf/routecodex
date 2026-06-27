@@ -1,14 +1,6 @@
-use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};
 use crate::shared_tool_mapping::build_anthropic_tool_alias_map_from_slice;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-
-#[derive(Debug, Serialize, Clone)]
-struct ResumeToolOutput {
-    #[serde(rename = "tool_call_id")]
-    tool_call_id: String,
-    content: String,
-}
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -16,15 +8,10 @@ struct ReqInboundSemanticLiftInput {
     payload: Option<Value>,
     protocol: Option<String>,
     entry_endpoint: Option<String>,
-    responses_resume: Option<Value>,
     #[serde(default)]
     has_client_tools_raw: bool,
     #[serde(default)]
     has_tool_alias_map: bool,
-    #[serde(default)]
-    has_responses_resume: bool,
-    #[serde(default)]
-    has_direct_tool_outputs: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -34,9 +21,6 @@ pub struct ReqInboundSemanticLiftApplyInput {
     pub payload: Option<Value>,
     pub protocol: Option<String>,
     pub entry_endpoint: Option<String>,
-    pub responses_resume: Option<Value>,
-    pub session_id: Option<String>,
-    pub conversation_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -46,209 +30,6 @@ struct ReqInboundSemanticLiftOutput {
     client_tools_raw: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_name_alias_map: Option<Map<String, Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    responses_resume: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mapped_tool_outputs: Option<Vec<ResumeToolOutput>>,
-}
-
-fn normalize_output_text(value: Option<&Value>) -> String {
-    match value {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Null) | None => "\"\"".to_string(),
-        Some(other) => {
-            serde_json::to_string(other).unwrap_or_else(|_| "[object Object]".to_string())
-        }
-    }
-}
-
-fn map_resume_tool_outputs_detailed(responses_resume: &Value) -> Vec<ResumeToolOutput> {
-    let detailed = responses_resume
-        .as_object()
-        .and_then(|obj| obj.get("toolOutputsDetailed"))
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    if detailed.is_empty() {
-        return Vec::new();
-    }
-
-    let mut mapped: Vec<ResumeToolOutput> = Vec::new();
-    for (index, entry) in detailed.iter().enumerate() {
-        let row = match entry.as_object() {
-            Some(v) => v,
-            None => continue,
-        };
-        let call_id = read_trimmed_string(row.get("callId"))
-            .or_else(|| read_trimmed_string(row.get("originalId")))
-            .unwrap_or(format!("resume_tool_{}", index + 1));
-
-        mapped.push(ResumeToolOutput {
-            tool_call_id: call_id,
-            content: normalize_output_text(row.get("outputText")),
-        });
-    }
-
-    mapped
-}
-
-fn sanitize_responses_resume_for_semantics(value: &Value) -> Option<Value> {
-    let mut row = value.as_object()?.clone();
-    row.remove("sessionId");
-    row.remove("conversationId");
-    Some(Value::Object(row))
-}
-
-fn build_responses_continuation(
-    payload: Option<&Value>,
-    responses_resume: Option<&Value>,
-) -> Option<Value> {
-    let payload_obj = payload.and_then(|value| value.as_object());
-    let resume_obj = responses_resume.and_then(|value| value.as_object());
-
-    let previous_request_id =
-        resume_obj.and_then(|row| read_object_trimmed_string(row, "previousRequestId"));
-    let restored_from_response_id =
-        resume_obj.and_then(|row| read_object_trimmed_string(row, "restoredFromResponseId"));
-    let previous_response_id =
-        payload_obj.and_then(|row| read_object_trimmed_string(row, "previous_response_id"));
-    let route_hint = resume_obj.and_then(|row| read_object_trimmed_string(row, "routeHint"));
-    let provider_key = resume_obj.and_then(|row| read_object_trimmed_string(row, "providerKey"));
-
-    let chain_id = previous_request_id
-        .clone()
-        .or_else(|| previous_response_id.clone())
-        .or_else(|| restored_from_response_id.clone());
-
-    let mut continuation = Map::<String, Value>::new();
-    if let Some(chain_id) = chain_id {
-        continuation.insert("chainId".to_string(), Value::String(chain_id));
-    }
-
-    let mut resume_from = Map::<String, Value>::new();
-    resume_from.insert(
-        "protocol".to_string(),
-        Value::String("openai-responses".to_string()),
-    );
-    if let Some(response_id) = restored_from_response_id {
-        resume_from.insert("responseId".to_string(), Value::String(response_id));
-    }
-    if let Some(previous_response_id) = previous_response_id {
-        resume_from.insert(
-            "previousResponseId".to_string(),
-            Value::String(previous_response_id),
-        );
-    }
-    if let Some(request_id) = previous_request_id {
-        resume_from.insert("requestId".to_string(), Value::String(request_id));
-    }
-    if !resume_from.is_empty() {
-        continuation.insert("resumeFrom".to_string(), Value::Object(resume_from));
-    }
-    if let Some(route_hint) = route_hint {
-        continuation.insert("routeHint".to_string(), Value::String(route_hint));
-    }
-    if let Some(provider_key) = provider_key {
-        continuation.insert("providerKey".to_string(), Value::String(provider_key));
-    }
-
-    let mapped_outputs = responses_resume
-        .map(map_resume_tool_outputs_detailed)
-        .unwrap_or_default();
-    if !mapped_outputs.is_empty() {
-        let mut tool_continuation = Map::<String, Value>::new();
-        tool_continuation.insert(
-            "mode".to_string(),
-            Value::String("submit_tool_outputs".to_string()),
-        );
-        if !mapped_outputs.is_empty() {
-            let submitted_ids = mapped_outputs
-                .iter()
-                .map(|entry| Value::String(entry.tool_call_id.clone()))
-                .collect::<Vec<_>>();
-            tool_continuation.insert(
-                "submittedToolCallIds".to_string(),
-                Value::Array(submitted_ids),
-            );
-            let resume_outputs = mapped_outputs
-                .iter()
-                .map(|entry| Value::String(entry.content.clone()))
-                .collect::<Vec<_>>();
-            tool_continuation.insert("resumeOutputs".to_string(), Value::Array(resume_outputs));
-        }
-        continuation.insert(
-            "toolContinuation".to_string(),
-            Value::Object(tool_continuation),
-        );
-    }
-
-    if continuation.is_empty() {
-        return None;
-    }
-
-    continuation.insert(
-        "continuationScope".to_string(),
-        Value::String("request_chain".to_string()),
-    );
-    continuation.insert(
-        "stateOrigin".to_string(),
-        Value::String("openai-responses".to_string()),
-    );
-    continuation.insert(
-        "continuationOwner".to_string(),
-        Value::String("relay".to_string()),
-    );
-    continuation.insert("restored".to_string(), Value::Bool(true));
-
-    Some(Value::Object(continuation))
-}
-
-fn build_generic_continuation(
-    protocol: Option<&str>,
-    session_id: Option<&str>,
-    conversation_id: Option<&str>,
-) -> Option<Value> {
-    let normalized_protocol = protocol.unwrap_or("").trim().to_ascii_lowercase();
-    let session_id = session_id
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty());
-    let conversation_id = conversation_id
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty());
-
-    let (chain_id, sticky_scope) = if let Some(session_id) = session_id {
-        (session_id.to_string(), "session")
-    } else if let Some(conversation_id) = conversation_id {
-        (conversation_id.to_string(), "conversation")
-    } else {
-        return None;
-    };
-
-    let state_origin = if normalized_protocol.is_empty() {
-        "unknown".to_string()
-    } else {
-        normalized_protocol
-    };
-
-    let mut continuation = Map::<String, Value>::new();
-    continuation.insert("chainId".to_string(), Value::String(chain_id));
-    continuation.insert(
-        "continuationScope".to_string(),
-        Value::String(sticky_scope.to_string()),
-    );
-    continuation.insert(
-        "stateOrigin".to_string(),
-        Value::String(state_origin.clone()),
-    );
-    continuation.insert("restored".to_string(), Value::Bool(false));
-    continuation.insert(
-        "resumeFrom".to_string(),
-        Value::Object(Map::from_iter([(
-            "protocol".to_string(),
-            Value::String(state_origin),
-        )])),
-    );
-    Some(Value::Object(continuation))
 }
 
 fn read_raw_tools(payload: Option<&Value>) -> Vec<Value> {
@@ -287,26 +68,6 @@ fn resolve_req_inbound_semantic_lift_plan(
             build_anthropic_tool_alias_map_from_slice(raw_tools.as_slice());
     }
 
-    let responses_resume = input.responses_resume.as_ref().and_then(|value| {
-        if value.is_object() {
-            Some(value.clone())
-        } else {
-            None
-        }
-    });
-
-    if let Some(resume) = responses_resume {
-        if !input.has_responses_resume {
-            output.responses_resume = Some(resume.clone());
-        }
-        if !input.has_direct_tool_outputs {
-            let mapped = map_resume_tool_outputs_detailed(&resume);
-            if !mapped.is_empty() {
-                output.mapped_tool_outputs = Some(mapped);
-            }
-        }
-    }
-
     output
 }
 
@@ -325,13 +86,7 @@ pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) 
         .or_insert_with(|| Value::Object(Map::new()));
     let payload = ensure_object(payload_value);
 
-    let has_direct_tool_outputs = payload
-        .get("toolOutputs")
-        .and_then(|v| v.as_array())
-        .map(|v| !v.is_empty())
-        .unwrap_or(false);
-
-    let (has_client_tools_raw, has_tool_alias_map, has_responses_resume) = {
+    let (has_client_tools_raw, has_tool_alias_map) = {
         let semantics_value = payload
             .entry("semantics".to_string())
             .or_insert_with(|| Value::Object(Map::new()));
@@ -351,51 +106,20 @@ pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) 
                 .and_then(|v| v.as_object())
                 .is_some();
         let has_client_tools_raw = tools.contains_key("clientToolsRaw");
-        let has_responses_resume = semantics
-            .get("responses")
-            .and_then(|v| v.as_object())
-            .map(|responses| responses.contains_key("resume"))
-            .unwrap_or(false);
-        (
-            has_client_tools_raw,
-            has_tool_alias_map,
-            has_responses_resume,
-        )
-    };
-
-    let normalized_responses_resume = input
-        .responses_resume
-        .as_ref()
-        .and_then(sanitize_responses_resume_for_semantics);
-    let continuation = if matches!(
-        input.protocol.as_deref().map(|value| value.trim().to_ascii_lowercase()),
-        Some(protocol) if protocol == "openai-responses"
-    ) {
-        build_responses_continuation(input.payload.as_ref(), normalized_responses_resume.as_ref())
-    } else {
-        build_generic_continuation(
-            input.protocol.as_deref(),
-            input.session_id.as_deref(),
-            input.conversation_id.as_deref(),
-        )
+        (has_client_tools_raw, has_tool_alias_map)
     };
 
     let plan = resolve_req_inbound_semantic_lift_plan(&ReqInboundSemanticLiftInput {
         payload: input.payload,
         protocol: input.protocol,
         entry_endpoint: input.entry_endpoint,
-        responses_resume: normalized_responses_resume.clone(),
         has_client_tools_raw,
         has_tool_alias_map,
-        has_responses_resume,
-        has_direct_tool_outputs,
     });
 
     let ReqInboundSemanticLiftOutput {
         client_tools_raw,
         tool_name_alias_map,
-        responses_resume,
-        mapped_tool_outputs,
     } = plan;
 
     {
@@ -422,38 +146,6 @@ pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) 
         if !has_tool_alias_map {
             if let Some(alias_map) = tool_name_alias_map {
                 tools.insert("toolNameAliasMap".to_string(), Value::Object(alias_map));
-            }
-        }
-
-        if !semantics
-            .get("continuation")
-            .and_then(|v| v.as_object())
-            .is_some()
-        {
-            if let Some(continuation) = continuation {
-                semantics.insert("continuation".to_string(), continuation);
-            }
-        }
-
-        if !has_responses_resume {
-            if let Some(resume) = responses_resume {
-                let responses_value = semantics
-                    .entry("responses".to_string())
-                    .or_insert_with(|| Value::Object(Map::new()));
-                let responses = ensure_object(responses_value);
-                responses.insert("resume".to_string(), resume);
-            }
-        }
-
-        if !has_direct_tool_outputs {
-            if let Some(resume) = normalized_responses_resume {
-                let mapped_outputs = mapped_tool_outputs
-                    .unwrap_or_else(|| map_resume_tool_outputs_detailed(&resume));
-                if !mapped_outputs.is_empty() {
-                    let mapped_value = serde_json::to_value(mapped_outputs)
-                        .unwrap_or_else(|_| Value::Array(Vec::new()));
-                    payload.insert("toolOutputs".to_string(), mapped_value);
-                }
             }
         }
     }

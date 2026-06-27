@@ -12,6 +12,7 @@ export interface NativeReqProcessToolGovernanceInput {
 
 export interface NativeReqProcessToolGovernanceOutput {
   processedRequest: Record<string, unknown>;
+  metadata: Record<string, unknown>;
   nodeResult: Record<string, unknown>;
 }
 
@@ -23,8 +24,12 @@ function parseToolGovernanceOutput(raw: string): NativeReqProcessToolGovernanceO
     }
     const row = parsed as Record<string, unknown>;
     const processedRequest = row.processedRequest;
+    const metadata = row.metadata;
     const nodeResult = row.nodeResult;
     if (!processedRequest || typeof processedRequest !== 'object' || Array.isArray(processedRequest)) {
+      return null;
+    }
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
       return null;
     }
     if (!nodeResult || typeof nodeResult !== 'object' || Array.isArray(nodeResult)) {
@@ -32,6 +37,7 @@ function parseToolGovernanceOutput(raw: string): NativeReqProcessToolGovernanceO
     }
     return {
       processedRequest: processedRequest as Record<string, unknown>,
+      metadata: metadata as Record<string, unknown>,
       nodeResult: nodeResult as Record<string, unknown>
     };
   } catch {

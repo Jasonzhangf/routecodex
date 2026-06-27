@@ -1,3 +1,20 @@
+# 2026-06-27 Hub Pipeline boundary / Responses continuation store-resume closeout
+
+- 本轮收口：`Responses` continuation restore/save 逻辑继续归 Chat Process / conversation store owner；`ReqInbound` 不再承载 resume/session-scope/tool_outputs lift，`RespOutbound/SSE` 不做 continuation 逻辑，只接 finalized semantic payload。
+- 新增黑盒：`tests/sharedmodule/responses-continuation-store.spec.ts` 覆盖跨请求 `response save -> response outbound release -> next request restore -> chat bridge mapping`，证明普通 pending operation 的 `function_call` / `function_call_output` 不在两个区间丢失。
+- stopless 修复：`resume_responses_conversation_payload` 在 submit_tool_outputs 追加后立即做 canonical history normalize + stopless auto hook pair collapse；payload.input 与 meta.fullInput 同源，下一轮 req inbound 不再承担逻辑补偿。
+- 额外验证阻塞清理：`sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs` 删除两个已不存在脚本的 stale matrix entry，恢复 residue gate。
+- 已验证：
+  - `cargo test -p router-hotpath-napi shared_responses_conversation --lib -- --nocapture` 通过，35/35。
+  - `cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture` 通过，39/39。
+  - `cargo test -p router-hotpath-napi hub_pipeline --lib -- --nocapture` 通过，225/225。
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` 通过。
+  - `npm run jest:run -- --runTestsByPath tests/sharedmodule/responses-continuation-store.spec.ts --runInBand` 通过，38/38。
+  - `npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline.metadata-center-provider-protocol.spec.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` 通过，150/150。
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` 通过。
+  - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` 通过。
+- 观察：当前工作树仍有大量无关脏改动；提交必须只 stage 本轮边界/continuation/store-resume 相关文件。
+
 # 2026-06-27 providerProtocol MetadataCenter-only closeout
 
 - 现场错误：`/v1/chat/completions` 入口选到 Anthropic upstream 后，响应解析仍按 OpenAI chat SSE 解码，报 `OpenAI chat SSE response did not contain choices array`。

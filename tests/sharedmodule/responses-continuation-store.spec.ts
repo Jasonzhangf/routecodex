@@ -329,6 +329,181 @@ describe('responses conversation store plain continuation restore', () => {
     });
   });
 
+  it('keeps a pending operation across response save, response outbound release, next request restore, and chat bridge mapping', async () => {
+    captureResponsesRequestContext({
+      requestId: track('req-cross-operation-store-1'),
+      sessionId: 'sess-cross-operation',
+      conversationId: 'conv-cross-operation',
+      providerKey: 'XL.key1.gpt-5.5',
+      payload: {
+        model: 'gpt-5.5',
+        store: true,
+        tools: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: { cmd: { type: 'string' } },
+              required: ['cmd']
+            }
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'run the verification command' }]
+          }
+        ],
+        toolsRaw: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: { cmd: { type: 'string' } },
+              required: ['cmd']
+            }
+          }
+        ]
+      }
+    });
+
+    recordResponsesResponse({
+      requestId: track('req-cross-operation-store-1'),
+      providerKey: 'XL.key1.gpt-5.5',
+      continuationOwner: 'relay',
+      response: {
+        id: 'resp-cross-operation-1',
+        status: 'requires_action',
+        output: [
+          {
+            id: 'fc_call_cross_operation_1',
+            type: 'function_call',
+            status: 'completed',
+            call_id: 'call_cross_operation_1',
+            name: 'exec_command',
+            arguments: '{"cmd":"printf cross-request"}'
+          }
+        ],
+        required_action: {
+          type: 'submit_tool_outputs',
+          submit_tool_outputs: {
+            tool_calls: [
+              {
+                id: 'call_cross_operation_1',
+                type: 'function',
+                name: 'exec_command',
+                arguments: '{"cmd":"printf cross-request"}'
+              }
+            ]
+          }
+        }
+      }
+    });
+
+    releaseResponsesConversationRequestPayload('req-cross-operation-store-1');
+
+    const resumed = resumeResponsesConversation(
+      'resp-cross-operation-1',
+      {
+        response_id: 'resp-cross-operation-1',
+        model: 'gpt-5.5',
+        tool_outputs: [
+          {
+            call_id: 'call_cross_operation_1',
+            output: 'cross-request'
+          }
+        ]
+      },
+      {
+        requestId: track('req-cross-operation-store-2'),
+        continuationOwner: 'relay'
+      }
+    );
+
+    expect(resumed.payload.previous_response_id).toBe('resp-cross-operation-1');
+    expect(resumed.meta).toMatchObject({
+      restoredFromResponseId: 'resp-cross-operation-1',
+      previousRequestId: 'req-cross-operation-store-1',
+      restored: true
+    });
+    expect((resumed.meta as any).fullInput).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'function_call',
+          call_id: 'call_cross_operation_1',
+          name: 'exec_command',
+          arguments: '{"cmd":"printf cross-request"}'
+        }),
+        expect.objectContaining({
+          type: 'function_call_output',
+          call_id: 'call_cross_operation_1',
+          output: 'cross-request'
+        })
+      ])
+    );
+
+    const requestContext = await buildResponsesRequestContextForHttp({
+      payload: resumed.payload,
+      requestId: track('req-cross-operation-store-2'),
+      resumeMeta: {
+        ...(resumed.meta as Record<string, unknown>),
+        continuationOwner: 'relay'
+      },
+      metadata: {
+        session_id: 'sess-cross-operation',
+        conversation_id: 'conv-cross-operation'
+      }
+    });
+
+    const chatRequest = buildChatRequestFromResponses(
+      {
+        model: 'gpt-5.5',
+        previous_response_id: 'resp-cross-operation-1',
+        input: requestContext.payload.input,
+        tools: requestContext.payload.tools,
+        semantics: {
+          responses: {
+            resume: resumed.meta
+          }
+        }
+      },
+      {
+        requestId: 'req-cross-operation-chat-bridge',
+        input: requestContext.context.input,
+        toolsNormalized: []
+      } as any
+    );
+
+    expect(findOpenAiChatToolOrderingViolation((chatRequest.request as any).messages)).toBeNull();
+    expect((chatRequest.request as any).messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          tool_calls: [
+            expect.objectContaining({
+              id: 'call_cross_operation_1',
+              type: 'function',
+              function: expect.objectContaining({
+                name: 'exec_command',
+                arguments: '{"cmd":"printf cross-request"}'
+              })
+            })
+          ]
+        }),
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call_cross_operation_1',
+          content: 'cross-request'
+        })
+      ])
+    );
+  });
+
   it('rebinds the same continuation request context across provider switch and resumes from final success only', () => {
     captureResponsesRequestContext({
       requestId: track('req-provider-switch-router-1'),

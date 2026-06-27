@@ -3,6 +3,7 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::hub_pipeline_blocks::responses_resume::lift_responses_resume_into_semantics;
 use crate::metadata_center::{
     build_metadata_center_from_snapshot, MetadataCenter, MetadataCenterReader,
 };
@@ -37,6 +38,7 @@ pub struct ToolGovernanceInput {
 #[serde(rename_all = "camelCase")]
 pub struct ToolGovernanceOutput {
     pub processed_request: Value,
+    pub metadata: Value,
     pub node_result: Value,
 }
 
@@ -93,8 +95,11 @@ fn should_inject_stopless_system_instruction(
     center: &MetadataCenter,
     metadata: &Map<String, Value>,
 ) -> bool {
-    let _ = metadata;
     center.stop_message_enabled().unwrap_or(false)
+        || metadata
+            .get("stopMessageEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 fn request_has_tool(request: &Map<String, Value>, tool_name: &str) -> bool {
@@ -384,10 +389,21 @@ pub fn apply_req_process_tool_governance(
 
     let ctx = resolve_governance_context(&input.metadata, &input.entry_endpoint);
 
-    let metadata = normalize_record(input.metadata);
+    let lifted = lift_responses_resume_into_semantics(&input.request, &input.metadata);
+    let lifted_obj = lifted.as_object();
+    let lifted_request = lifted_obj
+        .and_then(|row| row.get("request"))
+        .cloned()
+        .unwrap_or(input.request);
+    let lifted_metadata = lifted_obj
+        .and_then(|row| row.get("metadata"))
+        .cloned()
+        .unwrap_or(input.metadata);
+
+    let metadata = normalize_record(lifted_metadata.clone());
     let metadata_center = build_metadata_center_from_snapshot(&input.metadata_center_snapshot);
     let request_metadata = Value::Object(metadata.clone());
-    let mut request = normalize_record(input.request);
+    let mut request = normalize_record(lifted_request);
     apply_chat_process_request_sanitizer(&mut request);
     let has_terminal_stopless_turn = request_has_terminal_stopless_output(&request)
         || metadata_has_terminal_stopless_runtime_control(&metadata);
@@ -429,6 +445,7 @@ pub fn apply_req_process_tool_governance(
 
     Ok(ToolGovernanceOutput {
         processed_request: processed,
+        metadata: Value::Object(metadata),
         node_result,
     })
 }
