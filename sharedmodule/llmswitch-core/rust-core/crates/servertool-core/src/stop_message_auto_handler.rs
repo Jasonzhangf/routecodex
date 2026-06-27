@@ -479,7 +479,7 @@ fn handle_trigger(
         return StopMessageAutoHandlerPlan {
             action: StopMessageAutoPlanAction::ReturnTerminalFinal,
             compare_context: compare.clone(),
-            terminal_chat_response: Some(input.base.clone()),
+            terminal_chat_response: Some(build_terminal_visible_payload(&input.base, "")),
             ..Default::default()
         };
     }

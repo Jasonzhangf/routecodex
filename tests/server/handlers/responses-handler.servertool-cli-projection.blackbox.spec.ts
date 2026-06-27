@@ -17,6 +17,21 @@ function isolateSessionDir(label: string): void {
 
 function bindStoplessMetadataCenter<T extends Record<string, unknown>>(adapterContext: T): T {
   const center = MetadataCenter.attach(adapterContext);
+  const providerProtocol =
+    typeof adapterContext.providerProtocol === 'string' && adapterContext.providerProtocol.trim()
+      ? adapterContext.providerProtocol.trim()
+      : 'openai-responses';
+  if (providerProtocol) {
+    center.writeRuntimeControl(
+      'providerProtocol',
+      providerProtocol,
+      {
+        module: 'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
+        symbol: 'bindStoplessMetadataCenter',
+        stage: 'test'
+      }
+    );
+  }
   if (typeof adapterContext.requestId === 'string' && adapterContext.requestId.trim()) {
     center.writeRequestTruth(
       'requestId',
@@ -40,6 +55,36 @@ function bindStoplessMetadataCenter<T extends Record<string, unknown>>(adapterCo
     );
   }
   return adapterContext;
+}
+
+function bindStoplessLoopState<T extends Record<string, unknown>>(adapterContext: T, args: {
+  repeatCount: number;
+  maxRepeats: number;
+  continuationPrompt?: string;
+  active?: boolean;
+  triggerHint?: string;
+}): T {
+  const bound = bindStoplessMetadataCenter(adapterContext);
+  const center = MetadataCenter.attach(bound);
+  center.writeRuntimeControl(
+    'stopless',
+    {
+      flowId: 'stop_message_flow',
+      repeatCount: args.repeatCount,
+      maxRepeats: args.maxRepeats,
+      active: args.active ?? true,
+      ...(typeof args.continuationPrompt === 'string'
+        ? { continuationPrompt: args.continuationPrompt }
+        : {}),
+      ...(typeof args.triggerHint === 'string' ? { triggerHint: args.triggerHint } : {})
+    },
+    {
+      module: 'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
+      symbol: 'bindStoplessLoopState',
+      stage: 'test'
+    }
+  );
+  return bound;
 }
 
 describe('servertool CLI projection blackbox', () => {
@@ -91,7 +136,7 @@ describe('servertool CLI projection blackbox', () => {
     expect((result.chat as any).choices[0].finish_reason).toBe('stop');
     expect((result.chat as any).choices[0].message.tool_calls).toBeUndefined();
     expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
-    expect(String((result.chat as any).choices[0].message.content ?? '')).toBe('完成，准备收尾。');
+    expect(String((result.chat as any).choices[0].message.content ?? '')).toBe('done。下一步：无\n完成，准备收尾。');
   });
 
   it('projects non-terminal reasoningStop tool calls to client exec_command', async () => {
@@ -227,7 +272,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: { sessionId: 'sess-blackbox' } as any,
+      adapterContext: bindStoplessMetadataCenter({ sessionId: 'sess-blackbox' } as any),
       requestId: 'req_servertool_blackbox',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -264,7 +309,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: bindStoplessMetadataCenter({
+      adapterContext: bindStoplessLoopState({
         requestId: 'req_stop_cli_lifecycle',
         sessionId: 'sess-stop-cli-lifecycle',
         routecodexPortStopMessageEnabled: true,
@@ -272,16 +317,12 @@ describe('servertool CLI projection blackbox', () => {
         capturedChatRequest: {
           model: 'gpt-test',
           messages: [{ role: 'user', content: '继续执行' }]
-        },
-        __rt: {
-          stopMessageState: {
-            stopMessageText: '继续执行原任务',
-            stopMessageMaxRepeats: 3,
-            stopMessageUsed: 1,
-            stopMessageStageMode: 'on'
-          }
         }
-      } as any),
+      } as any, {
+        repeatCount: 1,
+        maxRepeats: 3,
+        continuationPrompt: '继续执行原任务'
+      }),
       requestId: 'req_stop_cli_lifecycle',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -398,21 +439,13 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: bindStoplessMetadataCenter({
+      adapterContext: bindStoplessLoopState({
         sessionId: 'sess-stop-cli-loop-guard-resume-reproject',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
         capturedChatRequest: {
           model: 'gpt-5.5',
           messages: [{ role: 'user', content: '继续执行' }]
-        },
-        __rt: {
-          stopMessageState: {
-            stopMessageText: '继续执行原任务',
-            stopMessageMaxRepeats: 3,
-            stopMessageUsed: 1,
-            stopMessageStageMode: 'on'
-          }
         },
         __raw_request_body: {
           model: 'gpt-5.5',
@@ -433,7 +466,11 @@ describe('servertool CLI projection blackbox', () => {
             }
           ]
         }
-      } as any),
+      } as any, {
+        repeatCount: 1,
+        maxRepeats: 3,
+        continuationPrompt: '继续执行原任务'
+      }),
       requestId: 'req_stop_cli_loop_guard',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -469,7 +506,7 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: bindStoplessMetadataCenter({
+      adapterContext: bindStoplessLoopState({
         requestId: 'req_stop_cli_schema_feedback_lock',
         sessionId: 'sess-stop-cli-schema-feedback-lock',
         routecodexPortStopMessageEnabled: true,
@@ -477,16 +514,12 @@ describe('servertool CLI projection blackbox', () => {
         capturedChatRequest: {
           model: 'gpt-5.5',
           messages: [{ role: 'user', content: '继续执行' }]
-        },
-        __rt: {
-          stopMessageState: {
-            stopMessageText: '继续执行原任务',
-            stopMessageMaxRepeats: 3,
-            stopMessageUsed: 1,
-            stopMessageStageMode: 'on'
-          }
         }
-      } as any),
+      } as any, {
+        repeatCount: 1,
+        maxRepeats: 3,
+        continuationPrompt: '继续执行原任务'
+      }),
       requestId: 'req_stop_cli_schema_feedback_lock',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -499,7 +532,7 @@ describe('servertool CLI projection blackbox', () => {
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     const command = JSON.parse(toolCall.function.arguments).cmd;
     const input = extractCommandInput(command);
-    expect(input.triggerHint).toBe('no_schema');
+    expect(input.triggerHint).toBe('stop_schema_missing');
     expect(input.schemaFeedback).toBeUndefined();
     expect(command).not.toContain('schemaFeedback');
     expect(command).not.toContain('stopreason');
@@ -528,23 +561,19 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: bindStoplessMetadataCenter({
+      adapterContext: bindStoplessLoopState({
         sessionId: 'sess-stop-cli-third-no-schema-terminal',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
         capturedChatRequest: {
           model: 'gpt-5.5',
           messages: [{ role: 'user', content: '继续执行' }]
-        },
-        __rt: {
-          stopMessageState: {
-            stopMessageText: '继续执行原任务',
-            stopMessageMaxRepeats: 3,
-            stopMessageUsed: 2,
-            stopMessageStageMode: 'on'
-          }
         }
-      } as any),
+      } as any, {
+        repeatCount: 2,
+        maxRepeats: 3,
+        continuationPrompt: '继续执行原任务'
+      }),
       requestId: 'req_stop_cli_third_no_schema_terminal',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -582,7 +611,7 @@ describe('servertool CLI projection blackbox', () => {
               content: [
                 '已完成在线验证。',
                 '<rcc_stop_schema>',
-                '{"stopreason":0,"reason":"已完成 allow-stop live 验证","has_evidence":1,"evidence":"5555 live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round allow stop","done_steps":"allow-stop response","next_step":"","next_suggested_path":"","learned":"summary must be markdown"}',
+                '{"stopreason":0,"reason":"已完成 allow-stop live 验证","has_evidence":1,"evidence":"5555 live probe","issue_cause":"none","excluded_factors":"none","diagnostic_order":"single round allow stop","done_steps":"allow-stop response","next_step":"","next_suggested_path":"无需后续动作","learned":"summary must be markdown","needs_user_input":false}',
                 '</rcc_stop_schema>'
               ].join('\n')
             },
@@ -590,23 +619,19 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: bindStoplessMetadataCenter({
+      adapterContext: bindStoplessLoopState({
         sessionId: 'sess-stop-cli-allow-stop-terminal',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
         capturedChatRequest: {
           model: 'gpt-test',
           messages: [{ role: 'user', content: '继续执行' }]
-        },
-        __rt: {
-          stopMessageState: {
-            stopMessageText: '继续执行原任务',
-            stopMessageMaxRepeats: 3,
-            stopMessageUsed: 0,
-            stopMessageStageMode: 'on'
-          }
         }
-      } as any),
+      } as any, {
+        repeatCount: 0,
+        maxRepeats: 3,
+        continuationPrompt: '继续执行原任务'
+      }),
       requestId: 'req_stop_cli_allow_stop_terminal',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -621,7 +646,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(JSON.stringify(payload)).not.toContain('routecodex servertool run stop_message_auto');
     expect(payload.required_action).toBeUndefined();
     const message = payload.choices?.[0]?.message;
-    expect(String(message?.content)).toBe('已完成在线验证。');
+    expect(String(message?.content)).toBe('已完成 allow-stop live 验证\n已完成在线验证。');
     expect(String(message?.content)).not.toContain('"stopreason"');
     expect(String(message?.content)).not.toContain('<rcc_stop_schema>');
     expect(String(message?.content)).not.toContain('</rcc_stop_schema>');
@@ -634,7 +659,7 @@ describe('servertool CLI projection blackbox', () => {
     }) as Record<string, any>;
     expect(Array.isArray(responsesPayload.output)).toBe(true);
     expect(responsesPayload.output.some((item: any) => item?.type === 'reasoning')).toBe(false);
-    expect(String(responsesPayload.output_text)).toBe('已完成在线验证。');
+    expect(String(responsesPayload.output_text)).toBe('已完成 allow-stop live 验证\n已完成在线验证。');
     expect(JSON.stringify(responsesPayload)).not.toContain('stopreason');
     expect(JSON.stringify(responsesPayload)).not.toContain('needs_user_input');
     expect(JSON.stringify(responsesPayload)).not.toContain('has_evidence');
@@ -683,7 +708,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(result.executed).toBe(true);
     const payload = result.chat as any;
     expect(payload.choices?.[0]?.finish_reason).toBe('stop');
-    expect(String(payload.choices?.[0]?.message?.content)).toBe('已完成。');
+    expect(String(payload.choices?.[0]?.message?.content)).toBe('done。下一步：无\n已完成。');
     expect(payload.choices?.[0]?.message?.reasoning).toBeUndefined();
     expect(payload.choices?.[0]?.message?.reasoning_text).toBeUndefined();
 
@@ -695,7 +720,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(JSON.stringify(responsesPayload)).not.toContain('reasoning_summary');
     expect(JSON.stringify(responsesPayload)).not.toContain('<rcc_stop_schema>');
     expect(JSON.stringify(responsesPayload)).not.toContain('stopreason');
-    expect(String(responsesPayload.output_text)).toBe('已完成。');
+    expect(String(responsesPayload.output_text)).toBe('done。下一步：无\n已完成。');
   });
 
   it('does not let malformed legacy CLI history suppress current stopless re-projection', async () => {
@@ -715,21 +740,13 @@ describe('servertool CLI projection blackbox', () => {
           }
         ]
       },
-      adapterContext: bindStoplessMetadataCenter({
+      adapterContext: bindStoplessLoopState({
         sessionId: 'sess-stop-cli-legacy-shape-reproject',
         routecodexPortStopMessageEnabled: true,
         stopMessageEnabled: true,
         capturedChatRequest: {
           model: 'gpt-5.5',
           messages: [{ role: 'user', content: '继续执行' }]
-        },
-        __rt: {
-          stopMessageState: {
-            stopMessageText: '继续执行原任务',
-            stopMessageMaxRepeats: 3,
-            stopMessageUsed: 1,
-            stopMessageStageMode: 'on'
-          }
         },
         __raw_request_body: {
           model: 'gpt-5.5',
@@ -750,7 +767,11 @@ describe('servertool CLI projection blackbox', () => {
             }
           ]
         }
-      } as any),
+      } as any, {
+        repeatCount: 1,
+        maxRepeats: 3,
+        continuationPrompt: '继续执行原任务'
+      }),
       requestId: 'req_stop_cli_legacy_shape_guard',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',

@@ -1,3 +1,19 @@
+# 2026-06-27: stopless CLI projection blackbox closeout
+
+- 已验证 stopless CLI projection 黑盒在 Rust owner 修复后转绿：
+  - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+  - `tests/servertool/stopless-cli-continuation.spec.ts`
+- 已修 Rust owner 缺口：
+  - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_auto_handler.rs`
+  - 第三轮 budget terminal 不能裸回 `input.base`，必须走 `build_terminal_visible_payload(&input.base, "")`，否则会泄漏 `<rcc_stop_schema>` / `reasoningStop` residue。
+- 已验证的合同事实：
+  - `allow-stop` 必须满足完整 terminal schema；缺字段时 Rust 会走 `stop_schema_terminal_missing_fields`，黑盒不该再用残缺样本当 allow-stop 正例。
+  - `allow-stop` / `terminal` 可见文本前缀属于当前 Rust 真相，不是清洗 bug。
+  - 第三轮 `no_schema` 在 native rebuild 后已确认终止，不再继续投 CLI。
+- 可复用规则：
+  - stopless 黑盒更新时，先对齐 MetadataCenter runtime_control 真源，再改断言。
+  - 若 focused 黑盒与 owner 结果不一致，先判旧 native 产物假红，再决定是否改实现。
+
 # 2026-06-27: provider-error-classifier thin shell cleanup
 
 - 已验证 `provider-error-classifier.ts` 已收缩为薄适配器：仅保留状态提取 + policy outcome，不再携带 daily-limit 特例分叉。
