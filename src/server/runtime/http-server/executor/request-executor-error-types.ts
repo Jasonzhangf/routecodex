@@ -32,11 +32,6 @@ export type ProviderRetryExclusionPlan = {
   excludedCurrentProvider: boolean;
 };
 
-export type ProviderRetryEligibilityPlan = {
-  shouldRetry: boolean;
-  blockingRecoverable: boolean;
-};
-
 export type ProviderRetryExecutionPlan = {
   shouldRetry: boolean;
   blockingRecoverable: boolean;

@@ -6,10 +6,10 @@ import {
 } from './request-executor-native-retry-policy.js';
 import {
   hasAlternativeRouteCandidate,
-  resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan
 } from './request-executor-retry-decision.js';
 import {
+  resolveProviderFailureActionPlan,
   resolveProviderFailureClassification
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import type {
@@ -121,16 +121,15 @@ export async function resolveProviderRetryExecutionPlan(args: {
     upstreamCode: args.retryError.upstreamCode,
     reason: args.retryError.reason
   });
-  const eligibilityPlan = resolveProviderRetryEligibilityPlan({
+  const retryActionPlan = resolveProviderFailureActionPlan({
     error: args.error,
-    retryError: args.retryError,
-    attempt: args.attempt,
-    maxAttempts: args.maxAttempts,
     stage: args.stage,
-    providerKey: args.providerKey,
+    statusCode: args.retryError.statusCode,
+    errorCode: args.retryError.errorCode,
+    upstreamCode: args.retryError.upstreamCode,
+    reason: args.retryError.reason,
+    classification,
     promptTooLong: args.promptTooLong,
-    contextOverflowRetries: args.contextOverflowRetries,
-    maxContextOverflowRetries: args.maxContextOverflowRetries
   });
   args.recordAttempt({ error: true });
 
@@ -178,7 +177,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     );
   const shouldRerouteExcludedFailure =
     !hostContractFailure
-    && !eligibilityPlan.shouldRetry
+    && !retryActionPlan.shouldRetry
     && retryExcludedCurrentProvider
     && hasTerminalAlternativeCandidate;
   const gate = resolveProviderRetryExecutionPlanExhaustionGate({
@@ -186,11 +185,11 @@ export async function resolveProviderRetryExecutionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys,
     defaultPoolAvailable: args.defaultTierAvailable === true,
   });
-  if (!eligibilityPlan.shouldRetry && !shouldRerouteExcludedFailure) {
+  if (!retryActionPlan.shouldRetry && !shouldRerouteExcludedFailure) {
     const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
     return {
       shouldRetry: false,
-      blockingRecoverable: eligibilityPlan.blockingRecoverable,
+      blockingRecoverable: retryActionPlan.blockingRecoverable,
       excludedCurrentProvider: keepTerminalExclusion,
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
       defaultPoolAvailable: gate.defaultPoolAvailable,
@@ -200,7 +199,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   }
 
   if (shouldRerouteExcludedFailure) {
-  const retrySwitchPlan = {
+    const retrySwitchPlan = {
     switchAction: 'exclude_and_reroute',
     decisionLabel: 'exclude_and_reroute',
     runtimeScopeExcluded: [],
@@ -209,7 +208,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
       return {
         shouldRetry: false,
-        blockingRecoverable: eligibilityPlan.blockingRecoverable,
+        blockingRecoverable: retryActionPlan.blockingRecoverable,
         excludedCurrentProvider: true,
         routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
         defaultPoolAvailable: gate.defaultPoolAvailable,
@@ -239,7 +238,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
     return {
       shouldRetry: false,
-      blockingRecoverable: eligibilityPlan.blockingRecoverable,
+      blockingRecoverable: retryActionPlan.blockingRecoverable,
       excludedCurrentProvider: retryExcludedCurrentProvider,
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
       defaultPoolAvailable: gate.defaultPoolAvailable,
@@ -249,7 +248,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   }
   return {
     shouldRetry: true,
-    blockingRecoverable: eligibilityPlan.blockingRecoverable,
+    blockingRecoverable: retryActionPlan.blockingRecoverable,
     excludedCurrentProvider: retryExcludedCurrentProvider,
     retrySwitchPlan,
     retryExecutionPolicyReason: nativeExecutionPolicy.reason,

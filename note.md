@@ -229,6 +229,23 @@
   - `npx tsc -p tsconfig.json --noEmit --pretty false`
 - 结论：
   - executor 侧对 provider failure 分类的桥接继续收口，测试仍全绿。
+
+# 2026-06-27 provider retry eligibility shell removal slice
+
+- 已物理删除：
+  - `resolveProviderRetryEligibilityPlan`
+  - `ProviderRetryEligibilityPlan`
+- 已同步修改：
+  - `src/server/runtime/http-server/executor/request-executor-retry-decision.ts`
+  - `src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts`
+  - `src/server/runtime/http-server/executor/request-executor-retry-planner.ts`
+  - `src/server/runtime/http-server/request-executor.ts`
+  - `tests/server/runtime/http-server/request-executor.spec.ts`
+- 已验证：
+  - `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/error-chain-singleton.unit.test.ts tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts tests/providers/core/runtime/provider-failure-policy.spec.ts`
+  - `npx tsc -p tsconfig.json --noEmit --pretty false`
+- 结论：
+  - retry eligibility 这层只是 `provider-failure-policy` 的单消费薄壳，已物理删除并把 execution plan 直接绑到 policy action plan。
   - 目前没有证据支持继续删 `resolveProviderFailureExclusionDecision` 或主 policy retry/classification 逻辑。
 
 # 2026-06-27 reselection wrapper closeout slice

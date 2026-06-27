@@ -1,23 +1,11 @@
 import {
-  resolveProviderFailureActionPlan,
-  resolveProviderFailureClassification
-} from '../../../../providers/core/runtime/provider-failure-policy.js';
-import {
-  readString,
-  normalizeCodeKey
+  readString
 } from './request-executor-error-shared.js';
 import type {
-  ProviderRetryEligibilityPlan,
   ProviderRetryExclusionPlan,
-  ProviderRetryExecutionPlan,
   RequestExecutorProviderErrorClassification,
-  RequestExecutorProviderErrorStage,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
-
-type RuntimeManager = {
-  resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
-};
 
 export function hasAlternativeRouteCandidate(args: {
   providerKey?: string;
@@ -57,7 +45,6 @@ export function resolveProviderRetryExclusionPlan(args: {
       excludedCurrentProvider: false
     };
   }
-  const is429 = args.status === 429;
   const hasAlternativeCandidate = hasAlternativeRouteCandidate({
     providerKey,
     routePool: args.routePool,
@@ -72,39 +59,5 @@ export function resolveProviderRetryExclusionPlan(args: {
   }
   return {
     excludedCurrentProvider: false
-  };
-}
-
-export function resolveProviderRetryEligibilityPlan(args: {
-  error: unknown;
-  retryError: RetryErrorSnapshot;
-  attempt: number;
-  maxAttempts: number;
-  stage?: RequestExecutorProviderErrorStage;
-  providerKey?: string;
-  promptTooLong?: boolean;
-  contextOverflowRetries?: number;
-  maxContextOverflowRetries?: number;
-}): ProviderRetryEligibilityPlan {
-  const eligibility = resolveProviderFailureActionPlan({
-    error: args.error,
-    stage: args.stage,
-    statusCode: args.retryError.statusCode,
-    errorCode: args.retryError.errorCode,
-    upstreamCode: args.retryError.upstreamCode,
-    reason: args.retryError.reason,
-    classification: resolveProviderFailureClassification({
-      error: args.error,
-      stage: args.stage,
-      statusCode: args.retryError.statusCode,
-      errorCode: args.retryError.errorCode,
-      upstreamCode: args.retryError.upstreamCode,
-      reason: args.retryError.reason
-    }),
-    promptTooLong: args.promptTooLong,
-  });
-  return {
-    shouldRetry: eligibility.shouldRetry,
-    blockingRecoverable: eligibility.blockingRecoverable
   };
 }

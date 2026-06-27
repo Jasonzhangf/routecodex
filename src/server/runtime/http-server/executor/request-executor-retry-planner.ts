@@ -6,7 +6,6 @@ import {
   retainLogicalRequestChain,
 } from './request-executor-retry-state.js';
 import {
-  resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan
 } from './request-executor-retry-decision.js';
 import {
@@ -26,7 +25,6 @@ export {
   deriveLogicalRequestChainKey,
   emitRequestExecutorProviderRetryTelemetry,
   releaseLogicalRequestChain,
-  resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExecutionPlan,
   resolveProviderRetryExclusionPlan,
   retainLogicalRequestChain

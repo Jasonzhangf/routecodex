@@ -200,7 +200,6 @@ import {
   releaseLogicalRequestChain,
   retainLogicalRequestChain,
   resetRequestExecutorRetryPlannerState,
-  resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExecutionPlan,
   resolveProviderRetryExclusionPlan,
 } from './executor/request-executor-retry-planner.js';
@@ -1480,7 +1479,6 @@ export const __requestExecutorTestables = {
   resolveOriginalRequestForResponseConversion,
   resolveProviderFailureClassification,
   resolveRequestExecutorProviderErrorReportPlan,
-  resolveProviderRetryEligibilityPlan,
   resolveProviderRetryExclusionPlan,
   resolveProviderRetryExecutionPlan,
   resolveRequestExecutorPipelineAttempt,

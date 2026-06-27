@@ -29,7 +29,8 @@ jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/re
   })
 }));
 
-const { __requestExecutorTestables, createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
+  const { __requestExecutorTestables, createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
+  const { resolveProviderFailureActionPlan } = await import('../../../../src/providers/core/runtime/provider-failure-policy.js');
 const { getServerToolRuntimeState, setServerToolEnabled } = await import('../../../../src/server/runtime/http-server/servertool-admin-state');
 const { StatsManager } = await import('../../../../src/server/runtime/http-server/stats-manager');
 const { createBridgeHttpServerMock } = await import('../../../helpers/bridge-http-server-mock');
@@ -1713,15 +1714,12 @@ describe('HubRequestExecutor failover', () => {
       excludedProviderKeys: new Set<string>()
     })).toEqual({ excludedCurrentProvider: false });
 
-    const promptTooLongPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+    const promptTooLongPlan = resolveProviderFailureActionPlan({
       error: new Error('context exceeded'),
-      retryError: { statusCode: 400, reason: 'context exceeded' },
-      attempt: 1,
-      maxAttempts: 6,
-      providerKey: 'tabglm.key1.glm-5',
+      statusCode: 400,
+      reason: 'context exceeded',
+      classification: 'recoverable',
       promptTooLong: true,
-      contextOverflowRetries: 1,
-      maxContextOverflowRetries: 2
     });
     expect(promptTooLongPlan).toEqual({
       shouldRetry: true,
@@ -1844,38 +1842,29 @@ describe('HubRequestExecutor failover', () => {
       stage: 'provider.send'
     })).toBe('unrecoverable');
 
-    expect(__requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+    expect(resolveProviderFailureActionPlan({
       error: Object.assign(new Error('tool history contract violated'), {
         code: 'MALFORMED_REQUEST'
       }),
-      retryError: {
-        errorCode: 'MALFORMED_REQUEST',
-        reason: 'tool history contract violated'
-      },
-      attempt: 1,
-      maxAttempts: 6,
-      providerKey: 'mimo.key1.mimo-v2.5-pro'
+      errorCode: 'MALFORMED_REQUEST',
+      reason: 'tool history contract violated'
     })).toEqual({
       shouldRetry: false,
       blockingRecoverable: false
     });
 
-    const followupEligibilityPlan = __requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+    const followupEligibilityPlan = resolveProviderFailureActionPlan({
       error: Object.assign(new Error('followup failed'), {
         code: 'SERVERTOOL_FOLLOWUP_FAILED',
         statusCode: 401,
         upstreamCode: 'invalid_api_key'
       }),
-      retryError: {
-        statusCode: 401,
-        errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
-        upstreamCode: 'invalid_api_key',
-        reason: 'followup failed'
-      },
-      attempt: 1,
-      maxAttempts: 6,
+      statusCode: 401,
+      errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
+      upstreamCode: 'invalid_api_key',
+      reason: 'followup failed',
       stage: 'provider.followup',
-      providerKey: 'ali-coding-plan.key1.kimi-k2.5'
+      classification: undefined
     });
     expect(followupEligibilityPlan).toEqual({
       shouldRetry: false,
@@ -2103,17 +2092,12 @@ describe('HubRequestExecutor failover', () => {
       stage: 'provider.send'
     })).toBe('unrecoverable');
 
-    expect(__requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+    expect(resolveProviderFailureActionPlan({
       error: Object.assign(new Error('tool history contract violated'), {
         code: 'MALFORMED_REQUEST'
       }),
-      retryError: {
-        errorCode: 'MALFORMED_REQUEST',
-        reason: 'tool history contract violated'
-      },
-      attempt: 1,
-      maxAttempts: 6,
-      providerKey: 'mimo.key1.mimo-v2.5-pro'
+      errorCode: 'MALFORMED_REQUEST',
+      reason: 'tool history contract violated'
     })).toEqual({
       shouldRetry: false,
       blockingRecoverable: false
@@ -2134,15 +2118,12 @@ describe('HubRequestExecutor failover', () => {
       stage: 'provider.send'
     })).toBe('recoverable');
 
-    expect(__requestExecutorTestables.resolveProviderRetryEligibilityPlan({
+    expect(resolveProviderFailureActionPlan({
       error: new Error('context exceeded'),
-      retryError: { statusCode: 400, reason: 'context exceeded' },
-      attempt: 1,
-      maxAttempts: 6,
-      providerKey: 'tabglm.key1.glm-5',
+      statusCode: 400,
+      reason: 'context exceeded',
+      classification: 'recoverable',
       promptTooLong: true,
-      contextOverflowRetries: 1,
-      maxContextOverflowRetries: 2
     })).toEqual({
       shouldRetry: true,
       blockingRecoverable: false
