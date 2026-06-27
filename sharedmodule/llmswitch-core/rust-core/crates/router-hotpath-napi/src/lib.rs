@@ -58,6 +58,7 @@ mod hub_text_markup_normalizer;
 mod hub_tool_session_compat;
 mod metadata_center;
 mod openai_openai_codec;
+mod provider_response_shared_pure_blocks;
 mod primary_exhausted_to_default_pool_blocks;
 mod req_executor_pipeline_attempt;
 mod req_outbound_stage3_compat;
@@ -2627,6 +2628,74 @@ pub fn is_client_disconnect_like_error_json(input_json: String) -> NapiResult<St
 pub fn is_generic_bridge_response_contract_error_json(input_json: String) -> NapiResult<String> {
     failure_policy::is_generic_bridge_response_contract_error_json(input_json)
         .map_err(|e| napi::Error::from_reason(e))
+}
+
+// ---------------------------------------------------------------------------
+// provider_response_shared_pure_blocks NAPI exports — Rust migration batch #3
+// ---------------------------------------------------------------------------
+
+use provider_response_shared_pure_blocks::payload_extraction;
+
+#[napi]
+pub fn as_flat_record_json(input_json: String) -> NapiResult<Option<String>> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+    let result = payload_extraction::as_flat_record(&raw);
+    Ok(result.map(|m| serde_json::to_string(m).unwrap()))
+}
+
+#[napi]
+pub fn extract_first_balanced_json_object_json(raw_string: String) -> NapiResult<Option<String>> {
+    Ok(payload_extraction::extract_first_balanced_json_object(&raw_string))
+}
+
+#[napi]
+pub fn try_parse_json_like_string_json(raw_string: String) -> NapiResult<Option<String>> {
+    let result = payload_extraction::try_parse_json_like_string(&raw_string);
+    Ok(result.map(|v| v.to_string()))
+}
+
+#[napi]
+pub fn extract_content_text_for_stopless_scan_json(input_json: String) -> NapiResult<String> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+    Ok(payload_extraction::extract_content_text_for_stopless_scan(&raw))
+}
+
+#[napi]
+pub fn extract_latest_user_text_for_stopless_scan_json(input_json: String) -> NapiResult<String> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+    Ok(payload_extraction::extract_latest_user_text_for_stopless_scan(&raw))
+}
+
+#[napi]
+pub fn has_stopless_directive_in_request_payload_json(input_json: String) -> NapiResult<bool> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+    Ok(payload_extraction::has_stopless_directive_in_request_payload(&raw))
+}
+
+#[napi]
+pub fn find_nested_raw_string_json(input_json: String) -> NapiResult<String> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+    Ok(payload_extraction::find_nested_raw_string(&raw, 3))
+}
+
+#[napi]
+pub fn find_nested_error_marker_json(input_json: String) -> NapiResult<String> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+    Ok(payload_extraction::find_nested_error_marker(&raw, 3))
+}
+
+#[napi]
+pub fn extract_bridge_provider_response_payload_json(input_json: String) -> NapiResult<Option<String>> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+    let result = payload_extraction::extract_bridge_provider_response_payload(&raw);
+    Ok(result.map(|v| v.to_string()))
 }
 
 // ---------------------------------------------------------------------------
