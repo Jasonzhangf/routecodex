@@ -39,8 +39,6 @@ import type {
 import { createServerColoredLogger } from './colored-logger.js';
 import { ManagerDaemon } from '../../../manager/index.js';
 import { ensureServerScopedSessionDir, resolvePortScopedSessionDir } from './session-dir.js';
-import { cleanupSessionStorageOnStartup } from './session-storage-cleanup.js';
-import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import {
   shouldLogStageEvent,
   extractProviderKeysForRoutingGroup,
@@ -105,7 +103,6 @@ import {
 } from './executor/request-executor-core-utils.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
-import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
 import {
   resolveVirtualRouterInput,
@@ -136,7 +133,6 @@ import {
 import {
   stopSessionDaemonInjectLoop
 } from './http-server-session-daemon.js';
-import { configureSessionClientRegistry } from './session-client-registry.js';
 import { setupRuntime } from './http-server-runtime-setup.js';
 import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
 import {
@@ -379,21 +375,6 @@ export class RouteCodexHttpServer {
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
     this.serverId = canonicalizeServerId(this.config.server.host, this.config.server.port);
-    const serverSessionDir = ensureServerScopedSessionDir(this.serverId);
-    configureSessionClientRegistry({
-      bindingsStorePath: serverSessionDir ? path.join(serverSessionDir, 'session-bindings.json') : undefined
-    });
-    const sessionCleanup = cleanupSessionStorageOnStartup({ isTmuxSessionAlive });
-    if (
-      sessionCleanup.removedLegacyScopeFiles > 0 ||
-      sessionCleanup.removedDeadTmuxStateFiles > 0 ||
-      sessionCleanup.removedHeartbeatStateFiles > 0 ||
-      sessionCleanup.prunedRegistryDirs > 0 ||
-      sessionCleanup.removedRegistryDirs > 0
-    ) {
-      console.log('[session-storage-cleanup] startup cleanup', sessionCleanup);
-    }
-
     try {
       this.pipelineLogger = new PipelineDebugLoggerImpl({ colored: this.coloredLogger }, { enableConsoleLogging: true });
     } catch (error) {
@@ -939,12 +920,9 @@ export class RouteCodexHttpServer {
 
   public async start(): Promise<void> {
     await startHttpServer(this);
-    // Start the session reaper after server is running
-    startSessionReaper();
   }
 
   public async stop(): Promise<void> {
-    stopSessionReaper();
     await stopHttpServer(this);
   }
 

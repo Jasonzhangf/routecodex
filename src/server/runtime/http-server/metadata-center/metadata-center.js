@@ -37,6 +37,10 @@ const HTTP_RESPONSE_METADATA_RELEASE_WRITER = {
     symbol: 'releaseMetadataCenterForHttpResponse',
     stage: 'ServerRespOutbound05ClientFrame',
 };
+function bindInternalStateCarrier(target, center) {
+    Reflect.set(target, METADATA_CENTER_SYMBOL, center);
+    target.__metadataCenter = center.snapshot();
+}
 function transitionSlotStatus(args) {
     if (METADATA_CENTER_STATUS_ORDER[args.previous.status] >= METADATA_CENTER_STATUS_ORDER[args.status]) {
         return args.previous;
@@ -76,21 +80,23 @@ export class MetadataCenter {
             continuationContext: {},
             runtimeControl: {},
             providerObservation: {},
-            clientAttachmentScope: {},
+            responseObservation: {},
+            closeoutStatus: {},
             debugSnapshot: {}
         };
     }
     static attach(target) {
         const existing = Reflect.get(target, METADATA_CENTER_SYMBOL);
         if (isMetadataCenterLike(existing)) {
+            bindInternalStateCarrier(target, existing);
             return existing;
         }
         const created = new MetadataCenter();
-        Reflect.set(target, METADATA_CENTER_SYMBOL, created);
+        bindInternalStateCarrier(target, created);
         return created;
     }
     static bind(target, center) {
-        Reflect.set(target, METADATA_CENTER_SYMBOL, center);
+        bindInternalStateCarrier(target, center);
     }
     static read(target) {
         if (!target) {
@@ -125,7 +131,7 @@ export class MetadataCenter {
             value,
             family: 'continuation_context',
             writtenBy,
-            writePolicy: 'replaceable',
+            writePolicy: 'replaceable_by_owner_only',
             previous,
             reason
         });
@@ -143,7 +149,6 @@ export class MetadataCenter {
     }
     readContinuationContext() {
         return {
-            responsesRequestContext: this.state.continuationContext.responsesRequestContext?.value,
             responsesResume: this.state.continuationContext.responsesResume?.value,
             previousResponseId: this.state.continuationContext.previousResponseId?.value,
             responseId: this.state.continuationContext.responseId?.value,
@@ -163,7 +168,7 @@ export class MetadataCenter {
             value,
             family: 'runtime_control',
             writtenBy,
-            writePolicy: 'replaceable',
+            writePolicy: 'replaceable_by_owner_only',
             previous,
             reason
         });
@@ -189,7 +194,6 @@ export class MetadataCenter {
             stopMessageCompareContext: this.state.runtimeControl.stopMessageCompareContext?.value,
             stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value,
             stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value,
-            stopMessageClientInject: this.state.runtimeControl.stopMessageClientInject?.value,
             streamIntent: this.state.runtimeControl.streamIntent?.value,
             clientAbort: this.state.runtimeControl.clientAbort?.value
         };
@@ -203,7 +207,7 @@ export class MetadataCenter {
             value,
             family: 'provider_observation',
             writtenBy,
-            writePolicy: 'replaceable',
+            writePolicy: 'append_only',
             previous,
             reason
         });
@@ -220,26 +224,49 @@ export class MetadataCenter {
             finishReason: this.state.providerObservation.finishReason?.value
         };
     }
-    writeClientAttachmentScope(key, value, writtenBy, reason) {
+    writeResponseObservation(key, value, writtenBy, reason) {
         if (value === undefined) {
             return;
         }
-        const previous = this.state.clientAttachmentScope[key];
-        this.state.clientAttachmentScope[key] = buildSlot({
+        const previous = this.state.responseObservation[key];
+        this.state.responseObservation[key] = buildSlot({
             value,
-            family: 'client_attachment_scope',
+            family: 'response_observation',
             writtenBy,
-            writePolicy: 'replaceable',
+            writePolicy: 'append_only',
             previous,
             reason
         });
     }
-    readClientAttachmentScope() {
+    readResponseObservation() {
         return {
-            daemonId: this.state.clientAttachmentScope.daemonId?.value,
-            tmuxSessionId: this.state.clientAttachmentScope.tmuxSessionId?.value,
-            tmuxTarget: this.state.clientAttachmentScope.tmuxTarget?.value,
-            workdir: this.state.clientAttachmentScope.workdir?.value
+            responseId: this.state.responseObservation.responseId?.value,
+            status: this.state.responseObservation.status?.value,
+            finishReason: this.state.responseObservation.finishReason?.value,
+            protocolKind: this.state.responseObservation.protocolKind?.value
+        };
+    }
+    writeCloseoutStatus(key, value, writtenBy, reason) {
+        if (value === undefined) {
+            return;
+        }
+        const previous = this.state.closeoutStatus[key];
+        this.state.closeoutStatus[key] = buildSlot({
+            value,
+            family: 'closeout_status',
+            writtenBy,
+            writePolicy: 'finalize_only',
+            previous,
+            reason
+        });
+    }
+    readCloseoutStatus() {
+        return {
+            finalized: this.state.closeoutStatus.finalized?.value,
+            released: this.state.closeoutStatus.released?.value,
+            releasedAt: this.state.closeoutStatus.releasedAt?.value,
+            releaseReason: this.state.closeoutStatus.releaseReason?.value,
+            releasedByStage: this.state.closeoutStatus.releasedByStage?.value
         };
     }
     writeDebugSnapshot(key, value, writtenBy, reason) {
@@ -313,12 +340,24 @@ export class MetadataCenter {
                 reason,
             });
         }
-        for (const key of Object.keys(this.state.clientAttachmentScope)) {
-            const slot = this.state.clientAttachmentScope[key];
+        for (const key of Object.keys(this.state.responseObservation)) {
+            const slot = this.state.responseObservation[key];
             if (!slot) {
                 continue;
             }
-            this.state.clientAttachmentScope[key] = transitionSlotStatus({
+            this.state.responseObservation[key] = transitionSlotStatus({
+                previous: slot,
+                status: 'released',
+                changedBy: writtenBy,
+                reason,
+            });
+        }
+        for (const key of Object.keys(this.state.closeoutStatus)) {
+            const slot = this.state.closeoutStatus[key];
+            if (!slot) {
+                continue;
+            }
+            this.state.closeoutStatus[key] = transitionSlotStatus({
                 previous: slot,
                 status: 'released',
                 changedBy: writtenBy,

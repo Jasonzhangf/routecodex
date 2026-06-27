@@ -75,12 +75,6 @@ export type RuntimeControlProjection = {
   };
   stopMessageEnabled?: boolean;
   stopMessageExcludeDirect?: boolean;
-  stopMessageClientInject?: {
-    ready?: boolean;
-    reason?: string;
-    sessionScope?: string;
-    tmuxSessionId?: string;
-  };
   streamIntent?: string;
   clientAbort?: boolean;
 };
@@ -258,7 +252,6 @@ export function readRuntimeControlProjection(
   const stopMessageCompareContext = asFlatRecord(runtimeControl?.stopMessageCompareContext);
   const stopMessageEnabled = readBoolean(runtimeControl?.stopMessageEnabled);
   const stopMessageExcludeDirect = readBoolean(runtimeControl?.stopMessageExcludeDirect);
-  const stopMessageClientInject = asFlatRecord(runtimeControl?.stopMessageClientInject);
   const streamIntent = readTrimmedString(runtimeControl?.streamIntent);
   const clientAbort = readBoolean(runtimeControl?.clientAbort);
   return {
@@ -329,20 +322,6 @@ export function readRuntimeControlProjection(
       : {}),
     ...(stopMessageEnabled !== undefined ? { stopMessageEnabled } : {}),
     ...(stopMessageExcludeDirect !== undefined ? { stopMessageExcludeDirect } : {}),
-    ...(stopMessageClientInject
-      ? {
-          stopMessageClientInject: {
-            ...(typeof stopMessageClientInject.ready === 'boolean' ? { ready: stopMessageClientInject.ready } : {}),
-            ...(readTrimmedString(stopMessageClientInject.reason) ? { reason: readTrimmedString(stopMessageClientInject.reason) } : {}),
-            ...(readTrimmedString(stopMessageClientInject.sessionScope)
-              ? { sessionScope: readTrimmedString(stopMessageClientInject.sessionScope) }
-              : {}),
-            ...(readTrimmedString(stopMessageClientInject.tmuxSessionId)
-              ? { tmuxSessionId: readTrimmedString(stopMessageClientInject.tmuxSessionId) }
-              : {}),
-          }
-        }
-      : {}),
     ...(streamIntent ? { streamIntent } : {}),
     ...(clientAbort !== undefined ? { clientAbort } : {}),
   };

@@ -134,10 +134,11 @@ verification:
       - npm run build:base
     notes:
       - "Validation must prove stopless request-side restore/guidance rewrite/schema-contract reinjection happens on the Chat Process request boundary after `/v1/responses` continuation restore and before normal request governance; response-side stop/schema/reasoningStop normalization must happen on the Chat Process response boundary before continuation save and before RespOutbound."
-      - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessOrchestrationAction` must expose `cli_projection` for non-terminal stop_message_flow."
+      - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessExecutionPlan` must compose request-truth session/control state and expose `cli_projection` for non-terminal stop_message_flow."
       - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
       - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoningStop` CLI."
       - "Engine must project stopless to a client-visible `exec_command` and must not call `reenterPipeline` for stopless CLI flows."
+      - "Validation must prove TS engine orchestration calls Rust `planStoplessExecutionJson` and does not build stopless `context.stopless`, `context.requestTruth`, or session truth locally."
       - "Command input must stay concise (`flowId/repeatCount/maxRepeats/triggerHint` plus optional structured `schemaFeedback{reasonCode,missingFields}`); CLI stdout must carry continuationPrompt/schemaGuidance plus structured feedback for req_chatprocess rewrite."
       - "Validation must prove the client-visible stopless command uses alias `reasoningStop` and the client payload does not expose `__servertool_cli_projection`."
       - "Validation must prove NoSchema stopless CLI stdout still carries schemaGuidance while current-request restoration advances repeatCount 1 -> 2 -> 3."
@@ -957,7 +958,6 @@ verification:
       - src/server/runtime/http-server/executor-metadata.ts
     contract:
       - tests/server/http-server/executor-metadata.spec.ts
-      - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
     integration: []
     smoke:
@@ -2007,7 +2007,7 @@ verification:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
     contract:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
-      - tests/server/http-server/provider-response-sse-marker.blackbox.spec.ts
+      - tests/sharedmodule/responses-sse-native-materialize.spec.ts
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     integration: []
     smoke:
@@ -2201,34 +2201,6 @@ verification:
       - npm run build:base
     notes:
       - "Instance registry is the authoritative local declaration of managed runtime state; verification must prove instance.json write/read/update/remove under runtime-lifecycle path."
-
-  - feature_id: runtime.tmux_client_binding
-    change_risk: high
-    unit:
-      - src/server/runtime/http-server/session-client-registry.ts
-      - src/server/runtime/http-server/session-client-registry-utils.ts
-      - src/server/runtime/http-server/session-client-routes.ts
-      - src/server/runtime/http-server/session-storage-cleanup.ts
-      - src/server/runtime/http-server/executor-metadata.ts
-      - src/server/runtime/http-server/executor/client-injection-flow.ts
-      - src/server/runtime/http-server/executor/request-retry-helpers.ts
-    contract:
-      - tests/server/http-server/session-client-registry.spec.ts
-      - tests/server/http-server/session-client-registry.inject-tmux-only.spec.ts
-      - tests/server/http-server/session-client-routes.spec.ts
-      - tests/server/http-server/session-storage-cleanup.spec.ts
-    integration:
-      - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
-      - tests/server/http-server/executor-metadata.spec.ts
-      - tests/server/runtime/http-server/executor/request-retry-helpers.session-binding.spec.ts
-    smoke:
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "Validation must prove tmux/client binding persists under its own owner, not as request session or continuation truth."
-      - "Validation must prove conversation->tmux mapping and workdir narrowing survive reload, cleanup, and executor binding lookups."
-      - "Validation must prove request-local stopless/session metadata changes do not require changes in session-client binding owner."
 
   - feature_id: server.port_config_provider_failure_exemption
     change_risk: medium

@@ -81,7 +81,6 @@ Clarification:
 - `routeId`
 - `providerProtocol`
 - `providerFamily`
-- `serverToolFollowup`
 - `stopMessageEnabled`
 - `routecodexPortStopMessageEnabled`
 - `stopMessageClientInjectReady`
@@ -271,7 +270,6 @@ MetadataCenter
 - `runtime_control.routeName`
 - `runtime_control.providerProtocol`
 - `runtime_control.providerFamily`
-- `runtime_control.serverToolFollowup`
 - `runtime_control.stopMessage`
 - `runtime_control.streamIntent`
 - `runtime_control.clientAbort`
@@ -341,12 +339,12 @@ type MetadataSlot<T> = {
 
 1. `request_truth.sessionId / conversationId`
 2. `continuation_context.responsesRequestContext / responsesResume`
-3. `runtime_control.serverToolFollowup / stopMessage* / routeHint`
+3. `runtime_control.stopMessage* / routeHint`
 4. `client_attachment_scope.tmux* / workdir`
 
 优先级理由：
 
-- stopless / responses continuation / servertool followup 都卡在这几类
+- stopless / responses continuation 都卡在这几类
 - 这几类目前也最容易相互污染
 
 ## Implementation Rules

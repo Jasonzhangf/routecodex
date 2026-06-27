@@ -2,7 +2,6 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 // feature_id: hub.metadata_center_request_capture
 import { asRecord } from './provider-utils.js';
 import {
-  extractContinuationContextSessionIdentifiersFromMetadata,
   extractSessionIdentifiersFromMetadata
 } from '../../../modules/llmswitch/bridge.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
@@ -10,10 +9,6 @@ import { extractSessionClientDaemonIdFromApiKey } from '../../../utils/session-c
 import {
   shouldTraceSessionScopeByContext
 } from '../../../utils/session-scope-trace.js';
-import { getSessionClientRegistry } from './session-client-registry.js';
-import { resolveTmuxSessionIdAndSource } from './session-scope-resolution.js';
-import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
-import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-session-probe.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { preserveLiveClientAbortCarriers } from './executor/request-executor-client-abort-block.js';
 import { hasStoplessDirectiveInRequestPayload } from './executor/provider-response-shared-pure-blocks.js';
@@ -326,96 +321,6 @@ function inferSessionClientType(metadata: Record<string, unknown>): string | und
   return undefined;
 }
 
-function resolveWorkdirFromSessionDaemon(daemonId: string | undefined): string | undefined {
-  if (!daemonId) {
-    return undefined;
-  }
-  try {
-    const record = getSessionClientRegistry().findByDaemonId(daemonId);
-    const workdir = typeof record?.workdir === 'string' ? record.workdir.trim() : '';
-    return workdir || undefined;
-  } catch (error) {
-    logExecutorMetadataNonBlocking('resolveWorkdirFromSessionDaemon', error, { daemonId });
-    return undefined;
-  }
-}
-
-function resolveWorkdirFromTmuxSessionId(tmuxSessionId: string | undefined): string | undefined {
-  if (!tmuxSessionId) {
-    return undefined;
-  }
-  try {
-    const record = getSessionClientRegistry().findByTmuxSessionId(tmuxSessionId);
-    const workdir = typeof record?.workdir === 'string' ? record.workdir.trim() : '';
-    if (workdir) {
-      return workdir;
-    }
-    return resolveTmuxSessionWorkingDirectory(tmuxSessionId);
-  } catch (error) {
-    logExecutorMetadataNonBlocking('resolveWorkdirFromTmuxSessionId', error, { tmuxSessionId });
-    return undefined;
-  }
-}
-
-function resolveTmuxSessionIdFromSessionDaemon(daemonId: string | undefined): string | undefined {
-  if (!daemonId) {
-    return undefined;
-  }
-  try {
-    const record = getSessionClientRegistry().findByDaemonId(daemonId);
-    const tmuxSessionId = typeof record?.tmuxSessionId === 'string' ? record.tmuxSessionId.trim() : '';
-    if (tmuxSessionId) {
-      return tmuxSessionId;
-    }
-    const sessionId = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
-    return sessionId || undefined;
-  } catch (error) {
-    logExecutorMetadataNonBlocking('resolveTmuxSessionIdFromSessionDaemon', error, { daemonId });
-    return undefined;
-  }
-}
-
-function resolveTmuxSessionIdFromConversationBinding(scopeId: string): string | undefined {
-  const token = normalizeToken(scopeId);
-  if (!token) {
-    return undefined;
-  }
-  try {
-    return getSessionClientRegistry().resolveBoundTmuxSession(token);
-  } catch (error) {
-    logExecutorMetadataNonBlocking('resolveTmuxSessionIdFromConversationBinding', error, { scopeId: token });
-    return undefined;
-  }
-}
-
-function resolveSessionDaemonIdFromTmuxSession(tmuxSessionId: string | undefined): string | undefined {
-  const token = normalizeToken(tmuxSessionId);
-  if (!token) {
-    return undefined;
-  }
-  try {
-    const record = getSessionClientRegistry().findByTmuxSessionId(token);
-    return typeof record?.daemonId === 'string' && record.daemonId.trim() ? record.daemonId.trim() : undefined;
-  } catch (error) {
-    logExecutorMetadataNonBlocking('resolveSessionDaemonIdFromTmuxSession', error, { tmuxSessionId: token });
-    return undefined;
-  }
-}
-
-function resolveTmuxTargetFromSessionDaemon(daemonId: string | undefined): string | undefined {
-  if (!daemonId) {
-    return undefined;
-  }
-  try {
-    const record = getSessionClientRegistry().findByDaemonId(daemonId);
-    const tmuxTarget = typeof record?.tmuxTarget === 'string' ? record.tmuxTarget.trim() : '';
-    return tmuxTarget || undefined;
-  } catch (error) {
-    logExecutorMetadataNonBlocking('resolveTmuxTargetFromSessionDaemon', error, { daemonId });
-    return undefined;
-  }
-}
-
 function shouldTraceSessionScopeMetadata(args: {
   entryEndpoint: string;
   userAgent?: string;
@@ -440,13 +345,12 @@ function logSessionScopeMetadata(args: {
   resolvedSessionDaemonId?: string;
   resolvedTmuxSessionId?: string;
   resolvedWorkdir?: string;
-  clientInjectReady: boolean;
   tmuxSource?: string;
 }): void {
   console.log(
     `[session-scope][metadata] requestId=${args.requestId || 'n/a'} endpoint=${args.entryEndpoint || 'n/a'} ` +
     `daemon=${args.resolvedSessionDaemonId || 'none'} tmux=${args.resolvedTmuxSessionId || 'none'} ` +
-    `ready=${args.clientInjectReady ? 'yes' : 'no'} workdir=${args.resolvedWorkdir || 'none'} ` +
+    `workdir=${args.resolvedWorkdir || 'none'} ` +
     `originator=${args.originator || 'n/a'} ua=${args.userAgent || 'n/a'} ` +
     `tmuxSource=${args.tmuxSource || 'none'}`
   );
@@ -456,6 +360,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const userMeta = asRecord(input.metadata);
   const bodyMeta = asRecord(asRecord(input.body).metadata);
   const headers = asRecord(input.headers);
+  const portContext = asRecord(userMeta.portContext) ?? asRecord(bodyMeta.portContext);
   const inboundUserAgent = extractHeaderValue(headers, 'user-agent');
   const inboundOriginator = extractHeaderValue(headers, 'originator');
   const normalizedClientHeaders =
@@ -478,97 +383,10 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   let resolvedSessionDaemonId = extractSessionDaemonId(userMeta, headers);
   const inferredClientType = inferSessionClientType(userMeta);
   const directWorkdir = extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders);
-  const requestScopeIdForBinding =
-    requestHeaderSessionId
-    || requestHeaderConversationId
-    || normalizeToken(userMeta.sessionId)
-    || normalizeToken(userMeta.conversationId)
-    || normalizeToken(bodyMeta.sessionId)
-    || normalizeToken(bodyMeta.conversationId);
-
-  if (requestScopeIdForBinding && directWorkdir) {
-    try {
-      const registry = getSessionClientRegistry();
-      if (!registry.resolveBoundTmuxSession(requestScopeIdForBinding)) {
-        registry.bindConversationSession({
-          conversationSessionId: requestScopeIdForBinding,
-          ...(resolvedSessionDaemonId ? { daemonId: resolvedSessionDaemonId } : {}),
-          ...(inferredClientType ? { clientType: inferredClientType } : {}),
-          workdir: directWorkdir
-        });
-      }
-    } catch (bindError) {
-      logExecutorMetadataNonBlocking('buildRequestMetadata.bindConversationSession', bindError, {
-        requestScopeId: requestScopeIdForBinding,
-        workdir: directWorkdir
-      });
-    }
-  }
-
-  const resolvedTmuxTarget =
-    normalizeToken(userMeta.clientTmuxTarget)
-    || normalizeToken(userMeta.client_tmux_target)
-    || normalizeToken(userMeta.tmuxTarget)
-    || normalizeToken(bodyMeta.clientTmuxTarget)
-    || normalizeToken(bodyMeta.client_tmux_target)
-    || normalizeToken(bodyMeta.tmuxTarget)
-    || resolveTmuxTargetFromSessionDaemon(resolvedSessionDaemonId);
-  const tmuxResolution = resolveTmuxSessionIdAndSource({
-    userMeta,
-    bodyMeta,
-    headers: headers ?? undefined,
-    clientHeaders: normalizedClientHeaders,
-    daemonId: resolvedSessionDaemonId,
-    resolveTmuxSessionIdFromDaemon: resolveTmuxSessionIdFromSessionDaemon,
-    resolveTmuxSessionIdFromBinding: resolveTmuxSessionIdFromConversationBinding,
-    isTmuxSessionAlive
-  });
-  if (!resolvedSessionDaemonId && tmuxResolution.tmuxSessionId) {
-    resolvedSessionDaemonId = resolveSessionDaemonIdFromTmuxSession(tmuxResolution.tmuxSessionId);
-  }
-  const resolvedWorkdir =
-    directWorkdir
-    || (tmuxResolution.source === 'registry_by_binding'
-      ? undefined
-      : resolveWorkdirFromTmuxSessionId(tmuxResolution.tmuxSessionId))
-    || (tmuxResolution.source === 'registry_by_binding'
-      ? undefined
-      : resolveWorkdirFromSessionDaemon(resolvedSessionDaemonId));
-  let resolvedTmuxSessionId = tmuxResolution.tmuxSessionId;
-  let tmuxSource = tmuxResolution.source;
-  const explicitClientInjectReady =
-    typeof userMeta.clientInjectReady === 'boolean' ? userMeta.clientInjectReady : undefined;
-  const explicitClientInjectReason =
-    typeof userMeta.clientInjectReason === 'string' && userMeta.clientInjectReason.trim()
-      ? userMeta.clientInjectReason.trim()
-      : undefined;
-  let clientInjectReady = explicitClientInjectReady ?? Boolean(resolvedTmuxSessionId);
-  let clientInjectReason =
-    explicitClientInjectReason || (clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing');
-  let stopMessageClientInjectSessionScope = resolvedTmuxSessionId ? `tmux:${resolvedTmuxSessionId}` : undefined;
-  if (resolvedTmuxSessionId && tmuxSource === 'registry_by_daemon' && evaluateTmuxScopeCleanup({
-    mode: 'request_guard',
-    tmuxSessionId: resolvedTmuxSessionId,
-    reason: 'request_guard',
-    isTmuxSessionAlive
-  }).cleanupTmuxScope) {
-    try {
-      getSessionClientRegistry().unbindSessionScope(`tmux:${resolvedTmuxSessionId}`);
-    } catch (unbindError) {
-      logExecutorMetadataNonBlocking('buildRequestMetadata.unbindSessionScope', unbindError, {
-        tmuxSessionId: resolvedTmuxSessionId
-      });
-    }
-    resolvedTmuxSessionId = undefined;
-    tmuxSource = 'none';
-    if (explicitClientInjectReady === undefined) {
-      clientInjectReady = false;
-    }
-    if (!explicitClientInjectReason) {
-      clientInjectReason = clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing';
-    }
-    stopMessageClientInjectSessionScope = undefined;
-  }
+  const resolvedTmuxTarget = undefined;
+  const resolvedWorkdir = directWorkdir;
+  const resolvedTmuxSessionId = undefined;
+  const tmuxSource = 'none';
   const metadata: Record<string, unknown> = {
     ...userMeta,
     entryEndpoint: input.entryEndpoint,
@@ -610,11 +428,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
           clientType: inferredClientType
         }
       : {}),
-    ...(stopMessageClientInjectSessionScope
-      ? { stopMessageClientInjectSessionScope }
-      : {}),
-    clientInjectReady,
-    clientInjectReason
   };
   delete metadata.routeHint;
   delete metadata.responsesRequestContext;
@@ -629,6 +442,39 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   }
 
   const center = MetadataCenter.attach(metadata);
+  const entryPortCandidate =
+    typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort)
+      ? Math.floor(portContext.matchedPort)
+      : typeof portContext?.localPort === 'number' && Number.isFinite(portContext.localPort)
+        ? Math.floor(portContext.localPort)
+        : typeof portContext?.entryPort === 'number' && Number.isFinite(portContext.entryPort)
+          ? Math.floor(portContext.entryPort)
+          : typeof userMeta.matchedPort === 'number' && Number.isFinite(userMeta.matchedPort)
+            ? Math.floor(userMeta.matchedPort)
+            : typeof userMeta.localPort === 'number' && Number.isFinite(userMeta.localPort)
+              ? Math.floor(userMeta.localPort)
+              : typeof userMeta.entryPort === 'number' && Number.isFinite(userMeta.entryPort)
+                ? Math.floor(userMeta.entryPort)
+                : typeof bodyMeta.matchedPort === 'number' && Number.isFinite(bodyMeta.matchedPort)
+                  ? Math.floor(bodyMeta.matchedPort)
+                  : typeof bodyMeta.localPort === 'number' && Number.isFinite(bodyMeta.localPort)
+                    ? Math.floor(bodyMeta.localPort)
+                    : typeof bodyMeta.entryPort === 'number' && Number.isFinite(bodyMeta.entryPort)
+                      ? Math.floor(bodyMeta.entryPort)
+                      : undefined;
+  if (typeof entryPortCandidate === 'number') {
+    center.writeRequestTruth(
+      'portScope',
+      String(entryPortCandidate),
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'ServerReqInbound01ClientRaw'
+      },
+      'request entry port scope'
+    );
+    metadata.portScope = String(entryPortCandidate);
+  }
   if (routeHint) {
     center.writeRuntimeControl(
       'routeHint',
@@ -641,7 +487,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       'request route hint'
     );
   }
-
   const requestTruthSource: Record<string, unknown> = {
     ...bodyMeta,
     ...metadata
@@ -711,6 +556,10 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     );
     metadata.responsesResume = responsesResumeSource;
     const runtimeControl = center.readRuntimeControl();
+    const responsesResumeContinuationOwner =
+      typeof responsesResumeSource.continuationOwner === 'string' && responsesResumeSource.continuationOwner.trim()
+        ? responsesResumeSource.continuationOwner.trim()
+        : undefined;
     const projectedRouteHint =
       typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
         ? runtimeControl.routeHint.trim()
@@ -732,7 +581,8 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     const projectedRetryProviderKey =
       typeof runtimeControl.retryProviderKey === 'string' && runtimeControl.retryProviderKey.trim()
         ? runtimeControl.retryProviderKey.trim()
-        : typeof responsesResumeSource.providerKey === 'string' && responsesResumeSource.providerKey.trim()
+        : responsesResumeContinuationOwner !== 'relay'
+          && typeof responsesResumeSource.providerKey === 'string' && responsesResumeSource.providerKey.trim()
           ? responsesResumeSource.providerKey.trim()
           : undefined;
     if (projectedRetryProviderKey && !runtimeControl.retryProviderKey) {
@@ -747,30 +597,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         'responses resume retry provider pin'
       );
     }
-  }
-  const continuationIdentifiers = extractContinuationContextSessionIdentifiersFromMetadata({
-    ...bodyMeta,
-    ...metadata
-  });
-  const requestTruth = center.readRequestTruth();
-  if (
-    continuationIdentifiers.sessionId
-    && !requestTruth.sessionId
-  ) {
-    center.writeContinuationContext(
-      'responsesRequestContext',
-      {
-        sessionId: continuationIdentifiers.sessionId,
-        ...(continuationIdentifiers.conversationId
-          ? { conversationId: continuationIdentifiers.conversationId }
-          : {})
-      },
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'HubReqInbound02Standardized'
-      }
-    );
   }
   if (hasStoplessDirectiveInRequestPayload(input.body)) {
     center.writeRuntimeControl(
@@ -799,7 +625,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       resolvedSessionDaemonId,
       resolvedTmuxSessionId,
       resolvedWorkdir,
-      clientInjectReady,
       tmuxSource
     });
   }
@@ -946,26 +771,5 @@ function requestMayContainToolOutput(value: unknown): boolean {
 }
 
 function cloneMetadata(source: Record<string, unknown>): Record<string, unknown> {
-  const structuredCloneFn = (globalThis as { structuredClone?: <T>(value: T) => T }).structuredClone;
-  if (typeof structuredCloneFn === 'function') {
-    try {
-      return structuredCloneFn(source);
-    } catch (structuredCloneError) {
-      logExecutorMetadataNonBlocking('cloneMetadata.structuredClone', structuredCloneError);
-    }
-  }
-  try {
-    return JSON.parse(JSON.stringify(source));
-  } catch {
-    return { ...source };
-  }
+  return source;
 }
-
-export const __executorMetadataTestables = {
-  resolveWorkdirFromSessionDaemon,
-  resolveWorkdirFromTmuxSessionId,
-  resolveTmuxSessionIdFromSessionDaemon,
-  resolveTmuxSessionIdFromConversationBinding,
-  resolveSessionDaemonIdFromTmuxSession,
-  resolveTmuxTargetFromSessionDaemon
-};

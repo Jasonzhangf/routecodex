@@ -610,57 +610,6 @@ chains:
         semantic_output: "instance.json status promoted to shutdown-intent on stop request"
         status: anchored
 
-  - chain_id: runtime.tmux_client_binding.mainline
-    summary: "tmux/client attachment registry: daemon registration persists records, conversation binding narrows to tmux session, executor/runtime lookup consumes binding without turning it into request identity truth."
-    entry_contract:
-      node: SessionClientRegisterRequest
-      owner_doc: docs/architecture/wiki/metadata-boundary-map.md
-    edges:
-      - step_id: scb-01
-        from_node: SessionClientRegisterRequest
-        to_node: TmuxClientRecordRegistered
-        caller_symbol: registerSessionClientRoutes
-        caller_file: src/server/runtime/http-server/session-client-routes.ts
-        callee_symbol: register
-        callee_file: src/server/runtime/http-server/session-client-registry.ts
-        owner_feature_id: runtime.tmux_client_binding
-        semantic_input: "daemonId + callbackUrl + optional tmuxSessionId/workdir/client flags"
-        semantic_output: "normalized daemon-attached tmux/client record in registry memory"
-        status: anchored
-      - step_id: scb-02
-        from_node: TmuxClientRecordRegistered
-        to_node: SessionBindingsPersisted
-        caller_symbol: register
-        caller_file: src/server/runtime/http-server/session-client-registry.ts
-        callee_symbol: persistConversationBindings
-        callee_file: src/server/runtime/http-server/session-client-registry.ts
-        owner_feature_id: runtime.tmux_client_binding
-        semantic_input: "registry record set + optional conversation binding updates"
-        semantic_output: "session-bindings.json updated under runtime workdir root"
-        status: anchored
-      - step_id: scb-03
-        from_node: ConversationSessionBindRequest
-        to_node: ConversationTmuxBindingResolved
-        caller_symbol: bindConversationSession
-        caller_file: src/server/runtime/http-server/session-client-registry.ts
-        callee_symbol: persistConversationBindings
-        callee_file: src/server/runtime/http-server/session-client-registry.ts
-        owner_feature_id: runtime.tmux_client_binding
-        semantic_input: "conversationSessionId plus optional tmux/daemon/workdir hints"
-        semantic_output: "conversationSessionId narrowed to one bound tmux session with persisted mapping"
-        status: anchored
-      - step_id: scb-04
-        from_node: ConversationTmuxBindingResolved
-        to_node: TmuxBindingLookupConsumed
-        caller_symbol: resolveBoundTmuxSession
-        caller_file: src/server/runtime/http-server/session-client-registry.ts
-        callee_symbol: resolveBoundTmuxSession
-        callee_file: src/server/runtime/http-server/executor-metadata.ts
-        owner_feature_id: runtime.tmux_client_binding
-        semantic_input: "conversation/session scope token from runtime-side executor metadata lookup"
-        semantic_output: "tmux binding used as runtime dispatch hint only, not as request session identity"
-        status: anchored
-
   - chain_id: stopless.session.mainline
     summary: "Stopless three-round contract inside Chat Process boundary: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop->CLI rewriting."
     entry_contract:
@@ -682,13 +631,13 @@ chains:
       - step_id: stl-02
         from_node: StoplessResp02SchemaGateEvaluated
         to_node: StoplessState03RuntimeSnapshotResolved
-        caller_symbol: resolveRuntimeStopMessageStateFromAdapterContextWithNative
-        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-        callee_symbol: resolve_runtime_stop_message_state_from_adapter_context
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
+        caller_symbol: planStoplessExecutionJson
+        caller_file: sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
+        callee_symbol: plan_stopless_execution_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "adapterContext/runtime metadata plus current request body/tool_outputs; request session truth may come from request metadata but never from responsesRequestContext"
-        semantic_output: "runtime stopless snapshot restored from request-local metadata or current CLI tool_output without continuation-context session promotion"
+        semantic_input: "engine execution plus current request-truth session id and MetadataCenter runtime_control.stopless control fields"
+        semantic_output: "Rust-built stopless execution/context plus orchestration plan; no TS session/context composition and no persisted/tmux/conversation fallback"
         status: anchored
       - step_id: stl-03
         from_node: StoplessState03RuntimeSnapshotResolved
@@ -789,7 +738,7 @@ chains:
         semantic_input: "request truth plus responses pipeline continuation control inputs"
         semantic_output: "responses continuation control attached without redefining request truth and without mirroring request/context payload into MetadataCenter"
         status: anchored
-        note: "Pipeline metadata write may attach `responsesResume` and other continuation control only; request truth remains write-once and MetadataCenter must not carry `responsesRequestContext` or any request/context payload mirror."
+        note: "Pipeline metadata write may attach `responsesResume` and other continuation control only; request truth remains write-once and MetadataCenter must not carry `responsesRequestContext` or any request/context payload mirror. continuation fields must not be promoted back into request identity."
       - step_id: mtc-02-result
         from_node: MetaReq02TruthMaterialized
         to_node: MetaReq03ContinuationAttached
@@ -928,15 +877,6 @@ shared_multi_reference_functions:
     reused_by_chains:
       - runtime.lifecycle.mainline
     note: "Promotes instance.json status; caller must already have a record via writeRuntimeInstance."
-  - function_id: runtime.tmux_client_binding_lookup
-    binding_status: confirmed
-    symbol: resolveBoundTmuxSession
-    file: src/server/runtime/http-server/session-client-registry.ts
-    owner_feature_id: runtime.tmux_client_binding
-    reused_by_chains:
-      - runtime.tmux_client_binding.mainline
-    note: "Conversation->tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership."
-
   - function_id: debug.surface_registry
     binding_status: confirmed
     symbol: createDebugToolkit

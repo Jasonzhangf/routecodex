@@ -2,7 +2,6 @@ import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import { registerRequestLogContext } from '../../../utils/request-log-color.js';
 import { buildRequestMetadata, cloneClientHeaders, resolveClientRequestId } from '../executor-metadata.js';
 import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
-import { bindSessionConversationSession } from './request-retry-helpers.js';
 import { writeInboundClientSnapshot } from './request-executor-core-utils.js';
 
 export type RequestExecutorInitialRequestState = {
@@ -21,7 +20,6 @@ export async function initializeRequestExecutorRequestState(args: {
   const initialMetadata = buildRequestMetadata(args.input);
   await args.onRequestStart?.({ requestId: args.input.requestId, metadata: initialMetadata });
 
-  bindSessionConversationSession(initialMetadata);
   const requestTruth = readRuntimeRequestTruthIdentifiers(initialMetadata);
   registerRequestLogContext(args.input.requestId, {
     logSessionColorKey: initialMetadata.logSessionColorKey,

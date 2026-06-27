@@ -46,7 +46,6 @@ import {
   mergeUsageMetrics
 } from './executor/usage-aggregator.js';
 import {
-  bindSessionConversationSession,
   extractStatusCodeFromError,
   isSseDecodeRetryableNetworkError,
   isSseDecodeRateLimitError
@@ -124,8 +123,17 @@ export function writeProviderProtocolRuntimeControl(
     return;
   }
   const center = MetadataCenter.read(metadata);
-  if (!center || center.readRuntimeControl().providerProtocol) {
+  if (!center) {
     return;
+  }
+  const existing = center.readRuntimeControl().providerProtocol;
+  if (existing) {
+    if (existing === providerProtocol) {
+      return;
+    }
+    throw new Error(
+      `MetadataCenter runtime_control.providerProtocol conflict: existing=${existing} selected=${providerProtocol}`
+    );
   }
   center.writeRuntimeControl(
     'providerProtocol',
@@ -170,6 +178,7 @@ import {
 import {
   resetErrorActionBackoffByScopePrefix,
   resetErrorActionQueueStateForTests,
+  recordErrorActionBackoff,
 } from './executor/request-executor-error-action-queue.js';
 import {
   detectAssistantSanitizationPlaceholder,
@@ -1124,7 +1133,7 @@ export class HubRequestExecutor implements RequestExecutor {
           const conversionPipelineMetadata = mergedMetadata;
           const converted = shouldBypassProviderResponseConversion(normalized, {
             entryEndpoint: input.entryEndpoint,
-            providerProtocol: handle.providerProtocol || providerProtocol,
+            providerProtocol,
             serverToolsEnabled,
             metadata: conversionPipelineMetadata
           })
@@ -1139,7 +1148,7 @@ export class HubRequestExecutor implements RequestExecutor {
             })()
             : await this.convertProviderResponseIfNeeded({
               entryEndpoint: input.entryEndpoint,
-              providerProtocol: handle.providerProtocol || providerProtocol,
+              providerProtocol,
               providerType: handle.providerType,
               providerFamily: handle.providerFamily,
               providerKey: target.providerKey,
@@ -1430,7 +1439,6 @@ export const __requestExecutorTestables = {
   isToolResultFollowupTurn,
   detectRetryableEmptyAssistantResponse,
   deriveLogicalRequestChainKey,
-  peekErrorActionBackoffWaitMs,
   recordErrorActionBackoff,
   resetErrorActionBackoffByScopePrefix,
   prepareRequestPayloadRetrySeed,

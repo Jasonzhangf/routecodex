@@ -4,7 +4,6 @@ const mockRegisterRequestLogContext = jest.fn();
 const mockBuildRequestMetadata = jest.fn();
 const mockCloneClientHeaders = jest.fn(() => undefined);
 const mockResolveClientRequestId = jest.fn(() => 'client-req-1');
-const mockBindSessionConversationSession = jest.fn();
 const mockWriteInboundClientSnapshot = jest.fn(async () => undefined);
 const mockGetClientConnectionAbortSignal = jest.fn(() => undefined);
 
@@ -16,10 +15,6 @@ jest.unstable_mockModule('../../../../../src/server/runtime/http-server/executor
   buildRequestMetadata: mockBuildRequestMetadata,
   cloneClientHeaders: mockCloneClientHeaders,
   resolveClientRequestId: mockResolveClientRequestId
-}));
-
-jest.unstable_mockModule('../../../../../src/server/runtime/http-server/executor/request-retry-helpers.js', () => ({
-  bindSessionConversationSession: mockBindSessionConversationSession
 }));
 
 jest.unstable_mockModule('../../../../../src/server/runtime/http-server/executor/request-executor-core-utils.js', () => ({
@@ -38,7 +33,6 @@ describe('request-executor-request-state', () => {
   it('registers request log context from metadata center request truth instead of flat metadata fields', async () => {
     jest.resetModules();
     mockRegisterRequestLogContext.mockReset();
-    mockBindSessionConversationSession.mockReset();
     mockWriteInboundClientSnapshot.mockReset();
 
     const { MetadataCenter } = await import(
@@ -93,7 +87,6 @@ describe('request-executor-request-state', () => {
   it('does not synthesize request log session context from flat metadata when request truth is absent', async () => {
     jest.resetModules();
     mockRegisterRequestLogContext.mockReset();
-    mockBindSessionConversationSession.mockReset();
     mockWriteInboundClientSnapshot.mockReset();
 
     mockBuildRequestMetadata.mockReturnValue({

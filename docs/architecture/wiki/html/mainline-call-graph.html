@@ -269,7 +269,7 @@
         <tr><td>resp-01</td><td><code>ProviderRespInbound01Raw -&gt; HubRespInbound02Parsed</code></td><td>anchored</td><td><code>run_hub_resp_inbound_02_parsed_entrypoint -&gt; parse_hub_resp_inbound_02_from_provider_resp_inbound_01</code></td><td></td><td><code>hub.response_provider_sse_materialization</code>&lt;br/&gt;Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry</td></tr>
         <tr><td>resp-02</td><td><code>HubRespInbound02Parsed -&gt; HubRespChatProcess03Governed</code></td><td>anchored</td><td><code>run_hub_resp_chatprocess_03_governed_entrypoint -&gt; build_hub_resp_chatprocess_03_from_hub_resp_inbound_02</code></td><td></td><td><code>hub.response_responses_chat_projection</code>&lt;br/&gt;OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers</td></tr>
         <tr><td>resp-03</td><td><code>HubRespChatProcess03Governed -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; projectResponsesClientPayloadForClientNative</code></td><td></td><td><code>hub.response_responses_client_projection</code>&lt;br/&gt;OpenAI Responses client-visible payload projection for JSON body and SSE frames after HubRespChatProcess03Governed normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore</td></tr>
-        <tr><td>resp-04</td><td><code>HubRespOutbound04ClientSemantic -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>sendPipelineResponse -&gt; sendSsePipelineResponse</code></td><td></td><td><code>server.responses_response_handler_bridge_surface</code>&lt;br/&gt;/v1/responses response bridge now owns only transport-facing close/clear helpers; continuation save truth lives in core Chat Process closeout</td></tr>
+        <tr><td>resp-04</td><td><code>HubRespOutbound04ClientSemantic -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>sendPipelineResponse -&gt; sendSsePipelineResponse</code></td><td></td><td><code>server.responses_response_handler_bridge_surface</code>&lt;br/&gt;/v1/responses response bridge is an opaque continuation/conversation facade only; continuation save truth lives in core Chat Process closeout</td></tr>
         </tbody>
         </table>
         <h2>responses.continuation.mainline</h2>
@@ -453,39 +453,6 @@
         <tr><td>rtl-12</td><td><code>ServerStopCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; updateRuntimeInstanceStatus</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         </tbody>
         </table>
-        <h2>runtime.tmux_client_binding.mainline</h2>
-        <p>tmux/client attachment registry: daemon registration persists records, conversation binding narrows to tmux session, executor/runtime lookup consumes binding without turning it into request identity truth.</p>
-        <p>Entry contract: <code>SessionClientRegisterRequest</code> via <code>docs/architecture/wiki/metadata-boundary-map.md</code></p>
-        <pre class="mermaid">flowchart LR
-          TmuxBindingLookupConsumed[&quot;TmuxBindingLookupConsumed&quot;]
-          ConversationTmuxBindingResolved[&quot;ConversationTmuxBindingResolved&quot;]
-          ConversationSessionBindRequest[&quot;ConversationSessionBindRequest&quot;]
-          SessionBindingsPersisted[&quot;SessionBindingsPersisted&quot;]
-          TmuxClientRecordRegistered[&quot;TmuxClientRecordRegistered&quot;]
-          SessionClientRegisterRequest[&quot;SessionClientRegisterRequest&quot;]
-          SessionClientRegisterRequest --&gt;|scb-01| TmuxClientRecordRegistered
-          TmuxClientRecordRegistered --&gt;|scb-02| SessionBindingsPersisted
-          ConversationSessionBindRequest --&gt;|scb-03| ConversationTmuxBindingResolved
-          ConversationTmuxBindingResolved --&gt;|scb-04| TmuxBindingLookupConsumed
-          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
-          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
-          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-          class SessionClientRegisterRequest anchored;
-          class TmuxClientRecordRegistered anchored;
-          class SessionBindingsPersisted anchored;
-          class ConversationSessionBindRequest anchored;
-          class ConversationTmuxBindingResolved anchored;
-          class TmuxBindingLookupConsumed anchored;</pre>
-        <table>
-        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
-        <tbody>
-        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>scb-01</td><td><code>SessionClientRegisterRequest -&gt; TmuxClientRecordRegistered</code></td><td>anchored</td><td><code>registerSessionClientRoutes -&gt; register</code></td><td></td><td><code>runtime.tmux_client_binding</code>&lt;br/&gt;tmux/client attachment registry persists daemon records plus conversation-&gt;tmux bindings under session-bindings.json</td></tr>
-        <tr><td>scb-02</td><td><code>TmuxClientRecordRegistered -&gt; SessionBindingsPersisted</code></td><td>anchored</td><td><code>register -&gt; persistConversationBindings</code></td><td></td><td><code>runtime.tmux_client_binding</code>&lt;br/&gt;tmux/client attachment registry persists daemon records plus conversation-&gt;tmux bindings under session-bindings.json</td></tr>
-        <tr><td>scb-03</td><td><code>ConversationSessionBindRequest -&gt; ConversationTmuxBindingResolved</code></td><td>anchored</td><td><code>bindConversationSession -&gt; persistConversationBindings</code></td><td></td><td><code>runtime.tmux_client_binding</code>&lt;br/&gt;tmux/client attachment registry persists daemon records plus conversation-&gt;tmux bindings under session-bindings.json</td></tr>
-        <tr><td>scb-04</td><td><code>ConversationTmuxBindingResolved -&gt; TmuxBindingLookupConsumed</code></td><td>anchored</td><td><code>resolveBoundTmuxSession -&gt; resolveBoundTmuxSession</code></td><td></td><td><code>runtime.tmux_client_binding</code>&lt;br/&gt;tmux/client attachment registry persists daemon records plus conversation-&gt;tmux bindings under session-bindings.json</td></tr>
-        </tbody>
-        </table>
         <h2>stopless.session.mainline</h2>
         <p>Stopless three-round contract inside Chat Process boundary: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop-&gt;CLI rewriting.</p>
         <p>Entry contract: <code>StoplessResp01StopDetected</code> via <code>docs/architecture/wiki/stopless-session-mainline-source.md</code></p>
@@ -524,7 +491,7 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>stl-01</td><td><code>StoplessResp01StopDetected -&gt; StoplessResp02SchemaGateEvaluated</code></td><td>anchored</td><td><code>runServerToolOrchestration -&gt; runStopMessageAutoHandlerWithNative</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
-        <tr><td>stl-02</td><td><code>StoplessResp02SchemaGateEvaluated -&gt; StoplessState03RuntimeSnapshotResolved</code></td><td>anchored</td><td><code>resolveRuntimeStopMessageStateFromAdapterContextWithNative -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>stl-02</td><td><code>StoplessResp02SchemaGateEvaluated -&gt; StoplessState03RuntimeSnapshotResolved</code></td><td>anchored</td><td><code>planStoplessExecutionJson -&gt; plan_stopless_execution_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>stl-03</td><td><code>StoplessState03RuntimeSnapshotResolved -&gt; StoplessCli04ProjectionPlanned</code></td><td>anchored</td><td><code>buildServertoolCliProjectionForAutoFlow -&gt; plan_client_exec_cli_projection_output</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>stl-04</td><td><code>StoplessCli04ProjectionPlanned -&gt; StoplessCli06ClientExecuted</code></td><td>anchored</td><td><code>createServertoolCommand -&gt; build_servertool_cli_binary_run_command_from_client_exec_result</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>stl-05</td><td><code>StoplessCli06ClientExecuted -&gt; StoplessReq07ContinuationRestored</code></td><td>anchored</td><td><code>has_stop_message_auto_cli_result_in_request_json -&gt; resolve_runtime_stop_message_state_from_adapter_context</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
@@ -591,7 +558,6 @@
         <tr><td>runtime.lifecycle.stop_intent_consumer</td><td><code>consumeServerStopIntent</code></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td><td>Consumes and TTL-gates stop-intent.json; same owner truth as the writer.</td></tr>
         <tr><td>runtime.lifecycle.instance_registry_writer</td><td><code>writeRuntimeInstance</code></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td><td>Atomic write via temp file + rename; authoritative description of the instance, not the pid cache.</td></tr>
         <tr><td>runtime.lifecycle.instance_registry_status</td><td><code>updateRuntimeInstanceStatus</code></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td><td>Promotes instance.json status; caller must already have a record via writeRuntimeInstance.</td></tr>
-        <tr><td>runtime.tmux_client_binding_lookup</td><td><code>resolveBoundTmuxSession</code></td><td><code>runtime.tmux_client_binding</code>&lt;br/&gt;tmux/client attachment registry persists daemon records plus conversation-&gt;tmux bindings under session-bindings.json</td><td>Conversation-&gt;tmux lookup narrows runtime dispatch scope; it must not be reinterpreted as request session truth or continuation ownership.</td></tr>
         <tr><td>debug.surface_registry</td><td><code>createDebugToolkit</code></td><td><code>debug.unified_surface</code>&lt;br/&gt;debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy</td><td>Canonical debug owner entrypoint. createDebugToolkit is the unified facade constructor for debug diag/snapshot/logger/harness replay surfaces.</td></tr>
         <tr><td>error.err_04_router_policy_applied</td><td><code>ErrorErr04RouterPolicyApplied</code></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td><td>Router policy applied between ErrorErr03 and ErrorErr05; type is registered in topology doc table.</td></tr>
         <tr><td>error.err_04_executor_envelope</td><td><code>RequestExecutorErrorErr04RouterPolicyEnvelope</code></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td><td>Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract.</td></tr>

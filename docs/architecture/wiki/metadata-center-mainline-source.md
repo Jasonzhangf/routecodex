@@ -26,6 +26,7 @@ That contract is the rule for `save / restore / materialize / release`. Field-le
 - Metadata must converge into one request-scoped center, not continue as free-floating `Record<string, unknown>` merges.
 - The same request-scoped `MetadataCenter` must be created at server request entry and then carried through `server -> Hub Pipeline -> provider/runtime -> response closeout`; later stages must not spawn a second center and merge it back.
 - The center must store both value and provenance.
+- The center is a control-side carrier only. It must not store request payloads, request context objects, normalized input snapshots, response payloads, or any data mirror used only for convenience transport.
 - Request truth, continuation context, runtime control, provider observation, client attachment scope, and debug snapshot are different families and must not share the same flat namespace.
 - stopless/servertool must read request truth from the center, not guess from continuation context, tmux scope, or scattered runtime fields.
 - The center is request-scoped, not session-scoped. `sessionId/conversationId` are write-once `request_truth` fields, not MetadataCenter instance keys and not legal restoration targets from continuation history.
@@ -58,8 +59,8 @@ flowchart LR
 | step | transition | owner stage | metadata families allowed to write | current owner truth |
 | --- | --- | --- | --- | --- |
 | `mtc-01` | inbound seed -> request truth | `ServerReqInbound01ClientRaw` / `HubReqInbound02Standardized` | `request_truth` seed only | handler + req_inbound capture |
-| `mtc-02` | request truth fixed -> continuation attached | `HubReqChatProcess03Governed` | `continuation_context` | responses/chat continuation semantics |
-| `mtc-02-result` | request truth fixed -> result continuation attached | `HubReqChatProcess03Governed` / host result bridge | `continuation_context` | `attachResponsesRequestContextToResultForHttp -> MetadataCenter.writeContinuationContext`; result metadata 现在也只把 `responsesRequestContext` 写进 center continuation family |
+| `mtc-02` | request truth fixed -> continuation attached | `HubReqChatProcess03Governed` | `continuation_context` | responses/chat continuation control only; no request/context payload mirror allowed |
+| `mtc-02-result` | request truth fixed -> result continuation attached | `HubReqChatProcess03Governed` / host result bridge | `continuation_context` | result side may preserve continuation control only; request context transport must stay in local variables, not MetadataCenter |
 | `mtc-03` | continuation attached -> runtime control bound | `HubReqChatProcess03Governed` / request-route owner / `VrRoute04SelectedTarget` | `runtime_control` | route hint / stream / servertool followup / stop-message controls; relay `/v1/responses` restore may carry `responsesResume` + `routeHint` at handler/bridge entry, while effective `retryProviderKey` is finalized later by request-executor request-route owner before Hub execution |
 | `mtc-04` | runtime control -> provider observation | `VrRoute04SelectedTarget` / `HubReqOutbound05ProviderSemantic` | `provider_observation` | `request-executor-pipeline-attempt.ts::resolveRequestExecutorPipelineAttempt -> MetadataCenter.writeProviderObservation`; target / providerKey / assignedModelId / compatibilityProfile now enter center instead of reviving flat `metadata.target` |
 | `mtc-05` | provider observation -> response observed | `HubRespInbound02Parsed` | `provider_observation` append + `response_observation` | `persistResponsesConversationLifecycleAtChatProcessExitWithinCore -> readMetadataCenterRequestTruth`; response-side continuation save owner is core Chat Process closeout |
@@ -73,7 +74,7 @@ This is the contract that must be mirrored into `function-map`, `mainline-call-m
 | family | initial write owner | legal fields | write policy | forbidden rewrites |
 | --- | --- | --- | --- | --- |
 | `request_truth` | `ServerReqInbound01ClientRaw -> HubReqInbound02Standardized` | `requestId`, `pipelineId`, `entryEndpoint`, `sessionId`, `conversationId`, `clientRequestId`, `portScope` | `write_once` | continuation restore, stopless/servertool, tmux/client attachment, provider response, SSE/handler closeout |
-| `continuation_context` | `HubReqChatProcess03Governed` continuation owner | `responsesRequestContext`, `responsesResume`, `previousResponseId`, `responseId`, `toolOutputs`, `continuationOwner`, `resumeFrom`, `chainId`, `stickyScope` | `replaceable_by_owner_only` | upgrading any field into `request_truth`; stopless using it as session truth |
+| `continuation_context` | `HubReqChatProcess03Governed` continuation owner | `responsesResume`, `previousResponseId`, `responseId`, `toolOutputs`, `continuationOwner`, `resumeFrom`, `chainId`, `stickyScope` | `replaceable_by_owner_only` | writing request/response payload mirrors; upgrading any field into `request_truth`; stopless using it as session truth |
 | `runtime_control` | `HubReqChatProcess03Governed` then request-route owner | `routeHint`, `routeName`, `routeId`, `providerProtocol`, `retryProviderKey`, `preselectedRoute`, `stopless`, `stopMessage*`, `streamIntent`, `clientAbort` | `replaceable_by_owner_only` | flat top-level metadata mirrors, `__rt`, SSE/JSON projection repair; relay continuation fields becoming handler-owned retry pin truth |
 | `provider_observation` | `VrRoute04SelectedTarget / HubReqOutbound05ProviderSemantic` then `HubRespInbound02Parsed` append | `target`, `providerKey`, `assignedModelId`, `compatibilityProfile`, `responseSemantics`, `finishReason` | `append_only` or owner-replaceable documented slot-by-slot | writing back into `request_truth` or reviving flat `metadata.target` / `metadata.compatibilityProfile` |
 | `response_observation` | `HubRespInbound02Parsed` | response status / finish-reason / protocol-observed facts | `append_only` | request-side identity/control rewrites |
@@ -105,7 +106,6 @@ These are identity facts of the current request. Later stages may read them, but
 
 These are legal continuation/recovery inputs and must not be upgraded into request truth:
 
-- `responsesRequestContext`
 - `responsesResume`
 - `previousResponseId`
 - `responseId`
@@ -118,6 +118,7 @@ These are legal continuation/recovery inputs and must not be upgraded into reque
 Contract lock:
 
 - this family only drives protocol-specific continuation owners such as `/v1/responses`
+- this family is control-only; request payload, normalized input, request context, and response payload mirrors are forbidden here
 - chat/messages/non-responses paths must not pseudo-reuse `continuation_context` as if they had entered the Responses continuation block
 - stopless/servertool may consume current-turn continuation-restored truth, but they must not read `continuation_context` as session truth or as an owner decision surface
 - continuation fields must not be promoted back into request identity

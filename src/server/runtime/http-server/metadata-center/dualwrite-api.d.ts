@@ -1,4 +1,4 @@
-import type { MetadataCenterClientAttachmentScope, MetadataCenterContinuationContext, MetadataCenterDebugSnapshot, MetadataCenterFamily, MetadataCenterProviderObservation, MetadataCenterRequestTruth, MetadataCenterRuntimeControl, MetadataCenterWriter } from './metadata-center-types.js';
+import type { MetadataCenterCloseoutStatus, MetadataCenterContinuationContext, MetadataCenterDebugSnapshot, MetadataCenterFamily, MetadataCenterProviderObservation, MetadataCenterResponseObservation, MetadataCenterRequestTruth, MetadataCenterRuntimeControl, MetadataCenterWriter } from './metadata-center-types.js';
 export type MetadataCenterDualWriteInput = {
     target: Record<string, unknown>;
     family: MetadataCenterFamily;
@@ -17,7 +17,8 @@ export type MetadataCenterRustSnapshot = {
     continuationContext?: MetadataCenterContinuationContext;
     runtimeControl?: MetadataCenterRuntimeControl;
     providerObservation?: MetadataCenterProviderObservation;
-    clientAttachmentScope?: MetadataCenterClientAttachmentScope;
+    responseObservation?: MetadataCenterResponseObservation;
+    closeoutStatus?: MetadataCenterCloseoutStatus;
     debugSnapshot?: MetadataCenterDebugSnapshot;
 };
 export declare function writeMetadataCenterSlot(input: MetadataCenterDualWriteInput): void;

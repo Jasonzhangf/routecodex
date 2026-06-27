@@ -5,7 +5,8 @@ const CAMEL_FAMILY = {
     continuation_context: 'continuationContext',
     runtime_control: 'runtimeControl',
     provider_observation: 'providerObservation',
-    client_attachment_scope: 'clientAttachmentScope',
+    response_observation: 'responseObservation',
+    closeout_status: 'closeoutStatus',
     debug_snapshot: 'debugSnapshot'
 };
 function asRecord(value) {
@@ -59,8 +60,11 @@ function writeJsMirror(input) {
         case 'provider_observation':
             center.writeProviderObservation(input.key, input.value, input.writer, input.reason);
             return;
-        case 'client_attachment_scope':
-            center.writeClientAttachmentScope(input.key, input.value, input.writer, input.reason);
+        case 'response_observation':
+            center.writeResponseObservation(input.key, input.value, input.writer, input.reason);
+            return;
+        case 'closeout_status':
+            center.writeCloseoutStatus(input.key, input.value, input.writer, input.reason);
             return;
         case 'debug_snapshot':
             center.writeDebugSnapshot(input.key, input.value, input.writer, input.reason);
@@ -111,8 +115,10 @@ export function readMetadataCenterSlot(_input) {
             return center.readRuntimeControl()[_input.key];
         case 'provider_observation':
             return center.readProviderObservation()[_input.key];
-        case 'client_attachment_scope':
-            return center.readClientAttachmentScope()[_input.key];
+        case 'response_observation':
+            return center.readResponseObservation()[_input.key];
+        case 'closeout_status':
+            return center.readCloseoutStatus()[_input.key];
         case 'debug_snapshot':
             return center.readDebugSnapshot()[_input.key];
     }
@@ -139,10 +145,6 @@ export function buildMetadataCenterRustSnapshot(source) {
         providerObservation: {
             ...center.readProviderObservation(),
             ...(rustSnapshot.providerObservation ?? {})
-        },
-        clientAttachmentScope: {
-            ...center.readClientAttachmentScope(),
-            ...(rustSnapshot.clientAttachmentScope ?? {})
         },
         debugSnapshot: {
             ...center.readDebugSnapshot(),

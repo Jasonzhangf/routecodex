@@ -1,5 +1,4 @@
 import type {
-  MetadataCenterClientAttachmentScope,
   MetadataCenterCloseoutStatus,
   MetadataCenterContinuationContext,
   MetadataCenterDebugSnapshot,
@@ -128,7 +127,6 @@ export class MetadataCenter {
       providerObservation: {},
       responseObservation: {},
       closeoutStatus: {},
-      clientAttachmentScope: {},
       debugSnapshot: {}
     };
   }
@@ -213,7 +211,6 @@ export class MetadataCenter {
 
   readContinuationContext(): MetadataCenterContinuationContext {
     return {
-      responsesRequestContext: this.state.continuationContext.responsesRequestContext?.value as Record<string, unknown> | undefined,
       responsesResume: this.state.continuationContext.responsesResume?.value as Record<string, unknown> | undefined,
       previousResponseId: this.state.continuationContext.previousResponseId?.value as string | undefined,
       responseId: this.state.continuationContext.responseId?.value as string | undefined,
@@ -272,7 +269,6 @@ export class MetadataCenter {
       stopMessageCompareContext: this.state.runtimeControl.stopMessageCompareContext?.value as MetadataCenterRuntimeControl['stopMessageCompareContext'] | undefined,
       stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,
       stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value as boolean | undefined,
-      stopMessageClientInject: this.state.runtimeControl.stopMessageClientInject?.value as MetadataCenterRuntimeControl['stopMessageClientInject'] | undefined,
       streamIntent: this.state.runtimeControl.streamIntent?.value as string | undefined,
       clientAbort: this.state.runtimeControl.clientAbort?.value as boolean | undefined
     };
@@ -367,35 +363,6 @@ export class MetadataCenter {
       releasedAt: this.state.closeoutStatus.releasedAt?.value as number | undefined,
       releaseReason: this.state.closeoutStatus.releaseReason?.value as string | undefined,
       releasedByStage: this.state.closeoutStatus.releasedByStage?.value as string | undefined
-    };
-  }
-
-  writeClientAttachmentScope<K extends keyof MetadataCenterClientAttachmentScope>(
-    key: K,
-    value: MetadataCenterClientAttachmentScope[K],
-    writtenBy: MetadataCenterWriter,
-    reason?: string
-  ): void {
-    if (value === undefined) {
-      return;
-    }
-    const previous = this.state.clientAttachmentScope[key] as MetadataCenterSlot<MetadataCenterClientAttachmentScope[K]> | undefined;
-    this.state.clientAttachmentScope[key] = buildSlot({
-      value,
-      family: 'client_attachment_scope',
-      writtenBy,
-      writePolicy: 'replaceable_by_owner_only',
-      previous,
-      reason
-    });
-  }
-
-  readClientAttachmentScope(): MetadataCenterClientAttachmentScope {
-    return {
-      daemonId: this.state.clientAttachmentScope.daemonId?.value as string | undefined,
-      tmuxSessionId: this.state.clientAttachmentScope.tmuxSessionId?.value as string | undefined,
-      tmuxTarget: this.state.clientAttachmentScope.tmuxTarget?.value as string | undefined,
-      workdir: this.state.clientAttachmentScope.workdir?.value as string | undefined
     };
   }
 
@@ -495,18 +462,6 @@ export class MetadataCenter {
         continue;
       }
       this.state.closeoutStatus[key] = transitionSlotStatus({
-        previous: slot,
-        status: 'released',
-        changedBy: writtenBy,
-        reason,
-      });
-    }
-    for (const key of Object.keys(this.state.clientAttachmentScope) as Array<keyof MetadataCenterClientAttachmentScope>) {
-      const slot = this.state.clientAttachmentScope[key];
-      if (!slot) {
-        continue;
-      }
-      this.state.clientAttachmentScope[key] = transitionSlotStatus({
         previous: slot,
         status: 'released',
         changedBy: writtenBy,

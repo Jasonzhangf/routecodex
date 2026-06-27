@@ -1,5 +1,5 @@
 lifecycle_id: metadata.center.mainline
-summary: request-scoped metadata center for request truth, continuation context, runtime control, provider observation, client attachment scope, and debug/replay provenance
+summary: request-scoped metadata center for request truth, continuation context, runtime control, provider observation, response observation, closeout status, and debug/replay provenance
 owner_feature_id: hub.metadata_center_mainline
 entrypoint:
   node_id: MetaReq01InboundSeeded
@@ -16,6 +16,7 @@ node_ids:
   - MetaResp08CloseoutReleased
 families:
   request_truth:
+    write_policy: write_once
     slots:
       - requestId
       - pipelineId
@@ -25,8 +26,8 @@ families:
       - clientRequestId
       - portScope
   continuation_context:
+    write_policy: replaceable_by_owner_only
     slots:
-      - responsesRequestContext
       - responsesResume
       - previousResponseId
       - responseId
@@ -36,6 +37,7 @@ families:
       - chainId
       - stickyScope
   runtime_control:
+    write_policy: replaceable_by_owner_only
     slots:
       - routeHint
       - routeName
@@ -46,6 +48,7 @@ families:
       - streamIntent
       - clientAbort
   provider_observation:
+    write_policy: append_only
     slots:
       - target
       - providerKey
@@ -55,13 +58,23 @@ families:
       - compatibilityProfile
       - responseSemantics
       - finishReason
-  client_attachment_scope:
+  response_observation:
+    write_policy: append_only
     slots:
-      - daemonId
-      - tmuxSessionId
-      - tmuxTarget
-      - workdir
+      - responseId
+      - status
+      - finishReason
+      - protocolKind
+  closeout_status:
+    write_policy: finalize_only
+    slots:
+      - finalized
+      - released
+      - releasedAt
+      - releaseReason
+      - releasedByStage
   debug_snapshot:
+    write_policy: append_only
     slots:
       - snapshotId
       - bridgeHistory
@@ -83,8 +96,9 @@ provenance:
     - released
   write_policies:
     - write_once
-    - replaceable
+    - replaceable_by_owner_only
     - append_only
+    - finalize_only
 stages:
   - node_id: MetaReq01InboundSeeded
     owner: ServerReqInbound01ClientRaw
@@ -124,30 +138,35 @@ stages:
     owner: HubRespInbound02Parsed
     write_families:
       - provider_observation
+      - response_observation
       - debug_snapshot
     read_families:
       - request_truth
       - continuation_context
       - runtime_control
       - provider_observation
+      - response_observation
   - node_id: MetaResp07ServertoolContextProjected
     owner: HubRespChatProcess03Governed
-    write_families:
-      - runtime_control
     read_families:
       - request_truth
       - continuation_context
       - runtime_control
       - provider_observation
+      - response_observation
+      - debug_snapshot
   - node_id: MetaResp08CloseoutReleased
     owner: HubRespOutbound04ClientSemantic
     write_families:
+      - closeout_status
       - debug_snapshot
     read_families:
       - request_truth
       - continuation_context
       - runtime_control
       - provider_observation
+      - response_observation
+      - closeout_status
       - debug_snapshot
 boundaries:
   request_truth:
@@ -155,18 +174,51 @@ boundaries:
       - continuation_context
       - runtime_control
       - provider_observation
-      - client_attachment_scope
+      - response_observation
+      - closeout_status
       - debug_snapshot
   continuation_context:
     must_not_be_overwritten_by:
       - request_truth
-      - client_attachment_scope
-  client_attachment_scope:
+      - response_observation
+      - closeout_status
+  runtime_control:
+    must_not_be_overwritten_by:
+      - request_truth
+      - continuation_context
+      - provider_observation
+      - response_observation
+      - closeout_status
+      - debug_snapshot
+    must_not_be_written_by_stages:
+      - HubRespInbound02Parsed
+      - HubRespChatProcess03Governed
+      - HubRespOutbound04ClientSemantic
+      - ServerRespOutbound05ClientFrame
+  provider_observation:
+    must_not_be_overwritten_by:
+      - request_truth
+      - continuation_context
+      - runtime_control
+      - response_observation
+      - closeout_status
+      - debug_snapshot
+  response_observation:
     must_not_be_overwritten_by:
       - request_truth
       - continuation_context
       - runtime_control
       - provider_observation
+      - closeout_status
+      - debug_snapshot
+  closeout_status:
+    must_not_be_overwritten_by:
+      - request_truth
+      - continuation_context
+      - runtime_control
+      - provider_observation
+      - response_observation
+      - debug_snapshot
   debug_snapshot:
     live_path_only: false
     replay_scope_required: true
@@ -178,3 +230,4 @@ verification:
     - npm run verify:function-map-compile-gate
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-wiki-sync
+    - npm run verify:architecture-metadata-center-write-boundaries

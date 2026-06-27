@@ -1,6 +1,5 @@
 // feature_id: hub.metadata_center_dualwrite_api
 import type {
-  MetadataCenterClientAttachmentScope,
   MetadataCenterCloseoutStatus,
   MetadataCenterContinuationContext,
   MetadataCenterDebugSnapshot,
@@ -22,7 +21,6 @@ type FamilyPayload = {
   provider_observation: MetadataCenterProviderObservation;
   response_observation: MetadataCenterResponseObservation;
   closeout_status: MetadataCenterCloseoutStatus;
-  client_attachment_scope: MetadataCenterClientAttachmentScope;
   debug_snapshot: MetadataCenterDebugSnapshot;
 };
 
@@ -32,7 +30,6 @@ type CamelFamilyName = 'requestTruth'
   | 'providerObservation'
   | 'responseObservation'
   | 'closeoutStatus'
-  | 'clientAttachmentScope'
   | 'debugSnapshot';
 
 const CAMEL_FAMILY: Record<MetadataCenterFamily, CamelFamilyName> = {
@@ -42,7 +39,6 @@ const CAMEL_FAMILY: Record<MetadataCenterFamily, CamelFamilyName> = {
   provider_observation: 'providerObservation',
   response_observation: 'responseObservation',
   closeout_status: 'closeoutStatus',
-  client_attachment_scope: 'clientAttachmentScope',
   debug_snapshot: 'debugSnapshot'
 };
 
@@ -68,7 +64,6 @@ export type MetadataCenterRustSnapshot = {
   providerObservation?: MetadataCenterProviderObservation;
   responseObservation?: MetadataCenterResponseObservation;
   closeoutStatus?: MetadataCenterCloseoutStatus;
-  clientAttachmentScope?: MetadataCenterClientAttachmentScope;
   debugSnapshot?: MetadataCenterDebugSnapshot;
 };
 
@@ -174,14 +169,6 @@ function writeJsMirror(input: MetadataCenterDualWriteInput): void {
         input.reason
       );
       return;
-    case 'client_attachment_scope':
-      center.writeClientAttachmentScope(
-        input.key as keyof MetadataCenterClientAttachmentScope,
-        input.value as MetadataCenterClientAttachmentScope[keyof MetadataCenterClientAttachmentScope],
-        input.writer,
-        input.reason
-      );
-      return;
     case 'debug_snapshot':
       center.writeDebugSnapshot(
         input.key as keyof MetadataCenterDebugSnapshot,
@@ -248,8 +235,6 @@ export function readMetadataCenterSlot(_input: {
       return center.readResponseObservation()[_input.key as keyof MetadataCenterResponseObservation];
     case 'closeout_status':
       return center.readCloseoutStatus()[_input.key as keyof MetadataCenterCloseoutStatus];
-    case 'client_attachment_scope':
-      return center.readClientAttachmentScope()[_input.key as keyof MetadataCenterClientAttachmentScope];
     case 'debug_snapshot':
       return center.readDebugSnapshot()[_input.key as keyof MetadataCenterDebugSnapshot];
   }
@@ -277,10 +262,6 @@ export function buildMetadataCenterRustSnapshot(source: Record<string, unknown>)
     providerObservation: {
       ...center.readProviderObservation(),
       ...(rustSnapshot.providerObservation ?? {})
-    },
-    clientAttachmentScope: {
-      ...center.readClientAttachmentScope(),
-      ...(rustSnapshot.clientAttachmentScope ?? {})
     },
     debugSnapshot: {
       ...center.readDebugSnapshot(),

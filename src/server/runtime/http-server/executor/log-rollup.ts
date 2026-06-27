@@ -1,6 +1,5 @@
 import { resolveBoolFromEnv } from './utils.js';
 import { resolveSessionAnsiColor, resolveSessionLogColorKey } from '../../../../utils/session-log-color.js';
-import { getSessionClientRegistry } from '../session-client-registry.js';
 import { getTokenStatsSnapshot } from './token-stats-store.js';
 import {
   formatMs,
@@ -526,41 +525,16 @@ function emitRealtimeVirtualRouterHitLog(args: {
   console.log(colorize(summary.join(' '), sessionColor));
 }
 
-function resolveProjectPathFromRegistry(sessionId: string): { path?: string; source: 'registry.tmux' | 'registry.bound' | 'none' } {
-  const normalizedSession = normalizeSessionId(sessionId);
-  if (!normalizedSession || normalizedSession === 'unknown') {
-    return { source: 'none' };
-  }
-  try {
-    const registry = getSessionClientRegistry();
-    const byTmux = registry.findByTmuxSessionId(normalizedSession);
-    const tmuxWorkdir = normalizeProjectPath(byTmux?.workdir);
-    if (tmuxWorkdir) {
-      return { path: tmuxWorkdir, source: 'registry.tmux' };
-    }
-    const boundWorkdir = normalizeProjectPath(registry.resolveBoundWorkdir(normalizedSession));
-    if (boundWorkdir) {
-      return { path: boundWorkdir, source: 'registry.bound' };
-    }
-  } catch {
-    // non-blocking fallback
-  }
-  return { source: 'none' };
-}
-
 function resolveProjectPathWithSource(
   sessionId: string,
   incomingProjectPath?: string
-): { path?: string; source: 'request.cwd' | 'registry.tmux' | 'registry.bound' | 'none' } {
+): { path?: string; source: 'request.cwd' | 'none' } {
   const normalizedIncoming = normalizeProjectPath(incomingProjectPath);
   if (normalizedIncoming) {
     return { path: normalizedIncoming, source: 'request.cwd' };
   }
-  const fallback = resolveProjectPathFromRegistry(sessionId);
-  return {
-    path: fallback.path,
-    source: fallback.source
-  };
+  void sessionId;
+  return { source: 'none' };
 }
 
 function updateSessionProjectPath(sessionId: string, incomingProjectPath?: string): void {
@@ -576,10 +550,7 @@ function updateSessionProjectPath(sessionId: string, incomingProjectPath?: strin
   if (record.projectPath) {
     return;
   }
-  const fallback = resolveProjectPathFromRegistry(sessionId).path;
-  if (fallback) {
-    record.projectPath = fallback;
-  }
+  void sessionId;
 }
 
 export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): void {
@@ -1133,7 +1104,7 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     const avgRetries = row.usageCalls > 0 ? row.totalRetryCount / row.usageCalls : 0;
     const sessionDir = row.sessionId === 'unknown'
       ? '-'
-      : (normalizeProjectPath(row.projectPath) || resolveProjectPathFromRegistry(row.sessionId).path || '-');
+      : (normalizeProjectPath(row.projectPath) || '-');
     const sessionColor = resolveSessionAnsiColor(row.sessionId) || ANSI_SESSION;
     const sessionLabel = shortSessionId(row.sessionId);
     console.log(colorize(`  ${idx + 1}) session=${sessionLabel}`, sessionColor));
@@ -1216,7 +1187,7 @@ export function flushLogRollup(trigger: 'interval' | 'beforeExit' | 'exit' | 'ma
     .map(([sessionId, events]) => ({
       sessionId,
       events: [...events].sort((a, b) => a.atMs - b.atMs),
-      projectPath: normalizeProjectPath(sessionRollups.get(sessionId)?.projectPath) || resolveProjectPathFromRegistry(sessionId).path
+      projectPath: normalizeProjectPath(sessionRollups.get(sessionId)?.projectPath)
     }))
     .filter((row) => row.events.length > 0)
     .sort((a, b) => {

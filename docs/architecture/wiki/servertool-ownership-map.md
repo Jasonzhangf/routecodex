@@ -18,7 +18,7 @@ Feature scope: `hub.servertool_*`
 | `hub.servertool_pre_command_hooks` | servertool pre-command hook config and rule normalization | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_selection` | servertool primary auto-hook first pass and rerun selection planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_cli_projection` | servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run build:base`<br/>`npm run verify:architecture-ci` |
-| `hub.servertool_stopless_cli_continuation` | stop_message_auto current-turn CLI continuation planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
+| `hub.servertool_stopless_cli_continuation` | stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_auto_hook_execution` | servertool auto-hook execution decision and trace event planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_auto_hook_queue_progress` | servertool auto-hook queue progress planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_preflight_contract` | servertool engine preflight early-return planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
@@ -277,13 +277,15 @@ Notes:
 
 ## hub.servertool_stopless_cli_continuation
 
-Summary: stop_message_auto current-turn CLI continuation planning
+Summary: stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary
 
 Owner kind: `rust_ssot`
 Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src`
-Owner scope: stop_message_auto current-turn tool_output continuation planning
+Owner scope: Chat Process-owned stopless lifecycle: response-side stop/reasoningStop schema judgment plus CLI/terminal normalization, request-side CLI result restore/guidance rewrite/schema-contract reinjection
 
 Canonical types:
+- `StoplessExecutionPlanInput`
+- `StoplessExecutionPlan`
 - `StoplessOrchestrationPlanInput`
 - `StoplessOrchestrationPlan`
 - `RuntimeStopMessageStateFromAdapterContextInput`
@@ -297,6 +299,7 @@ Canonical builders:
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
@@ -316,7 +319,6 @@ Required tests:
 - `tests/servertool/stopless-cli-continuation.spec.ts`
 - `tests/servertool/servertool-cli-projection.spec.ts`
 - `tests/servertool/stop-schema-lifecycle-contract.spec.ts`
-- `tests/servertool/stopless-vr-route-hint.spec.ts`
 - `tests/responses/responses-openai-bridge.spec.ts`
 - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
 - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
@@ -327,6 +329,7 @@ Required gates:
 - `npm run verify:function-map-compile-gate`
 
 Notes:
+- Stopless is not an outbound owner and not an SSE owner. Request-side stopless belongs to the ReqChatProcess entry boundary after `/v1/responses` continuation restore and before normal request governance; response-side stopless belongs to the RespChatProcess exit boundary before continuation save and before RespOutbound.
 - servertool-core owns stopless CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline.
 - req_chatprocess must always inject the stop hook contract for stopless-managed turns; missing injection is treated as a lifecycle failure and the loop-guard path must still be able to terminate after 3 no-schema stop attempts.
 - Stopless is a dual-gate stop contract: `finish_reason=stop` is only the trigger to evaluate stop; terminal stop additionally requires either a valid terminal stop schema or the temporary three-round safety guard.
@@ -345,8 +348,8 @@ Notes:
 - NoSchema is not a schema-less stop contract: the projected CLI stdout must always carry schemaGuidance, while the command string itself must remain status-only.
 - NoSchema stopless progression must advance `used/repeatCount` from current request tool_output/runtime metadata truth, not through file persistence or tmux/sessionDir fallback.
 - Once the standard `reasoningStop` tool is exposed on the request, legacy shell-projected stop history such as `exec_command(cmd="reasoningStop")`, `reasoning_stop`, and their paired `command not found` tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests.
-- Model side must stay unaware of stopless identity, but runtime stopless CLI projection still requires active request-truth `sessionId/requestId` flags for same-session loop counting; `sessionDir` and persisted writeback remain forbidden.
-- TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows.
+- Model side must stay unaware of stopless identity, but runtime stopless CLI projection still requires active request-truth `sessionId/requestId` flags for same-session loop counting; `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only allowed progression truth, and `sessionDir`/persisted writeback are forbidden.
+- TS engine orchestration may only call Rust `planStoplessExecutionJson` for stopless execution/context composition and orchestration planning; it must not build stopless context/requestTruth/session truth in TS, and it must not reenter for stopless CLI flows.
 - Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter.
 - `responsesRequestContext.sessionId/conversationId` is continuation-only context for `/v1/responses`; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material.
 
@@ -1067,7 +1070,8 @@ Forbidden paths:
 
 Required tests:
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
-- `tests/servertool/stop-message-auto.goal-default.spec.ts`
+- `tests/servertool/loop-state-block.spec.ts`
+- `tests/servertool/stopless-cli-continuation.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`

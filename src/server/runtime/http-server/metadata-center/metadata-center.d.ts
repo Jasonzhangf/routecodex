@@ -1,4 +1,4 @@
-import type { MetadataCenterClientAttachmentScope, MetadataCenterContinuationContext, MetadataCenterDebugSnapshot, MetadataCenterProviderObservation, MetadataCenterRequestTruth, MetadataCenterRuntimeControl, MetadataCenterState, MetadataCenterWriter } from './metadata-center-types.js';
+import type { MetadataCenterCloseoutStatus, MetadataCenterContinuationContext, MetadataCenterDebugSnapshot, MetadataCenterProviderObservation, MetadataCenterResponseObservation, MetadataCenterRequestTruth, MetadataCenterRuntimeControl, MetadataCenterState, MetadataCenterWriter } from './metadata-center-types.js';
 export declare class MetadataCenter {
     private readonly state;
     constructor();
@@ -14,8 +14,10 @@ export declare class MetadataCenter {
     readRuntimeControl(): MetadataCenterRuntimeControl;
     writeProviderObservation<K extends keyof MetadataCenterProviderObservation>(key: K, value: MetadataCenterProviderObservation[K], writtenBy: MetadataCenterWriter, reason?: string): void;
     readProviderObservation(): MetadataCenterProviderObservation;
-    writeClientAttachmentScope<K extends keyof MetadataCenterClientAttachmentScope>(key: K, value: MetadataCenterClientAttachmentScope[K], writtenBy: MetadataCenterWriter, reason?: string): void;
-    readClientAttachmentScope(): MetadataCenterClientAttachmentScope;
+    writeResponseObservation<K extends keyof MetadataCenterResponseObservation>(key: K, value: MetadataCenterResponseObservation[K], writtenBy: MetadataCenterWriter, reason?: string): void;
+    readResponseObservation(): MetadataCenterResponseObservation;
+    writeCloseoutStatus<K extends keyof MetadataCenterCloseoutStatus>(key: K, value: MetadataCenterCloseoutStatus[K], writtenBy: MetadataCenterWriter, reason?: string): void;
+    readCloseoutStatus(): MetadataCenterCloseoutStatus;
     writeDebugSnapshot<K extends keyof MetadataCenterDebugSnapshot>(key: K, value: MetadataCenterDebugSnapshot[K], writtenBy: MetadataCenterWriter, reason?: string): void;
     readDebugSnapshot(): MetadataCenterDebugSnapshot;
     markReleased(writtenBy: MetadataCenterWriter, reason?: string): void;

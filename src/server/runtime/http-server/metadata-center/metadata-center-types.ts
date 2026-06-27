@@ -5,7 +5,6 @@ export type MetadataCenterFamily =
   | 'provider_observation'
   | 'response_observation'
   | 'closeout_status'
-  | 'client_attachment_scope'
   | 'debug_snapshot';
 
 export type MetadataCenterStatus =
@@ -56,7 +55,6 @@ export type MetadataCenterRequestTruth = {
 };
 
 export type MetadataCenterContinuationContext = {
-  responsesRequestContext?: Record<string, unknown>;
   responsesResume?: Record<string, unknown>;
   previousResponseId?: string;
   responseId?: string;
@@ -100,13 +98,6 @@ export type MetadataCenterStopMessageCompareContext = {
   toolSignatureHash?: string;
 };
 
-export type MetadataCenterStopMessageClientInject = {
-  ready?: boolean;
-  reason?: string;
-  sessionScope?: string;
-  tmuxSessionId?: string;
-};
-
 export type MetadataCenterRuntimeControl = {
   routeHint?: string;
   routeName?: string;
@@ -119,7 +110,6 @@ export type MetadataCenterRuntimeControl = {
   stopMessageCompareContext?: MetadataCenterStopMessageCompareContext;
   stopMessageEnabled?: boolean;
   stopMessageExcludeDirect?: boolean;
-  stopMessageClientInject?: MetadataCenterStopMessageClientInject;
   streamIntent?: string;
   clientAbort?: boolean;
 };
@@ -150,13 +140,6 @@ export type MetadataCenterCloseoutStatus = {
   releasedByStage?: string;
 };
 
-export type MetadataCenterClientAttachmentScope = {
-  daemonId?: string;
-  tmuxSessionId?: string;
-  tmuxTarget?: string;
-  workdir?: string;
-};
-
 export type MetadataCenterDebugSnapshot = {
   snapshotId?: string;
   bridgeHistory?: unknown[];
@@ -177,6 +160,5 @@ export type MetadataCenterState = {
   providerObservation: Partial<Record<keyof MetadataCenterProviderObservation, MetadataCenterSlot>>;
   responseObservation: Partial<Record<keyof MetadataCenterResponseObservation, MetadataCenterSlot>>;
   closeoutStatus: Partial<Record<keyof MetadataCenterCloseoutStatus, MetadataCenterSlot>>;
-  clientAttachmentScope: Partial<Record<keyof MetadataCenterClientAttachmentScope, MetadataCenterSlot>>;
   debugSnapshot: Partial<Record<keyof MetadataCenterDebugSnapshot, MetadataCenterSlot>>;
 };

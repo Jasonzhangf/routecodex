@@ -53,12 +53,6 @@ export type RuntimeControlProjection = {
     };
     stopMessageEnabled?: boolean;
     stopMessageExcludeDirect?: boolean;
-    stopMessageClientInject?: {
-        ready?: boolean;
-        reason?: string;
-        sessionScope?: string;
-        tmuxSessionId?: string;
-    };
     streamIntent?: string;
     clientAbort?: boolean;
 };

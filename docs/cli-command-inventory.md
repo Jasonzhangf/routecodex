@@ -20,8 +20,6 @@ Source of truth: `src/cli.ts` (wiring) + command implementations in `src/cli/com
 | `camoufox-fp` *(optional)* | `src/cli.ts` dynamic import | `src/commands/camoufox-fp.ts` | Reads fingerprint JSON on disk | Sets `process.exitCode` on errors |
 | `camoufox-backfill` *(optional)* | `src/cli.ts` dynamic import | `src/commands/camoufox-backfill.ts` | Backfills fingerprints (disk IO) | Uses `process.exitCode` on errors (by pattern) |
 | `token-daemon` *(optional)* | `src/cli.ts` dynamic import | `src/commands/token-daemon.ts` | Spawns background daemon; reads/writes snapshots | Uses `process.exit(...)` / `process.exitCode` in command handlers |
-| `quota-status` *(optional)* | `src/cli.ts` dynamic import | `src/commands/quota-status.ts` | Reads quota snapshot file | Returns; throws on missing file |
-| `quota-daemon` *(optional)* | `src/cli.ts` dynamic import | `src/commands/quota-daemon.ts` | Reads replay NDJSON; writes `provider-quota.json` unless `--dry-run` | Returns; on failure throws/sets exit |
 | `oauth` *(optional)* | `src/cli.ts` dynamic import | `src/commands/oauth.ts` | Triggers OAuth flows (Camoufox/browser automation) | Returns; may set exit codes on failures (subcommands) |
 | `validate` *(optional)* | `src/cli.ts` dynamic import | `src/commands/validate.ts` | `fetch` health + API; may spawn `rcc start`; reads payload file | Calls `process.exit(1)` on failures |
 

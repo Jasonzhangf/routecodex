@@ -19,8 +19,6 @@ import { asRecord } from './provider-utils.js';
 import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
 import type { ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import type { ServerStatusV2 } from './types.js';
-import { cleanupSessionStorageOnShutdown } from './session-storage-cleanup.js';
-import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import { installPortLogConsoleRouter } from './port-log-context.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
@@ -51,21 +49,10 @@ export async function initializeHttpServer(server: any): Promise<void> {
         serverId: canonicalizeServerId(server.config.server.host, server.config.server.port),
         configPath: server.config?.configPath,
         getHubPipeline: () => server.hubPipeline,
-        quotaRoutingEnabled: server.isQuotaRoutingEnabled()
       });
       daemon.registerModule(new TokenManagerModule());
       daemon.registerModule(new RoutingStateManagerModule());
       daemon.registerModule(new HealthManagerModule());
-      try {
-        const mod = (await import('../../../manager/modules/quota/index.js')) as {
-          QuotaManagerModule?: new () => import('../../../manager/modules/quota/index.js').QuotaManagerModule;
-        };
-        if (typeof mod.QuotaManagerModule === 'function') {
-          daemon.registerModule(new mod.QuotaManagerModule());
-        }
-      } catch (error) {
-        logLifecycleNonBlockingError('initialize.optional_quota_module', error);
-      }
       await daemon.start();
       server.managerDaemon = daemon;
     }
@@ -273,20 +260,6 @@ export async function stopHttpServer(server: any): Promise<void> {
   }
 
   console.log('[RouteCodexHttpServer] Server stopped');
-  try {
-    const cleanup = cleanupSessionStorageOnShutdown({ isTmuxSessionAlive });
-    if (
-      cleanup.removedLegacyScopeFiles > 0 ||
-      cleanup.removedDeadTmuxStateFiles > 0 ||
-      cleanup.removedHeartbeatStateFiles > 0 ||
-      cleanup.prunedRegistryDirs > 0 ||
-      cleanup.removedRegistryDirs > 0
-    ) {
-      console.log('[session-storage-cleanup] shutdown cleanup', cleanup);
-    }
-  } catch (error) {
-    logShutdownNonBlocking('cleanup_session_storage', error);
-  }
 }
 
 export function getHttpServerStatus(server: any): ServerStatusV2 {
@@ -346,6 +319,7 @@ export async function initializeWithUserConfig(
   try {
     server.updateProviderProfiles(context?.providerProfiles, userConfig);
     await server.setupRuntime(userConfig);
+    await server.initializeRouteErrorHub();
     if (!server.runtimeReadyResolved) {
       server.runtimeReadyResolved = true;
       server.runtimeReadyResolve?.();
@@ -367,6 +341,7 @@ export async function reloadHttpServerRuntime(
 ): Promise<void> {
   server.updateProviderProfiles(context?.providerProfiles, userConfig);
   await server.setupRuntime(userConfig);
+  await server.initializeRouteErrorHub();
   if (!server.runtimeReadyResolved) {
     server.runtimeReadyResolved = true;
     server.runtimeReadyResolve?.();

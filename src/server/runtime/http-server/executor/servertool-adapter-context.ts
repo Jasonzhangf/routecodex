@@ -1,6 +1,5 @@
 import { applyClientConnectionStateToContext } from '../../../utils/client-connection-state.js';
 // feature_id: hub.metadata_center_servertool_context
-import { resolveStopMessageClientInjectReadiness } from './client-injection-flow.js';
 import { extractClientModelId } from './provider-response-utils.js';
 import {
   readRuntimeControlProjection,
@@ -26,25 +25,12 @@ function readNonEmptyString(value: unknown): string | undefined {
 const SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS = [
   'servertoolResponseOrchestration',
   'serverToolLoopState',
-  'stopMessageClientInject',
-  'stopMessageClientInjectReady',
-  'stopMessageClientInjectReason',
-  'stopMessageClientInjectSessionScope',
-  'stopMessageClientInjectTmuxSessionId',
 ] as const;
 
 function stripServertoolRuntimeControlMetadataFields(metadata: Record<string, unknown>): void {
   for (const key of SERVERTOOL_RUNTIME_CONTROL_METADATA_KEYS) {
     delete metadata[key];
   }
-}
-
-function hasOwnRuntimeControlValue(
-  center: MetadataCenter,
-  key: 'stopMessageClientInject'
-): boolean {
-  const runtimeControl = center.snapshot().runtimeControl;
-  return runtimeControl[key] !== undefined;
 }
 
 export function buildServerToolAdapterContext(args: {
@@ -107,20 +93,11 @@ export function buildServerToolAdapterContext(args: {
   if (!providerProtocol) {
     throw new Error('Servertool adapter context requires metadata center runtime_control.providerProtocol');
   }
-  const providerProtocolCenter = MetadataCenter.attach(baseContext);
-  if (readRuntimeControlProjection(baseContext).providerProtocol !== providerProtocol) {
-    providerProtocolCenter.writeRuntimeControl(
-      'providerProtocol',
-      providerProtocol,
-      {
-        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
-        symbol: 'buildServerToolAdapterContext',
-        stage: 'ServertoolAdapterContextRuntimeControl'
-      },
-      'servertool adapter provider protocol seed'
-    );
+  const sourceCenter = MetadataCenter.read(metadataBag);
+  if (!sourceCenter) {
+    throw new Error('Servertool adapter context requires bound MetadataCenter');
   }
-  baseContext.providerProtocol = providerProtocol;
+  MetadataCenter.bind(baseContext, sourceCenter);
 
   const originalModelId = extractClientModelId(metadataBag, originRequest);
   if (originalModelId) {
@@ -133,30 +110,7 @@ export function buildServerToolAdapterContext(args: {
 
   applyClientConnectionStateToContext(metadataBag, baseContext);
 
-  const stopMessageInjectReadiness = resolveStopMessageClientInjectReadiness(baseContext);
   const clientProtocol = readNonEmptyString(metadataBag.clientProtocol);
-  const baseCenter = MetadataCenter.attach(baseContext);
-  if (!hasOwnRuntimeControlValue(baseCenter, 'stopMessageClientInject')) {
-    baseCenter.writeRuntimeControl(
-      'stopMessageClientInject',
-      {
-        ready: stopMessageInjectReadiness.ready,
-        reason: stopMessageInjectReadiness.reason,
-        ...(stopMessageInjectReadiness.sessionScope
-          ? { sessionScope: stopMessageInjectReadiness.sessionScope }
-          : {}),
-        ...(stopMessageInjectReadiness.tmuxSessionId
-          ? { tmuxSessionId: stopMessageInjectReadiness.tmuxSessionId }
-          : {})
-      },
-      {
-        module: 'src/server/runtime/http-server/executor/servertool-adapter-context.ts',
-        symbol: 'buildServerToolAdapterContext',
-        stage: 'ServertoolAdapterContextRuntimeControl'
-      },
-      'servertool adapter client inject readiness'
-    );
-  }
   if (clientProtocol) {
     baseContext.clientProtocol = clientProtocol;
   }

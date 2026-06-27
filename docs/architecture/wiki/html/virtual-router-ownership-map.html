@@ -137,9 +137,10 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>vr.route_selection</code></td><td>virtual router route classification and selected target truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:repo-sanity</code></td></tr>
+        <tr><td><code>vr.metadata_center_surface</code></td><td>Virtual Router read-only metadata-center-backed route surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:architecture-owner-queryability</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code></td></tr>
         <tr><td><code>vr.route_retry_pin_surface</code></td><td>Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code></td></tr>
-        <tr><td><code>virtual_router.primary_exhausted_to_default_pool</code></td><td>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run build:base</code></td></tr>
-        <tr><td><code>vr.route_availability_floor</code></td><td>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-ci</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code></td></tr>
+        <tr><td><code>virtual_router.primary_exhausted_to_default_pool</code></td><td>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run build:base</code></td></tr>
+        <tr><td><code>vr.route_availability_floor</code></td><td>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-ci</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:vr-route-availability-default-floor</code></td></tr>
         <tr><td><code>vr.provider_forwarder_runtime</code></td><td>ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></td><td><code>npm run verify:vr-forwarder-runtime</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         </tbody>
         </table>
@@ -187,6 +188,57 @@
         <ul>
           <li>VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.</li>
           <li>Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns.</li>
+        </ul>
+        <h2>vr.metadata_center_surface</h2>
+        <p>Summary: Virtual Router read-only metadata-center-backed route surface</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs</code> Owner scope: Virtual Router read-only metadata-center-backed route scope surface for route hint, session scope, and stop-message routing reads</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>MetadataCenter</code></li>
+          <li><code>MetaRoute03RouteCarrier</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>resolve_routing_state_key</code></li>
+          <li><code>resolve_session_scope</code></li>
+          <li><code>resolve_stop_message_scope</code></li>
+          <li><code>is_server_tool_followup_request</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs</code></li>
+          <li><code>tests/sharedmodule/hub-pipeline-router-metadata.spec.ts</code></li>
+          <li><code>tests/servertool/virtual-router-servertool-routing.spec.ts</code></li>
+          <li><code>tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts</code></li>
+          <li><code>docs</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+          <li><code>src/providers/core/runtime</code></li>
+          <li><code>src/client</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/sharedmodule/hub-pipeline-router-metadata.spec.ts</code></li>
+          <li><code>tests/servertool/virtual-router-servertool-routing.spec.ts</code></li>
+          <li><code>tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+          <li><code>npm run verify:architecture-mainline-call-map</code></li>
+          <li><code>npm run verify:architecture-owner-queryability</code></li>
+          <li><code>npm run verify:vr-no-ts-runtime</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>VR reads route scope from the request-scoped MetadataCenter snapshot and its typed reader only; it must not restore route truth from <code>__rt</code>, flat metadata, or a separate VR-local store.</li>
+          <li>Route selection still outputs <code>VrRoute04SelectedTarget</code> through <code>hub.route_selection_bridge</code>; this owner only covers the read-only metadata surface used by VR decisions.</li>
         </ul>
         <h2>vr.route_retry_pin_surface</h2>
         <p>Summary: Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</p>
@@ -273,6 +325,7 @@
         <p>Required gates:</p>
         <ul>
           <li><code>npm run verify:function-map-compile-gate</code></li>
+          <li><code>npm run verify:architecture-mainline-call-map</code></li>
           <li><code>npm run build:base</code></li>
         </ul>
         <p>Notes:</p>
@@ -281,6 +334,7 @@
           <li>Host may extract route-scoped tier shape from runtime config and pass it to Rust unchanged; this is config plumbing, not planner ownership.</li>
           <li>Unknown target and empty default-pool are explicit contract states, never fallback.</li>
           <li>Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list.</li>
+          <li>Ordinary route-pool removal must not project terminal no-provider while default pool still retains its last provider; this guard is part of the Rust-owned plan/consumer contract, not a handler/executor-local reinterpretation.</li>
         </ul>
         <h2>vr.route_availability_floor</h2>
         <p>Summary: route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</p>
@@ -308,7 +362,6 @@
           <li><code>sharedmodule/llmswitch-core/src/router</code></li>
           <li><code>src/server/runtime/http-server/daemon-admin</code></li>
           <li><code>src/providers/core/runtime</code></li>
-          <li><code>src/manager/modules/quota</code></li>
         </ul>
         <p>Required tests:</p>
         <ul>
@@ -321,7 +374,9 @@
         <ul>
           <li><code>npm run verify:vr-no-ts-runtime</code></li>
           <li><code>npm run verify:architecture-ci</code></li>
+          <li><code>npm run verify:architecture-mainline-call-map</code></li>
           <li><code>npm run verify:llmswitch-rustification-audit</code></li>
+          <li><code>npm run verify:vr-route-availability-default-floor</code></li>
         </ul>
         <p>Notes:</p>
         <ul>
@@ -329,6 +384,7 @@
           <li>singleton/default hold decision and cooldown-hint parsing belong to Rust Virtual Router; TS executor may only consume native output and perform wait/log IO.</li>
           <li>do not patch empty-pool behavior in handlers, adapters, provider TS runtime, or executor-local policy code.</li>
           <li>route order is requested route -&gt; inserted tools route when required -&gt; default; search/tool path must stay <code>search -&gt; tools -&gt; default</code>, and if default pool has providers routing must not return empty.</li>
+          <li>Before excluding/removing an ordinary-route candidate, runtime truth must preserve the default-pool last-provider floor; <code>forwarder_no_available_target</code> or route-local empty-pool is non-terminal while default-pool availability remains.</li>
         </ul>
         <h2>vr.provider_forwarder_runtime</h2>
         <p>Summary: ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</p>
@@ -358,7 +414,6 @@
           <li><code>sharedmodule/llmswitch-core/src/router</code></li>
           <li><code>src/server/runtime/http-server/executor</code></li>
           <li><code>src/providers/core/runtime</code></li>
-          <li><code>src/manager/modules/quota</code></li>
           <li><code>src/client</code></li>
         </ul>
         <p>Required tests:</p>

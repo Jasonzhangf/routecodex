@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.3245",
+  "version": "0.90.3273",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -58,7 +58,7 @@
     "audit:custom-payload-carrier-owner-queryability": "node scripts/architecture/audit-custom-payload-carrier-owner-queryability.mjs",
     "audit:function-map-canonical-builder-spread": "node scripts/architecture/audit-function-map-canonical-builder-spread.mjs",
     "vr:dryrun": "node scripts/virtual-router-dryrun.mjs",
-    "test:routing-instructions": "npm run jest:run -- --runTestsByPath tests/token-daemon/token-daemon.auto-refresh-noninteractive.spec.ts tests/token-daemon/token-daemon.refresh-ahead.spec.ts tests/server/runtime/request-executor.single-attempt.spec.ts tests/server/runtime/executor-provider.retryable.spec.ts tests/server/runtime/http-server/executor/usage-aggregator.spec.ts tests/providers/core/runtime/deepseek-http-provider.unit.test.ts tests/server/http-server/daemon-admin.e2e.spec.ts tests/server/http-server/session-client-routes.spec.ts tests/server/http-server/hub-policy-injection.spec.ts tests/server/http-server/session-dir.spec.ts tests/server/handlers/sse-timeout.spec.ts tests/utils/is-direct-execution.test.ts tests/utils/windows-netstat.test.ts tests/servertool/virtual-router-context-fallback.spec.ts tests/servertool/virtual-router-longcontext-fallback.spec.ts tests/servertool/virtual-router-series-cooldown.spec.ts tests/servertool/routing-instructions.spec.ts tests/servertool/stop-message-sample-replay.spec.ts tests/servertool/stop-message-auto-no-reenter.red.spec.ts tests/servertool/stop-message-auto.config-precedence.spec.ts tests/servertool/stopmessage-session-scope.spec.ts tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts tests/servertool/stopmessage-compaction-false-positive.spec.ts tests/servertool/servertool-progress-logging.spec.ts tests/compat/tabglm-claude-code-profile.spec.ts tests/sharedmodule/virtual-router-hit-log.spec.ts tests/sharedmodule/virtual-router-routing-model-validation.spec.ts tests/sharedmodule/anthropic-tool-schema-stability.spec.ts tests/unified-hub/hub-v1-single-path-imports.spec.ts",
+    "test:routing-instructions": "npm run jest:run -- --runTestsByPath tests/token-daemon/token-daemon.auto-refresh-noninteractive.spec.ts tests/token-daemon/token-daemon.refresh-ahead.spec.ts tests/server/runtime/request-executor.single-attempt.spec.ts tests/server/runtime/http-server/executor/usage-aggregator.spec.ts tests/providers/core/runtime/deepseek-http-provider.unit.test.ts tests/server/http-server/daemon-admin.e2e.spec.ts tests/server/http-server/hub-policy-injection.spec.ts tests/server/http-server/session-dir.spec.ts tests/server/handlers/sse-timeout.spec.ts tests/utils/is-direct-execution.test.ts tests/utils/windows-netstat.test.ts tests/servertool/virtual-router-context-fallback.spec.ts tests/servertool/virtual-router-longcontext-fallback.spec.ts tests/servertool/routing-instructions.spec.ts tests/servertool/stop-message-sample-replay.spec.ts tests/servertool/stop-message-auto-no-reenter.red.spec.ts tests/servertool/stop-message-auto.config-precedence.spec.ts tests/servertool/stopmessage-session-scope.spec.ts tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts tests/servertool/stopmessage-compaction-false-positive.spec.ts tests/servertool/servertool-progress-logging.spec.ts tests/compat/tabglm-claude-code-profile.spec.ts tests/sharedmodule/virtual-router-hit-log.spec.ts tests/sharedmodule/virtual-router-routing-model-validation.spec.ts tests/sharedmodule/anthropic-tool-schema-stability.spec.ts tests/unified-hub/hub-v1-single-path-imports.spec.ts",
     "test:cli": "npm run jest:run -- --runTestsByPath tests/cli/camoufox-command.spec.ts tests/cli/clean-command.spec.ts tests/cli/code-command.spec.ts tests/cli/config-command.spec.ts tests/cli/env-command.spec.ts tests/cli/env-output.spec.ts tests/cli/examples-command.spec.ts tests/cli/launcher-utils.spec.ts tests/cli/port-command.spec.ts tests/cli/port-utils.spec.ts tests/cli/restart-command.spec.ts tests/cli/smoke.spec.ts tests/cli/start-command.spec.ts tests/cli/status-command.spec.ts tests/cli/stop-command.spec.ts",
     "test:watch": "npm run jest:run -- --watch",
     "test:coverage": "npm run jest:run -- --coverage",
@@ -114,7 +114,7 @@
     "verify:architecture-manifest-sync": "node scripts/architecture/verify-architecture-manifest-sync.mjs",
     "verify:architecture-metadata-center-manifest-code-sync": "node scripts/architecture/verify-architecture-metadata-center-manifest-code-sync.mjs",
     "verify:architecture-wiki-browser-smoke": "node scripts/architecture/verify-architecture-wiki-browser-smoke.mjs",
-    "verify:architecture-review-surface-light": "npm run verify:architecture-no-custom-payload-carriers && npm run verify:architecture-mainline-call-map && npm run verify:architecture-mainline-node-id-consistency && npm run verify:architecture-mainline-binding-pending-gate && npm run verify:architecture-wiki-sync && npm run verify:architecture-wiki-html-sync && npm run verify:architecture-manifest-sync && npm run verify:architecture-metadata-center-manifest-code-sync && npm run verify:architecture-mainline-manifest-sync && npm run verify:architecture-topology-doc-sync",
+    "verify:architecture-review-surface-light": "npm run verify:architecture-no-custom-payload-carriers && npm run verify:architecture-mainline-call-map && npm run verify:architecture-mainline-node-id-consistency && npm run verify:architecture-mainline-binding-pending-gate && npm run verify:architecture-wiki-sync && npm run verify:architecture-wiki-html-sync && npm run verify:architecture-manifest-sync && npm run verify:architecture-metadata-center-manifest-code-sync && npm run verify:architecture-metadata-center-write-boundaries && npm run verify:architecture-mainline-manifest-sync && npm run verify:architecture-topology-doc-sync",
     "verify:architecture-review-surface": "npm run verify:architecture-review-surface-light && npm run verify:architecture-wiki-browser-smoke",
     "verify:architecture-feature-map-growth-discipline": "node scripts/architecture/verify-architecture-feature-map-growth-discipline.mjs",
     "verify:architecture-forbidden-path-growth": "node scripts/architecture/verify-architecture-forbidden-path-growth.mjs",
@@ -253,7 +253,9 @@
     "verify:architecture-topology-type-consistency": "node scripts/architecture/verify-architecture-topology-type-consistency.mjs",
     "render:architecture-mainline-chain-manifests": "node scripts/architecture/generate-mainline-chain-manifests.mjs",
     "verify:request-executor-routepool-contract": "node scripts/architecture/verify-request-executor-routepool-contract.mjs",
-    "verify:metadata-center-dualwrite-api": "node scripts/architecture/verify-metadata-center-dualwrite-api.mjs"
+    "verify:metadata-center-dualwrite-api": "node scripts/architecture/verify-metadata-center-dualwrite-api.mjs",
+    "verify:architecture-metadata-center-write-boundaries": "node scripts/architecture/verify-architecture-metadata-center-write-boundaries.mjs",
+    "verify:vr-route-availability-default-floor": "node scripts/architecture/verify-vr-route-availability-default-floor.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

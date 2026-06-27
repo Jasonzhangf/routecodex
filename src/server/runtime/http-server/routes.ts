@@ -8,7 +8,6 @@ import type { HandlerContext } from '../../handlers/types.js';
 import { resolveReportedRouteErrorHttpResponse } from '../../handlers/handler-utils.js';
 import { isLocalRequest, registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import type { ServerConfigV2 } from './types.js';
-import { registerSessionClientRoutes } from './session-client-routes.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { buildInfo } from '../../../build-info.js';
 import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger.js';
@@ -634,8 +633,6 @@ export function registerHttpRoutes(options: RouteOptions): void {
     app,
     getManagerDaemon: () =>
       (typeof options.getManagerDaemon === 'function' ? (options.getManagerDaemon() as unknown) : null),
-    getHubPipeline: () =>
-      (typeof options.getHubPipeline === 'function' ? (options.getHubPipeline() as unknown) : null),
     getVirtualRouterArtifacts: () =>
       (typeof options.getVirtualRouterArtifacts === 'function'
         ? options.getVirtualRouterArtifacts()
@@ -663,14 +660,6 @@ export function registerHttpRoutes(options: RouteOptions): void {
         : `${config.server.host}:${config.server.port}`),
     getServerHost: () => String(config.server.host || ''),
     getServerPort: () => (typeof config?.server?.port === 'number' ? config.server.port : undefined)
-  });
-
-  // Session client daemon endpoints:
-  // - loopback bind: localhost-only
-  // - public bind: require httpserver.apikey
-  registerSessionClientRoutes(app, {
-    bindHost: config.server.host,
-    expectedApiKey: config.server.apikey
   });
 
   // OAuth Portal route is registered early in constructor, so we skip it here

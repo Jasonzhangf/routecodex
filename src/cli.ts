@@ -35,8 +35,6 @@ import { registerCodeCommand } from './cli/register/code-command.js';
 import { registerClaudeCommand } from './cli/register/claude-command.js';
 import { registerCodexCommand } from './cli/register/codex-command.js';
 import { registerCamoufoxCommand } from './cli/register/camoufox-command.js';
-import { registerSessionInjectCommand } from './cli/register/session-inject-command.js';
-import { registerSessionAdminCommand } from './cli/register/session-admin-command.js';
 import { registerGuardianDaemonCommand } from './cli/register/guardian-daemon-command.js';
 import { listManagedServerZombieChildrenByPort } from './utils/managed-server-pids.js';
 import { logProcessLifecycle } from './utils/process-lifecycle-logger.js';
@@ -286,14 +284,6 @@ try {
 }
 
 
-// Quota daemon command - offline replay/once maintenance for provider-quota snapshot
-try {
-  const { createQuotaDaemonCommand } = await import('./commands/quota-daemon.js');
-  program.addCommand(createQuotaDaemonCommand());
-} catch (error) {
-  logCliNonBlocking('load_optional_command_quota_daemon', error);
-}
-
 // OAuth command - force re-auth for a specific token (Camoufox-aware when enabled)
 try {
   const { createOauthCommand } = await import('./commands/oauth.js');
@@ -356,28 +346,6 @@ const launcherContext = {
 
 registerClaudeCommand(program, launcherContext);
 registerCodexCommand(program, launcherContext);
-
-registerSessionInjectCommand(program, {
-  isDevPackage: IS_DEV_PACKAGE,
-  defaultDevPort: DEFAULT_DEV_PORT,
-  logger,
-  log: (line) => console.log(line),
-  loadConfig: (explicitPath?: string) => loadRouteCodexConfig(explicitPath),
-  fetch,
-  env: process.env,
-  exit: (code) => process.exit(code)
-});
-
-registerSessionAdminCommand(program, {
-  isDevPackage: IS_DEV_PACKAGE,
-  defaultDevPort: DEFAULT_DEV_PORT,
-  logger,
-  log: (line) => console.log(line),
-  loadConfig: (explicitPath?: string) => loadRouteCodexConfig(explicitPath),
-  fetch,
-  env: process.env,
-  exit: (code) => process.exit(code)
-});
 
 // Init command - guided config generation
 registerInitCommand(program, {

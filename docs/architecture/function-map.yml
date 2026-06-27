@@ -212,6 +212,8 @@ owners:
     owner_scope: "Chat Process-owned stopless lifecycle: response-side stop/reasoningStop schema judgment plus CLI/terminal normalization, request-side CLI result restore/guidance rewrite/schema-contract reinjection"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
     canonical_types:
+      - StoplessExecutionPlanInput
+      - StoplessExecutionPlan
       - StoplessOrchestrationPlanInput
       - StoplessOrchestrationPlan
       - RuntimeStopMessageStateFromAdapterContextInput
@@ -223,6 +225,7 @@ owners:
       - resolve_stop_message_session_scope
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
@@ -269,7 +272,7 @@ owners:
       - "NoSchema stopless progression must advance `used/repeatCount` from current request tool_output/runtime metadata truth, not through file persistence or tmux/sessionDir fallback."
       - "Once the standard `reasoningStop` tool is exposed on the request, legacy shell-projected stop history such as `exec_command(cmd=\"reasoningStop\")`, `reasoning_stop`, and their paired `command not found` tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests."
       - "Model side must stay unaware of stopless identity, but runtime stopless CLI projection still requires active request-truth `sessionId/requestId` flags for same-session loop counting; `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only allowed progression truth, and `sessionDir`/persisted writeback are forbidden."
-      - "TS `engine.ts` may only call `planStoplessOrchestrationActionWithNative` and `buildServertoolCliProjectionForAutoFlow`; it must not reenter for stopless CLI flows."
+      - "TS engine orchestration may only call Rust `planStoplessExecutionJson` for stopless execution/context composition and orchestration planning; it must not build stopless context/requestTruth/session truth in TS, and it must not reenter for stopless CLI flows."
       - "Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter."
       - "`responsesRequestContext.sessionId/conversationId` is continuation-only context for `/v1/responses`; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material."
 
@@ -1668,9 +1671,7 @@ owners:
       - decorateMetadataForAttempt
     allowed_paths:
       - src/server/runtime/http-server/executor-metadata.ts
-      - src/server/runtime/http-server/session-client-registry.ts
       - tests/server/http-server/executor-metadata.spec.ts
-      - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
       - docs
     forbidden_paths:
       - src/providers/core/runtime
@@ -1678,7 +1679,6 @@ owners:
       - src/client
     required_tests:
       - tests/server/http-server/executor-metadata.spec.ts
-      - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
@@ -3117,58 +3117,6 @@ owners:
     notes:
       - "Authoritative description of the instance, not the pid cache."
       - "Wired from start.ts (daemon supervisor / daemon restart / direct spawn / shutdown-intent) and stop.ts (shutdown-intent); pid cache remains the transient hint, instance.json is the authoritative description."
-  - feature_id: runtime.tmux_client_binding
-    status: active
-    summary: "tmux/client attachment registry persists daemon records plus conversation->tmux bindings under session-bindings.json"
-    owner_kind: ts_runtime_owner
-    owner_scope: "tmux client registry, conversation-to-tmux binding, and registry-backed tmux injection lookup"
-    owner_module: src/server/runtime/http-server/session-client-registry.ts
-    canonical_types:
-      - SessionClientRecord
-      - SessionConversationBindArgs
-      - SessionClientInjectArgs
-      - SessionCleanupResult
-    canonical_builders:
-      - bindConversationSession
-      - resolveBoundTmuxSession
-      - resolveBoundWorkdir
-      - injectSessionClientPromptWithResult
-      - getSessionClientRegistry
-    allowed_paths:
-      - src/server/runtime/http-server/session-client-registry.ts
-      - src/server/runtime/http-server/session-client-registry-utils.ts
-      - src/server/runtime/http-server/session-client-routes.ts
-      - src/server/runtime/http-server/session-client-reaper.ts
-      - src/server/runtime/http-server/session-storage-cleanup.ts
-      - src/server/runtime/http-server/executor-metadata.ts
-      - src/server/runtime/http-server/executor/client-injection-flow.ts
-      - src/server/runtime/http-server/executor/request-retry-helpers.ts
-      - tests/server/http-server/session-client-registry.spec.ts
-      - tests/server/http-server/session-client-registry.inject-tmux-only.spec.ts
-      - tests/server/http-server/session-client-routes.spec.ts
-      - tests/server/http-server/session-storage-cleanup.spec.ts
-      - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
-      - tests/server/runtime/http-server/executor/request-retry-helpers.session-binding.spec.ts
-      - docs
-    forbidden_paths:
-      - sharedmodule/llmswitch-core/src/servertool
-      - src/providers
-      - src/server/handlers
-    required_tests:
-      - tests/server/http-server/session-client-registry.spec.ts
-      - tests/server/http-server/session-client-registry.inject-tmux-only.spec.ts
-      - tests/server/http-server/session-client-routes.spec.ts
-      - tests/server/http-server/session-storage-cleanup.spec.ts
-      - tests/server/runtime/http-server/executor-metadata.binding.spec.ts
-      - tests/server/runtime/http-server/executor/request-retry-helpers.session-binding.spec.ts
-    required_gates:
-      - npm run verify:function-map-compile-gate
-    migration_target: ts
-    notes:
-      - "This is a tmux/client attachment registry, not protocol-independent continuation and not request session truth."
-      - "`tmuxSessionId`, `conversationSessionId`, and request `sessionId` are separate namespaces; bindings file may narrow lookup between them but must not collapse them into one identity."
-      - "`session-bindings.json` persists client attachment state because it must survive daemon/client/runtime boundaries; stopless and other request-local states must not reuse this owner."
-      - "Current owner still resolves its file path from runtime workdir env/bootstrap owner; feature chains must not infer request identity from the path."
   - feature_id: server.http_runtime_entry
     status: active
     summary: "RouteCodexHttpServer index shell owns port registry and per-port dispatch wiring"
@@ -3489,7 +3437,7 @@ owners:
 
   - feature_id: server.responses_sse_bridge_surface
     status: active
-    summary: "/v1/responses SSE path is a locked transport-only boundary: frame write, keepalive, timeout, closeout, and JSON->SSE framing only"
+    summary: "/v1/responses SSE path is an opaque SSE/body handoff facade only: frame write, keepalive, timeout, closeout, and JSON->SSE framing only"
     owner_kind: ts_bridge
     owner_scope: "/v1/responses SSE path is an independent transport-only SSE surface: writes frames, manages stream transport, and performs no schema/tool/metadata/terminal business semantics"
     owner_module: src/modules/llmswitch/bridge/responses-sse-bridge.ts
@@ -3537,15 +3485,16 @@ owners:
       - "locked business module: the SSE surface is an independent transport-only module and may pass opaque SSE/body handoff state and request ids only."
       - "Server handler SSE transport code must stay physically isolated in `handler-response-sse.ts`; shared non-protocol helpers live in `handler-response-common.ts`; `handler-response-utils.ts` is dispatcher + JSON path only."
       - "TS bridge must do no SSE event allowlist, required_action parsing, response payload rebuilding, protocol projection, or nested response normalization in TS."
+      - "Boundary gate phrase: no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
       - "SSE terminal/probe/incomplete-repair is not a business module. Required_action detection, continuation probe synthesis, terminal repair, frame projection semantics, and persistence belong to Rust owners before this transport-only SSE surface."
       - "Neither `handler-response-sse.ts` nor `responses-response-bridge.ts` may keep `response.*` semantic event allowlists, required_action frame parsing, terminal-state parsing, client-close continuation gating, probe finish_reason resolution, stream-end semantic repair decisions, or SSE frame projector helpers."
       - "Client-visible Responses SSE must stay on the standard protocol surface: transport keepalive may only be SSE comments, never synthetic business events like `event: ping`."
       - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, finish_reason derivation, protocol-hint parsing, or `__sse_responses` dispatch-entry detection; those stay behind the dedicated SSE owner or disappear with TS semantic deletion."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
-    summary: "/v1/responses response bridge now owns only transport-facing close/clear helpers; continuation save truth lives in core Chat Process closeout"
+    summary: "/v1/responses response bridge is an opaque continuation/conversation facade only; continuation save truth lives in core Chat Process closeout"
     owner_kind: ts_bridge
-    owner_scope: "/v1/responses response bridge now owns only transport-facing close/clear helpers; continuation save truth lives in core Chat Process closeout"
+    owner_scope: "/v1/responses response bridge is an opaque continuation/conversation facade only; continuation save truth lives in core Chat Process closeout"
     owner_module: src/modules/llmswitch/bridge/responses-response-bridge.ts
     canonical_types:
       - ResponsesResponseLifecycleBridgeFacade
@@ -3601,8 +3550,6 @@ owners:
       - createGuardianDaemonCommand
       - createInitCommand
       - createRestartCommand
-      - createSessionAdminCommand
-      - createSessionInjectCommand
     allowed_paths:
       - src/cli/commands
       - src/cli/register
@@ -3713,7 +3660,7 @@ owners:
       - ResponsesResponse
     required_tests:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
-      - tests/server/http-server/provider-response-sse-marker.blackbox.spec.ts
+      - tests/sharedmodule/responses-sse-native-materialize.spec.ts
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary

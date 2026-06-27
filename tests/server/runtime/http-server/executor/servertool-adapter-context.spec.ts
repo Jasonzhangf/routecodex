@@ -79,7 +79,8 @@ describe('servertool adapter context builder', () => {
 
     expect(context.requestId).toBe('req-1');
     expect(context.entryEndpoint).toBe('/v1/responses');
-    expect(context.providerProtocol).toBe('openai-responses');
+    expect(context.providerProtocol).toBeUndefined();
+    expect(MetadataCenter.read(context)?.readRuntimeControl().providerProtocol).toBe('openai-responses');
     expect(context.routeId).toBe('thinking-primary');
     expect(context.originalModelId).toBe('client-model');
     expect(context.modelId).toBe('kimi-k2.5');
@@ -89,10 +90,6 @@ describe('servertool adapter context builder', () => {
     expect(context.__rt).toEqual({ existing: true });
     expect(context.__rt as Record<string, unknown>).not.toHaveProperty('stopMessageClientInjectReady');
     expect(context.__rt as Record<string, unknown>).not.toHaveProperty('stopMessageClientInjectTmuxSessionId');
-    expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageClientInject).toMatchObject({
-      ready: true,
-      tmuxSessionId: 'tmux-1'
-    });
     expect(context.capturedEntryRequest).toBe(entryOriginRequest);
     expect(context.capturedChatRequest).toBe(entryOriginRequest);
   });
@@ -246,7 +243,8 @@ describe('servertool adapter context builder', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(context.providerProtocol).toBe('anthropic-messages');
+    expect(context.providerProtocol).toBeUndefined();
+    expect(MetadataCenter.read(context)?.readRuntimeControl().providerProtocol).toBe('anthropic-messages');
   });
 
   it('fails fast when metadata center runtimeControl.providerProtocol is absent even if explicit providerProtocol argument exists', async () => {
@@ -376,51 +374,6 @@ describe('servertool adapter context builder', () => {
     expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageEnabled).toBe(true);
   });
 
-  it('does not overwrite existing runtime_control fields on the bound MetadataCenter', async () => {
-    jest.resetModules();
-
-    const { buildServerToolAdapterContext } = await import(
-      '../../../../../src/server/runtime/http-server/executor/servertool-adapter-context.js'
-    );
-    const { MetadataCenter } = await import(
-      '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
-    );
-
-    const metadata: Record<string, unknown> = bindProviderProtocolCenter({});
-    const center = MetadataCenter.attach(metadata);
-    center.writeRuntimeControl(
-      'stopMessageClientInject',
-      {
-        ready: false,
-        reason: 'seeded',
-        sessionScope: 'session:seeded'
-      },
-      {
-        module: 'tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts',
-        symbol: 'does not overwrite existing runtime_control fields on the bound MetadataCenter',
-        stage: 'test'
-      },
-      'seed existing client inject truth'
-    );
-
-    const context = buildServerToolAdapterContext({
-      metadata,
-      entryOriginRequest: {
-        input: 'continue'
-      },
-      requestId: 'req-preserve-runtime-control',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    });
-
-    const snapshot = MetadataCenter.read(context)?.snapshot();
-    expect(snapshot?.runtimeControl.stopMessageClientInject?.version).toBe(1);
-    expect(MetadataCenter.read(context)?.readRuntimeControl().stopMessageClientInject).toEqual({
-      ready: false,
-      reason: 'seeded',
-      sessionScope: 'session:seeded'
-    });
-  });
 
   it('does not project providerFamily into MetadataCenter runtime_control', async () => {
     jest.resetModules();

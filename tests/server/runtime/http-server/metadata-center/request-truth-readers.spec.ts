@@ -57,25 +57,6 @@ describe('request-truth-readers', () => {
     })).toEqual({});
   });
 
-  it('keeps client attachment scope separate from request truth', () => {
-    const metadata: Record<string, unknown> = {};
-    const center = MetadataCenter.attach(metadata);
-    center.writeClientAttachmentScope(
-      'tmuxSessionId',
-      'tmux-only',
-      {
-        module: 'tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts',
-        symbol: 'keeps client attachment scope separate from request truth',
-        stage: 'test'
-      }
-    );
-
-    expect(readRuntimeRequestTruthIdentifiers(metadata)).toEqual({});
-    expect(center.readClientAttachmentScope()).toEqual({
-      tmuxSessionId: 'tmux-only'
-    });
-  });
-
   it('keeps debug snapshot slots out of request truth and releases them with the center', () => {
     const metadata: Record<string, unknown> = {};
     const center = MetadataCenter.attach(metadata);

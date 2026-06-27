@@ -133,55 +133,6 @@ describe('Shape C: OpenAI-compat errors with type + code', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Shape D: session-client-routes register → 400 { error: { message, code } }
-// ═══════════════════════════════════════════════════════════════════
-describe('Shape D: session-client-routes unified error shape', () => {
-  it('/daemon/session-client/register without required fields → 400 { error } not { ok, reason }', async () => {
-    const { registerSessionClientRoutes } = await import(
-      '../../../src/server/runtime/http-server/session-client-routes.js'
-    );
-
-    const app = express();
-    app.use(express.json());
-    registerSessionClientRoutes(app);
-
-    await withServer(app, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/daemon/session-client/register`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      expect(response.status).toBe(400);
-      const body = await response.json();
-      assertErrorShape(body, 'bad_request');
-      expect(body.error.message).toContain('daemonId and callbackUrl are required');
-    });
-  });
-
-  it('/daemon/session-client/inject without tmuxSessionId → 400 { error }', async () => {
-    const { registerSessionClientRoutes } = await import(
-      '../../../src/server/runtime/http-server/session-client-routes.js'
-    );
-
-    const app = express();
-    app.use(express.json());
-    registerSessionClientRoutes(app);
-
-    await withServer(app, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/daemon/session-client/inject`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'hello' }),
-      });
-      expect(response.status).toBe(400);
-      const body = await response.json();
-      assertErrorShape(body, 'bad_request');
-      expect(body.error.message).toContain('tmuxSessionId is required');
-    });
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
 // Shape E: { error: { message, code }, errors[] } — config-admin
 // ═══════════════════════════════════════════════════════════════════
 describe('Shape E: config-admin-handler error shapes', () => {

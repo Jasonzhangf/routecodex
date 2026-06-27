@@ -7,7 +7,6 @@ import {
 } from '../../../src/server/runtime/http-server/executor-metadata.js';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { finalizeRequestExecutorAttemptMetadata } from '../../../src/server/runtime/http-server/executor/request-executor-attempt-state.js';
-import { getSessionClientRegistry } from '../../../src/server/runtime/http-server/session-client-registry.js';
 import {
   getClientConnectionAbortSignal,
   trackClientConnectionState
@@ -15,6 +14,21 @@ import {
 import { encodeSessionClientApiKey } from '../../../src/utils/session-client-token.js';
 
 describe('executor metadata session daemon extraction', () => {
+  it('does not derive providerProtocol from the client entry endpoint', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/chat/completions',
+      method: 'POST',
+      requestId: 'req-meta-provider-protocol-entry-1',
+      headers: {},
+      query: {},
+      body: { messages: [] },
+      metadata: {}
+    } as any);
+
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl().providerProtocol).toBeUndefined();
+    expect(metadata.providerProtocol).toBeUndefined();
+  });
+
   it('extracts sessionDaemonId from apikey bearer suffix', () => {
     const apiKey = encodeSessionClientApiKey('sk-base', 'sessiond_meta_1');
     const metadata = buildRequestMetadata({
@@ -33,8 +47,6 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.clientDaemonId).toBe('sessiond_meta_1');
     expect(metadata.sessionDaemonId).toBe('sessiond_meta_1');
     expect(metadata.sessionId).toBe('conv_meta_1');
-    expect(metadata.clientInjectReady).toBe(false);
-    expect(metadata.clientInjectReason).toBe('tmux_session_missing');
   });
 
   it('extracts tmuxSessionId directly from apikey bearer suffix without daemon registry lookup', () => {
@@ -55,8 +67,6 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.sessionDaemonId).toBe('sessiond_meta_1');
     expect(metadata.clientTmuxSessionId).toBe('tmux_meta_direct_1');
     expect(metadata.tmuxSessionId).toBe('tmux_meta_direct_1');
-    expect(metadata.clientInjectReady).toBe(true);
-    expect(metadata.clientInjectReason).toBe('tmux_session_ready');
   });
 
   it('prefers explicit daemon header when present', () => {
@@ -106,100 +116,6 @@ describe('executor metadata session daemon extraction', () => {
     });
   });
 
-  it('resolves workdir from session daemon registry without inferring tmux scope', () => {
-    const daemonId = 'sessiond_meta_workdir_1';
-    const registry = getSessionClientRegistry();
-    registry.register({
-      daemonId,
-      callbackUrl: 'http://127.0.0.1:65560/inject',
-      tmuxSessionId: 'tmux_meta_workdir_1',
-      workdir: '/tmp/routecodex-meta-workdir-1'
-    });
-
-    const metadata = buildRequestMetadata({
-      entryEndpoint: '/v1/chat/completions',
-      method: 'POST',
-      requestId: 'req-meta-4',
-      headers: {
-        authorization: `Bearer ${encodeSessionClientApiKey('sk-base', daemonId)}`
-      },
-      query: {},
-      body: { messages: [] },
-      metadata: { sessionId: 'conv_meta_4' }
-    } as any);
-
-    expect(metadata.clientDaemonId).toBe(daemonId);
-    expect(metadata.sessionDaemonId).toBe(daemonId);
-    expect(metadata.clientWorkdir).toBe('/tmp/routecodex-meta-workdir-1');
-    expect(metadata.workdir).toBe('/tmp/routecodex-meta-workdir-1');
-    expect(metadata.clientTmuxSessionId).toBeUndefined();
-    expect(metadata.tmuxSessionId).toBeUndefined();
-    expect(metadata.clientInjectReady).toBe(false);
-    expect(metadata.clientInjectReason).toBe('tmux_session_missing');
-    registry.unregister(daemonId);
-  });
-
-  it('does not bind tmux session from daemon registry when request lacks tmux scope', () => {
-    const daemonId = 'sessiond_meta_no_tmux_1';
-    const registry = getSessionClientRegistry();
-    registry.register({
-      daemonId,
-      callbackUrl: 'http://127.0.0.1:65562/inject',
-      tmuxSessionId: 'tmux_registry_should_not_bind',
-      workdir: '/tmp/routecodex-meta-workdir-2'
-    });
-
-    const metadata = buildRequestMetadata({
-      entryEndpoint: '/v1/chat/completions',
-      method: 'POST',
-      requestId: 'req-meta-4b',
-      headers: {
-        authorization: `Bearer ${encodeSessionClientApiKey('sk-base', daemonId)}`
-      },
-      query: {},
-      body: { messages: [] },
-      metadata: { sessionId: 'conv_meta_4b' }
-    } as any);
-
-    expect(metadata.clientDaemonId).toBe(daemonId);
-    expect(metadata.sessionDaemonId).toBe(daemonId);
-    expect(metadata.clientTmuxSessionId).toBeUndefined();
-    expect(metadata.tmuxSessionId).toBeUndefined();
-    expect(metadata.clientInjectReady).toBe(false);
-    expect(metadata.clientInjectReason).toBe('tmux_session_missing');
-    registry.unregister(daemonId);
-  });
-
-  it('prefers explicit tmuxSessionId from request metadata over daemon registry value', () => {
-    const daemonId = 'sessiond_meta_tmux_prefer_1';
-    const registry = getSessionClientRegistry();
-    registry.register({
-      daemonId,
-      callbackUrl: 'http://127.0.0.1:65561/inject',
-      tmuxSessionId: 'tmux_meta_registry_1'
-    });
-
-    const metadata = buildRequestMetadata({
-      entryEndpoint: '/v1/chat/completions',
-      method: 'POST',
-      requestId: 'req-meta-5',
-      headers: {
-        authorization: `Bearer ${encodeSessionClientApiKey('sk-base', daemonId)}`
-      },
-      query: {},
-      body: { messages: [] },
-      metadata: { tmuxSessionId: 'tmux_meta_explicit_1' }
-    } as any);
-
-    expect(metadata.clientDaemonId).toBe(daemonId);
-    expect(metadata.sessionDaemonId).toBe(daemonId);
-    expect(metadata.clientTmuxSessionId).toBe('tmux_meta_explicit_1');
-    expect(metadata.tmuxSessionId).toBe('tmux_meta_explicit_1');
-    expect(metadata.clientInjectReady).toBe(true);
-    expect(metadata.clientInjectReason).toBe('tmux_session_ready');
-    registry.unregister(daemonId);
-  });
-
   it('extracts tmux session id from x-codex-turn-metadata JSON payload', () => {
     const turnMetadata = JSON.stringify({
       scope: {
@@ -220,8 +136,6 @@ describe('executor metadata session daemon extraction', () => {
 
     expect(metadata.clientTmuxSessionId).toBe('tmux_turn_meta_1');
     expect(metadata.tmuxSessionId).toBe('tmux_turn_meta_1');
-    expect(metadata.clientInjectReady).toBe(true);
-    expect(metadata.clientInjectReason).toBe('tmux_session_ready');
   });
 
   it('does not synthesize request sessionId from tmux-only metadata', () => {
@@ -272,6 +186,133 @@ describe('executor metadata session daemon extraction', () => {
     expect(snapshot?.requestTruth.sessionId?.writtenBy.stage).toBe('ServerReqInbound01ClientRaw');
     expect(Array.isArray(snapshot?.requestTruth.sessionId?.history)).toBe(true);
     expect(snapshot?.requestTruth.sessionId?.history.length).toBeGreaterThan(0);
+  });
+
+  it('preserves requestTruth session identity across stopless submit_tool_outputs rounds', () => {
+    const round1 = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-stopless-round1',
+      headers: {},
+      query: {},
+      body: {
+        input: [],
+        metadata: {
+          sessionId: 'sess-meta-stopless-roundtrip-1',
+          conversationId: 'conv-meta-stopless-roundtrip-1'
+        }
+      },
+      metadata: {}
+    } as any);
+    const round1Center = MetadataCenter.read(round1);
+    expect(round1Center?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-meta-stopless-roundtrip-1',
+      conversationId: 'conv-meta-stopless-roundtrip-1'
+    });
+
+    const round2 = buildRequestMetadata({
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      method: 'POST',
+      requestId: 'req-meta-stopless-round2',
+      headers: {
+        'session-id': 'sess-meta-stopless-roundtrip-1',
+        'thread-id': 'sess-meta-stopless-roundtrip-1'
+      },
+      query: {},
+      body: {
+        tool_outputs: [
+          {
+            tool_call_id: 'call_servertool_cli_round1',
+            output: JSON.stringify({
+              ok: true,
+              toolName: 'stop_message_auto',
+              flowId: 'stop_message_flow',
+              repeatCount: 1,
+              maxRepeats: 3
+            })
+          }
+        ],
+        metadata: {
+          sessionId: 'sess-meta-stopless-roundtrip-1',
+          conversationId: 'conv-meta-stopless-roundtrip-1'
+        }
+      },
+      metadata: {}
+    } as any);
+    const round2Center = MetadataCenter.read(round2);
+    expect(round2Center?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess-meta-stopless-roundtrip-1',
+      conversationId: 'conv-meta-stopless-roundtrip-1'
+    });
+  });
+
+  it('keeps stopless runtimeControl progression in metadata center across round writes', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-stopless-runtime-progress',
+      headers: {},
+      query: {},
+      body: {
+        input: [],
+        metadata: {
+          sessionId: 'sess-meta-stopless-runtime-progress',
+          conversationId: 'conv-meta-stopless-runtime-progress'
+        }
+      },
+      metadata: {}
+    } as any);
+    const center = MetadataCenter.read(metadata);
+    expect(center).toBeDefined();
+
+    center?.writeRuntimeControl(
+      'stopless',
+      {
+        flowId: 'stop_message_flow',
+        repeatCount: 1,
+        maxRepeats: 3,
+        active: true,
+        triggerHint: 'stop_schema_missing'
+      },
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'keeps stopless runtimeControl progression in metadata center across round writes',
+        stage: 'test'
+      }
+    );
+    expect(center?.readRuntimeControl().stopless).toMatchObject({
+      flowId: 'stop_message_flow',
+      repeatCount: 1,
+      maxRepeats: 3,
+      active: true,
+      triggerHint: 'stop_schema_missing'
+    });
+
+    center?.writeRuntimeControl(
+      'stopless',
+      {
+        flowId: 'stop_message_flow',
+        repeatCount: 2,
+        maxRepeats: 3,
+        active: true,
+        triggerHint: 'stop_schema_missing'
+      },
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'keeps stopless runtimeControl progression in metadata center across round writes',
+        stage: 'test'
+      }
+    );
+    expect(center?.readRuntimeControl().stopless).toMatchObject({
+      flowId: 'stop_message_flow',
+      repeatCount: 2,
+      maxRepeats: 3,
+      active: true,
+      triggerHint: 'stop_schema_missing'
+    });
+    expect(center?.readRuntimeControl().stopless).not.toMatchObject({
+      repeatCount: 1
+    });
   });
 
   it('preserves prebound metadata center request truth from handler metadata for resumed relay requests', () => {
@@ -961,8 +1002,6 @@ describe('executor metadata session daemon extraction', () => {
 
     expect(metadata.clientTmuxSessionId).toBe('tmux_turn_meta_2');
     expect(metadata.tmuxSessionId).toBe('tmux_turn_meta_2');
-    expect(metadata.clientInjectReady).toBe(true);
-    expect(metadata.clientInjectReason).toBe('tmux_session_ready');
   });
 
   it('extracts workdir from URL-encoded base64 turn metadata in client headers', () => {
@@ -987,118 +1026,6 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.workdir).toBe('/tmp/turn-meta-workdir-2');
   });
 
-  it('binds tmux scope by session/workdir when request has no direct tmux metadata', () => {
-    const daemonId = 'sessiond_bind_workdir_1';
-    const tmuxSessionId = 'rcc_bind_tmux_1';
-    const conversationSessionId = 'conv_bind_workdir_1';
-    const workdir = '/tmp/routecodex-bind-workdir-1';
-    const registry = getSessionClientRegistry();
-    registry.register({
-      daemonId,
-      callbackUrl: 'http://127.0.0.1:65563/inject',
-      tmuxSessionId,
-      workdir,
-      clientType: 'codex'
-    });
-
-    const metadata = buildRequestMetadata({
-      entryEndpoint: '/v1/responses',
-      method: 'POST',
-      requestId: 'req-meta-bind-1',
-      headers: {
-        'x-codex-turn-metadata': JSON.stringify({
-          turn_id: '019c88d2-06ce-7851-b4b0-85952784add8',
-          workspaces: {
-            '/tmp/routecodex-bind-workdir-1': { has_changes: true }
-          },
-          sandbox: 'none'
-        }),
-        session_id: conversationSessionId,
-        'user-agent': 'codex_cli_rs/0.104.0',
-        originator: 'codex_cli_rs'
-      },
-      query: {},
-      body: { input: [] },
-      metadata: {
-        clientHeaders: {
-          'x-codex-turn-metadata': JSON.stringify({
-            turn_id: '019c88d2-06ce-7851-b4b0-85952784add8',
-            workspaces: {
-              '/tmp/routecodex-bind-workdir-1': { has_changes: true }
-            },
-            sandbox: 'none'
-          }),
-          session_id: conversationSessionId,
-          'user-agent': 'codex_cli_rs/0.104.0',
-          originator: 'codex_cli_rs'
-        }
-      }
-    } as any);
-
-    expect(metadata.sessionId).toBeUndefined();
-    expect(metadata.conversationId).toBeUndefined();
-    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
-      sessionId: conversationSessionId,
-      conversationId: conversationSessionId
-    });
-    expect(metadata.workdir).toBe(workdir);
-    expect(metadata.clientTmuxSessionId).toBe(tmuxSessionId);
-    expect(metadata.tmuxSessionId).toBe(tmuxSessionId);
-    expect(metadata.stopMessageClientInjectSessionScope).toBe(`tmux:${tmuxSessionId}`);
-    expect(metadata.clientInjectReady).toBe(true);
-    expect(metadata.clientInjectReason).toBe('tmux_session_ready');
-    expect(metadata.clientDaemonId).toBe(daemonId);
-    expect(metadata.sessionDaemonId).toBe(daemonId);
-    expect(registry.resolveBoundTmuxSession(conversationSessionId)).toBe(tmuxSessionId);
-
-    registry.unbindConversationSession(conversationSessionId);
-    registry.unregister(daemonId);
-  });
-
-  it('resolves tmux scope from conversation binding when request carries sessionId only', () => {
-    const daemonId = 'sessiond_meta_binding_1';
-    const tmuxSessionId = 'tmux_meta_binding_1';
-    const workdir = '/tmp/routecodex-meta-binding-1';
-    const conversationSessionId = 'conv_meta_binding_1';
-    const registry = getSessionClientRegistry();
-
-    registry.register({
-      daemonId,
-      callbackUrl: 'http://127.0.0.1:65562/inject',
-      tmuxSessionId,
-      workdir
-    });
-    registry.bindConversationSession({
-      conversationSessionId,
-      daemonId,
-      tmuxSessionId,
-      workdir
-    });
-
-    const metadata = buildRequestMetadata({
-      entryEndpoint: '/v1/responses',
-      method: 'POST',
-      requestId: 'req-meta-6',
-      headers: {},
-      query: {},
-      body: { input: [] },
-      metadata: { sessionId: conversationSessionId }
-    } as any);
-
-    expect(metadata.sessionId).toBe(conversationSessionId);
-    expect(metadata.clientTmuxSessionId).toBe(tmuxSessionId);
-    expect(metadata.tmuxSessionId).toBe(tmuxSessionId);
-    expect(metadata.clientWorkdir).toBeUndefined();
-    expect(metadata.workdir).toBeUndefined();
-    expect(metadata.clientInjectReady).toBe(true);
-    expect(metadata.clientInjectReason).toBe('tmux_session_ready');
-    expect(metadata.stopMessageClientInjectSessionScope).toBe(`tmux:${tmuxSessionId}`);
-    expect(metadata.clientDaemonId).toBe(daemonId);
-    expect(metadata.sessionDaemonId).toBe(daemonId);
-
-    registry.unbindConversationSession(conversationSessionId);
-    registry.unregister(daemonId);
-  });
 });
 
 describe('client connection timeout hint', () => {
