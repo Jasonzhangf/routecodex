@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveRccPath } from '../config/user-data-paths.js';
-import { redactSensitiveData } from './sensitive-redaction.js';
+import { redactSensitiveData } from '../utils/sensitive-redaction.js';
 
 const KB = 1024;
 const MB = 1024 * KB;

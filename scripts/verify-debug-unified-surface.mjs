@@ -81,6 +81,7 @@ if (!replayScript.includes('readDebugErrorDiagArtifact') || !replayScript.includ
 const debugIndex = readRepoFile('src/debug/index.ts');
 for (const requiredExport of [
   "export * from './diag/index.js';",
+  "export * from './errorsamples.js';",
   "export * from './snapshot/index.js';",
   "export * from './logger/index.js';",
   "export * from './hooks/index.js';",
@@ -103,6 +104,21 @@ assertShellOnly(
   'src/utils/snapshot-writer.ts',
   "export * from '../debug/snapshot/server-writer.js';",
   'export * from "../debug/snapshot/server-writer.js";'
+);
+assertShellOnly(
+  'src/utils/errorsamples.ts',
+  "export * from '../debug/errorsamples.js';",
+  'export * from "../debug/errorsamples.js";'
+);
+assertShellOnly(
+  'src/utils/errorsamples.js',
+  "export * from '../debug/errorsamples.js';",
+  'export * from "../debug/errorsamples.js";'
+);
+assertShellOnly(
+  'src/utils/errorsamples.d.ts',
+  "export * from '../debug/errorsamples.js';",
+  'export * from "../debug/errorsamples.js";'
 );
 assertShellOnly(
   'src/providers/core/utils/snapshot-writer.ts',
@@ -148,6 +164,9 @@ assertNotContains('src/debug/snapshot/provider-writer.ts', [
 
 for (const file of [
   'src/utils/snapshot-writer.ts',
+  'src/utils/errorsamples.ts',
+  'src/utils/errorsamples.js',
+  'src/utils/errorsamples.d.ts',
   'src/providers/core/utils/snapshot-writer.ts',
   'src/modules/pipeline/utils/debug-logger.ts',
   'src/modules/pipeline/utils/colored-logger.ts',
@@ -158,6 +177,8 @@ for (const file of [
     'fs/promises',
     'node:fs',
     'writeSnapshotViaHooks',
+    'writeFile',
+    'mkdir',
     'class ',
     'function ',
     'runtimeFlags',
@@ -182,6 +203,7 @@ const debugFiles = listFilesRecursive('src/debug');
 const allowedFileWriteOwners = new Set([
   'src/debug/snapshot/writer.ts',
   'src/debug/diag/error-artifact.ts',
+  'src/debug/errorsamples.ts',
   'src/debug/policy/violations.ts',
   'src/debug/snapshot-store.ts',
 ]);

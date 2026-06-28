@@ -56,6 +56,7 @@ export * from './snapshot-store.js';
 export * from './session-manager.js';
 export * from './harness/index.js';
 export * from './diag/index.js';
+export * from './errorsamples.js';
 export * from './logger/index.js';
 export * from './snapshot/index.js';
 export * from './hooks/index.js';
