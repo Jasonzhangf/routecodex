@@ -15,11 +15,15 @@ pub(crate) trait MetadataCenterReader {
 
 impl MetadataCenterReader for MetadataCenter {
     fn stop_message_enabled(&self) -> Option<bool> {
-        self.runtime_control.stop_message.enabled
+        self.runtime_control
+            .stop_message_enabled
+            .or(self.runtime_control.stop_message.enabled)
     }
 
     fn stop_message_exclude_direct(&self) -> Option<bool> {
-        self.runtime_control.stop_message.exclude_direct
+        self.runtime_control
+            .stop_message_exclude_direct
+            .or(self.runtime_control.stop_message.exclude_direct)
     }
 
     fn retry_provider_key(&self) -> Option<&str> {
@@ -63,6 +67,19 @@ mod tests {
 
     #[test]
     fn reads_stop_message_controls_from_snapshot_center() {
+        let center = build_metadata_center_from_snapshot(&json!({
+            "runtimeControl": {
+                "stopMessageEnabled": true,
+                "stopMessageExcludeDirect": false
+            }
+        }));
+
+        assert_eq!(center.stop_message_enabled(), Some(true));
+        assert_eq!(center.stop_message_exclude_direct(), Some(false));
+    }
+
+    #[test]
+    fn reads_legacy_nested_stop_message_controls_from_snapshot_center() {
         let center = build_metadata_center_from_snapshot(&json!({
             "runtimeControl": {
                 "stopMessage": {
