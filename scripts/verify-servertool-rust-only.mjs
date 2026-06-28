@@ -2282,11 +2282,28 @@ function checkStopMessageCompareContextRustOwner() {
     'ignore metadata write failures',
     'catch',
     'decision=unknown reason=no_context',
+    '../conversion/runtime-metadata.js',
+    'ensureRuntimeMetadata',
+    'readRuntimeMetadata',
+    '.__rt',
   ]) {
     if (tsShell.includes(keyword)) {
       fail(
         'stop-message-compare-context-ts-thin-shell',
         `Forbidden TS stop-message compare semantic/fallback "${keyword}" found in stop-message-compare-context.ts`
+      );
+    }
+  }
+  for (const keyword of [
+    'writeRuntimeControlToBoundMetadataCenter',
+    'readRuntimeControlFromAnyBoundMetadataCenter',
+    "key: STOP_MESSAGE_COMPARE_KEY",
+    "required: true",
+  ]) {
+    if (!tsShell.includes(keyword)) {
+      fail(
+        'stop-message-compare-context-metadata-center-only',
+        `stop-message-compare-context.ts must keep MetadataCenter runtime_control marker ${keyword}`
       );
     }
   }
@@ -2301,6 +2318,10 @@ function checkStopMessageCompareContextRustOwner() {
     TS_STOP_MESSAGE_COMPARE_CONTEXT,
     tsShell,
     'formatStopMessageCompareContextWithNative'
+  );
+  pass(
+    'stop-message-compare-context-metadata-center-only',
+    'stop-message compare context uses MetadataCenter runtime_control, not runtime metadata'
   );
   pass('stop-message-compare-context-rust-owner', 'servertool-core owns stop-message compare context normalization and formatting');
 }
