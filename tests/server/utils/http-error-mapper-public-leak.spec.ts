@@ -4,6 +4,33 @@ import {
 } from '../../../src/server/utils/http-error-mapper.js';
 
 describe('http-error-mapper public payload leak guard', () => {
+  it('projects provider business errors without wrapping them as 502', () => {
+    const mapped = mapErrorToHttp(Object.assign(
+      new Error('[provider] Upstream provider returned business error: 该模型访问量过大，请稍后再试'),
+      {
+        code: 'PROVIDER_BUSINESS_ERROR',
+        upstreamCode: 'provider_status_2056',
+        statusCode: 429,
+        response: {
+          data: {
+            error: {
+              code: 'provider_status_2056',
+              message: '该模型访问量过大，请稍后再试',
+              status: 429
+            }
+          },
+          status: 429
+        }
+      }
+    ));
+
+    expect(mapped.status).toBe(429);
+    expect(mapped.body.error).toMatchObject({
+      message: '该模型访问量过大，请稍后再试',
+      code: 'provider_status_2056'
+    });
+  });
+
   it('masks provider diagnostics from upstream 400 payloads', () => {
     const mapped = mapErrorToHttp({
       message: 'HTTP 400: {"error":{"message":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"bad_request_error\\",\\"message\\":\\"Error from provider (MiniMax): invalid params, tool result id not found (2013)\\",\\"http_code\\":\\"400\\"},\\"request_id\\":\\"066c94854d8da9b51651e2d687289e42\\"}","code":"HTTP_400"}}',

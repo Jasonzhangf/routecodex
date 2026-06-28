@@ -1157,11 +1157,17 @@ function checkStandaloneServertoolBinary() {
     'assert!(value["input"].get("schemaGuidance").is_none());',
     'assert!(value.get("schemaGuidance").is_none());',
     'SERVERTOOL_CLI_INVALID_FIELD: flowId',
-    'stopless budget exhausted',
+    '停止检查已收敛',
     'SERVERTOOL_CLI_INVALID_FIELD: inputJson',
     'SERVERTOOL_CLI_INVALID_JSON:',
   ]) {
     assertContains('servertool-cli-input-contract-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, needle);
+  }
+  if (rustCliBlackbox.includes('stopless budget exhausted')) {
+    fail(
+      'servertool-cli-input-contract-blackbox',
+      `${RUST_SERVERTOOL_CLI_BLACKBOX} must not assert internal stopless budget text in client-visible CLI output`
+    );
   }
   assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn non_client_exec_servertools_fail_fast');
   assertContains('servertool-cli-non-client-exec-blackbox', RUST_SERVERTOOL_CLI_BLACKBOX, rustCliBlackbox, 'fn unknown_tool_fails_fast_without_client_stdout');
@@ -5146,11 +5152,17 @@ function checkServertoolRustOutcomeCloseout() {
     'build_servertool_cli_binary_run_command_from_client_exec_result',
     'stopless_schema_guidance()',
     'SERVERTOOL_UNSUPPORTED_TOOL',
-    'stopless budget exhausted',
+    '停止检查已收敛',
     'SERVERTOOL_CLI_MISSING_FIELD: flowId',
     'SERVERTOOL_DENIED_TOOL: fake_exec',
   ]) {
     assertContains('servertool-cli-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCli, needle);
+  }
+  if (rustCli.includes('stopless budget exhausted')) {
+    fail(
+      'servertool-cli-rust-owner',
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs must not expose internal stopless budget text`
+    );
   }
 
   for (const marker of ['reenterPipeline', 'providerInvoker', 'serverToolFollowup', 'serverToolFollowupSource', '--ticket', 'stcli_', 'rcc_cli_']) {
@@ -5700,6 +5712,12 @@ function checkServertoolEngineStoplessSessionThinShell() {
   const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
   const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
   const builtinHandlerCatalogSource = readRequired(`${SERVERTOOL_TS_DIR}/builtin-handler-catalog.ts`);
+  const rustProjectionContextSource = readRequired(
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
+  );
+  const rustProjectionBridgeSource = readRequired(
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs`
+  );
   for (const marker of [
     'function logServerToolNonBlocking(',
     'createServertoolProgressLogger({',
@@ -5755,6 +5773,37 @@ function checkServertoolEngineStoplessSessionThinShell() {
       fail(
         'servertool-engine-stopless-session-no-ts-owner',
         `engine-postflight-shell.ts must not retain stopless projection semantic marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'execution_context',
+    'serverToolLoopState',
+    'stopSchemaTriggerHint',
+    'stopSchemaFeedback',
+    'stoplessRuntimeState',
+    'runtime_snapshot',
+    'runtimeSnapshot',
+    'pub trigger_hint',
+  ]) {
+    if (rustProjectionContextSource.includes(marker)) {
+      fail(
+        'servertool-engine-stopless-session-no-rust-internal-meta',
+        `stopless_cli_projection_context_contract.rs must read only MetadataCenter/write-plan control, found ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    '"executionContext": { "stopless"',
+    '"runtimeSnapshot"',
+    'context.get("stopless")',
+    'context.get("stopSchemaTriggerHint")',
+    'context.get("stoplessRuntimeState")',
+  ]) {
+    if (rustProjectionBridgeSource.includes(marker)) {
+      fail(
+        'servertool-engine-stopless-session-no-rust-internal-meta',
+        `stopless_auto_handler_bridge.rs must not source CLI projection control from execution context, found ${marker}`
       );
     }
   }

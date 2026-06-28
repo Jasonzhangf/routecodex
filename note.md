@@ -1,3 +1,25 @@
+# 2026-06-28 10000 longcontext / provider business error closeout
+
+- 现场根因：
+  - 10000 旧 400 样本 `~/.rcc/codex-samples/openai-chat/ports/10000/req_1782617466845_00cdbec9` 为 965 messages / 42 tools / ~1.42M message chars，VR 同时有 `search:last-tool-search|longcontext:token-threshold`，但 search 优先级压过 longcontext，先打到 `minimax.key1.MiniMax-M2.7`，上游报 context window 400。
+  - 10000 旧 502 样本的上游 HTTP 200 business error（`该模型访问量过大，请稍后再试`）被 `resolveProviderBusinessResponseError` 标成 `MALFORMED_RESPONSE/status=200`，HTTP 投影再包装成 generic 502。
+- 已收口：
+  - Rust VR classifier 将 `longcontext` 优先级调到 `search` 之前，并补 `longcontext_overrides_search_continuation_when_context_is_too_large`。
+  - provider business error 改为 `PROVIDER_BUSINESS_ERROR`，保留 upstream code/message；容量/限流类中文/英文错误投影 429，非限流业务错误投影 400，不再伪装成 malformed response。
+  - `http-error-mapper` 对 `PROVIDER_BUSINESS_ERROR` 直接投影 upstream message/code，避免把未明确映射的 provider business error 包成 502。
+  - stopless install blocker 已对齐：client-visible terminal summary 为 `停止检查已收敛`，gate 禁止旧内部英文 `stopless budget exhausted` 泄漏。
+- 已验证：
+  - `cargo test -p router-hotpath-napi virtual_router_engine::classifier --lib -- --nocapture` 通过，23/23。
+  - `pnpm jest tests/providers/core/runtime/provider-auto-retry-business-error.spec.ts tests/providers/core/runtime/provider-2056-classification.spec.ts tests/server/utils/http-error-mapper-public-leak.spec.ts --runInBand` 通过，20/20。
+  - `npm run verify:servertool-rust-only` 通过。
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` 通过。
+  - `git diff --check` 通过。
+  - install/restart/live：`routecodex/rcc 0.90.3285`，10000 health `status=ok ready=true pipelineReady=true version=0.90.3285`。
+  - live 10000：`longcontext/gateway-coding-10000-priority-longcontext` 命中；provider request 为 `glm-5.2`、1100+ messages、41 tools，不再是 MiniMax-M2.7 search route。
+  - live 10000：`该模型访问量过大，请稍后再试` 记录为 `statusCode=429 errorCode=PROVIDER_BUSINESS_ERROR upstreamCode=provider_status_10163` 并 provider switch，不再是 502/MALFORMED_RESPONSE。
+- 剩余缺口：
+  - executor 附加 Jest 中 `request-executor-provider-response.usage` 通过；`request-executor-provider-send-failure.abort` 旧 SSE decode retry 断言失败，`request-executor.spec` native export 测试入口不匹配失败，后续单独收口。
+
 # 2026-06-27 Hub Pipeline boundary / Responses continuation store-resume closeout
 
 - 本轮收口：`Responses` continuation restore/save 逻辑继续归 Chat Process / conversation store owner；`ReqInbound` 不再承载 resume/session-scope/tool_outputs lift，`RespOutbound/SSE` 不做 continuation 逻辑，只接 finalized semantic payload。

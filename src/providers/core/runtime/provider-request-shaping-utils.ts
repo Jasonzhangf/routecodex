@@ -45,6 +45,48 @@ function readStreamIntentFromRequestPayload(request: UnknownObject): boolean | u
   return undefined;
 }
 
+function resolveProviderBusinessErrorStatus(upstreamCode: string, message: string): number {
+  const normalizedCode = upstreamCode.trim().toLowerCase();
+  const normalizedMessage = message.trim().toLowerCase();
+  if (
+    normalizedCode === 'provider_status_2056'
+    || normalizedMessage.includes('usage limit')
+    || normalizedMessage.includes('rate limit')
+    || normalizedMessage.includes('too many requests')
+    || normalizedMessage.includes('访问量过大')
+    || normalizedMessage.includes('稍后再试')
+  ) {
+    return 429;
+  }
+  return 400;
+}
+
+function buildProviderBusinessResponseError(args: {
+  message: string;
+  upstreamCode: string;
+}): Error {
+  const statusCode = resolveProviderBusinessErrorStatus(args.upstreamCode, args.message);
+  return Object.assign(
+    new Error(`[provider] Upstream provider returned business error: ${args.message}`),
+    {
+      upstreamCode: args.upstreamCode,
+      code: 'PROVIDER_BUSINESS_ERROR',
+      statusCode,
+      status: statusCode,
+      response: {
+        data: {
+          error: {
+            code: args.upstreamCode,
+            message: args.message,
+            status: statusCode
+          }
+        },
+        status: statusCode
+      }
+    }
+  );
+}
+
 function resolveGenericStreamIntent(args: {
   request: UnknownObject;
   context?: ProviderContext;
@@ -163,14 +205,10 @@ export function resolveProviderBusinessResponseError(args: {
         ? baseResp.status_msg.trim()
         : `business error (status_code=${statusCode})`;
     if (typeof statusCode === 'number' && statusCode !== 0) {
-      return Object.assign(
-        new Error(`[provider] Upstream provider returned business error: ${statusMessage}`),
-        {
-          upstreamCode: `provider_status_${statusCode}`,
-          code: 'MALFORMED_RESPONSE',
-          statusCode: 200,
-        }
-      );
+      return buildProviderBusinessResponseError({
+        message: statusMessage,
+        upstreamCode: `provider_status_${statusCode}`
+      });
     }
   }
 
@@ -182,14 +220,17 @@ export function resolveProviderBusinessResponseError(args: {
       ? errorNode.message.trim()
       : `business error (code=${errorCode})`;
     if (typeof errorCode === 'number' && errorCode > 0) {
-      return Object.assign(
-        new Error(`[provider] Upstream provider returned business error: ${errorMessage}`),
-        {
-          upstreamCode: `provider_status_${errorCode}`,
-          code: 'MALFORMED_RESPONSE',
-          statusCode: 200,
-        }
-      );
+      return buildProviderBusinessResponseError({
+        message: errorMessage,
+        upstreamCode: `provider_status_${errorCode}`
+      });
+    }
+    const errorType = typeof errorNode.type === 'string' ? errorNode.type.trim() : '';
+    if (errorType) {
+      return buildProviderBusinessResponseError({
+        message: errorMessage || errorType,
+        upstreamCode: errorType
+      });
     }
   }
 
@@ -202,14 +243,10 @@ export function resolveProviderBusinessResponseError(args: {
       : typeof payloadRecord.message === 'string'
         ? (payloadRecord.message as string).trim()
         : `business error (error_code=${topLevelErrorCode})`;
-    return Object.assign(
-      new Error(`[provider] Upstream provider returned business error: ${errorMessage}`),
-      {
-        upstreamCode: `provider_status_${topLevelErrorCode}`,
-        code: 'MALFORMED_RESPONSE',
-        statusCode: 200,
-      }
-    );
+    return buildProviderBusinessResponseError({
+      message: errorMessage,
+      upstreamCode: `provider_status_${topLevelErrorCode}`
+    });
   }
 
   return undefined;

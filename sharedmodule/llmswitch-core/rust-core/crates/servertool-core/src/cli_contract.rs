@@ -261,7 +261,7 @@ fn build_terminal_stopless_output(
         ok: true,
         kind: "stop_message_auto".to_string(),
         tool: "stop_message_auto".to_string(),
-        summary: "stopless budget exhausted".to_string(),
+        summary: "停止检查已收敛".to_string(),
         model_guidance: continuation_prompt.clone(),
         tool_name: "stop_message_auto".to_string(),
         flow_id: "stop_message_flow".to_string(),
@@ -2362,7 +2362,7 @@ mod tests {
         )
         .expect("over budget must return terminal output, not error");
         assert_eq!(repeat_over_budget.ok, true);
-        assert_eq!(repeat_over_budget.summary, "stopless budget exhausted");
+        assert_eq!(repeat_over_budget.summary, "停止检查已收敛");
         assert_eq!(repeat_over_budget.repeat_count, 3);
         assert_eq!(repeat_over_budget.max_repeats, 3);
         assert!(!repeat_over_budget.continuation_prompt.is_empty());

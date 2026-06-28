@@ -1,8 +1,8 @@
 /**
  * MiniMax 2056 must be exposed as a provider business error.
  *
- * resolveProviderBusinessResponseError should throw MALFORMED_RESPONSE
- * (not swallow), so ErrorErr01-06 can classify and route policy can decide.
+ * resolveProviderBusinessResponseError should throw PROVIDER_BUSINESS_ERROR
+ * (not swallow or relabel as malformed), so ErrorErr01-06 can classify and route policy can decide.
  */
 
 import { describe, test, expect } from '@jest/globals';
@@ -10,7 +10,7 @@ import { resolveProviderBusinessResponseError } from '../../../../src/providers/
 import { normalizeKnownProviderError } from '../../../../src/providers/core/runtime/provider-error-catalog.js';
 
 describe('MiniMax 2056 provider error classification', () => {
-  test('2056 throws MALFORMED_RESPONSE so ErrorErr01 can capture it', () => {
+  test('2056 throws PROVIDER_BUSINESS_ERROR so ErrorErr01 can capture it', () => {
     const result = resolveProviderBusinessResponseError({
       response: {
         data: {
@@ -26,12 +26,15 @@ describe('MiniMax 2056 provider error classification', () => {
 
     expect(result).toBeInstanceOf(Error);
     expect((result as Error).message).toContain('business error');
+    expect((result as Record<string, unknown>).code).toBe('PROVIDER_BUSINESS_ERROR');
+    expect((result as Record<string, unknown>).upstreamCode).toBe('provider_status_2056');
+    expect((result as Record<string, unknown>).statusCode).toBe(429);
   });
 
   test('provider catalog classifies PROVIDER_STATUS_2056 as recoverable', () => {
     const error = new Error('test');
     Object.assign(error, {
-      code: 'MALFORMED_RESPONSE',
+      code: 'PROVIDER_BUSINESS_ERROR',
       upstreamCode: 'PROVIDER_STATUS_2056',
     });
 
@@ -48,7 +51,7 @@ describe('MiniMax 2056 provider error classification', () => {
   test('non-2056 status codes are not classified as 2056', () => {
     const error = new Error('test');
     Object.assign(error, {
-      code: 'MALFORMED_RESPONSE',
+      code: 'PROVIDER_BUSINESS_ERROR',
       upstreamCode: 'PROVIDER_STATUS_2013',
     });
 

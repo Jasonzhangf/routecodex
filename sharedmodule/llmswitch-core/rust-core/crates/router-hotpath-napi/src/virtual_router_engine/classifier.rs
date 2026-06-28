@@ -256,8 +256,8 @@ pub(crate) const ROUTE_PRIORITY: [&str; 9] = [
     "web_search",
     "thinking",
     "coding",
-    "search",
     "longcontext",
+    "search",
     "tools",
     "background",
     DEFAULT_ROUTE,
@@ -550,6 +550,28 @@ mod tests {
         assert_eq!(result.route_name, "coding");
         assert!(result.reasoning.contains("coding:last-tool-coding"));
         assert!(result.reasoning.contains("longcontext:token-threshold"));
+    }
+
+    #[test]
+    fn longcontext_overrides_search_continuation_when_context_is_too_large() {
+        let features = RoutingFeatures {
+            latest_message_from_user: false,
+            has_tools: true,
+            has_tool_call_responses: true,
+            estimated_tokens: 250_000,
+            last_assistant_tool_category: Some("search".to_string()),
+            ..Default::default()
+        };
+
+        let result = test_classifier().classify(&features);
+
+        assert_eq!(result.route_name, "longcontext");
+        assert!(result.reasoning.contains("longcontext:token-threshold"));
+        assert!(result.reasoning.contains("search:last-tool-search"));
+        assert_eq!(
+            result.candidates,
+            vec!["longcontext".to_string(), DEFAULT_ROUTE.to_string()]
+        );
     }
 
     #[test]

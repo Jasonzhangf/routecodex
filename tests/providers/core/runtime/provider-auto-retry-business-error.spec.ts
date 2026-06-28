@@ -12,9 +12,9 @@ import { resolveProviderBusinessResponseError } from '../../../../src/providers/
 
 describe('Provider business error detection', () => {
   describe('provider_status_2056 enters unified provider error catalog', () => {
-    it('maps MALFORMED_RESPONSE + upstreamCode=provider_status_2056 to recoverable catalog code', () => {
+    it('maps PROVIDER_BUSINESS_ERROR + upstreamCode=provider_status_2056 to recoverable catalog code', () => {
       const error = Object.assign(new Error('[hub_response] Upstream provider returned structured business error at chat_process.response.entry: usage limit exceeded'), {
-        code: 'MALFORMED_RESPONSE',
+        code: 'PROVIDER_BUSINESS_ERROR',
         upstreamCode: 'provider_status_2056',
       });
       const normalized = normalizeKnownProviderError({
@@ -27,9 +27,9 @@ describe('Provider business error detection', () => {
       expect(normalized?.class).toBe('recoverable');
     });
 
-    it('maps MALFORMED_RESPONSE + upstreamCode=PROVIDER_STATUS_2056 (upper) to recoverable catalog code', () => {
+    it('maps PROVIDER_BUSINESS_ERROR + upstreamCode=PROVIDER_STATUS_2056 (upper) to recoverable catalog code', () => {
       const error = Object.assign(new Error('business error'), {
-        code: 'MALFORMED_RESPONSE',
+        code: 'PROVIDER_BUSINESS_ERROR',
         upstreamCode: 'PROVIDER_STATUS_2056',
       });
       const normalized = normalizeKnownProviderError({
@@ -111,7 +111,8 @@ describe('Provider business error detection', () => {
 
       expect(result).toBeInstanceOf(Error);
       expect((result as Record<string, unknown>).upstreamCode).toBe('provider_status_2056');
-      expect((result as Record<string, unknown>).code).toBe('MALFORMED_RESPONSE');
+      expect((result as Record<string, unknown>).code).toBe('PROVIDER_BUSINESS_ERROR');
+      expect((result as Record<string, unknown>).statusCode).toBe(429);
     });
 
     it('detects base_resp.status_code=2056 without family profile', () => {
@@ -133,7 +134,8 @@ describe('Provider business error detection', () => {
       expect(result).toBeInstanceOf(Error);
       expect((result as Error).message).toContain('usage limit exceeded');
       expect((result as Record<string, unknown>).upstreamCode).toBe('provider_status_2056');
-      expect((result as Record<string, unknown>).code).toBe('MALFORMED_RESPONSE');
+      expect((result as Record<string, unknown>).code).toBe('PROVIDER_BUSINESS_ERROR');
+      expect((result as Record<string, unknown>).statusCode).toBe(429);
     });
 
     it('detects nested error.code=2056 without family profile', () => {
@@ -152,6 +154,7 @@ describe('Provider business error detection', () => {
 
       expect(result).toBeInstanceOf(Error);
       expect((result as Record<string, unknown>).upstreamCode).toBe('provider_status_2056');
+      expect((result as Record<string, unknown>).code).toBe('PROVIDER_BUSINESS_ERROR');
     });
 
     it('detects OpenAI-compatible SSE error payload with string type', () => {
@@ -169,7 +172,7 @@ describe('Provider business error detection', () => {
       });
 
       expect(result).toBeInstanceOf(Error);
-      expect((result as Record<string, unknown>).code).toBe('MALFORMED_RESPONSE');
+      expect((result as Record<string, unknown>).code).toBe('PROVIDER_BUSINESS_ERROR');
       expect((result as Record<string, unknown>).upstreamCode).toBe('server_error');
       expect((result as Error).message).toContain('server_error');
     });
@@ -188,6 +191,7 @@ describe('Provider business error detection', () => {
 
       expect(result).toBeInstanceOf(Error);
       expect((result as Record<string, unknown>).upstreamCode).toBe('provider_status_2056');
+      expect((result as Record<string, unknown>).code).toBe('PROVIDER_BUSINESS_ERROR');
     });
 
     it('returns undefined for successful response without business error', () => {

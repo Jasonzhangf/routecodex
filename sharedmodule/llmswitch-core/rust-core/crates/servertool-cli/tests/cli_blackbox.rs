@@ -286,7 +286,7 @@ fn exhausted_stopless_run_stays_terminal_for_current_input() {
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(
-        value["summary"], "stopless budget exhausted",
+        value["summary"], "停止检查已收敛",
         "exhausted stopless input must stay terminal closed; got: {}",
         value
     );
@@ -330,7 +330,7 @@ fn reasoning_stop_full_terminal_schema_at_budget_edge_must_not_downgrade_to_budg
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_ne!(
         value["summary"].as_str(),
-        Some("stopless budget exhausted"),
+        Some("停止检查已收敛"),
         "full terminal schema at budget edge must not be downgraded to budget exhausted: {}",
         value
     );
@@ -419,7 +419,7 @@ fn exhausted_stop_message_repeat_budget_returns_terminal_summary() {
             String::from_utf8_lossy(&output.stderr)
         );
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-        assert_eq!(value["summary"], "stopless budget exhausted");
+        assert_eq!(value["summary"], "停止检查已收敛");
         assert_eq!(value["repeatCount"], value["maxRepeats"]);
         assert_no_internal_or_restoration_carrier(&value);
     }
@@ -451,7 +451,7 @@ fn exhausted_explicit_repeat_args_return_terminal_summary() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["summary"], "stopless budget exhausted");
+    assert_eq!(value["summary"], "停止检查已收敛");
     assert_eq!(value["repeatCount"], 3);
     assert_eq!(value["maxRepeats"], 3);
     assert_no_internal_or_restoration_carrier(&value);
@@ -875,7 +875,7 @@ fn reasoning_stop_third_invalid_schema_stops_terminally() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["summary"], "stopless budget exhausted");
+    assert_eq!(value["summary"], "停止检查已收敛");
     assert_eq!(value["repeatCount"], 3);
     assert_eq!(value["maxRepeats"], 3);
     let guidance = value["modelGuidance"].as_str().expect("model guidance");

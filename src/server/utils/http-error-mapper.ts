@@ -97,6 +97,8 @@ type RawErrorPayload = {
   requestId?: string;
   request_id?: string;
   code?: string;
+  upstreamCode?: string;
+  upstreamMessage?: string;
   providerKey?: string;
   providerType?: string;
   routeName?: string;
@@ -225,6 +227,7 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   const nestedJson = tryExtractNestedJsonErrorMessage(upstreamMessage || baseMessage);
   const effectiveUpstreamMessage = nestedJson?.message || upstreamMessage;
   const effectiveCode = upstream.code || extractString(error.code) || 'upstream_error';
+  const sourceCode = extractString(error.code);
   const toolName = extractString(error.toolName) || extractString(error.details?.toolName);
   const validationReason =
     extractString(error.validationReason) || extractString(error.details?.validationReason);
@@ -245,6 +248,7 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   // Protocol/shape errors produced by our bridge/pipeline should be treated as client errors.
   // (e.g. /v1/responses with invalid payload shape)
   const normalizedCode = String(effectiveCode || '').trim().toUpperCase();
+  const normalizedSourceCode = String(sourceCode || '').trim().toUpperCase();
   if (normalizedCode === 'MALFORMED_REQUEST') {
     return formatPayload(400, {
       message: baseMessage || 'Malformed request',
@@ -276,6 +280,15 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   }
 
   if (status === 429) {
+    if (normalizedSourceCode === 'PROVIDER_BUSINESS_ERROR') {
+      return formatPayload(429, {
+        message: effectiveUpstreamMessage || upstreamMessage || baseMessage,
+        code: upstreamCode || effectiveCode,
+        request_id: requestId,
+        ...validationFields,
+        ...detailField
+      });
+    }
     return formatPayload(429, {
       message: 'Rate limited by upstream provider',
       code: upstreamCode || effectiveCode || 'rate_limit',
@@ -305,6 +318,15 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   }
 
   if (status >= 400 && status < 500) {
+    if (normalizedSourceCode === 'PROVIDER_BUSINESS_ERROR') {
+      return formatPayload(status, {
+        message: effectiveUpstreamMessage || upstreamMessage || baseMessage,
+        code: upstreamCode || effectiveCode,
+        request_id: requestId,
+        ...validationFields,
+        ...detailField
+      });
+    }
     return formatPayload(status, {
       message: 'Upstream rejected the request',
       code: upstreamCode || effectiveCode || 'upstream_client_error',
@@ -460,8 +482,8 @@ function extractUpstreamError(err: RawErrorPayload): {
   const details = err?.details || {};
   const responseError = err?.response?.data?.error;
   return {
-    code: extractString(responseError?.code) || extractString(details?.upstreamCode),
-    message: extractString(responseError?.message) || extractString(details?.upstreamMessage),
+    code: extractString(responseError?.code) || extractString(details?.upstreamCode) || extractString(err?.upstreamCode),
+    message: extractString(responseError?.message) || extractString(details?.upstreamMessage) || extractString(err?.upstreamMessage),
     status: typeof responseError?.status === 'number' ? responseError.status : undefined,
     providerKey: extractString(details?.providerKey)
   };
