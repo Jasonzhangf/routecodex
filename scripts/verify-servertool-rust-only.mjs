@@ -5194,6 +5194,46 @@ function checkDeletedStoplessMetadataWriterAbsent() {
   );
 }
 
+function checkStoplessNoTsRuntimeControlSpecialization() {
+  const scanFiles = [
+    `${SERVERTOOL_TS_DIR}/metadata-center-carrier.ts`,
+    `${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`,
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`,
+  ];
+  for (const file of scanFiles) {
+    const content = readRequired(file);
+    for (const marker of [
+      'writeStoplessRuntimeControlToBoundMetadataCenter',
+      'readStoplessRuntimeControlFromAnyBoundMetadataCenter',
+      'StoplessRuntimeControlValue',
+      'adapterContextForRust',
+      'fallbackSkip(',
+      "skipReason: 'native_unavailable'",
+      "skipReason: 'native_returned_non_string'",
+      "skipReason: 'native_parse_failed'",
+    ]) {
+      if (content.includes(marker)) {
+        fail(
+          'stopless-no-ts-runtime-control-specialization',
+          `Forbidden stopless TS runtime-control/context/fallback marker "${marker}" found in ${file.replace(`${ROOT}/`, '')}`
+        );
+      }
+    }
+  }
+  const engineShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
+  if (!engineShell.includes('readRuntimeControlFromAnyBoundMetadataCenter(')) {
+    fail(
+      'stopless-no-ts-runtime-control-specialization',
+      'engine-orchestration-shell.ts must pass generic runtime_control to Rust, not a TS-parsed stopless control shape'
+    );
+  }
+  pass(
+    'stopless-no-ts-runtime-control-specialization',
+    'stopless runtime_control stays generic in TS and native failures stay fail-fast'
+  );
+}
+
 function checkServertoolRustOutcomeCloseout() {
   const rustOutcome = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const rustCli = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
@@ -6187,6 +6227,7 @@ checkServertoolTextExtractionRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkStoplessNoContextDataPlane();
 checkDeletedStoplessMetadataWriterAbsent();
+checkStoplessNoTsRuntimeControlSpecialization();
 checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
 checkServertoolAutoHookCallerThinShell();

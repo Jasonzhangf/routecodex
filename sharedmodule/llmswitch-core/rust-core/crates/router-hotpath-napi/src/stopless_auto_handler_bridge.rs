@@ -20,7 +20,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use servertool_core::cli_contract::{self, ClientExecCliProjectionInput};
+use servertool_core::cli_contract;
 use servertool_core::persisted_lookup;
 use servertool_core::stop_message_auto_handler::{self, StopMessageAutoHandlerInput};
 use servertool_core::stop_message_default_config::{self, StopMessageDefaultConfigInput};
@@ -146,15 +146,6 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
     })
 }
 
-fn resolve_request_truth_session_id(input: &StoplessAutoHandlerRuntimeInput) -> Option<String> {
-    input
-        .runtime_metadata
-        .as_ref()
-        .and_then(|value| value.get("metadataCenterSnapshot"))
-        .and_then(|snapshot| snapshot.get("requestTruth"))
-        .and_then(|truth| read_trimmed_string(truth.get("sessionId")))
-}
-
 #[napi]
 pub fn plan_stopless_execution_json(input_json: String) -> NapiResult<String> {
     let input: StoplessExecutionPlanInput = serde_json::from_str(&input_json).map_err(|e| {
@@ -224,7 +215,13 @@ fn build_stopless_execution_value(input: &StoplessExecutionPlanInput) -> Value {
         .cloned()
         .unwrap_or_else(Map::new);
     let mut stopless = existing_stopless;
-    if let Some(control) = input.stopless_control.as_ref().and_then(Value::as_object) {
+    let runtime_stopless_control = input
+        .runtime_control
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|runtime| runtime.get("stopless"))
+        .and_then(Value::as_object);
+    if let Some(control) = runtime_stopless_control {
         for (key, value) in control {
             stopless.insert(key.clone(), value.clone());
         }
@@ -302,7 +299,7 @@ pub fn run_stopless_auto_handler_runtime_json(input_json: String) -> NapiResult<
 /// {
 ///   "adapterContext": { ... },
 ///   "metadataWritePlan": { "stopless": { ... } },
-///   "stoplessControl": { ... },
+///   "runtimeControl": { ... },
 ///   "chatStopText": "...",
 ///   "sessionId": "...",
 ///   "requestId": "..."
@@ -451,9 +448,9 @@ pub fn build_stopless_auto_cli_projection_from_engine_json(
         .get("context")
         .filter(|value| value.is_object() && !value.is_array())
         .and_then(Value::as_object);
-    let adapter_record = input.adapter_context.as_ref().and_then(Value::as_object);
-    let metadata_center_snapshot = adapter_record
-        .and_then(|adapter| adapter.get("metadataCenterSnapshot"))
+    let metadata_center_snapshot = input
+        .metadata_center_snapshot
+        .as_ref()
         .and_then(Value::as_object);
     let stopless_control = metadata_center_snapshot
         .and_then(|snapshot| snapshot.get("runtimeControl"))
@@ -467,7 +464,6 @@ pub fn build_stopless_auto_cli_projection_from_engine_json(
         .and_then(Value::as_object)
         .and_then(|truth| read_trimmed_string(truth.get("sessionId")));
     let projection_input = StoplessAutoCliProjectionInput {
-        adapter_context: input.adapter_context,
         metadata_write_plan: input.metadata_write_plan,
         stopless_control,
         chat_stop_text,
@@ -715,13 +711,12 @@ pub struct StoplessExecutionPlanInput {
     pub flow_id: Option<String>,
     pub execution: Value,
     pub request_truth_session_id: Option<String>,
-    pub stopless_control: Option<Value>,
+    pub runtime_control: Option<Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessAutoCliProjectionInput {
-    pub adapter_context: Option<Value>,
     pub metadata_write_plan: Option<Value>,
     pub stopless_control: Option<Value>,
     pub chat_stop_text: Option<String>,
@@ -732,7 +727,7 @@ pub struct StoplessAutoCliProjectionInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessAutoCliProjectionFromEngineInput {
-    pub adapter_context: Option<Value>,
+    pub metadata_center_snapshot: Option<Value>,
     pub execution: Value,
     pub metadata_write_plan: Option<Value>,
     pub request_id: Option<String>,

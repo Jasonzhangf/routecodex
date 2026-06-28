@@ -195,14 +195,8 @@ export async function runServertoolEnginePostflight(args: {
       throw new Error('buildStoplessAutoCliProjectionFromEngineJson native unavailable');
     }
     const metadataCenterSnapshot = buildStoplessProjectionMetadataCenterSnapshot(options.adapterContext);
-    const adapterContextForRust = metadataCenterSnapshot
-      ? {
-          ...(options.adapterContext as Record<string, unknown>),
-          metadataCenterSnapshot
-        }
-      : options.adapterContext as Record<string, unknown>;
     const inputJson = JSON.stringify({
-      adapterContext: adapterContextForRust,
+      metadataCenterSnapshot: metadataCenterSnapshot ?? null,
       execution: engineResult.execution ?? null,
       metadataWritePlan: engineResult.metadataWritePlan ?? null,
       requestId: options.requestId ?? null

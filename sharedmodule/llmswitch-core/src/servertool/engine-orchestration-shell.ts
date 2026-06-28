@@ -26,7 +26,7 @@ import { readNativeFunction } from '../native/router-hotpath/native-shared-conve
 import {
   readProviderProtocolFromAnyBoundMetadataCenter,
   readRequestTruthSessionIdFromAnyBoundMetadataCenter,
-  readStoplessRuntimeControlFromAnyBoundMetadataCenter
+  readRuntimeControlFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
 
 function planServertoolEngineRuntimeActionWithNativeLocal(input: {
@@ -67,19 +67,20 @@ function planServertoolEngineSkipWithNative(input: {
 }): { action: string; skipReason?: string } {
   const fn = readNativeFunction('planServertoolEngineSkipJson');
   if (!fn) {
-    return { action: 'return_skipped_passthrough', skipReason: 'native_unavailable' };
+    throw new Error('planServertoolEngineSkipJson native unavailable');
   }
   const raw = fn(JSON.stringify({
     engineMode: input.engineMode,
     hasExecution: input.hasExecution
   }));
   if (typeof raw !== 'string') {
-    return { action: 'return_skipped_passthrough', skipReason: 'native_returned_non_string' };
+    throw new Error(`planServertoolEngineSkipJson native returned non-string: ${typeof raw}`);
   }
   try {
     return JSON.parse(raw);
-  } catch {
-    return { action: 'return_skipped_passthrough', skipReason: 'native_parse_failed' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`planServertoolEngineSkipJson native parse failed: ${message}`);
   }
 }
 
@@ -87,7 +88,7 @@ function planStoplessExecutionWithNativeLocal(input: {
   flowId?: string;
   execution: Record<string, unknown>;
   requestTruthSessionId?: string;
-  stoplessControl?: Record<string, unknown> | null;
+  runtimeControl?: Record<string, unknown> | null;
 }): {
   execution: Record<string, unknown>;
   orchestrationPlan: { action: string; isStopMessageFlow: boolean; reason: string };
@@ -100,7 +101,7 @@ function planStoplessExecutionWithNativeLocal(input: {
     flowId: input.flowId ?? null,
     execution: input.execution,
     requestTruthSessionId: input.requestTruthSessionId ?? null,
-    stoplessControl: input.stoplessControl ?? null
+    runtimeControl: input.runtimeControl ?? null
   }));
   if (typeof raw !== 'string') {
     throw new Error(`planStoplessExecutionJson native returned non-string: ${typeof raw}`);
@@ -285,7 +286,7 @@ export async function runServerToolOrchestrationShell(
     execution: engineResult.execution
   });
   const totalSteps = 5;
-  const stoplessControl = readStoplessRuntimeControlFromAnyBoundMetadataCenter(
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
   const requestTruthSessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(
@@ -297,8 +298,8 @@ export async function runServerToolOrchestrationShell(
           ? engineResult.execution as unknown as Record<string, unknown>
           : {},
         requestTruthSessionId,
-        stoplessControl: stoplessControl && typeof stoplessControl === 'object'
-          ? stoplessControl as Record<string, unknown>
+        runtimeControl: runtimeControl && typeof runtimeControl === 'object'
+          ? runtimeControl as Record<string, unknown>
           : null
       });
   const stoplessExecution = stoplessExecutionPlan.execution;
