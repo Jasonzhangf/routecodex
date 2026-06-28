@@ -142,8 +142,7 @@ jest.unstable_mockModule(
           seedLoopPayloadFlowIds: [],
           clientInjectSourceByFlowId: {},
           transparentReplayRequestSuffixByFlowId: {},
-          ignoreRequiresActionFollowupFlowIds: [],
-          contextDecorationModeByFlowId: {}
+          ignoreRequiresActionFollowupFlowIds: []
         }
       },
       stateConfig: {
@@ -193,7 +192,6 @@ jest.unstable_mockModule(
     buildServertoolToolOutputPayloadWithNative: jest.fn((payload: any) => payload),
     webSearchIsGeminiEngineWithNative: jest.fn(() => false),
     webSearchIsGlmEngineWithNative: jest.fn(() => false),
-    webSearchIsQwenEngineWithNative: jest.fn(() => false),
     webSearchExtractAssistantMessageWithNative: jest.fn(() => 'null'),
     webSearchBuildToolMessagesWithNative: jest.fn(() => '[]'),
     webSearchCollectHitsWithNative: jest.fn(() => '[]'),
@@ -283,8 +281,7 @@ jest.unstable_mockModule(
           seedLoopPayloadFlowIds: [],
           clientInjectSourceByFlowId: {},
           transparentReplayRequestSuffixByFlowId: {},
-          ignoreRequiresActionFollowupFlowIds: [],
-          contextDecorationModeByFlowId: {}
+          ignoreRequiresActionFollowupFlowIds: []
         }
       },
       stateConfig: {
@@ -334,7 +331,6 @@ jest.unstable_mockModule(
     buildServertoolToolOutputPayloadWithNative: jest.fn((payload: any) => payload),
     webSearchIsGeminiEngineWithNative: jest.fn(() => false),
     webSearchIsGlmEngineWithNative: jest.fn(() => false),
-    webSearchIsQwenEngineWithNative: jest.fn(() => false),
     webSearchExtractAssistantMessageWithNative: jest.fn(() => 'null'),
     webSearchBuildToolMessagesWithNative: jest.fn(() => '[]'),
     webSearchCollectHitsWithNative: jest.fn(() => '[]'),

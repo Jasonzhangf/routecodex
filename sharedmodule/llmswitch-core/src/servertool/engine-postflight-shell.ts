@@ -111,9 +111,6 @@ export async function runServertoolEnginePostflight(args: {
           summary.toolOutputContent = firstToolOutput.content;
         }
       }
-      if (engineResult.execution?.context && typeof engineResult.execution.context === 'object') {
-        summary.context = engineResult.execution.context;
-      }
       const followup = engineResult.execution?.followup;
       if (followup && typeof followup === 'object' && !Array.isArray(followup)) {
         const followupEntryEndpoint =

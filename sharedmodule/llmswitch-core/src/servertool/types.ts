@@ -150,12 +150,6 @@ export interface ServerToolExecution {
     stickyKey: string;
     previousState: Record<string, unknown> | null;
   };
-  /**
-   * Optional tool-specific context for the execution result.
-   * For example, web_search handler may attach { web_search: { engineId, providerKey, summary } }
-   * so that orchestration layer can decorate final Chat response without touching host code.
-   */
-  context?: JsonObject;
 }
 
 /**

@@ -51,8 +51,7 @@ jest.unstable_mockModule(
           seedLoopPayloadFlowIds: [],
           clientInjectSourceByFlowId: {},
           transparentReplayRequestSuffixByFlowId: {},
-          ignoreRequiresActionFollowupFlowIds: [],
-          contextDecorationModeByFlowId: {}
+          ignoreRequiresActionFollowupFlowIds: []
         }
       },
       stateConfig: skeletonDocument.servertool.state

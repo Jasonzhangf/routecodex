@@ -186,7 +186,6 @@ export type ServertoolFollowupRuntimePlanPayload = {
   ignoreRequiresActionFollowup: boolean;
   clientInjectSource?: string;
   transparentReplayRequestSuffix?: string;
-  contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
 };
 
 export type StopMessagePersistedLookupPlanPayload = {
@@ -814,9 +813,6 @@ export function parseServertoolFollowupRuntimePlanPayload(raw: string): Serverto
       : {}),
     ...(typeof plan.transparentReplayRequestSuffix === 'string' && plan.transparentReplayRequestSuffix.trim()
       ? { transparentReplayRequestSuffix: plan.transparentReplayRequestSuffix.trim() }
-      : {}),
-    ...(plan.contextDecorationMode === 'continue_execution_summary' || plan.contextDecorationMode === 'web_search_summary'
-      ? { contextDecorationMode: plan.contextDecorationMode }
       : {})
   };
 }

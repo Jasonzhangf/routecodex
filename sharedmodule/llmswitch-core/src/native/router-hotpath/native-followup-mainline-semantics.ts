@@ -28,7 +28,6 @@ export interface FollowupFlowDecision {
   clientInjectSource?: string;
   transparentReplayRequestSuffix?: string;
   ignoreRequiresActionFollowup: boolean;
-  contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
 }
 
 function requireNativeFunction(capability: string): (...args: unknown[]) => unknown {
@@ -160,7 +159,6 @@ export interface ServertoolSkeletonConfig {
         clientInjectSource?: string;
         transparentReplayRequestSuffix?: string;
         ignoreRequiresActionFollowup?: boolean;
-        contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
       }>;
     };
   };

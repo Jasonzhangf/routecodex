@@ -58,29 +58,12 @@ pub struct ServertoolBackendRouteOriginDelta {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolBackendRouteFinalizePolicy {
-    pub context_decoration_mode: Option<String>,
     pub short_circuit_requires_action: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ServertoolBackendRouteFinalizeInput {
-    pub chat: Value,
-    pub execution: Option<ServertoolBackendRouteFinalizeExecution>,
-    pub decision: Option<ServertoolBackendRouteFinalizeDecision>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ServertoolBackendRouteFinalizeExecution {
-    pub flow_id: Option<String>,
-    pub context: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct ServertoolBackendRouteFinalizeDecision {
-    pub context_decoration_mode: Option<String>,
     pub ignore_requires_action_followup: Option<bool>,
 }
 
@@ -437,7 +420,6 @@ pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
                 apply_assistant_delta: true,
             },
             finalize: ServertoolBackendRouteFinalizePolicy {
-                context_decoration_mode: Some("web_search_summary".to_string()),
                 short_circuit_requires_action: false,
             },
             input: hint.input,
@@ -462,7 +444,6 @@ pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(
                     apply_assistant_delta: true,
                 },
                 finalize: ServertoolBackendRouteFinalizePolicy {
-                    context_decoration_mode: None,
                     short_circuit_requires_action: false,
                 },
                 input: hint.input,
@@ -527,60 +508,6 @@ pub fn plan_vision_eligibility(
     }
 }
 
-pub fn decorate_servertool_final_chat_with_context(
-    input: ServertoolBackendRouteFinalizeInput,
-) -> Value {
-    let mut chat = input.chat;
-    let Some(execution) = input.execution else {
-        return chat;
-    };
-    let Some(context) = execution.context else {
-        return chat;
-    };
-    let mode = input
-        .decision
-        .and_then(|decision| normalize_context_decoration_mode(decision.context_decoration_mode));
-    match mode.as_deref() {
-        Some("continue_execution_summary") => {
-            let Some(summary) =
-                read_nested_trimmed_string(&context, &["continue_execution", "visibleSummary"])
-            else {
-                return chat;
-            };
-            decorate_first_choice_message_content(&mut chat, |base| {
-                if base.trim().is_empty() {
-                    summary.clone()
-                } else {
-                    format!("{summary}\n\n{base}")
-                }
-            });
-            chat
-        }
-        Some("web_search_summary") => {
-            let Some(summary) = read_nested_trimmed_string(&context, &["web_search", "summary"])
-            else {
-                return chat;
-            };
-            let label = match read_nested_trimmed_string(&context, &["web_search", "engineId"]) {
-                Some(engine_id) => {
-                    format!("\u{3010}web_search \u{539f}\u{6587} | engine: {engine_id}\u{3011}")
-                }
-                None => "\u{3010}web_search \u{539f}\u{6587}\u{3011}".to_string(),
-            };
-            let suffix = format!("{label}\n{summary}");
-            decorate_first_choice_message_content(&mut chat, |base| {
-                if base.trim().is_empty() {
-                    suffix.clone()
-                } else {
-                    format!("{base}\n\n{suffix}")
-                }
-            });
-            chat
-        }
-        _ => chat,
-    }
-}
-
 pub fn should_short_circuit_requires_action_followup(
     input: ServertoolBackendRouteRequiresActionShortCircuitInput,
 ) -> bool {
@@ -618,14 +545,6 @@ pub fn plan_followup_execution_mode(
         .as_ref()
         .and_then(|item| item.client_inject_only)
         .unwrap_or(false);
-    let metadata_client_inject_source =
-        metadata_object.and_then(|item| read_trimmed_string(item.get("clientInjectSource")));
-    let client_inject_source = input
-        .client_inject_source
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .or(metadata_client_inject_source.as_deref());
     let metadata_client_inject_only = input.metadata_client_inject_only
         || metadata_object
             .map(|item| read_boolish(item.get("clientInjectOnly")))
@@ -1664,44 +1583,6 @@ fn build_bootstrap_replay_payload(seed: &Value) -> Option<Value> {
     Some(Value::Object(payload))
 }
 
-fn normalize_context_decoration_mode(value: Option<String>) -> Option<String> {
-    match value.as_deref().map(str::trim) {
-        Some("continue_execution_summary") => Some("continue_execution_summary".to_string()),
-        Some("web_search_summary") => Some("web_search_summary".to_string()),
-        _ => None,
-    }
-}
-
-fn read_nested_trimmed_string(value: &Value, path: &[&str]) -> Option<String> {
-    let mut current = value;
-    for key in path {
-        current = current.get(*key)?;
-    }
-    read_trimmed_string(Some(current))
-}
-
-fn decorate_first_choice_message_content<F>(chat: &mut Value, build_content: F)
-where
-    F: FnOnce(&str) -> String,
-{
-    let Some(message) = chat
-        .get_mut("choices")
-        .and_then(Value::as_array_mut)
-        .and_then(|choices| choices.get_mut(0))
-        .and_then(Value::as_object_mut)
-        .and_then(|choice| choice.get_mut("message"))
-        .and_then(Value::as_object_mut)
-    else {
-        return;
-    };
-    let base = message
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    message.insert("content".to_string(), Value::String(build_content(&base)));
-}
-
 fn resolve_vision_skip_reason(input: &Value) -> Option<String> {
     if has_qwen_image_generation_flag(input) {
         return Some("qwen_image_generation".to_string());
@@ -2044,66 +1925,11 @@ mod tests {
     }
 
     #[test]
-    fn decorates_continue_execution_summary_without_rewriting_finish_reason() {
-        let output =
-            decorate_servertool_final_chat_with_context(ServertoolBackendRouteFinalizeInput {
-                chat: json!({
-                    "choices": [{
-                        "finish_reason": "tool_calls",
-                        "message": { "role": "assistant", "content": null }
-                    }]
-                }),
-                execution: Some(ServertoolBackendRouteFinalizeExecution {
-                    flow_id: Some("continue_execution_flow".to_string()),
-                    context: Some(json!({
-                        "continue_execution": { "visibleSummary": "ok" }
-                    })),
-                }),
-                decision: Some(ServertoolBackendRouteFinalizeDecision {
-                    context_decoration_mode: Some("continue_execution_summary".to_string()),
-                    ignore_requires_action_followup: None,
-                }),
-            });
-        assert_eq!(output["choices"][0]["message"]["content"], "ok");
-        assert_eq!(output["choices"][0]["finish_reason"], "tool_calls");
-    }
-
-    #[test]
-    fn decorates_web_search_summary_after_existing_content() {
-        let output =
-            decorate_servertool_final_chat_with_context(ServertoolBackendRouteFinalizeInput {
-                chat: json!({
-                    "choices": [{
-                        "message": { "role": "assistant", "content": "answer" }
-                    }]
-                }),
-                execution: Some(ServertoolBackendRouteFinalizeExecution {
-                    flow_id: Some("web_search_flow".to_string()),
-                    context: Some(json!({
-                        "web_search": {
-                            "engineId": "stub",
-                            "summary": "raw summary"
-                        }
-                    })),
-                }),
-                decision: Some(ServertoolBackendRouteFinalizeDecision {
-                    context_decoration_mode: Some("web_search_summary".to_string()),
-                    ignore_requires_action_followup: None,
-                }),
-            });
-        assert_eq!(
-            output["choices"][0]["message"]["content"],
-            "answer\n\n\u{3010}web_search \u{539f}\u{6587} | engine: stub\u{3011}\nraw summary"
-        );
-    }
-
-    #[test]
     fn requires_action_short_circuit_is_rust_owned() {
         assert!(should_short_circuit_requires_action_followup(
             ServertoolBackendRouteRequiresActionShortCircuitInput {
                 flow_id: Some("stop_message_flow".to_string()),
                 decision: Some(ServertoolBackendRouteFinalizeDecision {
-                    context_decoration_mode: None,
                     ignore_requires_action_followup: Some(true),
                 }),
                 has_requires_action_shape: true,
@@ -2113,7 +1939,6 @@ mod tests {
             ServertoolBackendRouteRequiresActionShortCircuitInput {
                 flow_id: Some("stop_message_flow".to_string()),
                 decision: Some(ServertoolBackendRouteFinalizeDecision {
-                    context_decoration_mode: None,
                     ignore_requires_action_followup: Some(true),
                 }),
                 has_requires_action_shape: false,

@@ -111,13 +111,9 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                             "reasoning_stop_guard_flow": {},
                             "reasoning_stop_continue_flow": {},
                             "reasoning_stop_finalize_flow": {},
-                            "continue_execution_flow": {
-                                "contextDecorationMode": "continue_execution_summary"
-                            },
+                            "continue_execution_flow": {},
 
-                            "web_search_flow": {
-                                "contextDecorationMode": "web_search_summary"
-                            }
+                            "web_search_flow": {}
                         }
                     }
                 }
@@ -369,16 +365,6 @@ fn build_followup_config(document: &Value) -> Value {
                         normalized.insert(field.to_string(), Value::String(text));
                     }
                 }
-                if let Some(mode) =
-                    profile.and_then(|item| read_trimmed_string(item.get("contextDecorationMode")))
-                {
-                    if matches!(
-                        mode.as_str(),
-                        "continue_execution_summary" | "web_search_summary"
-                    ) {
-                        normalized.insert("contextDecorationMode".to_string(), Value::String(mode));
-                    }
-                }
                 output.insert(flow_id.to_string(), Value::Object(normalized));
             }
             Value::Object(output)
@@ -396,8 +382,7 @@ fn build_followup_config(document: &Value) -> Value {
             "seedLoopPayloadFlowIds": [],
             "clientInjectSourceByFlowId": {},
             "transparentReplayRequestSuffixByFlowId": {},
-            "ignoreRequiresActionFollowupFlowIds": [],
-            "contextDecorationModeByFlowId": {}
+            "ignoreRequiresActionFollowupFlowIds": []
         }
     })
 }
@@ -785,8 +770,7 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
         "seedLoopPayload": profile_obj.and_then(|v| v.get("seedLoopPayload")).and_then(|v| v.as_bool()).unwrap_or(false),
         "ignoreRequiresActionFollowup": profile_obj.and_then(|v| v.get("ignoreRequiresActionFollowup")).and_then(|v| v.as_bool()).unwrap_or(false),
         "clientInjectSource": profile_obj.and_then(|v| v.get("clientInjectSource")).cloned().unwrap_or(serde_json::Value::Null),
-        "transparentReplayRequestSuffix": profile_obj.and_then(|v| v.get("transparentReplayRequestSuffix")).cloned().unwrap_or(serde_json::Value::Null),
-        "contextDecorationMode": profile_obj.and_then(|v| v.get("contextDecorationMode")).cloned().unwrap_or(serde_json::Value::Null)
+        "transparentReplayRequestSuffix": profile_obj.and_then(|v| v.get("transparentReplayRequestSuffix")).cloned().unwrap_or(serde_json::Value::Null)
     });
     serde_json::to_string(&runtime_plan).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -1031,11 +1015,9 @@ mod tests {
                 ["seedLoopPayload"],
             true
         );
-        assert!(
-            parsed["followupConfig"]["flowPolicy"]["profilesByFlowId"]["web_search_flow"]
-                ["contextDecorationMode"]
-                .as_str()
-                .is_some()
+        assert_eq!(
+            parsed["followupConfig"]["flowPolicy"]["profilesByFlowId"]["web_search_flow"],
+            json!({})
         );
         assert_eq!(
             parsed["stateConfig"]["scopePriority"],

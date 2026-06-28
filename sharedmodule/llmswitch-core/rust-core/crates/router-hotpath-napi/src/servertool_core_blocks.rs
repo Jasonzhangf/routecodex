@@ -4,14 +4,14 @@
 use servertool_core::auto_hook_execution_contract;
 use servertool_core::auto_hook_queue_contract;
 use servertool_core::backend_route_contract::{
-    decorate_servertool_final_chat_with_context, plan_bootstrap_replay, plan_empty_followup_error,
-    plan_followup_append_user_text, plan_followup_auto_limit_error, plan_followup_error_envelope,
-    plan_followup_execution_mode, plan_followup_materialization, plan_followup_payload_stream,
-    plan_followup_runtime_action, plan_followup_runtime_metadata, plan_hub_followup_policy_shadow,
+    plan_bootstrap_replay, plan_empty_followup_error, plan_followup_append_user_text,
+    plan_followup_auto_limit_error, plan_followup_error_envelope, plan_followup_execution_mode,
+    plan_followup_materialization, plan_followup_payload_stream, plan_followup_runtime_action,
+    plan_followup_runtime_metadata, plan_hub_followup_policy_shadow,
     plan_missing_followup_payload_error, plan_preferred_final_response,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03, plan_vision_eligibility,
-    should_short_circuit_requires_action_followup, ServertoolBackendRouteFinalizeInput,
-    ServertoolBackendRoutePolicyInput, ServertoolBackendRouteRequiresActionShortCircuitInput,
+    should_short_circuit_requires_action_followup, ServertoolBackendRoutePolicyInput,
+    ServertoolBackendRouteRequiresActionShortCircuitInput,
     ServertoolBootstrapReplayPlanInput, ServertoolEmptyFollowupErrorPlanInput,
     ServertoolFollowupAppendUserTextInput, ServertoolFollowupAutoLimitErrorPlanInput,
     ServertoolFollowupErrorPlanInput, ServertoolFollowupExecutionModeInput,
@@ -1205,13 +1205,6 @@ pub fn plan_vision_eligibility_json(input_json: &str) -> Result<String, String> 
     serde_json::to_string(&output).map_err(|e| format!("serialize vision eligibility plan: {e}"))
 }
 
-pub fn decorate_servertool_final_chat_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolBackendRouteFinalizeInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize backend route finalize input: {e}"))?;
-    let output = decorate_servertool_final_chat_with_context(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize backend route final chat: {e}"))
-}
-
 pub fn should_short_circuit_requires_action_followup_json(
     input_json: &str,
 ) -> Result<String, String> {
@@ -1666,30 +1659,6 @@ mod tests {
         )
         .expect_err("stop_message_auto is not backend route");
         assert!(err.contains("SERVERTOOL_OUTCOME_MISMATCH"));
-    }
-
-    #[test]
-    fn decorates_final_chat_via_servertool_core_bridge() {
-        let raw = decorate_servertool_final_chat_json(
-            &json!({
-                "chat": {
-                    "choices": [{
-                        "finish_reason": "tool_calls",
-                        "message": { "role": "assistant", "content": null }
-                    }]
-                },
-                "execution": {
-                    "flowId": "continue_execution_flow",
-                    "context": { "continue_execution": { "visibleSummary": "ok" } }
-                },
-                "decision": { "contextDecorationMode": "continue_execution_summary" }
-            })
-            .to_string(),
-        )
-        .expect("finalize bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["choices"][0]["message"]["content"], "ok");
-        assert_eq!(parsed["choices"][0]["finish_reason"], "tool_calls");
     }
 
     #[test]

@@ -434,7 +434,6 @@ export interface ServertoolBackendRoutePolicyOutput {
     applyAssistantDelta: boolean;
   };
   finalize: {
-    contextDecorationMode?: string;
     shortCircuitRequiresAction: boolean;
   };
   input: unknown;
@@ -447,7 +446,6 @@ export interface ServertoolVisionEligibilityPlan {
 }
 
 export interface ServertoolBackendRouteFinalizeDecision {
-  contextDecorationMode?: string;
   ignoreRequiresActionFollowup?: boolean;
 }
 
@@ -599,11 +597,6 @@ export interface ServertoolBootstrapReplayPlan {
     reason?: string;
   } | null;
   replayPayload?: Record<string, unknown> | null;
-}
-
-export interface ServertoolBackendRouteFinalizeExecution {
-  flowId?: string;
-  context?: Record<string, unknown>;
 }
 
 export type StopMessagePersistedLookupPlanOutput = ReturnType<typeof parseStopMessagePersistedLookupPlanPayload> extends infer T
@@ -3844,23 +3837,6 @@ export function planVisionEligibilityWithNative(adapterContext: unknown): Server
     throw new Error('planVisionEligibilityJson native returned invalid reason');
   }
   return plan as ServertoolVisionEligibilityPlan;
-}
-
-export function decorateServertoolFinalChatWithNative(input: {
-  chat: Record<string, unknown>;
-  execution?: ServertoolBackendRouteFinalizeExecution;
-  decision?: ServertoolBackendRouteFinalizeDecision;
-}): Record<string, unknown> {
-  const capability = 'decorateServertoolFinalChatJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('decorateServertoolFinalChatJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`decorateServertoolFinalChatJson native returned non-string: ${typeof resultJson}`);
-  }
-  return JSON.parse(resultJson) as Record<string, unknown>;
 }
 
 export function shouldShortCircuitRequiresActionFollowupWithNative(input: {

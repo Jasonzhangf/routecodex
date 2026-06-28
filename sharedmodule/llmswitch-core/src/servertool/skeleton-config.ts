@@ -42,7 +42,6 @@ type ServertoolFlowProfile = {
   clientInjectSource?: string;
   transparentReplayRequestSuffix?: string;
   ignoreRequiresActionFollowup?: boolean;
-  contextDecorationMode?: 'continue_execution_summary' | 'web_search_summary';
 };
 
 type ServertoolFollowupConfig = {
@@ -58,7 +57,6 @@ type ServertoolFollowupConfig = {
     clientInjectSourceByFlowId: Record<string, string>;
     transparentReplayRequestSuffixByFlowId: Record<string, string>;
     ignoreRequiresActionFollowupFlowIds: string[];
-    contextDecorationModeByFlowId: Record<string, 'continue_execution_summary' | 'web_search_summary'>;
   };
 };
 

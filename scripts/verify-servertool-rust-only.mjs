@@ -41,6 +41,7 @@ const RUST_FOLLOWUP_CORE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates
 const RUST_ROUTER_HOTPATH_NAPI_LIB = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`;
 const RUST_ROUTER_HOTPATH_NAPI_PROXY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs`;
 const RUST_SERVERTOOL_CORE_LOOKUP = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`;
+const RUST_SERVERTOOL_CORE_BLOCKS = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`;
 const RUST_SERVERTOOL_STOP_GATEWAY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_gateway_context.rs`;
 const RUST_SERVERTOOL_STOP_MESSAGE_COMPARE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_compare_context.rs`;
 const RUST_SERVERTOOL_COUNTER = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_counter.rs`;
@@ -3986,16 +3987,14 @@ function checkBackendRoutePolicyRustOwner() {
   const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
   const responseShell = readRequired(TS_BACKEND_ROUTE_RESPONSE);
   const visionEligibilityShell = readRequired(TS_VISION_ELIGIBILITY);
+  const rustServertoolCoreBlocks = readRequired(RUST_SERVERTOOL_CORE_BLOCKS);
   const finalizeFunctionNames = Array.from(finalizeShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
     .map((match) => match[1])
     .sort();
-  if (
-    finalizeFunctionNames.join(',') !==
-    'decorateFinalChatWithServerToolContext,shouldShortCircuitRequiresActionFollowup'
-  ) {
+  if (finalizeFunctionNames.join(',') !== 'shouldShortCircuitRequiresActionFollowup') {
     fail(
       'backend-route-finalize-ts-thin-shell',
-      `backend-route-finalize-block.ts must remain a two-function native delegate; found exports: ${finalizeFunctionNames.join(',') || '(none)'}`
+      `backend-route-finalize-block.ts must only expose the native short-circuit delegate; found exports: ${finalizeFunctionNames.join(',') || '(none)'}`
     );
   }
   const finalizeShortCircuitBlock = extractFunctionBlock(finalizeShell, 'shouldShortCircuitRequiresActionFollowup');
@@ -4005,13 +4004,30 @@ function checkBackendRoutePolicyRustOwner() {
     finalizeShortCircuitBlock,
     'shouldShortCircuitRequiresActionFollowupWithNative'
   );
-  const finalizeDecorateBlock = extractFunctionBlock(finalizeShell, 'decorateFinalChatWithServerToolContext');
-  assertContains(
-    'backend-route-finalize-ts-thin-shell',
-    TS_BACKEND_ROUTE_FINALIZE,
-    finalizeDecorateBlock,
-    'decorateServertoolFinalChatWithNative'
-  );
+  for (const [filePath, source] of [
+    [TS_BACKEND_ROUTE_FINALIZE, finalizeShell],
+    [NATIVE_SERVERTOOL_CORE_WRAPPER, readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER)],
+    [NATIVE_REQUIRED_EXPORTS, readRequired(NATIVE_REQUIRED_EXPORTS)],
+    [RUST_SERVERTOOL_BACKEND_ROUTE, rustBackendRoute],
+    [RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib],
+    [RUST_SERVERTOOL_CORE_BLOCKS, rustServertoolCoreBlocks],
+  ]) {
+    for (const marker of [
+      'decorateFinalChatWithServerToolContext',
+      'decorateServertoolFinalChatWithNative',
+      'decorateServertoolFinalChatJson',
+      'decorate_servertool_final_chat',
+      'contextDecorationMode',
+      'context_decoration_mode',
+    ]) {
+      if (source.includes(marker)) {
+        fail(
+          'backend-route-context-decoration-deleted',
+          `${filePath} must not retain backend final context decoration marker ${marker}`
+        );
+      }
+    }
+  }
   const visionEligibilityFunctionNames = Array.from(visionEligibilityShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
     .map((match) => match[1])
     .sort();

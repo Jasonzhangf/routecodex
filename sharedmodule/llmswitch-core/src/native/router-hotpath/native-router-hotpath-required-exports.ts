@@ -326,7 +326,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "extractStopMessageAutoCliResultSnapshotFromRequestJson",
   "planServertoolBackendRoutePolicyJson",
   "planVisionEligibilityJson",
-  "decorateServertoolFinalChatJson",
   "shouldShortCircuitRequiresActionFollowupJson",
   "planFollowupExecutionModeJson",
   "planFollowupAutoLimitErrorJson",
