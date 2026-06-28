@@ -980,7 +980,31 @@ class ResponsesConversationStore {
   }
 }
 
-const store = new ResponsesConversationStore();
+const RESPONSES_CONVERSATION_STORE_GLOBAL_KEY = "__rccResponsesConversationStore";
+
+function isResponsesConversationStoreLike(value: unknown): value is ResponsesConversationStore {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && typeof (value as { captureRequestContext?: unknown }).captureRequestContext === 'function'
+    && typeof (value as { recordResponse?: unknown }).recordResponse === 'function'
+    && typeof (value as { getDebugStats?: unknown }).getDebugStats === 'function'
+  );
+}
+
+function resolveProcessResponsesConversationStore(): ResponsesConversationStore {
+  const globals = globalThis as Record<string, unknown>;
+  const existing = globals[RESPONSES_CONVERSATION_STORE_GLOBAL_KEY];
+  if (isResponsesConversationStoreLike(existing)) {
+    return existing;
+  }
+  const created = new ResponsesConversationStore();
+  globals[RESPONSES_CONVERSATION_STORE_GLOBAL_KEY] = created;
+  return created;
+}
+
+const store = resolveProcessResponsesConversationStore();
 store.startPruneTimer();
 const RESPONSES_DEBUG = (process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() === '1';
 const RESPONSES_WARN_THROTTLE_MS = 60_000;
@@ -1109,4 +1133,4 @@ export function clearUnresolvedResponsesConversationRequests(): number {
 export { store as responsesConversationStore };
 
 // Expose raw store for memory-observer diagnostics
-(globalThis as Record<string, unknown>)["__rccResponsesConversationStore"] = store;
+(globalThis as Record<string, unknown>)[RESPONSES_CONVERSATION_STORE_GLOBAL_KEY] = store;
