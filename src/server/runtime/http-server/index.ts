@@ -1502,17 +1502,9 @@ export class RouteCodexHttpServer {
       inboundProtocol,
       applyPatchMode,
     });
-    if (directRouteDecision.requiresHubRelay) {
-      this.logStage('router-direct.skipped', input.requestId, {
-        reason: directRouteDecision.reason ?? 'direct_payload_requires_hub_relay',
-        inboundProtocol,
-      });
-      return {
-        used: false,
-        reason: directRouteDecision.reason ?? 'direct_payload_requires_hub_relay',
-      };
-    }
-    if (!directRouteDecision.providerWireValid) {
+    const directRequiresHubRelay = directRouteDecision.requiresHubRelay === true;
+    const directRelayReason = directRouteDecision.reason ?? 'direct_payload_requires_hub_relay';
+    if (!directRouteDecision.providerWireValid && !directRequiresHubRelay) {
       throw annotateAsHostPayloadContractError(
         buildDirectPayloadContractError(
           directRouteDecision.reason ?? 'invalid direct payload',
@@ -1617,6 +1609,23 @@ export class RouteCodexHttpServer {
       typeof target.outboundProfile === 'string' && target.outboundProfile.trim()
         ? target.outboundProfile.trim()
         : undefined;
+    if (directRequiresHubRelay) {
+      this.logStage('router-direct.skipped', input.requestId, {
+        reason: directRelayReason,
+        inboundProtocol,
+        outboundProfile: targetOutboundProfile,
+        providerKey,
+      });
+      return {
+        used: false,
+        reason: directRelayReason,
+        preselectedRoute: {
+          target,
+          decision: routingDecision,
+          diagnostics: routeResult.diagnostics,
+        },
+      };
+    }
     if (targetOutboundProfile && targetOutboundProfile !== inboundProtocol) {
       this.logStage('router-direct.skipped', input.requestId, {
         reason: 'target_outbound_profile_requires_hub_relay',
