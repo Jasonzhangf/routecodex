@@ -8,7 +8,6 @@ import {
   readProviderProtocolFromAnyBoundMetadataCenter,
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 
 export function resolveServertoolEntryContext(args: {
   options: ServerSideToolEngineOptions;
@@ -33,6 +32,12 @@ export function resolveServertoolEntryContext(args: {
   if (!providerProtocol) {
     throw new Error('Servertool entry context requires metadata center runtime_control.providerProtocol');
   }
+  const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
+    args.options.adapterContext as Record<string, unknown>
+  );
+  if (!runtimeMetadataSnapshot) {
+    throw new Error('Servertool entry context requires MetadataCenter request truth or runtime_control snapshot');
+  }
 
   return {
     action: 'continue',
@@ -44,9 +49,7 @@ export function resolveServertoolEntryContext(args: {
       requestId: args.options.requestId,
       entryEndpoint: args.options.entryEndpoint,
       providerProtocol,
-      runtimeMetadata:
-        readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(args.options.adapterContext as Record<string, unknown>)
-        ?? readRuntimeMetadata(args.options.adapterContext as Record<string, unknown>)
+      runtimeMetadata: runtimeMetadataSnapshot
     },
     includeToolCallNames: normalizeFilterTokenSet(args.options.includeToolCallHandlerNames),
     excludeToolCallNames: normalizeFilterTokenSet(args.options.excludeToolCallHandlerNames),

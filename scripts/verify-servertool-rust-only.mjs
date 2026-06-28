@@ -5367,6 +5367,18 @@ function checkStoplessNoContextDataPlane() {
       );
     }
   }
+  const entryContextShell = readRequired(`${SERVERTOOL_TS_DIR}/entry-context-shell.ts`);
+  for (const marker of [
+    "from '../conversion/runtime-metadata.js'",
+    'readRuntimeMetadata(',
+  ]) {
+    if (entryContextShell.includes(marker)) {
+      fail(
+        'stopless-no-context-data-plane',
+        `entry-context-shell.ts must not restore servertool runtime metadata from internal meta marker ${marker}; use MetadataCenter snapshot only`
+      );
+    }
+  }
   pass(
     'stopless-no-context-data-plane',
     'stopless/servertool runtime path does not carry requestSemantics/raw/context payload state'
