@@ -18,6 +18,7 @@ import {
 import {
   recordResponsesResponse,
   finalizeResponsesConversationRequestRetention,
+  responsesConversationStore,
 } from '../../shared/responses-conversation-store.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
 import {
@@ -342,6 +343,18 @@ function readResponsesContinuationSavedWithinCore(metadata?: Record<string, unkn
   return readMetadataCenterRuntimeControl(metadata).responsesContinuationSavedAtChatProcessExit === true;
 }
 
+function resolveResponsesConversationRequestLabelWithinCore(args: {
+  metadata?: Record<string, unknown>;
+  requestLabel: string;
+}): string {
+  const requestTruth = readMetadataCenterRequestTruth(args.metadata);
+  const canonicalRequestId =
+    typeof requestTruth.requestId === 'string' && requestTruth.requestId.trim()
+      ? requestTruth.requestId.trim()
+      : undefined;
+  return canonicalRequestId ?? args.requestLabel;
+}
+
 async function persistResponsesConversationLifecycleAtChatProcessExitWithinCore(args: {
   entryEndpoint?: string;
   requestLabel: string;
@@ -368,8 +381,21 @@ async function persistResponsesConversationLifecycleAtChatProcessExitWithinCore(
     typeof requestTruth.routingPolicyGroup === 'string' && requestTruth.routingPolicyGroup.trim()
       ? requestTruth.routingPolicyGroup.trim()
       : undefined;
+  if (process.env.RESPONSES_DEBUG === '1') {
+    console.log('[provider-response] record core store before', {
+      requestLabel: args.requestLabel,
+      canonicalRequestId: resolveResponsesConversationRequestLabelWithinCore({
+        metadata: args.metadata,
+        requestLabel: args.requestLabel,
+      }),
+      stats: responsesConversationStore.getDebugStats(),
+    });
+  }
   recordResponsesResponse({
-    requestId: args.requestLabel,
+    requestId: resolveResponsesConversationRequestLabelWithinCore({
+      metadata: args.metadata,
+      requestLabel: args.requestLabel,
+    }),
     response: args.body,
     ...(typeof requestTruth.sessionId === 'string' && requestTruth.sessionId.trim()
       ? { sessionId: requestTruth.sessionId.trim() }

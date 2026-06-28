@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 type MainTab = 'providers' | 'routing' | 'ops';
-type ProvidersTab = 'catalog' | 'oauth';
 type OpsTab = 'stats' | 'control';
 type DensityMode = 'compact' | 'comfortable';
 type AdvancedTab = 'control';
@@ -29,16 +28,6 @@ export type ProviderSummary = {
   authType?: string;
 };
 
-export type CredentialItem = {
-  id?: string;
-  kind?: string;
-  provider?: string;
-  alias?: string;
-  status?: string;
-  expiresInSec?: number;
-  secretRef?: string;
-};
-
 export type RoutingSource = {
   path?: string;
   label?: string;
@@ -55,6 +44,10 @@ export type StatsRow = {
   totalPromptTokens?: number;
   totalCompletionTokens?: number;
   totalOutputTokens?: number;
+};
+
+export type ProviderRuntimeKeyItem = {
+  providerKey?: string;
 };
 
 export type PeriodStatsRow = {
@@ -208,7 +201,7 @@ export function extractRoutingTargets(routing: unknown): Set<string> {
   return result;
 }
 
-export function resolveTargetToProviderKeys(target: string, providers: QuotaProvider[]): string[] {
+export function resolveTargetToProviderKeys(target: string, providers: ProviderRuntimeKeyItem[]): string[] {
   const t = target.trim();
   if (!t) return [];
   const out = new Set<string>();
@@ -222,7 +215,7 @@ export function resolveTargetToProviderKeys(target: string, providers: QuotaProv
   return Array.from(out);
 }
 
-export function resolveRoutedProviderKeys(targets: Set<string>, providers: QuotaProvider[]): Set<string> {
+export function resolveRoutedProviderKeys(targets: Set<string>, providers: ProviderRuntimeKeyItem[]): Set<string> {
   const out = new Set<string>();
   for (const target of targets) {
     for (const key of resolveTargetToProviderKeys(target, providers)) {
@@ -230,23 +223,6 @@ export function resolveRoutedProviderKeys(targets: Set<string>, providers: Quota
     }
   }
   return out;
-}
-
-export function quotaSnapshotKeyToProviderKey(snapshotKey: string): string | null {
-  const raw = snapshotKey.trim();
-  if (!raw) return null;
-  const match = raw.match(/^([^:]+):\/\/([^/]+)\/(.+)$/);
-  if (!match) {
-    return raw;
-  }
-  const [, providerId, alias, model] = match;
-  const normalizedProviderId = textOf(providerId).trim();
-  const normalizedAlias = textOf(alias).trim();
-  const normalizedModel = textOf(model).trim();
-  if (!normalizedProviderId || !normalizedAlias || !normalizedModel) {
-    return null;
-  }
-  return `${normalizedProviderId}.${normalizedAlias}.${normalizedModel}`;
 }
 
 export function statusClass(status: string): string {
@@ -377,7 +353,6 @@ function AdminAuthPanel({
 
 export function App() {
   const [mainTab, setMainTab] = useState<MainTab>('providers');
-  const [providersTab, setProvidersTab] = useState<ProvidersTab>('catalog');
   const [opsTab, setOpsTab] = useState<OpsTab>('stats');
   const [densityMode, setDensityMode] = useState<DensityMode>(() => {
     const cached = readSessionValue('routecodex:webui:density').trim().toLowerCase();
@@ -527,9 +502,7 @@ export function App() {
   };
 
   const activeViewLabel = useMemo(() => {
-    if (mainTab === 'providers') {
-      return providersTab === 'catalog' ? 'Providers / Catalog' : 'Providers / OAuth';
-    }
+    if (mainTab === 'providers') return 'Providers / Catalog';
     if (mainTab === 'routing') {
       return 'Routing / Routing Groups';
     }
@@ -540,7 +513,7 @@ export function App() {
       return 'Ops / Control Plane';
     }
     return 'Ops / Control Plane';
-  }, [mainTab, providersTab, opsTab]);
+  }, [mainTab, opsTab]);
 
   const refreshCurrentView = () => {
     setViewEpoch((v) => v + 1);
@@ -652,14 +625,9 @@ export function App() {
               Ops
             </button>
             {mainTab === 'providers' ? (
-              <>
-                <button className={providersTab === 'catalog' ? 'active' : ''} onClick={() => setProvidersTab('catalog')}>
-                  Provider Catalog
-                </button>
-                <button className={providersTab === 'oauth' ? 'active' : ''} onClick={() => setProvidersTab('oauth')}>
-                  OAuth & Credentials
-                </button>
-              </>
+              <button className="active">
+                Provider Catalog
+              </button>
             ) : null}
             {mainTab === 'routing' ? (
               <button className="active">
@@ -697,11 +665,8 @@ export function App() {
           </div>
 
           <div style={{ marginTop: 10 }}>
-            {mainTab === 'providers' && providersTab === 'catalog' ? (
+            {mainTab === 'providers' ? (
               <ProviderPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} apiKey={apiKey} onToast={showToast} />
-            ) : null}
-            {mainTab === 'providers' && providersTab === 'oauth' ? (
-              <OAuthPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
             ) : null}
             {mainTab === 'routing' ? (
               <RoutingPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
@@ -782,8 +747,6 @@ export function ProviderPage({
   const readAuthRef = (authNode: Record<string, unknown>): string => {
     const apiKeyRef = textOf(authNode.apiKey).trim();
     if (apiKeyRef) return apiKeyRef;
-    const tokenFile = textOf(authNode.tokenFile).trim();
-    if (tokenFile) return tokenFile;
     const secretRef = textOf(authNode.secretRef).trim();
     if (secretRef) return secretRef;
     return '';
@@ -1200,7 +1163,7 @@ export function ProviderPage({
             value={providerIdInput}
             onChange={(e) => setProviderIdInput(e.target.value)}
             style={{ minWidth: 220, flex: 1 }}
-            placeholder="e.g. tab / qwen / iflow"
+            placeholder="e.g. openai / glm / custom"
           />
           <button onClick={() => void loadProvider(providerIdInput)} disabled={!authenticated}>
             Load
@@ -1274,17 +1237,12 @@ export function ProviderPage({
               onChange={(e) =>
                 patchDraft((obj) => {
                   const auth = toRecord(obj.auth);
-                  const authType = textOf(auth.type || '').toLowerCase();
-                  if (authType.includes('oauth')) {
-                    auth.tokenFile = e.target.value;
-                  } else {
-                    auth.apiKey = e.target.value;
-                  }
+                  auth.apiKey = e.target.value;
                   obj.auth = auth;
                 })
               }
               style={{ minWidth: 280, flex: 1 }}
-              placeholder="tokenFile / authfile-* / env-ref"
+              placeholder="api key / authfile-* / env-ref"
             />
           </div>
         </div>
@@ -1366,248 +1324,6 @@ export function ProviderPage({
         </div>
 
         <LogBox value={log} />
-      </div>
-    </div>
-  );
-}
-
-export function OAuthPage({
-  authenticated,
-  authEpoch,
-  onToast
-}: {
-  authenticated: boolean;
-  authEpoch: number;
-  onToast: (message: string, kind?: 'ok' | 'err') => void;
-}) {
-  const [credentials, setCredentials] = useState<CredentialItem[]>([]);
-  const [oauthBrowser, setOauthBrowser] = useState<'default' | 'camoufox'>('default');
-
-  const [provider, setProvider] = useState('qwen');
-  const [alias, setAlias] = useState('default');
-  const [mode, setMode] = useState<'manual' | 'auto'>('manual');
-  const [openBrowser, setOpenBrowser] = useState(true);
-  const [forceReauthorize, setForceReauthorize] = useState(true);
-  const [headful, setHeadful] = useState(false);
-
-  const [log, setLog] = useState('');
-
-  const refreshData = async () => {
-    if (!authenticated) return;
-    try {
-      const [items, settings] = await Promise.all([
-        apiFetch<CredentialItem[]>('/daemon/credentials'),
-        apiFetch<{ oauthBrowser?: string }>('/config/settings').catch(() => ({ oauthBrowser: 'default' }))
-      ]);
-      setCredentials(Array.isArray(items) ? items : []);
-      const ob = textOf(settings?.oauthBrowser || 'default').toLowerCase();
-      setOauthBrowser(ob === 'camoufox' ? 'camoufox' : 'default');
-    } catch (error) {
-      onToast(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  useEffect(() => {
-    void refreshData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, authEpoch]);
-
-  const providerOptions = useMemo(() => {
-    const out = new Set(['qwen', 'iflow', 'tab']);
-    for (const item of credentials) {
-      const p = textOf(item.provider).trim().toLowerCase();
-      if (p) out.add(p);
-    }
-    return Array.from(out).sort();
-  }, [credentials]);
-
-  const saveSettings = async () => {
-    if (!authenticated) return;
-    try {
-      await apiFetch('/config/settings', {
-        method: 'PUT',
-        body: JSON.stringify({ oauthBrowser })
-      });
-      setLog(`Saved oauthBrowser=${oauthBrowser}`);
-      onToast('OAuth settings saved.', 'ok');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`Save settings failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  const authorize = async () => {
-    if (!authenticated) return;
-    try {
-      const out = await apiFetch<{ tokenFile?: string }>('/daemon/oauth/authorize', {
-        method: 'POST',
-        body: JSON.stringify({
-          provider,
-          alias: alias.trim() || 'default',
-          openBrowser,
-          forceReauthorize,
-          mode,
-          headful
-        })
-      });
-      setLog(`[${mode}] authorize ok. tokenFile=${out?.tokenFile || '—'}`);
-      onToast('OAuth authorize started.', 'ok');
-      await refreshData();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`[${mode}] authorize failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  const refreshCredential = async (item: CredentialItem) => {
-    if (!authenticated) return;
-    const id = textOf(item.id).trim();
-    if (!id) return;
-    try {
-      const out = await apiFetch<{ status?: string; refreshed?: boolean }>(`/daemon/credentials/${encodeURIComponent(id)}/refresh`, {
-        method: 'POST'
-      });
-      setLog(`Refresh ${id}: status=${textOf(out?.status || '—')} refreshed=${String(out?.refreshed === true)}`);
-      onToast(`Credential refreshed: ${id}`, 'ok');
-      await refreshData();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`Refresh ${id} failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  const formatExpires = (secRaw: unknown) => {
-    const sec = Number(secRaw);
-    if (!Number.isFinite(sec)) return '—';
-    if (sec <= 0) return 'expired';
-    if (sec < 60) return `${Math.round(sec)}s`;
-    if (sec < 3600) return `${Math.round(sec / 60)}m`;
-    return `${Math.round(sec / 3600)}h`;
-  };
-
-  return (
-    <div className="grid grid-wide-right">
-      <div className="panel">
-        <SectionHeader title="Auth Inventory" sub="Token files + API key authfiles under ~/.routecodex/auth" />
-        <div className="row" style={{ marginBottom: 8 }}>
-          <button className="primary" onClick={() => void refreshData()} disabled={!authenticated}>
-            Refresh
-          </button>
-        </div>
-
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>kind</th>
-                <th>provider</th>
-                <th>alias</th>
-                <th>status</th>
-                <th>expires</th>
-                <th>secretRef</th>
-                <th>action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {credentials.map((item) => {
-                const p = textOf(item.provider).trim().toLowerCase();
-                const a = textOf(item.alias || 'default').trim().toLowerCase();
-                return (
-                  <tr key={`${item.id || p}.${a}`}>
-                    <td>{textOf(item.kind || '—')}</td>
-                    <td className="mono">{textOf(item.provider || '—')}</td>
-                    <td className="mono">{textOf(item.alias || '—')}</td>
-                    <td>
-                      <span className={`pill ${statusClass(textOf(item.status || 'unknown'))}`}>{textOf(item.status || '—')}</span>
-                    </td>
-                    <td className="mono">{formatExpires(item.expiresInSec)}</td>
-                    <td className="mono">{textOf(item.secretRef || '—')}</td>
-                    <td>
-                      <div className="row">
-                        <button onClick={() => void refreshCredential(item)} disabled={!authenticated || item.kind !== 'oauth'}>
-                          Refresh
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {!credentials.length ? (
-                <tr>
-                  <td colSpan={7} className="muted">
-                    No credentials.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="panel">
-        <SectionHeader title="OAuth Workbench" sub="Manual/Auto auth controls." />
-
-        <div className="row" style={{ marginBottom: 8 }}>
-          <label>oauthBrowser</label>
-          <select value={oauthBrowser} onChange={(e) => setOauthBrowser(e.target.value === 'camoufox' ? 'camoufox' : 'default')}>
-            <option value="default">default</option>
-            <option value="camoufox">camoufox</option>
-          </select>
-          <button className="primary" onClick={() => void saveSettings()} disabled={!authenticated}>
-            Save
-          </button>
-        </div>
-
-        <div className="row" style={{ marginBottom: 8 }}>
-          <label>provider</label>
-          <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-            {providerOptions.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <label>alias</label>
-          <input value={alias} onChange={(e) => setAlias(e.target.value)} style={{ width: 180 }} />
-        </div>
-
-        <div className="row" style={{ marginBottom: 8 }}>
-          <button className={mode === 'manual' ? 'active' : ''} onClick={() => setMode('manual')}>
-            Manual Auth
-          </button>
-          <button className={mode === 'auto' ? 'active' : ''} onClick={() => setMode('auto')}>
-            Auto Auth
-          </button>
-        </div>
-
-        <div className="row" style={{ marginBottom: 8 }}>
-          <label>
-            <input type="checkbox" checked={openBrowser} onChange={(e) => setOpenBrowser(e.target.checked)} /> open browser
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={forceReauthorize}
-              onChange={(e) => setForceReauthorize(e.target.checked)}
-            />{' '}
-            force reauthorize
-          </label>
-          <label>
-            <input type="checkbox" checked={headful} onChange={(e) => setHeadful(e.target.checked)} /> headful
-          </label>
-          <button className="primary" onClick={() => void authorize()} disabled={!authenticated}>
-            Start {mode === 'manual' ? 'Manual' : 'Auto'} Auth
-          </button>
-        </div>
-
-        <AppNotice>Choose provider + alias, then run manual or auto auth.</AppNotice>
-
-        <div style={{ marginTop: 8 }}>
-          <LogBox value={log} />
-        </div>
       </div>
     </div>
   );

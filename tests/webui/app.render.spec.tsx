@@ -3,7 +3,6 @@ import { renderToString } from 'react-dom/server';
 import {
   AdvancedPage,
   App,
-  OAuthPage,
   ProviderPage,
   RoutingPage,
   StatsPage
@@ -26,9 +25,6 @@ describe('webui render smoke', () => {
 
     const provider = renderToString(<ProviderPage {...common} apiKey="" />);
     expect(provider).toContain('Provider Pool');
-
-    const oauth = renderToString(<OAuthPage {...common} />);
-    expect(oauth).toContain('Auth Inventory');
 
     const routing = renderToString(<RoutingPage {...common} />);
     expect(routing).toContain('Routing Management');

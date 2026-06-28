@@ -42,6 +42,6 @@ export type { UnknownObject } from '../../../types/common-types.js';
  * 3. createHttpTransportProvider - 便捷创建函数
  * 4. OpenAIStandardConfig - 统一配置接口
  * 5. fromV1Config - V1到V2配置转换
- * 6. ApiKeyAuthProvider/OAuthAuthProvider - 认证模块
+ * 6. ApiKeyAuthProvider - 认证模块
  * 7. SERVICE_PROFILES - 服务配置档案
  */

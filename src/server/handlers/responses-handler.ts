@@ -161,6 +161,8 @@ export async function handleResponses(
       requestContext,
     });
     const responsesPipelineCenter = MetadataCenter.attach(responsesPipelineMetadata);
+    responsesPipelineMetadata.requestId = requestId;
+    responsesPipelineMetadata.clientRequestId = clientRequestId;
     if (typeof ctx.portContext?.stopMessageEnabled === 'boolean') {
       responsesPipelineCenter.writeRuntimeControl(
         'stopMessageEnabled',

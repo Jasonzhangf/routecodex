@@ -58,30 +58,10 @@ export interface ProviderConfig {
   /** 认证配置 */
   auth?: {
     /** 认证类型 */
-    type: 'bearer' | 'oauth' | 'apikey' | 'none';
-    /** OAuth配置 */
-    oauth?: OAuthConfig;
+    type: 'bearer' | 'apikey' | 'none';
   };
   /** 提供商特定配置 */
   [key: string]: unknown;
-}
-
-/**
- * OAuth配置
- */
-export interface OAuthConfig {
-  /** 客户端ID */
-  clientId: string;
-  /** 客户端密钥 */
-  clientSecret: string;
-  /** 授权URL */
-  authUrl: string;
-  /** 令牌URL */
-  tokenUrl: string;
-  /** 重定向URL */
-  redirectUri?: string;
-  /** 作用域 */
-  scope?: string;
 }
 
 /**

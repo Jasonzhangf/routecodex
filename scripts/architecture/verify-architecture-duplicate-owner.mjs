@@ -108,9 +108,6 @@ const familyOf = (mod) => {
   if (mod.startsWith('src/manager/modules/routing')) return 'vr-bridge';
   if (mod.startsWith('src/manager/modules/health')) return 'vr-bridge';
   if (mod.startsWith('src/manager/modules/token')) return 'token-bridge';
-  if (mod.startsWith('src/token-daemon')) return 'token';
-  if (mod.startsWith('src/manager/quota')) return 'quota-lifecycle';
-  if (mod.startsWith('src/manager/modules/quota')) return 'quota-control';
   if (mod.startsWith('src/server/runtime/http-server/daemon-admin')) return 'daemon-admin';
   if (mod.startsWith('src/server/runtime/http-server')) return 'http-entry';
   if (mod.startsWith('src/server/handlers')) return 'handler-family';

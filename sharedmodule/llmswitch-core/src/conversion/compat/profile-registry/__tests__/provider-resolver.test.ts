@@ -50,10 +50,6 @@ describe('provider-resolver: config-driven resolution', () => {
       expect(detectProviderTypeFromConfig(config, { type: 'gemini' })).toBe('gemini');
     });
 
-    test('returns qwen when type contains qwen', () => {
-      expect(detectProviderTypeFromConfig(config, { type: 'qwen' })).toBe('qwen');
-    });
-
     test('returns glm when type contains glm', () => {
       expect(detectProviderTypeFromConfig(config, { type: 'glm' })).toBe('glm');
     });
@@ -95,14 +91,6 @@ describe('provider-resolver: config-driven resolution', () => {
       expect(result).toBe('anthropic');
     });
 
-    test('mirrors the original detectProviderType for qwenchat', () => {
-      const result = detectProviderTypeFromConfig(config, {
-        type: 'openai',
-        id: 'qwenchat'
-      });
-      // 'qwenchat' in id → matches 'qwen' keyword
-      expect(result).toBe('qwen');
-    });
   });
 
   // =========================================================================
@@ -119,10 +107,6 @@ describe('provider-resolver: config-driven resolution', () => {
 
     test('gemini → gemini-chat', () => {
       expect(resolveOutboundProfileFromConfig(config, 'gemini')).toBe('gemini-chat');
-    });
-
-    test('qwen → openai-chat (default)', () => {
-      expect(resolveOutboundProfileFromConfig(config, 'qwen')).toBe('openai-chat');
     });
 
     test('glm → openai-chat (default)', () => {

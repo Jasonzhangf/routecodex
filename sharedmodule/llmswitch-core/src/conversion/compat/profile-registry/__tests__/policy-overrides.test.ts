@@ -33,8 +33,7 @@ describe('shouldSkipPolicy', () => {
     expect(shouldSkipPolicy(overrides, 'enforce')).toBe(false);
   });
 
-  test('mirrors hardcoded deepseek-web skip behavior', () => {
-    // This mirrors: if (compatibilityProfile === 'chat:deepseek-web') return;
+  test('supports skipping a phase from profile config', () => {
     const overrides: PolicyOverrideConfig = { observe: { skip: true }, enforce: { skip: true } };
     expect(shouldSkipPolicy(overrides, 'observe')).toBe(true);
     expect(shouldSkipPolicy(overrides, 'enforce')).toBe(true);

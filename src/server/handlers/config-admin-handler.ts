@@ -172,7 +172,7 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       });
     }
 
-    // 3) 内置模板集合：标准 provider 只给协议级引导；OAuth/account provider 保留宿主管理模板
+    // 3) 内置模板集合：标准 provider 只给协议级引导
     const templates = getBootstrapProviderTemplates().map((template) => {
       const providerNode = isRecord(template.provider) ? template.provider : {};
       const authNode = isRecord(providerNode.auth) ? providerNode.auth : undefined;

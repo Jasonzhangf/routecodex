@@ -1,4 +1,5 @@
 // feature_id: hub.route_selection_bridge
+use napi::Env;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -39,6 +40,7 @@ use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::stopless_auto_handler_bridge::{
     build_stopless_auto_cli_projection_from_engine_json, run_stopless_auto_handler_runtime_json,
 };
+use crate::virtual_router_engine::VirtualRouterEngineCore;
 use crate::vr_route_04_selection_boundary::apply_vr_route_04_selection;
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
@@ -67,6 +69,21 @@ fn read_entry_provider_protocol(
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
         })
+}
+
+fn has_explicit_provider_retry_exclusions(metadata: &Value) -> bool {
+    metadata
+        .get("excludedProviderKeys")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items.iter().any(|item| {
+                item.as_str()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .is_some()
+            })
+        })
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -120,12 +137,56 @@ impl HubPipelineEngine {
                 "diagnostics": {}
             }));
         }
-        read_preselected_route(metadata_center_snapshot, metadata).ok_or_else(|| {
-            HubPipelineError::new(
-                "hub_pipeline_missing_preselected_route",
-                "Rust HubPipeline req route stage requires metadata.runtime_control.preselectedRoute for bootstrapped virtual router config",
-            )
-        })
+        if let Some(route) = read_preselected_route(metadata_center_snapshot, metadata) {
+            return Ok(route);
+        }
+        if has_explicit_provider_retry_exclusions(metadata) {
+            return self.select_explicit_provider_retry_route(request, metadata, metadata_center_snapshot);
+        }
+        Err(HubPipelineError::new(
+            "hub_pipeline_missing_preselected_route",
+            "Rust HubPipeline req route stage requires metadata.runtime_control.preselectedRoute for bootstrapped virtual router config",
+        ))
+    }
+
+    fn select_explicit_provider_retry_route(
+        &self,
+        request: &Value,
+        metadata: &Value,
+        metadata_center_snapshot: &Value,
+    ) -> HubPipelineResult<Value> {
+        let mut metadata_for_router = serde_json::json!({
+            "metadataCenterSnapshot": metadata_center_snapshot,
+        });
+        if let Some(excluded_provider_keys) = metadata
+            .get("excludedProviderKeys")
+            .and_then(|value| value.as_array())
+            .cloned()
+        {
+            if let Some(row) = metadata_for_router.as_object_mut() {
+                row.insert(
+                    "excludedProviderKeys".to_string(),
+                    Value::Array(excluded_provider_keys),
+                );
+            }
+        }
+        let mut router = VirtualRouterEngineCore::new();
+        router
+            .initialize(&self.config.virtual_router)
+            .map_err(|message| {
+                HubPipelineError::new(
+                    "hub_pipeline_virtual_router_retry_init_failed",
+                    format!("Rust HubPipeline explicit provider retry VR init failed: {}", message),
+                )
+            })?;
+        router
+            .route(unsafe { Env::from_raw(std::ptr::null_mut()) }, request, &metadata_for_router)
+            .map_err(|message| {
+                HubPipelineError::new(
+                    "hub_pipeline_virtual_router_retry_route_failed",
+                    format!("Rust HubPipeline explicit provider retry VR route failed: {}", message),
+                )
+            })
     }
 
     pub fn execute(

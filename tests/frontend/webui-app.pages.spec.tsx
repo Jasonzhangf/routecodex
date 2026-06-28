@@ -4,7 +4,6 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import {
   ControlPage,
-  OAuthPage,
   ProviderPage,
   RoutingPage,
   StatsPage
@@ -34,43 +33,43 @@ function installPageFetchMock() {
     if (path === '/config/providers/v2' && method === 'GET') {
       return json([
         {
-          id: 'qwen',
+          id: 'demo',
           family: 'openai',
           protocol: 'compat:passthrough',
           enabled: true,
-          defaultModels: ['qwen-max', 'qwen-plus'],
-          credentialsRef: 'authfile-qwen-default',
+          defaultModels: ['demo-max', 'demo-plus'],
+          credentialsRef: 'authfile-demo-default',
           version: '2.0.0'
         }
       ]);
     }
-    if (path === '/config/providers/v2/qwen' && method === 'GET') {
+    if (path === '/config/providers/v2/demo' && method === 'GET') {
       return json({
-        id: 'qwen',
+        id: 'demo',
         version: '2.0.0',
         provider: {
-          id: 'qwen',
+          id: 'demo',
           type: 'openai',
           providerType: 'openai',
           enabled: true,
           baseURL: 'https://example.com/v1',
           compatibilityProfile: 'compat:passthrough',
-          models: { 'qwen-max': {}, 'qwen-plus': {} },
-          auth: { type: 'oauth', tokenFile: 'default' }
+          models: { 'demo-max': {}, 'demo-plus': {} },
+          auth: { type: 'apikey', apiKey: '' }
         }
       });
     }
     if (path === '/config/providers/v2' && method === 'POST') {
-      return json({ ok: true, path: '/tmp/provider/qwen/config.v2.json' });
+      return json({ ok: true, path: '/tmp/provider/demo/config.v2.json' });
     }
-    if (path === '/config/providers/v2/qwen' && method === 'DELETE') {
-      return json({ ok: true, path: '/tmp/provider/qwen/config.v2.json' });
+    if (path === '/config/providers/v2/demo' && method === 'DELETE') {
+      return json({ ok: true, path: '/tmp/provider/demo/config.v2.json' });
     }
     if (path === '/providers/runtimes' && method === 'GET') {
       return json([
         {
-          providerKey: 'qwen.default.qwen-max',
-          runtimeKey: 'qwen.default.qwen-max',
+          providerKey: 'demo.default.demo-max',
+          runtimeKey: 'demo.default.demo-max',
           family: 'openai',
           protocol: 'compat:passthrough',
           enabled: true
@@ -82,27 +81,27 @@ function installPageFetchMock() {
       return json({
         providers: [
           {
-            id: 'qwen',
+            id: 'demo',
             type: 'openai',
             enabled: true,
             baseURL: 'https://example.com/v1',
             modelCount: 2,
-            modelsPreview: ['qwen-max'],
+            modelsPreview: ['demo-max'],
             compatibilityProfile: 'openai',
-            authType: 'oauth'
+            authType: 'apikey'
           }
         ]
       });
     }
-    if (path === '/config/providers/qwen' && method === 'GET') {
+    if (path === '/config/providers/demo' && method === 'GET') {
       return json({
         provider: {
-          id: 'qwen',
+          id: 'demo',
           type: 'openai',
           enabled: true,
           baseURL: 'https://example.com/v1',
-          models: { 'qwen-max': {}, 'qwen-plus': {} },
-          auth: { type: 'oauth', tokenFile: 'default' }
+          models: { 'demo-max': {}, 'demo-plus': {} },
+          auth: { type: 'apikey', apiKey: '' }
         }
       });
     }
@@ -118,36 +117,6 @@ function installPageFetchMock() {
     if (path === '/v1/responses' && method === 'POST') {
       return json({ output_text: 'pong' });
     }
-
-    if (path === '/daemon/credentials' && method === 'GET') {
-      return json([
-        {
-          id: 'cred-qwen',
-          kind: 'oauth',
-          provider: 'qwen',
-          alias: 'default',
-          status: 'valid',
-          expiresInSec: 1200,
-          secretRef: 'oauth-qwen-default'
-        }
-      ]);
-    }
-    if (path === '/config/settings' && method === 'GET') {
-      return json({ oauthBrowser: 'default' });
-    }
-    if (path === '/config/settings' && method === 'PUT') {
-      return json({ ok: true });
-    }
-    if (path === '/daemon/oauth/authorize' && method === 'POST') {
-      return json({ ok: true, tokenFile: 'qwen-default.json' });
-    }
-    if (path.startsWith('/daemon/credentials/') && path.endsWith('/refresh') && method === 'POST') {
-      return json({ ok: true, status: 'valid', refreshed: true });
-    }
-    if (path === '/daemon/oauth/open' && method === 'POST') {
-      return json({ ok: true });
-    }
-
     if (path === '/config/routing/sources' && method === 'GET') {
       return json({
         activePath: '/tmp/config.json',
@@ -156,7 +125,7 @@ function installPageFetchMock() {
     }
     if (path === '/config/routing/groups' && method === 'GET') {
       return json({
-        groups: { default: { routing: { default: [{ targets: ['qwen.default.qwen-max'] }] } } },
+        groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
         activeGroupId: 'default',
         location: 'virtualrouter.routing',
         path: '/tmp/config.json'
@@ -164,7 +133,7 @@ function installPageFetchMock() {
     }
     if (path.startsWith('/config/routing/groups/') && method === 'PUT') {
       return json({
-        groups: { default: { routing: { default: [{ targets: ['qwen.default.qwen-max'] }] } } },
+        groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
         activeGroupId: 'default',
         location: 'virtualrouter.routing',
         path: '/tmp/config.json'
@@ -172,7 +141,7 @@ function installPageFetchMock() {
     }
     if (path === '/config/routing/groups/activate' && method === 'POST') {
       return json({
-        groups: { default: { routing: { default: [{ targets: ['qwen.default.qwen-max'] }] } } },
+        groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
         activeGroupId: 'default',
         location: 'virtualrouter.routing',
         path: '/tmp/config.json'
@@ -182,7 +151,7 @@ function installPageFetchMock() {
       return json({ ok: true, action: body.action || 'unknown' });
     }
     if (path === '/config/routing' && method === 'GET') {
-      return json({ routing: { default: [{ targets: ['qwen.default.qwen-max'] }] } });
+      return json({ routing: { default: [{ targets: ['demo.default.demo-max'] }] } });
     }
 
     if (path === '/daemon/stats' && method === 'GET') {
@@ -190,8 +159,8 @@ function installPageFetchMock() {
         session: {
           totals: [
             {
-              providerKey: 'qwen.default.qwen-max',
-              model: 'qwen-max',
+              providerKey: 'demo.default.demo-max',
+              model: 'demo-max',
               requestCount: 9,
               errorCount: 1,
               totalPromptTokens: 100,
@@ -203,8 +172,8 @@ function installPageFetchMock() {
         historical: {
           totals: [
             {
-              providerKey: 'qwen.default.qwen-max',
-              model: 'qwen-max',
+              providerKey: 'demo.default.demo-max',
+              model: 'demo-max',
               requestCount: 99,
               errorCount: 5,
               totalPromptTokens: 1000,
@@ -238,7 +207,7 @@ function installPageFetchMock() {
         nowMs: Date.now(),
         servers: [{ port: 3000, version: 'test', ready: true, pids: [123] }],
         quota: {
-          providers: [{ providerKey: 'qwen.default.qwen-max', inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null }]
+          providers: [{ providerKey: 'demo.default.demo-max', inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null }]
         },
         serverTool: {
           state: { enabled: true, updatedAtMs: Date.now(), updatedBy: 'test' },
@@ -280,26 +249,17 @@ describe('webui page-level coverage', () => {
     const providerEditorPanel = screen.getByText('Provider Editor').closest('.panel') as HTMLElement;
     const modelPanel = screen.getByText('Models + Test + Authfile').closest('.panel') as HTMLElement;
     const providerIdInput = screen.getByLabelText('provider id') as HTMLInputElement;
-    fireEvent.change(providerIdInput, { target: { value: 'qwen' } });
+    fireEvent.change(providerIdInput, { target: { value: 'demo' } });
     fireEvent.click(within(providerEditorPanel).getByText('Load'));
     onToast.mockClear();
     fireEvent.click(within(providerEditorPanel).getByText('Save'));
     await waitFor(() => expect(hasToast('Provider saved.')).toBe(true));
-    fireEvent.change(within(modelPanel).getByPlaceholderText('new model id'), { target: { value: 'qwen-next' } });
+    fireEvent.change(within(modelPanel).getByPlaceholderText('new model id'), { target: { value: 'demo-next' } });
     fireEvent.click(within(modelPanel).getByText('Add Model'));
     onToast.mockClear();
     fireEvent.click(within(modelPanel).getByText('Test Provider (/v1/responses)'));
     await waitFor(() => expect(hasToast('Provider test passed.')).toBe(true));
     providerView.unmount();
-
-    const oauthView = render(<OAuthPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('OAuth Workbench')).toBeTruthy());
-    const oauthPanel = screen.getByText('OAuth Workbench').closest('.panel') as HTMLElement;
-    onToast.mockClear();
-    fireEvent.click(screen.getByText('Save'));
-    await waitFor(() => expect(hasToast('OAuth settings saved.')).toBe(true));
-    oauthView.unmount();
-
     const routingView = render(<RoutingPage authenticated authEpoch={1} onToast={onToast} />);
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
     routingView.unmount();

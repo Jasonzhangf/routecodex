@@ -60,13 +60,11 @@ export type InitCommandContext = {
   fsImpl?: typeof fs;
   pathImpl?: typeof path;
   prompt?: (question: string) => Promise<string>;
-  prepareCamoufoxEnvironment?: () => boolean;
 };
 
 export type InitCommandOptions = {
   config?: string;
   force?: boolean;
-  camoufox?: boolean;
   providers?: string;
   defaultProvider?: string;
   defaultModel?: string;

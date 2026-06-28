@@ -302,11 +302,6 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       return;
     }
 
-    if (path === '/token-auth/demo' && isLocalhostRequest(req)) {
-      next();
-      return;
-    }
-
     res.status(401).json({
       error: {
         message: 'Unauthorized',

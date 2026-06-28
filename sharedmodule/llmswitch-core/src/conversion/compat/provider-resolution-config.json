@@ -3,7 +3,6 @@
     { "keywords": ["anthropic", "claude"], "providerType": "anthropic" },
     { "keywords": ["responses"], "providerType": "responses" },
     { "keywords": ["gemini"], "providerType": "gemini" },
-    { "keywords": ["qwen"], "providerType": "qwen" },
     { "keywords": ["glm"], "providerType": "glm" },
     { "keywords": ["lmstudio"], "providerType": "lmstudio" }
   ],

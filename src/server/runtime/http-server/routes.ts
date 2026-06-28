@@ -606,9 +606,6 @@ export function registerHttpRoutes(options: RouteOptions): void {
     getServerPort: () => (typeof config?.server?.port === 'number' ? config.server.port : undefined)
   });
 
-  // OAuth Portal route is registered early in constructor, so we skip it here
-  // to avoid duplicate route registration
-
   app.post('/shutdown', (req: Request, res: Response) => {
     try {
       const ip = req.socket?.remoteAddress || '';

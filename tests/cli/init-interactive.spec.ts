@@ -72,14 +72,14 @@ describe('init interactive helpers', () => {
   it('handles provider selection/default picker and host-port prompts', async () => {
     const catalog = [
       { id: 'openai', label: 'OpenAI' },
-      { id: 'qwen', label: 'Qwen' }
+      { id: 'glm', label: 'GLM' }
     ] as Array<{ id: string; label: string }>;
 
     const selected = await interactiveSelectProviders(queuePrompt(['1', '2', 'd']), catalog as any);
-    expect(selected.map((item) => item.id).sort()).toEqual(['openai', 'qwen']);
+    expect(selected.map((item) => item.id).sort()).toEqual(['glm', 'openai']);
 
     const defaultProvider = await interactivePickDefaultProvider(queuePrompt(['2']), selected as any);
-    expect(defaultProvider).toBe('qwen');
+    expect(defaultProvider).toBe('glm');
     const defaultFallback = await interactivePickDefaultProvider(queuePrompt(['']), selected as any);
     expect(defaultFallback).toBe('openai');
 
@@ -102,7 +102,7 @@ describe('init interactive helpers', () => {
       default: [{ targets: ['openai.gpt-4.1'] }],
       thinking: [{ targets: ['openai.gpt-4.1'] }],
       tools: [{ targets: ['openai.gpt-4.1'] }],
-      longcontext: [{ targets: ['qwen.qwen-plus'] }]
+      longcontext: [{ targets: ['glm.glm-4.7'] }]
     };
     const prompt = queuePrompt([
       '', // keep default
@@ -114,14 +114,14 @@ describe('init interactive helpers', () => {
       'default', // edit summary
       'openai.gpt-5.2', // set default in summary
       'thinking', // edit summary
-      'qwen.qwen-plus', // set thinking
+      'glm.glm-4.7', // set thinking
       'save'
     ]);
     const routing = await interactiveRoutingWizard(prompt, existing as any, 'openai.gpt-4.1');
     expect(routing).not.toBeNull();
     expect((routing as any).default[0].targets[0]).toMatch(/^openai\./);
-    expect((routing as any).thinking[0].targets[0]).toBe('qwen.qwen-plus');
-    expect((routing as any).longcontext[0].targets[0]).toBe('qwen.qwen-plus');
+    expect((routing as any).thinking[0].targets[0]).toBe('glm.glm-4.7');
+    expect((routing as any).longcontext[0].targets[0]).toBe('glm.glm-4.7');
   });
 
   it('validates routing target format and supports cancel from wizard', async () => {

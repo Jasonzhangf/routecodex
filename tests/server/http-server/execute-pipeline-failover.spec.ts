@@ -56,13 +56,13 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
 
   it('does not inject startupExcludedProviderKeys into hub metadata in request-executor path', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
-    const providerKey = 'deepseek-web.1.deepseek-chat';
+    const providerKey = 'demo-web.1.demo-chat';
     const runtimeKey = 'runtime:B';
 
-    server.startupExcludedProviderKeys = new Set(['deepseek-web.2.deepseek-chat']);
+    server.startupExcludedProviderKeys = new Set(['demo-web.2.demo-chat']);
 
     const hubExecute = attachHubPipeline(server, async () => ({
-      providerPayload: { model: 'deepseek-chat' },
+      providerPayload: { model: 'demo-chat' },
       target: {
         providerKey,
         providerType: 'openai',
@@ -79,8 +79,8 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerKey,
       runtimeKey,
       providerType: 'openai',
-      providerFamily: 'deepseek',
-      providerId: 'deepseek-web',
+      providerFamily: 'deep',
+      providerId: 'demo-web',
       providerProtocol: 'openai-chat',
       processIncoming: async () => ({ status: 200, data: { ok: true } })
     });
@@ -250,7 +250,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
   it('re-enters hub pipeline when runtime resolve fails for selected provider', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
-    const providerA = 'deepseek-web.1.deepseek-chat.deepseek-chat';
+    const providerA = 'demo-web.1.demo-chat.demo-chat';
     const providerB = 'crs.key1.gpt-5.3-codex.gpt-5.3-codex';
 
     const hubExecute = attachHubPipeline(server, async (input: any) => {
@@ -273,12 +273,12 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         };
       }
       return {
-        providerPayload: { model: 'deepseek-chat' },
+        providerPayload: { model: 'demo-chat' },
         target: {
           providerKey: providerA,
           providerType: 'responses',
           outboundProfile: 'openai-responses',
-          runtimeKey: 'deepseek-web.1',
+          runtimeKey: 'demo-web.1',
           processMode: 'standard'
         },
         routingDecision: { routeName: 'longcontext' },
@@ -315,7 +315,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
   it('re-enters hub pipeline when upstream response status is 502', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
-    const providerA = 'deepseek-web.1.deepseek-chat.deepseek-chat';
+    const providerA = 'demo-web.1.demo-chat.demo-chat';
     const providerB = 'crs.key1.gpt-5.3-codex.gpt-5.3-codex';
 
     const hubExecute = attachHubPipeline(server, async (input: any) => {
@@ -338,7 +338,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         };
       }
       return {
-        providerPayload: { model: 'deepseek-chat' },
+        providerPayload: { model: 'demo-chat' },
         target: {
           providerKey: providerA,
           providerType: 'responses',
@@ -356,8 +356,8 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerKey: providerA,
       runtimeKey: 'runtime:A',
       providerType: 'responses',
-      providerFamily: 'deepseek',
-      providerId: 'deepseek-web',
+      providerFamily: 'deep',
+      providerId: 'demo-web',
       providerProtocol: 'openai-responses',
       processIncoming: async () => ({ status: 502, data: { error: { message: 'upstream bad gateway' } } })
     });

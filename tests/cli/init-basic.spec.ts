@@ -9,7 +9,6 @@ import {
   backupFileBestEffort,
   buildRouting,
   buildV2ConfigFromExisting,
-  collectOauthTokenNames,
   collectProviderKeyMasks,
   computeBackupPath,
   ensureTargetProvidersExist,
@@ -168,21 +167,15 @@ describe('init basic utilities', () => {
         enabled: true,
         baseURL: 'https://api.example.com/v1',
         models: { a: {}, b: {} },
-        auth: {
-          type: 'oauth',
-          apiKey: 'abc123xyz',
-          tokenFile: '/tmp/token-main.json',
-          entries: [{ alias: 'acc1', tokenFile: '/tmp/token-1.json' }]
-        }
+        auth: { type: 'apikey', apiKey: 'abc123xyz' }
       }
     };
     expect(maskSecretTail3('abc123')).toBe('****123');
     expect(collectProviderKeyMasks(asRecord(payload.provider))).toEqual(['****xyz']);
-    expect(collectOauthTokenNames(asRecord(payload.provider))).toEqual(['token-main.json', 'acc1(token-1.json)']);
 
     const line = getProviderSummaryLine('demo', payload);
     expect(line).toContain('models=2');
-    expect(line).toContain('oauth=');
+    expect(line).not.toContain('oauth=');
     expect(line).toContain('baseURL=https://api.example.com/v1');
 
     const lines: string[] = [];
@@ -218,8 +211,11 @@ describe('init basic utilities', () => {
   });
 
   it('checks missing target providers and builds v2 config object', () => {
-    const routing = buildRouting('openai.gpt-4.1', { thinking: 'missing.model' });
-    const missing = ensureTargetProvidersExist(routing, new Set(['openai']));
+    const routing = buildRouting('openai.gpt-4.1');
+    const missing = ensureTargetProvidersExist(
+      { ...routing, tools: [{ targets: ['missing.model'] }] },
+      new Set(['openai'])
+    );
     expect(missing).toEqual(['missing.model']);
 
     const nextConfig = buildV2ConfigFromExisting({ legacy: true }, routing, '127.0.0.1', 5555);

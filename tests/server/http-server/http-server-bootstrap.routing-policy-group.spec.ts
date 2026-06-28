@@ -13,10 +13,10 @@ describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => 
             routing: {
               coding: [
                 {
-                  targets: ['llmgate.deepseek-v4-pro', 'mini27.MiniMax-M2.7'],
+                  targets: ['llmgate.demo-v4-pro', 'mini27.MiniMax-M2.7'],
                   loadBalancing: {
                     weights: {
-                      'llmgate.deepseek-v4-pro': 1,
+                      'llmgate.demo-v4-pro': 1,
                       'mini27.MiniMax-M2.7': 1,
                     },
                   },
@@ -29,7 +29,7 @@ describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => 
               ],
               default: [
                 {
-                  target: 'qwenchat.qwen3.6-plus',
+                  target: 'demochat.demo3.6-plus',
                 },
               ],
             },
@@ -42,7 +42,7 @@ describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => 
       'llmgate',
       'mimo',
       'mini27',
-      'qwenchat',
+      'demochat',
     ]);
   });
 

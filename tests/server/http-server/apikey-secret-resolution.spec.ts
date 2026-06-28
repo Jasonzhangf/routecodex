@@ -67,15 +67,15 @@ describe('apikey secret resolution', () => {
     await expect((server as any).resolveApiKeyValue(runtime, auth)).rejects.toThrow(/missing api key/i);
   });
 
-  it('allows empty apikey for qwenchat-guest remote runtime', async () => {
+  it('allows empty apikey for demochat-guest remote runtime', async () => {
     const server = await createServer();
     const runtime = {
-      runtimeKey: 'qwenchat.key1',
-      providerId: 'qwenchat',
-      baseURL: 'https://chat.qwen.ai',
-      auth: { type: 'apikey', rawType: 'qwenchat-guest' }
+      runtimeKey: 'demochat.key1',
+      providerId: 'demochat',
+      baseURL: 'https://chat.demo.ai',
+      auth: { type: 'apikey', rawType: 'demochat-guest' }
     };
-    const auth = { type: 'apikey', rawType: 'qwenchat-guest', value: '' };
+    const auth = { type: 'apikey', rawType: 'demochat-guest', value: '' };
     const resolved = await (server as any).resolveApiKeyValue(runtime, auth);
     expect(resolved).toBe('');
   });

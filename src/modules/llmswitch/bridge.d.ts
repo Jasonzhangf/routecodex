@@ -4,7 +4,7 @@
  * Single boundary module for llmswitch-core integration.
  */
 import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../types/llmswitch-local-types.js';
-export type { ProviderErrorEvent, ProviderSuccessEvent, ProviderUsageEvent, StaticQuotaConfig, QuotaState, QuotaStore, QuotaStoreSnapshot } from '../../types/llmswitch-local-types.js';
+export type { ProviderErrorEvent, ProviderSuccessEvent, ProviderUsageEvent } from '../../types/llmswitch-local-types.js';
 export { importCoreDist, requireCoreDist, resolveImplForSubpath, resolveCoreModulePath, type AnyRecord, type LlmsImpl } from './bridge/module-loader.js';
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests, type SnapshotRecorder } from './bridge/snapshot-recorder.js';
 export { convertProviderResponse } from './bridge/response-converter.js';

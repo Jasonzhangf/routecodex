@@ -34,7 +34,7 @@ describe('models route port scoping', () => {
     await fs.mkdir(path.join(providerRoot, 'DF'), { recursive: true });
     await fs.writeFile(
       path.join(providerRoot, 'DF', 'config.v2.toml'),
-      `version = "2.0.0"\nproviderId = "DF"\n\n[provider]\nid = "DF"\nenabled = true\ntype = "openai"\nbaseURL = "https://www.dreamfield.top/v1"\n\n[provider.auth]\ntype = "apikey"\napiKey = "test"\n\n[provider.models."deepseek-v4-pro"]\nsupportsStreaming = true\naliases = ["deepseek-v4-pro"]\n\n[provider.models."deepseek-v4-flash"]\nsupportsStreaming = true\n`,
+      `version = "2.0.0"\nproviderId = "DF"\n\n[provider]\nid = "DF"\nenabled = true\ntype = "openai"\nbaseURL = "https://www.dreamfield.top/v1"\n\n[provider.auth]\ntype = "apikey"\napiKey = "test"\n\n[provider.models."demo-v4-pro"]\nsupportsStreaming = true\naliases = ["demo-v4-pro"]\n\n[provider.models."demo-v4-flash"]\nsupportsStreaming = true\n`,
       'utf8'
     );
     const app = express();
@@ -51,8 +51,8 @@ describe('models route port scoping', () => {
           routingPolicyGroups: {
             gateway_coding_10000: {
               routing: {
-                coding: [{ targets: ['DF.deepseek-v4-pro'] }],
-                tools: [{ targets: ['DF.deepseek-v4-flash'] }]
+                coding: [{ targets: ['DF.demo-v4-pro'] }],
+                tools: [{ targets: ['DF.demo-v4-flash'] }]
               }
             }
           }
@@ -66,9 +66,9 @@ describe('models route port scoping', () => {
         const body = await response.json();
         const models = readModelsPayload(body);
         const ids = models.map((x: any) => x.id).sort();
-        expect(ids).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro', 'gpt-5.5']);
-        expect(models.find((x: any) => x.id === 'deepseek-v4-pro').owned_by).toBe('DF');
-        expect(models.find((x: any) => x.id === 'deepseek-v4-flash').owned_by).toBe('DF');
+        expect(ids).toEqual(['demo-v4-flash', 'demo-v4-pro', 'gpt-5.5']);
+        expect(models.find((x: any) => x.id === 'demo-v4-pro').owned_by).toBe('DF');
+        expect(models.find((x: any) => x.id === 'demo-v4-flash').owned_by).toBe('DF');
       });
     } finally {
       if (restoreRccHome === undefined) delete process.env.RCC_HOME; else process.env.RCC_HOME = restoreRccHome;

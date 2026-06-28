@@ -882,6 +882,16 @@ export async function captureResponsesPipelineRequestContextForHttp(args: {
   requestContext: ResponsesRequestContextForHttp;
   providerKey?: string;
 }): Promise<void> {
+  if (process.env.RESPONSES_DEBUG === '1') {
+    console.log('[responses-request-bridge] capture-pipeline-context', {
+      entryEndpoint: args.entryEndpoint,
+      requestId: args.requestId,
+      hasPayload: Boolean(args.requestContext?.payload),
+      hasContext: Boolean(args.requestContext?.context),
+      sessionId: args.requestContext?.sessionId,
+      conversationId: args.requestContext?.conversationId,
+    });
+  }
   if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
     return;
   }

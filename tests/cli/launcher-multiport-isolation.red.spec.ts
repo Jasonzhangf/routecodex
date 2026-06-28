@@ -119,7 +119,6 @@ describe('launcher multi-port isolation red tests', () => {
       },
       ensurePortAvailable: async () => undefined,
       ensureLocalTokenPortalEnv: async () => undefined,
-      ensureTokenDaemonAutoStart: async () => undefined,
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
       setupKeypress: () => () => undefined,

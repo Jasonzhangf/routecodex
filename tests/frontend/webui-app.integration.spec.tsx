@@ -14,8 +14,6 @@ describe('webui integration flows (feature coverage)', () => {
     'provider.manage_models',
     'provider.authfile_create',
     'provider.delete',
-    'oauth.settings_save',
-    'oauth.auto_authorize',
     'routing.group_create_copy',
     'routing.group_save',
     'routing.activate_local',
@@ -31,7 +29,7 @@ describe('webui integration flows (feature coverage)', () => {
   const routingGroups: Record<string, JsonRecord> = {
     default: {
       routing: {
-        default: [{ targets: ['qwen.default.qwen-max'] }]
+        default: [{ targets: ['demo.default.demo-max'] }]
       },
       loadBalancing: { strategy: 'round-robin' }
     }
@@ -40,28 +38,7 @@ describe('webui integration flows (feature coverage)', () => {
   const state = {
     authenticated: true,
     hasPassword: true,
-    oauthBrowser: 'default',
-    activeGroupId: 'default',
-    credentials: [
-      {
-        id: 'cred-qwen',
-        kind: 'oauth',
-        provider: 'qwen',
-        alias: 'default',
-        status: 'valid',
-        expiresInSec: 3600,
-        secretRef: 'oauth-qwen-default'
-      },
-      {
-        id: 'cred-qwen-work',
-        kind: 'oauth',
-        provider: 'qwen',
-        alias: 'work',
-        status: 'expired',
-        expiresInSec: -1,
-        secretRef: 'oauth-qwen-work'
-      }
-    ]
+    activeGroupId: 'default'
   };
   const fault = {
     controlMutateFail: false,
@@ -105,22 +82,22 @@ describe('webui integration flows (feature coverage)', () => {
 
     providers.clear();
 
-    providers.set('qwen', {
-      id: 'qwen',
+    providers.set('demo', {
+      id: 'demo',
       type: 'openai',
       enabled: true,
       baseURL: 'https://example.com/v1',
       compatibilityProfile: 'openai',
-      auth: { type: 'oauth', tokenFile: 'default' },
+      auth: { type: 'apikey', apiKey: '' },
       models: {
-        'qwen-max': {},
-        'qwen-plus': {}
+        'demo-max': {},
+        'demo-plus': {}
       }
     });
 
     routingGroups.default = {
       routing: {
-        default: [{ targets: ['qwen.default.qwen-max'] }]
+        default: [{ targets: ['demo.default.demo-max'] }]
       },
       loadBalancing: { strategy: 'round-robin' }
     };
@@ -130,29 +107,7 @@ describe('webui integration flows (feature coverage)', () => {
 
     state.authenticated = true;
     state.hasPassword = true;
-    state.oauthBrowser = 'default';
     state.activeGroupId = 'default';
-
-    state.credentials = [
-      {
-        id: 'cred-qwen',
-        kind: 'oauth',
-        provider: 'qwen',
-        alias: 'default',
-        status: 'valid',
-        expiresInSec: 3600,
-        secretRef: 'oauth-qwen-default'
-      },
-      {
-        id: 'cred-qwen-work',
-        kind: 'oauth',
-        provider: 'qwen',
-        alias: 'work',
-        status: 'expired',
-        expiresInSec: -1,
-        secretRef: 'oauth-qwen-work'
-      }
-    ];
     fault.controlMutateFail = false;
     fault.clockFetchFail = false;
 
@@ -298,37 +253,6 @@ describe('webui integration flows (feature coverage)', () => {
       if (path === '/v1/responses' && method === 'POST') {
         return json({ output_text: 'pong from mock upstream' });
       }
-
-      if (path === '/daemon/credentials' && method === 'GET') {
-        return json(state.credentials);
-      }
-
-      if (path === '/config/settings' && method === 'GET') {
-        return json({ oauthBrowser: state.oauthBrowser });
-      }
-      if (path === '/config/settings' && method === 'PUT') {
-        state.oauthBrowser = typeof body.oauthBrowser === 'string' ? body.oauthBrowser : state.oauthBrowser;
-        return json({ ok: true, oauthBrowser: state.oauthBrowser });
-      }
-
-      if (path === '/daemon/oauth/authorize' && method === 'POST') {
-        return json({ ok: true, tokenFile: `${body.provider || 'provider'}-${body.alias || 'default'}.json` });
-      }
-
-      if (path.startsWith('/daemon/credentials/') && path.endsWith('/refresh') && method === 'POST') {
-        const id = decodeURIComponent(path.split('/')[3] || '');
-        const item = state.credentials.find((x) => x.id === id);
-        if (item) {
-          item.status = 'valid';
-          item.expiresInSec = 3600;
-        }
-        return json({ ok: true, status: 'valid', refreshed: true });
-      }
-
-      if (path === '/daemon/oauth/open' && method === 'POST') {
-        return json({ ok: true });
-      }
-
       if (path === '/config/routing/sources' && method === 'GET') {
         return json({
           ok: true,
@@ -380,8 +304,8 @@ describe('webui integration flows (feature coverage)', () => {
           session: {
             totals: [
               {
-                providerKey: 'qwen.default.qwen-max',
-                model: 'qwen-max',
+                providerKey: 'demo.default.demo-max',
+                model: 'demo-max',
                 requestCount: 10,
                 errorCount: 1,
                 totalPromptTokens: 100,
@@ -393,8 +317,8 @@ describe('webui integration flows (feature coverage)', () => {
           historical: {
             totals: [
               {
-                providerKey: 'qwen.default.qwen-max',
-                model: 'qwen-max',
+                providerKey: 'demo.default.demo-max',
+                model: 'demo-max',
                 requestCount: 100,
                 errorCount: 3,
                 totalPromptTokens: 1000,
@@ -521,30 +445,6 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(within(providerEditorPanel).getByText('Delete'));
     await waitFor(() => expect(screen.getByText(/Provider deleted\./)).toBeTruthy());
     hit('provider.delete');
-
-    // OAuth page
-    fireEvent.click(screen.getByText('OAuth & Credentials'));
-    await waitFor(() => expect(screen.getByText('Auth Inventory')).toBeTruthy());
-
-    const oauthPanel = panelByTitle('OAuth Workbench');
-    const oauthBrowserSelect = oauthPanel.querySelector('select') as HTMLSelectElement;
-    expect(oauthBrowserSelect).toBeTruthy();
-    fireEvent.change(oauthBrowserSelect, { target: { value: 'camoufox' } });
-    fireEvent.click(within(oauthPanel).getByText('Save'));
-    await waitFor(() => expect(screen.getByText(/OAuth settings saved\./)).toBeTruthy());
-    hit('oauth.settings_save');
-
-    fireEvent.click(within(oauthPanel).getByText('Auto Auth'));
-    const oauthProviderSelect = oauthPanel.querySelectorAll('select')[1] as HTMLSelectElement;
-    expect(oauthProviderSelect).toBeTruthy();
-    fireEvent.change(oauthProviderSelect, { target: { value: 'tab' } });
-    const oauthAliasInput = oauthPanel.querySelector('input[style*="width: 180px"]') as HTMLInputElement;
-    expect(oauthAliasInput).toBeTruthy();
-    fireEvent.change(oauthAliasInput, { target: { value: 'work' } });
-    fireEvent.click(within(oauthPanel).getByText('Start Auto Auth'));
-    await waitFor(() => expect(screen.getByText(/OAuth authorize started\./)).toBeTruthy());
-    hit('oauth.auto_authorize');
-
     // Routing page
     fireEvent.click(screen.getByText('Routing'));
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
@@ -637,11 +537,6 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(within(modelPanel).getByText('Create authfile'));
     await waitFor(() => expect(screen.getByText(/api key is required/i)).toBeTruthy());
     expect((within(modelPanel).getByText('Apply to provider') as HTMLButtonElement).disabled).toBe(true);
-
-    fireEvent.click(screen.getByText('OAuth & Credentials'));
-    await waitFor(() => expect(screen.getByText('OAuth Workbench')).toBeTruthy());
-    fireEvent.click(screen.getByText('Routing'));
-    await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
     const routingPanel = panelByTitle('Routing Management');
     fireEvent.click(screen.getByText('Create/Copy Group'));
     await waitFor(() => expect(screen.getByText(/new group id is required/i)).toBeTruthy());

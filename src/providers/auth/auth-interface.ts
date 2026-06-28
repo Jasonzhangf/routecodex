@@ -1,7 +1,7 @@
 /**
  * Auth Interface - 认证接口定义
  *
- * 定义统一的认证接口，支持API Key和OAuth认证
+ * 定义统一的 API key 认证接口
  */
 
 import type { ApiKeyAuth } from '../core/api/provider-config.js';
@@ -9,7 +9,7 @@ import type { ApiKeyAuth } from '../core/api/provider-config.js';
 /**
  * 认证提供者接口
  *
- * 统一的认证接口，支持不同类型的认证方式
+ * 统一的 API key 认证接口
  */
 export interface IAuthProvider {
   readonly type: 'apikey';

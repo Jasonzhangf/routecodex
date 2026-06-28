@@ -21,9 +21,6 @@ const TS_OWNER_WHITELIST = new Set([
   'server.responses_sse_bridge_surface', // SSE-side opaque bridge shell
   'server.responses_response_handler_bridge_surface', // response-side opaque bridge shell
   'cli.command_surface', // CLI dispatch shell
-  'manager.token_runtime', // token-daemon is the unique owner; no Rust twin
-  'quota.unified_control_surface', // control surface bridge over Rust host
-  'manager.quota_lifecycle', // lifecycle bridge over TS provider-quota-center
   'config.path_resolution_surface', // path resolution surface is TS config glue
   'config.user_config_codec', // user config codec is TS config glue
   'config.provider_config_codec', // provider config codec is TS config glue

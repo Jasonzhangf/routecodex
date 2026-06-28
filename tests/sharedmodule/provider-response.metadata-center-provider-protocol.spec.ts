@@ -90,6 +90,9 @@ jest.unstable_mockModule(
 const { convertProviderResponse } = await import(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
 );
+const { recordResponsesResponse } = await import(
+  '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js'
+);
 
 const TEST_METADATA_WRITER = {
   module: 'tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts',
@@ -102,6 +105,7 @@ describe('provider response metadata center providerProtocol contract', () => {
     executeHubPipelineWithNativeMock.mockReset();
     normalizeProviderResponseEffectPlanWithNativeMock.mockClear();
     materializeProviderResponseSsePayloadWithNativeMock.mockClear();
+    recordResponsesResponse.mockClear();
     executeHubPipelineWithNativeMock.mockReturnValue({
       success: true,
       payload: {
@@ -140,12 +144,12 @@ describe('provider response metadata center providerProtocol contract', () => {
 
   it('prefers bound MetadataCenter runtimeControl.providerProtocol over external providerProtocol option', async () => {
     const context: Record<string, unknown> = {
-      requestId: 'req_provider_response_center_protocol',
-      entryEndpoint: '/v1/chat/completions',
+      requestId: 'openai-responses-provider-20260628T184855563-416867-1902',
+      entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-chat'
     };
     const center = MetadataCenter.attach(context);
-    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('requestId', 'openai-responses-router-20260628T184855563-416867-1902', TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRuntimeControl(
       'providerProtocol',
@@ -166,7 +170,7 @@ describe('provider response metadata center providerProtocol contract', () => {
         usage: { input_tokens: 1, output_tokens: 1 }
       },
       context: context as any,
-      entryEndpoint: '/v1/chat/completions',
+      entryEndpoint: '/v1/responses',
       wantsStream: false
     });
 
@@ -175,6 +179,9 @@ describe('provider response metadata center providerProtocol contract', () => {
       request: expect.objectContaining({
         providerProtocol: 'anthropic-messages',
       })
+    }));
+    expect(recordResponsesResponse).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'openai-responses-router-20260628T184855563-416867-1902'
     }));
     expect(result.body?.choices?.[0]?.message?.content).toBe('center protocol wins');
   });

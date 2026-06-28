@@ -442,6 +442,43 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   }
 
   const center = MetadataCenter.attach(metadata);
+  const initialRequestTruth = center.readRequestTruth();
+  if (input.requestId && !initialRequestTruth.requestId) {
+    center.writeRequestTruth(
+      'requestId',
+      input.requestId,
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'ServerReqInbound01ClientRaw'
+      },
+      'request entry request id'
+    );
+  }
+  if (input.entryEndpoint && !initialRequestTruth.entryEndpoint) {
+    center.writeRequestTruth(
+      'entryEndpoint',
+      input.entryEndpoint,
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'ServerReqInbound01ClientRaw'
+      },
+      'request entry endpoint'
+    );
+  }
+  if (typeof metadata.clientRequestId === 'string' && metadata.clientRequestId.trim() && !initialRequestTruth.clientRequestId) {
+    center.writeRequestTruth(
+      'clientRequestId',
+      metadata.clientRequestId.trim(),
+      {
+        module: 'src/server/runtime/http-server/executor-metadata.ts',
+        symbol: 'buildRequestMetadata',
+        stage: 'ServerReqInbound01ClientRaw'
+      },
+      'request entry client request id'
+    );
+  }
   const entryPortCandidate =
     typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort)
       ? Math.floor(portContext.matchedPort)

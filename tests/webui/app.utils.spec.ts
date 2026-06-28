@@ -7,14 +7,13 @@ import {
   formatTs,
   parseJsonObject,
   prettyJson,
-  quotaSnapshotKeyToProviderKey,
   resolveRoutedProviderKeys,
   resolveTargetToProviderKeys,
   readSessionValue,
   statusClass,
   textOf,
   writeSessionValue,
-  type QuotaProvider
+  type ProviderRuntimeKeyItem
 } from '../../webui/src/App';
 
 describe('webui App utilities', () => {
@@ -63,7 +62,7 @@ describe('webui App utilities', () => {
   it('extractRoutingTargets and resolver map targets to provider keys', () => {
     const routing = {
       default: [
-        { targets: ['qwen', 'tab.work.gpt-4'] },
+        { targets: ['demo', 'tab.work.gpt-4'] },
         { targets: ['tab'] }
       ],
       tools: [{ targets: ['mock.provider.model-a'] }]
@@ -72,38 +71,32 @@ describe('webui App utilities', () => {
     const targets = extractRoutingTargets(routing);
     expect(Array.from(targets).sort()).toEqual([
       'mock.provider.model-a',
-      'qwen',
+      'demo',
       'tab',
       'tab.work.gpt-4'
     ]);
 
-    const providers: QuotaProvider[] = [
-      { providerKey: 'qwen.default.qwen-max' },
-      { providerKey: 'qwen.work.qwen-plus' },
+    const providers: ProviderRuntimeKeyItem[] = [
+      { providerKey: 'demo.default.demo-max' },
+      { providerKey: 'demo.work.demo-plus' },
       { providerKey: 'tab.key1.gpt-5' },
       { providerKey: 'tab.work.gpt-4' },
       { providerKey: 'mock.provider.model-a' }
     ];
 
-    expect(resolveTargetToProviderKeys('qwen', providers).sort()).toEqual([
-      'qwen.default.qwen-max',
-      'qwen.work.qwen-plus'
+    expect(resolveTargetToProviderKeys('demo', providers).sort()).toEqual([
+      'demo.default.demo-max',
+      'demo.work.demo-plus'
     ]);
 
     const resolved = resolveRoutedProviderKeys(targets, providers);
     expect(Array.from(resolved).sort()).toEqual([
       'mock.provider.model-a',
-      'qwen.default.qwen-max',
-      'qwen.work.qwen-plus',
+      'demo.default.demo-max',
+      'demo.work.demo-plus',
       'tab.key1.gpt-5',
       'tab.work.gpt-4'
     ]);
-  });
-
-  it('normalizes quota snapshot keys back to provider keys', () => {
-    expect(quotaSnapshotKeyToProviderKey('tab://work/gpt-4')).toBe('tab.work.gpt-4');
-    expect(quotaSnapshotKeyToProviderKey('qwen.default.qwen-max')).toBe('qwen.default.qwen-max');
-    expect(quotaSnapshotKeyToProviderKey('')).toBeNull();
   });
 
   it('statusClass maps status to semantic classes', () => {

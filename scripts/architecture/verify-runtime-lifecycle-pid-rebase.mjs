@@ -5,7 +5,6 @@
 // Forbidden patterns:
 // - join(<someHome>, `server-${port}.pid`)
 // - join(<someHome>, `daemon-stop-${port}.json`)
-// - resolveRccPath('token-daemon.pid') used as the pid file path
 // - `daemon-stop-${Math.floor(port)}.json` literal in the new helper module
 //
 // The gate is intentionally source-level: it cannot see runtime behaviour, but
@@ -42,18 +41,6 @@ const checks = [
     file: 'src/utils/daemon-stop-intent.ts',
     forbidden: [/daemon-stop-\$\{Math\.floor\(port\)\}\.json/],
     required: [/from\s+'\.\/server-runtime-stop-intent\.js'/]
-  },
-  {
-    label: 'src/cli.ts token-daemon pid path is sourced from helper',
-    file: 'src/cli.ts',
-    forbidden: [/resolveRccPath\('token-daemon\.pid'\)/],
-    required: [/resolveTokenDaemonPidPath\(\)/]
-  },
-  {
-    label: 'src/commands/token-daemon.ts pid path is sourced from helper',
-    file: 'src/commands/token-daemon.ts',
-    forbidden: [/resolveRccPath\('token-daemon\.pid'\)/],
-    required: [/resolveTokenDaemonPidPath\(\)/]
   },
   {
     label: 'src/config/user-data-paths.ts exposes runtime-lifecycle subdir',

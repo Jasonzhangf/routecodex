@@ -190,18 +190,6 @@ describe('HTTP apikey auth (optional)', () => {
     }
   });
 
-  it('keeps /token-auth/demo reachable from localhost (for oauth portal)', async () => {
-    const expected = 'test-apikey';
-    const { server, baseUrl, configDir, restoreEnv } = await startTestServer(expected, '0.0.0.0');
-    try {
-      const portal = await getJson(baseUrl, '/token-auth/demo');
-      expect(portal.status).toBe(200);
-      expect(String(portal.body)).toContain('<html');
-    } finally {
-      await stopTestServer(server, configDir, restoreEnv);
-    }
-  });
-
   it('keeps /shutdown reachable from localhost so cli stop can work on apikey-protected servers', async () => {
     const expected = 'test-apikey';
     const { raw, baseUrl } = await startStubMiddlewareServer(expected);

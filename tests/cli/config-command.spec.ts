@@ -827,7 +827,7 @@ describe('cli init command', () => {
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch).toBeUndefined();
   });
 
-  it('init (non-interactive) ignores unknown qwen and still avoids webSearch injection for glm', async () => {
+  it('init (non-interactive) ignores an unknown provider and still avoids webSearch injection for glm', async () => {
     const writes = new Map<string, string>();
     const program = new Command();
     createInitCommand(program, {
@@ -860,213 +860,13 @@ describe('cli init command', () => {
     });
 
     await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'glm,qwen', '--force'],
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'glm,openai', '--force'],
       { from: 'node' }
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search).toBeUndefined();
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch).toBeUndefined();
-  });
-
-  it('init (non-interactive) injects deepseek webSearch defaults when deepseek-web is selected', async () => {
-    const writes = new Map<string, string>();
-    const program = new Command();
-    createInitCommand(program, {
-      logger: {
-        info: () => {},
-        warning: () => {},
-        success: () => {},
-        error: () => {}
-      },
-      createSpinner: async () =>
-        ({
-          start: () => ({} as any),
-          succeed: () => {},
-          fail: () => {},
-          warn: () => {},
-          info: () => {},
-          stop: () => {},
-          text: ''
-        }) as any,
-      fsImpl: {
-        existsSync: () => false,
-        readFileSync: () => '',
-        writeFileSync: (p: any, content: any) => {
-          writes.set(String(p), String(content));
-        },
-        mkdirSync: () => {}
-      },
-      pathImpl: path as any,
-      getHomeDir: () => '/tmp'
-    });
-
-    await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'deepseek-web', '--force'],
-      { from: 'node' }
-    );
-
-    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(
-      parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.tools?.[0]?.loadBalancing?.weights?.[
-        'deepseek-web.deepseek-v4-flash-nothinking'
-      ]
-    ).toBe(1);
-    expect(
-      parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.loadBalancing?.weights?.[
-        'deepseek-web.deepseek-v4-flash-search-nothinking'
-      ]
-    ).toBe(1);
-    expect(
-      parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.multimodal?.[0]?.loadBalancing?.weights?.[
-        'deepseek-web.deepseek-v4-vision'
-      ]
-    ).toBe(1);
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
-      'deepseek-web.deepseek-v4-flash-search-nothinking'
-    );
-  });
-
-  it('init (non-interactive) keeps deepseek as the only webSearch engine when glm has no webSearch binding', async () => {
-    const writes = new Map<string, string>();
-    const program = new Command();
-    createInitCommand(program, {
-      logger: {
-        info: () => {},
-        warning: () => {},
-        success: () => {},
-        error: () => {}
-      },
-      createSpinner: async () =>
-        ({
-          start: () => ({} as any),
-          succeed: () => {},
-          fail: () => {},
-          warn: () => {},
-          info: () => {},
-          stop: () => {},
-          text: ''
-        }) as any,
-      fsImpl: {
-        existsSync: () => false,
-        readFileSync: () => '',
-        writeFileSync: (p: any, content: any) => {
-          writes.set(String(p), String(content));
-        },
-        mkdirSync: () => {}
-      },
-      pathImpl: path as any,
-      getHomeDir: () => '/tmp'
-    });
-
-    await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'deepseek-web,glm', '--force'],
-      { from: 'node' }
-    );
-
-    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(
-      Object.keys(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.loadBalancing?.weights || {})
-    ).toEqual(['deepseek-web.deepseek-v4-flash-search-nothinking']);
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.default).toBe(true);
-    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
-      'deepseek-web.deepseek-v4-flash-search-nothinking'
-    );
-  });
-
-  it('init prepares camoufox environment when selected provider requires oauth/deepseek fingerprint', async () => {
-    const writes = new Map<string, string>();
-    let prepareCalls = 0;
-    const program = new Command();
-    createInitCommand(program, {
-      logger: {
-        info: () => {},
-        warning: () => {},
-        success: () => {},
-        error: () => {}
-      },
-      createSpinner: async () =>
-        ({
-          start: () => ({} as any),
-          succeed: () => {},
-          fail: () => {},
-          warn: () => {},
-          info: () => {},
-          stop: () => {},
-          text: ''
-        }) as any,
-      fsImpl: {
-        existsSync: () => false,
-        readFileSync: () => '',
-        writeFileSync: (p: any, content: any) => {
-          writes.set(String(p), String(content));
-        },
-        mkdirSync: () => {}
-      },
-      pathImpl: path as any,
-      getHomeDir: () => '/tmp',
-      prepareCamoufoxEnvironment: () => {
-        prepareCalls += 1;
-        return true;
-      }
-    });
-
-    await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'deepseek-web', '--force'],
-      { from: 'node' }
-    );
-
-    expect(writes.has('/tmp/config.json')).toBe(true);
-    expect(prepareCalls).toBe(1);
-  });
-
-  it('init supports explicit --camoufox trigger even when selected provider does not require it', async () => {
-    const writes = new Map<string, string>();
-    let prepareCalls = 0;
-    const program = new Command();
-    createInitCommand(program, {
-      logger: {
-        info: () => {},
-        warning: () => {},
-        success: () => {},
-        error: () => {}
-      },
-      createSpinner: async () =>
-        ({
-          start: () => ({} as any),
-          succeed: () => {},
-          fail: () => {},
-          warn: () => {},
-          info: () => {},
-          stop: () => {},
-          text: ''
-        }) as any,
-      fsImpl: {
-        existsSync: () => false,
-        readFileSync: () => '',
-        writeFileSync: (p: any, content: any) => {
-          writes.set(String(p), String(content));
-        },
-        mkdirSync: () => {}
-      },
-      pathImpl: path as any,
-      getHomeDir: () => '/tmp',
-      prepareCamoufoxEnvironment: () => {
-        prepareCalls += 1;
-        return true;
-      }
-    });
-
-    await program.parseAsync(
-      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'openai', '--camoufox', '--force'],
-      { from: 'node' }
-    );
-
-    expect(writes.has('/tmp/config.json')).toBe(true);
-    expect(prepareCalls).toBe(1);
   });
 
   it('init creates a minimal v2 config when config is missing and no providers are specified', async () => {
@@ -1251,13 +1051,7 @@ describe('cli init command', () => {
               providerId: 'glm',
               provider: {
                 enabled: false,
-                auth: {
-                  type: 'device-oauth',
-                  entries: [
-                    { alias: 'alice', tokenFile: '~/.routecodex/auth/gemini-oauth-1-alice.json' },
-                    { alias: 'bob', tokenFile: '~/.routecodex/auth/gemini-oauth-2-bob.json' }
-                  ]
-                },
+                auth: { type: 'apikey', apiKey: '${GLM_API_KEY}' },
                 models: { 'glm-4.7': {} }
               }
             });
@@ -1274,10 +1068,8 @@ describe('cli init command', () => {
     await program.parseAsync(['node', 'routecodex', 'init', '--list-current-providers'], { from: 'node' });
 
     expect(infos.join('\n')).toContain('Configured providers (2):');
-    expect(infos.join('\n')).toContain('openai | enabled | models=2 | keys=1 [****123] | oauth=- | baseURL=https://api.openai.com');
-    expect(infos.join('\n')).toContain(
-      'glm | disabled | models=1 | keys=0 | oauth=alice(gemini-oauth-1-alice.json), bob(gemini-oauth-2-bob.json) | baseURL=(unset)'
-    );
+    expect(infos.join('\n')).toContain('openai | enabled | models=2 | keys=1 [****123] | baseURL=https://api.openai.com');
+    expect(infos.join('\n')).toContain('glm | disabled | models=1 | keys=0 | baseURL=(unset)');
   });
 
   it('v2 maintenance menu can list providers', async () => {
@@ -1348,7 +1140,7 @@ describe('cli init command', () => {
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
 
     expect(infos.join('\n')).toContain('Configured providers (1):');
-    expect(infos.join('\n')).toContain('openai | enabled | models=1 | keys=1 [****789] | oauth=- | baseURL=(unset)');
+    expect(infos.join('\n')).toContain('openai | enabled | models=1 | keys=1 [****789] | baseURL=(unset)');
     expect(infos.join('\n')).toContain('Exit without saving changes to main config.');
     expect(writes.some((item) => item === '/tmp/config.json')).toBe(false);
   });
@@ -2219,7 +2011,7 @@ describe('init-config', () => {
     expect(writes.has('/tmp/config.json')).toBe(false);
   });
 
-  it('returns invalid_selection when initializeConfigV1 receives glm plus unknown qwen', async () => {
+  it('returns invalid_selection when initializeConfigV1 receives glm plus an unknown provider', async () => {
     const writes = new Map<string, string>();
     const result = await initializeConfigV1(
       {
@@ -2231,7 +2023,7 @@ describe('init-config', () => {
         },
         pathImpl: path as any
       },
-      { configPath: '/tmp/config.json', force: true, providers: ['glm', 'qwen'] }
+      { configPath: '/tmp/config.json', force: true, providers: ['glm', 'missing-provider'] }
     );
 
     expect(result.ok).toBe(false);
@@ -2239,62 +2031,6 @@ describe('init-config', () => {
       expect(result.reason).toBe('invalid_selection');
     }
     expect(writes.has('/tmp/config.json')).toBe(false);
-  });
-
-  it('writes deepseek webSearch defaults when deepseek-web is selected', async () => {
-    const writes = new Map<string, string>();
-    const result = await initializeConfigV1(
-      {
-        fsImpl: {
-          existsSync: () => false,
-          mkdirSync: () => {},
-          readFileSync: () => '',
-          writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
-        },
-        pathImpl: path as any
-      },
-      { configPath: '/tmp/config.json', force: true, providers: ['deepseek-web'] }
-    );
-
-    expect(result.ok).toBe(true);
-    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.tools[0].loadBalancing.weights).toMatchObject({
-      'deepseek-web.deepseek-v4-flash-nothinking': 1
-    });
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
-    expect(
-      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)[0]
-    ).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
-    expect(
-      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.multimodal[0].loadBalancing.weights)[0]
-    ).toBe('deepseek-web.deepseek-v4-vision');
-  });
-
-  it('keeps deepseek as the only webSearch engine when glm has no webSearch binding', async () => {
-    const writes = new Map<string, string>();
-    const result = await initializeConfigV1(
-      {
-        fsImpl: {
-          existsSync: () => false,
-          mkdirSync: () => {},
-          readFileSync: () => '',
-          writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
-        },
-        pathImpl: path as any
-      },
-      { configPath: '/tmp/config.json', force: true, providers: ['deepseek-web', 'glm'] }
-    );
-
-    expect(result.ok).toBe(true);
-    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].default).toBe(true);
-    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-v4-flash-search-nothinking');
-    expect(
-      Object.keys(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].loadBalancing.weights)
-    ).toEqual(['deepseek-web.deepseek-v4-flash-search-nothinking']);
   });
 
   it('does not inject webSearch defaults when glm is not selected', async () => {

@@ -5,7 +5,6 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import {
   App,
   ControlPage,
-  OAuthPage,
   ProviderPage,
   RoutingPage,
   StatsPage
@@ -148,14 +147,12 @@ describe('webui edge coverage', () => {
     await waitFor(() => expect(screen.getByText('serverId: edge-daemon')).toBeTruthy());
   });
 
-  it('covers provider/oauth/routing edge branches and failure paths', async () => {
+  it('covers provider/routing edge branches and failure paths', async () => {
     const onToast = jest.fn();
     const hasToast = (needle: string) => onToast.mock.calls.some(([msg]) => String(msg).includes(needle));
 
     let responseTestCalls = 0;
     let apiKeyCredentialCalls = 0;
-    let oauthQuotaCalls = 0;
-    let oauthSettingsCalls = 0;
     let routingActivateCalls = 0;
 
     global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -165,12 +162,12 @@ describe('webui edge coverage', () => {
       if (path === '/config/providers/v2' && method === 'GET') {
         return responseJson([
           {
-            id: 'qwen',
+            id: 'demo',
             family: 'openai',
             protocol: 'compat:passthrough',
             enabled: true,
-            defaultModels: ['qwen-max'],
-            credentialsRef: 'authfile-qwen-default',
+            defaultModels: ['demo-max'],
+            credentialsRef: 'authfile-demo-default',
             version: '2.0.0'
           }
         ]);
@@ -178,8 +175,8 @@ describe('webui edge coverage', () => {
       if (path === '/providers/runtimes' && method === 'GET') {
         return responseJson([
           {
-            providerKey: 'qwen.default.qwen-max',
-            runtimeKey: 'qwen.default.qwen-max',
+            providerKey: 'demo.default.demo-max',
+            runtimeKey: 'demo.default.demo-max',
             family: 'openai',
             protocol: 'compat:passthrough',
             enabled: true
@@ -192,16 +189,16 @@ describe('webui edge coverage', () => {
       if (path === '/config/providers/missing' && method === 'GET') {
         return responseJson({ error: { message: 'provider not found' } }, 404);
       }
-      if (path === '/config/providers/v2/qwen' && method === 'GET') {
+      if (path === '/config/providers/v2/demo' && method === 'GET') {
         return responseJson({
           version: '2.0.0',
           provider: {
-            id: 'qwen',
+            id: 'demo',
             type: 'openai',
             enabled: true,
             baseURL: 'https://example.com/v1',
-            models: { 'qwen-max': {} },
-            auth: { type: 'oauth', tokenFile: 'default' }
+            models: { 'demo-max': {} },
+            auth: { type: 'apikey', apiKey: '' }
           }
         });
       }
@@ -225,45 +222,10 @@ describe('webui edge coverage', () => {
       if (path === '/daemon/credentials/apikey' && method === 'POST') {
         apiKeyCredentialCalls += 1;
         if (apiKeyCredentialCalls === 1) {
-          return responseJson({ ok: true, secretRef: 'authfile-qwen-default' });
+          return responseJson({ ok: true, secretRef: 'authfile-demo-default' });
         }
         return responseJson({ error: { message: 'apikey service down' } }, 500);
       }
-
-      // OAuth page
-      if (path === '/daemon/credentials' && method === 'GET') {
-        return responseJson([
-          {
-            id: 'cred-qwen',
-            kind: 'oauth',
-            provider: 'qwen',
-            alias: 'default',
-            status: 'expired',
-            expiresInSec: -1,
-            secretRef: 'oauth-qwen-default'
-          }
-        ]);
-      }
-      if (path === '/config/settings' && method === 'GET') {
-        oauthSettingsCalls += 1;
-        if (oauthSettingsCalls === 1) {
-          return responseJson({ error: { message: 'settings unavailable' } }, 500);
-        }
-        return responseJson({ oauthBrowser: 'default' });
-      }
-      if (path === '/config/settings' && method === 'PUT') {
-        return responseJson({ error: { message: 'save settings failed' } }, 500);
-      }
-      if (path === '/daemon/oauth/authorize' && method === 'POST') {
-        return responseJson({ error: { message: 'authorize failed' } }, 500);
-      }
-      if (path === '/daemon/credentials/cred-qwen/refresh' && method === 'POST') {
-        return responseJson({ error: { message: 'refresh failed' } }, 500);
-      }
-      if (path === '/daemon/oauth/open' && method === 'POST') {
-        return responseJson({ error: { message: 'open verify failed' } }, 500);
-      }
-
       // Routing page
       if (path === '/config/routing/sources' && method === 'GET') {
         return responseJson({
@@ -274,8 +236,8 @@ describe('webui edge coverage', () => {
       if (path === '/config/routing/groups' && method === 'GET') {
         return responseJson({
           groups: {
-            default: { routing: { default: [{ targets: ['qwen.default.qwen-max'] }] } },
-            canary: { routing: { default: [{ targets: ['qwen.default.qwen-max'] }] } }
+            default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } },
+            canary: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } }
           },
           activeGroupId: 'default',
           location: 'virtualrouter.routing',
@@ -288,7 +250,7 @@ describe('webui edge coverage', () => {
       if (path === '/config/routing/groups/canary' && method === 'DELETE') {
         return responseJson({
           groups: {
-            default: { routing: { default: [{ targets: ['qwen.default.qwen-max'] }] } }
+            default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } }
           },
           activeGroupId: 'default',
           location: 'virtualrouter.routing',
@@ -324,7 +286,7 @@ describe('webui edge coverage', () => {
     fireEvent.click(screen.getByText('Load'));
     await waitFor(() => expect(hasToast('provider not found')).toBe(true));
 
-    fireEvent.change(screen.getByLabelText('provider id'), { target: { value: 'qwen' } });
+    fireEvent.change(screen.getByLabelText('provider id'), { target: { value: 'demo' } });
     onToast.mockClear();
     fireEvent.click(screen.getByText('Test Provider (/v1/responses)'));
     await waitFor(() => expect(hasToast('HTTP 500')).toBe(true));
@@ -350,30 +312,6 @@ describe('webui edge coverage', () => {
     fireEvent.click(within(modelPanel).getByText('Create authfile'));
     await waitFor(() => expect(hasToast('apikey service down')).toBe(true));
     providerView.unmount();
-
-    const oauthView = render(<OAuthPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('OAuth Workbench')).toBeTruthy());
-
-    const authInventoryPanel = screen.getByText('Auth Inventory').closest('.panel') as HTMLElement;
-    fireEvent.click(within(authInventoryPanel).getByText('Refresh'));
-
-    const oauthPanel = screen.getByText('OAuth Workbench').closest('.panel') as HTMLElement;
-    onToast.mockClear();
-    fireEvent.click(within(oauthPanel).getByText('Save'));
-    await waitFor(() => expect(hasToast('save settings failed')).toBe(true));
-
-    onToast.mockClear();
-    fireEvent.click(within(oauthPanel).getByText('Start Manual Auth'));
-    await waitFor(() => expect(hasToast('authorize failed')).toBe(true));
-
-    const credRow = within(authInventoryPanel).getByText('oauth-qwen-default').closest('tr') as HTMLElement;
-    const refreshButton = within(credRow).getByText('Refresh');
-    onToast.mockClear();
-    fireEvent.click(refreshButton);
-    await waitFor(() => expect(hasToast('refresh failed')).toBe(true));
-
-    oauthView.unmount();
-
     const routingView = render(<RoutingPage authenticated authEpoch={1} onToast={onToast} />);
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
 
@@ -429,7 +367,7 @@ describe('webui edge coverage', () => {
           return responseJson({ error: { message: 'stats down' } }, 500);
         }
         return responseJson({
-          session: { totals: [{ providerKey: 'qwen.default.qwen-max', model: 'qwen-max', requestCount: 1, errorCount: 0 }] },
+          session: { totals: [{ providerKey: 'demo.default.demo-max', model: 'demo-max', requestCount: 1, errorCount: 0 }] },
           historical: { totals: [] },
           totals: { session: { requestCount: 1, errorCount: 0 }, historical: { requestCount: 0, errorCount: 0 } }
         });

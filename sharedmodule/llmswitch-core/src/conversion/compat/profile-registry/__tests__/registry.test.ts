@@ -48,8 +48,8 @@ describe('loadCompatProfileRegistry', () => {
   });
 
   test('getProfile returns existing profile', () => {
-    const profile = getProfile(registry, 'chat:qwen');
-    expect(profile.id).toBe('chat:qwen');
+    const profile = getProfile(registry, 'chat:glm');
+    expect(profile.id).toBe('chat:glm');
     expect(profile.protocol).toBe('openai-chat');
   });
 

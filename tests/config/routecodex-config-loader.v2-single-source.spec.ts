@@ -177,6 +177,50 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     expect((loaded.userConfig.httpserver as any).sameProtocolBehavior).toBe('relay');
   });
 
+  it('materializes existing v2 routingPolicyGroups without rewriting legacy runtime selector fields', async () => {
+    const root = await mkTmp('routecodex-v2-existing-selector-');
+    process.env.RCC_HOME = root;
+    process.env.ROUTECODEX_USER_DIR = root;
+    process.env.ROUTECODEX_HOME = root;
+    await writeProviderConfig(root);
+
+    const configPath = path.join(root, 'config.json');
+    const configPayload = {
+      version: '2.0.0',
+      httpserver: {
+        host: '127.0.0.1',
+        port: 5555
+      },
+      virtualrouter: {
+        activeRoutingPolicyGroup: 'canary',
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              default: [{ id: 'default-primary', targets: ['ali-coding-plan.glm-5'] }]
+            }
+          },
+          canary: {
+            routing: {
+              default: [{ id: 'canary-primary', targets: ['ali-coding-plan.qwen3.5-plus'] }]
+            }
+          }
+        },
+        routing: {
+          default: [{ id: 'stale-runtime-copy', targets: ['ali-coding-plan.glm-5'] }]
+        }
+      }
+    };
+    await fs.writeFile(configPath, `${JSON.stringify(configPayload, null, 2)}\n`, 'utf8');
+
+    const before = await fs.readFile(configPath, 'utf8');
+    const loaded = await loadRouteCodexConfig(configPath);
+    const after = await fs.readFile(configPath, 'utf8');
+
+    expect(after).toBe(before);
+    expect(loaded.userConfig.virtualrouterMode).toBe('v2');
+    expect((loaded.userConfig.virtualrouter as any).routing.default[0].id).toBe('canary-primary');
+  });
+
   it('rejects routingPolicyGroup without explicit non-empty default route skeleton', async () => {
     const root = await mkTmp('routecodex-v2-default-skeleton-');
     process.env.RCC_HOME = root;

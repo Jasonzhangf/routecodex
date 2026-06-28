@@ -574,29 +574,6 @@ function readRecordString(record: UnknownRecord | undefined, key: string): strin
   return readString(record[key]);
 }
 
-function readBoolean(value: unknown): boolean | undefined {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
-      return true;
-    }
-    if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
-      return false;
-    }
-  }
-  return undefined;
-}
-
-function readRecordBoolean(record: UnknownRecord | undefined, key: string): boolean | undefined {
-  if (!record) {
-    return undefined;
-  }
-  return readBoolean(record[key]);
-}
-
 function truncateLogValue(value: string, maxLength = 256): string {
   if (value.length <= maxLength) {
     return value;
@@ -913,7 +890,6 @@ class RouteCodexApp {
       let bindPort = port;
       let bindApiKey = readRecordString(getNestedRecord(userConfigRecord, ['httpserver']), 'apikey')
         ?? readRecordString(getNestedRecord(userConfigRecord, ['modules', 'httpserver', 'config']), 'apikey');
-      let quotaRoutingEnabled: boolean | undefined;
       try {
         const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
         const httpConfig =
@@ -921,9 +897,6 @@ class RouteCodexApp {
           getNestedRecord(userConfigRecord, ['modules', 'httpserver', 'config']);
         const serverConfig = getNestedRecord(userConfigRecord, ['server']);
         const portRaw = readRecordNumber(httpConfig, 'port') ?? readRecordNumber(serverConfig, 'port');
-        quotaRoutingEnabled =
-          readRecordBoolean(httpConfig, 'quotaRoutingEnabled') ??
-          readRecordBoolean(httpConfig, 'quotaRouting');
         bindApiKey = readRecordString(httpConfig, 'apikey') ?? bindApiKey;
         if (Number.isFinite(envPort) && envPort > 0) {
           bindPort = envPort;
@@ -949,8 +922,7 @@ class RouteCodexApp {
         server: {
           host: bindHost,
           port: bindPort,
-          apikey: bindApiKey,
-          ...(typeof quotaRoutingEnabled === 'boolean' ? { quotaRoutingEnabled } : {})
+          apikey: bindApiKey
         },
         logging: { level: 'debug', enableConsole: true },
         providers: {},
@@ -975,13 +947,6 @@ class RouteCodexApp {
       console.log(`🧱 Virtual router routes: ${routeEntries.length}`);
       console.log(`🔑 Provider targets: ${targetCount}`);
 
-      const normalizePortalHost = (value: string): string => {
-        const normalized = value.trim().toLowerCase();
-        if (!normalized || normalized === '0.0.0.0' || normalized === '::' || normalized === '::1' || normalized === 'localhost') {
-          return LOCAL_HOSTS.IPV4;
-        }
-        return value;
-      };
       this.prepareRuntimeExitForensics(bindPort);
       if (hasMultiPortConfig) {
         delete process.env.ROUTECODEX_PORT;
@@ -992,14 +957,8 @@ class RouteCodexApp {
       }
       process.env.ROUTECODEX_HTTP_HOST = bindHost;
       process.env.ROUTECODEX_HTTP_PORT = String(bindPort);
-      if (!process.env.ROUTECODEX_TOKEN_PORTAL_BASE) {
-        const portalHost = normalizePortalHost(bindHost);
-        const portalBaseUrl = `${HTTP_PROTOCOLS.HTTP}${portalHost}:${bindPort}/token-auth/demo`;
-        process.env.ROUTECODEX_TOKEN_PORTAL_BASE = portalBaseUrl;
-      }
 
       // 5. 启动 HTTP Server 监听端口（若端口被占用，先尝试优雅释放）
-      //    必须在 provider OAuth 初始化之前完成监听，否则本地 token portal 无法访问。
       // Ensure the port is available before continuing. Attempt graceful shutdown first.
       const buildRestartOnly = isBuildRestartOnlyMode();
       const bootstrapPorts = configuredPortGroup.length > 0 ? configuredPortGroup : [port];
@@ -1042,7 +1001,7 @@ class RouteCodexApp {
         }
       }
 
-      // 6. 在服务已监听的前提下初始化运行时（包括 Hub Pipeline 和 Provider OAuth）
+      // 6. 在服务已监听的前提下初始化运行时（包括 Hub Pipeline 和 Provider runtime）
       await this.httpServer.initializeWithUserConfig(userConfig, { providerProfiles });
 
       // 异步写入 PID cache，不阻塞启动流程

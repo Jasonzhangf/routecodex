@@ -12,7 +12,6 @@ import { resolveRccRuntimeLifecycleDir, resolveRccUserDir } from '../config/user
 //   <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache
 //   <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json
 //   <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json
-//   <rccUserDir>/state/runtime-lifecycle/daemon/token-daemon.pid
 //
 // The old `server-<port>.pid` and `daemon-stop-<port>.json` files that lived
 // directly under `<rccUserDir>/` are stale and must not be written again.
@@ -34,13 +33,6 @@ export function resolveServerPidCachePath(port: number, routeCodexHomeDir?: stri
 
 export function resolveServerInstancePath(port: number, routeCodexHomeDir?: string): string {
   return path.join(resolvePortsDir(routeCodexHomeDir), String(normalizePort(port)), 'instance.json');
-}
-
-export function resolveTokenDaemonPidPath(routeCodexHomeDir?: string): string {
-  if (routeCodexHomeDir && routeCodexHomeDir.trim()) {
-    return path.join(path.resolve(routeCodexHomeDir), 'state', 'runtime-lifecycle', 'daemon', 'token-daemon.pid');
-  }
-  return path.join(resolveRccRuntimeLifecycleDir(), 'daemon', 'token-daemon.pid');
 }
 
 export type ServerPidCacheRecord = {

@@ -7,7 +7,6 @@ import { describe, expect, it } from '@jest/globals';
 import {
   readServerPidCache,
   resolveServerPidCachePath,
-  resolveTokenDaemonPidPath,
   unlinkServerPidCacheBestEffort,
   writeServerPidCache
 } from '../../src/utils/server-runtime-pid.js';
@@ -42,11 +41,5 @@ describe('server runtime pid cache', () => {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, 'not-json', 'utf8');
     expect(readServerPidCache({ port: 5556, routeCodexHomeDir: home })).toBeNull();
-  });
-
-  it('resolveTokenDaemonPidPath lives under state/runtime-lifecycle/daemon', () => {
-    expect(resolveTokenDaemonPidPath('/tmp/rc-home')).toBe(
-      path.join('/tmp/rc-home', 'state', 'runtime-lifecycle', 'daemon', 'token-daemon.pid')
-    );
   });
 });

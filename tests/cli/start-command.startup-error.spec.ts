@@ -109,7 +109,6 @@ describe('cli start command startup error fail-fast', () => {
       tmpdir: () => '/tmp',
       sleep: async (ms) => { await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 20))); },
       ensureLocalTokenPortalEnv: async () => {},
-      ensureTokenDaemonAutoStart: async () => {},
       ensurePortAvailable: async () => {},
       findListeningPids: () => [],
       killPidBestEffort: () => {},

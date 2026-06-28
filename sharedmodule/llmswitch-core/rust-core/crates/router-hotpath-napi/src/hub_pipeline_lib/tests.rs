@@ -133,6 +133,116 @@ fn execute_hub_pipeline_json_uses_total_entry_contract() {
 }
 
 #[test]
+fn execute_hub_pipeline_json_fails_without_preselected_route_and_retry_exclusions() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "providers": {
+                    "openai.key1.gpt-5.5": {
+                        "providerKey": "openai.key1.gpt-5.5",
+                        "providerType": "openai",
+                        "runtimeKey": "openai.key1",
+                        "modelId": "gpt-5.5",
+                        "endpoint": "mock://openai-1",
+                        "auth": { "type": "apikey", "apiKey": "openai-key-1" }
+                    }
+                },
+                "routing": {
+                    "default": [{
+                        "id": "default-priority",
+                        "mode": "priority",
+                        "targets": ["openai.key1.gpt-5.5"]
+                    }]
+                }
+            }
+        },
+        "request": {
+            "requestId": "req-missing-preselected-route",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "payload": {
+                "model": "gpt-5.5",
+                "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "ping" }] }]
+            },
+            "metadata": {},
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+
+    let error = execute_hub_pipeline_json(input.to_string()).unwrap_err();
+    assert_eq!(error.code, "hub_pipeline_missing_preselected_route");
+}
+
+#[test]
+fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_route() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "providers": {
+                    "openai.key1.gpt-5.5": {
+                        "providerKey": "openai.key1.gpt-5.5",
+                        "providerType": "openai",
+                        "runtimeKey": "openai.key1",
+                        "modelId": "gpt-5.5",
+                        "endpoint": "mock://openai-1",
+                        "auth": { "type": "apikey", "apiKey": "openai-key-1" }
+                    },
+                    "openai.key2.gpt-5.5": {
+                        "providerKey": "openai.key2.gpt-5.5",
+                        "providerType": "openai",
+                        "runtimeKey": "openai.key2",
+                        "modelId": "gpt-5.5",
+                        "endpoint": "mock://openai-2",
+                        "auth": { "type": "apikey", "apiKey": "openai-key-2" }
+                    }
+                },
+                "routing": {
+                    "default": [{
+                        "id": "default-priority",
+                        "mode": "priority",
+                        "targets": [
+                            "openai.key1.gpt-5.5",
+                            "openai.key2.gpt-5.5"
+                        ]
+                    }]
+                }
+            }
+        },
+        "request": {
+            "requestId": "req-explicit-retry-route",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "payload": {
+                "model": "gpt-5.5",
+                "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "ping" }] }]
+            },
+            "metadata": {
+                "excludedProviderKeys": [
+                    "openai.key1.gpt-5.5"
+                ]
+            },
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(true));
+    assert_eq!(
+        output
+            .pointer("/metadata/target/providerKey")
+            .and_then(|value| value.as_str()),
+        Some("openai.key2.gpt-5.5")
+    );
+}
+
+#[test]
 fn execute_hub_pipeline_json_uses_preselected_route_outbound_profile_for_responses_to_chat() {
     let input = json!({
         "config": {

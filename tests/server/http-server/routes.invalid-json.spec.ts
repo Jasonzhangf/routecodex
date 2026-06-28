@@ -75,7 +75,7 @@ describe('http routes invalid json handling', () => {
       const response = await fetch(`${baseUrl}/v1/responses`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: '{"model":"deepseek-web.deepseek-chat","input":"bad\\escape"}'
+        body: '{"model":"demo-web.demo-chat","input":"bad\\escape"}'
       });
       expect(response.status).toBe(400);
       expect(response.headers.get('content-type') || '').toContain('application/json');
@@ -88,7 +88,7 @@ describe('http routes invalid json handling', () => {
   it('exposes context_window for provider-prefixed models from provider v2 configs', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-context-window-'));
     const providerRoot = path.join(tmp, 'provider');
-    const providerDir = path.join(providerRoot, 'deepseek-web');
+    const providerDir = path.join(providerRoot, 'demo-web');
     const restoreRccHome = process.env.RCC_HOME;
     process.env.RCC_HOME = tmp;
     await fs.mkdir(providerDir, { recursive: true });
@@ -97,14 +97,14 @@ describe('http routes invalid json handling', () => {
       JSON.stringify(
         {
           version: '2.0.0',
-          providerId: 'deepseek-web',
+          providerId: 'demo-web',
           provider: {
-            id: 'deepseek-web',
+            id: 'demo-web',
             enabled: true,
             type: 'openai',
-            baseURL: 'https://chat.deepseek.com',
+            baseURL: 'https://chat.example.com',
             models: {
-              'deepseek-reasoner': {
+              'demo-reasoner': {
                 supportsStreaming: true,
                 maxContext: 750000,
                 maxContextTokens: 750000
@@ -133,7 +133,7 @@ describe('http routes invalid json handling', () => {
         const response = await fetch(`${baseUrl}/v1/models`);
         expect(response.status).toBe(200);
         const body = await response.json();
-        const target = readModelsPayload(body).find((item: any) => item?.id === 'deepseek-web.deepseek-reasoner');
+        const target = readModelsPayload(body).find((item: any) => item?.id === 'demo-web.demo-reasoner');
         expect(target).toBeTruthy();
         expect(target.context_window).toBe(750000);
       });
@@ -232,10 +232,10 @@ describe('http routes invalid json handling', () => {
     }
   });
 
-  it('projects /v1/models instead of raw provider.models while keeping gpt and deepseek v4 pro visible', async () => {
+  it('projects /v1/models instead of raw provider.models while keeping gpt and deep v4 pro visible', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-visible-filter-'));
     const providerRoot = path.join(tmp, 'provider');
-    const providerDir = path.join(providerRoot, 'deepseek-web');
+    const providerDir = path.join(providerRoot, 'demo-web');
     const restoreRccHome = process.env.RCC_HOME;
     process.env.RCC_HOME = tmp;
     await fs.mkdir(providerDir, { recursive: true });
@@ -244,15 +244,15 @@ describe('http routes invalid json handling', () => {
       JSON.stringify(
         {
           version: '2.0.0',
-          providerId: 'deepseek-web',
+          providerId: 'demo-web',
           provider: {
-            id: 'deepseek-web',
+            id: 'demo-web',
             enabled: true,
             type: 'openai',
-            baseURL: 'https://chat.deepseek.com',
+            baseURL: 'https://chat.example.com',
             models: {
-              'deepseek-v4-pro': { supportsStreaming: true },
-              'deepseek-v4-flash': { supportsStreaming: true },
+              'demo-v4-pro': { supportsStreaming: true },
+              'demo-v4-flash': { supportsStreaming: true },
               'gpt-5.5': { supportsStreaming: true }
             }
           }
@@ -280,9 +280,9 @@ describe('http routes invalid json handling', () => {
         const body = await response.json();
         const ids = readModelsPayload(body).map((item: any) => item?.id).filter(Boolean);
         expect(ids).toContain('gpt-5.5');
-        expect(ids).toContain('deepseek-web.deepseek-v4-pro');
-        expect(ids).toContain('deepseek-web.deepseek-v4-flash');
-        expect(ids).not.toEqual(expect.arrayContaining(['deepseek-v4-pro', 'deepseek-v4-flash', 'gpt-5.5']));
+        expect(ids).toContain('demo-web.demo-v4-pro');
+        expect(ids).toContain('demo-web.demo-v4-flash');
+        expect(ids).not.toEqual(expect.arrayContaining(['demo-v4-pro', 'demo-v4-flash', 'gpt-5.5']));
       });
     } finally {
       if (restoreRccHome === undefined) {
@@ -321,7 +321,7 @@ describe('http routes invalid json handling', () => {
         '',
         '[provider.models."DeepSeek-V4-Pro"]',
         'supportsStreaming = true',
-        'aliases = ["deepseek-v4-pro"]',
+        'aliases = ["demo-v4-pro"]',
         '',
         '[provider.models."DeepSeek-V4-Flash"]',
         'supportsStreaming = true'
@@ -343,8 +343,8 @@ describe('http routes invalid json handling', () => {
           routingPolicyGroups: {
             gateway_coding_10000: {
               routing: {
-                coding: [{ targets: ['DF.key1.deepseek-v4-pro'] }],
-                tools: [{ targets: ['DF.key1.deepseek-v4-flash'] }]
+                coding: [{ targets: ['DF.key1.demo-v4-pro'] }],
+                tools: [{ targets: ['DF.key1.demo-v4-flash'] }]
               }
             }
           }
@@ -358,10 +358,10 @@ describe('http routes invalid json handling', () => {
         expect(response.status).toBe(200);
         const body = await response.json();
         const ids = readModelsPayload(body).map((item: any) => item.id).sort();
-        expect(ids).toContain('deepseek-v4-pro');
-        expect(ids).toContain('deepseek-v4-flash');
-        expect(ids).not.toContain('DF.deepseek-v4-pro');
-        expect(ids).not.toContain('DF.deepseek-v4-flash');
+        expect(ids).toContain('demo-v4-pro');
+        expect(ids).toContain('demo-v4-flash');
+        expect(ids).not.toContain('DF.demo-v4-pro');
+        expect(ids).not.toContain('DF.demo-v4-flash');
         expect(ids).not.toContain('DeepSeek-V4-Pro');
         expect(ids).not.toContain('DeepSeek-V4-Flash');
       });

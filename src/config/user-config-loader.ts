@@ -47,6 +47,7 @@ export async function materializeRouteCodexConfig(
   providerRootDir?: string
 ): Promise<MaterializedRouteCodexConfig> {
   const userConfig: UnknownRecord = structuredClone(userConfigInput);
+  normalizeV2RuntimeSource(userConfig);
   validateV2ConfigSources(userConfig);
   materializeActiveRoutingPolicyGroup(userConfig);
   const vrBase = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
@@ -72,7 +73,7 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
   const errors: string[] = [];
   const modeRaw = userConfig.virtualrouterMode;
   const mode = typeof modeRaw === 'string' ? modeRaw.trim().toLowerCase() : '';
-  if (mode !== 'v2') {
+  if (mode !== 'v2' && !isImplicitV2Config(userConfig)) {
     errors.push('RouteCodex only supports virtualrouterMode="v2"');
   }
   const allowedTopLevel = new Set(['version', 'httpserver', 'virtualrouter', 'virtualrouterMode', 'servertool']);
@@ -96,10 +97,10 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
   if (!vr) {
     errors.push('v2 config requires virtualrouter.routingPolicyGroups');
   } else {
-    const allowedVr = new Set(['routingPolicyGroups', 'forwarders']);
+    const allowedVr = new Set(['routingPolicyGroups', 'forwarders', 'activeRoutingPolicyGroup', 'routing']);
     for (const key of Object.keys(vr)) {
       if (!allowedVr.has(key)) {
-        errors.push(`v2 config disallows virtualrouter field "${key}" (routingPolicyGroups only); activeRoutingPolicyGroup is no longer supported`);
+        errors.push(`v2 config disallows virtualrouter field "${key}" (routingPolicyGroups/forwarders only)`);
       }
     }
 
@@ -178,6 +179,26 @@ function resolvePrimaryRouterRoutingPolicyGroup(userConfig: UnknownRecord): stri
   if (!groups) {
     return undefined;
   }
+  const activeGroup = typeof virtualrouter?.activeRoutingPolicyGroup === 'string'
+    ? virtualrouter.activeRoutingPolicyGroup.trim()
+    : '';
+  if (activeGroup && isRecord(groups[activeGroup])) {
+    return activeGroup;
+  }
   const groupIds = Object.keys(groups).filter((groupId) => groupId.trim());
   return groupIds.length === 1 ? groupIds[0] : undefined;
+}
+
+function isImplicitV2Config(userConfig: UnknownRecord): boolean {
+  if (userConfig.version !== '2.0.0') {
+    return false;
+  }
+  const vr = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;
+  return Boolean(vr && isRecord(vr.routingPolicyGroups));
+}
+
+function normalizeV2RuntimeSource(userConfig: UnknownRecord): void {
+  if (!userConfig.virtualrouterMode && isImplicitV2Config(userConfig)) {
+    userConfig.virtualrouterMode = 'v2';
+  }
 }

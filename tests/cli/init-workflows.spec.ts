@@ -49,18 +49,18 @@ function createSpinner(logs: string[]) {
 function testCatalog(): InitProviderTemplate[] {
   return [
     {
-      id: 'qwen',
-      label: 'Qwen',
+      id: 'glm',
+      label: 'GLM',
       description: 'managed template',
       provider: {
-        id: 'qwen',
+        id: 'glm',
         enabled: true,
         type: 'openai',
-        baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        auth: { type: 'qwen-oauth', tokenFile: '~/.rcc/auth/qwen-oauth.json' },
-        models: { 'qwen-plus': { supportsStreaming: true } }
+        baseURL: 'https://api.glm.example/v1',
+        auth: { type: 'apikey', apiKey: '${GLM_API_KEY}' },
+        models: { 'glm-4.7': { supportsStreaming: true } }
       },
-      defaultModel: 'qwen-plus'
+      defaultModel: 'glm-4.7'
     },
     {
       id: 'openai',
@@ -110,10 +110,10 @@ describe('init workflows', () => {
               auth: { type: 'apikey', apiKey: '${NEW_KEY}' },
               models: { new: { supportsStreaming: true } }
             },
-            qwen: {
-              id: 'qwen',
+            glm: {
+              id: 'glm',
               enabled: true,
-              models: { 'qwen-plus': { supportsStreaming: true } }
+              models: { 'glm-4.7': { supportsStreaming: true } }
             }
           }
         },
@@ -129,7 +129,7 @@ describe('init workflows', () => {
       prompt: queuePrompt(['s', 'm'])
     });
 
-    expect(result.convertedProviders.sort()).toEqual(['openai', 'qwen']);
+    expect(result.convertedProviders.sort()).toEqual(['glm', 'openai']);
     expect(result.backupPath).toContain('config.json.bak');
     expect(fs.existsSync(result.backupPath!)).toBe(true);
 
@@ -330,12 +330,12 @@ describe('init workflows', () => {
     const configPath = path.join(dir, 'config.json');
     fs.mkdirSync(providerRoot, { recursive: true });
 
-    writeProviderV2(fs, path, providerRoot, 'qwen', {
-      id: 'qwen',
+    writeProviderV2(fs, path, providerRoot, 'glm', {
+      id: 'glm',
       enabled: true,
       type: 'openai',
-      auth: { type: 'apikey', apiKey: '${QWEN_API_KEY}' },
-      models: { 'qwen-plus': { supportsStreaming: true } }
+      auth: { type: 'apikey', apiKey: '${GLM_API_KEY}' },
+      models: { 'glm-4.7': { supportsStreaming: true } }
     });
     writeProviderV2(fs, path, providerRoot, 'customx', {
       id: 'customx',
@@ -350,7 +350,7 @@ describe('init workflows', () => {
       httpserver: { host: '127.0.0.1', port: 5555 },
       virtualrouter: {
         routing: {
-          default: [{ targets: ['qwen.qwen-plus'] }]
+          default: [{ targets: ['glm.glm-4.7'] }]
         }
       }
     };
@@ -370,11 +370,11 @@ describe('init workflows', () => {
         '99', // invalid provider selection
         '1', // add
         '1', // managed mode
-        '1', // qwen (exists)
+        '1', // glm (exists)
         'x', // invalid resolution
         '1', // add
         '1', // managed mode
-        '1', // qwen (exists)
+        '1', // glm (exists)
         'k', // keep existing provider
         '2', // delete
         'b', // back
@@ -446,7 +446,7 @@ describe('init workflows', () => {
     expect(logs.join('\n')).toContain('log:Back to V2 menu.');
     expect(logs.join('\n')).toContain('log:Unknown add mode.');
     expect(logs.join('\n')).toContain('log:Invalid choice. Use o / k / b.');
-    expect(logs.join('\n')).toContain('log:Skipped existing provider: qwen');
+    expect(logs.join('\n')).toContain('log:Skipped existing provider: glm');
     expect(logs.join('\n')).toContain('log:No managed-auth template for provider customx');
     expect(logs.join('\n')).toContain('log:Back to V2 menu without routing changes.');
     expect(logs.join('\n')).toContain(`succeed:Configuration updated: ${configPath}`);

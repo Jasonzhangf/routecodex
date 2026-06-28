@@ -349,53 +349,6 @@ export function collectProviderKeyMasks(providerNode: UnknownRecord): string[] {
   return masks;
 }
 
-export function collectOauthTokenNames(providerNode: UnknownRecord): string[] {
-  const authNode = asRecord(providerNode.auth);
-  const authType = typeof authNode.type === 'string' ? authNode.type.trim().toLowerCase() : '';
-  const looksOauth = authType.includes('oauth') || typeof authNode.tokenFile === 'string' || Array.isArray(authNode.entries);
-  if (!looksOauth) {
-    return [];
-  }
-
-  const labels: string[] = [];
-  const seen = new Set<string>();
-  const addLabel = (label: string) => {
-    const normalized = label.trim();
-    if (!normalized || seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    labels.push(normalized);
-  };
-
-  const baseTokenFile = typeof authNode.tokenFile === 'string' ? authNode.tokenFile.trim() : '';
-  if (baseTokenFile) {
-    addLabel(path.basename(baseTokenFile));
-  }
-
-  const entries = Array.isArray(authNode.entries) ? authNode.entries : [];
-  for (const entry of entries) {
-    const node = asRecord(entry);
-    const alias = typeof node.alias === 'string' ? node.alias.trim() : '';
-    const tokenFile = typeof node.tokenFile === 'string' ? node.tokenFile.trim() : '';
-    const tokenName = tokenFile ? path.basename(tokenFile) : '';
-
-    if (alias && tokenName) {
-      addLabel(`${alias}(${tokenName})`);
-      continue;
-    }
-    if (alias) {
-      addLabel(alias);
-      continue;
-    }
-    if (tokenName) {
-      addLabel(tokenName);
-    }
-  }
-
-  return labels;
-}
-
 export function getProviderSummaryLine(providerId: string, payload: ProviderV2Payload): string {
   const providerNode = asRecord(payload.provider);
   const enabled = providerNode.enabled === false ? 'disabled' : 'enabled';
@@ -403,11 +356,10 @@ export function getProviderSummaryLine(providerId: string, payload: ProviderV2Pa
   const models = asRecord(providerNode.models);
   const modelCount = Object.keys(models).length;
   const keyMasks = collectProviderKeyMasks(providerNode);
-  const oauthTokens = collectOauthTokenNames(providerNode);
   return (
     `${providerId} | ${enabled} | models=${modelCount} | ` +
     `keys=${keyMasks.length}${keyMasks.length ? ` [${keyMasks.join(', ')}]` : ''} | ` +
-    `oauth=${oauthTokens.length ? oauthTokens.join(', ') : '-'} | baseURL=${baseUrl}`
+    `baseURL=${baseUrl}`
   );
 }
 

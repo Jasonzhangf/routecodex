@@ -129,11 +129,11 @@ describe('cli init command - additional coverage', () => {
         '--providers',
         'openai',
         '--default-provider',
-        'qwen'
+        'missing-provider'
       ],
       { from: 'node' }
     );
-    expect(invalidDefault.errors.join('\n')).toContain('defaultProvider "qwen" is not in selected providers');
+    expect(invalidDefault.errors.join('\n')).toContain('defaultProvider "missing-provider" is not in selected providers');
 
     const existingConfigPath = '/tmp/existing-config.json';
     const fsMock = createFsMock({

@@ -48,6 +48,12 @@ const HANDLER_RUNTIME_CONTROL_WRITER = {
   stage: 'handler_pipeline_runtime_control'
 } as const;
 
+const HANDLER_REQUEST_TRUTH_WRITER = {
+  module: 'src/server/handlers/handler-utils.ts',
+  symbol: 'buildHandlerPipelineMetadata',
+  stage: 'ServerReqInbound01ClientRaw'
+} as const;
+
 const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
   && process.env.RCC_HTTP_LOG_DISABLE !== '1';
 const RAW_REQUEST_PREVIEW_MAX_ARRAY_ITEMS = 32;
@@ -705,6 +711,31 @@ export function buildHandlerPipelineMetadata(
     : { ...internalMetadata };
   const metadataCenter = MetadataCenter.read(internalMetadata) ?? MetadataCenter.attach(merged);
   MetadataCenter.bind(merged, metadataCenter);
+  const existingRequestTruth = metadataCenter.readRequestTruth();
+  const requestId =
+    typeof internalMetadata.requestId === 'string' && internalMetadata.requestId.trim()
+      ? internalMetadata.requestId.trim()
+      : undefined;
+  if (requestId && !existingRequestTruth.requestId) {
+    metadataCenter.writeRequestTruth(
+      'requestId',
+      requestId,
+      HANDLER_REQUEST_TRUTH_WRITER,
+      'handler canonical request id'
+    );
+  }
+  const clientRequestId =
+    typeof internalMetadata.clientRequestId === 'string' && internalMetadata.clientRequestId.trim()
+      ? internalMetadata.clientRequestId.trim()
+      : undefined;
+  if (clientRequestId && !existingRequestTruth.clientRequestId) {
+    metadataCenter.writeRequestTruth(
+      'clientRequestId',
+      clientRequestId,
+      HANDLER_REQUEST_TRUTH_WRITER,
+      'handler canonical client request id'
+    );
+  }
   const portContext = internalMetadata.portContext && typeof internalMetadata.portContext === 'object' && !Array.isArray(internalMetadata.portContext)
     ? (internalMetadata.portContext as Record<string, unknown>)
     : undefined;

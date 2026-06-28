@@ -7,8 +7,8 @@ describe('init-v2-builder', () => {
     const routing = buildInitRouting({
       defaultTarget: 'openai.gpt-5.2',
       thinkingTarget: 'tab.gpt-5.2',
-      webSearchTargets: ['ali-coding-plan.qwen3.6-plus', 'qwen.qwen3.5-plus'],
-      multimodalTargets: ['deepseek-web.deepseek-chat']
+      webSearchTargets: ['search-primary.gpt-5.2', 'glm.glm-4.7'],
+      multimodalTargets: ['vision-primary.gpt-5.2']
     }) as Record<string, any>;
 
     expect(routing.default[0]).toEqual({
@@ -20,11 +20,11 @@ describe('init-v2-builder', () => {
     });
     expect(routing.thinking[0].loadBalancing.weights['tab.gpt-5.2']).toBe(1);
     expect(routing.web_search[0].loadBalancing.weights).toEqual({
-      'ali-coding-plan.qwen3.6-plus': 1,
-      'qwen.qwen3.5-plus': 1
+      'search-primary.gpt-5.2': 1,
+      'glm.glm-4.7': 1
     });
     expect(routing.multimodal[0].loadBalancing.weights).toEqual({
-      'deepseek-web.deepseek-chat': 1
+      'vision-primary.gpt-5.2': 1
     });
     expect(routing.web_search[0].mode).toBeUndefined();
   });

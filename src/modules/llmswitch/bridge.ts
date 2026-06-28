@@ -7,22 +7,14 @@
 import type {
   ProviderErrorEvent,
   ProviderSuccessEvent,
-  ProviderUsageEvent,
-  StaticQuotaConfig,
-  QuotaState,
-  QuotaStore,
-  QuotaStoreSnapshot
+  ProviderUsageEvent
 } from '../../types/llmswitch-local-types.js';
 
 // Re-export types from core.
 export type {
   ProviderErrorEvent,
   ProviderSuccessEvent,
-  ProviderUsageEvent,
-  StaticQuotaConfig,
-  QuotaState,
-  QuotaStore,
-  QuotaStoreSnapshot
+  ProviderUsageEvent
 } from '../../types/llmswitch-local-types.js';
 
 // Core module loading utilities.

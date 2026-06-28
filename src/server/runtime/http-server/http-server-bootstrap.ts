@@ -389,7 +389,7 @@ export function buildProviderLabel(_server: any, providerKey?: string, model?: s
   return _buildProviderLabel(providerKey, model);
 }
 
-export function normalizeAuthType(_server: any, input: unknown): 'apikey' | 'oauth' {
+export function normalizeAuthType(_server: any, input: unknown): 'apikey' {
   const value = typeof input === 'string' ? input.toLowerCase() : '';
   if (value.includes('oauth')) {
     throw new Error('OAuth auth has been removed; use auth.type="apikey"');

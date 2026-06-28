@@ -167,7 +167,7 @@ describe('providers v2 id guard - e2e', () => {
             providerType: 'openai',
             compatibilityProfile: 'openai-responses',
             auth: { type: 'apiKey', tokenFile: 'authfile-test-token' },
-            models: { 'qwen/qwen3.6-plus:free': {} }
+            models: { 'demo/demo3.6-plus:free': {} }
           }
         })
       });
@@ -211,7 +211,7 @@ describe('providers v2 id guard - e2e', () => {
             providerType: 'openai',
             compatibilityProfile: 'openai-responses',
             auth: { type: 'apiKey', tokenFile: 'authfile-test-token' },
-            models: { 'qwen/qwen3.6-plus:free': {} }
+            models: { 'demo/demo3.6-plus:free': {} }
           }
         })
       });

@@ -11,7 +11,6 @@ routecodex-server → Hub Pipeline → Provider V2
 
 ## Key Files
 - `core/runtime/*-http-provider.ts`: Protocol-specific implementations (Chat/Responses/Anthropic/Gemini)
-- `core/strategies/`: OAuth flows (device/code/hybrid)
 - `core/utils/provider-error-reporter.ts`: Emit errors via `errorHandlingCenter`
 
 ## Configuration
