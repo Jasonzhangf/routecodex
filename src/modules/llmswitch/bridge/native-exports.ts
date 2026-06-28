@@ -179,6 +179,12 @@ type NativeRouterHotpathJsonBinding = {
   decideDirectRouterRetryJson?: (inputJson: string) => string;
   decideDirectProviderRetryJson?: (inputJson: string) => string;
 
+  // -- traffic-governor-core (独立基础设施) --
+  trafficGovernorAcquireJson?: (inputJson: string) => string;
+  trafficGovernorReleaseJson?: (inputJson: string) => string;
+  trafficGovernorIsAtCapacityJson?: (inputJson: string) => boolean;
+  trafficGovernorObserveOutcomeJson?: (inputJson: string) => void;
+
   classifyProviderFailureJson?: (
     statusCode: number | undefined,
     errorCode: string | undefined,

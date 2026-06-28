@@ -17,7 +17,7 @@ pub(crate) use builder::build_metadata_center_from_snapshot;
 pub(crate) use reader::MetadataCenterReader;
 pub(crate) use types::{
     ContinuationContext, MetadataCenter, RequestTruth, RuntimeControl, StopMessageControl,
-    StoplessControl,
+    StoplessControl, TrafficGovernorControl,
 };
 pub(crate) use write_plan::{
     build_stopless_metadata_center_write_plan, StoplessMetadataCenterWritePlan,

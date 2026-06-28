@@ -114,6 +114,28 @@ pub struct RuntimeControl {
     pub stop_message_compare_context: StopMessageCompareContext,
     pub client_abort: Option<bool>,
     pub stream_intent: Option<String>,
+    #[serde(default)]
+    pub traffic_governor: TrafficGovernorControl,
+}
+
+/// Traffic governor control — 独立基础设施的配置接口
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrafficGovernorControl {
+    /// 是否启用流量治理
+    pub enabled: Option<bool>,
+    /// 最大并发数 (maxInFlight)
+    pub max_in_flight: Option<u32>,
+    /// RPM 限制
+    pub requests_per_minute: Option<u32>,
+    /// 自适应并发是否启用
+    pub adaptive_enabled: Option<bool>,
+    /// 自适应硬上限
+    pub adaptive_hard_max: Option<u32>,
+    /// 获取 lease 超时 (ms)
+    pub acquire_timeout_ms: Option<u64>,
+    /// stale lease 超时 (ms)
+    pub stale_lease_ms: Option<u64>,
 }
 
 /// The full request-scoped MetadataCenter.

@@ -8,6 +8,7 @@
 //! MetadataCenter 作为唯一控制接口，不内建状态变量。
 
 pub mod concurrency;
+pub mod metadata;
 pub mod rpm;
 pub mod adaptive;
 pub mod store;

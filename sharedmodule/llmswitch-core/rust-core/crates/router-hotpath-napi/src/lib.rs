@@ -2780,3 +2780,193 @@ pub fn merge_observed_route_pool_chain_json(
 pub fn sanitize_provider_outbound_payload_export_json(input_json: String) -> NapiResult<String> {
     hub_protocol_spec_semantics::sanitize_provider_outbound_payload_json(input_json)
 }
+
+// ---------------------------------------------------------------------------
+// traffic-governor-core NAPI exports
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn traffic_governor_acquire_json(input_json: String) -> NapiResult<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        runtime_key: String,
+        #[serde(default)]
+        provider_key: Option<String>,
+        request_id: String,
+        #[serde(default)]
+        scope_key: Option<String>,
+        #[serde(default)]
+        max_in_flight: Option<u32>,
+        #[serde(default)]
+        acquire_timeout_ms: Option<u64>,
+        #[serde(default)]
+        stale_lease_ms: Option<u64>,
+        #[serde(default)]
+        requests_per_minute: Option<u32>,
+        #[serde(default)]
+        rpm_timeout_ms: Option<u64>,
+        #[serde(default)]
+        store_root: Option<String>,
+    }
+
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+
+    let store_root = input.store_root.as_deref().unwrap_or("/tmp/routecodex-traffic");
+    let governor = traffic_governor_core::TrafficGovernor::new(store_root);
+
+    let ctx = traffic_governor_core::types::AcquireContext {
+        runtime_key: input.runtime_key,
+        provider_key: input.provider_key,
+        request_id: input.request_id,
+        scope_key: input.scope_key,
+        max_in_flight: input.max_in_flight.map(|v| v as usize),
+        acquire_timeout_ms: input.acquire_timeout_ms,
+        stale_lease_ms: input.stale_lease_ms,
+        requests_per_minute: input.requests_per_minute,
+        rpm_timeout_ms: input.rpm_timeout_ms,
+    };
+
+    let result = governor.acquire(&ctx)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+    serde_json::to_string(&serde_json::json!({
+        "permit": {
+            "runtimeKey": result.permit.runtime_key,
+            "providerKey": result.permit.provider_key,
+            "requestId": result.permit.request_id,
+            "leaseId": result.permit.lease_id,
+            "stateKey": result.permit.state_key,
+            "scopeKey": result.permit.scope_key,
+            "maxInFlight": result.permit.max_in_flight,
+            "pid": result.permit.pid,
+            "serverId": result.permit.server_id,
+            "startedAt": result.permit.started_at,
+            "expiresAt": result.permit.expires_at,
+        },
+        "policy": {
+            "maxInFlight": result.policy.max_in_flight,
+            "acquireTimeoutMs": result.policy.acquire_timeout_ms,
+            "staleLeaseMs": result.policy.stale_lease_ms,
+            "requestsPerMinute": result.policy.requests_per_minute,
+            "rpmTimeoutMs": result.policy.rpm_timeout_ms,
+            "rpmWindowMs": result.policy.rpm_window_ms,
+        },
+        "waitedMs": result.waited_ms,
+        "activeInFlight": result.active_in_flight,
+        "rpmInWindow": result.rpm_in_window,
+    }))
+    .map_err(|e| napi::Error::from_reason(format!("serialize: {}", e)))
+}
+
+#[napi]
+pub fn traffic_governor_release_json(input_json: String) -> NapiResult<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        runtime_key: String,
+        request_id: String,
+        lease_id: String,
+        state_key: String,
+        #[serde(default)]
+        store_root: Option<String>,
+    }
+
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+
+    let store_root = input.store_root.as_deref().unwrap_or("/tmp/routecodex-traffic");
+    let governor = traffic_governor_core::TrafficGovernor::new(store_root);
+
+    let permit = traffic_governor_core::types::Permit {
+        runtime_key: input.runtime_key,
+        provider_key: None,
+        request_id: input.request_id,
+        lease_id: input.lease_id,
+        state_key: input.state_key,
+        scope_key: None,
+        max_in_flight: 0,
+        pid: 0,
+        server_id: String::new(),
+        started_at: 0,
+        expires_at: 0,
+    };
+
+    let result = governor.release(&permit)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+    serde_json::to_string(&serde_json::json!({
+        "released": result.released,
+        "activeInFlight": result.active_in_flight,
+    }))
+    .map_err(|e| napi::Error::from_reason(format!("serialize: {}", e)))
+}
+
+#[napi]
+pub fn traffic_governor_is_at_capacity_json(input_json: String) -> NapiResult<bool> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        runtime_key: String,
+        #[serde(default)]
+        store_root: Option<String>,
+    }
+
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+
+    let store_root = input.store_root.as_deref().unwrap_or("/tmp/routecodex-traffic");
+    let governor = traffic_governor_core::TrafficGovernor::new(store_root);
+
+    Ok(governor.is_at_capacity(&input.runtime_key))
+}
+
+#[napi]
+pub fn traffic_governor_observe_outcome_json(input_json: String) -> NapiResult<()> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Input {
+        runtime_key: String,
+        #[serde(default)]
+        provider_key: Option<String>,
+        #[serde(default)]
+        request_id: Option<String>,
+        success: bool,
+        #[serde(default)]
+        status_code: Option<u16>,
+        #[serde(default)]
+        error_code: Option<String>,
+        #[serde(default)]
+        upstream_code: Option<String>,
+        #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
+        active_in_flight: Option<u32>,
+        #[serde(default)]
+        store_root: Option<String>,
+    }
+
+    let input: Input = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+
+    let store_root = input.store_root.as_deref().unwrap_or("/tmp/routecodex-traffic");
+    let governor = traffic_governor_core::TrafficGovernor::new(store_root);
+
+    let event = traffic_governor_core::types::OutcomeEvent {
+        runtime_key: input.runtime_key,
+        provider_key: input.provider_key,
+        request_id: input.request_id,
+        success: input.success,
+        status_code: input.status_code,
+        error_code: input.error_code,
+        upstream_code: input.upstream_code,
+        reason: input.reason,
+        active_in_flight: input.active_in_flight,
+        observed_at_ms: None,
+        configured_max_in_flight: None,
+    };
+
+    governor.observe_outcome(&event);
+    Ok(())
+}
