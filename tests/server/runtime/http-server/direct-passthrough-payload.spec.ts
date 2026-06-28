@@ -65,8 +65,12 @@ describe('direct-passthrough-payload', () => {
     const decision = evaluateDirectRouteDecision({
       payload: body,
       metadata: {
-        stopMessageEnabled: true,
-        stopMessageExcludeDirect: false,
+        metadataCenterSnapshot: {
+          runtimeControl: {
+            stopMessageEnabled: true,
+            stopMessageExcludeDirect: false,
+          },
+        },
       },
       inboundProtocol: 'openai-responses',
       applyPatchMode: 'client',

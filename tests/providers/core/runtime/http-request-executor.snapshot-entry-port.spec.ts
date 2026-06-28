@@ -48,6 +48,8 @@ describe('http-request-executor snapshot entryPort', () => {
         resolveRequestEndpoint: () => '/v1/responses',
         buildHttpRequestBody: (payload: unknown) => payload as Record<string, unknown>,
         prepareSseRequestBody: () => undefined,
+        getEntryEndpointFromPayload: () => '/v1/responses',
+        getClientRequestIdFromContext: () => 'req-http-executor-entry-port',
         buildRequestHeaders: async () => ({ 'content-type': 'application/json' }),
         finalizeRequestHeaders: async (headers: Record<string, string>) => headers,
         applyStreamModeHeaders: (headers: Record<string, string>) => headers,
@@ -73,11 +75,16 @@ describe('http-request-executor snapshot entryPort', () => {
       }) as any
     );
 
-    expect(writeProviderSnapshot).toHaveBeenCalled();
-    expect(writeProviderSnapshot.mock.calls[0]?.[0]).toMatchObject({
+    const calls = writeProviderSnapshot.mock.calls.map((call) => call[0]);
+    expect(calls).toContainEqual(expect.objectContaining({
+      phase: 'provider-request',
+      requestId: 'req-http-executor-entry-port',
+      entryPort: 5520
+    }));
+    expect(calls).toContainEqual(expect.objectContaining({
       phase: 'provider-response',
       requestId: 'req-http-executor-entry-port',
       entryPort: 5520
-    });
+    }));
   });
 });

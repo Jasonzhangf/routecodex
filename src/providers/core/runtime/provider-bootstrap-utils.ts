@@ -1,12 +1,10 @@
 import { HttpClient } from '../utils/http-client.js';
 import { ServiceProfileValidator } from '../config/service-profiles.js';
 import type { IAuthProvider } from '../../auth/auth-interface.js';
-import type { OAuthAuth, OpenAIStandardConfig } from '../api/provider-config.js';
+import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ServiceProfile } from '../api/provider-types.js';
 import { DEFAULT_PROVIDER } from '../../../constants/index.js';
-import { AuthModeUtils, AuthProviderFactory } from './transport/index.js';
-
-type OAuthAuthExtended = OAuthAuth & { rawType?: string; oauthProviderId?: string; tokenFile?: string };
+import { AuthProviderFactory } from './transport/index.js';
 
 export function createTransportAuthProvider(options: {
   config: OpenAIStandardConfig;
@@ -16,26 +14,22 @@ export function createTransportAuthProvider(options: {
   extensions?: Record<string, unknown>;
 }): {
   authProvider: IAuthProvider;
-  authMode: 'apikey' | 'oauth';
-  oauthProviderId?: string;
+  authMode: 'apikey';
 } {
-  const { config, providerType, moduleType, serviceProfile, extensions } = options;
+  const { config, providerType, moduleType, serviceProfile } = options;
   const auth = config.config.auth;
-  const authMode = AuthModeUtils.normalizeAuthMode(auth.type);
-  const resolvedOAuthProviderId =
-    authMode === 'oauth'
-      ? AuthModeUtils.ensureOAuthProviderId(auth as unknown as OAuthAuthExtended, extensions)
-      : undefined;
-
-  const serviceProfileKey = resolvedOAuthProviderId ?? providerType;
+  const authMode = 'apikey';
+  if (auth.type !== 'apikey') {
+    throw new Error(`Unsupported auth type: ${auth.type}`);
+  }
 
   const validation = ServiceProfileValidator.validateServiceProfile(
-    serviceProfileKey,
+    providerType,
     authMode
   );
   if (!validation.isValid) {
     throw new Error(
-      `Invalid auth configuration for ${serviceProfileKey}: ${validation.errors.join(', ')}`
+      `Invalid auth configuration for ${providerType}: ${validation.errors.join(', ')}`
     );
   }
 
@@ -49,10 +43,7 @@ export function createTransportAuthProvider(options: {
 
   return {
     authProvider,
-    authMode,
-    oauthProviderId: authMode === 'oauth'
-      ? (resolvedOAuthProviderId ?? serviceProfileKey)
-      : undefined
+    authMode
   };
 }
 

@@ -59,4 +59,18 @@ describe('http-server index request truth contract', () => {
     expect(source).toContain("'stopMessageExcludeDirect'");
     expect(source).toContain('writeMetadataCenterRuntimeControl(');
   });
+
+  it('router-direct metadata carries entry port truth for provider snapshots', () => {
+    const source = fs.readFileSync(INDEX_PATH, 'utf8');
+    const directMetadataBlock = source.slice(
+      source.indexOf('const metadataForHub: Record<string, unknown> = {'),
+      source.indexOf('writeMetadataCenterRuntimeControl(', source.indexOf('const metadataForHub: Record<string, unknown> = {'))
+    );
+
+    expect(directMetadataBlock).toContain('routecodexLocalPort: portConfig.port');
+    expect(directMetadataBlock).toContain('entryPort: portConfig.port');
+    expect(directMetadataBlock).toContain('matchedPort: portConfig.port');
+    expect(source).toContain("symbol: 'executeRouterDirectPipelineForPort'");
+    expect(source).toContain("'router-direct request entry port scope'");
+  });
 });

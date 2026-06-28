@@ -19,12 +19,10 @@ import {
   PROVIDER_NETWORK_CODES,
   PROVIDER_UNRECOVERABLE_CODES
 } from './provider-error-catalog.js';
-import { DEEPSEEK_UNRECOVERABLE_CODES } from '../contracts/deepseek-provider-contract.js';
 
-// Phase 2: SSOT composition - provider-agnostic catalog + provider-specific contracts.
+// Phase 2: SSOT composition - provider-agnostic catalog.
 const UNRECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
-  ...PROVIDER_UNRECOVERABLE_CODES,
-  ...DEEPSEEK_UNRECOVERABLE_CODES
+  ...PROVIDER_UNRECOVERABLE_CODES
 ]);
 const NETWORK_ERROR_CODE_SET: ReadonlySet<string> = PROVIDER_NETWORK_CODES;
 

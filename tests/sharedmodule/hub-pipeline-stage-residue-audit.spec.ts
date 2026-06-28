@@ -1510,11 +1510,11 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('server response handler must not classify response tool continuation in TS', () => {
-    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-response-bridge.ts');
+    const filePath = path.join(process.cwd(), 'src/server/runtime/http-server/index.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    const helperStart = source.indexOf('function isDirectResponsesToolCallContinuationForHttp');
+    const helperStart = source.indexOf('private async persistOrClearResponsesDirectContinuation');
     expect(helperStart).toBeGreaterThanOrEqual(0);
-    const helperEnd = source.indexOf('export async function rebindResponsesConversationRequestIdForHttp', helperStart);
+    const helperEnd = source.indexOf('private async buildRouterDirectResult', helperStart);
     expect(helperEnd).toBeGreaterThan(helperStart);
     const helperBody = source.slice(helperStart, helperEnd);
     const findings = collectMatches(helperBody, [
@@ -4221,17 +4221,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('servertool adapter context must not backfill captured tools with TS semantics', () => {
+  it('servertool adapter context module must stay physically removed', () => {
     const filePath = path.join(process.cwd(), 'src/server/runtime/http-server/executor/servertool-adapter-context.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'ts-read-tool-name', pattern: /function\s+readToolName\s*\(/ },
-      { label: 'ts-replace-captured-tools', pattern: /capturedChatRequest\.tools\s*=/ },
-      { label: 'ts-client-tool-name-set', pattern: /new\s+Set\([^\n]*clientToolsRaw\.map\(readToolName\)/ },
-      { label: 'ts-existing-tool-name-map', pattern: /existingTools\.map\(readToolName\)/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('servertool response SSE projection must use post-governance client semantic truth', () => {

@@ -41,7 +41,7 @@ flowchart LR
   MetaReq04RuntimeControlBound["MetaReq04RuntimeControlBound<br/>route/servertool/stream control slots attached"]
   MetaReq05ProviderObservationProjected["MetaReq05ProviderObservationProjected<br/>target/provider observation projected"]
   MetaResp06ResponseObserved["MetaResp06ResponseObserved<br/>finish reason / response semantics observed"]
-  MetaResp07ServertoolContextProjected["MetaResp07ServertoolContextProjected<br/>adapter/servertool read-only projection"]
+  MetaResp07ServertoolContextProjected["MetaResp07ServertoolContextProjected<br/>servertool read-only bridge projection"]
   MetaResp08CloseoutReleased["MetaResp08CloseoutReleased<br/>request-scoped metadata finalized and released"]
 
   MetaReq01InboundSeeded -->|mtc-01| MetaReq02TruthMaterialized
@@ -64,7 +64,7 @@ flowchart LR
 | `mtc-03` | continuation attached -> runtime control bound | `HubReqChatProcess03Governed` / request-route owner / `VrRoute04SelectedTarget` | `runtime_control` | route hint / stream / servertool followup / stop-message controls; relay `/v1/responses` restore may carry `responsesResume` + `routeHint` at handler/bridge entry, while effective `retryProviderKey` is finalized later by request-executor request-route owner before Hub execution |
 | `mtc-04` | runtime control -> provider observation | `VrRoute04SelectedTarget` / `HubReqOutbound05ProviderSemantic` | `provider_observation` | `request-executor-pipeline-attempt.ts::resolveRequestExecutorPipelineAttempt -> MetadataCenter.writeProviderObservation`; target / providerKey / assignedModelId / compatibilityProfile now enter center instead of reviving flat `metadata.target` |
 | `mtc-05` | provider observation -> response observed | `HubRespInbound02Parsed` | `provider_observation` append + `response_observation` | `persistResponsesConversationLifecycleAtChatProcessExitWithinCore -> readMetadataCenterRequestTruth`; response-side continuation save owner is core Chat Process closeout |
-| `mtc-06` | response observed -> servertool context projection | `HubRespChatProcess03Governed` | read-only projection from center; no new request truth | `buildServerToolAdapterContext -> readRuntimeServerToolProjection`; session/conversation/model/compatibility projection now goes through one MetadataCenter-backed helper |
+| `mtc-06` | response observed -> servertool bridge projection | `HubRespChatProcess03Governed` | read-only projection from center; no new request truth | `provider-response-converter.ts::buildBridgeAdapterContext -> readRuntimeServerToolProjection`; session/conversation/model/compatibility projection now happens locally before the native bridge; the old standalone `servertool-adapter-context` owner is removed |
 | `mtc-07` | projected -> closeout released | `HubRespOutbound04ClientSemantic` / `ServerRespOutbound05ClientFrame` | `status/provenance` closeout only | `metadata-center.ts::releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`; JSON closeout、SSE finish/close、SSE bridge-error 现已共用真实 handler closeout owner |
 
 ## Write-Point Lock Table
@@ -241,7 +241,7 @@ Request truth itself no longer lacks a single write ledger:
 
 - `src/server/runtime/http-server/executor-metadata.ts::buildRequestMetadata` owns request truth materialization
 - `src/modules/llmswitch/bridge/responses-request-bridge.ts` owns continuation context attachment
-- `src/server/runtime/http-server/executor/servertool-adapter-context.ts` now reads request truth only from `MetadataCenter`
+- `src/server/runtime/http-server/executor/provider-response-converter.ts::buildBridgeAdapterContext` now reads request truth from `MetadataCenter` for the native bridge; the standalone `servertool-adapter-context` module is physically removed
 
 The remaining problem is now narrower: broader runtime families still pass through flat metadata containers, but provider observation no longer relies on flat `target` / `compatibilityProfile` revival.
 
@@ -271,7 +271,7 @@ Historical bad sources were:
 
 Current verified status:
 
-- `servertool-adapter-context` no longer backfills request `sessionId/conversationId` from `entryOriginRequest` / flat metadata / `__rt`
+- `provider-response-converter.ts::buildBridgeAdapterContext` no longer backfills request `sessionId/conversationId` from `entryOriginRequest` / flat metadata / `__rt`
 - `responsesRequestContext-only` no longer activates stopless
 - request truth is write-once inside `MetadataCenter`
 

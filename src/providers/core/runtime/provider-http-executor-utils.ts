@@ -7,8 +7,6 @@ import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { extractStatusCodeFromError } from './provider-error-classifier.js';
 import { normalizeKnownProviderError, PROVIDER_NETWORK_CODES } from './provider-error-catalog.js';
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
-import { OAuthRecoveryHandler } from './transport/oauth-recovery-handler.js';
-import type { HttpClient } from '../utils/http-client.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
@@ -58,85 +56,6 @@ function summarizeUnknownError(error: unknown): string {
     return JSON.stringify(error);
   } catch {
     return String(error ?? 'unknown_error');
-  }
-}
-
-function logProviderOAuthRecoveryNonBlocking(
-  stage: string,
-  error: unknown,
-  details: Record<string, unknown> = {}
-): void {
-  try {
-    const suffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(
-      `[provider-oauth-recovery] ${stage} failed (non-blocking): ${summarizeUnknownError(error)}${suffix}`
-    );
-  } catch {
-    // never throw from best-effort logging
-  }
-}
-
-export async function tryRecoverOAuthAndReplay(options: {
-  error: unknown;
-  requestInfo: PreparedHttpRequest;
-  processedRequest: UnknownObject;
-  captureSse: boolean;
-  context: ProviderContext;
-  authProvider: IAuthProvider | null;
-  oauthProviderId?: string;
-  providerType: string;
-  config: OpenAIStandardConfig;
-  httpClient: HttpClient;
-  buildRequestHeaders: () => Promise<Record<string, string>>;
-  finalizeRequestHeaders: (headers: Record<string, string>, req: UnknownObject) => Promise<Record<string, string>>;
-  applyStreamModeHeaders: (headers: Record<string, string>, wantsSse: boolean) => Record<string, string>;
-  wrapUpstreamSseResponse: (stream: NodeJS.ReadableStream, ctx: ProviderContext) => Promise<UnknownObject>;
-}): Promise<unknown | undefined> {
-  try {
-    const recovery = new OAuthRecoveryHandler({
-      authProvider: options.authProvider,
-      oauthProviderId: options.oauthProviderId,
-      providerType: options.providerType,
-      config: options.config,
-      httpClient: options.httpClient
-    });
-    return await recovery.tryRecoverOAuthAndReplay(
-      options.error,
-      options.requestInfo,
-      options.processedRequest,
-      options.captureSse,
-      options.context,
-      options.buildRequestHeaders,
-      options.finalizeRequestHeaders,
-      options.applyStreamModeHeaders,
-      options.wrapUpstreamSseResponse
-    );
-  } catch (error) {
-    const auth = options.config?.config?.auth as
-      | {
-          type?: unknown;
-          rawType?: unknown;
-          tokenFile?: unknown;
-          oauthProviderId?: unknown;
-        }
-      | undefined;
-    logProviderOAuthRecoveryNonBlocking('tryRecoverOAuthAndReplay', error, {
-      requestId: options.context.requestId,
-      providerKey: options.context.providerKey,
-      providerId: options.context.providerId,
-      providerType: options.providerType,
-      oauthProviderId: options.oauthProviderId ?? null,
-      authType: typeof auth?.type === 'string' ? auth.type : null,
-      authRawType: typeof auth?.rawType === 'string' ? auth.rawType : null,
-      tokenFile: typeof auth?.tokenFile === 'string' ? auth.tokenFile : null,
-      upstreamStatus: extractStatusCodeFromError(options.error as ProviderErrorAugmented) ?? null,
-      upstreamCode:
-        typeof (options.error as ProviderErrorAugmented | null | undefined)?.code === 'string'
-          ? (options.error as ProviderErrorAugmented).code
-          : null,
-      upstreamMessage: summarizeUnknownError(options.error)
-    });
-    return undefined;
   }
 }
 

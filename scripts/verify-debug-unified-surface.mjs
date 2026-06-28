@@ -63,7 +63,6 @@ function listFilesRecursive(dir) {
 }
 
 const responsesHandler = readRepoFile('src/server/handlers/responses-handler.ts');
-const replayScript = readRepoFile('scripts/debug/replay-live-minimax-2013.mjs');
 
 if (responsesHandler.includes("'.rcc', 'diag'") || responsesHandler.includes('fs.writeFileSync(path.join(diagDir')) {
   failures.push('responses-handler.ts still contains ad hoc ~/.rcc/diag file-writing logic');
@@ -71,11 +70,8 @@ if (responsesHandler.includes("'.rcc', 'diag'") || responsesHandler.includes('fs
 if (!responsesHandler.includes('writeDebugErrorDiagArtifact')) {
   failures.push('responses-handler.ts no longer references the unified debug diag writer');
 }
-if (replayScript.includes('/Users/fanzhang/.rcc/diag/')) {
-  failures.push('replay-live-minimax-2013.mjs still hardcodes a local-machine diag path');
-}
-if (!replayScript.includes('readDebugErrorDiagArtifact') || !replayScript.includes('process.argv[2]')) {
-  failures.push('replay-live-minimax-2013.mjs is not reading diag artifacts through the unified reader + explicit CLI path');
+if (repoFileExists('scripts/debug/replay-live-minimax-2013.mjs')) {
+  failures.push('replay-live-minimax-2013.mjs is removed; do not restore local-machine replay debug scripts');
 }
 
 const debugIndex = readRepoFile('src/debug/index.ts');
@@ -145,6 +141,11 @@ assertShellOnly(
   "export * from '../../../debug/hooks/bidirectional.js';",
   'export * from "../../../debug/hooks/bidirectional.js";'
 );
+assertShellOnly(
+  'src/providers/core/utils/provider-error-logger.ts',
+  "export * from '../../../debug/logger/provider-error.js';",
+  'export * from "../../../debug/logger/provider-error.js";'
+);
 
 if (repoFileExists('src/providers/core/utils/snapshot-writer-buffer.ts')) {
   failures.push('src/providers/core/utils/snapshot-writer-buffer.ts must stay physically deleted; owner is src/debug/snapshot/buffer.ts');
@@ -172,6 +173,7 @@ for (const file of [
   'src/modules/pipeline/utils/colored-logger.ts',
   'src/providers/core/hooks/debug-example-hooks.ts',
   'src/providers/core/config/provider-debug-hooks.ts',
+  'src/providers/core/utils/provider-error-logger.ts',
 ]) {
   assertNotContains(file, [
     'fs/promises',

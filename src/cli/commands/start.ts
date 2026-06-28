@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
@@ -9,7 +9,6 @@ import { writeRuntimeInstance, updateRuntimeInstanceStatus } from '../../utils/r
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import { detectUserConfigFormat, parseUserConfigText } from '../../config/user-config-codec.js';
-import { writeUserConfigFile } from '../../config/user-config-writer.js';
 import { describeHealthProbeFailure, probeRouteCodexHealth } from '../../utils/http-health-probe.js';
 import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
@@ -123,7 +122,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
     .option('-c, --config <config>', 'Configuration file path')
     .option('-p, --port <port>', 'RouteCodex server port (overrides env/config)')
     .option('--mode <mode>', 'Run mode (router|analysis|server). analysis => router + force snapshots', 'router')
-    .option('--quota-routing <mode>', 'Quota routing admission control (on|off). off => do not remove providers from pool based on quota')
     .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
     .option('--codex', 'Use Codex system prompt (tools unchanged)')
     .option('--claude', 'Use Claude system prompt (tools unchanged)')
@@ -142,8 +140,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
       const fsImpl = ctx.fsImpl ?? fs;
       const pathImpl = ctx.pathImpl ?? path;
       const home = ctx.homedir ?? (() => homedir());
-      const tmp = ctx.tmpdir ?? (() => tmpdir());
-
       try {
         const runMode = normalizeRunMode(options.mode) ?? 'router';
         ctx.env.RCC_MODE = runMode;
@@ -262,30 +258,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           ctx.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
         }
 
-        const quotaRoutingOverride = parseBoolish((options as { quotaRouting?: unknown }).quotaRouting);
-        if ((options as { quotaRouting?: unknown }).quotaRouting !== undefined && quotaRoutingOverride === undefined) {
-          spinner.fail('Invalid --quota-routing value. Use on|off');
-          ctx.exit(1);
-        }
-        if (typeof quotaRoutingOverride === 'boolean') {
-          const carrier = config && typeof config === 'object' ? (config as Record<string, unknown>) : {};
-          const httpserver =
-            carrier.httpserver && typeof carrier.httpserver === 'object' && carrier.httpserver !== null
-              ? (carrier.httpserver as Record<string, unknown>)
-              : {};
-          carrier.httpserver = {
-            ...httpserver,
-            quotaRoutingEnabled: quotaRoutingOverride
-          };
-          config = carrier;
-
-          const dir = fsImpl.mkdtempSync(pathImpl.join(tmp(), 'routecodex-config-'));
-          const patchedPath = pathImpl.join(dir, pathImpl.basename(configPath));
-          await writeUserConfigFile(patchedPath, config, configFormat);
-          configPath = patchedPath;
-          spinner.info(`quota routing override: ${quotaRoutingOverride ? 'on' : 'off'} (temp config)`);
-        }
-
         // Determine effective port:
         // - dev package (`routecodex`): env override, otherwise固定端口 DEFAULT_DEV_PORT
         // - release package (`rcc`): 严格按配置文件端口启动
@@ -398,10 +370,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         }
         ctx.env.ROUTECODEX_HTTP_HOST = serverHost;
         ctx.env.ROUTECODEX_HTTP_PORT = String(resolvedPort);
-        await ctx.ensureLocalTokenPortalEnv();
-
-        // Best-effort auto-start of token daemon (can be disabled via env)
-        await ctx.ensureTokenDaemonAutoStart();
 
         const modulesConfigPath = ctx.getModulesConfigPath();
         if (!fsImpl.existsSync(modulesConfigPath)) {
@@ -1170,9 +1138,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                 childExited
               }
             });
-            if (ctx.isDevPackage) {
-              await ctx.stopTokenDaemonIfRunning?.();
-            }
             closeServerLogStream();
             try {
               ctx.exit(0);

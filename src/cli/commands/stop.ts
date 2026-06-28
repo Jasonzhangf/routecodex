@@ -47,7 +47,6 @@ export type StopCommandContext = {
   findListeningPids: (port: number) => number[];
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   sleep: (ms: number) => Promise<void>;
-  stopTokenDaemonIfRunning?: () => Promise<void>;
   stopGuardianDaemon?: () => Promise<GuardianStopResult>;
   reportGuardianLifecycle?: (event: GuardianLifecycleEvent) => Promise<boolean>;
   fetchImpl?: typeof fetch;
@@ -275,9 +274,6 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
             actorPid: process.pid,
             metadata: { port: resolvedPort }
           });
-          if (ctx.isDevPackage) {
-            await ctx.stopTokenDaemonIfRunning?.();
-          }
           await ctx.stopGuardianDaemon?.();
         };
         for (const resolvedPort of targetPorts) {

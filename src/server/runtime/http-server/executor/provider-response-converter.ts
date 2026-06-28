@@ -24,11 +24,9 @@ import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
 import {
-  buildServerToolAdapterContext
-} from './servertool-adapter-context.js';
-import {
   readRuntimeControlProjection,
   readRuntimeDebugSnapshotProjection,
+  readRuntimeServerToolProjection,
 } from '../metadata-center/request-truth-readers.js';
 
 import {
@@ -109,6 +107,30 @@ const PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER = {
   symbol: 'syncAdapterContextRuntimeBackToPipelineMetadata',
   stage: 'provider_response_debug_snapshot'
 } as const;
+
+function buildBridgeAdapterContext(args: {
+  metadata: Record<string, unknown>;
+  entryOriginRequest?: Record<string, unknown>;
+  requestId: string;
+  entryEndpoint?: string;
+  providerProtocol?: string;
+  serverToolsEnabled?: boolean;
+}): Record<string, unknown> {
+  const context: Record<string, unknown> = {
+    ...args.metadata,
+    ...readRuntimeServerToolProjection(args.metadata),
+    requestId: args.requestId,
+    ...(args.entryEndpoint ? { entryEndpoint: args.entryEndpoint } : {}),
+    ...(args.providerProtocol ? { providerProtocol: args.providerProtocol } : {}),
+    ...(args.serverToolsEnabled !== undefined ? { serverToolsEnabled: args.serverToolsEnabled } : {}),
+    ...(args.entryOriginRequest ? { entryOriginRequest: args.entryOriginRequest } : {}),
+  };
+  const center = MetadataCenter.read(args.metadata);
+  if (center) {
+    MetadataCenter.bind(context, center);
+  }
+  return context;
+}
 
 function attachTimingBreakdown(response: PipelineExecutionResult): PipelineExecutionResult {
   const clientInjectWaitMsRaw = response.usageLogInfo?.clientInjectWaitMs;
@@ -249,7 +271,6 @@ export type ConvertProviderResponseOptions = {
   serverToolsEnabled?: boolean;
   wantsStream: boolean;
   entryOriginRequest?: Record<string, unknown> | undefined;
-  requestSemantics?: Record<string, unknown> | undefined;
   processMode?: string;
   response: PipelineExecutionResult;
   pipelineMetadata?: Record<string, unknown>;
@@ -406,18 +427,15 @@ export async function convertProviderResponseIfNeeded(
     });
     return options.response;
   }
-  let adapterContext: Record<string, unknown> | undefined;
   try {
-    const baseContext = buildServerToolAdapterContext({
+    const adapterContext = buildBridgeAdapterContext({
       metadata: responseMetadataBag,
       entryOriginRequest: options.entryOriginRequest,
-      requestSemantics: options.requestSemantics,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol: effectiveProviderProtocol,
       serverToolsEnabled: options.serverToolsEnabled !== false
     });
-    adapterContext = baseContext;
     const bridgeProviderProtocol = readProviderProtocolForProviderResponseConverter({
       metadata: responseMetadataBag,
       adapterContext
@@ -460,7 +478,6 @@ export async function convertProviderResponseIfNeeded(
       context: adapterContext,
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
-      requestSemantics: options.requestSemantics,
       stageRecorder
     });
     syncAdapterContextRuntimeBackToPipelineMetadata({

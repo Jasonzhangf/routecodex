@@ -40,8 +40,6 @@ export abstract class BaseProvider implements IProviderV2 {
   protected requestCount = 0;
   protected errorCount = 0;
   protected lastActivity: number = Date.now();
-  protected authMode: 'apikey' | 'oauth' = 'apikey';
-  protected oauthProviderId?: string;
   private lastRuntimeMetadata?: ProviderRuntimeMetadata;
   private runtimeProfile?: ProviderRuntimeProfile;
 

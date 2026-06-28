@@ -463,17 +463,26 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
                       ? Math.floor(bodyMeta.entryPort)
                       : undefined;
   if (typeof entryPortCandidate === 'number') {
-    center.writeRequestTruth(
-      'portScope',
-      String(entryPortCandidate),
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'ServerReqInbound01ClientRaw'
-      },
-      'request entry port scope'
-    );
-    metadata.portScope = String(entryPortCandidate);
+    const entryPortScope = String(entryPortCandidate);
+    const existingPortScope = center.readRequestTruth().portScope;
+    if (existingPortScope && existingPortScope !== entryPortScope) {
+      throw new Error(
+        `MetadataCenter request_truth.portScope conflict: existing=${existingPortScope} incoming=${entryPortScope}`
+      );
+    }
+    if (!existingPortScope) {
+      center.writeRequestTruth(
+        'portScope',
+        entryPortScope,
+        {
+          module: 'src/server/runtime/http-server/executor-metadata.ts',
+          symbol: 'buildRequestMetadata',
+          stage: 'ServerReqInbound01ClientRaw'
+        },
+        'request entry port scope'
+      );
+    }
+    metadata.portScope = entryPortScope;
   }
   if (routeHint) {
     center.writeRuntimeControl(

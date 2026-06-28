@@ -381,11 +381,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/server/runtime/http-server/executor/servertool-adapter-context.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/server/runtime/http-server/executor/servertool-followup-metadata.ts",
       "textContains": ""
     },

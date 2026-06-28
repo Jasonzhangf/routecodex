@@ -24,7 +24,6 @@ export type StartCommandOptions = {
   config?: string;
   port?: string;
   mode?: string;
-  quotaRouting?: unknown;
   logLevel?: string;
   codex?: boolean;
   claude?: boolean;
@@ -51,9 +50,6 @@ export type StartCommandContext = {
   homedir?: () => string;
   tmpdir?: () => string;
   sleep: (ms: number) => Promise<void>;
-  ensureLocalTokenPortalEnv: () => Promise<unknown>;
-  ensureTokenDaemonAutoStart: () => Promise<void>;
-  stopTokenDaemonIfRunning?: () => Promise<void>;
   ensurePortAvailable: (port: number, spinner: Spinner, opts?: { restart?: boolean }) => Promise<void>;
   findListeningPids: (port: number) => number[];
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;

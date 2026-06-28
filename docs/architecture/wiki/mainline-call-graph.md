@@ -176,7 +176,7 @@ flowchart LR
   ChatProcReqContinuation01EntryEvidence -.->|rct-01| ChatProcReqContinuation02OwnerResolved
   ChatProcReqContinuation02OwnerResolved -.->|rct-02| ChatProcReqContinuation03CanonicalRestored
   ChatProcReqContinuation03CanonicalRestored -->|rct-03| ChatProcReqContinuation04HookRestored
-  ChatProcReqContinuation04HookRestored -.->|rct-04| ChatProcReqContinuation05Governed
+  ChatProcReqContinuation04HookRestored -->|rct-04| ChatProcReqContinuation05Governed
   ChatProcReqContinuation05Governed -.->|rct-05| ChatProcRespContinuation06ResponseGoverned
   ChatProcRespContinuation06ResponseGoverned -->|rct-06| ChatProcRespContinuation07CanonicalSaved
   ChatProcRespContinuation07CanonicalSaved -->|rct-07| ChatProcRespContinuation08Released
@@ -185,8 +185,8 @@ flowchart LR
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
   class ChatProcReqContinuation01EntryEvidence partial;
   class ChatProcReqContinuation02OwnerResolved partial;
-  class ChatProcReqContinuation03CanonicalRestored pending;
-  class ChatProcReqContinuation04HookRestored pending;
+  class ChatProcReqContinuation03CanonicalRestored partial;
+  class ChatProcReqContinuation04HookRestored anchored;
   class ChatProcReqContinuation05Governed partial;
   class ChatProcRespContinuation06ResponseGoverned partial;
   class ChatProcRespContinuation07CanonicalSaved anchored;
@@ -197,8 +197,8 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | rct-01 | `ChatProcReqContinuation01EntryEvidence -> ChatProcReqContinuation02OwnerResolved` | partial | `prepareResponsesHandlerEntryForHttp -> planResponsesHandlerEntry` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-02 | `ChatProcReqContinuation02OwnerResolved -> ChatProcReqContinuation03CanonicalRestored` | partial | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
-| rct-03 | `ChatProcReqContinuation03CanonicalRestored -> ChatProcReqContinuation04HookRestored` | binding pending | `binding pending` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
-| rct-04 | `ChatProcReqContinuation04HookRestored -> ChatProcReqContinuation05Governed` | partial | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-03 | `ChatProcReqContinuation03CanonicalRestored -> ChatProcReqContinuation04HookRestored` | anchored | `buildCapturedRelayResumeRequestContextForHttp -> captureReqInboundResponsesContextSnapshot` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-04 | `ChatProcReqContinuation04HookRestored -> ChatProcReqContinuation05Governed` | anchored | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-05 | `ChatProcReqContinuation05Governed -> ChatProcRespContinuation06ResponseGoverned` | partial | `prepareResponsesJsonClientDispatchPlanForHttp -> projectResponsesClientPayloadForClientNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-06 | `ChatProcRespContinuation06ResponseGoverned -> ChatProcRespContinuation07CanonicalSaved` | anchored | `persistResponsesConversationLifecycleAtChatProcessExitWithinCore -> recordResponsesResponse` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-07 | `ChatProcRespContinuation07CanonicalSaved -> ChatProcRespContinuation08Released` | anchored | `releaseMetadataCenterForHttpResponse -> releaseMetadataCenterForHttpResponse` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
@@ -295,7 +295,7 @@ flowchart LR
 
 ## runtime.lifecycle.mainline
 
-Managed server and token-daemon lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity.
+Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity.
 
 Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle-ssot.md`
 
@@ -305,8 +305,6 @@ flowchart LR
   DaemonRestartLoop["DaemonRestartLoop"]
   DaemonSupervisorLoop["DaemonSupervisorLoop"]
   RuntimeInstanceRecord["RuntimeInstanceRecord"]
-  TokenDaemonPidRecord["TokenDaemonPidRecord"]
-  TokenDaemonBootstrap["TokenDaemonBootstrap"]
   StopIntentRecord["StopIntentRecord"]
   ServerStopCommand["ServerStopCommand"]
   ServerPidCacheRecord["ServerPidCacheRecord"]
@@ -315,8 +313,6 @@ flowchart LR
   ServerStartCommand -->|rtl-02| ServerPidCacheRecord
   ServerStopCommand -->|rtl-03| StopIntentRecord
   ServerStartCommand -->|rtl-04| StopIntentRecord
-  TokenDaemonBootstrap -->|rtl-05| TokenDaemonPidRecord
-  TokenDaemonBootstrap -->|rtl-06| TokenDaemonPidRecord
   ServerStartCommand -->|rtl-07| RuntimeInstanceRecord
   DaemonSupervisorLoop -->|rtl-08| RuntimeInstanceRecord
   DaemonRestartLoop -->|rtl-09| RuntimeInstanceRecord
@@ -330,8 +326,6 @@ flowchart LR
   class ServerPidCacheRecord anchored;
   class ServerStopCommand anchored;
   class StopIntentRecord anchored;
-  class TokenDaemonBootstrap anchored;
-  class TokenDaemonPidRecord anchored;
   class RuntimeInstanceRecord anchored;
   class DaemonSupervisorLoop anchored;
   class DaemonRestartLoop anchored;
@@ -344,8 +338,6 @@ flowchart LR
 | rtl-02 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> writeServerPidCache` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
 | rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> writeServerStopIntent` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
 | rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> consumeServerStopIntent` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
-| rtl-05 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
-| rtl-06 | `TokenDaemonBootstrap -> TokenDaemonPidRecord` | anchored | `resolveTokenDaemonPidPath -> resolveTokenDaemonPidPath` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
 | rtl-07 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-08 | `DaemonSupervisorLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-09 | `DaemonRestartLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
@@ -448,7 +440,7 @@ flowchart LR
 | mtc-03 | `MetaReq03ContinuationAttached -> MetaReq04RuntimeControlBound` | anchored | `finalizeRequestExecutorAttemptMetadata -> finalizeRequestExecutorAttemptMetadata` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-04 | `MetaReq04RuntimeControlBound -> MetaReq05ProviderObservationProjected` | anchored | `resolveRequestExecutorPipelineAttempt -> resolveRequestExecutorPipelineAttempt` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-05 | `MetaReq05ProviderObservationProjected -> MetaResp06ResponseObserved` | anchored | `persistResponsesConversationLifecycleAtChatProcessExitWithinCore -> readMetadataCenterRequestTruth` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
-| mtc-06 | `MetaResp06ResponseObserved -> MetaResp07ServertoolContextProjected` | anchored | `buildServerToolAdapterContext -> readRuntimeServerToolProjection` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-06 | `MetaResp06ResponseObserved -> MetaResp07ServertoolContextProjected` | anchored | `buildBridgeAdapterContext -> readRuntimeServerToolProjection` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-07 | `MetaResp07ServertoolContextProjected -> MetaResp08CloseoutReleased` | anchored | `releaseMetadataCenterForHttpResponse -> markReleased` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 
 ## Shared Multi-Reference Functions

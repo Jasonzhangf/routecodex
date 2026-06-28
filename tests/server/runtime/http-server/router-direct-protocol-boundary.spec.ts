@@ -171,6 +171,62 @@ describe('router direct protocol boundary', () => {
     expect(readRuntimeControlProjection(relayMetadata).preselectedRoute).toEqual(preselectedRoute);
   });
 
+  it('preserves MetadataCenter routeHint when router-direct rebuilds metadata for VR', async () => {
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    const server = new RouteCodexHttpServer(createRouterServer());
+    const routeSpy = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      expect(readRuntimeControlProjection(metadata).routeHint).toBe('search');
+      expect(
+        (metadata.metadataCenterSnapshot as Record<string, unknown> | undefined)?.runtimeControl
+      ).toEqual(expect.objectContaining({ routeHint: 'search' }));
+      return {
+        target: {
+          providerKey: 'anthropic.key1.claude',
+          providerType: 'anthropic',
+          runtimeKey: 'anthropic.key1.claude',
+          outboundProfile: 'anthropic-messages',
+        },
+        decision: {
+          routeName: 'search',
+          pool: ['anthropic.key1.claude'],
+          reasoning: 'route_hint:search',
+        },
+        diagnostics: {},
+      };
+    });
+    attachRouterPort(server as any);
+    (server as any).hubPipeline = {
+      execute: jest.fn(),
+      updateVirtualRouterConfig: jest.fn(),
+      getVirtualRouter: () => ({ route: routeSpy }),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', (server as any).hubPipeline],
+    ]);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { id: 'relay_after_route_hint_preserved', object: 'response' },
+      metadata: { relayed: true },
+    } as any);
+
+    await (server as any).executePortAwarePipeline(
+      5555,
+      {
+        ...buildResponsesInput('req_router_direct_route_hint_preserved'),
+        headers: { 'x-route-hint': 'search' },
+      },
+    );
+
+    expect(routeSpy).toHaveBeenCalledTimes(1);
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    const relayMetadata = executePipelineSpy.mock.calls[0]?.[0]?.metadata as Record<string, unknown>;
+    expect(readRuntimeControlProjection(relayMetadata).preselectedRoute).toEqual(expect.objectContaining({
+      decision: expect.objectContaining({
+        reasoning: 'route_hint:search',
+      }),
+    }));
+  });
+
   it('does not record router-direct storm backoff when protocol mismatch is relayed', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));

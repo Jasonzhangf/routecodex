@@ -6,9 +6,6 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
 import type { HttpRequestExecutorDeps, PreparedHttpRequest, PreparedRequestExecutor } from './http-request-executor.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
-import {
-  tryRecoverOAuthAndReplay as tryRecoverProviderOAuthAndReplay
-} from './provider-http-executor-utils.js';
 
 type BuildProviderRequestExecutorDepsArgs = {
   wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean;
@@ -31,7 +28,6 @@ type BuildProviderRequestExecutorDepsArgs = {
     context: ProviderContext
   ): Promise<ProviderErrorAugmented>;
   authProvider: IAuthProvider | null;
-  oauthProviderId?: string;
   providerType: string;
   config: OpenAIStandardConfig;
   httpClient: HttpClient;
@@ -53,22 +49,6 @@ export function buildProviderRequestExecutorDeps(args: BuildProviderRequestExecu
     getClientRequestIdFromContext: (context) => ProviderPayloadUtils.getClientRequestIdFromContext(context),
     wrapUpstreamSseResponse: args.wrapUpstreamSseResponse,
     executePreparedRequest: args.executePreparedRequest,
-    tryRecoverOAuthAndReplay: (error, requestInfo, processedRequest, captureSse, context) => tryRecoverProviderOAuthAndReplay({
-      error,
-      requestInfo,
-      processedRequest,
-      captureSse,
-      context,
-      authProvider: args.authProvider,
-      oauthProviderId: args.oauthProviderId,
-      providerType: args.providerType,
-      config: args.config,
-      httpClient: args.httpClient,
-      buildRequestHeaders: args.buildRequestHeaders,
-      finalizeRequestHeaders: args.finalizeRequestHeaders,
-      applyStreamModeHeaders: args.applyStreamModeHeaders,
-      wrapUpstreamSseResponse: args.wrapUpstreamSseResponse
-    }),
     resolveBusinessResponseError: args.resolveBusinessResponseError,
     normalizeHttpError: (error, processedRequest, requestInfo, context) =>
       args.normalizeHttpError(error, processedRequest, requestInfo, context)

@@ -51,10 +51,7 @@ import { VercelAiSdkOpenAiTransport } from './vercel-ai-sdk/openai-sdk-transport
 import { OpenAiResponsesSdkTransport } from './openai-responses-sdk-transport.js';
 
 // Transport submodules
-import {
-  AuthModeUtils,
-  RuntimeDetector
-} from './transport/index.js';
+import { RuntimeDetector } from './transport/index.js';
 
 type ProtocolClient = HttpProtocolClient<ProtocolRequestPayload>;
 type TokenPayloadReader = {
@@ -168,16 +165,9 @@ export class HttpTransportProvider extends BaseProvider {
     try {
       if (this.authProvider) {
         await this.authProvider.initialize();
-        const providerConfig = this.config.config;
-        const auth = providerConfig.auth;
-        const authMode = AuthModeUtils.normalizeAuthMode(auth.type);
-        // Token 管理迁移后，OAuth 初始化交由 TokenManager/TokenDaemon 负责，
-        // 这里不再在服务器启动阶段主动跑 ensureValidOAuthToken，避免多余日志和上游调用。
-        if (authMode !== 'oauth') {
-          runNonBlockingCredentialValidation(async () => {
-            await this.authProvider?.validateCredentials();
-          });
-        }
+        runNonBlockingCredentialValidation(async () => {
+          await this.authProvider?.validateCredentials();
+        });
       }
 
     } catch (error) {
@@ -236,8 +226,6 @@ export class HttpTransportProvider extends BaseProvider {
         ? this.config.config.extensions as Record<string, unknown>
         : undefined
     });
-    this.authMode = authBootstrap.authMode;
-    this.oauthProviderId = authBootstrap.oauthProviderId;
     return authBootstrap.authProvider;
   }
 
@@ -270,7 +258,6 @@ export class HttpTransportProvider extends BaseProvider {
       resolveBusinessResponseError: this.resolveProfileBusinessResponseError.bind(this),
       normalizeHttpError: this.normalizeHttpError.bind(this),
       authProvider: this.authProvider,
-      oauthProviderId: this.oauthProviderId,
       providerType: this.providerType,
       config: this.config,
       httpClient: this.httpClient
@@ -455,8 +442,7 @@ export class HttpTransportProvider extends BaseProvider {
       runtimeProfile: this.getRuntimeProfile(),
       configProviderId: this.config?.config?.providerId,
       configProviderType: this.config?.config?.providerType,
-      providerType: this.providerType,
-      oauthProviderId: this.oauthProviderId
+      providerType: this.providerType
     });
   }
 
@@ -488,7 +474,7 @@ export class HttpTransportProvider extends BaseProvider {
       providerId: typeof cfg.providerId === 'string' ? cfg.providerId : undefined
     });
     const auth = this.config.config.auth;
-    const authMode = AuthModeUtils.normalizeAuthMode(auth.type);
+    const authMode = auth.type === 'apikey' ? 'apikey' : String(auth.type || 'unknown');
 
     // 验证认证类型
     const supportedAuthTypes = [...profile.requiredAuth, ...profile.optionalAuth];
@@ -507,7 +493,6 @@ export class HttpTransportProvider extends BaseProvider {
     return buildProviderRequestHeaders({
       config: this.config.config,
       authProvider: this.authProvider,
-      oauthProviderId: this.oauthProviderId,
       serviceProfile: this.serviceProfile,
       runtimeMetadata,
       runtimeHeaders,
@@ -571,7 +556,7 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
   private getRuntimeDetector(): RuntimeDetector {
-    return new RuntimeDetector(this.config, this.providerType, this.oauthProviderId);
+    return new RuntimeDetector(this.config, this.providerType);
   }
 
   private resolveAuthResourceBaseUrlOverride(): string | undefined {

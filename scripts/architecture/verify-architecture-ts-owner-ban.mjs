@@ -36,7 +36,6 @@ const TS_OWNER_WHITELIST = new Set([
   'hub.metadata_center_mainline', // transitional request-scoped center currently lives in TS host/runtime bridge; migration target remains Rust
   'hub.metadata_center_request_capture', // transitional request-scoped metadata capture shell in TS host/runtime bridge
   'hub.metadata_center_attempt_merge', // transitional request-scoped metadata merge shell in TS host/runtime bridge
-  'hub.metadata_center_servertool_context', // transitional request-scoped servertool context projection shell
   'runtime.lifecycle.pid_cache', // runtime lifecycle cache is TS host process glue; pid cache is not semantic truth
   'runtime.lifecycle.stop_intent', // runtime lifecycle stop signal is TS host process glue
   'runtime.lifecycle.instance_registry', // runtime lifecycle instance declaration is TS host process glue

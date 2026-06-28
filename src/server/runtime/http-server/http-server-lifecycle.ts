@@ -5,7 +5,6 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext } from '../../handlers/types.js';
 import { registerHttpRoutes } from './routes.js';
 import { canonicalizeServerId } from './server-id.js';
-import { shutdownCamoufoxLaunchers } from '../../../providers/core/config/camoufox-launcher.js';
 import {
   reportRouteError,
   type RouteErrorPayload
@@ -14,7 +13,6 @@ import { formatValueForConsole } from '../../../utils/logger.js';
 import { ManagerDaemon } from '../../../manager/index.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
-import { TokenManagerModule } from '../../../manager/modules/token/index.js';
 import { asRecord } from './provider-utils.js';
 import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
 import type { ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
@@ -50,7 +48,6 @@ export async function initializeHttpServer(server: any): Promise<void> {
         configPath: server.config?.configPath,
         getHubPipeline: () => server.hubPipeline,
       });
-      daemon.registerModule(new TokenManagerModule());
       daemon.registerModule(new RoutingStateManagerModule());
       daemon.registerModule(new HealthManagerModule());
       await daemon.start();
@@ -189,11 +186,6 @@ export async function stopHttpServer(server: any): Promise<void> {
   };
 
   server.stopSessionDaemonInjectLoop();
-  try {
-    await shutdownCamoufoxLaunchers();
-  } catch (error) {
-    logShutdownNonBlocking('shutdown_camoufox_launchers', error);
-  }
   if (!server.server && server.getPortRegistry().size === 0) {
     return;
   }

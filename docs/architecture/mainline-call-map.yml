@@ -475,7 +475,7 @@ chains:
         note: "TS is a consumer only on this edge. It may not infer global no-provider from forwarder empty or ordinary route exhaustion while a default-pool last provider remains."
 
   - chain_id: runtime.lifecycle.mainline
-    summary: "Managed server and token-daemon lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
+    summary: "Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
     entry_contract:
       node: ServerPidCacheRecord
       owner_doc: docs/design/server-runtime-lifecycle-ssot.md
@@ -523,28 +523,6 @@ chains:
         owner_feature_id: runtime.lifecycle.stop_intent
         semantic_input: "port context"
         semantic_output: "stop-intent record if fresh TTL-valid intent exists, otherwise null"
-        status: anchored
-      - step_id: rtl-05
-        from_node: TokenDaemonBootstrap
-        to_node: TokenDaemonPidRecord
-        caller_symbol: resolveTokenDaemonPidPath
-        caller_file: src/cli.ts
-        callee_symbol: resolveTokenDaemonPidPath
-        callee_file: src/utils/server-runtime-pid.ts
-        owner_feature_id: runtime.lifecycle.pid_cache
-        semantic_input: "daemon identity"
-        semantic_output: "resolved path under <rccUserDir>/run/token-daemon.pid"
-        status: anchored
-      - step_id: rtl-06
-        from_node: TokenDaemonBootstrap
-        to_node: TokenDaemonPidRecord
-        caller_symbol: resolveTokenDaemonPidPath
-        caller_file: src/commands/token-daemon.ts
-        callee_symbol: resolveTokenDaemonPidPath
-        callee_file: src/utils/server-runtime-pid.ts
-        owner_feature_id: runtime.lifecycle.pid_cache
-        semantic_input: "daemon identity"
-        semantic_output: "resolved path under <rccUserDir>/run/token-daemon.pid"
         status: anchored
       - step_id: rtl-07
         from_node: ServerStartCommand
@@ -793,15 +771,15 @@ chains:
       - step_id: mtc-06
         from_node: MetaResp06ResponseObserved
         to_node: MetaResp07ServertoolContextProjected
-        caller_symbol: buildServerToolAdapterContext
-        caller_file: src/server/runtime/http-server/executor/servertool-adapter-context.ts
+        caller_symbol: buildBridgeAdapterContext
+        caller_file: src/server/runtime/http-server/executor/provider-response-converter.ts
         callee_symbol: readRuntimeServerToolProjection
         callee_file: src/server/runtime/http-server/metadata-center/request-truth-readers.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "request/continuation/runtime/provider observation families"
         semantic_output: "servertool adapter context reads request truth from MetadataCenter and projects session/conversation truth without reusing continuation context as request truth"
         status: anchored
-        note: "The servertool adapter context now projects request truth plus provider observation through `readRuntimeServerToolProjection(...)`; broader adapter enrichment still happens locally, but the MetadataCenter-backed projection edge is concrete."
+        note: "The provider response converter now performs this read-only projection locally before calling the native bridge; the old standalone servertool-adapter-context owner is physically removed."
       - step_id: mtc-07
         from_node: MetaResp07ServertoolContextProjected
         to_node: MetaResp08CloseoutReleased

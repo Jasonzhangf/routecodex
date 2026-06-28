@@ -12,14 +12,6 @@ import {
 import {
   loadNativeRouterHotpathBinding
 } from './native-router-hotpath-loader.js';
-export {
-  buildQuotaBuckets,
-  buildQuotaBucketsWithMode,
-  getNativeRouterHotpathSource,
-  resolveNativeModuleUrlFromEnv,
-  type QuotaBucketInputEntry,
-  type QuotaBucketResult
-} from './native-router-hotpath-quota-buckets.js';
 
 function toErrorReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? 'unknown');

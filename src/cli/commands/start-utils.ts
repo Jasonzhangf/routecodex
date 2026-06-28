@@ -4,7 +4,6 @@ type StartCommandArgOptions = {
   port?: string;
   logLevel?: string;
   ua?: string;
-  quotaRouting?: unknown;
   codex?: boolean;
   claude?: boolean;
   snap?: boolean;
@@ -80,9 +79,6 @@ export function buildStartCommandArgs(options: StartCommandArgOptions, configPat
   }
   if (typeof options.ua === 'string' && options.ua.trim()) {
     args.push('--ua', options.ua.trim());
-  }
-  if (typeof options.quotaRouting === 'string' && options.quotaRouting.trim()) {
-    args.push('--quota-routing', options.quotaRouting.trim());
   }
   appendFlag(args, options.codex === true, '--codex');
   appendFlag(args, options.claude === true, '--claude');

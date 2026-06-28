@@ -291,13 +291,6 @@ export type HttpRequestExecutorDeps = {
   getClientRequestIdFromContext(context: ProviderContext): string | undefined;
   wrapUpstreamSseResponse(stream: NodeJS.ReadableStream, context: ProviderContext): Promise<UnknownObject>;
   executePreparedRequest?: PreparedRequestExecutor;
-  tryRecoverOAuthAndReplay?(
-    error: unknown,
-    requestInfo: PreparedHttpRequest,
-    processedRequest: UnknownObject,
-    captureSse: boolean,
-    context: ProviderContext
-  ): Promise<unknown | undefined>;
   resolveBusinessResponseError?(response: unknown, context: ProviderContext): Error | undefined;
   normalizeHttpError(
     error: unknown,
@@ -559,19 +552,6 @@ export class HttpRequestExecutor {
       try {
         return await this.executeHttpRequestOnce(candidate, context, captureSse);
       } catch (error) {
-        if (this.deps.tryRecoverOAuthAndReplay) {
-          const oauthReplay = await this.deps.tryRecoverOAuthAndReplay(
-            error,
-            candidate,
-            processedRequest,
-            captureSse,
-            context
-          );
-          if (oauthReplay) {
-            return oauthReplay;
-          }
-        }
-
         const canTryNext = idx + 1 < targets.length && this.shouldTryNextTarget(error, context);
         if (canTryNext) {
           continue;
