@@ -5,10 +5,10 @@ import { RoutingStateManagerModule } from '../../../manager/modules/routing/inde
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { HubPipeline, HubPipelineConfig, HubPipelineCtor, VirtualRouterArtifacts } from './types.js';
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
-import { getSharedProviderTrafficGovernor } from './provider-traffic-governor.js';
 import { clearUnresolvedResponsesConversationRequests, preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
+import { trafficGovernorIsAtCapacity } from '../../../modules/traffic-governor/index.js';
 
 type RoutingProviderScope = {
   providerKeys: string[];
@@ -249,12 +249,12 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   server.routingProviderScope = routingScope;
   await applyRoutingScopeToManagerModules(server, routingScope);
   try {
-    const resetResult = await getSharedProviderTrafficGovernor().resetCurrentProcessState();
-    if (resetResult.leasesRemoved > 0 || resetResult.rpmEventsRemoved > 0) {
-      console.warn(
-        '[provider-traffic] reset stale current-process state on runtime setup',
-        JSON.stringify(resetResult)
-      );
+    // traffic-governor: 已迁移到独立模块 (traffic-governor-core)
+    // reset 功能后续通过 Rust 启动流程处理
+    const runtimeKey = process.env.ROUTECODEX_SERVER_ID || `pid-${process.pid}`;
+    const isAtCap = trafficGovernorIsAtCapacity(runtimeKey);
+    if (isAtCap) {
+      console.warn(`[traffic-governor] runtimeKey=${runtimeKey} at capacity on startup — stale leases may remain`);
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

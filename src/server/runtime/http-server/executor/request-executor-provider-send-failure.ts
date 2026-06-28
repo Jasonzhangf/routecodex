@@ -1,6 +1,8 @@
 import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderProtocol } from '../types.js';
-import type { ProviderTrafficGovernorLike } from '../provider-traffic-governor.js';
+import {
+  trafficGovernorObserveOutcome
+} from '../../../../modules/traffic-governor/index.js';
 import {
   emitRequestExecutorProviderRetryTelemetry
 } from './request-executor-retry-telemetry.js';
@@ -60,7 +62,6 @@ type RequestExecutorProviderSendFailureArgs = {
     runtimeScopeExcludedCount?: number;
   }) => void;
   bypassTrafficGovernor: boolean;
-  trafficGovernor: ProviderTrafficGovernorLike;
   trafficActiveInFlightAtAcquire: number;
   trafficPolicyMaxInFlight: number;
   providerSendStartedAtMs: number;
@@ -159,7 +160,6 @@ function isRetryableProviderResponseProcessingFailure(args: {
 }
 
 async function observeFailedTrafficOutcome(args: {
-  governor: ProviderTrafficGovernorLike;
   runtimeKey: string;
   providerKey: string;
   requestId: string;
@@ -170,9 +170,8 @@ async function observeFailedTrafficOutcome(args: {
     reason: string;
   };
   activeInFlight: number;
-  configuredMaxInFlight?: number;
 }): Promise<void> {
-  await args.governor.observeOutcome?.({
+  trafficGovernorObserveOutcome({
     runtimeKey: args.runtimeKey,
     providerKey: args.providerKey,
     requestId: args.requestId,
@@ -182,7 +181,6 @@ async function observeFailedTrafficOutcome(args: {
     upstreamCode: args.retryError.upstreamCode,
     reason: args.retryError.reason,
     activeInFlight: args.activeInFlight,
-    configuredMaxInFlight: args.configuredMaxInFlight
   });
 }
 
@@ -224,13 +222,11 @@ export async function processProviderSendFailure(
     try {
       if (args.runtimeKey) {
         await observeFailedTrafficOutcome({
-          governor: args.trafficGovernor,
           runtimeKey: args.runtimeKey,
           providerKey: args.providerKey,
           requestId: args.requestId,
           retryError,
           activeInFlight: args.trafficActiveInFlightAtAcquire,
-          configuredMaxInFlight: args.trafficPolicyMaxInFlight || undefined
         });
       }
     } catch (observeError) {
