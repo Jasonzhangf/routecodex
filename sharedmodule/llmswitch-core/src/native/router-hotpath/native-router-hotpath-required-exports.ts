@@ -290,6 +290,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planServertoolRegistryLookupActionJson",
   "planServertoolRegistryAutoHookDescriptorsJson",
   "planServertoolRegistryProjectionJson",
+  "planServertoolRegistrySourceProjectionJson",
   "planStoplessCliProjectionContextJson",
   "planEngineSelectionStartJson",
   "planEngineSelectionAfterRunJson",

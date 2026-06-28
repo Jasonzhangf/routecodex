@@ -78,6 +78,58 @@ function mockToolSpec(name: unknown): any | null {
   return (skeletonDocument.servertool.internalTools as Record<string, any>)[key] ?? null;
 }
 
+function mockRegistrySourceProjection(input: any): any {
+  const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+  const normalizeRecord = (record: any, source: 'builtin' | 'adhoc', sourceIndex: number) => ({
+    name: normalize(record?.name),
+    trigger: String(record?.trigger ?? '').trim(),
+    source,
+    sourceIndex
+  });
+  const validRecord = (record: any) =>
+    record.name && (record.trigger === 'tool_call' || record.trigger === 'auto');
+  const registeredNames = [...new Set([
+    ...(Array.isArray(input?.builtinNames) ? input.builtinNames.map(normalize).filter(Boolean) : []),
+    ...(Array.isArray(input?.adHocNames) ? input.adHocNames.map(normalize).filter(Boolean) : [])
+  ])].sort();
+  const autoHandlerRefs = [
+    ...(Array.isArray(input?.builtinAutoHandlerNames)
+      ? input.builtinAutoHandlerNames.map((name: any, sourceIndex: number) => ({
+          name: normalize(name),
+          source: 'builtin' as const,
+          sourceIndex
+        }))
+      : []),
+    ...(Array.isArray(input?.adHocAutoHandlerNames)
+      ? input.adHocAutoHandlerNames.map((name: any, sourceIndex: number) => ({
+          name: normalize(name),
+          source: 'adhoc' as const,
+          sourceIndex
+        }))
+      : [])
+  ].filter((entry) => entry.name);
+  const records = [
+    ...(Array.isArray(input?.builtinRecords)
+      ? input.builtinRecords.map((record: any, sourceIndex: number) =>
+          normalizeRecord(record, 'builtin', sourceIndex)
+        )
+      : []),
+    ...(Array.isArray(input?.adHocRecords)
+      ? input.adHocRecords.map((record: any, sourceIndex: number) =>
+          normalizeRecord(record, 'adhoc', sourceIndex)
+        )
+      : [])
+  ].filter(validRecord);
+  return {
+    registeredNames,
+    autoHandlerRefs,
+    registeredRecordRefs: [
+      ...records.filter((record) => record.trigger === 'tool_call'),
+      ...records.filter((record) => record.trigger === 'auto')
+    ]
+  };
+}
+
 function mockRegistryRegistrationFromSkeleton(input: any): any {
   const name = String(input?.name ?? '').trim().toLowerCase();
   if (!name || input?.hasHandler !== true) {
@@ -557,6 +609,7 @@ jest.unstable_mockModule(
         autoHandlerNames
       };
     }),
+    planServertoolRegistrySourceProjectionWithNative: jest.fn(mockRegistrySourceProjection),
     planServertoolHookScheduleWithNative
   })
 );
@@ -629,6 +682,7 @@ jest.unstable_mockModule(
         autoHandlerNames
       };
     }),
+    planServertoolRegistrySourceProjectionWithNative: jest.fn(mockRegistrySourceProjection),
     planServertoolHookScheduleWithNative
   })
 );

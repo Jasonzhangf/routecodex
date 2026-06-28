@@ -1506,6 +1506,12 @@ pub fn plan_servertool_registry_projection_json(input_json: String) -> NapiResul
 }
 
 #[napi]
+pub fn plan_servertool_registry_source_projection_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_registry_source_projection_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_stopless_cli_projection_context_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stopless_cli_projection_context_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

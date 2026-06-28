@@ -2880,6 +2880,24 @@ export type ServertoolRegistryProjectionPlan = {
   autoHandlerNames: string[];
 };
 
+export type ServertoolRegistrySourceKind = 'builtin' | 'adhoc';
+
+export type ServertoolRegistrySourceRefPlan = {
+  name: string;
+  source: ServertoolRegistrySourceKind;
+  sourceIndex: number;
+};
+
+export type ServertoolRegistrySourceRecordRefPlan = ServertoolRegistrySourceRefPlan & {
+  trigger: 'tool_call' | 'auto';
+};
+
+export type ServertoolRegistrySourceProjectionPlan = {
+  registeredNames: string[];
+  autoHandlerRefs: ServertoolRegistrySourceRefPlan[];
+  registeredRecordRefs: ServertoolRegistrySourceRecordRefPlan[];
+};
+
 export function planServertoolRegistryProjectionWithNative(input: {
   registeredNames: string[];
   registeredRecords: Array<{
@@ -2946,6 +2964,101 @@ export function planServertoolRegistryProjectionWithNative(input: {
         throw new Error('planServertoolRegistryProjectionJson native returned invalid auto handler name');
       }
       return name;
+    })
+  };
+}
+
+function parseServertoolRegistrySource(value: unknown, capability: string): ServertoolRegistrySourceKind {
+  if (value !== 'builtin' && value !== 'adhoc') {
+    throw new Error(`${capability} native returned invalid source`);
+  }
+  return value;
+}
+
+function parseServertoolRegistrySourceIndex(value: unknown, capability: string): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    throw new Error(`${capability} native returned invalid sourceIndex`);
+  }
+  return value;
+}
+
+export function planServertoolRegistrySourceProjectionWithNative(input: {
+  builtinNames: string[];
+  adHocNames: string[];
+  builtinAutoHandlerNames: string[];
+  adHocAutoHandlerNames: string[];
+  builtinRecords: Array<{
+    name: string;
+    trigger: string;
+  }>;
+  adHocRecords: Array<{
+    name: string;
+    trigger: string;
+  }>;
+}): ServertoolRegistrySourceProjectionPlan {
+  const capability = 'planServertoolRegistrySourceProjectionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolRegistrySourceProjectionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolRegistrySourceProjectionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    !Array.isArray(record.registeredNames) ||
+    !Array.isArray(record.autoHandlerRefs) ||
+    !Array.isArray(record.registeredRecordRefs)
+  ) {
+    throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid plan arrays');
+  }
+  return {
+    registeredNames: record.registeredNames.map((name) => {
+      if (typeof name !== 'string' || !name.trim()) {
+        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid registered name');
+      }
+      return name;
+    }),
+    autoHandlerRefs: record.autoHandlerRefs.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid auto handler ref');
+      }
+      const item = entry as Record<string, unknown>;
+      if (typeof item.name !== 'string' || !item.name.trim()) {
+        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid auto handler name');
+      }
+      return {
+        name: item.name,
+        source: parseServertoolRegistrySource(item.source, 'planServertoolRegistrySourceProjectionJson'),
+        sourceIndex: parseServertoolRegistrySourceIndex(item.sourceIndex, 'planServertoolRegistrySourceProjectionJson')
+      };
+    }),
+    registeredRecordRefs: record.registeredRecordRefs.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid registered record ref');
+      }
+      const item = entry as Record<string, unknown>;
+      if (typeof item.name !== 'string' || !item.name.trim()) {
+        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid registered record name');
+      }
+      if (item.trigger !== 'tool_call' && item.trigger !== 'auto') {
+        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid registered record trigger');
+      }
+      return {
+        name: item.name,
+        trigger: item.trigger,
+        source: parseServertoolRegistrySource(item.source, 'planServertoolRegistrySourceProjectionJson'),
+        sourceIndex: parseServertoolRegistrySourceIndex(item.sourceIndex, 'planServertoolRegistrySourceProjectionJson')
+      };
     })
   };
 }

@@ -4,8 +4,8 @@ import {
   type ServerToolRegisteredHandlerRecord
 } from './skeleton-config.js';
 import {
-  getBuiltinHandlerEntry,
   listBuiltinAutoHandlerEntries,
+  listBuiltinHandlerRecordEntries,
   listBuiltinHandlerNames
 } from './builtin-handler-catalog.js';
 import {
@@ -20,10 +20,8 @@ import {
   registerServerToolHandlerViaNativePlan
 } from './registry-registration-shell.js';
 import {
-  projectAutoServerToolHandlers,
   projectAutoServerToolHookDescriptors,
-  projectRegisteredServerToolHandlerRecords,
-  projectRegistryHandlerNames
+  projectRegistrySources
 } from './registry-projection-shell.js';
 import type {
   ServerToolAutoHookDescriptor,
@@ -55,10 +53,23 @@ export const getServerToolHandler = (
   name: string
 ): ServerToolHandlerEntry | undefined => getServerToolHandlerViaNativePlan(name);
 
-export function listRegisteredServerToolHandlerNames(): string[] {
-  return projectRegistryHandlerNames({
-    names: [...listBuiltinHandlerNames(), ...listAdHocHandlerNames()]
+function projectCurrentRegistrySources(): {
+  registeredNames: string[];
+  autoHandlers: ServerToolHandlerEntry[];
+  registeredRecords: ServerToolRegisteredHandlerRecord[];
+} {
+  return projectRegistrySources({
+    builtinNames: listBuiltinHandlerNames(),
+    adHocNames: listAdHocHandlerNames(),
+    builtinAutoHandlerEntries: listBuiltinAutoHandlerEntries(),
+    adHocAutoHandlerEntries: listAdHocAutoHandlerEntries(),
+    builtinRecordEntries: listBuiltinHandlerRecordEntries(),
+    adHocHandlerRecords: listAdHocHandlerRecords()
   });
+}
+
+export function listRegisteredServerToolHandlerNames(): string[] {
+  return projectCurrentRegistrySources().registeredNames;
 }
 
 export function listAdHocRegisteredToolCallHandlerSpecs(): Array<{
@@ -71,9 +82,7 @@ export function listAdHocRegisteredToolCallHandlerSpecs(): Array<{
 }
 
 export const listAutoServerToolHandlers = (): ServerToolHandlerEntry[] => {
-  return projectAutoServerToolHandlers({
-    entries: [...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()]
-  });
+  return projectCurrentRegistrySources().autoHandlers;
 };
 
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
@@ -87,24 +96,5 @@ export function isRegisteredServerToolName(name: string): boolean {
 }
 
 export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHandlerRecord[] {
-  const builtinEntries = listBuiltinHandlerNames()
-    .map((name) => getBuiltinHandlerEntry(name))
-    .filter((entry): entry is ServerToolHandlerEntry => Boolean(entry));
-  const rawRecords = [
-    ...builtinEntries.map((entry) => ({
-      name: entry.name,
-      trigger: entry.registration.trigger,
-      registration: entry.registration,
-      handler: undefined
-    })),
-    ...listAdHocHandlerRecords().map((entry) => ({
-      name: entry.registration.name,
-      trigger: entry.registration.trigger,
-      registration: entry.registration,
-      handler: entry.handler
-    }))
-  ];
-  return projectRegisteredServerToolHandlerRecords({
-    rawRecords
-  });
+  return projectCurrentRegistrySources().registeredRecords;
 }

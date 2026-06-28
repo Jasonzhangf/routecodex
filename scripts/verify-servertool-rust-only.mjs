@@ -115,6 +115,7 @@ const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
 const TS_REGISTRY_REGISTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-registration-shell.ts`;
 const TS_REGISTRY_PROJECTION_SHELL = `${SERVERTOOL_TS_DIR}/registry-projection-shell.ts`;
+const TS_REGISTRY_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`;
 const TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL = `${SERVERTOOL_TS_DIR}/run-server-side-tool-engine-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
@@ -3410,6 +3411,7 @@ function checkServertoolRegistryRustOwner() {
   const registryImpl = readRequired(`${SERVERTOOL_TS_DIR}/registry-impl.ts`);
   const registryRegistrationShell = readRequired(TS_REGISTRY_REGISTRATION_SHELL);
   const registryProjectionShell = readRequired(TS_REGISTRY_PROJECTION_SHELL);
+  const registryOrchestrationShell = readRequired(TS_REGISTRY_ORCHESTRATION_SHELL);
 
   for (const needle of [
     'feature_id: hub.servertool_registry_contract',
@@ -3425,6 +3427,9 @@ function checkServertoolRegistryRustOwner() {
     'pub struct ServertoolRegistryProjectionInput',
     'pub struct ServertoolRegistryProjectionPlan',
     'pub fn plan_servertool_registry_projection',
+    'pub struct ServertoolRegistrySourceProjectionInput',
+    'pub struct ServertoolRegistrySourceProjectionPlan',
+    'pub fn plan_servertool_registry_source_projection',
   ]) {
     assertContains('servertool-registry-rust-owner', RUST_SERVERTOOL_REGISTRY_CONTRACT, rustRegistry, needle);
   }
@@ -3439,6 +3444,7 @@ function checkServertoolRegistryRustOwner() {
     'plan_servertool_registry_lookup_action_json',
     'plan_servertool_registry_auto_hook_descriptors_json',
     'plan_servertool_registry_projection_json',
+    'plan_servertool_registry_source_projection_json',
   ]) {
     assertContains('servertool-registry-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, needle);
     assertContains('servertool-registry-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, `pub fn ${needle}`);
@@ -3448,6 +3454,7 @@ function checkServertoolRegistryRustOwner() {
     'planServertoolRegistryLookupActionJson',
     'planServertoolRegistryAutoHookDescriptorsJson',
     'planServertoolRegistryProjectionJson',
+    'planServertoolRegistrySourceProjectionJson',
     'planServertoolRegistryRegistrationFromSkeletonJson',
     'planServertoolRegistryLookupFromSkeletonJson',
     'resolveServertoolRegisteredNameJson',
@@ -3492,13 +3499,43 @@ function checkServertoolRegistryRustOwner() {
   for (const needle of [
     'planServertoolRegistryAutoHookDescriptorsWithNative',
     'planServertoolRegistryProjectionWithNative',
+    'planServertoolRegistrySourceProjectionWithNative',
     'projectRegistryHandlerNames',
     'projectAutoServerToolHandlers',
     'projectAutoServerToolHookDescriptors',
     'projectRegisteredServerToolHandlerRecords',
+    'projectRegistrySources',
   ]) {
     assertContains('servertool-registry-projection-shell', TS_REGISTRY_PROJECTION_SHELL, registryProjectionShell, needle);
   }
+  assertContains(
+    'servertool-registry-orchestration-shell',
+    TS_REGISTRY_ORCHESTRATION_SHELL,
+    registryOrchestrationShell,
+    'projectRegistrySources('
+  );
+  for (const marker of [
+    '[...listBuiltinHandlerNames(), ...listAdHocHandlerNames()]',
+    '[...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()]',
+    'builtinEntries',
+    'rawRecords = [',
+    '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry))',
+    '.map((name) => getBuiltinHandlerEntry(name))',
+    'projectRegistryHandlerNames({',
+    'projectAutoServerToolHandlers({',
+    'projectRegisteredServerToolHandlerRecords({',
+  ]) {
+    if (registryOrchestrationShell.includes(marker)) {
+      fail(
+        'servertool-registry-orchestration-no-ts-source-merge',
+        `registry-orchestration-shell.ts must not retain TS registry source composition marker ${marker}`
+      );
+    }
+  }
+  pass(
+    'servertool-registry-orchestration-no-ts-source-merge',
+    'registry-orchestration-shell.ts delegates source merge/order/grouping to Rust source projection'
+  );
   for (const keyword of [
     'planServertoolRegistryRegistrationActionWithNative',
     'planServertoolRegistryLookupActionWithNative',

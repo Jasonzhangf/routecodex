@@ -11,14 +11,14 @@ use servertool_core::backend_route_contract::{
     plan_missing_followup_payload_error, plan_preferred_final_response,
     plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03, plan_vision_eligibility,
     should_short_circuit_requires_action_followup, ServertoolBackendRoutePolicyInput,
-    ServertoolBackendRouteRequiresActionShortCircuitInput,
-    ServertoolBootstrapReplayPlanInput, ServertoolEmptyFollowupErrorPlanInput,
-    ServertoolFollowupAppendUserTextInput, ServertoolFollowupAutoLimitErrorPlanInput,
-    ServertoolFollowupErrorPlanInput, ServertoolFollowupExecutionModeInput,
-    ServertoolFollowupMaterializationInput, ServertoolFollowupPayloadStreamPlanInput,
-    ServertoolFollowupRuntimeActionInput, ServertoolFollowupRuntimeMetadataInput,
-    ServertoolHubFollowupPolicyShadowInput, ServertoolMissingFollowupPayloadErrorPlanInput,
-    ServertoolPreferredFinalResponseInput, ServertoolVisionEligibilityInput,
+    ServertoolBackendRouteRequiresActionShortCircuitInput, ServertoolBootstrapReplayPlanInput,
+    ServertoolEmptyFollowupErrorPlanInput, ServertoolFollowupAppendUserTextInput,
+    ServertoolFollowupAutoLimitErrorPlanInput, ServertoolFollowupErrorPlanInput,
+    ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
+    ServertoolFollowupPayloadStreamPlanInput, ServertoolFollowupRuntimeActionInput,
+    ServertoolFollowupRuntimeMetadataInput, ServertoolHubFollowupPolicyShadowInput,
+    ServertoolMissingFollowupPayloadErrorPlanInput, ServertoolPreferredFinalResponseInput,
+    ServertoolVisionEligibilityInput,
 };
 use servertool_core::blocked_report_contract;
 use servertool_core::cli_contract;
@@ -602,6 +602,16 @@ pub fn plan_servertool_registry_projection_json(input_json: &str) -> Result<Stri
         .map_err(|e| format!("plan servertool registry projection: {e}"))?;
     serde_json::to_string(&plan)
         .map_err(|e| format!("serialize servertool registry projection plan: {e}"))
+}
+
+pub fn plan_servertool_registry_source_projection_json(input_json: &str) -> Result<String, String> {
+    let input: registry_contract::ServertoolRegistrySourceProjectionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool registry source projection input: {e}"))?;
+    let plan = registry_contract::plan_servertool_registry_source_projection(input)
+        .map_err(|e| format!("plan servertool registry source projection: {e}"))?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize servertool registry source projection plan: {e}"))
 }
 
 pub fn plan_stopless_cli_projection_context_json(input_json: &str) -> Result<String, String> {
@@ -3603,6 +3613,38 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
     assert_eq!(
         projection_value["autoHandlerNames"],
         serde_json::json!(["vision_auto", "stop_message_auto"])
+    );
+
+    let source_projection = plan_servertool_registry_source_projection_json(
+        &serde_json::json!({
+            "builtinNames": [" stop_message_auto "],
+            "adHocNames": ["custom_tool", "stop_message_auto"],
+            "builtinAutoHandlerNames": ["stop_message_auto"],
+            "adHocAutoHandlerNames": ["custom_auto"],
+            "builtinRecords": [
+                { "name": "stop_message_auto", "trigger": "auto" }
+            ],
+            "adHocRecords": [
+                { "name": "custom_tool", "trigger": "tool_call" },
+                { "name": "custom_auto", "trigger": "auto" }
+            ]
+        })
+        .to_string(),
+    )
+    .expect("registry source projection plan");
+    let source_projection_value: serde_json::Value =
+        serde_json::from_str(&source_projection).expect("parse registry source projection plan");
+    assert_eq!(
+        source_projection_value["registeredNames"],
+        serde_json::json!(["custom_tool", "stop_message_auto"])
+    );
+    assert_eq!(
+        source_projection_value["autoHandlerRefs"][0],
+        serde_json::json!({ "name": "stop_message_auto", "source": "builtin", "sourceIndex": 0 })
+    );
+    assert_eq!(
+        source_projection_value["registeredRecordRefs"][0],
+        serde_json::json!({ "name": "custom_tool", "trigger": "tool_call", "source": "adhoc", "sourceIndex": 0 })
     );
 }
 

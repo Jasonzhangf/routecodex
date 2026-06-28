@@ -105,6 +105,62 @@ pub struct ServertoolRegistryProjectionPlan {
     pub auto_handler_names: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServertoolRegistrySourceKind {
+    Builtin,
+    Adhoc,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolRegistrySourceRecordInput {
+    pub name: String,
+    pub trigger: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolRegistrySourceProjectionInput {
+    #[serde(default)]
+    pub builtin_names: Vec<String>,
+    #[serde(default)]
+    pub ad_hoc_names: Vec<String>,
+    #[serde(default)]
+    pub builtin_auto_handler_names: Vec<String>,
+    #[serde(default)]
+    pub ad_hoc_auto_handler_names: Vec<String>,
+    #[serde(default)]
+    pub builtin_records: Vec<ServertoolRegistrySourceRecordInput>,
+    #[serde(default)]
+    pub ad_hoc_records: Vec<ServertoolRegistrySourceRecordInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolRegistrySourceRefPlan {
+    pub name: String,
+    pub source: ServertoolRegistrySourceKind,
+    pub source_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolRegistrySourceRecordRefPlan {
+    pub name: String,
+    pub trigger: String,
+    pub source: ServertoolRegistrySourceKind,
+    pub source_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolRegistrySourceProjectionPlan {
+    pub registered_names: Vec<String>,
+    pub auto_handler_refs: Vec<ServertoolRegistrySourceRefPlan>,
+    pub registered_record_refs: Vec<ServertoolRegistrySourceRecordRefPlan>,
+}
+
 fn normalize_name(name: &str) -> Option<String> {
     let trimmed = name.trim().to_lowercase();
     if trimmed.is_empty() {
@@ -254,6 +310,104 @@ pub fn plan_servertool_registry_projection(
         registered_names: registered_name_set.into_iter().collect(),
         registered_records,
         auto_handler_names,
+    })
+}
+
+fn push_source_refs(
+    output: &mut Vec<ServertoolRegistrySourceRefPlan>,
+    seen: &mut std::collections::HashSet<String>,
+    names: Vec<String>,
+    source: ServertoolRegistrySourceKind,
+    label: &str,
+) -> Result<(), String> {
+    for (source_index, name) in names.into_iter().enumerate() {
+        let canonical =
+            normalize_name(&name).ok_or_else(|| format!("invalid {label} handler name"))?;
+        if !seen.insert(canonical.clone()) {
+            return Err(format!("duplicate auto handler name: {canonical}"));
+        }
+        output.push(ServertoolRegistrySourceRefPlan {
+            name: canonical,
+            source: source.clone(),
+            source_index,
+        });
+    }
+    Ok(())
+}
+
+fn source_record_plan(
+    record: ServertoolRegistrySourceRecordInput,
+    source: ServertoolRegistrySourceKind,
+    source_index: usize,
+) -> Result<ServertoolRegistrySourceRecordRefPlan, String> {
+    let canonical =
+        normalize_name(&record.name).ok_or_else(|| "invalid registered record name".to_string())?;
+    let trigger = match record.trigger.trim() {
+        "tool_call" => "tool_call".to_string(),
+        "auto" => "auto".to_string(),
+        other => return Err(format!("invalid registered record trigger: {other}")),
+    };
+    Ok(ServertoolRegistrySourceRecordRefPlan {
+        name: canonical,
+        trigger,
+        source,
+        source_index,
+    })
+}
+
+pub fn plan_servertool_registry_source_projection(
+    input: ServertoolRegistrySourceProjectionInput,
+) -> Result<ServertoolRegistrySourceProjectionPlan, String> {
+    let mut registered_name_set = std::collections::BTreeSet::new();
+    for name in input.builtin_names.into_iter().chain(input.ad_hoc_names) {
+        let canonical =
+            normalize_name(&name).ok_or_else(|| "invalid registered handler name".to_string())?;
+        registered_name_set.insert(canonical);
+    }
+
+    let mut auto_handler_refs = Vec::new();
+    let mut seen_auto_names = std::collections::HashSet::new();
+    push_source_refs(
+        &mut auto_handler_refs,
+        &mut seen_auto_names,
+        input.builtin_auto_handler_names,
+        ServertoolRegistrySourceKind::Builtin,
+        "builtin auto",
+    )?;
+    push_source_refs(
+        &mut auto_handler_refs,
+        &mut seen_auto_names,
+        input.ad_hoc_auto_handler_names,
+        ServertoolRegistrySourceKind::Adhoc,
+        "ad-hoc auto",
+    )?;
+
+    let mut tool_call_records = Vec::new();
+    let mut auto_records = Vec::new();
+    for (source_index, record) in input.builtin_records.into_iter().enumerate() {
+        let plan = source_record_plan(record, ServertoolRegistrySourceKind::Builtin, source_index)?;
+        if plan.trigger == "tool_call" {
+            tool_call_records.push(plan);
+        } else {
+            auto_records.push(plan);
+        }
+    }
+    for (source_index, record) in input.ad_hoc_records.into_iter().enumerate() {
+        let plan = source_record_plan(record, ServertoolRegistrySourceKind::Adhoc, source_index)?;
+        if plan.trigger == "tool_call" {
+            tool_call_records.push(plan);
+        } else {
+            auto_records.push(plan);
+        }
+    }
+
+    let mut registered_record_refs = tool_call_records;
+    registered_record_refs.extend(auto_records);
+
+    Ok(ServertoolRegistrySourceProjectionPlan {
+        registered_names: registered_name_set.into_iter().collect(),
+        auto_handler_refs,
+        registered_record_refs,
     })
 }
 
@@ -469,6 +623,89 @@ mod tests {
         assert_eq!(
             duplicate_auto.expect_err("duplicate auto handler must fail"),
             "duplicate auto handler name: vision_auto"
+        );
+    }
+
+    #[test]
+    fn registry_source_projection_keeps_source_refs_and_groups_records() {
+        let plan =
+            plan_servertool_registry_source_projection(ServertoolRegistrySourceProjectionInput {
+                builtin_names: vec![" stop_message_auto ".to_string()],
+                ad_hoc_names: vec!["custom_tool".to_string(), "stop_message_auto".to_string()],
+                builtin_auto_handler_names: vec!["stop_message_auto".to_string()],
+                ad_hoc_auto_handler_names: vec![" custom_auto ".to_string()],
+                builtin_records: vec![ServertoolRegistrySourceRecordInput {
+                    name: "stop_message_auto".to_string(),
+                    trigger: "auto".to_string(),
+                }],
+                ad_hoc_records: vec![
+                    ServertoolRegistrySourceRecordInput {
+                        name: "custom_tool".to_string(),
+                        trigger: "tool_call".to_string(),
+                    },
+                    ServertoolRegistrySourceRecordInput {
+                        name: "custom_auto".to_string(),
+                        trigger: "auto".to_string(),
+                    },
+                ],
+            })
+            .expect("source projection plan");
+
+        assert_eq!(
+            plan.registered_names,
+            vec!["custom_tool".to_string(), "stop_message_auto".to_string()]
+        );
+        assert_eq!(
+            plan.auto_handler_refs,
+            vec![
+                ServertoolRegistrySourceRefPlan {
+                    name: "stop_message_auto".to_string(),
+                    source: ServertoolRegistrySourceKind::Builtin,
+                    source_index: 0,
+                },
+                ServertoolRegistrySourceRefPlan {
+                    name: "custom_auto".to_string(),
+                    source: ServertoolRegistrySourceKind::Adhoc,
+                    source_index: 0,
+                },
+            ]
+        );
+        assert_eq!(
+            plan.registered_record_refs,
+            vec![
+                ServertoolRegistrySourceRecordRefPlan {
+                    name: "custom_tool".to_string(),
+                    trigger: "tool_call".to_string(),
+                    source: ServertoolRegistrySourceKind::Adhoc,
+                    source_index: 0,
+                },
+                ServertoolRegistrySourceRecordRefPlan {
+                    name: "stop_message_auto".to_string(),
+                    trigger: "auto".to_string(),
+                    source: ServertoolRegistrySourceKind::Builtin,
+                    source_index: 0,
+                },
+                ServertoolRegistrySourceRecordRefPlan {
+                    name: "custom_auto".to_string(),
+                    trigger: "auto".to_string(),
+                    source: ServertoolRegistrySourceKind::Adhoc,
+                    source_index: 1,
+                },
+            ]
+        );
+
+        let duplicate_auto =
+            plan_servertool_registry_source_projection(ServertoolRegistrySourceProjectionInput {
+                builtin_names: vec![],
+                ad_hoc_names: vec![],
+                builtin_auto_handler_names: vec!["alpha".to_string()],
+                ad_hoc_auto_handler_names: vec![" alpha ".to_string()],
+                builtin_records: vec![],
+                ad_hoc_records: vec![],
+            });
+        assert_eq!(
+            duplicate_auto.expect_err("duplicate source auto handler must fail"),
+            "duplicate auto handler name: alpha"
         );
     }
 }

@@ -132,3 +132,9 @@ export function listBuiltinAutoHandlerEntries(): ServerToolHandlerEntry[] {
     .map((name) => getBuiltinHandlerEntry(name))
     .filter((entry): entry is ServerToolHandlerEntry => Boolean(entry?.autoHook));
 }
+
+export function listBuiltinHandlerRecordEntries(): ServerToolHandlerEntry[] {
+  return listBuiltinHandlerNames()
+    .map((name) => getBuiltinHandlerEntry(name))
+    .filter((entry): entry is ServerToolHandlerEntry => Boolean(entry));
+}
