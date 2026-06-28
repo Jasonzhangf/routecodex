@@ -40,7 +40,6 @@ export interface ServertoolExecutedRecord {
   execution?: {
     flowId: string;
     followup?: unknown;
-    context?: unknown;
   };
 }
 
@@ -51,7 +50,6 @@ export interface ServertoolExecutionLoopState {
   lastExecution?: {
     flowId: string;
     followup?: unknown;
-    context?: unknown;
   };
 }
 

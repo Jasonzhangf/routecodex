@@ -2813,6 +2813,18 @@ function checkServertoolExecutionDispatchRustOwner() {
       );
     }
   }
+  for (const [file, content, marker] of [
+    [RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub context: Option<Value>'],
+    [RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'context: input.context'],
+    [`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'context?: unknown'],
+  ]) {
+    if (content.includes(marker)) {
+      fail(
+        'servertool-execution-state-context-carrier-deleted',
+        `Forbidden execution loop context carrier "${marker}" found in ${file.replace(`${ROOT}/`, '')}`
+      );
+    }
+  }
   assertMissing(
     'servertool-execution-state-ts-thin-shell-deleted-wrapper-guard',
     `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,

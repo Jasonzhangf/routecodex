@@ -9,8 +9,6 @@ pub struct ServertoolExecutionSummary {
     pub flow_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -105,7 +103,6 @@ fn normalize_execution(input: ServertoolExecutionSummary) -> ServertoolExecution
     ServertoolExecutionSummary {
         flow_id: input.flow_id.trim().to_string(),
         followup: input.followup,
-        context: input.context,
     }
 }
 
@@ -141,7 +138,6 @@ mod tests {
             execution: Some(ServertoolExecutionSummary {
                 flow_id: " flow_1 ".to_string(),
                 followup: Some(json!({ "requestIdSuffix": ":servertool_followup" })),
-                context: Some(json!({ "k": "v" })),
             }),
         });
         assert_eq!(state.executed_tool_calls.len(), 1);
@@ -153,7 +149,6 @@ mod tests {
             Some(ServertoolExecutionSummary {
                 flow_id: "flow_1".to_string(),
                 followup: Some(json!({ "requestIdSuffix": ":servertool_followup" })),
-                context: Some(json!({ "k": "v" })),
             })
         );
     }
