@@ -185,6 +185,7 @@ export interface ServerToolHandlerContext {
   requestId: string;
   entryEndpoint: string;
   providerProtocol: string;
+  runtimeMetadata?: JsonObject;
 }
 
 export interface ServerToolHandlerResult {

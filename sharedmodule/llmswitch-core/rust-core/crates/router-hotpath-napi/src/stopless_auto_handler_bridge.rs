@@ -107,7 +107,6 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
     let decision_signals =
         stopless_decision_context_signals::plan_stopless_decision_context_signals(
             &StoplessDecisionContextSignalsInput {
-                adapter_context: Value::Object(Map::new()),
                 runtime_metadata: input.runtime_metadata.clone(),
             },
         );
@@ -124,14 +123,12 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
     let effective_runtime_loop_state =
         persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context(
             &persisted_lookup::RuntimeStopMessageStateFromAdapterContextInput {
-                adapter_context: Value::Object(Map::new()),
                 runtime_metadata: input.runtime_metadata.clone(),
             },
         )
         .and_then(|snapshot| serde_json::to_value(snapshot).ok());
 
     serde_json::json!({
-        "adapterContext": Value::Object(Map::new()),
         "base": input.base,
         "requestId": input.request_id,
         "followupFlowId": Value::Null,
@@ -297,7 +294,6 @@ pub fn run_stopless_auto_handler_runtime_json(input_json: String) -> NapiResult<
 /// Input JSON shape:
 /// ```json
 /// {
-///   "adapterContext": { ... },
 ///   "metadataWritePlan": { "stopless": { ... } },
 ///   "runtimeControl": { ... },
 ///   "chatStopText": "...",
@@ -736,7 +732,6 @@ pub struct StoplessAutoCliProjectionFromEngineInput {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessAutoHandlerRuntimeInput {
-    pub adapter_context: Value,
     pub base: Value,
     pub request_id: String,
     pub runtime_metadata: Option<Value>,
@@ -815,7 +810,6 @@ mod tests {
     #[test]
     fn plan_stopless_auto_handler_roundtrip() {
         let input = json!({
-            "adapterContext": { "sessionId": "sess-1" },
             "base": { "choices": [] },
             "requestId": "req-1",
             "shouldRunVisionFlow": false,
@@ -844,11 +838,11 @@ mod tests {
     #[test]
     fn build_stopless_auto_cli_projection_basic_happy_path() {
         let input = json!({
-            "adapterContext": { "sessionId": "sess-proj" },
             "metadataWritePlan": {
                 "stopless": { "repeatCount": 1, "maxRepeats": 3, "triggerHint": "stop_schema_missing" }
             },
             "chatStopText": "继续推进当前任务",
+            "sessionId": "sess-proj",
             "requestId": "req-proj-1"
         });
         let result =
@@ -863,7 +857,6 @@ mod tests {
     #[test]
     fn handler_input_reads_stopless_state_from_runtime_control_only() {
         let input = StoplessAutoHandlerRuntimeInput {
-            adapter_context: json!({}),
             base: json!({ "choices": [] }),
             request_id: "req-runtime-control".to_string(),
             runtime_metadata: Some(json!({
@@ -888,13 +881,12 @@ mod tests {
             output["effectiveRuntimeLoopState"]["text"],
             json!("continue from runtime control")
         );
-        assert_eq!(output["adapterContext"], json!({}));
+        assert!(output.get("adapterContext").is_none());
     }
 
     #[test]
     fn write_stopless_learned_note_no_content_returns_ok_false() {
         let input = json!({
-            "adapterContext": {},
             "requestId": "req-note-1",
             "parsed": { "reason": "test" }
         });
@@ -907,7 +899,6 @@ mod tests {
     #[test]
     fn write_stopless_learned_note_missing_workdir_returns_ok_false() {
         let input = json!({
-            "adapterContext": {},
             "requestId": "req-note-2",
             "parsed": { "learned": "fact" }
         });
@@ -922,8 +913,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("stopless_note_test_{}", uuid::Uuid::new_v4()));
         let _ = std::fs::create_dir_all(&dir);
         let input = json!({
-            "adapterContext": { "workdir": dir.to_str().unwrap() },
+            "workingDirectory": dir.to_str().unwrap(),
             "requestId": "req-note-3",
+            "sessionId": "sess-note-3",
             "parsed": { "learned": "test fact", "reason": "test reason", "evidence": "log output" }
         });
         let result = write_stopless_learned_note_json(input.to_string()).expect("note write");

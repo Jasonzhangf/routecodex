@@ -4,8 +4,11 @@ use serde_json::Value;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessLearnedNotePlanInput {
-    pub adapter_context: Value,
     pub request_id: String,
+    #[serde(default)]
+    pub working_directory: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
     #[serde(default)]
     pub parsed: Option<Value>,
     #[serde(default)]
@@ -42,30 +45,14 @@ pub fn plan_stopless_learned_note_write(
         .unwrap_or(0);
     StoplessLearnedNoteWritePlan {
         should_write: learned.is_some(),
-        working_directory: resolve_working_directory_from_adapter_context(&input.adapter_context),
+        working_directory: normalize_optional_string(input.working_directory),
         request_id: input.request_id,
-        session_id: read_non_empty_string(input.adapter_context.get("sessionId")),
+        session_id: normalize_optional_string(input.session_id),
         timestamp_ms,
         learned,
         reason: read_non_empty_string(parsed.get("reason")),
         evidence: read_non_empty_string(parsed.get("evidence")),
     }
-}
-
-pub fn resolve_working_directory_from_adapter_context(adapter_context: &Value) -> Option<String> {
-    let record = adapter_context.as_object()?;
-    read_working_directory_fields(record).or_else(|| {
-        record
-            .get("__rt")
-            .and_then(Value::as_object)
-            .and_then(read_working_directory_fields)
-    })
-}
-
-fn read_working_directory_fields(record: &serde_json::Map<String, Value>) -> Option<String> {
-    ["cwd", "workdir", "workingDirectory", "clientWorkdir"]
-        .iter()
-        .find_map(|key| read_non_empty_string(record.get(*key)))
 }
 
 fn read_non_empty_string(value: Option<&Value>) -> Option<String> {
@@ -74,6 +61,15 @@ fn read_non_empty_string(value: Option<&Value>) -> Option<String> {
         None
     } else {
         Some(raw.to_string())
+    }
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    let raw = value?.trim().to_string();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw)
     }
 }
 
@@ -103,11 +99,9 @@ mod tests {
     #[test]
     fn plans_stopless_learned_note_write_from_schema_report() {
         let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
-            adapter_context: json!({
-                "workdir": "/repo",
-                "sessionId": " session-1 "
-            }),
             request_id: "req_1".to_string(),
+            working_directory: Some("/repo".to_string()),
+            session_id: Some(" session-1 ".to_string()),
             parsed: Some(json!({
                 "learned": "  learned fact  ",
                 "reason": "  stop reason  ",
@@ -127,15 +121,11 @@ mod tests {
     }
 
     #[test]
-    fn skips_write_when_learned_is_empty_but_preserves_context_fields() {
+    fn skips_write_when_learned_is_empty_but_preserves_control_fields() {
         let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
-            adapter_context: json!({
-                "__rt": {
-                    "cwd": "/rt-repo"
-                },
-                "sessionId": "session-2"
-            }),
             request_id: "req_2".to_string(),
+            working_directory: Some("/rt-repo".to_string()),
+            session_id: Some("session-2".to_string()),
             parsed: Some(json!({
                 "learned": "   ",
                 "reason": "ignored"
@@ -153,11 +143,9 @@ mod tests {
     #[test]
     fn skips_write_when_schema_report_is_missing() {
         let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
-            adapter_context: json!({
-                "workdir": "/repo",
-                "sessionId": "session-3"
-            }),
             request_id: "req_3".to_string(),
+            working_directory: Some("/repo".to_string()),
+            session_id: Some("session-3".to_string()),
             parsed: None,
             timestamp_ms: Some(json!(9000)),
         });
@@ -180,8 +168,9 @@ mod tests {
             json!({"text": "not string"}),
         ] {
             let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
-                adapter_context: json!({}),
                 request_id: "req_non_string".to_string(),
+                working_directory: None,
+                session_id: None,
                 parsed: Some(json!({
                     "learned": learned,
                     "reason": "ignored when learned missing",
@@ -205,8 +194,9 @@ mod tests {
             json!({ "bad": 1 }),
         ] {
             let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
-                adapter_context: json!({}),
                 request_id: "req_time".to_string(),
+                working_directory: None,
+                session_id: None,
                 parsed: Some(json!({ "learned": "fact" })),
                 timestamp_ms: Some(timestamp_ms),
             });
@@ -217,38 +207,17 @@ mod tests {
     }
 
     #[test]
-    fn adapter_context_workdir_precedes_runtime_metadata_workdir() {
-        let workdir = resolve_working_directory_from_adapter_context(&json!({
-            "cwd": "/adapter",
-            "__rt": {
-                "cwd": "/runtime"
-            }
-        }));
-
-        assert_eq!(workdir.as_deref(), Some("/adapter"));
-    }
-
     #[test]
-    fn resolves_working_directory_by_explicit_field_order() {
-        let workdir = resolve_working_directory_from_adapter_context(&json!({
-            "cwd": "   ",
-            "workdir": "/workdir",
-            "workingDirectory": "/working-directory",
-            "clientWorkdir": "/client-workdir"
-        }));
-        assert_eq!(workdir.as_deref(), Some("/workdir"));
+    fn trims_explicit_working_directory_and_session_id() {
+        let plan = plan_stopless_learned_note_write(StoplessLearnedNotePlanInput {
+            request_id: "req_trim".to_string(),
+            working_directory: Some("  /repo  ".to_string()),
+            session_id: Some("  session-trim  ".to_string()),
+            parsed: Some(json!({ "learned": "fact" })),
+            timestamp_ms: None,
+        });
 
-        let workdir = resolve_working_directory_from_adapter_context(&json!({
-            "workingDirectory": "/working-directory",
-            "clientWorkdir": "/client-workdir"
-        }));
-        assert_eq!(workdir.as_deref(), Some("/working-directory"));
-
-        let workdir = resolve_working_directory_from_adapter_context(&json!({
-            "__rt": {
-                "clientWorkdir": "/runtime-client"
-            }
-        }));
-        assert_eq!(workdir.as_deref(), Some("/runtime-client"));
+        assert_eq!(plan.working_directory.as_deref(), Some("/repo"));
+        assert_eq!(plan.session_id.as_deref(), Some("session-trim"));
     }
 }

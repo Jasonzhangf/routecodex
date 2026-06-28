@@ -30,80 +30,6 @@ function isBuiltinRuntimeSupported(name: string): boolean {
   }
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
-
-type MetadataCenterLike = {
-  readRequestTruth?: () => Record<string, unknown>;
-  readContinuationContext?: () => Record<string, unknown>;
-  readRuntimeControl?: () => Record<string, unknown>;
-  readProviderObservation?: () => Record<string, unknown>;
-  readClientAttachmentScope?: () => Record<string, unknown>;
-  readDebugSnapshot?: () => Record<string, unknown>;
-};
-
-function isMetadataCenterLike(value: unknown): value is MetadataCenterLike {
-  const record = asRecord(value);
-  if (!record) {
-    return false;
-  }
-  return (
-    typeof record.readRequestTruth === 'function'
-    && typeof record.readContinuationContext === 'function'
-    && typeof record.readRuntimeControl === 'function'
-    && typeof record.readProviderObservation === 'function'
-    && typeof record.readDebugSnapshot === 'function'
-  );
-}
-
-function readBoundMetadataCenter(target: unknown): MetadataCenterLike | null {
-  const record = asRecord(target);
-  if (!record) {
-    return null;
-  }
-  const symbolValue = Reflect.get(record, Symbol.for('routecodex.metadataCenter'));
-  if (isMetadataCenterLike(symbolValue)) {
-    return symbolValue;
-  }
-  return null;
-}
-
-function buildMetadataCenterRustSnapshot(target: unknown): Record<string, unknown> | null {
-  const center = readBoundMetadataCenter(target);
-  if (!center) {
-    return null;
-  }
-  return {
-    requestTruth: center.readRequestTruth?.() ?? {},
-    continuationContext: center.readContinuationContext?.() ?? {},
-    runtimeControl: center.readRuntimeControl?.() ?? {},
-    providerObservation: center.readProviderObservation?.() ?? {},
-    clientAttachmentScope: center.readClientAttachmentScope?.() ?? {},
-    debugSnapshot: center.readDebugSnapshot?.() ?? {},
-  };
-}
-
-function readMetadataCenterSnapshot(target: unknown): Record<string, unknown> | null {
-  const liveSnapshot = buildMetadataCenterRustSnapshot(target);
-  if (liveSnapshot) {
-    return liveSnapshot;
-  }
-  const record = asRecord(target);
-  if (!record) {
-    return null;
-  }
-  const direct = asRecord(record.metadataCenterSnapshot);
-  if (direct) {
-    return direct;
-  }
-  const nestedMetadata = asRecord(record.metadata);
-  return nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) : null;
-}
-
 async function runStoplessAutoHandlerRuntimeNapi(
   ctx: ServerToolHandlerContext
 ): Promise<StoplessAutoHandlerRuntimeOutput> {
@@ -111,17 +37,10 @@ async function runStoplessAutoHandlerRuntimeNapi(
   if (!fn) {
     throw new Error('runStoplessAutoHandlerRuntimeJson native unavailable');
   }
-  const metadataCenterSnapshot = readMetadataCenterSnapshot(ctx.adapterContext);
-  const runtimeMetadata = metadataCenterSnapshot
-    ? {
-        metadataCenterSnapshot
-      }
-    : null;
   const raw = fn(JSON.stringify({
-    adapterContext: {},
     base: ctx.base,
     requestId: ctx.requestId,
-    runtimeMetadata,
+    runtimeMetadata: ctx.runtimeMetadata ?? null,
   }));
   if (typeof raw === 'string') {
     return JSON.parse(raw) as StoplessAutoHandlerRuntimeOutput;

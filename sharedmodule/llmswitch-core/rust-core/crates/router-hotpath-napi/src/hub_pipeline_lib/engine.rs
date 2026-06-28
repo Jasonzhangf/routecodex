@@ -869,27 +869,7 @@ fn run_servertool_resp_stopless_hook_skeleton(
         return Ok(None);
     }
 
-    let mut adapter_context = metadata
-        .as_object()
-        .cloned()
-        .map(Value::Object)
-        .unwrap_or(Value::Object(Default::default()));
-    if let Some(record) = adapter_context.as_object_mut() {
-        record.insert(
-            "metadataCenterSnapshot".to_string(),
-            metadata_center_snapshot.clone(),
-        );
-        let mut rt = record
-            .get("__rt")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        rt.insert("stopGatewayContext".to_string(), stop_gateway);
-        record.insert("__rt".to_string(), Value::Object(rt));
-    }
-
     let runtime_input = serde_json::json!({
-        "adapterContext": adapter_context,
         "base": chatprocess_payload,
         "requestId": request_id,
         "runtimeMetadata": {
@@ -957,7 +937,7 @@ fn run_servertool_resp_stopless_hook_skeleton(
                     .unwrap_or_else(|| chatprocess_payload.clone())
             } else {
                 let projection_input = serde_json::json!({
-                    "adapterContext": adapter_context,
+                    "metadataCenterSnapshot": metadata_center_snapshot,
                     "execution": execution,
                     "metadataWritePlan": metadata_write_plan,
                     "requestId": request_id

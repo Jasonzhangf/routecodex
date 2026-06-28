@@ -5170,6 +5170,7 @@ function checkStoplessNoContextDataPlane() {
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_auto_handler.rs`,
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_compare_context.rs`,
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_learned_note_contract.rs`,
     `${ROOT}/sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`,
     `${ROOT}/src/server/runtime/http-server/executor/provider-response-converter.ts`,
   ];
@@ -5202,11 +5203,52 @@ function checkStoplessNoContextDataPlane() {
     'resolve_stopless_cli_result_snapshot_from_responses_resume',
     'resolve_stopless_cli_result_snapshot_from_runtime_metadata',
     'read_stopless_cli_result_snapshot_from_tool_output_details',
+    'pub adapter_context: Value',
   ]) {
     if (persistedLookup.includes(marker)) {
       fail(
         'stopless-no-context-data-plane',
         `persisted_lookup.rs must not restore stopless state from request/continuation data-plane helper ${marker}`
+      );
+    }
+  }
+  const stoplessBridge = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs`).split('#[cfg(test)]')[0];
+  for (const marker of [
+    'pub adapter_context: Value',
+    '"adapterContext": adapter_context',
+    '"adapterContext": Value::Object',
+  ]) {
+    if (stoplessBridge.includes(marker)) {
+      fail(
+        'stopless-no-context-data-plane',
+        `stopless_auto_handler_bridge.rs must not use adapterContext runtime input marker ${marker}`
+      );
+    }
+  }
+  const learnedNote = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_learned_note_contract.rs`).split('#[cfg(test)]')[0];
+  for (const marker of [
+    'adapter_context',
+    'resolve_working_directory_from_adapter_context',
+  ]) {
+    if (learnedNote.includes(marker)) {
+      fail(
+        'stopless-no-context-data-plane',
+        `stopless_learned_note_contract.rs must not derive learned-note control fields from adapterContext marker ${marker}`
+      );
+    }
+  }
+  const builtinCatalog = readRequired(`${SERVERTOOL_TS_DIR}/builtin-handler-catalog.ts`);
+  for (const marker of [
+    'readMetadataCenterSnapshot',
+    'buildMetadataCenterRustSnapshot',
+    'readBoundMetadataCenter',
+    'ctx.adapterContext',
+    'adapterContext: {}',
+  ]) {
+    if (builtinCatalog.includes(marker)) {
+      fail(
+        'stopless-no-context-data-plane',
+        `builtin-handler-catalog.ts must not read adapterContext/MetadataCenter for stopless runtime marker ${marker}`
       );
     }
   }

@@ -4,7 +4,11 @@ import type {
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
+import {
+  readProviderProtocolFromAnyBoundMetadataCenter,
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
+} from './metadata-center-carrier.js';
+import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 
 export function resolveServertoolEntryContext(args: {
   options: ServerSideToolEngineOptions;
@@ -39,7 +43,10 @@ export function resolveServertoolEntryContext(args: {
       adapterContext: args.options.adapterContext,
       requestId: args.options.requestId,
       entryEndpoint: args.options.entryEndpoint,
-      providerProtocol
+      providerProtocol,
+      runtimeMetadata:
+        readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(args.options.adapterContext as Record<string, unknown>)
+        ?? readRuntimeMetadata(args.options.adapterContext as Record<string, unknown>)
     },
     includeToolCallNames: normalizeFilterTokenSet(args.options.includeToolCallHandlerNames),
     excludeToolCallNames: normalizeFilterTokenSet(args.options.excludeToolCallHandlerNames),

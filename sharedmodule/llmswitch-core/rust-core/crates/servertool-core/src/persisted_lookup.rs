@@ -136,7 +136,6 @@ pub struct StopMessageRoutingStateClearPlanOutput {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStopMessageStateFromAdapterContextInput {
-    pub adapter_context: Value,
     pub runtime_metadata: Option<Value>,
 }
 
@@ -2031,7 +2030,7 @@ mod tests {
     }
 
     #[test]
-    fn adapter_context_direct_runtime_stop_state_wins_over_request_records() {
+    fn runtime_metadata_stop_state_wins_without_request_records() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: Some(json!({
                 "stopMessageState": {
@@ -2041,11 +2040,6 @@ mod tests {
                     "stopMessageUsed": 1
                 }
             })),
-            adapter_context: json!({
-                "capturedEntryRequest": {
-                    "input": "normal user input"
-                }
-            }),
         };
 
         let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
@@ -2058,7 +2052,7 @@ mod tests {
     }
 
     #[test]
-    fn adapter_context_does_not_restore_stopless_state_from_context_or_raw_request() {
+    fn runtime_metadata_does_not_restore_stopless_state_from_context_payload() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: Some(json!({
                 "responsesRequestContext": {
@@ -2070,28 +2064,6 @@ mod tests {
                     }
                 }
             })),
-            adapter_context: json!({
-                "capturedEntryRequest": {
-                    "tool_outputs": [{
-                        "type": "function_call_output",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"from captured\",\"repeatCount\":3,\"maxRepeats\":5}"
-                    }]
-                },
-                "capturedChatRequest": {
-                    "messages": [{ "role": "tool", "content": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}" }]
-                },
-                "__raw_request_body": {
-                    "input": [{
-                        "type": "function_call_output",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"from raw\",\"repeatCount\":1,\"maxRepeats\":3}"
-                    }]
-                },
-                "responsesResume": {
-                    "toolOutputsDetailed": [{
-                        "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"from resume\",\"repeatCount\":2,\"maxRepeats\":3}"
-                    }]
-                }
-            }),
         };
 
         assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
@@ -2125,14 +2097,6 @@ mod tests {
                     }
                 }
             })),
-            adapter_context: json!({
-                "__raw_request_body": {
-                    "input": [{
-                        "type": "function_call_output",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"must not win either\",\"repeatCount\":3,\"maxRepeats\":3}"
-                    }]
-                }
-            }),
         };
 
         let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
@@ -2152,43 +2116,18 @@ mod tests {
     }
 
     #[test]
-    fn adapter_context_ignores_stopless_command_seed_with_plain_exec_text() {
+    fn missing_runtime_metadata_ignores_stopless_command_seed() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: None,
-            adapter_context: json!({
-                "__raw_request_body": {
-                    "input": [{
-                        "type": "function_call",
-                        "call_id": "call_cli_seed",
-                        "name": "exec_command",
-                        "arguments": json!({
-                            "cmd": "routecodex servertool run stop_message_auto --input-json '{}'"
-                        }).to_string()
-                    }],
-                    "tool_outputs": [{
-                        "call_id": "call_cli_seed",
-                        "output": "shell output"
-                    }]
-                }
-            }),
         };
 
         assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
     }
 
     #[test]
-    fn adapter_context_ignores_non_stopless_exec_output() {
+    fn missing_runtime_metadata_ignores_non_stopless_exec_output() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: None,
-            adapter_context: json!({
-                "capturedEntryRequest": {
-                    "tool_outputs": [{
-                        "type": "function_call_output",
-                        "call_id": "call_other",
-                        "output": "{\"toolName\":\"servertool_fixture\",\"flowId\":\"servertool_cli_projection\"}"
-                    }]
-                }
-            }),
         };
 
         assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());

@@ -505,7 +505,7 @@ fn execute_hub_pipeline_json_preserves_stopless_instructions_for_anthropic_provi
     assert!(
         output
             .pointer("/payload/system")
-            .and_then(|value| value.as_str())
+            .map(|value| value.to_string())
             .unwrap_or_default()
             .contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"),
         "unexpected output: {}",

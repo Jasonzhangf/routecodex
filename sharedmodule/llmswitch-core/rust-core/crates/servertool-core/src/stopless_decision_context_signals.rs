@@ -4,7 +4,6 @@ use serde_json::Value;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessDecisionContextSignalsInput {
-    pub adapter_context: Value,
     pub runtime_metadata: Option<Value>,
 }
 
@@ -19,7 +18,7 @@ pub struct StoplessDecisionContextSignals {
 pub fn plan_stopless_decision_context_signals(
     input: &StoplessDecisionContextSignalsInput,
 ) -> StoplessDecisionContextSignals {
-    let metadata = resolve_metadata_carrier(&input.adapter_context);
+    let metadata = resolve_metadata_carrier(input.runtime_metadata.as_ref());
     StoplessDecisionContextSignals {
         port_stop_message_disabled: has_disabled_port_signal(metadata),
         has_responses_submit_tool_outputs_resume: has_responses_submit_tool_outputs_resume(
@@ -29,11 +28,8 @@ pub fn plan_stopless_decision_context_signals(
     }
 }
 
-fn resolve_metadata_carrier(adapter_context: &Value) -> Option<&Value> {
-    adapter_context
-        .get("metadata")
-        .filter(|value| value.is_object())
-        .or_else(|| adapter_context.is_object().then_some(adapter_context))
+fn resolve_metadata_carrier(runtime_metadata: Option<&Value>) -> Option<&Value> {
+    runtime_metadata.filter(|value| value.is_object())
 }
 
 fn has_disabled_port_signal(metadata: Option<&Value>) -> bool {
@@ -92,15 +88,14 @@ mod tests {
     #[test]
     fn reads_submit_resume_and_port_disable_from_metadata_carriers() {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
-            adapter_context: json!({
+            runtime_metadata: Some(json!({
                 "runtime_control": {
                     "stopMessageEnabled": false
                 },
                 "responsesResume": {
                     "toolOutputsDetailed": [{ "tool_call_id": "call_1" }]
                 }
-            }),
-            runtime_metadata: None,
+            })),
         });
 
         assert!(plan.port_stop_message_disabled);
@@ -111,7 +106,7 @@ mod tests {
     #[test]
     fn prefers_metadata_center_snapshot_stop_message_signal_over_flat_metadata() {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
-            adapter_context: json!({
+            runtime_metadata: Some(json!({
                 "runtime_control": {
                     "stopMessageEnabled": true
                 },
@@ -122,8 +117,7 @@ mod tests {
                         }
                     }
                 }
-            }),
-            runtime_metadata: None,
+            })),
         });
 
         assert!(plan.port_stop_message_disabled);
@@ -132,7 +126,7 @@ mod tests {
     #[test]
     fn reads_submit_resume_from_metadata_center_continuation_context() {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
-            adapter_context: json!({
+            runtime_metadata: Some(json!({
                 "metadataCenterSnapshot": {
                     "continuationContext": {
                         "responsesResume": {
@@ -140,8 +134,7 @@ mod tests {
                         }
                     }
                 }
-            }),
-            runtime_metadata: None,
+            })),
         });
 
         assert!(plan.has_responses_submit_tool_outputs_resume);
@@ -150,9 +143,6 @@ mod tests {
     #[test]
     fn does_not_derive_plan_mode_from_request_context() {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
-            adapter_context: json!({
-                "system": "<collaboration_mode># Collaboration Mode: Plan\n</collaboration_mode>"
-            }),
             runtime_metadata: Some(json!({ "stopMessageEnabled": true })),
         });
 
@@ -162,22 +152,14 @@ mod tests {
     }
 
     #[test]
-    fn nested_metadata_carrier_still_works_for_transition_contexts() {
+    fn runtime_metadata_carrier_still_works_without_adapter_context() {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
-            adapter_context: json!({
-                "metadata": {
-                    "runtime_control": {
-                        "stopMessageEnabled": false
-                    },
-                    "responsesResume": {
-                        "toolOutputsDetailed": [{ "tool_call_id": "call_nested" }]
-                    }
-                }
-            }),
             runtime_metadata: Some(json!({
-                "stopMessageEnabled": true,
+                "runtime_control": {
+                    "stopMessageEnabled": false
+                },
                 "responsesResume": {
-                    "toolOutputsDetailed": [{ "tool_call_id": "call_ignored_runtime" }]
+                    "toolOutputsDetailed": [{ "tool_call_id": "call_runtime" }]
                 }
             })),
         });
@@ -189,9 +171,6 @@ mod tests {
     #[test]
     fn plan_mode_signal_requires_metadata_center_control_not_context_text() {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
-            adapter_context: json!({
-                "system": "<collaboration_mode># Collaboration Mode: Plan\n# Collaboration Mode: Default</collaboration_mode>"
-            }),
             runtime_metadata: None,
         });
 

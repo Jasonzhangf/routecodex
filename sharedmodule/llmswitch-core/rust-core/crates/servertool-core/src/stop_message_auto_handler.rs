@@ -29,7 +29,6 @@ use crate::stopless_decision_context_signals::StoplessDecisionContextSignals;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StopMessageAutoHandlerInput {
-    pub adapter_context: Value,
     pub base: Value,
     pub request_id: String,
     pub followup_flow_id: Option<String>,
@@ -951,7 +950,6 @@ mod tests {
     #[test]
     fn vision_flow_returns_null_plan() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({}),
             request_id: "req-1".to_string(),
             followup_flow_id: None,
@@ -978,7 +976,6 @@ mod tests {
     #[test]
     fn media_context_returns_null_plan() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({}),
             request_id: "req-2".to_string(),
             followup_flow_id: None,
@@ -1006,11 +1003,6 @@ mod tests {
     fn not_stop_finish_reason_skips() {
         // finish_reason is not "stop" so stop_gateway says not eligible
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({
-                "metadata": {
-                    "stopMessageEnabled": true,
-                }
-            }),
             base: json!({
                 "choices": [{
                     "index": 0,
@@ -1045,7 +1037,6 @@ mod tests {
     #[test]
     fn servertool_followup_hop_skips() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "content": "ok" } }] }),
             request_id: "req-4".to_string(),
             followup_flow_id: Some("__servertool_followup__".to_string()),
@@ -1073,14 +1064,6 @@ mod tests {
     #[test]
     fn budget_exhausted_returns_terminal() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({
-                "metadata": {
-                    "stopMessageEnabled": true,
-                    "metadataCenterSnapshot": {
-                        "runtimeControl": { "stopMessage": { "enabled": false } }
-                    }
-                }
-            }),
             base: json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "content": "done" } }] }),
             request_id: "req-5".to_string(),
             followup_flow_id: None,
@@ -1111,7 +1094,6 @@ mod tests {
     #[test]
     fn handler_plan_has_correct_structure() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "content": "test" } }] }),
             request_id: "req-6".to_string(),
             followup_flow_id: None,
@@ -1160,7 +1142,6 @@ mod tests {
             Some("stop_schema_continue_next_step")
         );
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({
                 "choices": [{
                     "index": 0,
@@ -1214,7 +1195,6 @@ mod tests {
     fn terminal_schema_with_empty_reason_is_followup() {
         // stopreason=0 but empty reason → followup, not allow_stop
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({
                 "choices": [{
                     "index": 0,
@@ -1269,9 +1249,6 @@ mod tests {
     #[test]
     fn no_schema_with_no_runtime_initializes_stopless_and_returns_handler_plan() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({
-                "metadata": { "stopMessageEnabled": true }
-            }),
             base: json!({
                 "choices": [{
                     "index": 0,
@@ -1309,9 +1286,6 @@ mod tests {
     #[test]
     fn responses_completed_empty_text_is_missing_schema_followup() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({
-                "metadata": { "stopMessageEnabled": true }
-            }),
             base: json!({
                 "status": "completed",
                 "output_text": "",
@@ -1373,7 +1347,6 @@ mod tests {
     #[test]
     fn budget_exhausted_followup_path_preserves_original_visible_text() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({
                 "choices": [{
                     "index": 0,
@@ -1465,7 +1438,6 @@ mod tests {
         let gate = evaluate_stop_schema_gate(&extracted, None, 2, 3, "", 0);
         assert_eq!(gate.action, "allow_stop", "extracted={extracted}");
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base,
             request_id: "req-complete-schema-budget-boundary".to_string(),
             followup_flow_id: None,
@@ -1516,7 +1488,6 @@ mod tests {
     #[test]
     fn continue_needed_with_next_step_returns_handler_plan() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({
                 "choices": [{
                     "index": 0,
@@ -1566,7 +1537,6 @@ mod tests {
     #[test]
     fn schema_feedback_includes_reason_code() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({
                 "choices": [{
                     "index": 0,
@@ -1614,7 +1584,6 @@ mod tests {
     fn blocked_needs_user_input_returns_terminal_summary_and_question() {
         let schema = r#"<rcc_stop_schema>{"stopreason":1,"reason":"需要用户选择部署窗口","has_evidence":1,"evidence":"两个候选窗口都会影响线上流量","next_step":"请决定：今晚 23:00 还是明早 09:00 部署？","needs_user_input":true}</rcc_stop_schema>"#;
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({
                 "choices": [{
                     "index": 0,
@@ -1695,7 +1664,6 @@ mod tests {
     #[test]
     fn responses_submit_tool_outputs_resume_still_returns_handler_plan_for_stopless_loop() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            adapter_context: json!({}),
             base: json!({
                 "id": "resp_submit_round_2",
                 "object": "response",

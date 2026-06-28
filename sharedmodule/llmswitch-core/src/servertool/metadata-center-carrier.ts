@@ -1,3 +1,5 @@
+import type { JsonObject } from '../conversion/hub/types/json.js';
+
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
 type RuntimeControlWriter = {
@@ -125,4 +127,37 @@ export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(
   }
   const metadata = asRecord(target?.metadata);
   return readRequestTruthSessionIdFromBoundMetadataCenter(metadata);
+}
+
+export function readRequestTruthFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!target) {
+    return undefined;
+  }
+  const directCenter = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  if (directCenter && typeof directCenter.readRequestTruth === 'function') {
+    const requestTruth = directCenter.readRequestTruth();
+    return requestTruth && typeof requestTruth === 'object' && !Array.isArray(requestTruth)
+      ? requestTruth
+      : undefined;
+  }
+  const metadata = asRecord(target.metadata);
+  return metadata ? readRequestTruthFromAnyBoundMetadataCenter(metadata) : undefined;
+}
+
+export function readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): JsonObject | undefined {
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(target);
+  const requestTruth = readRequestTruthFromAnyBoundMetadataCenter(target);
+  if (!runtimeControl && !requestTruth) {
+    return undefined;
+  }
+  return {
+    metadataCenterSnapshot: {
+      requestTruth: (requestTruth ?? {}) as JsonObject,
+      runtimeControl: (runtimeControl ?? {}) as JsonObject
+    }
+  };
 }

@@ -600,33 +600,33 @@ chains:
       - step_id: stl-01
         from_node: StoplessResp01StopDetected
         to_node: StoplessResp02SchemaGateEvaluated
-        caller_symbol: runServerToolOrchestration
-        caller_file: sharedmodule/llmswitch-core/src/servertool/engine.ts
-        callee_symbol: runStopMessageAutoHandlerWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts
+        caller_symbol: run_servertool_resp_stopless_hook_skeleton
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: run_stopless_auto_handler_runtime_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "HubRespChatProcess03Governed stop response + adapterContext carrying requestId/sessionId/entryEndpoint/routeName"
+        semantic_input: "HubRespChatProcess03Governed stop response + requestId + MetadataCenter snapshot carrying requestTruth/session scope and runtime_control.stopless"
         semantic_output: "stop schema gate decision and stopless loop state candidate"
         status: anchored
         note: "Response-side Chat Process exit stage. Same-round provider request must already have injected stop guidance plus internal reasoningStop."
       - step_id: stl-02
         from_node: StoplessResp02SchemaGateEvaluated
         to_node: StoplessState03RuntimeSnapshotResolved
-        caller_symbol: planStoplessExecutionJson
-        caller_file: sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
+        caller_symbol: run_stopless_auto_handler_runtime_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         callee_symbol: plan_stopless_execution_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "engine execution plus current request-truth session id and MetadataCenter runtime_control.stopless control fields"
-        semantic_output: "Rust-built stopless execution/context plus orchestration plan; no TS session/context composition and no persisted/tmux/conversation fallback"
+        semantic_output: "Rust-built stopless execution control plus orchestration plan; no TS session/context composition, no adapterContext carrier, and no persisted/tmux/conversation fallback"
         status: anchored
       - step_id: stl-03
         from_node: StoplessState03RuntimeSnapshotResolved
         to_node: StoplessCli04ProjectionPlanned
-        caller_symbol: buildServertoolCliProjectionForAutoFlow
-        caller_file: sharedmodule/llmswitch-core/src/servertool/cli-projection.ts
-        callee_symbol: plan_client_exec_cli_projection_output
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs
+        caller_symbol: run_servertool_resp_stopless_hook_skeleton
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: build_stopless_auto_cli_projection_from_engine_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "concise stopless command payload: flowId/repeatCount/maxRepeats/triggerHint plus optional schemaFeedback{reasonCode,missingFields}"
         semantic_output: "client-visible exec_command using public alias reasoningStop; no sessionDir/sessionId/requestId flags; natural-language feedback is deferred to req_chatprocess rewrite"
