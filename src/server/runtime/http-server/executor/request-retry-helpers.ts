@@ -1,5 +1,6 @@
 import { extractStatusCodeFromError } from './utils.js';
 import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
+import { getRouterHotpathJsonBindingSync } from '../../../../modules/llmswitch/bridge/native-exports.js';
 
 export {
   extractStatusCodeFromError
@@ -33,7 +34,23 @@ function coerceErrorCode(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function withRateLimitNative(message: string, ...codes: Array<string | undefined>): boolean | undefined {
+  try {
+    const binding = getRouterHotpathJsonBindingSync();
+    if (typeof binding.isRateLimitLikeErrorJson === 'function') {
+      const filteredCodes = codes.filter((c): c is string => typeof c === 'string');
+      const raw = binding.isRateLimitLikeErrorJson(JSON.stringify({ message, codes: filteredCodes }));
+      return (JSON.parse(raw) as { result: boolean }).result === true;
+    }
+  } catch {
+    // fall through
+  }
+  return undefined;
+}
+
 export function isRateLimitLikeError(message: string, ...codes: Array<string | undefined>): boolean {
+  const native = withRateLimitNative(message, ...codes);
+  if (native !== undefined) return native;
   const loweredMessage = String(message || '').toLowerCase();
   const normalizedCodes = codes
     .map((code) => coerceErrorCode(code))

@@ -3,10 +3,34 @@
  *
  * Zero side effects. No external state. No env reads. No logging.
  * Only deterministic input → output transforms.
+ *
+ * NOTE: Most functions now delegate to Rust NAPI (batch #3, #2). TS fallback
+ * is preserved for backward compatibility when native binding is unavailable.
  */
 
 import { validateCanonicalClientToolCall } from './provider-response-tool-validation-blocks.js';
 import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
+import { getRouterHotpathJsonBindingSync } from '../../../../modules/llmswitch/bridge/native-exports.js';
+
+function getBinding() {
+  try {
+    return getRouterHotpathJsonBindingSync();
+  } catch {
+    return undefined;
+  }
+}
+
+function withNativeBinding<T>(fn: (binding: NonNullable<ReturnType<typeof getBinding>>) => T, fallback: () => T): T {
+  const binding = getBinding();
+  if (binding) {
+    try {
+      return fn(binding);
+    } catch {
+      // fall through
+    }
+  }
+  return fallback();
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -67,9 +91,19 @@ export const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:[^*]+\*\*>/i;
 // ---------------------------------------------------------------------------
 
 export function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.asFlatRecordJson === 'function') {
+        const raw = binding.asFlatRecordJson(JSON.stringify(value));
+        return raw !== null ? JSON.parse(raw) as Record<string, unknown> : undefined;
+      }
+      return undefined;
+    },
+    () => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+      return value as Record<string, unknown>;
+    }
+  );
 }
 
 export function readSessionLikeToken(value: unknown): string | undefined {
@@ -85,72 +119,61 @@ export function readSessionLikeToken(value: unknown): string | undefined {
 // ---------------------------------------------------------------------------
 
 export function extractFirstBalancedJsonObject(raw: string): string | undefined {
-  const start = raw.indexOf('{');
-  if (start < 0) {
-    return undefined;
-  }
-  let depth = 0;
-  let inString = false;
-  let escaping = false;
-  for (let i = start; i < raw.length; i += 1) {
-    const ch = raw[i];
-    if (inString) {
-      if (escaping) {
-        escaping = false;
-        continue;
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.extractFirstBalancedJsonObjectJson === 'function') {
+        const raw2 = binding.extractFirstBalancedJsonObjectJson(raw);
+        return raw2 !== null ? String(raw2) : undefined;
       }
-      if (ch === '\\') {
-        escaping = true;
-        continue;
+      return undefined;
+    },
+    () => {
+      const start = raw.indexOf('{');
+      if (start < 0) return undefined;
+      let depth = 0;
+      let inString = false;
+      let escaping = false;
+      for (let i = start; i < raw.length; i += 1) {
+        const ch = raw[i];
+        if (inString) {
+          if (escaping) { escaping = false; continue; }
+          if (ch === '\\') { escaping = true; continue; }
+          if (ch === '"') { inString = false; }
+          continue;
+        }
+        if (ch === '"') { inString = true; continue; }
+        if (ch === '{') { depth += 1; continue; }
+        if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) return raw.slice(start, i + 1);
+        }
       }
-      if (ch === '"') {
-        inString = false;
-      }
-      continue;
+      return undefined;
     }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === '{') {
-      depth += 1;
-      continue;
-    }
-    if (ch === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return raw.slice(start, i + 1);
-      }
-    }
-  }
-  return undefined;
+  );
 }
 
 export function tryParseJsonLikeString(raw: string): unknown {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  if (
-    !(trimmed.startsWith('{') || trimmed.startsWith('['))
-    && !trimmed.includes('{"')
-    && !trimmed.includes("{'")
-  ) {
-    return undefined;
-  }
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const balanced = extractFirstBalancedJsonObject(trimmed);
-    if (!balanced) {
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.tryParseJsonLikeStringJson === 'function') {
+        const raw2 = binding.tryParseJsonLikeStringJson(raw);
+        return raw2 !== null ? JSON.parse(raw2) : undefined;
+      }
       return undefined;
+    },
+    () => {
+      const trimmed = raw.trim();
+      if (!trimmed) return undefined;
+      if (!(trimmed.startsWith('{') || trimmed.startsWith('[')) && !trimmed.includes('{"') && !trimmed.includes("{'")) return undefined;
+      try { return JSON.parse(trimmed); }
+      catch {
+        const balanced = extractFirstBalancedJsonObject(trimmed);
+        if (!balanced) return undefined;
+        try { return JSON.parse(balanced); } catch { return undefined; }
+      }
     }
-    try {
-      return JSON.parse(balanced);
-    } catch {
-      return undefined;
-    }
-  }
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -158,60 +181,63 @@ export function tryParseJsonLikeString(raw: string): unknown {
 // ---------------------------------------------------------------------------
 
 export function extractContentTextForStoplessScan(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return '';
-  }
-  const parts: string[] = [];
-  for (const item of content) {
-    if (typeof item === 'string') {
-      parts.push(item);
-      continue;
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.extractContentTextForStoplessScanJson === 'function') {
+        return binding.extractContentTextForStoplessScanJson(JSON.stringify(content));
+      }
+      return '';
+    },
+    () => {
+      if (typeof content === 'string') return content;
+      if (!Array.isArray(content)) return '';
+      const parts: string[] = [];
+      for (const item of content) {
+        if (typeof item === 'string') { parts.push(item); continue; }
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+        const text = typeof (item as Record<string, unknown>).text === 'string' ? String((item as Record<string, unknown>).text) : '';
+        if (text) parts.push(text);
+      }
+      return parts.join('\n');
     }
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      continue;
-    }
-    const text = typeof (item as Record<string, unknown>).text === 'string'
-      ? String((item as Record<string, unknown>).text)
-      : '';
-    if (text) {
-      parts.push(text);
-    }
-  }
-  return parts.join('\n');
+  );
 }
 
 export function extractLatestUserTextForStoplessScan(source: unknown): string {
-  const record = asFlatRecord(source);
-  if (!record) {
-    return '';
-  }
-  const rows = Array.isArray(record.messages)
-    ? record.messages
-    : Array.isArray(record.input)
-      ? record.input
-      : [];
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = asFlatRecord(rows[i]);
-    if (!row) {
-      continue;
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.extractLatestUserTextForStoplessScanJson === 'function') {
+        return binding.extractLatestUserTextForStoplessScanJson(JSON.stringify(source));
+      }
+      return '';
+    },
+    () => {
+      const record = asFlatRecord(source);
+      if (!record) return '';
+      const rows = Array.isArray(record.messages) ? record.messages : Array.isArray(record.input) ? record.input : [];
+      for (let i = rows.length - 1; i >= 0; i -= 1) {
+        const row = asFlatRecord(rows[i]);
+        if (!row) continue;
+        const role = typeof row.role === 'string' ? row.role.trim().toLowerCase() : '';
+        if (role !== 'user') continue;
+        const text = extractContentTextForStoplessScan(row.content).trim();
+        if (text) return text;
+      }
+      return '';
     }
-    const role = typeof row.role === 'string' ? row.role.trim().toLowerCase() : '';
-    if (role !== 'user') {
-      continue;
-    }
-    const text = extractContentTextForStoplessScan(row.content).trim();
-    if (text) {
-      return text;
-    }
-  }
-  return '';
+  );
 }
 
 export function hasStoplessDirectiveInRequestPayload(source: unknown): boolean {
-  return STOPLESS_DIRECTIVE_PATTERN.test(extractLatestUserTextForStoplessScan(source));
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.hasStoplessDirectiveInRequestPayloadJson === 'function') {
+        return binding.hasStoplessDirectiveInRequestPayloadJson(JSON.stringify(source)) === true;
+      }
+      return false;
+    },
+    () => STOPLESS_DIRECTIVE_PATTERN.test(extractLatestUserTextForStoplessScan(source))
+  );
 }
 
 export function shouldAllowDirectResponsesPrebuiltSsePassthrough(args: {
@@ -273,51 +299,49 @@ export function stringifyToolCallArgumentsForValidation(value: unknown): string 
 // ---------------------------------------------------------------------------
 
 export function findNestedRawString(payload: unknown, depth = 3): string {
-  if (depth < 0 || payload === null || payload === undefined) {
-    return '';
-  }
-  if (typeof payload === 'string') {
-    return payload;
-  }
-  if (typeof payload !== 'object' || Array.isArray(payload)) {
-    return '';
-  }
-  const record = payload as Record<string, unknown>;
-  const directRaw = typeof record.raw === 'string' ? record.raw : '';
-  if (directRaw) {
-    return directRaw;
-  }
-  for (const key of ['body', 'data', 'payload', 'response', 'error']) {
-    const nested = findNestedRawString(record[key], depth - 1);
-    if (nested) {
-      return nested;
+  void depth;
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.findNestedRawStringJson === 'function') {
+        return binding.findNestedRawStringJson(JSON.stringify(payload));
+      }
+      return '';
+    },
+    () => {
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload) || depth < 0) return '';
+      const record = payload as Record<string, unknown>;
+      const directRaw = typeof record.raw === 'string' ? record.raw : '';
+      if (directRaw) return directRaw;
+      for (const key of ['body', 'data', 'payload', 'response', 'error']) {
+        const nested = findNestedRawString(record[key], depth - 1);
+        if (nested) return nested;
+      }
+      return '';
     }
-  }
-  return '';
+  );
 }
 
 export function findNestedErrorMarker(payload: unknown, depth = 3): string {
-  if (depth < 0 || payload === null || payload === undefined) {
-    return '';
-  }
-  if (typeof payload === 'string') {
-    return payload;
-  }
-  if (typeof payload !== 'object' || Array.isArray(payload)) {
-    return '';
-  }
-  const record = payload as Record<string, unknown>;
-  const directError = typeof record.error === 'string' ? record.error.trim() : '';
-  if (directError) {
-    return directError;
-  }
-  for (const key of ['body', 'data', 'payload', 'response']) {
-    const nested = findNestedErrorMarker(record[key], depth - 1);
-    if (nested) {
-      return nested;
+  void depth;
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.findNestedErrorMarkerJson === 'function') {
+        return binding.findNestedErrorMarkerJson(JSON.stringify(payload));
+      }
+      return '';
+    },
+    () => {
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload) || depth < 0) return '';
+      const record = payload as Record<string, unknown>;
+      const directError = typeof record.error === 'string' ? record.error.trim() : '';
+      if (directError) return directError;
+      for (const key of ['body', 'data', 'payload', 'response']) {
+        const nested = findNestedErrorMarker(record[key], depth - 1);
+        if (nested) return nested;
+      }
+      return '';
     }
-  }
-  return '';
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -392,18 +416,26 @@ export function isGenericBridgeResponseContractError(args: {
   error: Record<string, unknown>;
   message: string;
 }): boolean {
-  const code = typeof args.error.code === 'string' ? args.error.code.trim() : '';
-  const name = typeof args.error.name === 'string' ? args.error.name.trim() : '';
-  const normalizedMessage = args.message.trim().toLowerCase();
-  if (name !== 'ProviderProtocolError') {
-    return false;
-  }
-  if (code !== 'MALFORMED_RESPONSE') {
-    return false;
-  }
-  return (
-    normalizedMessage.includes('[hub_response] non-canonical response payload')
-    || normalizedMessage.includes('[hub_response] failed to canonicalize response payload')
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.isGenericBridgeResponseContractErrorJson === 'function') {
+        const raw = binding.isGenericBridgeResponseContractErrorJson(JSON.stringify({
+          errorCode: String(args.error.code ?? ''),
+          errorName: String(args.error.name ?? ''),
+          message: args.message,
+        }));
+        return (JSON.parse(raw) as { result: boolean }).result === true;
+      }
+      return false;
+    },
+    () => {
+      const code = typeof args.error.code === 'string' ? args.error.code.trim() : '';
+      const name = typeof args.error.name === 'string' ? args.error.name.trim() : '';
+      const normalizedMessage = args.message.trim().toLowerCase();
+      if (name !== 'ProviderProtocolError') return false;
+      if (code !== 'MALFORMED_RESPONSE') return false;
+      return normalizedMessage.includes('[hub_response] non-canonical response payload') || normalizedMessage.includes('[hub_response] failed to canonicalize response payload');
+    }
   );
 }
 
@@ -412,55 +444,56 @@ export function isContextLengthExceededError(
   upstreamCode?: string,
   detailReason?: string
 ): boolean {
-  const normalizedMessage = message.toLowerCase();
-  const normalizedUpstream = typeof upstreamCode === 'string' ? upstreamCode.trim().toLowerCase() : '';
-  const normalizedReason = typeof detailReason === 'string' ? detailReason.trim().toLowerCase() : '';
-  if (
-    normalizedUpstream.includes('context_length_exceeded') ||
-    normalizedUpstream.includes('context_window_exceeded') ||
-    normalizedUpstream.includes('model_context_window_exceeded') ||
-    normalizedUpstream.includes('input_exceeds_limit')
-  ) {
-    return true;
-  }
-  if (
-    normalizedReason === 'context_length_exceeded' ||
-    normalizedReason === 'context_window_exceeded' ||
-    normalizedReason === 'model_context_window_exceeded' ||
-    normalizedReason === 'input_exceeds_limit'
-  ) {
-    return true;
-  }
-  return CONTEXT_LENGTH_MESSAGE_HINTS.some((hint) => normalizedMessage.includes(hint));
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.isContextLengthExceededErrorJson === 'function') {
+        const raw = binding.isContextLengthExceededErrorJson(JSON.stringify({
+          message,
+          upstreamCode: upstreamCode ?? null,
+          detailReason: detailReason ?? null,
+        }));
+        return (JSON.parse(raw) as { result: boolean }).result === true;
+      }
+      return false;
+    },
+    () => {
+      const normalizedMessage = message.toLowerCase();
+      const normalizedUpstream = typeof upstreamCode === 'string' ? upstreamCode.trim().toLowerCase() : '';
+      const normalizedReason = typeof detailReason === 'string' ? detailReason.trim().toLowerCase() : '';
+      if (normalizedUpstream.includes('context_length_exceeded') || normalizedUpstream.includes('context_window_exceeded') || normalizedUpstream.includes('model_context_window_exceeded') || normalizedUpstream.includes('input_exceeds_limit')) return true;
+      if (normalizedReason === 'context_length_exceeded' || normalizedReason === 'context_window_exceeded' || normalizedReason === 'model_context_window_exceeded' || normalizedReason === 'input_exceeds_limit') return true;
+      return CONTEXT_LENGTH_MESSAGE_HINTS.some((hint) => normalizedMessage.includes(hint));
+    }
+  );
 }
 
 export function isRetryableNetworkSseWrapperError(message: string, upstreamCode?: string, statusCode?: number): boolean {
-  const known = normalizeKnownProviderError({
-    statusCode,
-    code: upstreamCode,
-    upstreamCode,
-    message,
-  });
-  if (known?.code === '429.2000') {
-    return false;
-  }
-  if (known?.class === 'recoverable') {
-    return true;
-  }
-  if (known?.class === 'unrecoverable') {
-    return false;
-  }
-  if (typeof statusCode === 'number' && Number.isFinite(statusCode)) {
-    if (statusCode === 408 || statusCode === 425 || statusCode === 502 || statusCode === 503 || statusCode === 504) {
-      return true;
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.isRetryableNetworkSseWrapperErrorJson === 'function') {
+        const raw = binding.isRetryableNetworkSseWrapperErrorJson(JSON.stringify({
+          message,
+          upstreamCode: upstreamCode ?? null,
+          statusCode: statusCode ?? null,
+        }));
+        return (JSON.parse(raw) as { result: boolean }).result === true;
+      }
+      return false;
+    },
+    () => {
+      const known = normalizeKnownProviderError({ statusCode, code: upstreamCode, upstreamCode, message });
+      if (known?.code === '429.2000') return false;
+      if (known?.class === 'recoverable') return true;
+      if (known?.class === 'unrecoverable') return false;
+      if (typeof statusCode === 'number' && Number.isFinite(statusCode)) {
+        if (statusCode === 408 || statusCode === 425 || statusCode === 502 || statusCode === 503 || statusCode === 504) return true;
+      }
+      const normalizedMessage = String(message || '').trim().toLowerCase();
+      const normalizedUpstream = typeof upstreamCode === 'string' ? upstreamCode.trim().toLowerCase() : '';
+      if (normalizedUpstream && RETRYABLE_NETWORK_CODE_HINTS.some((hint) => normalizedUpstream.includes(hint))) return true;
+      return RETRYABLE_NETWORK_MESSAGE_HINTS.some((hint) => normalizedMessage.includes(hint));
     }
-  }
-  const normalizedMessage = String(message || '').trim().toLowerCase();
-  const normalizedUpstream = typeof upstreamCode === 'string' ? upstreamCode.trim().toLowerCase() : '';
-  if (normalizedUpstream && RETRYABLE_NETWORK_CODE_HINTS.some((hint) => normalizedUpstream.includes(hint))) {
-    return true;
-  }
-  return RETRYABLE_NETWORK_MESSAGE_HINTS.some((hint) => normalizedMessage.includes(hint));
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -470,33 +503,22 @@ export function isRetryableNetworkSseWrapperError(message: string, upstreamCode?
 export function extractBridgeProviderResponsePayload(
   body: Record<string, unknown> | null | undefined
 ): Record<string, unknown> | undefined {
-  if (!body || typeof body !== 'object') {
-    return undefined;
-  }
-  const payload =
-    body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload)
-      ? (body.payload as Record<string, unknown>)
-      : undefined;
-  if (payload) {
-    return payload;
-  }
-  const nestedBody =
-    body.body && typeof body.body === 'object' && !Array.isArray(body.body)
-      ? (body.body as Record<string, unknown>)
-      : undefined;
-  const nestedData =
-    nestedBody?.data && typeof nestedBody.data === 'object' && !Array.isArray(nestedBody.data)
-      ? (nestedBody.data as Record<string, unknown>)
-      : undefined;
-  if (nestedData) {
-    return nestedData;
-  }
-  if (nestedBody) {
-    return nestedBody;
-  }
-  const rootData =
-    body.data && typeof body.data === 'object' && !Array.isArray(body.data)
-      ? (body.data as Record<string, unknown>)
-      : undefined;
-  return rootData;
+  return withNativeBinding(
+    (binding) => {
+      if (typeof binding.extractBridgeProviderResponsePayloadJson === 'function') {
+        const raw = binding.extractBridgeProviderResponsePayloadJson(JSON.stringify(body ?? {}));
+        return raw !== null ? JSON.parse(raw) as Record<string, unknown> : undefined;
+      }
+      return undefined;
+    },
+    () => {
+      if (!body || typeof body !== 'object') return undefined;
+      if (body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload)) return body.payload as Record<string, unknown>;
+      const nestedBody = body.body && typeof body.body === 'object' && !Array.isArray(body.body) ? body.body as Record<string, unknown> : undefined;
+      if (nestedBody?.data && typeof nestedBody.data === 'object' && !Array.isArray(nestedBody.data)) return nestedBody.data as Record<string, unknown>;
+      if (nestedBody) return nestedBody;
+      if (body.data && typeof body.data === 'object' && !Array.isArray(body.data)) return body.data as Record<string, unknown>;
+      return undefined;
+    }
+  );
 }

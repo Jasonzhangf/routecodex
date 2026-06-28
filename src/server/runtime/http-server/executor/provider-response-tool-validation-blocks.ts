@@ -7,7 +7,22 @@
  * - primitive field type
  *
  * Do not perform semantic auditing, compatibility guessing, or content repair.
+ *
+ * NOTE: containsBroadKillCommand, hasInvalidShellWrapperShape, and
+ * validateCanonicalClientToolCall now delegate to Rust NAPI (batch #5).
+ * The TS fallback functions are preserved (suffixed with Fallback) for
+ * backward compatibility if the native binding is unavailable.
  */
+
+import { getRouterHotpathJsonBindingSync } from '../../../../modules/llmswitch/bridge/native-exports.js';
+
+function getRouterHotpathJsonBindingSyncWithFallback(): ReturnType<typeof getRouterHotpathJsonBindingSync> {
+  try {
+    return getRouterHotpathJsonBindingSync();
+  } catch {
+    return {} as ReturnType<typeof getRouterHotpathJsonBindingSync>;
+  }
+}
 
 export function isImagePathLike(value: string): boolean {
   return typeof value === 'string';
@@ -52,6 +67,44 @@ export function buildToolValidationFailure(args: {
 }
 
 export function containsBroadKillCommand(cmd: string): boolean {
+  const binding = getRouterHotpathJsonBindingSyncWithFallback();
+  if (typeof binding.containsBroadKillCommandJson === 'function') {
+    try {
+      const raw = binding.containsBroadKillCommandJson(JSON.stringify({ cmd }));
+      const parsed = JSON.parse(raw) as { result: boolean };
+      return parsed.result === true;
+    } catch {
+      // fall through to TS fallback
+    }
+  }
+  return containsBroadKillCommandFallback(cmd);
+}
+
+export function hasInvalidShellWrapperShape(cmd: string): boolean {
+  const binding = getRouterHotpathJsonBindingSyncWithFallback();
+  if (typeof binding.hasInvalidShellWrapperShapeJson === 'function') {
+    try {
+      const raw = binding.hasInvalidShellWrapperShapeJson(JSON.stringify({ cmd }));
+      const parsed = JSON.parse(raw) as { result: boolean };
+      return parsed.result === true;
+    } catch {
+      // fall through
+    }
+  }
+  return hasInvalidShellWrapperShapeFallback(cmd);
+}
+
+function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Fallback implementations — used when Rust NAPI is unavailable
+// ---------------------------------------------------------------------------
+
+function containsBroadKillCommandFallback(cmd: string): boolean {
   const text = String(cmd || '').trim();
   if (!text) {
     return false;
@@ -87,7 +140,7 @@ export function containsBroadKillCommand(cmd: string): boolean {
   return false;
 }
 
-export function hasInvalidShellWrapperShape(cmd: string): boolean {
+function hasInvalidShellWrapperShapeFallback(cmd: string): boolean {
   const trimmed = String(cmd || '').trim();
   if (!trimmed) {
     return false;
@@ -103,11 +156,121 @@ export function hasInvalidShellWrapperShape(cmd: string): boolean {
   return shellWrapperPrefixes.some((prefix) => trimmed.startsWith(prefix) && !trimmed.endsWith("'"));
 }
 
-function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
+function validateCanonicalClientToolCallFallback(
+  name: string,
+  argsString: string,
+): {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  missingFields?: string[];
+  normalizedArgs?: string;
+} {
+  const parsed = parseToolArgsRecord(argsString);
+  const normalizedName = name.trim().toLowerCase();
+  switch (normalizedName) {
+    case 'exec_command': {
+      if (!parsed || typeof parsed.cmd !== 'string') {
+        return buildToolValidationFailure({
+          reason: 'missing_cmd',
+          message: 'exec_command requires input.cmd as a string.',
+          missingFields: ['cmd']
+        });
+      }
+      const cmd = parsed.cmd;
+      return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, cmd }) };
+    }
+    case 'view_image': {
+      if (!parsed || typeof parsed.path !== 'string') {
+        return buildToolValidationFailure({
+          reason: 'missing_path',
+          message: 'view_image requires input.path as a string.',
+          missingFields: ['path']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ path: parsed.path }) };
+    }
+    case 'apply_patch': {
+      if (!parsed) {
+        return buildToolValidationFailure({
+          reason: 'missing_patch',
+          message: 'apply_patch requires patch as a string.',
+          missingFields: ['patch']
+        });
+      }
+      const patch =
+        typeof parsed.patch === 'string' ? parsed.patch
+        : typeof parsed.input === 'string' ? parsed.input
+        : undefined;
+      if (typeof patch !== 'string') {
+        return buildToolValidationFailure({
+          reason: 'missing_patch',
+          message: 'apply_patch requires patch as a string.',
+          missingFields: ['patch']
+        });
+      }
+      const normalized = { ...parsed, patch } as Record<string, unknown>;
+      delete normalized.input;
+      return { ok: true, normalizedArgs: JSON.stringify(normalized) };
+    }
+    case 'update_plan': {
+      if (!Array.isArray(parsed?.plan)) {
+        return buildToolValidationFailure({
+          reason: 'missing_plan',
+          message: 'update_plan requires input.plan as an array.',
+          missingFields: ['plan']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ explanation: parsed?.explanation, plan: parsed.plan }) };
+    }
+    case 'shell_command':
+    case 'bash': {
+      if (!parsed || typeof parsed.command !== 'string') {
+        return buildToolValidationFailure({
+          reason: 'missing_command',
+          message: `${normalizedName} requires input.command as a string.`,
+          missingFields: ['command']
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+    }
+    case 'shell': {
+      const command = parsed?.command;
+      if (!(Array.isArray(command) && command.every((entry) => typeof entry === 'string'))) {
+        return buildToolValidationFailure({
+          reason: 'invalid_command',
+          message: 'shell requires input.command as a string array.'
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+    }
+    case 'read_mcp_resource': {
+      if (!parsed || typeof parsed.server !== 'string' || typeof parsed.uri !== 'string') {
+        return buildToolValidationFailure({
+          reason: 'missing_server_or_uri',
+          message: 'read_mcp_resource requires input.server and input.uri as strings.',
+          missingFields: buildMissingFields([
+            !parsed || typeof parsed.server !== 'string' ? 'server' : undefined,
+            !parsed || typeof parsed.uri !== 'string' ? 'uri' : undefined
+          ])
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify({ server: parsed.server, uri: parsed.uri }) };
+    }
+    default:
+      if (!parsed) {
+        return buildToolValidationFailure({
+          reason: 'invalid_tool_arguments',
+          message: `Tool "${name.trim()}" requires JSON object arguments.`
+        });
+      }
+      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Shell internals (kept as TS fallback)
+// ---------------------------------------------------------------------------
 
 type ShellTokenSpan = {
   value: string;
@@ -255,104 +418,25 @@ export function validateCanonicalClientToolCall(
   missingFields?: string[];
   normalizedArgs?: string;
 } {
-  const parsed = parseToolArgsRecord(argsString);
-  const normalizedName = name.trim().toLowerCase();
-  switch (normalizedName) {
-    case 'exec_command': {
-      if (!parsed || typeof parsed.cmd !== 'string') {
-        return buildToolValidationFailure({
-          reason: 'missing_cmd',
-          message: 'exec_command requires input.cmd as a string.',
-          missingFields: ['cmd']
-        });
-      }
-      const cmd = parsed.cmd;
-      return { ok: true, normalizedArgs: JSON.stringify({ ...parsed, cmd }) };
+  // Delegate to Rust NAPI
+  const binding = getRouterHotpathJsonBindingSyncWithFallback();
+  if (typeof binding.validateCanonicalClientToolCallJson === 'function') {
+    try {
+      const raw = binding.validateCanonicalClientToolCallJson(JSON.stringify({ name, argsString }));
+      const parsed = JSON.parse(raw) as {
+        ok: boolean;
+        reason?: string;
+        message?: string;
+        missingFields?: string[];
+        normalizedArgs?: string;
+      };
+      // If unknown tool + valid object, Rust returns ok=true. The declaredToolNames
+      // filtering is TS-only logic — if declaredToolNames is set and the name isn't
+      // in it, the caller (normalizeRecoveredToolCalls) already filtered by name.
+      return parsed;
+    } catch {
+      // fall through to TS
     }
-    case 'view_image': {
-      if (!parsed || typeof parsed.path !== 'string') {
-        return buildToolValidationFailure({
-          reason: 'missing_path',
-          message: 'view_image requires input.path as a string.',
-          missingFields: ['path']
-        });
-      }
-      return { ok: true, normalizedArgs: JSON.stringify({ path: parsed.path }) };
-    }
-    case 'apply_patch': {
-      if (!parsed) {
-        return buildToolValidationFailure({
-          reason: 'missing_patch',
-          message: 'apply_patch requires patch as a string.',
-          missingFields: ['patch']
-        });
-      }
-      const patch =
-        typeof parsed.patch === 'string' ? parsed.patch
-        : typeof parsed.input === 'string' ? parsed.input
-        : undefined;
-      if (typeof patch !== 'string') {
-        return buildToolValidationFailure({
-          reason: 'missing_patch',
-          message: 'apply_patch requires patch as a string.',
-          missingFields: ['patch']
-        });
-      }
-      const normalized = { ...parsed, patch } as Record<string, unknown>;
-      delete normalized.input;
-      return { ok: true, normalizedArgs: JSON.stringify(normalized) };
-    }
-    case 'update_plan': {
-      if (!Array.isArray(parsed?.plan)) {
-        return buildToolValidationFailure({
-          reason: 'missing_plan',
-          message: 'update_plan requires input.plan as an array.',
-          missingFields: ['plan']
-        });
-      }
-      return { ok: true, normalizedArgs: JSON.stringify({ explanation: parsed?.explanation, plan: parsed.plan }) };
-    }
-    case 'shell_command':
-    case 'bash': {
-      if (!parsed || typeof parsed.command !== 'string') {
-        return buildToolValidationFailure({
-          reason: 'missing_command',
-          message: `${normalizedName} requires input.command as a string.`,
-          missingFields: ['command']
-        });
-      }
-      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
-    }
-    case 'shell': {
-      const command = parsed?.command;
-      if (!(Array.isArray(command) && command.every((entry) => typeof entry === 'string'))) {
-        return buildToolValidationFailure({
-          reason: 'invalid_command',
-          message: 'shell requires input.command as a string array.'
-        });
-      }
-      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
-    }
-    case 'read_mcp_resource': {
-      if (!parsed || typeof parsed.server !== 'string' || typeof parsed.uri !== 'string') {
-        return buildToolValidationFailure({
-          reason: 'missing_server_or_uri',
-          message: 'read_mcp_resource requires input.server and input.uri as strings.',
-          missingFields: buildMissingFields([
-            !parsed || typeof parsed.server !== 'string' ? 'server' : undefined,
-            !parsed || typeof parsed.uri !== 'string' ? 'uri' : undefined
-          ])
-        });
-      }
-      return { ok: true, normalizedArgs: JSON.stringify({ server: parsed.server, uri: parsed.uri }) };
-    }
-    default:
-      if (!parsed) {
-        return buildToolValidationFailure({
-          reason: 'invalid_tool_arguments',
-          message: `Tool "${name.trim()}" requires JSON object arguments.`
-        });
-      }
-      return { ok: true, normalizedArgs: JSON.stringify(parsed) };
   }
+  return validateCanonicalClientToolCallFallback(name, argsString);
 }

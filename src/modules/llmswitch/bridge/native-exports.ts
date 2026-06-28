@@ -149,6 +149,36 @@ type NativeRouterHotpathJsonBinding = {
   normalizeExplicitRoutePoolJson?: (inputJson: string) => string;
   mergeObservedRoutePoolChainJson?: (existingJson: string | null, observedJson: string) => string | null;
 
+  // -- hub_pipeline batch #6 --
+  resolveEntryProtocolFromEndpointJson?: (entryEndpoint: string) => string;
+
+  // -- failure_policy batch #2 (error classification) --
+  isContextLengthExceededErrorJson?: (inputJson: string) => string;
+  isRateLimitLikeErrorJson?: (inputJson: string) => string;
+  isRetryableNetworkSseWrapperErrorJson?: (inputJson: string) => string;
+  isClientDisconnectLikeErrorJson?: (inputJson: string) => string;
+  isGenericBridgeResponseContractErrorJson?: (inputJson: string) => string;
+
+  // -- provider_response_tool_validation_blocks batch #5 --
+  validateCanonicalClientToolCallJson?: (inputJson: string) => string;
+  containsBroadKillCommandJson?: (inputJson: string) => string;
+  hasInvalidShellWrapperShapeJson?: (inputJson: string) => string;
+
+  // -- provider_response_shared_pure_blocks batch #3 --
+  asFlatRecordJson?: (inputJson: string) => string | null;
+  extractFirstBalancedJsonObjectJson?: (rawString: string) => string | null;
+  tryParseJsonLikeStringJson?: (rawString: string) => string | null;
+  extractContentTextForStoplessScanJson?: (inputJson: string) => string;
+  extractLatestUserTextForStoplessScanJson?: (inputJson: string) => string;
+  hasStoplessDirectiveInRequestPayloadJson?: (inputJson: string) => boolean;
+  findNestedRawStringJson?: (inputJson: string) => string;
+  findNestedErrorMarkerJson?: (inputJson: string) => string;
+  extractBridgeProviderResponsePayloadJson?: (inputJson: string) => string | null;
+
+  // -- direct_decision batch #4 --
+  decideDirectRouterRetryJson?: (inputJson: string) => string;
+  decideDirectProviderRetryJson?: (inputJson: string) => string;
+
   classifyProviderFailureJson?: (
     statusCode: number | undefined,
     errorCode: string | undefined,
@@ -193,9 +223,6 @@ type NativeRouterHotpathJsonBinding = {
     payloadJson: string,
     optionsJson?: string
   ) => string;
-  validateCanonicalClientToolCallJson?: (inputJson: string) => string;
-  containsBroadKillCommandJson?: (inputJson: string) => string;
-  hasInvalidShellWrapperShapeJson?: (inputJson: string) => string;
 };
 
 type NativeHubVrNodeContracts = {
@@ -1113,4 +1140,17 @@ export function mergeObservedRoutePoolChainNative(
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// batch #6: resolveEntryProtocolFromEndpoint
+// ---------------------------------------------------------------------------
+
+export function resolveEntryProtocolFromEndpointNative(entryEndpoint: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.resolveEntryProtocolFromEndpointJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveEntryProtocolFromEndpointJson not available');
+  }
+  return fn(entryEndpoint);
 }

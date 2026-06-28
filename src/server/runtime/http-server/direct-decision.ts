@@ -27,7 +27,11 @@
  *       reach client projection.
  */
 
-import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
+import { isClientDisconnectLikeError as isClientDisconnectLikeErrorTs } from './direct-client-disconnect.js';
+
+function isClientDisconnectLikeError(error: unknown): boolean {
+  return isClientDisconnectLikeErrorTs(error);
+}
 
 export type DirectRetryAction = 'request_reroute' | 'rethrow';
 
@@ -43,7 +47,6 @@ export interface DirectRetryPlanLike {
   shouldRetry?: boolean;
   retrySwitchPlan?: { switchAction?: string } | null | undefined;
   excludedCurrentProvider?: boolean;
-  blockingRecoverable?: boolean;
   defaultPoolAvailable?: boolean;
   mayProject?: boolean;
 }
