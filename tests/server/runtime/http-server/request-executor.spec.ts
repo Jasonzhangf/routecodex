@@ -1,6 +1,6 @@
 import { jest } from '@jest/globals';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
-import type { ProviderTrafficGovernorLike } from '../../../../src/server/runtime/http-server/provider-traffic-governor.js';
+// ProviderTrafficGovernorLike: 已迁移到独立 Rust crate (traffic-governor-core)
 
 const { __requestExecutorTestables, createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
 const { resolveProviderFailureActionPlan } = await import('../../../../src/providers/core/runtime/provider-failure-policy.js');
@@ -735,7 +735,7 @@ describe('HubRequestExecutor failover', () => {
 
   test('propagates concurrency busy state by runtime/alias scope instead of provider target key', async () => {
     let busyCallback: ((scopeKey: string, busy: boolean) => void) | null = null;
-    const fakeTrafficGovernor: ProviderTrafficGovernorLike = {
+    const fakeTrafficGovernor: any = {
       setConcurrencyBusyCallback(cb) {
         busyCallback = cb;
       },
@@ -833,7 +833,7 @@ describe('HubRequestExecutor failover', () => {
         rpmInWindow: 1
       };
     });
-    const fakeTrafficGovernor: ProviderTrafficGovernorLike = {
+    const fakeTrafficGovernor: any = {
       setConcurrencyBusyCallback() {},
       acquire,
       async release() {
