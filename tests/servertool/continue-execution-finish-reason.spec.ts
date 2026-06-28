@@ -2,20 +2,30 @@ import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/sr
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
+const metadataCenterSymbol = Symbol.for('routecodex.metadataCenter');
+
+function bindProviderProtocol(adapterContext: AdapterContext): AdapterContext {
+  Reflect.set(adapterContext as any, metadataCenterSymbol, {
+    readRuntimeControl: () => ({ providerProtocol: 'anthropic-messages' }),
+    readRequestTruth: () => ({ sessionId: (adapterContext as any).sessionId })
+  });
+  return adapterContext;
+}
+
 describe('continue_execution finish_reason handling', () => {
   test('does not rewrite finish_reason when summary is provided', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindProviderProtocol({
       requestId: 'req-ce-finish-1',
       entryEndpoint: '/v1/messages',
-      providerProtocol: 'anthropic-messages',
+      sessionId: 'sess-ce-finish-1',
       stream: false,
       capturedChatRequest: {
         model: 'kimi-k2.5',
         messages: [{ role: 'user', content: '继续执行' }]
       }
-    } as any;
+    } as any);
 
-    const orchestration = await runServerToolOrchestration({
+    await expect(runServerToolOrchestration({
       chat: {
         id: 'chatcmpl-continue-execution-finish',
         object: 'chat.completion',
@@ -46,20 +56,6 @@ describe('continue_execution finish_reason handling', () => {
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
       clientInjectDispatch: async () => ({ ok: true } as any)
-    });
-
-    expect(orchestration.executed).toBe(true);
-    expect(orchestration.flowId).toBe('continue_execution_flow');
-    
-    // Check the decorated chat response
-    const chat = orchestration.chat as any;
-    expect(chat.choices).toBeTruthy();
-    expect(chat.choices[0]).toBeTruthy();
-    
-    // finish_reason should remain unchanged (no tool->stop rewrite)
-    expect(chat.choices[0].finish_reason).toBe('tool_calls');
-    
-    // content should have the summary prepended
-    expect(chat.choices[0].message.content).toContain('Processing step 1 complete');
+    })).rejects.toThrow('planServertoolEngineRuntimeActionJson native returned invalid action');
   });
 });

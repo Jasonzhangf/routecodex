@@ -345,7 +345,6 @@ export interface ServertoolExecutionLoopEffectPlan {
   execution: {
     flowId: string;
     followup?: unknown;
-    context?: unknown;
   };
 }
 
@@ -2626,7 +2625,6 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
   };
   noopFlowId?: string;
   noopFollowup?: unknown;
-  noopExecutionContext?: unknown;
 }): ServertoolExecutionLoopEffectPlan {
   const capability = 'planServertoolExecutionLoopEffectJson';
   const fn = readNativeFunction(capability);
@@ -2666,8 +2664,7 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     },
     execution: {
       flowId: execution.flowId,
-      ...(execution.followup !== undefined ? { followup: execution.followup } : {}),
-      ...(execution.context !== undefined ? { context: execution.context } : {})
+      ...(execution.followup !== undefined ? { followup: execution.followup } : {})
     }
   };
 }

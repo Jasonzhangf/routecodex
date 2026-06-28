@@ -63,7 +63,7 @@ const TARGETS = [
       'stripAfterExecute: true',
       'noopResult.flowId',
       'noopResult.followup',
-      'noopResult.executionContext',
+      'noopExecutionContext',
       'executedToolCalls: [],',
       'executedIds: new Set<string>()',
       'executedFlowIds: []',

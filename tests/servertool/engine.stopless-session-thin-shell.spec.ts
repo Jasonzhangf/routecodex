@@ -43,12 +43,12 @@ describe('engine stopless session thin-shell guard', () => {
       'utf8'
     );
 
-    expect(source).toContain('planServertoolEngineRuntimeActionWithNativeLocal');
+    expect(source).toContain('planServertoolEngineRuntimeActionWithNative');
     expect(source).not.toContain('if (engineResult.pendingInjection)');
     expect(source).not.toContain("if (stoplessPlan.action === 'terminal_final')");
     expect(source).not.toContain("if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow)");
     expect(source).not.toContain('!stoplessPlan.isStopMessageFlow &&');
-    expect(source).toContain('stopless: {');
+    expect(source).toContain('planStoplessExecutionWithNativeLocal');
   });
 
   test('runServerToolOrchestration routes synthetic/direct preflight through native planning', () => {
@@ -95,7 +95,17 @@ describe('engine stopless session thin-shell guard', () => {
         }
       }
     } as any;
-    MetadataCenter.attach(adapterContext);
+    const metadataCenter = MetadataCenter.attach(adapterContext);
+    metadataCenter.writeRuntimeControl(
+      'providerProtocol',
+      'openai-responses',
+      {
+        module: 'tests.servertool.engine.stopless-session-thin-shell',
+        symbol: 'stopless cli projection sample',
+        stage: 'test'
+      },
+      'test control provider protocol'
+    );
 
     const result = await runServerToolOrchestration({
       chat: {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const getServerToolHandler = jest.fn();
 const runServertoolHandler = jest.fn();
+const executeBuiltinServerToolHandler = jest.fn();
 const materializeServertoolPlannedResult = jest.fn();
 const createServertoolExecutionLoopStateFromNative = jest.fn();
 const appendExecutedToolRecordFromNative = jest.fn();
@@ -61,6 +62,7 @@ jest.unstable_mockModule(
     createServertoolExecutionLoopStateFromNative,
     appendExecutedToolRecordFromNative,
     buildServertoolOutcomePlanInput: jest.fn((input: any) => input),
+    executeBuiltinServerToolHandler,
     materializeNativeToolCallExecutionOutcome: materializeNativeToolCallExecutionOutcomeNative
   })
 );
@@ -219,8 +221,7 @@ describe('execution-dispatch-outcome-shell', () => {
         },
         execution: {
           flowId: String(input?.noopFlowId ?? 'continue_execution_flow'),
-          ...(input?.noopFollowup !== undefined ? { followup: input.noopFollowup } : {}),
-          ...(input?.noopExecutionContext !== undefined ? { context: input.noopExecutionContext } : {})
+          ...(input?.noopFollowup !== undefined ? { followup: input.noopFollowup } : {})
         }
       };
     });
@@ -301,6 +302,7 @@ describe('execution-dispatch-outcome-shell', () => {
     getServerToolHandler.mockReturnValue({
       trigger: 'tool_call',
       registration: { executionMode: 'guarded' },
+      execution: { kind: 'handler', handler: jest.fn() },
       handler: jest.fn()
     });
     runServertoolHandler.mockRejectedValue(new Error('boom-from-execution-shell'));
@@ -402,6 +404,7 @@ describe('execution-dispatch-outcome-shell', () => {
     getServerToolHandler.mockReturnValue({
       trigger: 'tool_call',
       registration: { executionMode: 'legacy' },
+      execution: { kind: 'handler', handler: jest.fn() },
       handler: jest.fn()
     });
 
@@ -456,6 +459,7 @@ describe('execution-dispatch-outcome-shell', () => {
     getServerToolHandler.mockReturnValue({
       trigger: 'auto',
       registration: { executionMode: 'guarded' },
+      execution: { kind: 'handler', handler: jest.fn() },
       handler: jest.fn()
     });
 
@@ -507,8 +511,7 @@ describe('execution-dispatch-outcome-shell', () => {
         tool_outputs: [{ tool_call_id: 'call_continue_1', name: 'continue_execution', content: '{"ok":true}' }]
       },
       flowId: 'continue_execution_flow',
-      followup: { requestIdSuffix: ':continue_execution_followup' },
-      executionContext: { continue_execution: { visibleSummary: '继续执行' } }
+      followup: { requestIdSuffix: ':continue_execution_followup' }
     });
 
     const result = await runServertoolIoExecutionQueue({
@@ -547,8 +550,7 @@ describe('execution-dispatch-outcome-shell', () => {
         stripAfterExecute: false
       },
       noopFlowId: 'continue_execution_flow',
-      noopFollowup: { requestIdSuffix: ':continue_execution_followup' },
-      noopExecutionContext: { continue_execution: { visibleSummary: '继续执行' } }
+      noopFollowup: { requestIdSuffix: ':continue_execution_followup' }
     });
     expect(result.executedToolCalls[0]).toMatchObject({
       toolCall: {
@@ -560,8 +562,7 @@ describe('execution-dispatch-outcome-shell', () => {
       },
       execution: {
         flowId: 'continue_execution_flow',
-        followup: { requestIdSuffix: ':continue_execution_followup' },
-        context: { continue_execution: { visibleSummary: '继续执行' } }
+        followup: { requestIdSuffix: ':continue_execution_followup' }
       }
     });
   });

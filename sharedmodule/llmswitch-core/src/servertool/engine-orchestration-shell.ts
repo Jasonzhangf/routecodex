@@ -28,56 +28,10 @@ import {
   readRequestTruthSessionIdFromAnyBoundMetadataCenter,
   readRuntimeControlFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
-
-function planServertoolEngineRuntimeActionWithNativeLocal(input: {
-  hasPendingInjection: boolean;
-  isStopMessageFlow: boolean;
-  hasServertoolCliProjectionContext: boolean;
-  stoplessAction: string;
-}): { action: string } {
-  const fn = readNativeFunction('planServertoolEngineRuntimeActionJson');
-  if (!fn) {
-    throw new Error('planServertoolEngineRuntimeActionJson native unavailable');
-  }
-  const raw = fn(JSON.stringify({
-    hasPendingInjection: input.hasPendingInjection,
-    isStopMessageFlow: input.isStopMessageFlow,
-    hasServertoolCliProjectionContext: input.hasServertoolCliProjectionContext,
-    stoplessAction: input.stoplessAction
-  }));
-  if (typeof raw !== 'string') {
-    throw new Error(`planServertoolEngineRuntimeActionJson native returned non-string: ${typeof raw}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`planServertoolEngineRuntimeActionJson native parse failed: ${message}`);
-  }
-}
-
-function planServertoolEngineSkipWithNative(input: {
-  engineMode: string;
-  hasExecution: boolean;
-}): { action: string; skipReason?: string } {
-  const fn = readNativeFunction('planServertoolEngineSkipJson');
-  if (!fn) {
-    throw new Error('planServertoolEngineSkipJson native unavailable');
-  }
-  const raw = fn(JSON.stringify({
-    engineMode: input.engineMode,
-    hasExecution: input.hasExecution
-  }));
-  if (typeof raw !== 'string') {
-    throw new Error(`planServertoolEngineSkipJson native returned non-string: ${typeof raw}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`planServertoolEngineSkipJson native parse failed: ${message}`);
-  }
-}
+import {
+  planServertoolEngineRuntimeActionWithNative,
+  planServertoolEngineSkipWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 function planStoplessExecutionWithNativeLocal(input: {
   flowId?: string;
@@ -300,7 +254,7 @@ export async function runServerToolOrchestrationShell(
   const stoplessExecution = stoplessExecutionPlan.execution;
   const stoplessPlan = stoplessExecutionPlan.orchestrationPlan;
   const hasServertoolCliProjectionContext = stoplessExecution.flowId === 'servertool_cli_projection';
-  const runtimeAction = planServertoolEngineRuntimeActionWithNativeLocal({
+  const runtimeAction = planServertoolEngineRuntimeActionWithNative({
     hasPendingInjection: Boolean(engineResult.pendingInjection),
     isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
     hasServertoolCliProjectionContext,

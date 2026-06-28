@@ -476,11 +476,6 @@ describe('servertool CLI native bridge', () => {
         noopFlowId: 'continue_execution_flow',
         noopFollowup: {
           requestIdSuffix: ':continue_execution_followup'
-        },
-        noopExecutionContext: {
-          continue_execution: {
-            visibleSummary: '继续执行'
-          }
         }
       })
     ).toEqual({
@@ -495,11 +490,6 @@ describe('servertool CLI native bridge', () => {
         flowId: 'continue_execution_flow',
         followup: {
           requestIdSuffix: ':continue_execution_followup'
-        },
-        context: {
-          continue_execution: {
-            visibleSummary: '继续执行'
-          }
         }
       }
     });

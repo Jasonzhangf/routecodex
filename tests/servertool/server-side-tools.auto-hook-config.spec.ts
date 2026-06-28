@@ -113,7 +113,6 @@ jest.unstable_mockModule(
           ]
         }
       },
-      executionContext: {},
       chatResponse: input.base ?? {}
     })),
     planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({

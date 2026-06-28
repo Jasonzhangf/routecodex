@@ -70,6 +70,7 @@ const RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT = `${ROOT}/sharedmodule/llmswitc
 const RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs`;
 const RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs`;
 const RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs`;
+const RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs`;
 const RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs`;
 const RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs`;
 const RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`;
@@ -2600,6 +2601,7 @@ function checkServertoolExecutionDispatchRustOwner() {
   const executionQueueShell = readRequired(TS_EXECUTION_QUEUE_SHELL);
   const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
   const rustExecutionBranch = readRequired(RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT);
+  const rustExecutionLoopEffect = readRequired(RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT);
   const rustExecutionLoopRuntimeAction = readRequired(RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT);
   const rustExecutionOutcomeRuntimeAction = readRequired(RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT);
   const rustExecutionState = readRequired(RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT);
@@ -2751,6 +2753,14 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-engine-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_runtime_action_json'],
     ['servertool-engine-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEngineRuntimeActionJson'],
     ['servertool-engine-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineRuntimeActionWithNative'],
+    ['servertool-execution-loop-effect-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT, rustExecutionLoopEffect, 'feature_id: hub.servertool_execution_loop_effect_contract'],
+    ['servertool-execution-loop-effect-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT, rustExecutionLoopEffect, 'pub fn plan_servertool_execution_loop_effect'],
+    ['servertool-execution-loop-effect-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_loop_effect_contract'],
+    ['servertool-execution-loop-effect-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_execution_loop_effect_json'],
+    ['servertool-execution-loop-effect-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_loop_effect_json'],
+    ['servertool-execution-loop-effect-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionLoopEffectJson'],
+    ['servertool-execution-loop-effect-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionLoopEffectWithNative'],
+    ['servertool-execution-loop-effect-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'planServertoolExecutionLoopEffectWithNative'],
     ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'feature_id: hub.servertool_execution_loop_runtime_action_contract'],
     ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'pub fn plan_servertool_execution_loop_runtime_action'],
     ['servertool-execution-loop-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_loop_runtime_action_contract'],
@@ -2783,6 +2793,24 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'appendExecutedToolRecordFromNative'],
   ]) {
     assertContains(check, file, content, needle);
+  }
+  for (const [file, content, marker] of [
+    [TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'noopExecutionContext'],
+    [TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'noopResult.executionContext'],
+    [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'noopExecutionContext?:'],
+    [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'noopExecutionContext'],
+    [RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT, rustExecutionLoopEffect, 'noop_execution_context'],
+    [RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT, rustExecutionLoopEffect, 'context: input.noop_execution_context'],
+    [`${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, '"noopExecutionContext"'],
+    [CHAT_SERVERTOOL_ORCHESTRATION, readRequired(CHAT_SERVERTOOL_ORCHESTRATION), 'execution_context: Value'],
+    [CHAT_SERVERTOOL_ORCHESTRATION, readRequired(CHAT_SERVERTOOL_ORCHESTRATION), 'execution_context,'],
+  ]) {
+    if (content.includes(marker)) {
+      fail(
+        'servertool-noop-context-carrier-deleted',
+        `Forbidden noop execution context carrier "${marker}" found in ${file.replace(`${ROOT}/`, '')}`
+      );
+    }
   }
   assertMissing(
     'servertool-execution-state-ts-thin-shell-deleted-wrapper-guard',

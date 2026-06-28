@@ -1826,7 +1826,6 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         /// The injected tool output content.
         tool_content: Value,
         followup: Value,
-        execution_context: Value,
     }
 
     let input: NoopInput =
@@ -1872,12 +1871,6 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
     if let Some(obj) = chat_response.as_object_mut() {
         obj.insert("tool_outputs".to_string(), Value::Array(new_outputs));
     }
-    let execution_context = serde_json::json!({
-        "continue_execution": {
-            "visibleSummary": visible_summary
-        }
-    });
-
     let followup = serde_json::json!({
         "requestIdSuffix": ":continue_execution_followup",
         "injection": {
@@ -1899,7 +1892,6 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         flow_id: "continue_execution_flow".to_string(),
         tool_content,
         followup,
-        execution_context,
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -2892,10 +2884,7 @@ mod tests {
             parsed["followup"]["metadata"]["visibleSummary"],
             "Processing data..."
         );
-        assert_eq!(
-            parsed["executionContext"]["continue_execution"]["visibleSummary"],
-            "Processing data..."
-        );
+        assert!(parsed.get("executionContext").is_none());
         assert_eq!(
             parsed["chatResponse"]["tool_outputs"][0]["name"],
             "continue_execution"
@@ -2920,10 +2909,7 @@ mod tests {
             "继续执行"
         );
         assert_eq!(parsed["followup"]["metadata"]["visibleSummary"], "");
-        assert_eq!(
-            parsed["executionContext"]["continue_execution"]["visibleSummary"],
-            ""
-        );
+        assert!(parsed.get("executionContext").is_none());
     }
 
     #[test]

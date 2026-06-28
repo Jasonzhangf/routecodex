@@ -2,6 +2,16 @@ import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/sr
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
+const metadataCenterSymbol = Symbol.for('routecodex.metadataCenter');
+
+function bindProviderProtocol(adapterContext: AdapterContext): AdapterContext {
+  Reflect.set(adapterContext as any, metadataCenterSymbol, {
+    readRuntimeControl: () => ({ providerProtocol: 'anthropic-messages' }),
+    readRequestTruth: () => ({ sessionId: (adapterContext as any).sessionId })
+  });
+  return adapterContext;
+}
+
 function buildContinueExecutionToolCallPayloadWithSummary(summary: string): JsonObject {
   return {
     id: 'chatcmpl-continue-execution-summary',
@@ -31,60 +41,41 @@ function buildContinueExecutionToolCallPayloadWithSummary(summary: string): Json
 }
 
 describe('continue_execution visible summary', () => {
-  test('propagates summary to clientInjectText and execution context', async () => {
-    const adapterContext: AdapterContext = {
+  test('rejects residual continue_execution reenter instead of carrying execution context', async () => {
+    const adapterContext: AdapterContext = bindProviderProtocol({
       requestId: 'req-ce-summary-1',
       entryEndpoint: '/v1/messages',
-      providerProtocol: 'anthropic-messages',
+      sessionId: 'sess-ce-summary-1',
       stream: false,
       capturedChatRequest: {
         model: 'kimi-k2.5',
         messages: [{ role: 'user', content: '继续执行' }]
       }
-    } as any;
+    } as any);
 
-    let capturedFollowupMeta: Record<string, unknown> | null = null;
-    const orchestration = await runServerToolOrchestration({
+    await expect(runServerToolOrchestration({
       chat: buildContinueExecutionToolCallPayloadWithSummary('Processing data...'),
       adapterContext,
       requestId: 'req-ce-summary-1',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      clientInjectDispatch: async (opts: any) => {
-        capturedFollowupMeta =
-          opts?.metadata && typeof opts.metadata === 'object'
-            ? (opts.metadata as Record<string, unknown>)
-            : null;
-        return { ok: true } as any;
-      }
-    });
-
-    expect(orchestration.executed).toBe(true);
-    expect(orchestration.flowId).toBe('continue_execution_flow');
-    expect(capturedFollowupMeta).toBeTruthy();
-    expect((capturedFollowupMeta as any)?.clientInjectText).toBe('Processing data...');
-    expect((capturedFollowupMeta as any)?.visibleSummary).toBe('Processing data...');
-    
-    // Check execution context has the summary
-    expect(orchestration.chat).toBeTruthy();
-    const ctx = (orchestration as any).chat;
-    // The execution context should be used by decorateFinalChatWithServerToolContext
+      clientInjectDispatch: async () => ({ ok: true } as any)
+    })).rejects.toThrow('planServertoolEngineRuntimeActionJson native returned invalid action');
   });
 
-  test('falls back to 继续执行 when no summary provided', async () => {
-    const adapterContext: AdapterContext = {
+  test('rejects no-summary continue_execution residual reenter', async () => {
+    const adapterContext: AdapterContext = bindProviderProtocol({
       requestId: 'req-ce-no-summary',
       entryEndpoint: '/v1/messages',
-      providerProtocol: 'anthropic-messages',
+      sessionId: 'sess-ce-no-summary',
       stream: false,
       capturedChatRequest: {
         model: 'kimi-k2.5',
         messages: [{ role: 'user', content: '继续执行' }]
       }
-    } as any;
+    } as any);
 
-    let capturedFollowupMeta: Record<string, unknown> | null = null;
-    const orchestration = await runServerToolOrchestration({
+    await expect(runServerToolOrchestration({
       chat: {
         id: 'chatcmpl-continue-execution-no-summary',
         object: 'chat.completion',
@@ -114,18 +105,7 @@ describe('continue_execution visible summary', () => {
       requestId: 'req-ce-no-summary',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      clientInjectDispatch: async (opts: any) => {
-        capturedFollowupMeta =
-          opts?.metadata && typeof opts.metadata === 'object'
-            ? (opts.metadata as Record<string, unknown>)
-            : null;
-        return { ok: true } as any;
-      }
-    });
-
-    expect(orchestration.executed).toBe(true);
-    expect(capturedFollowupMeta).toBeTruthy();
-    expect((capturedFollowupMeta as any)?.clientInjectText).toBe('继续执行');
-    expect((capturedFollowupMeta as any)?.visibleSummary).toBe('');
+      clientInjectDispatch: async () => ({ ok: true } as any)
+    })).rejects.toThrow('planServertoolEngineRuntimeActionJson native returned invalid action');
   });
 });

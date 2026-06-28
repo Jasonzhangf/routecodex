@@ -20,8 +20,6 @@ pub struct ServertoolExecutionLoopEffectExecutionSummary {
     pub flow_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -33,8 +31,6 @@ pub struct ServertoolExecutionLoopEffectInput {
     pub noop_flow_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub noop_followup: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub noop_execution_context: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -63,7 +59,6 @@ pub fn plan_servertool_execution_loop_effect(
             execution: ServertoolExecutionLoopEffectExecutionSummary {
                 flow_id: format!("{tool_name}_error"),
                 followup: None,
-                context: None,
             },
         };
     }
@@ -83,7 +78,6 @@ pub fn plan_servertool_execution_loop_effect(
                 .trim()
                 .to_string(),
             followup: input.noop_followup,
-            context: input.noop_execution_context,
         },
     }
 }
@@ -106,7 +100,6 @@ mod tests {
             },
             noop_flow_id: None,
             noop_followup: None,
-            noop_execution_context: None,
         });
         assert_eq!(plan.tool_call.execution_mode.as_deref(), Some("guarded"));
         assert_eq!(plan.execution.flow_id, "web_search_error");
@@ -126,7 +119,6 @@ mod tests {
             },
             noop_flow_id: Some("continue_execution_flow".to_string()),
             noop_followup: Some(json!({"requestIdSuffix": ":continue_execution_followup"})),
-            noop_execution_context: Some(json!({"continue_execution": {"visibleSummary": "ok"}})),
         });
         assert_eq!(plan.tool_call.execution_mode.as_deref(), Some("noop"));
         assert_eq!(plan.tool_call.strip_after_execute, Some(true));

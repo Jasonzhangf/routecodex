@@ -3432,11 +3432,6 @@ fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
             "noopFlowId": "continue_execution_flow",
             "noopFollowup": {
                 "requestIdSuffix": ":continue_execution_followup"
-            },
-            "noopExecutionContext": {
-                "continue_execution": {
-                    "visibleSummary": "继续执行"
-                }
             }
         })
         .to_string(),

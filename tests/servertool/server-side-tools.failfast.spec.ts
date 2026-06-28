@@ -586,7 +586,6 @@ jest.unstable_mockModule(
         requestIdSuffix: ':servertool_followup',
         injection: { ops: [] }
       },
-      executionContext: {},
       chatResponse: input?.base ?? {}
     })),
     planServertoolHandlerContractWithNative: jest.fn((input: any) => {
