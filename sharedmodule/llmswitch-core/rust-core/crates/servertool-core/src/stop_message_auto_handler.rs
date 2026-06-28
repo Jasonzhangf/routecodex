@@ -761,7 +761,13 @@ fn normalize_trigger_hint(reason_code: Option<&str>) -> Option<String> {
     reason_code
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+        .map(|s| {
+            if s == "stop_schema_missing" {
+                "no_schema".to_string()
+            } else {
+                s.to_string()
+            }
+        })
 }
 
 fn build_schema_feedback(reason_code: &str, missing_fields: &[String]) -> SchemaFeedback {
@@ -1412,7 +1418,7 @@ mod tests {
         assert_eq!(persist_plan.next_max_repeats, 3);
         assert_eq!(
             plan.stopless_trigger_hint.as_deref(),
-            Some("stop_schema_missing")
+            Some("no_schema")
         );
         assert_eq!(plan.compare_context.reason, "stop_schema_missing");
     }
@@ -1477,7 +1483,7 @@ mod tests {
         assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
         assert_eq!(
             plan.stopless_trigger_hint.as_deref(),
-            Some("stop_schema_missing")
+            Some("no_schema")
         );
         assert_eq!(plan.compare_context.reason, "stop_schema_missing");
         let persist_plan = plan.persist_plan.as_ref().expect("persist plan");

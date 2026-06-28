@@ -62,18 +62,56 @@ const STOPLESS_SYSTEM_INSTRUCTION: &str = concat!(
     "无 arguments 且无 <rcc_stop_schema> 时，不允许停止。"
 );
 
-fn request_already_has_stopless_system_instruction(request: &Map<String, Value>) -> bool {
-    request
-        .get("instructions")
-        .and_then(Value::as_str)
-        .map(|content| content.contains("<rcc_stop_schema>"))
-        .unwrap_or(false)
+fn text_has_current_stopless_system_instruction(content: &str) -> bool {
+    content.contains("<rcc_stop_schema>") && content.contains("字段不是全局必填，而是关系必填")
+}
+
+fn text_has_any_stopless_system_instruction(content: &str) -> bool {
+    content.contains("<rcc_stop_schema>")
+        && (content.contains("reasoningStop") || content.contains("stopreason"))
+}
+
+fn value_has_current_stopless_system_instruction(value: &Value) -> bool {
+    match value {
+        Value::String(content) => text_has_current_stopless_system_instruction(content),
+        Value::Array(items) => items
+            .iter()
+            .any(value_has_current_stopless_system_instruction),
+        Value::Object(row) => row
+            .values()
+            .any(value_has_current_stopless_system_instruction),
+        _ => false,
+    }
+}
+
+fn value_has_any_stopless_system_instruction(value: &Value) -> bool {
+    match value {
+        Value::String(content) => text_has_any_stopless_system_instruction(content),
+        Value::Array(items) => items.iter().any(value_has_any_stopless_system_instruction),
+        Value::Object(row) => row.values().any(value_has_any_stopless_system_instruction),
+        _ => false,
+    }
+}
+
+fn build_stopless_responses_system_input_item() -> Value {
+    serde_json::json!({
+        "type": "message",
+        "role": "system",
+        "content": [{
+            "type": "input_text",
+            "text": STOPLESS_SYSTEM_INSTRUCTION
+        }]
+    })
+}
+
+fn build_stopless_chat_system_message() -> Value {
+    serde_json::json!({
+        "role": "system",
+        "content": STOPLESS_SYSTEM_INSTRUCTION
+    })
 }
 
 fn inject_stopless_system_instruction(request: &mut Map<String, Value>) {
-    if request_already_has_stopless_system_instruction(request) {
-        return;
-    }
     let has_supported_turns = request
         .get("input")
         .map(|value| matches!(value, Value::Array(_)))
@@ -85,10 +123,29 @@ fn inject_stopless_system_instruction(request: &mut Map<String, Value>) {
     if !has_supported_turns {
         return;
     }
-    request.insert(
-        "instructions".to_string(),
-        Value::String(STOPLESS_SYSTEM_INSTRUCTION.to_string()),
-    );
+    if request
+        .get("instructions")
+        .map(value_has_any_stopless_system_instruction)
+        .unwrap_or(false)
+    {
+        request.remove("instructions");
+    }
+    if let Some(input) = request.get_mut("input").and_then(Value::as_array_mut) {
+        if !input
+            .iter()
+            .any(value_has_current_stopless_system_instruction)
+        {
+            input.insert(0, build_stopless_responses_system_input_item());
+        }
+    }
+    if let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) {
+        if !messages
+            .iter()
+            .any(value_has_current_stopless_system_instruction)
+        {
+            messages.insert(0, build_stopless_chat_system_message());
+        }
+    }
 }
 
 fn should_inject_stopless_system_instruction(
@@ -259,8 +316,18 @@ fn strip_tool_choice_for_terminal_stopless_turn(request: &mut Map<String, Value>
 }
 
 fn strip_stopless_terminal_controls(request: &mut Map<String, Value>) {
-    if request_already_has_stopless_system_instruction(request) {
+    if request
+        .get("instructions")
+        .map(value_has_any_stopless_system_instruction)
+        .unwrap_or(false)
+    {
         request.remove("instructions");
+    }
+    if let Some(input) = request.get_mut("input").and_then(Value::as_array_mut) {
+        input.retain(|item| !value_has_any_stopless_system_instruction(item));
+    }
+    if let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) {
+        messages.retain(|item| !value_has_any_stopless_system_instruction(item));
     }
     if let Some(tools) = request.get_mut("tools").and_then(Value::as_array_mut) {
         tools.retain(|tool| {
@@ -377,6 +444,28 @@ fn read_nested_string_field<'a>(
         })
 }
 
+fn normalize_stopless_runtime_trigger_hint(token: &str) -> &'static str {
+    match token.trim() {
+        "stop_schema_missing" | "no_schema" => "no_schema",
+        "stop_schema_reason_missing"
+        | "stop_schema_terminal_missing_fields"
+        | "stop_schema_stopreason_missing_or_non_numeric"
+        | "stop_schema_needs_user_input_missing_next_step"
+        | "stop_schema_next_step_missing"
+        | "stop_schema_forcestop_reason_missing"
+        | "stop_schema_continue_without_next_step"
+        | "invalid_schema" => "invalid_schema",
+        "stop_schema_continue_next_step" | "non_terminal_schema" => "non_terminal_schema",
+        "stop_schema_budget_exhausted" | "budget_exhausted" => "budget_exhausted",
+        "stop_schema_finished"
+        | "stop_schema_blocked"
+        | "stop_schema_needs_user_input"
+        | "stop_schema_forcestop"
+        | "schema_pass" => "schema_pass",
+        _ => "no_schema",
+    }
+}
+
 fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<Value> {
     let repeat_count = read_u64_field(row, "repeatCount", "repeat_count").or_else(|| {
         row.get("input")
@@ -394,26 +483,27 @@ fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<V
         .or_else(|| read_trimmed_string(row.get("flow_id")))
         .or_else(|| read_nested_string_field(row, "input", "flowId", "flow_id"))
         .unwrap_or_else(|| "stop_message_flow".to_string());
-    let trigger_hint = row
+    let reason_code = row
         .get("schemaFeedback")
         .or_else(|| row.get("schema_feedback"))
         .and_then(Value::as_object)
         .and_then(|feedback| {
             read_trimmed_string(feedback.get("reasonCode"))
                 .or_else(|| read_trimmed_string(feedback.get("reason_code")))
-        })
-        .or_else(|| {
-            row.get("schemaGuidance")
-                .or_else(|| row.get("schema_guidance"))
-                .and_then(Value::as_object)
-                .and_then(|guidance| {
-                    read_trimmed_string(guidance.get("triggerHint"))
-                        .or_else(|| read_trimmed_string(guidance.get("trigger_hint")))
-                })
+        });
+    let trigger_hint = row
+        .get("schemaGuidance")
+        .or_else(|| row.get("schema_guidance"))
+        .and_then(Value::as_object)
+        .and_then(|guidance| {
+            read_trimmed_string(guidance.get("triggerHint"))
+                .or_else(|| read_trimmed_string(guidance.get("trigger_hint")))
         })
         .or_else(|| read_nested_string_field(row, "input", "triggerHint", "trigger_hint"))
         .or_else(|| read_trimmed_string(row.get("triggerHint")))
-        .or_else(|| read_trimmed_string(row.get("trigger_hint")));
+        .or_else(|| read_trimmed_string(row.get("trigger_hint")))
+        .or(reason_code)
+        .map(|token| normalize_stopless_runtime_trigger_hint(&token).to_string());
     let continuation_prompt = read_trimmed_string(row.get("continuationPrompt"))
         .or_else(|| read_trimmed_string(row.get("continuation_prompt")));
     let schema_feedback = row

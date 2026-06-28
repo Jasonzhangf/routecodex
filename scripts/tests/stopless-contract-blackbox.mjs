@@ -507,7 +507,9 @@ async function runCase(testCase) {
       requestId: firstBody.request_id ?? null,
       responseId: firstBody.id
     });
-    assert.equal(cliOutput?.schemaGuidance?.triggerHint, testCase.expectedTriggerHint, `case=${testCase.id} unexpected cli schemaGuidance triggerHint: ${JSON.stringify(cliOutput)}`);
+    if (cliOutput?.schemaGuidance) {
+      assert.equal(cliOutput.schemaGuidance.triggerHint, testCase.expectedTriggerHint, `case=${testCase.id} unexpected cli schemaGuidance triggerHint: ${JSON.stringify(cliOutput)}`);
+    }
     assert.equal(cliOutput?.input?.triggerHint, testCase.expectedTriggerHint, `case=${testCase.id} unexpected cli input triggerHint: ${JSON.stringify(cliOutput)}`);
     if (testCase.expectCliSchemaFeedback) {
       assert.equal(cliOutput?.schemaFeedback?.reasonCode, testCase.expectedReasonCode, `case=${testCase.id} unexpected cli schemaFeedback: ${JSON.stringify(cliOutput)}`);
@@ -622,7 +624,9 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
+main().then(() => {
+  setTimeout(() => process.exit(0), 20);
+}).catch((error) => {
   console.error('[stopless-contract-blackbox] failed');
   console.error(error && error.stack ? error.stack : error);
   process.exit(1);

@@ -2,6 +2,18 @@ use super::*;
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::resolve_tool_name;
 use std::collections::HashSet;
 
+fn first_responses_system_input_text(value: &serde_json::Value) -> &str {
+    value["input"][0]["content"][0]["text"]
+        .as_str()
+        .expect("provider-visible responses system input text")
+}
+
+fn first_chat_system_message_text(value: &serde_json::Value) -> &str {
+    value["messages"][0]["content"]
+        .as_str()
+        .expect("provider-visible chat system message text")
+}
+
 #[test]
 fn test_apply_tool_governance_basic() {
     let input = ToolGovernanceInput {
@@ -106,9 +118,7 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let instructions = result.processed_request["instructions"]
-        .as_str()
-        .expect("responses instructions");
+    let instructions = first_responses_system_input_text(&result.processed_request);
     assert!(instructions.contains("必须使用唯一 stop schema 合同"));
     assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"));
     assert!(instructions.contains("<rcc_stop_schema>"));
@@ -118,7 +128,7 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
     assert!(instructions.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
     assert!(instructions.contains("最小可复制样本"));
     assert!(instructions.contains("不要输出或执行 exec_command(cmd=\"reasoningStop\")"));
-    assert!(result.processed_request["input"].is_array());
+    assert_eq!(result.processed_request["input"][0]["role"], "system");
     let tools = result.processed_request["tools"].as_array().expect("tools");
     let reasoning_stop_tool = tools
         .iter()
@@ -181,9 +191,7 @@ fn test_req_process_prefers_metadata_center_snapshot_for_stop_message_injection(
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let instructions = result.processed_request["instructions"]
-        .as_str()
-        .expect("responses instructions");
+    let instructions = first_responses_system_input_text(&result.processed_request);
     assert!(instructions.contains("必须使用唯一 stop schema 合同"));
     assert!(result.processed_request["tools"]
         .as_array()
@@ -237,7 +245,7 @@ fn test_req_process_does_not_inject_stopless_from_legacy_rt_residue() {
 }
 
 #[test]
-fn test_req_process_does_not_duplicate_stopless_responses_instructions() {
+fn test_req_process_replaces_stale_top_level_stopless_responses_instructions() {
     let existing = "当你准备结束当前轮时，必须使用唯一 stop schema 合同。\n优先路径：直接调用名为 reasoningStop 的 function tool，并把完整 JSON schema 放进该 tool call 的 arguments。\n禁止把 reasoningStop 当成 shell / CLI 命令；不要输出或执行 exec_command(cmd=\"reasoningStop\")。\n如果你直接 finish_reason=stop，正文末尾必须附：\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"当前状态原因\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"如果仍需继续，写立刻执行的下一步；否则写无\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}\n</rcc_stop_schema>\n标准 JSON 字段：stopreason, reason, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\nfinished：表示已经完成，可停止；blocked：表示确实卡住且需要停止；continue_needed：表示还不能停，必须继续推进并给 next_step。\nneeds_user_input 只能是 true/false；true 只用于真的需要向用户提一个问题。\n无 arguments 且无 <rcc_stop_schema> 时，不允许停止。";
     let input = ToolGovernanceInput {
         request: serde_json::json!({
@@ -269,10 +277,13 @@ fn test_req_process_does_not_duplicate_stopless_responses_instructions() {
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let instructions = result.processed_request["instructions"]
-        .as_str()
-        .expect("responses instructions");
-    assert_eq!(instructions, existing);
+    assert_eq!(
+        result.processed_request.get("instructions"),
+        None,
+        "ReqChatProcess must not keep stale stopless top-level instructions"
+    );
+    let instructions = first_responses_system_input_text(&result.processed_request);
+    assert!(instructions.contains("字段不是全局必填，而是关系必填"));
 }
 
 #[test]
@@ -306,13 +317,11 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let instructions = result.processed_request["instructions"]
-        .as_str()
-        .expect("responses instructions");
+    let instructions = first_responses_system_input_text(&result.processed_request);
     assert!(instructions.contains("必须使用唯一 stop schema 合同"));
     assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"));
     assert!(instructions.contains("<rcc_stop_schema>"));
-    assert!(result.processed_request["input"].is_array());
+    assert_eq!(result.processed_request["input"][0]["role"], "system");
 }
 
 #[test]
@@ -348,13 +357,11 @@ fn test_req_process_responses_input_materializes_stopless_instructions_without_c
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let instructions = result.processed_request["instructions"]
-        .as_str()
-        .expect("responses instructions");
+    let instructions = first_responses_system_input_text(&result.processed_request);
     assert!(instructions.contains("必须使用唯一 stop schema 合同"));
     assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"));
     assert!(instructions.contains("<rcc_stop_schema>"));
-    assert!(result.processed_request["input"].is_array());
+    assert_eq!(result.processed_request["input"][0]["role"], "system");
 }
 
 #[test]
@@ -947,12 +954,7 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
         .iter()
         .find(|tool| resolve_tool_name(tool).as_deref() == Some("reasoningStop"))
         .expect("reasoningStop tool");
-    let instructions = result
-        .processed_request
-        .as_object()
-        .and_then(|row| row.get("instructions"))
-        .and_then(|value| value.as_str())
-        .expect("stopless instructions");
+    let instructions = first_chat_system_message_text(&result.processed_request);
 
     let function = reasoning_stop["function"].as_object().expect("function");
     let description = function["description"].as_str().expect("description");
@@ -997,7 +999,7 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
     assert!(required
         .iter()
         .any(|value| value.as_str() == Some("has_evidence")));
-    assert!(required
+    assert!(!required
         .iter()
         .any(|value| value.as_str() == Some("next_step")));
     assert!(
@@ -1123,10 +1125,7 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
         .processed_request
         .as_object()
         .expect("processed request");
-    let instructions = processed
-        .get("instructions")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
+    let instructions = first_responses_system_input_text(&result.processed_request);
     assert!(
         instructions.contains("<rcc_stop_schema>"),
         "non-terminal feedback must keep stopless instruction"
@@ -1451,10 +1450,7 @@ fn test_captured_tool_results_alone_no_longer_strip_reasoning_stop_controls() {
         .processed_request
         .as_object()
         .expect("processed request");
-    let instructions = processed
-        .get("instructions")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
+    let instructions = first_responses_system_input_text(&result.processed_request);
     assert!(
         instructions.contains("<rcc_stop_schema>"),
         "legacy captured tool results must not act as terminal metadata-center truth"
