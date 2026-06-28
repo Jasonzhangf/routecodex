@@ -7,7 +7,6 @@ import type {
 } from './skeleton-config.js';
 import {
   planServertoolRegistryAutoHookDescriptorsWithNative,
-  planServertoolRegistryProjectionWithNative,
   planServertoolRegistrySourceProjectionWithNative,
   type ServertoolRegistrySourceKind
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -33,35 +32,6 @@ function selectSourceArray<T>(args: {
   adhoc: T[];
 }): T[] {
   return args.source === 'builtin' ? args.builtin : args.adhoc;
-}
-
-export function projectRegistryHandlerNames(args: {
-  names: string[];
-}): string[] {
-  return planServertoolRegistryProjectionWithNative({
-    registeredNames: args.names,
-    registeredRecords: [],
-    autoHandlerNames: []
-  }).registeredNames;
-}
-
-export function projectAutoServerToolHandlers(args: {
-  entries: ServerToolHandlerEntry[];
-}): ServerToolHandlerEntry[] {
-  const entryByName = new Map(
-    args.entries.map((entry) => [entry.name.trim().toLowerCase(), entry] as const)
-  );
-  return planServertoolRegistryProjectionWithNative({
-    registeredNames: [],
-    registeredRecords: [],
-    autoHandlerNames: args.entries.map((entry) => entry.name)
-  }).autoHandlerNames.map((name) => {
-    const entry = entryByName.get(name.trim().toLowerCase());
-    if (!entry) {
-      throw new Error(`[servertool] native registry auto handler order missing entry for name: ${name}`);
-    }
-    return entry;
-  });
 }
 
 export function projectAutoServerToolHookDescriptors(args: {
@@ -91,41 +61,6 @@ export function projectAutoServerToolHookDescriptors(args: {
       order: descriptor.order,
       registration: entry.registration,
       execution: entry.execution
-    };
-  });
-}
-
-export function projectRegisteredServerToolHandlerRecords(args: {
-  rawRecords: Array<{
-    name: string;
-    trigger: string;
-    registration: ServerToolRegisteredHandlerRecord['registration'];
-    handler?: ServerToolRegisteredHandlerRecord['handler'];
-  }>;
-}): ServerToolRegisteredHandlerRecord[] {
-  const projection = planServertoolRegistryProjectionWithNative({
-    registeredNames: [],
-    registeredRecords: args.rawRecords.map((entry, sourceIndex) => ({
-      name: entry.name,
-      trigger: entry.trigger,
-      sourceIndex
-    })),
-    autoHandlerNames: []
-  });
-  return projection.registeredRecords.map((recordPlan) => {
-    const entry = args.rawRecords[recordPlan.sourceIndex];
-    if (
-      !entry ||
-      entry.name.trim().toLowerCase() !== recordPlan.name.trim().toLowerCase() ||
-      entry.trigger !== recordPlan.trigger
-    ) {
-      throw new Error(
-        `[servertool] native registry record projection mismatch at sourceIndex=${recordPlan.sourceIndex} for ${recordPlan.trigger}:${recordPlan.name}`
-      );
-    }
-    return {
-      registration: entry.registration,
-      handler: entry.handler
     };
   });
 }

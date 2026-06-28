@@ -411,12 +411,10 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts',
     forbidden: [],
     required: [
-      'planServertoolRegistryProjectionWithNative',
       'planServertoolRegistryAutoHookDescriptorsWithNative',
-      'projectRegistryHandlerNames',
-      'projectAutoServerToolHandlers',
       'projectAutoServerToolHookDescriptors',
-      'projectRegisteredServerToolHandlerRecords',
+      'planServertoolRegistrySourceProjectionWithNative',
+      'projectRegistrySources',
     ],
   },
   {

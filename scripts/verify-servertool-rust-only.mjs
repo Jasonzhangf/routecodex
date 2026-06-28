@@ -3498,12 +3498,8 @@ function checkServertoolRegistryRustOwner() {
   }
   for (const needle of [
     'planServertoolRegistryAutoHookDescriptorsWithNative',
-    'planServertoolRegistryProjectionWithNative',
     'planServertoolRegistrySourceProjectionWithNative',
-    'projectRegistryHandlerNames',
-    'projectAutoServerToolHandlers',
     'projectAutoServerToolHookDescriptors',
-    'projectRegisteredServerToolHandlerRecords',
     'projectRegistrySources',
   ]) {
     assertContains('servertool-registry-projection-shell', TS_REGISTRY_PROJECTION_SHELL, registryProjectionShell, needle);
