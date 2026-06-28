@@ -13,8 +13,7 @@ import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { IProviderV2, ProviderRuntimeProfile } from '../api/provider-types.js';
 import {
   normalizeProviderFamily,
-  normalizeProviderType,
-  providerTypeToProtocol
+  normalizeProviderType
 } from '../utils/provider-type-utils.js';
 import {
   isDeepSeekRuntimeIdentity,
@@ -279,7 +278,9 @@ export class ProviderFactory {
     ) {
       extensions.deepseek = deepseekOptions;
     }
-    extensions.providerProtocol = runtime.providerProtocol || providerTypeToProtocol(providerType);
+    if (runtime.providerProtocol) {
+      extensions.providerProtocol = runtime.providerProtocol;
+    }
     const implicitModuleOverride = this.resolveImplicitProviderModule(runtime, authConfig);
     const explicitModuleOverride = resolveProviderModule(runtime.providerModule);
     const moduleOverride =

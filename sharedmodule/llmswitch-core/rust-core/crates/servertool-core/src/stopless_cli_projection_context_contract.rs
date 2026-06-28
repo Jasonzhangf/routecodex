@@ -82,15 +82,17 @@ pub fn plan_stopless_cli_projection_context(
         .map(|used| used.saturating_add(1));
     let repeat_count = match (explicit_repeat_count, runtime_repeat_count) {
         (_, _) if execution_stopless_repeat_count.is_some() => execution_stopless_repeat_count,
-        (Some(explicit), Some(runtime)) if runtime > explicit && stopless_control_repeat_count.is_some() => {
+        (Some(explicit), Some(runtime))
+            if runtime > explicit && stopless_control_repeat_count.is_some() =>
+        {
             Some(runtime)
         }
         (Some(explicit), _) => Some(explicit),
         (None, Some(runtime)) => Some(runtime),
         (None, None) => None,
     }
-        .map(|count| count.max(1))
-        .unwrap_or(1);
+    .map(|count| count.max(1))
+    .unwrap_or(1);
 
     let explicit_max_repeats = execution_stopless
         .and_then(|row| row.get("maxRepeats"))
@@ -107,7 +109,11 @@ pub fn plan_stopless_cli_projection_context(
         })
         .filter(|value| *value > 0);
     let max_repeats = explicit_max_repeats
-        .or_else(|| runtime_snapshot.and_then(|snapshot| snapshot.max_repeats).filter(|value| *value > 0))
+        .or_else(|| {
+            runtime_snapshot
+                .and_then(|snapshot| snapshot.max_repeats)
+                .filter(|value| *value > 0)
+        })
         .unwrap_or_else(|| repeat_count.max(1));
 
     let trigger_hint = first_non_empty_string([
@@ -337,7 +343,8 @@ mod tests {
     }
 
     #[test]
-    fn explicit_execution_stopless_repeat_count_stays_current_turn_even_if_runtime_snapshot_is_higher() {
+    fn explicit_execution_stopless_repeat_count_stays_current_turn_even_if_runtime_snapshot_is_higher(
+    ) {
         let plan = plan_stopless_cli_projection_context(StoplessCliProjectionContextInput {
             execution_context: Some(json!({
                 "stopless": {
@@ -364,7 +371,6 @@ mod tests {
         assert_eq!(plan.repeat_count, 1);
         assert_eq!(plan.max_repeats, 3);
     }
-
 
     #[test]
     fn prefers_canonical_stopless_budget_over_legacy_loop_budget() {

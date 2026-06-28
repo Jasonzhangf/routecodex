@@ -4,26 +4,22 @@ import { MetadataCenter } from '../../../../src/server/runtime/http-server/metad
 import { extractContinuationContextSessionIdentifiersFromMetadata } from '../../../../src/modules/llmswitch/bridge/state-integrations.js';
 
 describe('state-integrations continuation context extraction', () => {
-  it('reads continuation session identifiers from MetadataCenter continuation_context', () => {
+  it('does not read continuation session identifiers from MetadataCenter continuation_context', () => {
     const metadata: Record<string, unknown> = {};
     const center = MetadataCenter.attach(metadata);
     center.writeContinuationContext(
-      'responsesRequestContext',
+      'responsesResume',
       {
-        sessionId: 'sess-center-continuation',
-        conversationId: 'conv-center-continuation'
+        responseId: 'resp-center-continuation'
       },
       {
         module: 'tests/modules/llmswitch/bridge/state-integrations.metadata-center.spec.ts',
-        symbol: 'reads continuation session identifiers from MetadataCenter continuation_context',
+        symbol: 'does not read continuation session identifiers from MetadataCenter continuation_context',
         stage: 'test'
       }
     );
 
-    expect(extractContinuationContextSessionIdentifiersFromMetadata(metadata)).toEqual({
-      sessionId: 'sess-center-continuation',
-      conversationId: 'conv-center-continuation'
-    });
+    expect(extractContinuationContextSessionIdentifiersFromMetadata(metadata)).toEqual({});
   });
 
   it('does not read top-level metadata.responsesRequestContext without MetadataCenter binding', () => {

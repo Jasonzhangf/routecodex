@@ -170,6 +170,64 @@ function extractToolNames(tools) {
     .filter((value) => typeof value === 'string');
 }
 
+function findTool(tools, toolName) {
+  if (!Array.isArray(tools)) {
+    return null;
+  }
+  return tools.find((tool) => (tool?.name ?? tool?.function?.name) === toolName) ?? null;
+}
+
+function assertStoplessSystemInstructionContract(text, label) {
+  const value = String(text || '');
+  assert.ok(value.includes('<rcc_stop_schema>'), `${label} missing rcc_stop_schema tag: ${value}`);
+  assert.ok(
+    value.includes('字段不是全局必填，而是关系必填'),
+    `${label} missing conditional-field system guidance: ${value}`
+  );
+  assert.ok(
+    value.includes('has_evidence=1') && value.includes('evidence'),
+    `${label} missing has_evidence/evidence relation: ${value}`
+  );
+  assert.ok(
+    value.includes('stopreason=2') && value.includes('next_step'),
+    `${label} missing continue/next_step relation: ${value}`
+  );
+  assert.ok(
+    value.includes('needs_user_input=true') && value.includes('next_step'),
+    `${label} missing user-decision relation: ${value}`
+  );
+  assert.ok(value.includes('最小可复制样本'), `${label} missing minimal sample: ${value}`);
+}
+
+function assertReasoningStopToolContract(tool, label) {
+  assert.ok(tool, `${label} missing reasoningStop tool`);
+  const fn = tool.function ?? tool;
+  const description = String(fn.description || '');
+  assert.ok(
+    description.includes('Fields are conditionally required, not globally required'),
+    `${label} missing conditional-field tool description: ${description}`
+  );
+  assert.ok(
+    description.includes('stopreason=2 requires next_step'),
+    `${label} missing continue/next_step tool description: ${description}`
+  );
+  assert.ok(
+    description.includes('needs_user_input=true requires next_step'),
+    `${label} missing user-decision tool description: ${description}`
+  );
+  assert.ok(
+    description.includes('Minimal continue sample') && description.includes('Minimal finished sample'),
+    `${label} missing tool samples: ${description}`
+  );
+  assert.ok(!description.includes('fill every field'), `${label} retained all-fields wording: ${description}`);
+  const required = fn.parameters?.required ?? fn.input_schema?.required ?? [];
+  assert.deepEqual(
+    [...required].sort(),
+    ['has_evidence', 'reason', 'stopreason'].sort(),
+    `${label} reasoningStop required fields must be baseline only`
+  );
+}
+
 function extractInputJson(command) {
   const match = String(command).match(/--input-json '([^']+)'(?=\s--|$)/u);
   return JSON.parse(match?.[1] ?? '{}');
@@ -185,6 +243,10 @@ function hasStopSchemaContractText(text) {
     && (
       value.includes('stopreason 取值：0=finished，1=blocked，2=continue_needed')
       || value.includes('stopreason values: 0=finished, 1=blocked, 2=continue_needed')
+    )
+    && (
+      value.includes('字段不是全局必填，而是关系必填')
+      || value.includes('Fields are conditionally required, not globally required')
     )
     && value.includes('next_step');
 }
@@ -346,18 +408,28 @@ async function runCase(testCase) {
 
   let upstreamServer;
   let harnessServer;
+  let upstreamHits = [];
 
   try {
-    const upstreamHits = [];
-
     const upstreamApp = express();
     upstreamApp.use(express.json({ limit: '2mb' }));
-    upstreamApp.post('/responses', (req, res) => {
+    upstreamApp.use((req, _res, next) => {
+      console.error('[stopless-contract-blackbox] upstream request', req.method, req.path);
+      next();
+    });
+    upstreamApp.all('*', (req, res) => {
       upstreamHits.push(req.body);
-      if (upstreamHits.length === 1) {
-        return res.json(upstreamResponse('第一轮普通 stop，无 schema'));
+      if (String(req.path).includes('/models')) {
+        return res.json({ data: [{ id: 'gpt-5.3-codex' }] });
       }
-      return res.json(upstreamResponse(`第二轮继续 stop: ${testCase.id}`));
+      if (String(req.path).includes('/submit_tool_outputs')) {
+        return res.json(upstreamResponse(`submit_tool_outputs stop: ${testCase.id}`));
+      }
+      return res.json(upstreamResponse(
+        upstreamHits.length === 1
+          ? '第一轮普通 stop，无 schema'
+          : `第二轮继续 stop: ${testCase.id}`
+      ));
     });
     upstreamServer = await listen(http.createServer(upstreamApp));
 
@@ -421,7 +493,12 @@ async function runCase(testCase) {
     assert.equal(first.status, 200, `case=${testCase.id} expected first response 200, body=${firstText}`);
     assert.ok(firstExec, `case=${testCase.id} expected exec_command, body=${firstText}`);
     assert.ok(hasStopSchemaContractText(firstProviderText), `case=${testCase.id} missing stop schema contract in provider-request: ${firstProviderText}`);
+    assertStoplessSystemInstructionContract(firstProviderText, `case=${testCase.id} first provider-request system instruction`);
     assert.ok(firstProviderTools.includes('reasoningStop'), `case=${testCase.id} missing reasoningStop tool in first provider-request: ${JSON.stringify(firstProviderPayload)}`);
+    assertReasoningStopToolContract(
+      findTool(firstProviderPayload.tools, 'reasoningStop'),
+      `case=${testCase.id} first provider-request`
+    );
     assert.ok(firstProviderTools.includes('exec_command'), `case=${testCase.id} missing exec_command tool in first provider-request: ${JSON.stringify(firstProviderPayload)}`);
     assert.ok(!JSON.stringify(firstBody).includes('"reasoningStop"'), `case=${testCase.id} client payload leaked raw reasoningStop: ${firstText}`);
 
@@ -522,6 +599,13 @@ async function runCase(testCase) {
       `case=${testCase.id} restored provider-facing output must not leak raw stop_message_auto CLI payload: ${JSON.stringify(secondProviderPayload)}`
     );
   } finally {
+    if (upstreamServer) {
+      try {
+        console.error('[stopless-contract-blackbox] upstreamHits', JSON.stringify(upstreamHits ?? []));
+      } catch {
+        // non-blocking
+      }
+    }
     await close(harnessServer?.server);
     await close(upstreamServer?.server);
     for (const restore of restores.reverse()) restore();

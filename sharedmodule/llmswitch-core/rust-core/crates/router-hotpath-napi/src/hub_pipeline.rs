@@ -24,14 +24,16 @@ pub fn resolve_entry_protocol_from_endpoint(entry_endpoint: &str) -> Result<Stri
     } else if normalized.contains("/v1/chat/completions") {
         Ok("openai-chat".to_string())
     } else {
-        Err(format!("Unsupported hub pipeline entry endpoint: {}", entry_endpoint))
+        Err(format!(
+            "Unsupported hub pipeline entry endpoint: {}",
+            entry_endpoint
+        ))
     }
 }
 
 #[napi(js_name = "resolveEntryProtocolFromEndpointJson")]
 pub fn resolve_entry_protocol_from_endpoint_json(entry_endpoint: String) -> NapiResult<String> {
-    resolve_entry_protocol_from_endpoint(&entry_endpoint)
-        .map_err(|e| napi::Error::from_reason(e))
+    resolve_entry_protocol_from_endpoint(&entry_endpoint).map_err(|e| napi::Error::from_reason(e))
 }
 
 #[cfg(test)]
@@ -73,7 +75,8 @@ mod entry_protocol_tests {
     #[test]
     fn test_resolve_full_url() {
         assert_eq!(
-            resolve_entry_protocol_from_endpoint("http://localhost:8080/v1/chat/completions").unwrap(),
+            resolve_entry_protocol_from_endpoint("http://localhost:8080/v1/chat/completions")
+                .unwrap(),
             "openai-chat"
         );
     }
@@ -88,9 +91,7 @@ mod entry_protocol_tests {
 
     #[test]
     fn test_resolve_unsupported_endpoint() {
-        assert!(
-            resolve_entry_protocol_from_endpoint("/v1/completions").is_err()
-        );
+        assert!(resolve_entry_protocol_from_endpoint("/v1/completions").is_err());
     }
 }
 

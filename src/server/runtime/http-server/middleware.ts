@@ -277,9 +277,6 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       path.startsWith('/admin/')
       || path === '/admin'
       || path.startsWith('/providers/')
-      || path.startsWith('/quota/')
-      || path === '/quota/summary'
-      || path === '/quota/providers'
       || path.startsWith('/config/providers')
       || path.startsWith('/config/routing')
       || path.startsWith('/config/settings')

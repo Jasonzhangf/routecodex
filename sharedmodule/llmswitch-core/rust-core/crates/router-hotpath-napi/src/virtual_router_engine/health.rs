@@ -218,8 +218,7 @@ impl ProviderHealthManager {
         })
     }
 
-    pub(crate) fn import_persistable_state(&mut self, _raw: &Value, _now_ms: i64) {
-    }
+    pub(crate) fn import_persistable_state(&mut self, _raw: &Value, _now_ms: i64) {}
 
     fn get_state_mut(&mut self, provider_key: &str) -> &mut ProviderInternalState {
         let canonical = Self::canonicalize_provider_key(provider_key);

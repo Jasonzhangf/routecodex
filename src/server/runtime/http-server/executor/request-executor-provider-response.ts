@@ -42,6 +42,11 @@ function coalesceUsageMetrics(primary?: UsageMetrics, secondary?: UsageMetrics):
   };
 }
 
+function prefersConvertedUsage(providerProtocol: string | undefined): boolean {
+  const normalized = typeof providerProtocol === 'string' ? providerProtocol.trim().toLowerCase() : '';
+  return normalized !== '' && !normalized.startsWith('anthropic');
+}
+
 export function buildProviderExecutionSuccessResult(args: {
   converted: PipelineExecutionResult;
   providerKey: string;
@@ -548,7 +553,9 @@ export async function processSuccessfulProviderResponse(args: {
     providerProtocol: args.providerProtocol,
     providerKey: args.providerKey
   });
-  const usage = coalesceUsageMetrics(args.providerUsageFallback, convertedUsage);
+  const usage = prefersConvertedUsage(args.providerProtocol)
+    ? coalesceUsageMetrics(convertedUsage, args.providerUsageFallback)
+    : coalesceUsageMetrics(args.providerUsageFallback, convertedUsage);
   const aggregatedUsage = usage ?? args.aggregatedUsage;
   args.logStage('provider.usage_extract.completed', args.inputRequestId, {
     providerKey: args.providerKey,

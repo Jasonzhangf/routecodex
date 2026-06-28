@@ -505,8 +505,7 @@ fn web_search_and_vision_auto_are_client_exec_cli_tools() {
             "{tool_name} must be executable through client CLI stdout: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let value: serde_json::Value =
-            serde_json::from_slice(&output.stdout).expect("json stdout");
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
         assert_eq!(value["toolName"], tool_name);
         assert_eq!(value["kind"], tool_name);
         assert_eq!(value["flowId"], "servertool_cli_projection");

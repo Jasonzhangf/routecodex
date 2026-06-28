@@ -3,33 +3,6 @@ import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../.
 import type { HubPipeline, ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 
-jest.unstable_mockModule(
-  '../../../../src/modules/llmswitch/bridge/native-exports.js',
-  async () => {
-    const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.js');
-    return {
-      ...actual,
-      resolveProviderRetryExecutionPolicyNative: jest.fn(() => ({
-      excludeCurrentProvider: true,
-      reason: 'existing_exclusion'
-      }))
-    };
-  }
-);
-jest.unstable_mockModule(
-  '../../../../src/modules/llmswitch/bridge/native-exports.ts',
-  async () => {
-    const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.ts');
-    return {
-      ...actual,
-      resolveProviderRetryExecutionPolicyNative: jest.fn(() => ({
-      excludeCurrentProvider: true,
-      reason: 'existing_exclusion'
-      }))
-    };
-  }
-);
-
 const mockRebindResponsesConversationRequestId = jest.fn(async () => undefined);
 
 const mockBridgeModule = () => ({
@@ -51,6 +24,7 @@ const mockBridgeModule = () => ({
   resumeLatestResponsesContinuationByScope: jest.fn(async () => null),
   createResponsesSseToJsonConverter: jest.fn(async () => ({ convertSseToJson: async () => ({}) })),
   resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
+  reprojectDirectChatToolCallStreamForHttp: jest.fn(async () => undefined),
   reportProviderErrorToRouterPolicy: jest.fn(async (event: unknown) => event),
   reportProviderSuccessToRouterPolicy: jest.fn(async (event: unknown) => event),
   bootstrapVirtualRouterConfig: jest.fn(),

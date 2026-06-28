@@ -376,6 +376,92 @@ describe('responses-request-bridge relay request-context normalization', () => {
     ]);
   });
 
+  it('persists normalized stopless payload instead of raw exec_command and tool message shape', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+      input: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: '继续处理' }],
+        },
+        {
+          type: 'function_call',
+          id: 'fc_live_stopless_1',
+          call_id: 'call_live_stopless_1',
+          name: 'reasoningStop',
+          arguments: '{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3}',
+        },
+        {
+          type: 'function_call_output',
+          id: 'fc_live_stopless_1',
+          call_id: 'call_live_stopless_1',
+          output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
+        },
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '继续' }],
+        },
+      ],
+      toolsRaw: [
+        { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } },
+        { type: 'function', name: 'reasoningStop', parameters: { type: 'object', properties: {} } }
+      ],
+    });
+
+    const context = await buildResponsesRequestContextForHttp({
+      payload: {
+        model: 'gpt-5.4',
+        input: [
+          {
+            role: 'assistant',
+            tool_calls: [
+              {
+                id: 'call_live_stopless_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}',
+                },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_live_stopless_1',
+            name: 'reasoningStop',
+            content: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
+          },
+          {
+            role: 'user',
+            content: '继续',
+          },
+        ],
+      },
+      requestId: 'req_live_stopless_payload_normalized_1',
+      metadata: {
+        session_id: 'sess_live_stopless_1',
+        conversation_id: 'conv_live_stopless_1',
+      },
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555',
+    });
+
+    expect(context.context.input[1]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_live_stopless_1',
+      name: 'reasoningStop',
+    });
+    expect(context.context.input[2]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'call_live_stopless_1',
+      output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
+    });
+    expect(context.payload.input).toEqual(context.context.input);
+    expect(JSON.stringify(context.payload.input)).not.toContain('"role":"tool"');
+    expect(JSON.stringify(context.payload.input)).not.toContain('"name":"exec_command"');
+  });
+
   it('materializes request context session truth from factual Codex client headers', async () => {
     mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
       input: [],

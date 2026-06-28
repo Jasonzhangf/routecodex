@@ -170,15 +170,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     routedProviderKeys,
     isInRoutingScope
   } = resolveProviderRoutingScope(server.routingProviderScope as { providerKeys?: unknown[] } | undefined);
-  const quotaModule = server.managerDaemon?.getModule('quota') as
-    | {
-        registerProviderStaticConfig?: (
-          providerKey: string,
-          config: { authType?: string | null; priorityTier?: number | null; apikeyDailyResetTime?: string | null }
-        ) => void;
-        disableProvider?: (options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }) => Promise<unknown>;
-      }
-    | undefined;
 
   const runtimeKeyAuthType = new Map<string, string | null>();
   const apikeyDailyResetTime = (() => {
@@ -213,7 +204,9 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
       continue;
     }
     const runtimeProfile = runtime as ProviderRuntimeProfile;
-    const runtimeKey = runtimeProfile.runtimeKey || providerKey;
+    const runtimeKey = typeof runtimeProfile.runtimeKey === 'string' && runtimeProfile.runtimeKey.trim()
+      ? runtimeProfile.runtimeKey.trim()
+      : providerKey;
 
     const authTypeFromRuntime =
       runtimeProfile && (runtimeProfile as any).auth && typeof (runtimeProfile as any).auth.type === 'string'
@@ -260,23 +253,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         }
         if (denormalizedRuntimeKey !== runtimeKey && !server.providerHandles.has(denormalizedRuntimeKey)) {
           server.providerHandles.set(denormalizedRuntimeKey, handle);
-        }
-        const runtimeKeyParts = runtimeKey.split('.');
-        if (runtimeKeyParts.length >= 3) {
-          const aliasScopedRuntimeKey = `${runtimeKeyParts[0]}.${runtimeKeyParts[1]}`;
-          if (!server.providerHandles.has(aliasScopedRuntimeKey)) {
-            server.providerHandles.set(aliasScopedRuntimeKey, handle);
-          }
-          const aliasNormalized = runtimeKeyParts[1].replace(/^key(\d+)$/i, '$1');
-          const aliasDenormalized = runtimeKeyParts[1].match(/^\d+$/) ? `key${runtimeKeyParts[1]}` : runtimeKeyParts[1];
-          const normalizedAliasScopedRuntimeKey = `${runtimeKeyParts[0]}.${aliasNormalized}`;
-          const denormalizedAliasScopedRuntimeKey = `${runtimeKeyParts[0]}.${aliasDenormalized}`;
-          if (!server.providerHandles.has(normalizedAliasScopedRuntimeKey)) {
-            server.providerHandles.set(normalizedAliasScopedRuntimeKey, handle);
-          }
-          if (!server.providerHandles.has(denormalizedAliasScopedRuntimeKey)) {
-            server.providerHandles.set(denormalizedAliasScopedRuntimeKey, handle);
-          }
         }
         server.providerRuntimeInitErrors.delete(runtimeKey);
       } catch (error) {
@@ -328,20 +304,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
       }
     }
 
-    try {
-      const authType = runtimeKeyAuthType.get(runtimeKey) ?? authTypeFromRuntime;
-      const apikeyResetForKey = authType === 'apikey' ? apikeyDailyResetTime : null;
-      quotaModule?.registerProviderStaticConfig?.(providerKey, {
-        authType: authType ?? null,
-        apikeyDailyResetTime: apikeyResetForKey
-      });
-    } catch (error) {
-      logRuntimeProvidersNonBlockingError('quota.register_provider_static_config', error, {
-        providerKey,
-        runtimeKey
-      });
-    }
-
     const normalizedRuntimeKey = typeof runtimeKey === 'string'
       ? runtimeKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1')
       : runtimeKey;
@@ -373,18 +335,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
         aliasScopedProviderKeyToRuntimeKey.set(aliasScopedKey, resolvedRuntimeKey);
         if (!server.providerKeyToRuntimeKey.has(aliasScopedKey)) {
           server.providerKeyToRuntimeKey.set(aliasScopedKey, resolvedRuntimeKey);
-        }
-        const aliasNormalized = providerKeyParts[1].replace(/^key(\d+)$/i, '$1');
-        const aliasDenormalized = providerKeyParts[1].match(/^\d+$/) ? `key${providerKeyParts[1]}` : providerKeyParts[1];
-        const normalizedAliasScopedKey = `${providerKeyParts[0]}.${aliasNormalized}`;
-        const denormalizedAliasScopedKey = `${providerKeyParts[0]}.${aliasDenormalized}`;
-        aliasScopedProviderKeyToRuntimeKey.set(normalizedAliasScopedKey, resolvedRuntimeKey);
-        aliasScopedProviderKeyToRuntimeKey.set(denormalizedAliasScopedKey, resolvedRuntimeKey);
-        if (!server.providerKeyToRuntimeKey.has(normalizedAliasScopedKey)) {
-          server.providerKeyToRuntimeKey.set(normalizedAliasScopedKey, resolvedRuntimeKey);
-        }
-        if (!server.providerKeyToRuntimeKey.has(denormalizedAliasScopedKey)) {
-          server.providerKeyToRuntimeKey.set(denormalizedAliasScopedKey, resolvedRuntimeKey);
         }
       }
     }

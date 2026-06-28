@@ -185,11 +185,21 @@ export async function resolveProviderRetryExecutionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys,
     defaultPoolAvailable: args.defaultTierAvailable === true,
   });
+  const maySwitchToAlternativeProvider = hasAlternativeCandidate && exclusionPlan.excludedCurrentProvider;
+  if (!hasAlternativeCandidate) {
+    return {
+      shouldRetry: false,
+      excludedCurrentProvider: false,
+      routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+      defaultPoolAvailable: gate.defaultPoolAvailable,
+      policyExhausted: gate.policyExhausted,
+      mayProject: gate.mayProject,
+    };
+  }
   if (!retryActionPlan.shouldRetry && !shouldRerouteExcludedFailure) {
     const keepTerminalExclusion = exclusionPlan.excludedCurrentProvider;
     return {
-      shouldRetry: false,
-      blockingRecoverable: retryActionPlan.blockingRecoverable,
+      shouldRetry: maySwitchToAlternativeProvider,
       excludedCurrentProvider: keepTerminalExclusion,
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
       defaultPoolAvailable: gate.defaultPoolAvailable,
@@ -208,7 +218,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
       return {
         shouldRetry: false,
-        blockingRecoverable: retryActionPlan.blockingRecoverable,
         excludedCurrentProvider: true,
         routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
         defaultPoolAvailable: gate.defaultPoolAvailable,
@@ -218,7 +227,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
     }
     return {
       shouldRetry: true,
-      blockingRecoverable: false,
       excludedCurrentProvider: true,
       retrySwitchPlan,
       retryExecutionPolicyReason: nativeExecutionPolicy.reason,
@@ -238,7 +246,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
   if (args.providerOwnedContinuation === true && retrySwitchPlan.switchAction === 'exclude_and_reroute') {
     return {
       shouldRetry: false,
-      blockingRecoverable: retryActionPlan.blockingRecoverable,
       excludedCurrentProvider: retryExcludedCurrentProvider,
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
       defaultPoolAvailable: gate.defaultPoolAvailable,
@@ -248,7 +255,6 @@ export async function resolveProviderRetryExecutionPlan(args: {
   }
   return {
     shouldRetry: true,
-    blockingRecoverable: retryActionPlan.blockingRecoverable,
     excludedCurrentProvider: retryExcludedCurrentProvider,
     retrySwitchPlan,
     retryExecutionPolicyReason: nativeExecutionPolicy.reason,

@@ -11,29 +11,6 @@ type EnginePostflightAction = {
   action: string;
 };
 
-function readSessionAndRequestId(
-  engineResult: ServerSideToolEngineResult,
-  adapterContext: AdapterContext,
-): { sessionId?: string; requestId?: string } {
-  const executionContext =
-    engineResult.execution?.context && typeof engineResult.execution.context === 'object' && !Array.isArray(engineResult.execution.context)
-      ? engineResult.execution.context as Record<string, unknown>
-      : undefined;
-  const sessionId =
-    typeof executionContext?.sessionId === 'string'
-      ? String(executionContext.sessionId)
-      : typeof (adapterContext as Record<string, unknown>).sessionId === 'string'
-        ? String((adapterContext as Record<string, unknown>).sessionId)
-        : undefined;
-  const requestId =
-    typeof executionContext?.requestId === 'string'
-      ? String(executionContext.requestId)
-      : typeof (adapterContext as Record<string, unknown>).requestId === 'string'
-        ? String((adapterContext as Record<string, unknown>).requestId)
-        : undefined;
-  return { sessionId, requestId };
-}
-
 export async function runServertoolEnginePostflight(args: {
   options: {
     requestId: string;
@@ -161,50 +138,18 @@ export async function runServertoolEnginePostflight(args: {
   }
 
   if (runtimeAction.action === 'build_stop_message_cli_projection') {
-    const executionContext =
-      engineResult.execution?.context && typeof engineResult.execution.context === 'object' && !Array.isArray(engineResult.execution.context)
-        ? engineResult.execution.context as Record<string, unknown>
-        : undefined;
-    const stoplessControl =
-      executionContext?.stopless && typeof executionContext.stopless === 'object' && !Array.isArray(executionContext.stopless)
-        ? executionContext.stopless as Record<string, unknown>
-        : undefined;
-    const { sessionId, requestId } = readSessionAndRequestId(engineResult, options.adapterContext);
-    const chatStopText =
-      typeof executionContext?.assistantStopText === 'string' && executionContext.assistantStopText.trim()
-        ? executionContext.assistantStopText.trim()
-        : undefined;
-    const runtimeSnapshot =
-      executionContext?.stoplessRuntimeState
-      && typeof executionContext.stoplessRuntimeState === 'object'
-      && !Array.isArray(executionContext.stoplessRuntimeState)
-        ? executionContext.stoplessRuntimeState as Record<string, unknown>
-        : null;
-
-    // Call Rust-native build_stopless_auto_cli_projection_json (single NAPI call).
-    // Replaces the previous three-call TS sequence:
-    //   1. planStoplessCliProjectionContextWithNative
-    //   2. buildClientExecCliProjectionOutputWithNative
-    //   3. buildClientVisibleProjectionShellWithNative
-    const fn = readNativeFunction('buildStoplessAutoCliProjectionJson');
-    let projectionChatResponse: JsonObject;
-    if (fn) {
-      const inputJson = JSON.stringify({
-        adapterContext: options.adapterContext as Record<string, unknown>,
-        executionContext: executionContext ?? null,
-        stoplessControl: stoplessControl ?? null,
-        runtimeSnapshot,
-        chatStopText: chatStopText ?? null,
-        sessionId: sessionId ?? null,
-        requestId: options.requestId ?? null
-      });
-      const raw = fn(inputJson);
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      projectionChatResponse = parsed.chatResponse as JsonObject;
-    } else {
-      // Last-resort fallback: keep the original finalChatResponse so the request doesn't crash.
-      projectionChatResponse = engineResult.finalChatResponse as JsonObject;
+    const fn = readNativeFunction('buildStoplessAutoCliProjectionFromEngineJson');
+    if (!fn) {
+      throw new Error('buildStoplessAutoCliProjectionFromEngineJson native unavailable');
     }
+    const inputJson = JSON.stringify({
+      adapterContext: options.adapterContext as Record<string, unknown>,
+      execution: engineResult.execution ?? null,
+      requestId: options.requestId ?? null
+    });
+    const raw = fn(inputJson);
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const projectionChatResponse = parsed.chatResponse as JsonObject;
     args.logProgress(5, totalSteps, 'completed (stop_message cli projection; no reenter)', { flowId });
     return {
       chat: projectionChatResponse,

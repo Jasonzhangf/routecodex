@@ -15,8 +15,7 @@ import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normalizer.js';
 import { extractRequestExecutorProviderErrorStage } from './request-executor-error-shared.js';
 import type {
-  RetryErrorSnapshot,
-  BlockingRecoverableRouteHoldState
+  RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
 type RequestExecutorProviderSendFailureArgs = {
@@ -94,8 +93,6 @@ type RequestExecutorProviderSendFailureArgs = {
 
 export type RequestExecutorProviderSendFailureResult = {
   lastError: unknown;
-  blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
-  allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
   forcedRouteHint?: string;
   contextOverflowRetries: number;
   cumulativeExternalLatencyMs: number;
@@ -359,21 +356,6 @@ export async function processProviderSendFailure(
   if (!providerFailurePlan.retryTelemetryPlan) {
     throw args.error;
   }
-  const blockingRecoverableRouteHoldState =
-    retryExecutionPlan.blockingRecoverable
-      ? {
-        providerKey: args.providerKey,
-        runtimeKey: args.runtimeKey,
-        retryError,
-        explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
-        routePoolForSameProviderRetry: undefined
-      }
-      : null;
-  const allowBlockingRecoverableRetryBeyondAttemptBudget =
-    args.maxAttempts <= 1
-    && args.attempt >= args.maxAttempts
-    && retryExecutionPlan.retrySwitchPlan.switchAction === 'exclude_and_reroute';
-
   emitRequestExecutorProviderRetryTelemetry({
     requestId: args.requestId,
     retryTelemetryPlan: providerFailurePlan.retryTelemetryPlan,
@@ -383,8 +365,6 @@ export async function processProviderSendFailure(
 
   return {
     lastError: args.error,
-    blockingRecoverableRouteHoldState,
-    allowBlockingRecoverableRetryBeyondAttemptBudget,
     forcedRouteHint,
     contextOverflowRetries,
     cumulativeExternalLatencyMs

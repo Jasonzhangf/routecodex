@@ -1055,6 +1055,65 @@ fn project_responses_client_payload_for_client_synthesizes_required_action_for_p
 }
 
 #[test]
+fn project_responses_client_payload_for_client_preserves_stopless_cli_command_arguments() {
+    let cmd = "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"stop_schema_continue_next_step\"}' --session-id 'manual-stopless-live-1782569604975' --request-id 'openai-responses-orangeai.key1-glm-5.2-20260627T221325004-413357-1890' --repeat-count '1' --max-repeats '3'";
+    let args = serde_json::to_string(&json!({ "cmd": cmd })).expect("serialize args");
+    let payload = json!({
+        "id": "resp_stopless_cli_projection",
+        "object": "response",
+        "status": "requires_action",
+        "output": [{
+            "id": "fc_call_stopless",
+            "type": "function_call",
+            "status": "completed",
+            "name": "exec_command",
+            "call_id": "call_stopless",
+            "arguments": args
+        }],
+        "required_action": {
+            "type": "submit_tool_outputs",
+            "submit_tool_outputs": {
+                "tool_calls": [{
+                    "id": "call_stopless",
+                    "type": "function",
+                    "name": "exec_command",
+                    "arguments": args,
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": args
+                    }
+                }]
+            }
+        }
+    });
+    let tools_raw = json!([{
+        "type": "function",
+        "name": "exec_command",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "cmd": { "type": "string" }
+            },
+            "required": ["cmd"],
+            "additionalProperties": false
+        }
+    }]);
+
+    let output = project_responses_client_payload_for_client(&payload, &tools_raw, &json!({}));
+    let projected_args = output["required_action"]["submit_tool_outputs"]["tool_calls"][0]
+        ["function"]["arguments"]
+        .as_str()
+        .expect("projected arguments");
+    let parsed: Value = serde_json::from_str(projected_args).expect("arguments stay valid JSON");
+
+    assert_eq!(parsed["cmd"], Value::String(cmd.to_string()));
+    assert_eq!(
+        output["output"][0]["arguments"],
+        Value::String(args.to_string())
+    );
+}
+
+#[test]
 fn project_responses_client_payload_for_client_keeps_completed_when_tool_output_already_present() {
     let payload = json!({
         "type": "response.completed",

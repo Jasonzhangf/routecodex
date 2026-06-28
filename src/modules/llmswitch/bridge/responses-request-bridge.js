@@ -46,11 +46,6 @@ export function buildResponsesPipelineMetadataForHttp(args) {
             stage: 'MetaReq02TruthMaterialized'
         }, 'responses handler request-context conversation truth');
     }
-    center.writeContinuationContext('responsesRequestContext', args.requestContext, {
-        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-        symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'MetaReq03ContinuationAttached'
-    });
     center.writeRuntimeControl('streamIntent', args.streamPlan.inboundStream || args.streamPlan.outboundStream ? 'stream' : 'non_stream', {
         module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
         symbol: 'buildResponsesPipelineMetadataForHttp',
@@ -291,9 +286,7 @@ function isProviderOwnedSubmitToolOutputsResumePayload(payload) {
         ? payload.response_id.trim()
         : undefined;
     const toolOutputs = Array.isArray(payload.tool_outputs) ? payload.tool_outputs : [];
-    const hasChatHistory = (Array.isArray(payload.input) && payload.input.length > 0)
-        || (Array.isArray(payload.messages) && payload.messages.length > 0);
-    return Boolean(responseId && toolOutputs.length > 0 && !hasChatHistory);
+    return Boolean(responseId && toolOutputs.length > 0);
 }
 function isRelayMaterializedSubmitToolOutputsResumePayload(payload, resumeMeta) {
     if (!resumeMeta
@@ -387,10 +380,43 @@ export async function buildResponsesRequestContextForHttp(args) {
         });
     }
     if (isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)) {
+        const providerOwnedInput = Array.isArray(payloadForPersistence.input) && payloadForPersistence.input.length > 0
+            ? payloadForPersistence.input
+            : Array.isArray(payloadForPersistence.tool_outputs)
+                ? payloadForPersistence.tool_outputs
+                    .map((item) => {
+                    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                        return null;
+                    }
+                    const row = item;
+                    const callId = (typeof row.call_id === 'string' && row.call_id.trim())
+                        ? row.call_id.trim()
+                        : ((typeof row.tool_call_id === 'string' && row.tool_call_id.trim())
+                            ? row.tool_call_id.trim()
+                            : ((typeof row.id === 'string' && row.id.trim())
+                                ? row.id.trim()
+                                : undefined));
+                    if (!callId) {
+                        return null;
+                    }
+                    return {
+                        type: 'function_call_output',
+                        call_id: callId,
+                        output: typeof row.output === 'string' ? row.output : JSON.stringify(row.output ?? ''),
+                    };
+                })
+                    .filter((item) => Boolean(item))
+                : [];
         return {
-            payload: payloadForPersistence,
+            payload: {
+                ...payloadForPersistence,
+                ...(typeof payloadForPersistence.response_id === 'string' && payloadForPersistence.response_id.trim()
+                    ? { previous_response_id: payloadForPersistence.response_id.trim() }
+                    : {}),
+                input: providerOwnedInput,
+            },
             context: {
-                input: [],
+                input: providerOwnedInput,
             },
             sessionId: readResponsesSessionIdFromHttp(args.metadata),
             conversationId: readResponsesConversationIdFromHttp(args.metadata),
@@ -405,8 +431,15 @@ export async function buildResponsesRequestContextForHttp(args) {
     });
     const capturedInput = Array.isArray(captured.input) ? captured.input : [];
     const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : undefined;
+    const normalizedPayload = {
+        ...payloadForPersistence,
+        input: capturedInput,
+    };
+    if (capturedToolsRaw?.length) {
+        normalizedPayload.tools = capturedToolsRaw;
+    }
     return {
-        payload: payloadForPersistence,
+        payload: normalizedPayload,
         context: {
             input: capturedInput,
             toolsRaw: capturedToolsRaw,
@@ -648,19 +681,13 @@ export async function captureResponsesPipelineRequestContextForHttp(args) {
     });
 }
 export function attachResponsesRequestContextToResultForHttp(args) {
+    void args.requestContext;
     if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
         return args.resultMetadata;
     }
-    const nextMetadata = {
+    return {
         ...(args.resultMetadata || {}),
     };
-    const center = MetadataCenter.attach(nextMetadata);
-    center.writeContinuationContext('responsesRequestContext', args.requestContext, {
-        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-        symbol: 'attachResponsesRequestContextToResultForHttp',
-        stage: 'HubRespChatProcess03Governed'
-    });
-    return nextMetadata;
 }
 export async function recordResponsesResponseForHttp(args) {
     await recordResponsesResponseForRequest({
@@ -710,10 +737,9 @@ export async function finalizeResponsesPipelineResultForHttp(args) {
     if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
         return nextMetadata;
     }
-    const continuationContext = MetadataCenter.read(nextMetadata)?.readContinuationContext();
     await seedResponsesToolCallResponseForHttp({
         body: args.body,
-        requestContext: continuationContext?.responsesRequestContext,
+        requestContext: args.requestContext,
         providerKey: args.providerKey,
         ...(typeof args.routeHint === 'string' ? { routeHint: args.routeHint } : {})
     });

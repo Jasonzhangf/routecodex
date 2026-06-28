@@ -370,7 +370,7 @@ fn build_stop_hook_reasoning_stop_arguments_from_output(raw: &str) -> String {
     .to_string()
 }
 
-fn build_stop_hook_reasoning_stop_output_text(raw: &str) -> String {
+pub(crate) fn build_stop_hook_reasoning_stop_output_text(raw: &str) -> String {
     let trimmed = raw.trim();
     let Ok(Value::Object(mut row)) = serde_json::from_str::<Value>(trimmed) else {
         return trimmed.to_string();
@@ -383,7 +383,10 @@ fn build_stop_hook_reasoning_stop_output_text(raw: &str) -> String {
     Value::Object(row).to_string()
 }
 
-fn build_responses_reasoning_stop_function_call_item(call_id: &str, raw_output: &str) -> Value {
+pub(crate) fn build_responses_reasoning_stop_function_call_item(
+    call_id: &str,
+    raw_output: &str,
+) -> Value {
     serde_json::json!({
         "type": "function_call",
         "id": call_id,
@@ -393,7 +396,7 @@ fn build_responses_reasoning_stop_function_call_item(call_id: &str, raw_output: 
     })
 }
 
-fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
+pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
     let trimmed = raw.trim();
     if let Ok(Value::Object(row)) = serde_json::from_str::<Value>(trimmed) {
         let tool_name = read_trimmed_string(row.get("toolName"))
@@ -418,7 +421,7 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
             {
                 parts.push(prompt);
             }
-            let mut rendered_schema_guidance = false;
+            let feedback_context = read_stopless_schema_feedback_context(&row);
             if let Some(schema_guidance) = row
                 .get("schemaGuidance")
                 .or_else(|| row.get("schema_guidance"))
@@ -426,44 +429,61 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
                 .and_then(|value| serde_json::from_value::<serde_json::Value>(value).ok())
                 .and_then(|v| Some(v.clone()))
             {
-                let trigger_hint = schema_guidance
+                if let Some(trigger_hint) = schema_guidance
                     .get("triggerHint")
                     .or_else(|| schema_guidance.get("trigger_hint"))
                     .and_then(serde_json::Value::as_str)
-                    .unwrap_or("no_schema");
-                let max_repeats = row
-                    .get("maxRepeats")
-                    .and_then(serde_json::Value::as_u64)
-                    .map(|n| n as u32)
-                    .unwrap_or(3);
-                let used = repeat_count.map(|n| n.saturating_sub(1)).unwrap_or(0);
-                parts.push(render_stopless_schema_guidance_text(
-                    &schema_guidance,
-                    trigger_hint,
-                    used,
-                    max_repeats,
-                ));
-                rendered_schema_guidance = true;
-            }
-            if !rendered_schema_guidance {
-                let trigger_hint = row
-                    .get("triggerHint")
-                    .or_else(|| row.get("trigger_hint"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("no_schema");
-                let max_repeats = row
-                    .get("maxRepeats")
-                    .or_else(|| row.get("max_repeats"))
-                    .and_then(serde_json::Value::as_u64)
-                    .map(|n| n as u32)
-                    .unwrap_or(3);
-                let used = repeat_count.map(|n| n.saturating_sub(1)).unwrap_or(0);
-                parts.push(render_stopless_schema_guidance_text(
-                    &serde_json::json!({}),
-                    trigger_hint,
-                    used,
-                    max_repeats,
-                ));
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    let max_repeats = row
+                        .get("maxRepeats")
+                        .or_else(|| row.get("max_repeats"))
+                        .and_then(serde_json::Value::as_u64)
+                        .map(|n| n as u32)
+                        .unwrap_or(3);
+                    let used = repeat_count.map(|n| n.saturating_sub(1)).unwrap_or(0);
+                    parts.push(render_stopless_schema_guidance_text(
+                        &schema_guidance,
+                        trigger_hint,
+                        used,
+                        max_repeats,
+                    ));
+                } else {
+                    parts.push(
+                        "STOPLESS_CLI_RESULT_MALFORMED: schemaGuidance 缺少 triggerHint；不能把它当作有效 schema guidance。请按 schemaFeedback 的缺失字段修复，或重新运行 reasoningStop 生成合法 CLI 输出。"
+                            .to_string(),
+                    );
+                }
+            } else if let Some((reason_code, missing_fields)) = feedback_context {
+                if let Some(trigger_hint) = derive_stopless_trigger_hint_from_reason(&reason_code) {
+                    let max_repeats = row
+                        .get("maxRepeats")
+                        .or_else(|| row.get("max_repeats"))
+                        .and_then(serde_json::Value::as_u64)
+                        .map(|n| n as u32)
+                        .unwrap_or(3);
+                    let used = repeat_count.map(|n| n.saturating_sub(1)).unwrap_or(0);
+                    let guidance = serde_json::json!({
+                        "triggerHint": trigger_hint,
+                        "requiredFields": missing_fields,
+                    });
+                    parts.push(render_stopless_schema_guidance_text(
+                        &guidance,
+                        trigger_hint,
+                        used,
+                        max_repeats,
+                    ));
+                } else {
+                    parts.push(format!(
+                        "STOPLESS_CLI_RESULT_MALFORMED: schemaFeedback.reasonCode={reason_code} 没有注册的修复引导；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
+                    ));
+                }
+            } else {
+                parts.push(
+                    "STOPLESS_CLI_RESULT_MALFORMED: 缺少 schemaGuidance，且 schemaFeedback.reasonCode/missingFields 不完整；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
+                        .to_string(),
+                );
             }
             if !parts.is_empty() {
                 return parts.join("\n");
@@ -471,6 +491,51 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
         }
     }
     trimmed.to_string()
+}
+
+fn read_stopless_schema_feedback_context(
+    row: &Map<String, Value>,
+) -> Option<(String, Vec<String>)> {
+    let feedback = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))?
+        .as_object()?;
+    let reason_code = feedback
+        .get("reasonCode")
+        .or_else(|| feedback.get("reason_code"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    let missing_fields = feedback
+        .get("missingFields")
+        .or_else(|| feedback.get("missing_fields"))
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(String::from)
+        .collect::<Vec<_>>();
+    if missing_fields.is_empty() {
+        return None;
+    }
+    Some((reason_code, missing_fields))
+}
+
+fn derive_stopless_trigger_hint_from_reason(reason_code: &str) -> Option<&'static str> {
+    match reason_code {
+        "stop_schema_missing" => Some("no_schema"),
+        "stop_schema_continue_next_step" => Some("non_terminal_schema"),
+        "stop_schema_stopreason_missing_or_non_numeric"
+        | "stop_schema_reason_missing"
+        | "stop_schema_forcestop_reason_missing"
+        | "stop_schema_terminal_missing_fields"
+        | "stop_schema_needs_user_input_missing_next_step"
+        | "stop_schema_next_step_missing"
+        | "stop_schema_continue_without_next_step" => Some("invalid_schema"),
+        _ => None,
+    }
 }
 
 fn read_stopless_tool_result_snapshot_text(row: &Map<String, Value>) -> Option<String> {
@@ -572,26 +637,18 @@ fn render_stopless_schema_guidance_text(
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect::<Vec<_>>()
         })
-        .unwrap_or_else(|| {
-            vec![
-                "stopreason".to_string(),
-                "reason".to_string(),
-                "has_evidence".to_string(),
-                "evidence".to_string(),
-                "issue_cause".to_string(),
-                "excluded_factors".to_string(),
-                "diagnostic_order".to_string(),
-                "done_steps".to_string(),
-                "next_step".to_string(),
-                "next_suggested_path".to_string(),
-                "needs_user_input".to_string(),
-                "learned".to_string(),
-            ]
-        });
+        .unwrap_or_default();
     let fields = required_fields.join(", ");
-    let base = format!(
-        "如果这一轮准备收尾，结尾补齐这些字段：{fields}\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\n"
-    );
+    let base = if fields.is_empty() {
+        "如果这一轮准备收尾，按条件填写 stop schema；本轮 CLI 输出没有提供缺失字段列表，不能假造字段全集。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\n".to_string()
+    } else {
+        format!(
+            "如果这一轮准备收尾，结尾按条件补齐这些字段：{fields}\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\n"
+        )
+    };
+    let conditional_rules =
+        "必填关系：stopreason 必须是数字 0/1/2；reason 必须说明当前状态；has_evidence 必须是 0 或 1；has_evidence=1 时 evidence 必须写证据；stopreason=0/1 是停止条件，必须 has_evidence=1 且 evidence 非空；stopreason=2 必须写 next_step，下一轮只执行 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。"
+            .to_string();
     let hint = match trigger_hint {
         "no_schema" => {
             if used == 0 {
@@ -615,9 +672,9 @@ fn render_stopless_schema_guidance_text(
         _ => String::new(),
     };
     let sample = if trigger_hint == "budget_exhausted" {
-        "样例：{\"stopreason\":1,\"reason\":\"需要用户确认上线策略\",\"issue_cause\":\"缺少发布授权\"}".to_string()
+        "最小可复制样本：{\"stopreason\":1,\"reason\":\"需要用户确认上线策略\",\"has_evidence\":1,\"evidence\":\"缺少发布授权\",\"next_step\":\"请确认是否上线\",\"needs_user_input\":true}".to_string()
     } else {
-        "样例：{\"stopreason\":0,\"reason\":\"已完成并验证\",\"has_evidence\":1,\"evidence\":\"测试通过日志\",\"done_steps\":\"已编译并验证\"}".to_string()
+        "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"运行下一条验证命令\",\"needs_user_input\":false}".to_string()
     };
     let decision_rules = guidance
         .get("decisionRules")
@@ -643,7 +700,7 @@ fn render_stopless_schema_guidance_text(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let mut sections = vec![base, hint, sample];
+    let mut sections = vec![base, hint, conditional_rules, sample];
     if !decision_rules.is_empty() {
         sections.push(format!("判定规则：\n- {}", decision_rules.join("\n- ")));
     }
@@ -2125,7 +2182,9 @@ mod tests {
         assert!(!restored_output.contains("stop_message_auto"));
         assert!(restored_output.contains("invalid_schema"));
         assert_eq!(messages[2]["role"], "user");
-        let guidance = messages[2]["content"][0]["text"].as_str().expect("guidance");
+        let guidance = messages[2]["content"][0]["text"]
+            .as_str()
+            .expect("guidance");
         assert!(guidance.contains("上一轮执行结果：repeatCount=1/3"));
         assert!(guidance.contains("刚才那段我没看明白"));
         assert!(guidance.contains("stopreason"));
@@ -2809,6 +2868,7 @@ mod tests {
                     "missingFields": ["reason"]
                 },
                 "schemaGuidance": {
+                    "triggerHint": "invalid_schema",
                     "requiredFields": ["stopreason", "reason", "next_step"],
                     "stopreasonValues": {
                         "finished": 0,
@@ -2828,11 +2888,18 @@ mod tests {
         assert!(text.contains("stopreason"));
         assert!(text.contains("next_step"));
         assert!(text.contains("0=finished"));
+        assert!(text.contains("按条件补齐这些字段"));
+        assert!(text.contains("has_evidence=1 时 evidence 必须写证据"));
+        assert!(text.contains("stopreason=2 必须写 next_step"));
+        assert!(text.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
+        assert!(text.contains("最小可复制样本："));
+        assert!(text.contains("\"next_step\""));
         assert!(text.contains("只有任务确实已经完成"));
         assert!(!text.contains("servertool"));
         assert!(!text.contains("停止 JSON"));
         assert!(!text.contains("格式不对"));
         assert!(!text.contains("重试机会"));
+        assert!(!text.contains("样例："));
     }
 
     #[test]
@@ -2862,6 +2929,12 @@ mod tests {
         assert!(text.contains("继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"));
         assert!(!text.contains("如果任务还没完成，不要停，继续执行当前任务"));
         assert!(text.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+        assert!(text.contains("按条件补齐这些字段"));
+        assert!(text.contains("has_evidence=1 时 evidence 必须写证据"));
+        assert!(text.contains("stopreason=2 必须写 next_step"));
+        assert!(text.contains("最小可复制样本："));
+        assert!(text.contains("\"needs_user_input\":false"));
+        assert!(!text.contains("样例："));
     }
 
     #[test]
@@ -2892,6 +2965,51 @@ mod tests {
             "如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"
         ));
         assert!(text.contains("如果任务还没完成，不要停，继续执行当前任务"));
+        assert!(text.contains("has_evidence=1 时 evidence 必须写证据"));
+        assert!(text.contains("stopreason=2 必须写 next_step"));
+        assert!(text.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
+        assert!(text.contains("最小可复制样本："));
+        assert!(text.contains("\"next_step\":\"运行下一条验证命令\""));
+        assert!(!text.contains("样例："));
+    }
+
+    #[test]
+    fn stop_hook_guidance_text_rejects_unregistered_feedback_without_default_guidance() {
+        let text = build_stop_hook_guidance_text_from_output(
+            &json!({
+                "toolName": "stop_message_auto",
+                "repeatCount": 2,
+                "schemaFeedback": {
+                    "reasonCode": "stop_schema_unknown_future_reason",
+                    "missingFields": ["next_step"]
+                }
+            })
+            .to_string(),
+        );
+        assert!(text.contains("STOPLESS_CLI_RESULT_MALFORMED"));
+        assert!(text.contains("没有注册的修复引导"));
+        assert!(!text.contains("triggerHint"));
+        assert!(!text.contains("no_schema"));
+        assert!(!text.contains("结尾按条件补齐这些字段：stopreason, reason, has_evidence"));
+    }
+
+    #[test]
+    fn stop_hook_guidance_text_rejects_incomplete_feedback_without_default_guidance() {
+        let text = build_stop_hook_guidance_text_from_output(
+            &json!({
+                "toolName": "stop_message_auto",
+                "repeatCount": 2,
+                "schemaFeedback": {
+                    "reasonCode": "stop_schema_next_step_missing",
+                    "missingFields": []
+                }
+            })
+            .to_string(),
+        );
+        assert!(text.contains("STOPLESS_CLI_RESULT_MALFORMED"));
+        assert!(text.contains("schemaFeedback.reasonCode/missingFields 不完整"));
+        assert!(!text.contains("no_schema"));
+        assert!(!text.contains("结尾按条件补齐这些字段：stopreason, reason, has_evidence"));
     }
 
     #[test]

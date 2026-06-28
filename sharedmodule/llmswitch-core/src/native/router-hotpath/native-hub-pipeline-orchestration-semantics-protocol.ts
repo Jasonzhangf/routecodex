@@ -53,6 +53,7 @@ export type ProviderResponseRuntimeEffectPlan = {
     requestId: string;
   } | null;
   runtimeStateWrite?: Record<string, unknown> | null;
+  stoplessMetadataCenterWrite?: Record<string, unknown> | null;
   servertoolRuntimeActions: Array<Record<string, unknown>>;
 };
 
@@ -294,12 +295,24 @@ function parseProviderResponseRuntimeEffectPlan(raw: string): ProviderResponseRu
     : row.runtimeStateWrite && typeof row.runtimeStateWrite === 'object' && !Array.isArray(row.runtimeStateWrite)
       ? row.runtimeStateWrite as Record<string, unknown>
       : undefined;
-  if (streamPipe === undefined || runtimeStateWrite === undefined || !Array.isArray(row.servertoolRuntimeActions)) {
+  const stoplessMetadataCenterWrite =
+    row.stoplessMetadataCenterWrite === null || row.stoplessMetadataCenterWrite === undefined
+      ? null
+      : row.stoplessMetadataCenterWrite && typeof row.stoplessMetadataCenterWrite === 'object' && !Array.isArray(row.stoplessMetadataCenterWrite)
+        ? row.stoplessMetadataCenterWrite as Record<string, unknown>
+        : undefined;
+  if (
+    streamPipe === undefined
+    || runtimeStateWrite === undefined
+    || stoplessMetadataCenterWrite === undefined
+    || !Array.isArray(row.servertoolRuntimeActions)
+  ) {
     return null;
   }
   return {
     streamPipe,
     runtimeStateWrite,
+    stoplessMetadataCenterWrite,
     servertoolRuntimeActions: row.servertoolRuntimeActions as Array<Record<string, unknown>>,
   };
 }

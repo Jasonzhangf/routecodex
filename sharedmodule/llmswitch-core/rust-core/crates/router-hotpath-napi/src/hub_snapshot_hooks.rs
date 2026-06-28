@@ -850,11 +850,7 @@ fn build_runtime_request_truth_summary(runtime_metadata: Option<&Value>) -> Opti
 
     if let Some(runtime_control) = metadata.get("runtime_control").and_then(Value::as_object) {
         let mut runtime_summary = Map::<String, Value>::new();
-        for key in [
-            "serverToolFollowup",
-            "serverToolFollowupSource",
-            "stopless",
-        ] {
+        for key in ["serverToolFollowup", "serverToolFollowupSource", "stopless"] {
             if let Some(value) = runtime_control.get(key) {
                 runtime_summary.insert(key.to_string(), value.clone());
             }

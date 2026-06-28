@@ -122,7 +122,8 @@ impl VirtualRouterEngineCore {
         let now = now_ms();
         match classification {
             _ => {
-                self.health_manager.record_failure(provider_key, reason, now);
+                self.health_manager
+                    .record_failure(provider_key, reason, now);
                 self.persist_provider_health();
                 true
             }
@@ -498,7 +499,8 @@ mod tests {
         let first_cycle = provider_state(&core, provider_key);
         let first_expiry = first_cycle.cooldown_expires_at.expect("cooldown expiry");
         assert!(
-            core.health_manager.is_available(provider_key, first_expiry + 1),
+            core.health_manager
+                .is_available(provider_key, first_expiry + 1),
             "expiry should restore availability"
         );
         let restored = provider_state(&core, provider_key);
@@ -513,7 +515,10 @@ mod tests {
         let second_cycle = provider_state(&core, provider_key);
         assert_eq!(second_cycle.state, "tripped");
         assert_eq!(second_cycle.failure_count, 3);
-        let ttl = second_cycle.cooldown_expires_at.expect("second cooldown expiry") - now_ms();
+        let ttl = second_cycle
+            .cooldown_expires_at
+            .expect("second cooldown expiry")
+            - now_ms();
         assert!(
             ttl > 29 * 60_000 && ttl <= 31 * 60_000,
             "second cycle should still use ~30m ttl, got {ttl}"

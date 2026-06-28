@@ -189,7 +189,7 @@ reporter 只能透传，不得 fallback 成另一套语义。
 
 ### Rule 6: backoff 动作唯一队列
 - 统一 owner：`src/server/runtime/http-server/executor/request-executor-error-action-queue.ts`
-- category 固定：`global_error` / `session_storm` / `provider_recoverable` / `provider_transport` / `provider_traffic_saturated` / `servertool_followup`
+- category 固定：`global_error` / `session_storm` / `provider_recoverable` / `provider_transport` / `servertool_followup`
 - delay 固定：`1s -> 2s -> 3s` 循环
 - 等待固定：blocking wait + category/scope gate
 - hooks 固定：`record` / `wait_start` / `wait_end`
@@ -205,7 +205,6 @@ reporter 只能透传，不得 fallback 成另一套语义。
 这些错误允许进入的 action category 仅限：
 - `provider_recoverable`
 - `provider_transport`
-- `provider_traffic_saturated`
 - 或 Router/VR health/cooldown 侧的 provider/server truth
 
 禁止行为：
@@ -226,8 +225,7 @@ reporter 只能透传，不得 fallback 成另一套语义。
 - `session_storm` 不得承担 provider health、provider cooldown、provider exclusion、default-pool fallback 的任何语义
 
 ### Rule 7: provider traffic saturation
-- 并发/RPM 满时，先释放 traffic state lock，再通过 `provider_traffic_saturated` 队列 blocking wait 一次。
-- 醒后重查；仍满则抛 `ProviderTrafficSaturatedError`，由上层错误链/Virtual Router 切 provider。
+- 并发/RPM 满时，先释放 traffic state lock，然后立刻抛 `ProviderTrafficSaturatedError`，由上层错误链/Virtual Router 切 provider。
 - priority mode 不允许因为当前 provider 优先级最高就绕过切换或无限等待。
 
 ## 迁移计划

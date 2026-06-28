@@ -1,8 +1,9 @@
 lifecycle_id: metadata.center.mainline
-summary: "request-scoped metadata center mainline: request truth is materialized
-  once, continuation/runtime/provider observation attach as separate families,
-  and response/servertool consume read-only projections before closeout
-  release."
+summary: "single request-scoped metadata center mainline: one bound center flows
+  across server -> Hub Pipeline -> provider/runtime -> response closeout;
+  request truth is materialized once, continuation/runtime/provider observation
+  attach as separate families, and later stages consume read-only projections
+  before closeout release."
 owner_feature_id: hub.metadata_center_mainline
 entrypoint:
   node_id: MetaReq01InboundSeeded
@@ -42,7 +43,7 @@ edges:
   - step_id: mtc-03
     from_node: MetaReq03ContinuationAttached
     to_node: MetaReq04RuntimeControlBound
-    status: partial
+    status: anchored
     owner_feature_id: hub.metadata_center_mainline
     binding_pending: null
     split_binding_id: null
@@ -78,4 +79,3 @@ verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-mainline-manifest-sync
-    - npm run verify:metadata-center-dualwrite-api

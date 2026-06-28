@@ -346,7 +346,7 @@ mod tests {
         });
         let request = build_request_from_responses_payload(
             payload_row.as_object().expect("payload row"),
-            &context
+            &context,
         )
         .expect("request");
 

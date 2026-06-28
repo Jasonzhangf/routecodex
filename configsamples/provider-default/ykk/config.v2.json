@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "providerId": "ykk",
+  "provider": {
+    "id": "ykk",
+    "enabled": true,
+    "type": "responses",
+    "baseURL": "http://106.52.126.193:63513/v1",
+    "compatibilityProfile": "responses:crs",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${YKK_API_KEY}"
+    },
+    "models": {
+      "gpt-5.4": {
+        "supportsStreaming": true
+      }
+    },
+    "responses": {
+      "process": "chat",
+      "streaming": "always"
+    },
+    "config": {
+      "responses": {
+        "process": "chat",
+        "streaming": "always"
+      }
+    },
+    "transportBackend": "openai-sdk",
+    "concurrency": {
+      "maxInFlight": 8,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
+  }
+}

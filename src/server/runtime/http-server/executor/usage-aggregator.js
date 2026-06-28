@@ -77,8 +77,6 @@ export function extractUsageFromResult(result, metadata) {
     const runtimeControl = readRuntimeControlProjection(metadata);
     const sourceProtocol = typeof runtimeControl.providerProtocol === 'string'
         ? runtimeControl.providerProtocol.trim().toLowerCase()
-        : typeof metadata?.providerProtocol === 'string'
-            ? String(metadata.providerProtocol).trim().toLowerCase()
         : undefined;
     const candidates = [];
     if (result.body && typeof result.body === 'object') {

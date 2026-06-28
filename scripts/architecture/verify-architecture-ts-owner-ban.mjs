@@ -40,7 +40,6 @@ const TS_OWNER_WHITELIST = new Set([
   'runtime.lifecycle.pid_cache', // runtime lifecycle cache is TS host process glue; pid cache is not semantic truth
   'runtime.lifecycle.stop_intent', // runtime lifecycle stop signal is TS host process glue
   'runtime.lifecycle.instance_registry', // runtime lifecycle instance declaration is TS host process glue
-  'runtime.tmux_client_binding', // tmux/client attachment registry is TS host integration, not request/session truth
   'server.port_config_provider_failure_exemption', // server config validation contract is TS config glue with provider paths forbidden
   'snapshot.provider_error_buffer', // provider snapshot error buffer is TS diagnostics glue, not payload/runtime truth
   'provider.debug_example_hooks_surface', // debug example hooks are TS-only diagnostics surface

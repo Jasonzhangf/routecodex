@@ -42,7 +42,10 @@ describe('server responses SSE surface single owner', () => {
 
     for (const forbiddenExport of [
       'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
+      'export function inspectResponsesContinuationProbeForHttp(',
       'export function planResponsesStreamEndRepairForHttp(',
+      'export function resolveResponsesTerminalProbeFinishReasonForHttp(',
+      'export function shouldRequireResponsesTerminalEventForHttp(',
       'export async function createResponsesJsonToSseConverterForHttp(',
       'export async function projectResponsesSseFrameForClientForHttp(',
       'export async function normalizeResponsesSseFrameForClientForHttp(',

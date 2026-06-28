@@ -129,7 +129,10 @@ pub(crate) fn strip_visible_content_from_tool_call_rounds(payload: &mut Value) -
         if finish_reason != "tool_calls" {
             continue;
         }
-        let Some(message) = choice_row.get_mut("message").and_then(|v| v.as_object_mut()) else {
+        let Some(message) = choice_row
+            .get_mut("message")
+            .and_then(|v| v.as_object_mut())
+        else {
             continue;
         };
         let has_tool_calls = message

@@ -17,21 +17,15 @@ function isolateSessionDir(label: string): void {
 
 function bindStoplessMetadataCenter<T extends Record<string, unknown>>(adapterContext: T): T {
   const center = MetadataCenter.attach(adapterContext);
-  const providerProtocol =
-    typeof adapterContext.providerProtocol === 'string' && adapterContext.providerProtocol.trim()
-      ? adapterContext.providerProtocol.trim()
-      : 'openai-responses';
-  if (providerProtocol) {
-    center.writeRuntimeControl(
-      'providerProtocol',
-      providerProtocol,
-      {
-        module: 'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
-        symbol: 'bindStoplessMetadataCenter',
-        stage: 'test'
-      }
-    );
-  }
+  center.writeRuntimeControl(
+    'providerProtocol',
+    'openai-responses',
+    {
+      module: 'tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts',
+      symbol: 'bindStoplessMetadataCenter',
+      stage: 'test'
+    }
+  );
   if (typeof adapterContext.requestId === 'string' && adapterContext.requestId.trim()) {
     center.writeRequestTruth(
       'requestId',

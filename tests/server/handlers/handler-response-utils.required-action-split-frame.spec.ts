@@ -449,8 +449,8 @@ async function waitForEndWithTimeout(stream: PassThrough, timeoutMs: number): Pr
   ]);
 }
 
-describe('handler-response-utils required_action split frame regression', () => {
-  it('RED: split response.required_action SSE frames must not terminate before data payload arrives', async () => {
+describe('handler-response-utils required_action transport-only regression', () => {
+  it('does not split response.required_action SSE frames in the handler transport layer', async () => {
     const previousProjectionTimeout = process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
     const previousTerminalCloseTimeout = process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
     const previousTotalTimeout = process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
@@ -533,13 +533,12 @@ describe('handler-response-utils required_action split frame regression', () => 
     const ended = await waitForEndWithTimeout(res, 1500);
     expect(ended).toBe(true);
     const text = chunks.join('');
-    expect(text).toContain('event: response.output_item.added');
-    expect(text).toContain('event: response.function_call_arguments.done');
-    expect(text).toContain('event: response.output_item.done');
-    expect(text).toContain('event: response.completed');
-    expect(text).toContain('event: response.done');
-    expect(text.indexOf('event: response.output_item.done')).toBeLessThan(text.indexOf('event: response.completed'));
-    expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
+    expect(text).toContain('event: response.required_action');
+    expect(text).not.toContain('event: response.output_item.added');
+    expect(text).not.toContain('event: response.function_call_arguments.done');
+    expect(text).not.toContain('event: response.output_item.done');
+    expect(text).not.toContain('event: response.completed');
+    expect(text).not.toContain('event: response.done');
     if (previousProjectionTimeout === undefined) {
       delete process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
     } else {

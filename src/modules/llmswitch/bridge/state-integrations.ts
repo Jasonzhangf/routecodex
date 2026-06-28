@@ -8,7 +8,6 @@
 import { requireCoreDist } from './module-loader.js';
 import type { AnyRecord } from './module-loader.js';
 import { formatUnknownError } from '../../../utils/common-utils.js';
-import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 type RoutingInstructionState = Record<string, unknown>;
 
@@ -105,16 +104,8 @@ export function extractContinuationContextSessionIdentifiersFromMetadata(
   meta: Record<string, unknown> | undefined
 ): SessionIdentifiers {
   try {
-    const responsesRequestContext = MetadataCenter.read(meta)?.readContinuationContext().responsesRequestContext;
-    if (!responsesRequestContext || typeof responsesRequestContext !== 'object') {
-      return {};
-    }
-    const sessionId = readNormalizedMetadataToken(responsesRequestContext, ['sessionId', 'session_id']);
-    const conversationId = readNormalizedMetadataToken(responsesRequestContext, ['conversationId', 'conversation_id']);
-    return {
-      ...(sessionId ? { sessionId } : {}),
-      ...(conversationId ? { conversationId } : {})
-    };
+    void meta;
+    return {};
   } catch (error) {
     throw buildStateIntegrationFailure('session_identifiers.extract_continuation.invoke', error);
   }

@@ -8,8 +8,7 @@ const verificationMap = fs.readFileSync(path.join(root, 'docs/architecture/verif
 const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
 const handlerSource = fs.readFileSync(path.join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
 const sseBridgeSource = fs.readFileSync(path.join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
-const sseSemanticsSource = fs.readFileSync(path.join(root, 'src/modules/llmswitch/bridge/responses-sse-semantics.ts'), 'utf8');
-const clientProjectionSource = fs.readFileSync(path.join(root, 'src/modules/llmswitch/bridge/responses-client-projection.ts'), 'utf8');
+const sseTransportSource = fs.readFileSync(path.join(root, 'src/modules/llmswitch/bridge/responses-sse-transport.ts'), 'utf8');
 const responseLifecycleBridgeSource = fs.readFileSync(
   path.join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'),
   'utf8'
@@ -53,8 +52,9 @@ expectContains(packageJson, '"verify:responses-sse-business-module"', 'package.j
 expectContains(packageJson, 'npm run verify:responses-sse-business-module', 'package.json verification wiring must execute verify:responses-sse-business-module');
 
 expectContains(handlerSource, "from '../../modules/llmswitch/bridge/responses-sse-bridge.js'", 'handler-response-sse.ts must import the dedicated SSE bridge facade');
-expectContains(handlerSource, "from '../../modules/llmswitch/bridge/responses-client-projection.js'", 'handler-response-sse.ts must import the dedicated client projection facade');
 expectContains(sseBridgeSource, '// feature_id: server.responses_sse_bridge_surface', 'responses-sse-bridge.ts must stay feature-anchored');
+expectContains(sseTransportSource, 'export function buildClientSseKeepaliveFrameForHttp(', 'responses-sse-transport.ts must own keepalive framing');
+expectContains(sseTransportSource, 'export function shouldDropClientSseFrameForHttp(', 'responses-sse-transport.ts must own transport-only frame drop policy');
 
 for (const forbiddenLocalDefinition of [
   'function inspectResponsesTerminalStateFromSseChunk(',
@@ -88,48 +88,15 @@ for (const forbiddenLifecycleBridgeExport of [
   );
 }
 
-for (const forbiddenSseSemanticsExport of [
-  'export function updateResponsesContractProbeFromSseChunkForHttp(',
-  'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
-  'export function planResponsesStreamEndRepairForHttp(',
-  'export function summarizeResponsesSseFrameForLogForHttp(',
-  'export function resolveResponsesProviderProtocolHintFromSseFrameForHttp(',
-]) {
-  expectNotContains(
-    sseSemanticsSource,
-    forbiddenSseSemanticsExport,
-    `responses-sse-semantics.ts must stay transport/projection-only: ${forbiddenSseSemanticsExport}`
-  );
-}
-
-expectContains(
-  clientProjectionSource,
-  'export async function normalizeClientVisibleResponsesSseFrameForHttp(',
-  'responses-client-projection.ts must own the thin TS client SSE projection shell'
-);
-
-for (const forbiddenClientProjectionExport of [
-  'export async function projectResponsesSseFrameForClientForHttp(',
-  'export async function normalizeResponsesSseFrameForClientForHttp(',
-  'export function summarizeResponsesSseFrameForLogForHttp(',
-  'export function resolveResponsesProviderProtocolHintFromSseFrameForHttp(',
-]) {
-  expectNotContains(
-    clientProjectionSource,
-    forbiddenClientProjectionExport,
-    `responses-client-projection.ts must not own client projection or app-specific semantics: ${forbiddenClientProjectionExport}`
-  );
-}
-
 expectNotContains(
   sseBridgeSource,
   'normalizeClientVisibleResponsesSseFrameForHttp',
   'responses-sse-bridge.ts must not keep client projection semantics'
 );
 expectNotContains(
-  sseSemanticsSource,
+  sseTransportSource,
   'response.required_action',
-  'responses-sse-semantics.ts must not special-case response.required_action semantics'
+  'responses-sse-transport.ts must not special-case response.required_action semantics'
 );
 
 for (const forbiddenDirectNativeImport of [

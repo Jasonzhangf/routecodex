@@ -43,10 +43,6 @@ type ControlSnapshot = {
     state: ReturnType<typeof getServerToolRuntimeState>;
     stats: ReturnType<typeof readServerToolStatsSnapshot>;
   };
-  quota?: {
-    providers?: unknown[];
-    updatedAtMs: number;
-  };
   routing?: {
     virtualRouterConfig?: unknown;
     policy?: unknown;
@@ -181,83 +177,6 @@ async function discoverServers(): Promise<ControlServerInfo[]> {
   return out;
 }
 
-function getQuotaModule(options: DaemonAdminRouteOptions): any | null {
-  const daemon = options.getManagerDaemon() as { getModule?: (id: string) => any } | null;
-  if (!daemon || typeof daemon.getModule !== 'function') {
-    return null;
-  }
-  return daemon.getModule('quota') ?? null;
-}
-
-
-function canonicalizeQuotaSnapshotLookupKey(providerKey: string): string {
-  const lower = typeof providerKey === 'string' ? providerKey.trim().toLowerCase() : '';
-  if (!lower) {
-    return '';
-  }
-  return lower.replace(/\.key(\d+)(?=\.|$)/g, '.$1');
-}
-
-function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
-  const daemon = options.getManagerDaemon() as { getModule?: (id: string) => any } | null;
-  if (!daemon || typeof daemon.getModule !== 'function') {
-    return null;
-  }
-  const quotaModule = daemon.getModule('quota') ?? null;
-  if (!quotaModule) {
-    return null;
-  }
-  return typeof quotaModule.getControlSurface === 'function'
-    ? quotaModule.getControlSurface()
-    : null;
-}
-
-function isRustQuotaMutatorUnavailableResult(result: unknown): boolean {
-  const reason = result && typeof result === 'object'
-    ? (result as { reason?: unknown }).reason
-    : undefined;
-  return Boolean(
-    result
-    && typeof result === 'object'
-    && (result as { ok?: unknown }).ok === false
-    && (
-      reason === 'rust_quota_host_mutator_unavailable'
-      || (x7eGate.phase1UnifiedQuota && reason === 'no_quota_manager_available')
-    )
-  );
-}
-
-function readQuotaProviderSnapshot(quotaMod: any, providerKey: string): unknown {
-  try {
-    const snapshot = typeof quotaMod?.getAdminSnapshot === 'function' ? quotaMod.getAdminSnapshot() : null;
-    if (!snapshot || typeof snapshot !== 'object') {
-      return null;
-    }
-    const normalizedLookup = canonicalizeQuotaSnapshotLookupKey(providerKey);
-    const direct = (snapshot as Record<string, unknown>)[providerKey]
-      ?? (normalizedLookup ? (snapshot as Record<string, unknown>)[normalizedLookup] : null)
-      ?? null;
-    if (direct) {
-      return direct;
-    }
-    for (const [key, value] of Object.entries(snapshot as Record<string, unknown>)) {
-      if (key === providerKey || (normalizedLookup && canonicalizeQuotaSnapshotLookupKey(key) === normalizedLookup)) {
-        return value;
-      }
-      if (value && typeof value === 'object') {
-        const valueProviderKey = String((value as any).providerKey || '');
-        if (valueProviderKey === providerKey || (normalizedLookup && canonicalizeQuotaSnapshotLookupKey(valueProviderKey) === normalizedLookup)) {
-          return value;
-        }
-      }
-    }
-    return null;
-  } catch (error) {
-    logControlNonBlockingError('readQuotaProviderSnapshot', error, { providerKey });
-    return null;
-  }
-}
-
 function mapRoutingGroupErrorToStatus(error: unknown): number {
   const code = (error as { code?: string } | null)?.code;
   if (code === 'group_not_found') {
@@ -318,29 +237,6 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
     const nowMs = Date.now();
     const servers = await discoverServers();
 
-    const quotaMod = getQuotaModule(options);
-    let quotaProviders: unknown[] | undefined = undefined;
-    try {
-      const adminSnapshot = typeof quotaMod?.getAdminSnapshot === 'function' ? quotaMod.getAdminSnapshot() : null;
-      if (adminSnapshot && typeof adminSnapshot === 'object') {
-        quotaProviders = Object.values(adminSnapshot).map((state: any) => ({
-          providerKey: state?.providerKey ?? null,
-          inPool: Boolean(state?.inPool),
-          reason: state?.reason ?? null,
-          authIssue: state?.authIssue ?? null,
-          authType: state?.authType ?? null,
-          priorityTier: typeof state?.priorityTier === 'number' ? state.priorityTier : null,
-          cooldownUntil: state?.cooldownUntil ?? null,
-          blacklistUntil: state?.blacklistUntil ?? null,
-          consecutiveErrorCount: typeof state?.consecutiveErrorCount === 'number' ? state.consecutiveErrorCount : 0,
-          ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
-        }));
-      }
-    } catch (error) {
-      logControlNonBlockingError('snapshot.quotaAdminSnapshot', error);
-      quotaProviders = undefined;
-    }
-
     let vrConfig: unknown = null;
     try {
       const artifacts = typeof options.getVirtualRouterArtifacts === 'function' ? options.getVirtualRouterArtifacts() : null;
@@ -360,11 +256,6 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       serverTool: {
         state: getServerToolRuntimeState(),
         stats: readServerToolStatsSnapshot()
-      },
-      quota: {
-        providers: quotaProviders,
-        updatedAtMs: nowMs,
-        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
       },
       routing: {
         virtualRouterConfig: vrConfig,
@@ -541,165 +432,6 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       }
 
       res.status(200).json({ ok: true, action, nowMs, results, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
-      return;
-    }
-
-    if (action === 'quota.disable') {
-      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
-      const mode = body.mode === 'blacklist' ? 'blacklist' : 'cooldown';
-      const durationMs = typeof body.durationMs === 'number' && Number.isFinite(body.durationMs) ? Math.floor(body.durationMs) : 0;
-      if (!providerKey || !durationMs) {
-        res.status(400).json({ error: { message: 'providerKey and durationMs are required', code: 'bad_request' } });
-        return;
-      }
-      const quotaMod = getQuotaAdapter(options);
-      if (!quotaMod || typeof quotaMod.disableProvider !== 'function') {
-        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
-        return;
-      }
-      const result = await quotaMod.disableProvider({ providerKey, mode, durationMs });
-      if (isRustQuotaMutatorUnavailableResult(result)) {
-        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
-        return;
-      }
-      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
-      return;
-    }
-
-    if (action === 'quota.recover') {
-      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
-      if (!providerKey) {
-        res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
-        return;
-      }
-      const quotaMod = getQuotaAdapter(options);
-      if (!quotaMod || typeof quotaMod.recoverProvider !== 'function') {
-        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
-        return;
-      }
-      const result = await quotaMod.recoverProvider(providerKey);
-      if (isRustQuotaMutatorUnavailableResult(result)) {
-        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
-        return;
-      }
-      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
-      return;
-    }
-
-    if (action === 'quota.reset') {
-      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
-      if (!providerKey) {
-        res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
-        return;
-      }
-      const quotaMod = getQuotaAdapter(options);
-      if (!quotaMod || typeof quotaMod.resetProvider !== 'function') {
-        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
-        return;
-      }
-      const result = await quotaMod.resetProvider(providerKey);
-      if (isRustQuotaMutatorUnavailableResult(result)) {
-        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
-        return;
-      }
-      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
-      return;
-    }
-
-    if (action === 'quota.clearCooldown' || action === 'quota.clear_cooldown') {
-      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
-      if (!providerKey) {
-        res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
-        return;
-      }
-      const quotaMod = getQuotaAdapter(options);
-      if (!quotaMod || typeof quotaMod.clearCooldown !== 'function') {
-        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
-        return;
-      }
-      const result = await quotaMod.clearCooldown(providerKey);
-      if (isRustQuotaMutatorUnavailableResult(result)) {
-        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
-        return;
-      }
-      const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
-      res.status(200).json({
-        ok: true,
-        action,
-        nowMs,
-        result,
-        snapshot,
-        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
-      });
-      return;
-    }
-
-    if (action === 'quota.restoreNow' || action === 'quota.restore_now') {
-      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
-      if (!providerKey) {
-        res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
-        return;
-      }
-      const quotaMod = getQuotaAdapter(options);
-      if (!quotaMod || typeof quotaMod.restoreNow !== 'function') {
-        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
-        return;
-      }
-      const result = await quotaMod.restoreNow(providerKey);
-      if (isRustQuotaMutatorUnavailableResult(result)) {
-        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
-        return;
-      }
-      const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
-      res.status(200).json({
-        ok: true,
-        action,
-        nowMs,
-        result,
-        snapshot,
-        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
-      });
-      return;
-    }
-
-    if (action === 'quota.setQuota' || action === 'quota.set_quota' || action === 'quota.set') {
-      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
-      const quota = typeof body.quota === 'number' ? body.quota : Number.NaN;
-      const reason = typeof body.reason === 'string' ? body.reason.trim() : undefined;
-      if (!providerKey || !Number.isFinite(quota)) {
-        res.status(400).json({ error: { message: 'providerKey and quota(number) are required', code: 'bad_request' } });
-        return;
-      }
-      const quotaMod = getQuotaAdapter(options);
-      if (!quotaMod || typeof quotaMod.setQuota !== 'function') {
-        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
-        return;
-      }
-      const result = await quotaMod.setQuota({ providerKey, quota, ...(reason ? { reason } : {}) });
-      if (isRustQuotaMutatorUnavailableResult(result)) {
-        res.status(503).json({ error: { message: 'rust quota host mutator not available', code: 'not_ready' } });
-        return;
-      }
-      const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
-      res.status(200).json({
-        ok: true,
-        action,
-        nowMs,
-        result,
-        snapshot,
-        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
-      });
-      return;
-    }
-
-    if (action === 'quota.refresh') {
-      const quotaMod = getQuotaAdapter(options);
-      if (!quotaMod || typeof quotaMod.refreshNow !== 'function') {
-        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
-        return;
-      }
-      const result = await quotaMod.refreshNow();
-      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
 

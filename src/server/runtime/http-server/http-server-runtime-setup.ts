@@ -590,14 +590,8 @@ async function applyRoutingScopeToManagerModules(server: any, scope: RoutingProv
   const tokenModule = server.managerDaemon?.getModule?.('token') as
     | { updateRoutingScope?: (scope: RoutingProviderScope) => Promise<void> | void }
     | undefined;
-  const quotaModule = server.managerDaemon?.getModule?.('quota') as
-    | { updateRoutingScope?: (scope: RoutingProviderScope) => Promise<void> | void }
-    | undefined;
 
   if (tokenModule && typeof tokenModule.updateRoutingScope === 'function') {
     await tokenModule.updateRoutingScope(scope);
-  }
-  if (quotaModule && typeof quotaModule.updateRoutingScope === 'function') {
-    await quotaModule.updateRoutingScope(scope);
   }
 }

@@ -1,7 +1,12 @@
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
 use crate::hub_req_inbound_context_capture::normalize_responses_input_items;
+use crate::hub_req_inbound_tool_call_normalization::{
+    build_responses_reasoning_stop_function_call_item, build_stop_hook_guidance_text_from_output,
+    build_stop_hook_reasoning_stop_output_text,
+};
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 use crate::shared_json_utils::read_trimmed_string;
+use crate::virtual_router_engine::derive_model_id;
 use serde_json::{Map, Value};
 
 pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, String> {
@@ -26,11 +31,16 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         .and_then(|v| v.as_object())
         .ok_or_else(|| "normalized must be object".to_string())?;
 
+    let metadata_from_normalized = normalized
+        .get("metadata")
+        .and_then(|v| v.as_object())
+        .cloned();
     let model = payload
         .get("model")
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+        .or_else(|| derive_model_from_continuation_metadata(metadata_from_normalized.as_ref()))
         .ok_or_else(|| "[HubPipeline] outbound stage requires payload.model".to_string())?;
     let tools = payload
         .get("tools")
@@ -47,6 +57,10 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
             let normalized_input_items =
                 normalize_responses_input_items(payload).unwrap_or_else(|| input_items.clone());
+            let normalized_input_items = append_stopless_resume_outputs_from_metadata(
+                normalized_input_items,
+                metadata_from_normalized.as_ref(),
+            );
             let allow_output_only_resume_tool_result =
                 is_output_only_resume_tool_result(payload, normalized_input_items.as_slice());
             convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
@@ -56,6 +70,20 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
                 normalize_function_name: Some("responses".to_string()),
                 allow_pending_terminal_tool_call: Some(true),
                 allow_orphan_tool_result: Some(allow_output_only_resume_tool_result),
+            })?
+            .messages
+        } else if let Some(tool_outputs) = payload
+            .get("tool_outputs")
+            .and_then(|v| v.as_array())
+            .cloned()
+        {
+            convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
+                input: normalize_submit_tool_outputs_as_responses_input(tool_outputs),
+                tools: tools.clone(),
+                tool_result_fallback_text: None,
+                normalize_function_name: Some("responses".to_string()),
+                allow_pending_terminal_tool_call: Some(true),
+                allow_orphan_tool_result: Some(true),
             })?
             .messages
         } else if let Some(input_text) = payload
@@ -77,10 +105,6 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         .unwrap_or_default();
     let semantics_from_payload = payload
         .get("semantics")
-        .and_then(|v| v.as_object())
-        .cloned();
-    let metadata_from_normalized = normalized
-        .get("metadata")
         .and_then(|v| v.as_object())
         .cloned();
     let previous_response_id = payload
@@ -255,6 +279,135 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
     );
     output.insert("rawPayload".to_string(), Value::Object(raw_payload));
     Ok(Value::Object(output))
+}
+
+fn derive_model_from_continuation_metadata(
+    metadata: Option<&Map<String, Value>>,
+) -> Option<String> {
+    let metadata = metadata?;
+    let provider_key = read_trimmed_string(metadata.get("retryProviderKey")).or_else(|| {
+        metadata
+            .get("responsesResume")
+            .and_then(Value::as_object)
+            .and_then(|resume| read_trimmed_string(resume.get("providerKey")))
+    })?;
+    let model = derive_model_id(provider_key.as_str());
+    let model = model.trim();
+    if model.is_empty() {
+        None
+    } else {
+        Some(model.to_string())
+    }
+}
+
+fn normalize_submit_tool_outputs_as_responses_input(tool_outputs: Vec<Value>) -> Vec<Value> {
+    tool_outputs
+        .into_iter()
+        .map(|entry| {
+            let Some(row) = entry.as_object() else {
+                return entry;
+            };
+            let mut normalized = row.clone();
+            normalized
+                .entry("type".to_string())
+                .or_insert_with(|| Value::String("function_call_output".to_string()));
+            Value::Object(normalized)
+        })
+        .collect()
+}
+
+fn append_stopless_resume_outputs_from_metadata(
+    mut input_items: Vec<Value>,
+    metadata: Option<&Map<String, Value>>,
+) -> Vec<Value> {
+    let Some(metadata) = metadata else {
+        return input_items;
+    };
+    let Some(resume) = metadata.get("responsesResume").and_then(Value::as_object) else {
+        return input_items;
+    };
+    let Some(tool_outputs) = resume.get("toolOutputsDetailed").and_then(Value::as_array) else {
+        return input_items;
+    };
+    if tool_outputs.is_empty() {
+        return input_items;
+    }
+
+    let existing_output_call_ids = input_items
+        .iter()
+        .filter_map(responses_tool_output_call_id)
+        .collect::<std::collections::HashSet<_>>();
+    let existing_function_call_ids = input_items
+        .iter()
+        .filter_map(|entry| {
+            if !is_responses_function_call_item(entry) {
+                return None;
+            }
+            entry.as_object().and_then(|row| {
+                read_trimmed_string(row.get("call_id"))
+                    .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                    .or_else(|| read_trimmed_string(row.get("id")))
+            })
+        })
+        .collect::<std::collections::HashSet<_>>();
+
+    for (index, entry) in tool_outputs.iter().enumerate() {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let call_id = read_trimmed_string(row.get("callId"))
+            .or_else(|| read_trimmed_string(row.get("originalId")))
+            .unwrap_or_else(|| format!("stopless_resume_tool_{}", index + 1));
+        if existing_output_call_ids.contains(call_id.as_str())
+            || existing_function_call_ids.contains(call_id.as_str())
+        {
+            continue;
+        }
+        let Some(output_text) = read_trimmed_string(row.get("outputText")) else {
+            continue;
+        };
+        if !is_stopless_cli_output(output_text.as_str()) {
+            continue;
+        }
+
+        input_items.push(build_responses_reasoning_stop_function_call_item(
+            call_id.as_str(),
+            output_text.as_str(),
+        ));
+        input_items.push(serde_json::json!({
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": build_stop_hook_reasoning_stop_output_text(output_text.as_str())
+        }));
+        let guidance = build_stop_hook_guidance_text_from_output(output_text.as_str())
+            .trim()
+            .to_string();
+        if !guidance.is_empty() {
+            input_items.push(serde_json::json!({
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": guidance
+                    }
+                ]
+            }));
+        }
+    }
+
+    input_items
+}
+
+fn is_stopless_cli_output(raw: &str) -> bool {
+    let Ok(Value::Object(row)) = serde_json::from_str::<Value>(raw.trim()) else {
+        return false;
+    };
+    read_trimmed_string(row.get("toolName"))
+        .or_else(|| read_trimmed_string(row.get("tool_name")))
+        .or_else(|| read_trimmed_string(row.get("tool")))
+        .map(|tool_name| tool_name == "stop_message_auto")
+        .unwrap_or(false)
 }
 
 fn copy_optional_payload_fields(
@@ -520,6 +673,79 @@ mod tests {
         assert_eq!(
             standardized["messages"][0]["tool_call_id"],
             json!("call_function_snr978zyv21w_1")
+        );
+    }
+
+    #[test]
+    fn responses_standardization_restores_stopless_resume_tool_output_from_metadata() {
+        let stopless_output = json!({
+            "ok": true,
+            "kind": "stop_message_auto",
+            "tool": "stop_message_auto",
+            "toolName": "stop_message_auto",
+            "flowId": "stop_message_flow",
+            "summary": "stopless continuation ready",
+            "continuationPrompt": "继续推进当前任务。",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "schemaFeedback": {
+                "reasonCode": "stop_schema_continue_next_step",
+                "missingFields": []
+            },
+            "input": {
+                "flowId": "stop_message_flow",
+                "maxRepeats": 3,
+                "repeatCount": 1,
+                "triggerHint": "non_terminal_schema"
+            }
+        })
+        .to_string();
+        let input = json!({
+            "payload": {
+                "model": "glm-5.2",
+                "input": [
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "original task" }] },
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续执行，完成既定目标。" }] }
+                ]
+            },
+            "normalized": {
+                "id": "req_test",
+                "entryEndpoint": "/v1/responses",
+                "stream": false,
+                "processMode": "chat",
+                "metadata": {
+                    "responsesResume": {
+                        "continuationOwner": "relay",
+                        "entryKind": "responses",
+                        "toolOutputsDetailed": [{
+                            "callId": "call_stopless_resume",
+                            "originalId": "call_stopless_resume",
+                            "outputText": stopless_output
+                        }]
+                    }
+                }
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let messages = output["standardizedRequest"]["messages"]
+            .as_array()
+            .expect("standardized messages");
+        let serialized = serde_json::to_string(messages).unwrap();
+        assert!(
+            serialized.contains("reasoningStop"),
+            "request standardization must restore stopless resume output as reasoningStop pair: {}",
+            serialized
+        );
+        assert!(
+            serialized.contains("repeatCount=1/3"),
+            "request standardization must render stopless guidance from resume output: {}",
+            serialized
+        );
+        assert!(
+            !serialized.contains("stop_message_auto"),
+            "provider-facing restored tool result must not leak stop_message_auto identity: {}",
+            serialized
         );
     }
 

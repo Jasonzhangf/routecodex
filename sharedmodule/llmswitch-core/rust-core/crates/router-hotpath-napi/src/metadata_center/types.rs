@@ -100,6 +100,8 @@ pub struct RuntimeControl {
     pub preselected_route: Option<Value>,
     pub server_tool_followup: Option<bool>,
     pub server_tool_followup_source: Option<String>,
+    pub stop_message_enabled: Option<bool>,
+    pub stop_message_exclude_direct: Option<bool>,
     #[serde(default)]
     pub stop_message: StopMessageControl,
     #[serde(default)]

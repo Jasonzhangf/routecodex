@@ -57,7 +57,7 @@ edges:
   - step_id: rct-06
     from_node: ChatProcRespContinuation06ResponseGoverned
     to_node: ChatProcRespContinuation07CanonicalSaved
-    status: partial
+    status: anchored
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null

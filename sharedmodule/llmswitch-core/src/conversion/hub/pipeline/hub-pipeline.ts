@@ -112,7 +112,9 @@ function readString(value: unknown): string | undefined {
 
 function readProviderProtocol(metadata: Record<string, unknown>): HubPipelineProviderProtocol {
   const runtimeControl = readRuntimeControlFromBoundMetadataCenter(metadata);
-  const providerProtocol = readString(runtimeControl?.providerProtocol);
+  const providerProtocol =
+    readString(runtimeControl?.providerProtocol)
+    ?? readString(metadata.providerProtocol);
   if (!providerProtocol) {
     throw new Error("HubPipeline requires metadata center runtime_control.providerProtocol");
   }

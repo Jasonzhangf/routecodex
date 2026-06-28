@@ -535,19 +535,19 @@ function assertRuntimeMetadataSessionDirLock() {
     'runtime-metadata-session-dir-lock',
     RUST_ROUTER_HOTPATH_NAPI_PROXY,
     proxy,
-    'let rt = metadata.get("__rt");'
+    'metadata.get("metadataCenterSnapshot")'
   );
   assertContains(
     'runtime-metadata-session-dir-lock',
     RUST_ROUTER_HOTPATH_NAPI_PROXY,
     proxy,
-    'runtime_path_overrides_read_only_from_rt_namespace'
+    'snapshot_runtime_control'
   );
   assertContains(
     'runtime-metadata-session-dir-lock',
     RUST_ROUTER_HOTPATH_NAPI_PROXY,
     proxy,
-    'runtime_path_overrides_do_not_fallback_to_top_level_metadata'
+    'snapshot.get("runtimeControl")'
   );
   const runtimeSource = proxy.split('#[cfg(test)]')[0];
   for (const forbidden of [
@@ -4866,16 +4866,21 @@ function checkStoplessOrchestrationActionRustOwner() {
 
   for (const [check, file, content, needle] of [
     ['stopless-orchestration-action-rust-owner', RUST_SERVERTOOL_STOPLESS_ORCHESTRATION, rustStoplessOrchestration, 'pub fn plan_stopless_orchestration_action'],
-    ['stopless-orchestration-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_orchestration_action_json'],
-    ['stopless-orchestration-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_orchestration_action_json'],
-    ['stopless-orchestration-action-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessOrchestrationActionJson'],
-    ['stopless-orchestration-action-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planStoplessOrchestrationActionWithNative'],
-    ['stopless-orchestration-action-thin-shell', TS_ENGINE_ORCHESTRATION_SHELL, servertoolEngine, 'planStoplessOrchestrationActionShell'],
+    ['stopless-orchestration-action-rust-owner', RUST_SERVERTOOL_STOPLESS_ORCHESTRATION, rustStoplessOrchestration, 'pub fn plan_stopless_execution'],
+    ['stopless-orchestration-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_execution_json'],
+    ['stopless-orchestration-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_execution_json'],
+    ['stopless-orchestration-action-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessExecutionJson'],
+    ['stopless-orchestration-action-thin-shell', TS_ENGINE_ORCHESTRATION_SHELL, servertoolEngine, "readNativeFunction('planStoplessExecutionJson')"],
   ]) {
     assertContains(check, file, content, needle);
   }
 
   for (const keyword of [
+    'planStoplessOrchestrationActionWithNative',
+    "readNativeFunction('planStoplessOrchestrationActionJson')",
+    'requestTruth: { sessionId: requestTruthSessionId }',
+    'stopless: {',
+    'executionContext?.stopless',
     'function isStopMessageTerminalFinal',
     'stopMessageTerminalFinal === true',
   ]) {
@@ -5694,6 +5699,7 @@ function checkServertoolResponseStageGateThinShell() {
 function checkServertoolEngineStoplessSessionThinShell() {
   const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
   const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
+  const builtinHandlerCatalogSource = readRequired(`${SERVERTOOL_TS_DIR}/builtin-handler-catalog.ts`);
   for (const marker of [
     'function logServerToolNonBlocking(',
     'createServertoolProgressLogger({',
@@ -5725,15 +5731,59 @@ function checkServertoolEngineStoplessSessionThinShell() {
     );
   }
   for (const marker of [
-    'resolveStoplessCliProjectionContext(',
-    'planStoplessCliProjectionContextWithNative(',
-    'buildServertoolCliProjectionForAutoFlowShell({',
     "if (runtimeAction.action === 'build_stop_message_cli_projection')",
+    "readNativeFunction('buildStoplessAutoCliProjectionFromEngineJson')",
   ]) {
     if (!postflightSource.includes(marker)) {
       fail(
         'servertool-engine-stopless-session-thin-shell',
         `engine-postflight-shell.ts must keep stopless session thin-shell marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'resolveStoplessCliProjectionContext(',
+    'planStoplessCliProjectionContextWithNative(',
+    'buildServertoolCliProjectionForAutoFlowShell({',
+    'buildStoplessAutoCliProjectionJson',
+    'function readSessionAndRequestId(',
+    'executionContext?.stopless',
+    'executionContext?.assistantStopText',
+    'executionContext?.stoplessRuntimeState',
+  ]) {
+    if (postflightSource.includes(marker)) {
+      fail(
+        'servertool-engine-stopless-session-no-ts-owner',
+        `engine-postflight-shell.ts must not retain stopless projection semantic marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'switch (runtime.action)',
+    "'return_terminal_final'",
+    "'return_schema_fail_fast'",
+    "'return_schema_allow_stop'",
+    "'return_handler_plan'",
+    "'throw_goal_active_loop'",
+    'runtime.chatResponse ?? ctx.base',
+    'runtime.execution ??',
+    'stopMessageTerminalFinal: true',
+  ]) {
+    if (builtinHandlerCatalogSource.includes(marker)) {
+      fail(
+        'servertool-builtin-handler-stopless-no-ts-action-owner',
+        `builtin-handler-catalog.ts must not retain stopless runtime action semantic marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    "readNativeFunction('runStoplessAutoHandlerRuntimeJson')",
+    "runtime.action !== 'return_handler_result'",
+  ]) {
+    if (!builtinHandlerCatalogSource.includes(marker)) {
+      fail(
+        'servertool-builtin-handler-stopless-thin-shell',
+        `builtin-handler-catalog.ts must keep Rust stopless runtime thin-shell marker ${marker}`
       );
     }
   }
@@ -6018,6 +6068,7 @@ checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
 checkServertoolAutoHookCallerThinShell();
 checkServertoolResponseStageGateThinShell();
+checkServertoolEngineStoplessSessionThinShell();
 checkServertoolActiveOrchestrationAuditRedGate();
 checkDeletedEmptyReplyContinueAbsent();
 

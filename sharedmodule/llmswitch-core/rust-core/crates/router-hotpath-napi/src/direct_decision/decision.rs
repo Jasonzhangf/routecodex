@@ -174,19 +174,17 @@ fn is_client_disconnect_from_error<'a>(
 // ---------------------------------------------------------------------------
 
 pub fn decide_direct_router_retry_json(input_json: String) -> Result<String, String> {
-    let input: DecideDirectRouterRetryArgs = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: DecideDirectRouterRetryArgs =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let decision = decide_direct_router_retry(&input);
-    serde_json::to_string(&decision)
-        .map_err(|e| format!("serialize: {}", e))
+    serde_json::to_string(&decision).map_err(|e| format!("serialize: {}", e))
 }
 
 pub fn decide_direct_provider_retry_json(input_json: String) -> Result<String, String> {
-    let input: DecideDirectProviderRetryArgs = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: DecideDirectProviderRetryArgs =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let decision = decide_direct_provider_retry(&input);
-    serde_json::to_string(&decision)
-        .map_err(|e| format!("serialize: {}", e))
+    serde_json::to_string(&decision).map_err(|e| format!("serialize: {}", e))
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +195,13 @@ pub fn decide_direct_provider_retry_json(input_json: String) -> Result<String, S
 mod tests {
     use super::*;
 
-    fn make_plan(should_retry: bool, switch_action: &str, excluded_current: bool, default_pool: Option<bool>, may_project: Option<bool>) -> DirectRetryPlanLike {
+    fn make_plan(
+        should_retry: bool,
+        switch_action: &str,
+        excluded_current: bool,
+        default_pool: Option<bool>,
+        may_project: Option<bool>,
+    ) -> DirectRetryPlanLike {
         DirectRetryPlanLike {
             should_retry: Some(should_retry),
             switch_action: Some(switch_action.to_string()),

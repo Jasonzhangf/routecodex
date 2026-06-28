@@ -1,41 +1,12 @@
-import { Transform } from 'node:stream';
 import { createResponsesJsonToSseConverter, importCoreDist, isToolCallContinuationResponseNative, rebindResponsesConversationRequestId, requireCoreDist, } from './index.js';
-import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, finalizeResponsesConversationRequestRetention, recordResponsesResponseForRequest, } from './runtime-integrations.js';
+import { clearResponsesConversationByRequestId, } from './runtime-integrations.js';
 import { buildResponsesPayloadFromChatNative, projectResponsesClientPayloadForClientNative, } from './native-exports.js';
-import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { normalizeUsage } from '../../../server/runtime/http-server/executor/usage-aggregator.js';
-import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 import { readRuntimeRequestTruthIdentifiers, } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 export function resolveResponsesRequestContextForHttp(args) {
-    const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
-        ? args.metadata
-        : undefined;
-    const fromMetadata = readMetadataCenterContinuationContextForHttp(metadata).responsesRequestContext;
-    if (fromMetadata && typeof fromMetadata === 'object' && !Array.isArray(fromMetadata)) {
-        const metadataContext = fromMetadata;
-        return {
-            payload: metadataContext.payload && typeof metadataContext.payload === 'object' && !Array.isArray(metadataContext.payload)
-                ? metadataContext.payload
-                : {},
-            context: metadataContext.context && typeof metadataContext.context === 'object' && !Array.isArray(metadataContext.context)
-                ? metadataContext.context
-                : {},
-            ...(typeof metadataContext.sessionId === 'string' && metadataContext.sessionId.trim()
-                ? { sessionId: metadataContext.sessionId.trim() }
-                : {}),
-            ...(typeof metadataContext.conversationId === 'string' && metadataContext.conversationId.trim()
-                ? { conversationId: metadataContext.conversationId.trim() }
-                : {}),
-            ...(typeof metadataContext.matchedPort === 'number'
-                ? { matchedPort: metadataContext.matchedPort }
-                : {}),
-            ...(typeof metadataContext.routingPolicyGroup === 'string' && metadataContext.routingPolicyGroup.trim()
-                ? { routingPolicyGroup: metadataContext.routingPolicyGroup.trim() }
-                : {}),
-        };
-    }
-    return undefined;
+    void args.metadata;
+    return args.fallback;
 }
 function isChatCompletionsEndpointForHttp(entryEndpoint) {
     return typeof entryEndpoint === 'string' && entryEndpoint.toLowerCase().includes('/v1/chat/completions');
@@ -93,9 +64,6 @@ function asRecordForHttp(value) {
     return value && typeof value === 'object' && !Array.isArray(value)
         ? value
         : {};
-}
-function readMetadataCenterContinuationContextForHttp(metadata) {
-    return MetadataCenter.read(metadata)?.readContinuationContext() ?? {};
 }
 const RESPONSES_DEBUG = (process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() === '1';
 function summarizeDebugToolsForHttp(tools) {
@@ -165,41 +133,6 @@ export function buildClientSseKeepaliveFrameForHttp(entryEndpoint) {
     const commentFrame = ': keepalive\n\n';
     return commentFrame;
 }
-export function shouldRequireResponsesTerminalEventForHttp(args) {
-    return (Boolean(args.probe)
-        && (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs'));
-}
-export function shouldPersistResponsesConversationStateForHttp(args) {
-    return shouldRequireResponsesTerminalEventForHttp(args);
-}
-export function resolveResponsesTerminalProbeFinishReasonForHttp(args) {
-    if (typeof args.finishReason === 'string' && args.finishReason.trim()) {
-        return args.finishReason.trim();
-    }
-    if (!args.probe || typeof args.probe !== 'object' || Array.isArray(args.probe)) {
-        return undefined;
-    }
-    const derived = deriveFinishReason(args.probe);
-    if (derived && derived.trim()) {
-        return derived.trim();
-    }
-    const probeRecord = args.probe;
-    const output = Array.isArray(probeRecord.output) ? probeRecord.output : [];
-    const sawCompletedAssistantMessage = output.some((item) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-            return false;
-        }
-        const row = item;
-        return row.type === 'message'
-            && row.role === 'assistant'
-            && typeof row.status === 'string'
-            && row.status.trim().toLowerCase() === 'completed';
-    });
-    if (sawCompletedAssistantMessage) {
-        return 'stop';
-    }
-    return undefined;
-}
 export function shouldClearResponsesConversationOnClientCloseForHttp(args) {
     return args.closeBeforeStreamEnd && args.entryEndpoint === '/v1/responses';
 }
@@ -225,50 +158,19 @@ export function resolveResponsesConversationClearReasonForHttp(phase) {
             return 'json-error';
     }
 }
-export function isToolCallContinuationResponseForHttp(body) {
-    return isToolCallContinuationResponseNative(body);
-}
-export function inspectResponsesContinuationProbeForHttp(args) {
+function isDirectResponsesToolCallContinuationForHttp(args) {
     if (args.entryEndpoint !== '/v1/responses'
         && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
-        return {
-            isToolCallContinuation: false,
-            hasRequiredAction: false,
-            hasHarvestableFunctionCallHistory: false,
-        };
+        return false;
     }
-    if (!args.probe || typeof args.probe !== 'object' || Array.isArray(args.probe)) {
-        return {
-            isToolCallContinuation: false,
-            hasRequiredAction: false,
-            hasHarvestableFunctionCallHistory: false,
-        };
-    }
-    const isToolCallContinuation = isToolCallContinuationResponseForHttp(args.probe);
-    const probeRecord = args.probe;
-    const output = Array.isArray(probeRecord.output) ? probeRecord.output : [];
-    return {
-        isToolCallContinuation,
-        hasRequiredAction: isToolCallContinuation
-            && Boolean(probeRecord.required_action
-                && typeof probeRecord.required_action === 'object'
-                && !Array.isArray(probeRecord.required_action)),
-        hasHarvestableFunctionCallHistory: output.some((item) => item
-            && typeof item === 'object'
-            && !Array.isArray(item)
-            && item.type === 'function_call'),
-    };
-}
-export function shouldPersistResponsesContinuationOnProbeUpdateForHttp(args) {
-    const probeState = inspectResponsesContinuationProbeForHttp(args);
-    return probeState.isToolCallContinuation && probeState.hasHarvestableFunctionCallHistory;
+    return isToolCallContinuationResponseNative(args.responseBody);
 }
 export function planResponsesContinuationCloseActionForHttp(args) {
-    const probeState = inspectResponsesContinuationProbeForHttp({
+    const isToolCallContinuation = isDirectResponsesToolCallContinuationForHttp({
         entryEndpoint: args.entryEndpoint,
-        probe: args.probe,
+        responseBody: args.probe,
     });
-    if (args.requestContextPresent && probeState.isToolCallContinuation) {
+    if (args.requestContextPresent && isToolCallContinuation) {
         return {
             action: 'persist_continuation',
             keepForSubmitToolOutputs: true,
@@ -279,524 +181,8 @@ export function planResponsesContinuationCloseActionForHttp(args) {
         keepForSubmitToolOutputs: false,
     };
 }
-export function shouldRepairResponsesContinuationTerminalForHttp(args) {
-    return inspectResponsesContinuationProbeForHttp({
-        entryEndpoint: args.entryEndpoint,
-        probe: args.probe,
-    }).isToolCallContinuation;
-}
-export async function captureResponsesRequestContextForHttpProjection(args) {
-    await captureResponsesRequestContextForRequest(args);
-}
 export async function rebindResponsesConversationRequestIdForHttp(oldId, newId) {
     await rebindResponsesConversationRequestId(oldId, newId);
-}
-export async function clearResponsesConversationByRequestIdForHttpProjection(requestId) {
-    await clearResponsesConversationByRequestId(requestId);
-}
-export async function recordResponsesResponseForHttpProjection(args) {
-    await recordResponsesResponseForRequest(args);
-}
-function readResponsesConversationResponseIdForHttp(body) {
-    if (!body || typeof body !== 'object' || Array.isArray(body))
-        return undefined;
-    const record = body;
-    const nested = record.response && typeof record.response === 'object' && !Array.isArray(record.response)
-        ? record.response
-        : undefined;
-    for (const value of [record.id, record.response_id, nested?.id]) {
-        if (typeof value === 'string' && value.trim())
-            return value.trim();
-    }
-    return undefined;
-}
-function normalizeResponsesConversationPersistBodyForHttp(body) {
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
-        return body;
-    }
-    const record = body;
-    const nested = record.response && typeof record.response === 'object' && !Array.isArray(record.response)
-        ? record.response
-        : undefined;
-    const topHasCanonicalShape = typeof record.id === 'string'
-        || Array.isArray(record.output)
-        || (record.required_action && typeof record.required_action === 'object');
-    if (topHasCanonicalShape || !nested) {
-        return body;
-    }
-    return {
-        ...nested,
-        ...(record.required_action
-            ? { required_action: record.required_action }
-            : {}),
-    };
-}
-function resolveResponsesConversationRecordRequestIdsForHttp(args) {
-    const responseIds = [];
-    const requestIds = [];
-    const add = (target, value) => {
-        if (typeof value !== 'string')
-            return;
-        const trimmed = value.trim();
-        if (!trimmed || target.includes(trimmed))
-            return;
-        target.push(trimmed);
-    };
-    add(responseIds, args.responseId);
-    add(requestIds, args.requestLabel);
-    if (Array.isArray(args.timingRequestIds)) {
-        for (const id of args.timingRequestIds)
-            add(requestIds, id);
-    }
-    return responseIds.length > 0 ? responseIds : requestIds;
-}
-function resolveResponsesConversationStaleRequestIdsForHttp(args) {
-    const staleRequestIds = [];
-    const canonical = new Set(Array.isArray(args.canonicalRequestIds)
-        ? args.canonicalRequestIds
-            .filter((value) => typeof value === 'string')
-            .map((value) => value.trim())
-            .filter(Boolean)
-        : []);
-    const add = (value) => {
-        if (typeof value !== 'string') {
-            return;
-        }
-        const trimmed = value.trim();
-        if (!trimmed || canonical.has(trimmed) || staleRequestIds.includes(trimmed)) {
-            return;
-        }
-        staleRequestIds.push(trimmed);
-    };
-    add(args.requestLabel);
-    if (Array.isArray(args.timingRequestIds)) {
-        for (const requestId of args.timingRequestIds) {
-            add(requestId);
-        }
-    }
-    return staleRequestIds;
-}
-function readResponsesToolDefinitionNameForHttp(tool) {
-    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) {
-        return undefined;
-    }
-    const record = tool;
-    const directName = typeof record.name === 'string' ? record.name.trim() : '';
-    if (directName) {
-        return directName;
-    }
-    const fn = record.function && typeof record.function === 'object' && !Array.isArray(record.function)
-        ? record.function
-        : undefined;
-    const fnName = typeof fn?.name === 'string' ? fn.name.trim() : '';
-    return fnName || undefined;
-}
-function buildMinimalResponsesToolDefinitionForHttp(name) {
-    return {
-        type: 'function',
-        name,
-        parameters: { type: 'object' },
-    };
-}
-function collectResponsesProjectedToolDefinitionsForHttp(body) {
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
-        return [];
-    }
-    const record = body;
-    const output = Array.isArray(record.output) ? record.output : [];
-    const requiredAction = record.required_action && typeof record.required_action === 'object' && !Array.isArray(record.required_action)
-        ? record.required_action
-        : undefined;
-    const submitToolOutputs = requiredAction?.submit_tool_outputs
-        && typeof requiredAction.submit_tool_outputs === 'object'
-        && !Array.isArray(requiredAction.submit_tool_outputs)
-        ? requiredAction.submit_tool_outputs
-        : undefined;
-    const requiredToolCalls = Array.isArray(submitToolOutputs?.tool_calls) ? submitToolOutputs.tool_calls : [];
-    const merged = [];
-    for (const item of output) {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-            continue;
-        }
-        const row = item;
-        if (row.type !== 'function_call') {
-            continue;
-        }
-        const name = typeof row.name === 'string' ? row.name.trim() : '';
-        if (!name) {
-            continue;
-        }
-        merged.push(buildMinimalResponsesToolDefinitionForHttp(name));
-    }
-    for (const item of requiredToolCalls) {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-            continue;
-        }
-        const row = item;
-        const functionRecord = row.function && typeof row.function === 'object' && !Array.isArray(row.function)
-            ? row.function
-            : undefined;
-        const name = (typeof functionRecord?.name === 'string' ? functionRecord.name.trim() : '')
-            || (typeof row.name === 'string' ? row.name.trim() : '');
-        if (!name) {
-            continue;
-        }
-        merged.push(buildMinimalResponsesToolDefinitionForHttp(name));
-    }
-    return merged;
-}
-function mergeResponsesToolDefinitionsForHttp(...sources) {
-    const merged = [];
-    const seenNames = new Set();
-    for (const source of sources) {
-        if (!Array.isArray(source)) {
-            continue;
-        }
-        for (const tool of source) {
-            const name = readResponsesToolDefinitionNameForHttp(tool);
-            if (name) {
-                if (seenNames.has(name)) {
-                    continue;
-                }
-                seenNames.add(name);
-            }
-            merged.push(tool);
-        }
-    }
-    return merged;
-}
-function buildPersistResponsesRequestContextForHttp(requestContext, canonicalBody) {
-    if (!requestContext) {
-        return undefined;
-    }
-    const payloadTools = Array.isArray(requestContext.payload?.tools) ? requestContext.payload.tools : [];
-    const contextTools = Array.isArray(requestContext.context?.toolsRaw) ? requestContext.context.toolsRaw : [];
-    const contextClientTools = Array.isArray(requestContext.context?.clientToolsRaw)
-        ? requestContext.context.clientToolsRaw
-        : [];
-    const responseDeltaTools = collectResponsesProjectedToolDefinitionsForHttp(canonicalBody);
-    const mergedTools = mergeResponsesToolDefinitionsForHttp(payloadTools, contextTools, contextClientTools, responseDeltaTools);
-    if (mergedTools.length <= 0) {
-        return requestContext;
-    }
-    return {
-        ...requestContext,
-        payload: {
-            ...requestContext.payload,
-            tools: mergedTools,
-        },
-        context: {
-            ...requestContext.context,
-            ...(Array.isArray(requestContext.context?.clientToolsRaw)
-                ? { clientToolsRaw: requestContext.context.clientToolsRaw }
-                : {}),
-            toolsRaw: mergedTools,
-        },
-    };
-}
-function shouldPersistResponsesToolCallContinuationRecordForHttp(entryEndpoint, requestContext) {
-    if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
-        return true;
-    }
-    return entryEndpoint === '/v1/responses';
-}
-function parseResponsesLifecycleSseFrameForHttp(frame) {
-    const lines = frame.split(/\r?\n/);
-    const eventName = lines
-        .find((line) => line.startsWith('event:'))
-        ?.slice('event:'.length)
-        .trim();
-    if (eventName !== 'response.completed' && eventName !== 'response.done') {
-        return undefined;
-    }
-    const dataText = lines
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.slice('data:'.length).trimStart())
-        .join('\n')
-        .trim();
-    if (!dataText || dataText === '[DONE]') {
-        return undefined;
-    }
-    try {
-        const data = JSON.parse(dataText);
-        const response = data.response && typeof data.response === 'object' && !Array.isArray(data.response)
-            ? data.response
-            : data;
-        return response && typeof response === 'object' && !Array.isArray(response)
-            ? response
-            : undefined;
-    }
-    catch {
-        return undefined;
-    }
-}
-export function attachResponsesConversationLifecycleStreamForHttp(args) {
-    if (args.entryEndpoint !== '/v1/responses'
-        && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
-        return args.stream;
-    }
-    let pending = '';
-    let finalResponse;
-    const inspectFrames = (text) => {
-        pending += text;
-        let boundary = /\r?\n\r?\n/.exec(pending);
-        while (boundary) {
-            const frameEnd = boundary.index + boundary[0].length;
-            const frame = pending.slice(0, frameEnd);
-            pending = pending.slice(frameEnd);
-            const response = parseResponsesLifecycleSseFrameForHttp(frame);
-            if (response) {
-                finalResponse = response;
-            }
-            boundary = /\r?\n\r?\n/.exec(pending);
-        }
-    };
-    const persistFinalResponse = async () => {
-        if (pending.trim()) {
-            const response = parseResponsesLifecycleSseFrameForHttp(`${pending}\n\n`);
-            if (response) {
-                finalResponse = response;
-            }
-            pending = '';
-        }
-        if (!finalResponse) {
-            args.onTrace?.('stream_lifecycle.skip_no_final_response', {
-                entryEndpoint: args.entryEndpoint,
-            });
-            return;
-        }
-        await persistResponsesConversationLifecycleForHttp({
-            entryEndpoint: args.entryEndpoint,
-            requestLabel: args.requestLabel,
-            usageLogInfo: args.usageLogInfo,
-            metadata: args.metadata,
-            requestContext: args.requestContext,
-            body: stripInternalKeysDeep(finalResponse),
-            onTrace: (stage, details) => args.onTrace?.(`stream_lifecycle.${stage}`, details),
-            onNonBlockingError: args.onNonBlockingError,
-        });
-    };
-    const lifecycleTransform = new Transform({
-        transform(chunk, _encoding, callback) {
-            try {
-                const text = typeof chunk === 'string'
-                    ? chunk
-                    : Buffer.isBuffer(chunk)
-                        ? chunk.toString('utf8')
-                        : chunk instanceof Uint8Array
-                            ? Buffer.from(chunk).toString('utf8')
-                            : String(chunk ?? '');
-                if (text) {
-                    inspectFrames(text);
-                }
-                callback(null, chunk);
-            }
-            catch (error) {
-                callback(error);
-            }
-        },
-        flush(callback) {
-            persistFinalResponse()
-                .then(() => callback())
-                .catch((error) => {
-                args.onNonBlockingError?.(`responses-conversation-stream-lifecycle:${args.requestLabel}`, error);
-                callback();
-            });
-        },
-    });
-    return args.stream.pipe(lifecycleTransform);
-}
-function resolveResponsesConversationPersistInputsForHttp(args) {
-    const timingRequestIds = Array.isArray(args.timingRequestIds) && args.timingRequestIds.length > 0
-        ? args.timingRequestIds
-        : Array.isArray(args.usageLogInfo?.timingRequestIds) && args.usageLogInfo.timingRequestIds.length > 0
-            ? args.usageLogInfo.timingRequestIds
-            : undefined;
-    const providerKey = typeof args.providerKey === 'string' && args.providerKey.trim()
-        ? args.providerKey.trim()
-        : deriveResponsesConversationProviderKeyForHttp(args.usageLogInfo);
-    const metadataCenterContinuation = readMetadataCenterContinuationContextForHttp(args.metadata);
-    const metadataCenterOwner = metadataCenterContinuation.continuationOwner === 'direct' || metadataCenterContinuation.continuationOwner === 'relay'
-        ? metadataCenterContinuation.continuationOwner
-        : undefined;
-    const continuationOwner = args.continuationOwner ?? metadataCenterOwner ?? 'relay';
-    const requestTruth = readRuntimeRequestTruthIdentifiers(args.metadata);
-    const sessionId = typeof args.sessionId === 'string' && args.sessionId.trim()
-        ? args.sessionId.trim()
-        : typeof args.usageLogInfo?.sessionId === 'string' && args.usageLogInfo.sessionId.trim()
-            ? args.usageLogInfo.sessionId.trim()
-            : requestTruth.sessionId
-                ? requestTruth.sessionId
-                : undefined;
-    const conversationId = typeof args.conversationId === 'string' && args.conversationId.trim()
-        ? args.conversationId.trim()
-        : typeof args.usageLogInfo?.conversationId === 'string' && args.usageLogInfo.conversationId.trim()
-            ? args.usageLogInfo.conversationId.trim()
-            : requestTruth.conversationId
-                ? requestTruth.conversationId
-                : undefined;
-    return {
-        timingRequestIds,
-        providerKey,
-        continuationOwner,
-        sessionId,
-        conversationId,
-    };
-}
-export async function persistResponsesConversationLifecycleForHttp(args) {
-    if (args.entryEndpoint !== '/v1/responses'
-        && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
-        return { recorded: false, reason: 'not_responses_endpoint' };
-    }
-    const responseId = readResponsesConversationResponseIdForHttp(args.body);
-    const canonicalBody = normalizeResponsesConversationPersistBodyForHttp(args.body);
-    const finishReason = deriveFinishReason(canonicalBody);
-    const isContinuation = isToolCallContinuationResponseForHttp(canonicalBody);
-    const persisted = resolveResponsesConversationPersistInputsForHttp(args);
-    const isToolCallFinish = finishReason === 'tool_calls';
-    const persistRequestContext = buildPersistResponsesRequestContextForHttp(args.requestContext, canonicalBody);
-    if (RESPONSES_DEBUG) {
-        console.log('[responses-bridge] persist.lifecycle', JSON.stringify({
-            requestLabel: args.requestLabel,
-            entryEndpoint: args.entryEndpoint,
-            responseId,
-            finishReason,
-            isContinuation,
-            isToolCallFinish,
-            requestContextPayloadTools: summarizeDebugToolsForHttp(args.requestContext?.payload?.tools),
-            requestContextToolsRaw: summarizeDebugToolsForHttp(args.requestContext?.context?.toolsRaw),
-            persistPayloadTools: summarizeDebugToolsForHttp(persistRequestContext?.payload?.tools),
-            persistToolsRaw: summarizeDebugToolsForHttp(persistRequestContext?.context?.toolsRaw),
-            persistSessionId: persistRequestContext?.sessionId,
-            persistConversationId: persistRequestContext?.conversationId,
-            matchedPort: persistRequestContext?.matchedPort,
-            routingPolicyGroup: persistRequestContext?.routingPolicyGroup,
-        }));
-    }
-    if ((isContinuation || isToolCallFinish)
-        && shouldPersistResponsesToolCallContinuationRecordForHttp(args.entryEndpoint, args.requestContext)
-        && canonicalBody
-        && typeof canonicalBody === 'object'
-        && !Array.isArray(canonicalBody)) {
-        if (!responseId) {
-            args.onTrace?.('record.skip_missing_response_id', {
-                providerKey: args.providerKey,
-            });
-            return { recorded: false, reason: 'missing_response_id' };
-        }
-        args.onTrace?.('capture.start', {
-            responseId,
-            providerKey: args.providerKey,
-        });
-        const captureRequestIds = resolveResponsesConversationRecordRequestIdsForHttp({
-            requestLabel: args.requestLabel,
-            timingRequestIds: persisted.timingRequestIds,
-            responseId,
-        });
-        if (persistRequestContext) {
-            for (const requestId of captureRequestIds) {
-                await captureResponsesRequestContextForHttpProjection({
-                    requestId,
-                    payload: persistRequestContext.payload,
-                    context: persistRequestContext.context,
-                    sessionId: persistRequestContext.sessionId,
-                    conversationId: persistRequestContext.conversationId,
-                    providerKey: persisted.providerKey,
-                    matchedPort: persistRequestContext.matchedPort,
-                    routingPolicyGroup: persistRequestContext.routingPolicyGroup,
-                }).catch((error) => {
-                    args.onTrace?.('capture.error', {
-                        captureRequestId: requestId,
-                        responseId,
-                        message: error instanceof Error ? error.message : String(error ?? 'unknown'),
-                    });
-                    args.onNonBlockingError?.(`responses-conversation-capture:${requestId}`, error);
-                });
-            }
-        }
-        let recordedRequestId;
-        try {
-            await recordResponsesResponseForHttpProjection({
-                requestId: responseId,
-                response: canonicalBody,
-                sessionId: persisted.sessionId ?? persistRequestContext?.sessionId,
-                conversationId: persisted.conversationId ?? persistRequestContext?.conversationId,
-                providerKey: persisted.providerKey,
-                continuationOwner: persisted.continuationOwner,
-                matchedPort: persistRequestContext?.matchedPort,
-                routingPolicyGroup: persistRequestContext?.routingPolicyGroup,
-            });
-            recordedRequestId = responseId;
-        }
-        catch (error) {
-            args.onTrace?.('record.error', {
-                recordRequestId: responseId,
-                responseId,
-                message: error instanceof Error ? error.message : String(error ?? 'unknown'),
-            });
-            args.onNonBlockingError?.(`responses-conversation-record:${responseId}`, error);
-        }
-        if (!recordedRequestId) {
-            args.onTrace?.('record.skipped_no_context', {
-                responseId,
-                attemptedRequestIds: [responseId],
-            });
-            return { recorded: false, reason: 'no_recorded_request_context' };
-        }
-        await finalizeResponsesConversationRequestRetentionForHttp(recordedRequestId, {
-            keepForSubmitToolOutputs: true,
-        }).catch((error) => {
-            args.onTrace?.('record.finalize_error', {
-                retainRequestId: recordedRequestId,
-                responseId,
-                message: error instanceof Error ? error.message : String(error ?? 'unknown'),
-            });
-            args.onNonBlockingError?.(`responses-conversation-finalize:${recordedRequestId}`, error);
-        });
-        const staleRequestIds = resolveResponsesConversationStaleRequestIdsForHttp({
-            requestLabel: args.requestLabel,
-            timingRequestIds: persisted.timingRequestIds,
-            canonicalRequestIds: [recordedRequestId],
-        });
-        for (const staleRequestId of staleRequestIds) {
-            await clearResponsesConversationByRequestIdForHttpProjection(staleRequestId).catch((error) => {
-                args.onTrace?.('record.clear_stale_error', {
-                    staleRequestId,
-                    responseId,
-                    message: error instanceof Error ? error.message : String(error ?? 'unknown'),
-                });
-                args.onNonBlockingError?.(`responses-conversation-clear-stale:${staleRequestId}`, error);
-            });
-        }
-        args.onTrace?.('record.done', { responseId, retainedRequestIds: [recordedRequestId] });
-        return { recorded: true, responseId };
-    }
-    if (isContinuation || isToolCallFinish) {
-        return { recorded: false, reason: 'not_continuation' };
-    }
-    const retainRequestIds = resolveResponsesConversationRecordRequestIdsForHttp({
-        requestLabel: args.requestLabel,
-        timingRequestIds: persisted.timingRequestIds,
-        responseId,
-    });
-    for (const retainRequestId of retainRequestIds) {
-        await finalizeResponsesConversationRequestRetentionForHttp(retainRequestId, {
-            keepForSubmitToolOutputs: false,
-        }).catch((error) => {
-            args.onNonBlockingError?.(`responses-conversation-finalize:${retainRequestId}`, error);
-        });
-    }
-    const staleRequestIds = resolveResponsesConversationStaleRequestIdsForHttp({
-        requestLabel: args.requestLabel,
-        timingRequestIds: persisted.timingRequestIds,
-        canonicalRequestIds: retainRequestIds,
-    });
-    for (const staleRequestId of staleRequestIds) {
-        await clearResponsesConversationByRequestIdForHttpProjection(staleRequestId).catch((error) => {
-            args.onNonBlockingError?.(`responses-conversation-clear-stale:${staleRequestId}`, error);
-        });
-    }
-    return { recorded: false, reason: 'not_continuation' };
 }
 export async function clearResponsesConversationRequestIdsForHttp(args) {
     const ids = [];
@@ -815,30 +201,10 @@ export async function clearResponsesConversationRequestIdsForHttp(args) {
             add(id);
     }
     for (const requestId of ids) {
-        await clearResponsesConversationByRequestIdForHttpProjection(requestId).catch((error) => {
+        await clearResponsesConversationByRequestId(requestId).catch((error) => {
             args.onNonBlockingError?.(`responses-conversation-clear-${args.reason}:${requestId}`, error);
         });
     }
-}
-function deriveResponsesConversationProviderKeyForHttp(usageLogInfo) {
-    const direct = typeof usageLogInfo?.providerKey === 'string' ? usageLogInfo.providerKey.trim() : '';
-    if (direct)
-        return direct;
-    const ids = Array.isArray(usageLogInfo?.timingRequestIds) ? usageLogInfo.timingRequestIds : [];
-    for (const id of ids) {
-        if (typeof id !== 'string')
-            continue;
-        const match = id.match(/^openai-responses-(.+)-\d{8}T\d{9}-\d+-\d+$/);
-        if (!match)
-            continue;
-        const normalized = match[1].replace(/-/g, '.');
-        if (normalized)
-            return normalized;
-    }
-    return undefined;
-}
-export async function finalizeResponsesConversationRequestRetentionForHttp(requestId, options) {
-    await finalizeResponsesConversationRequestRetention(requestId, options);
 }
 let cachedChatJsonToSseConverterFactory = null;
 export async function createChatJsonToSseConverterForHttp() {
@@ -982,23 +348,6 @@ export async function importResponsesHandlerCoreDist(specifier) {
 export async function buildResponsesPayloadFromChatForHttp(payload, context) {
     return buildResponsesPayloadFromChatNative(payload, context);
 }
-export async function projectResponsesClientPayloadForClientForHttp(args) {
-    return stripClientVisibleMetadataDeep(await projectResponsesClientPayloadForClientNative(args));
-}
-function readResponsesClientToolsRawForHttp(requestContext) {
-    const payloadTools = Array.isArray(requestContext?.payload?.tools) ? requestContext.payload.tools : undefined;
-    if (payloadTools?.length) {
-        return payloadTools;
-    }
-    const contextTools = Array.isArray(requestContext?.context?.toolsRaw) ? requestContext.context.toolsRaw : undefined;
-    if (contextTools?.length) {
-        return contextTools;
-    }
-    const contextClientTools = Array.isArray(requestContext?.context?.clientToolsRaw)
-        ? requestContext.context.clientToolsRaw
-        : undefined;
-    return contextClientTools?.length ? contextClientTools : [];
-}
 function readResponsesRequestModelForHttp(requestContext) {
     const payloadModel = requestContext?.payload?.model;
     if (typeof payloadModel === 'string' && payloadModel.trim()) {
@@ -1030,6 +379,21 @@ function ensureResponsesJsonToSseRequiredFieldsForHttp(args) {
         model,
     };
 }
+function readResponsesClientToolsRawForHttp(requestContext) {
+    const contextToolsRaw = requestContext?.context?.toolsRaw;
+    if (Array.isArray(contextToolsRaw)) {
+        return contextToolsRaw;
+    }
+    const contextClientToolsRaw = requestContext?.context?.clientToolsRaw;
+    if (Array.isArray(contextClientToolsRaw)) {
+        return contextClientToolsRaw;
+    }
+    const payloadTools = requestContext?.payload?.tools;
+    if (Array.isArray(payloadTools)) {
+        return payloadTools;
+    }
+    return [];
+}
 export async function normalizeResponsesClientPayloadForHttp(args) {
     if (args.entryEndpoint !== '/v1/responses'
         && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
@@ -1038,18 +402,15 @@ export async function normalizeResponsesClientPayloadForHttp(args) {
     if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
         return args.payload;
     }
-    const projectedPayload = await projectResponsesClientPayloadForClientForHttp({
+    const projectedPayload = projectResponsesClientPayloadForClientNative({
         payload: args.payload,
         toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
         metadata: args.metadata,
     });
     return ensureResponsesJsonToSseRequiredFieldsForHttp({
-        payload: projectedPayload,
+        payload: stripClientVisibleMetadataDeep(projectedPayload),
         requestContext: args.requestContext,
     });
-}
-export function resolveResponsesClientPayloadFinishReasonForHttp(payload) {
-    return deriveFinishReason(payload);
 }
 export async function prepareResponsesJsonSseDispatchPlanForHttp(args) {
     const normalizedPayload = ensureResponsesJsonToSseRequiredFieldsForHttp({
@@ -1078,53 +439,7 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args) {
     return {
         clientBody,
         sanitizedBody: stripInternalKeysDeep(clientBody),
-        finishReason: resolveResponsesClientPayloadFinishReasonForHttp(clientBody),
     };
-}
-function readResponsesConversationPersistedAtChatProcessExitForHttp(metadata) {
-    const runtimeControl = MetadataCenter.read(metadata)?.readRuntimeControl() ?? {};
-    return runtimeControl.responsesContinuationSavedAtChatProcessExit === true;
-}
-function markResponsesConversationPersistedAtChatProcessExitForHttp(metadata) {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-        return;
-    }
-    MetadataCenter.attach(metadata).writeRuntimeControl('responsesContinuationSavedAtChatProcessExit', true, {
-        module: 'src/modules/llmswitch/bridge/responses-response-bridge.ts',
-        symbol: 'markResponsesConversationPersistedAtChatProcessExitForHttp',
-        stage: 'ChatProcRespContinuation07CanonicalSaved',
-    }, 'responses continuation saved at chat process exit');
-}
-export async function persistResponsesConversationLifecycleAtChatProcessExitForHttp(args) {
-    if (args.entryEndpoint !== '/v1/responses'
-        && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
-        return { recorded: false, reason: 'not_responses_endpoint' };
-    }
-    if (readResponsesConversationPersistedAtChatProcessExitForHttp(args.metadata)) {
-        return { recorded: false, reason: 'already_persisted' };
-    }
-    const requestContext = args.requestContext ?? resolveResponsesRequestContextForHttp({
-        metadata: args.metadata,
-    });
-    const dispatchPlan = await prepareResponsesJsonClientDispatchPlanForHttp({
-        body: args.body,
-        entryEndpoint: args.entryEndpoint,
-        requestLabel: args.requestLabel,
-        requestContext,
-        metadata: args.metadata,
-    });
-    const result = await persistResponsesConversationLifecycleForHttp({
-        entryEndpoint: args.entryEndpoint,
-        requestLabel: args.requestLabel,
-        usageLogInfo: (args.usageLogInfo ?? undefined),
-        metadata: args.metadata,
-        requestContext,
-        body: dispatchPlan.sanitizedBody,
-        onTrace: args.onTrace,
-        onNonBlockingError: args.onNonBlockingError,
-    });
-    markResponsesConversationPersistedAtChatProcessExitForHttp(args.metadata);
-    return result;
 }
 function stripClientVisibleMetadataDeep(value) {
     if (!value || typeof value !== 'object') {
@@ -1143,3 +458,4 @@ function stripClientVisibleMetadataDeep(value) {
     }
     return out;
 }
+//# sourceMappingURL=responses-response-bridge.js.map

@@ -25,6 +25,15 @@ export interface ServertoolResponseStageShellOptions {
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
   allowFollowup?: boolean;
+  clientInjectDispatch?: (options: {
+    entryEndpoint: string;
+    requestId: string;
+    body?: JsonObject;
+    metadata?: JsonObject;
+  }) => Promise<{
+    ok: boolean;
+    reason?: string;
+  }>;
   stageRecorder?: StageRecorder;
 }
 
@@ -92,6 +101,9 @@ export async function runServertoolResponseStageOrchestrationShell(
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
     providerProtocol,
+    ...(typeof options.clientInjectDispatch === 'function'
+      ? { clientInjectDispatch: options.clientInjectDispatch }
+      : {}),
     stageRecorder: options.stageRecorder
   });
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'completed', {

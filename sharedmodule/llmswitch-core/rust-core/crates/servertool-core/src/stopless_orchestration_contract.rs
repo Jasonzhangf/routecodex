@@ -103,9 +103,7 @@ fn is_stop_message_budget_exhausted(execution: &Value) -> bool {
     let Some(context) = execution.get("context").and_then(Value::as_object) else {
         return false;
     };
-    let stopless = context
-        .get("stopless")
-        .and_then(Value::as_object);
+    let stopless = context.get("stopless").and_then(Value::as_object);
     let loop_state = context
         .get("serverToolLoopState")
         .and_then(Value::as_object);

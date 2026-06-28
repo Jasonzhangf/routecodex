@@ -34,7 +34,10 @@ describe('server responses SSE business module contract', () => {
 
     for (const forbiddenLifecycleBridgeExport of [
       'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
+      'export function inspectResponsesContinuationProbeForHttp(',
       'export function planResponsesStreamEndRepairForHttp(',
+      'export function resolveResponsesTerminalProbeFinishReasonForHttp(',
+      'export function shouldRequireResponsesTerminalEventForHttp(',
       'export async function createResponsesJsonToSseConverterForHttp(',
       'export async function projectResponsesSseFrameForClientForHttp(',
       'export async function normalizeResponsesSseFrameForClientForHttp(',
@@ -51,6 +54,9 @@ describe('server responses SSE business module contract', () => {
       'sanitizeDirectPassthroughResponsesSseFrameForHttp',
       'attachResponsesStreamSemanticsForHttp',
       'inspectResponsesTerminalStateFromSseChunkForHttp',
+      'inspectResponsesContinuationProbeForHttp',
+      'resolveResponsesTerminalProbeFinishReasonForHttp',
+      'shouldRequireResponsesTerminalEventForHttp',
     ]) {
       expect(bridge).not.toContain(forbiddenBridgeSemantic);
       expect(responseLifecycleBridge).not.toContain(forbiddenBridgeSemantic);

@@ -398,17 +398,6 @@ export interface StoplessLearnedNoteWritePlan {
   evidence?: string;
 }
 
-export interface StoplessOrchestrationActionInput {
-  flowId?: string;
-  execution: unknown;
-}
-
-export interface StoplessOrchestrationActionPlan {
-  action: 'terminal_final' | 'cli_projection';
-  isStopMessageFlow: boolean;
-  reason: string;
-}
-
 export interface StoplessCliProjectionContextRuntimeSnapshot {
   used?: number;
   maxRepeats?: number;
@@ -1566,42 +1555,6 @@ export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string
     throw new Error(`planStopMessageAutoHandlerJson native returned non-string: ${typeof raw}`);
   }
   return JSON.parse(raw) as TPlan;
-}
-
-export function planStoplessOrchestrationActionWithNative(
-  input: StoplessOrchestrationActionInput,
-): StoplessOrchestrationActionPlan {
-  const capability = 'planStoplessOrchestrationActionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStoplessOrchestrationActionJson native unavailable');
-  }
-  const raw = fn(JSON.stringify(input));
-  const parsed = typeof raw === 'string' ? JSON.parse(raw) as unknown : raw;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planStoplessOrchestrationActionJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  const action = record.action;
-  if (action !== 'terminal_final' && action !== 'cli_projection') {
-    throw new Error('planStoplessOrchestrationActionJson native returned invalid action');
-  }
-  const isStopMessageFlow = record.isStopMessageFlow ?? record.is_stop_message_flow;
-  if (typeof isStopMessageFlow !== 'boolean' || typeof record.reason !== 'string' || !record.reason.trim()) {
-    throw new Error('planStoplessOrchestrationActionJson native returned invalid fields');
-  }
-  const sessionId =
-    typeof record.sessionId === 'string' && record.sessionId.trim()
-      ? record.sessionId.trim()
-      : typeof record.session_id === 'string' && record.session_id.trim()
-        ? record.session_id.trim()
-        : undefined;
-  return {
-    action,
-    isStopMessageFlow,
-    reason: record.reason.trim(),
-    ...(sessionId ? { sessionId } : {})
-  };
 }
 
 export function planStoplessCliProjectionContextWithNative(input: {

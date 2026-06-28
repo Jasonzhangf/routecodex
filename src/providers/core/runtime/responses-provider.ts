@@ -47,6 +47,7 @@ import {
 } from './responses-sse-error-guard.js';
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
+import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'> & Partial<Pick<HttpClient, 'postStreamOrResponse'>>;
 type ResponsesSseConverter = {
@@ -68,10 +69,17 @@ const buildProviderSseStreamConfig = (context: ProviderContext): {
   const runtimeMeta = context.runtimeMetadata && typeof context.runtimeMetadata === 'object'
     ? context.runtimeMetadata as Record<string, unknown>
     : undefined;
+  const runtimeMetadataRecord =
+    context.runtimeMetadata?.metadata && typeof context.runtimeMetadata.metadata === 'object' && !Array.isArray(context.runtimeMetadata.metadata)
+      ? context.runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
   const candidate =
     meta?.providerStreamNoContentTimeoutMs
     ?? meta?.streamNoContentTimeoutMs
     ?? meta?.noContentTimeoutMs
+    ?? runtimeMetadataRecord?.providerStreamNoContentTimeoutMs
+    ?? runtimeMetadataRecord?.streamNoContentTimeoutMs
+    ?? runtimeMetadataRecord?.noContentTimeoutMs
     ?? runtimeMeta?.providerStreamNoContentTimeoutMs
     ?? runtimeMeta?.streamNoContentTimeoutMs
     ?? runtimeMeta?.noContentTimeoutMs;
@@ -79,6 +87,9 @@ const buildProviderSseStreamConfig = (context: ProviderContext): {
     meta?.providerStreamHeadersTimeoutMs
     ?? meta?.streamHeadersTimeoutMs
     ?? meta?.headersTimeoutMs
+    ?? runtimeMetadataRecord?.providerStreamHeadersTimeoutMs
+    ?? runtimeMetadataRecord?.streamHeadersTimeoutMs
+    ?? runtimeMetadataRecord?.headersTimeoutMs
     ?? runtimeMeta?.providerStreamHeadersTimeoutMs
     ?? runtimeMeta?.streamHeadersTimeoutMs
     ?? runtimeMeta?.headersTimeoutMs;
@@ -106,19 +117,19 @@ function readProviderSnapshotEntryPort(metadata: unknown): number | undefined {
     return undefined;
   }
   const record = metadata as Record<string, unknown>;
-  const portContext =
-    record.portContext && typeof record.portContext === 'object' && !Array.isArray(record.portContext)
-      ? record.portContext as Record<string, unknown>
-      : undefined;
+  const requestTruthPortScope = MetadataCenter.read(record)?.readRequestTruth().portScope;
+  if (typeof requestTruthPortScope === 'string') {
+    const parsed = Number.parseInt(requestTruthPortScope, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
   for (const value of [
     record.entryPort,
     record.matchedPort,
     record.routecodexLocalPort,
     record.localPort,
-    record.portScope,
-    portContext?.matchedPort,
-    portContext?.localPort,
-    portContext?.port
+    record.portScope
   ]) {
     const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
     if (Number.isFinite(numeric) && numeric > 0) {
@@ -126,6 +137,15 @@ function readProviderSnapshotEntryPort(metadata: unknown): number | undefined {
     }
   }
   return undefined;
+}
+
+function readProviderContextSnapshotEntryPort(context: ProviderContext): number | undefined {
+  const runtimeMetadata = context.runtimeMetadata;
+  const runtimeMetadataRecord =
+    runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
+      ? runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
+  return readProviderSnapshotEntryPort(runtimeMetadataRecord) ?? readProviderSnapshotEntryPort(context.metadata);
 }
 
 function applyRequestRuntimeMetadataToProviderContext(
@@ -136,7 +156,6 @@ function applyRequestRuntimeMetadataToProviderContext(
     return;
   }
   context.runtimeMetadata = context.runtimeMetadata ?? runtimeMetadata;
-  context.metadata = runtimeMetadata.metadata ?? context.metadata;
   context.providerId = context.providerId ?? runtimeMetadata.providerId ?? runtimeMetadata.providerKey;
   context.providerKey = context.providerKey ?? runtimeMetadata.providerKey;
   context.providerProtocol = context.providerProtocol ?? runtimeMetadata.providerProtocol;
@@ -610,7 +629,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url: targetUrl,
         entryEndpoint,
-        entryPort: readProviderSnapshotEntryPort(context.metadata),
+      entryPort: readProviderContextSnapshotEntryPort(context),
         clientRequestId: extractClientRequestId(context),
         providerKey: context.providerKey,
         providerId: context.providerId
@@ -662,7 +681,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url,
         entryEndpoint,
-        entryPort: readProviderSnapshotEntryPort(context.metadata),
+          entryPort: readProviderContextSnapshotEntryPort(context),
         clientRequestId,
         providerKey: context.providerKey,
         providerId: context.providerId,
@@ -721,7 +740,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url: targetUrl,
         entryEndpoint,
-        entryPort: readProviderSnapshotEntryPort(context.metadata),
+          entryPort: readProviderContextSnapshotEntryPort(context),
         clientRequestId: extractClientRequestId(context),
         providerKey: context.providerKey,
         providerId: context.providerId
@@ -899,10 +918,17 @@ export class ResponsesProvider extends HttpTransportProvider {
     const runtimeMeta = context.runtimeMetadata && typeof context.runtimeMetadata === 'object'
       ? context.runtimeMetadata as Record<string, unknown>
       : undefined;
+    const runtimeMetadataRecord =
+      context.runtimeMetadata?.metadata && typeof context.runtimeMetadata.metadata === 'object' && !Array.isArray(context.runtimeMetadata.metadata)
+        ? context.runtimeMetadata.metadata as Record<string, unknown>
+        : undefined;
     const candidate =
       meta?.providerStreamNoContentTimeoutMs
       ?? meta?.streamNoContentTimeoutMs
       ?? meta?.noContentTimeoutMs
+      ?? runtimeMetadataRecord?.providerStreamNoContentTimeoutMs
+      ?? runtimeMetadataRecord?.streamNoContentTimeoutMs
+      ?? runtimeMetadataRecord?.noContentTimeoutMs
       ?? runtimeMeta?.providerStreamNoContentTimeoutMs
       ?? runtimeMeta?.streamNoContentTimeoutMs
       ?? runtimeMeta?.noContentTimeoutMs;
@@ -923,10 +949,17 @@ export class ResponsesProvider extends HttpTransportProvider {
     const runtimeMeta = context.runtimeMetadata && typeof context.runtimeMetadata === 'object'
       ? context.runtimeMetadata as Record<string, unknown>
       : undefined;
+    const runtimeMetadataRecord =
+      context.runtimeMetadata?.metadata && typeof context.runtimeMetadata.metadata === 'object' && !Array.isArray(context.runtimeMetadata.metadata)
+        ? context.runtimeMetadata.metadata as Record<string, unknown>
+        : undefined;
     const candidate =
       meta?.providerStreamContentIdleTimeoutMs
       ?? meta?.streamContentIdleTimeoutMs
       ?? meta?.contentIdleTimeoutMs
+      ?? runtimeMetadataRecord?.providerStreamContentIdleTimeoutMs
+      ?? runtimeMetadataRecord?.streamContentIdleTimeoutMs
+      ?? runtimeMetadataRecord?.contentIdleTimeoutMs
       ?? runtimeMeta?.providerStreamContentIdleTimeoutMs
       ?? runtimeMeta?.streamContentIdleTimeoutMs
       ?? runtimeMeta?.contentIdleTimeoutMs;

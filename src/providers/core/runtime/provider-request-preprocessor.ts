@@ -2,6 +2,7 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { attachProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
+import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 type MetadataContainer = {
   metadata?: Record<string, unknown>;
@@ -46,11 +47,15 @@ export class ProviderRequestPreprocessor {
         ? ((request as MetadataContainer).metadata as Record<string, unknown>)
         : undefined;
     if (runtimeMetadata && requestMetadata) {
+      const requestMetadataCenter = MetadataCenter.read(requestMetadata);
       if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
         runtimeMetadata.metadata = {};
       }
       const runtimeCarrier = runtimeMetadata.metadata as Record<string, unknown>;
       Object.assign(runtimeCarrier, requestMetadata);
+      if (requestMetadataCenter) {
+        MetadataCenter.bind(runtimeCarrier, requestMetadataCenter);
+      }
       for (const [key, value] of Object.entries(requestMetadata)) {
         if (key === 'clientHeaders' || key === 'entryEndpoint' || key === 'stream') {
           continue;
@@ -96,6 +101,7 @@ export class ProviderRequestPreprocessor {
       if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
         runtimeMetadata.metadata = {};
       }
+      const runtimeMetadataCenter = MetadataCenter.read(runtimeMetadata.metadata);
       if (entryEndpoint) {
         (runtimeMetadata.metadata as Record<string, unknown>).entryEndpoint = entryEndpoint;
       }
@@ -104,6 +110,9 @@ export class ProviderRequestPreprocessor {
       }
       if (typeof inboundModel === 'string' && inboundModel.trim()) {
         (runtimeMetadata.metadata as Record<string, unknown>).__origModel = inboundModel;
+      }
+      if (runtimeMetadataCenter) {
+        MetadataCenter.bind(runtimeMetadata.metadata as Record<string, unknown>, runtimeMetadataCenter);
       }
     }
     if (runtimeMetadata && processedRequest && typeof processedRequest === 'object') {

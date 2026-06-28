@@ -326,6 +326,120 @@ describe('stopless CLI continuation', () => {
     expect(extractInput(command).repeatCount).toBe(2);
   });
 
+  test('client-facing stopless blackbox advances repeatCount across submit_tool_outputs rounds and stops on round three', async () => {
+    const sessionId = `session-stopless-client-blackbox-${Date.now()}`;
+    const requestId1 = `req-stopless-client-blackbox-1-${Date.now()}`;
+    const round1Context = buildAdapterContext({
+      requestId: requestId1,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: '继续执行 stopless 在线验证' }]
+      }
+    });
+    bindRequestTruth(round1Context, requestId1, sessionId);
+
+    const round1 = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: round1Context,
+      requestId: requestId1,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless client-facing round 1 must not reenter');
+      }
+    });
+    expect(round1.executed).toBe(true);
+    const command1 = extractExecCommand(round1.chat);
+    expect(extractInput(command1)).toMatchObject({
+      flowId: 'stop_message_flow',
+      repeatCount: 1,
+      maxRepeats: 3
+    });
+    const stdout1 = await runStoplessCliStdout(command1);
+    expect(stdout1.repeatCount).toBe(1);
+
+    const requestId2 = `req-stopless-client-blackbox-2-${Date.now()}`;
+    const round2Context = buildAdapterContext({
+      requestId: requestId2,
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      providerProtocol: 'openai-responses',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: '继续执行 stopless 在线验证' }]
+      },
+      __raw_request_body: {
+        tool_outputs: [
+          {
+            tool_call_id: 'call_servertool_cli_round1',
+            output: JSON.stringify(stdout1)
+          }
+        ]
+      }
+    });
+    bindRequestTruth(round2Context, requestId2, sessionId);
+
+    const round2 = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: round2Context,
+      requestId: requestId2,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless client-facing round 2 must not reenter');
+      }
+    });
+    expect(round2.executed).toBe(true);
+    const command2 = extractExecCommand(round2.chat);
+    expect(extractInput(command2)).toMatchObject({
+      flowId: 'stop_message_flow',
+      repeatCount: 2,
+      maxRepeats: 3
+    });
+    const stdout2 = await runStoplessCliStdout(command2);
+    expect(stdout2.repeatCount).toBe(2);
+
+    const requestId3 = `req-stopless-client-blackbox-3-${Date.now()}`;
+    const round3Context = buildAdapterContext({
+      requestId: requestId3,
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      providerProtocol: 'openai-responses',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: '继续执行 stopless 在线验证' }]
+      },
+      __raw_request_body: {
+        tool_outputs: [
+          {
+            tool_call_id: 'call_servertool_cli_round2',
+            output: JSON.stringify(stdout2)
+          }
+        ]
+      }
+    });
+    bindRequestTruth(round3Context, requestId3, sessionId);
+
+    const round3 = await runServerToolOrchestration({
+      chat: buildStopChatResponse('need more evidence'),
+      adapterContext: round3Context,
+      requestId: requestId3,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        throw new Error('stopless client-facing round 3 must not reenter');
+      }
+    });
+    expect(round3.executed).toBe(true);
+    expect(maybeExtractExecCommand(round3.chat)).toBeUndefined();
+    expect((round3.chat as any).choices?.[0]?.finish_reason).toBe('stop');
+    expect(JSON.stringify(round3.chat)).toContain('stopless budget exhausted');
+    expect(JSON.stringify(round3.chat)).not.toContain('need more evidence');
+  });
+
   test('missing request truth sessionId keeps stopless terminal', async () => {
     const adapterContext = buildAdapterContext({
       entryEndpoint: '/v1/responses',
@@ -665,14 +779,14 @@ describe('stopless CLI continuation', () => {
       flowId: 'stop_message_flow',
       repeatCount: 1,
       maxRepeats: 3,
-      triggerHint: 'stop_schema_terminal_missing_fields'
+      triggerHint: 'stop_schema_reason_missing'
     });
     expect(center?.readRuntimeControl().stopless).toEqual(
       expect.objectContaining({
         flowId: 'stop_message_flow',
         repeatCount: 1,
         maxRepeats: 3,
-        triggerHint: 'stop_schema_terminal_missing_fields',
+        triggerHint: 'stop_schema_reason_missing',
         active: true
       })
     );

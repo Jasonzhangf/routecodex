@@ -90,10 +90,10 @@ export function applyStoplessMetadataCenterWritePlan(args: {
   adapterContext: Record<string, unknown>;
   plan: StoplessMetadataCenterWritePlan;
   reason?: string;
-}): boolean {
+}): void {
   const center = findBoundMetadataCenter(args.adapterContext);
   if (!center) {
-    return false;
+    throw new Error('Stopless MetadataCenter write failed: bound MetadataCenter missing');
   }
 
   if (args.plan.stopless) {
@@ -120,5 +120,4 @@ export function applyStoplessMetadataCenterWritePlan(args: {
     );
   }
 
-  return true;
 }

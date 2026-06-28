@@ -16,6 +16,7 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
+import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
@@ -295,7 +296,9 @@ export const runServertoolHandler = async (
         toolName,
         requestId: ctx.requestId,
         entryEndpoint: ctx.entryEndpoint,
-        providerProtocol: ctx.providerProtocol,
+        providerProtocol:
+          readProviderProtocolFromAnyBoundMetadataCenter(ctx.adapterContext as Record<string, unknown>) ??
+          'unknown',
         error: message
       })
     ) as ProviderProtocolError & { status?: number; cause?: unknown };

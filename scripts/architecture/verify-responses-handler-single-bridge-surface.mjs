@@ -77,28 +77,27 @@ const checks = [
     forbiddenTokens: [],
   },
   {
-    file: 'src/modules/llmswitch/bridge/responses-client-projection.ts',
-    allowedImport: './native-exports.js',
+    file: 'src/modules/llmswitch/bridge/responses-sse-transport.ts',
+    allowedImport: './runtime-integrations.js',
     forbiddenLocalTokens: [
       'export async function projectResponsesSseFrameForClientForHttp(',
       'export async function normalizeResponsesSseFrameForClientForHttp(',
+      'export async function normalizeClientVisibleResponsesSseFrameForHttp(',
       'function shouldSuppressDuplicateApplyPatchSseFrameForHttp(',
       'function normalizeNestedResponsesPayloadInSseFrameForHttp(',
       'function collectEmittedApplyPatchDoneCallIdsFromFrameForHttp(',
       'function readResponsesSseCallIdForHttp(',
       'function isApplyPatchFunctionCallRecordForHttp(',
       'function readResponsesClientToolsRawForHttp(',
+      'response.required_action',
     ],
     forbiddenTokens: [],
   },
   {
     file: 'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
-    allowedImport: './responses-sse-semantics.js',
+    allowedImport: './responses-sse-transport.js',
     forbiddenLocalTokens: [
       'normalizeClientVisibleResponsesSseFrameForHttp(',
-      'prepareResponsesJsonSseDispatchPlanForHttp',
-      'prepareResponsesJsonBodyForSseBridgeForHttp',
-      'resolveResponsesClientPayloadFinishReasonForHttp',
       'response.required_action',
       'projectResponsesSseFrameForClientNative(',
     ],
@@ -188,9 +187,7 @@ const checks = [
   {
     file: 'src/server/handlers/handler-response-sse.ts',
     allowedImport: '../../modules/llmswitch/bridge/responses-sse-bridge.js',
-    requiredImports: [
-      '../../modules/llmswitch/bridge/responses-client-projection.js',
-    ],
+    requiredImports: [],
     forbiddenLocalTokens: [
       "from '../utils/finish-reason.js'",
       "from '../runtime/http-server/session-execution-state.js'",

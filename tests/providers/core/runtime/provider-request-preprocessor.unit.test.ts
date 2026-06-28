@@ -116,4 +116,32 @@ describe('provider-request-preprocessor', () => {
     expect(attached?.metadata?.client_tmux_session_id).toBe('tmux-live');
     expect((out as any).metadata).toBeUndefined();
   });
+
+  it('preserves metadata center binding so request truth port scope survives preprocessing', async () => {
+    const { MetadataCenter } = await import('../../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
+    const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
+    const req = {
+      model: 'gpt-5.5',
+      metadata: {
+        entryEndpoint: '/v1/responses'
+      }
+    } as any;
+    const center = MetadataCenter.attach(req.metadata);
+    center.writeRequestTruth(
+      'portScope',
+      '5520',
+      {
+        module: 'tests/providers/core/runtime/provider-request-preprocessor.unit.test.ts',
+        symbol: 'preserves metadata center binding so request truth port scope survives preprocessing',
+        stage: 'ServerReqInbound01ClientRaw'
+      }
+    );
+    const runtimeMetadata = { metadata: {} } as any;
+
+    const out = ProviderRequestPreprocessor.preprocess(req, runtimeMetadata);
+    const attached = extractProviderRuntimeMetadata(out as Record<string, unknown>);
+
+    expect(attached?.metadata?.entryEndpoint).toBe('/v1/responses');
+    expect(MetadataCenter.read(attached?.metadata as Record<string, unknown>)?.readRequestTruth().portScope).toBe('5520');
+  });
 });

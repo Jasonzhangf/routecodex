@@ -28,11 +28,11 @@ function readSnapshotEntryPort(source?: UnknownObject): number | undefined {
       ? record.portContext as Record<string, unknown>
       : undefined;
   for (const value of [
+    record?.portScope,
     record?.entryPort,
     record?.matchedPort,
     record?.routecodexLocalPort,
     record?.localPort,
-    record?.portScope,
     portContext?.matchedPort,
     portContext?.localPort,
     portContext?.port

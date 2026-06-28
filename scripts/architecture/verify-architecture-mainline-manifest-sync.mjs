@@ -45,7 +45,7 @@ const failures = [];
 
 const expectedChains = [
   'request.mainline', 'response.mainline', 'error.mainline',
-  'runtime.lifecycle.mainline', 'runtime.tmux_client_binding.mainline',
+  'runtime.lifecycle.mainline',
   'stopless.session.mainline', 'metadata.center.mainline',
 ];
 

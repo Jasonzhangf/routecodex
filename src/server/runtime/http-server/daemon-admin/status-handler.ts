@@ -10,57 +10,6 @@ interface ModuleStatusView {
   details?: Record<string, unknown>;
 }
 
-type RustQuotaHostSnapshotEntry = {
-  providerKey?: unknown;
-};
-
-type RustQuotaHostMutator = {
-  getStatus?(): { quotaHostSnapshot?: unknown } | null;
-  resetProviderQuota?(providerKey: string): unknown;
-};
-
-function logDaemonStatusNonBlockingError(operation: string, error: unknown): void {
-  const reason = error instanceof Error ? error.message : String(error);
-  console.warn(`[daemon-status] ${operation} failed (non-blocking): ${reason}`);
-}
-
-function getRustQuotaHostMutator(options: DaemonAdminRouteOptions): RustQuotaHostMutator | null {
-  const hubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline() : null;
-  if (!hubPipeline || typeof hubPipeline !== 'object') {
-    return null;
-  }
-  const getVirtualRouter = (hubPipeline as { getVirtualRouter?: () => unknown | null }).getVirtualRouter;
-  if (typeof getVirtualRouter !== 'function') {
-    return null;
-  }
-  const virtualRouter = getVirtualRouter();
-  if (!virtualRouter || typeof virtualRouter !== 'object') {
-    return null;
-  }
-  return virtualRouter as RustQuotaHostMutator;
-}
-
-function readRustQuotaHostSnapshotProviderKeys(mutator: RustQuotaHostMutator | null): string[] {
-  if (!mutator || typeof mutator.getStatus !== 'function') {
-    return [];
-  }
-  try {
-    const status = mutator.getStatus();
-    const snapshot = Array.isArray(status?.quotaHostSnapshot) ? status?.quotaHostSnapshot : [];
-    return snapshot
-      .map((entry) => {
-        const providerKey = typeof (entry as RustQuotaHostSnapshotEntry | null)?.providerKey === 'string'
-          ? String((entry as RustQuotaHostSnapshotEntry).providerKey).trim()
-          : '';
-        return providerKey;
-      })
-      .filter((providerKey) => providerKey.length > 0);
-  } catch (error: unknown) {
-    logDaemonStatusNonBlockingError('readRustQuotaHostSnapshotProviderKeys', error);
-    return [];
-  }
-}
-
 export function registerStatusRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/status', (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
@@ -74,7 +23,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
 
     if (manager) {
       // 当前 ManagerDaemon 没有统一的 introspection 接口，这里仅基于已知 id 做轻量推断。
-      const knownModuleIds = ['token', 'quota', 'provider-quota', 'health', 'routing'];
+      const knownModuleIds = ['token', 'health', 'routing'];
       for (const id of knownModuleIds) {
         const mod = typeof manager.getModule === 'function' ? manager.getModule(id) : undefined;
         if (!mod) {
@@ -165,7 +114,6 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
   });
 
   // Best-effort "refresh" semantics for modules that expose refreshNow()/reset().
-  // This is primarily used by quota modules so the admin UI can force refresh without restart.
   app.post('/daemon/modules/:id/refresh', async (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
@@ -223,117 +171,12 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
     }
     const mod = daemon.getModule(id) as (ManagerModule & { reset?: (opts?: unknown) => Promise<unknown> }) | undefined;
     if (!mod) {
-      // Back-compat for daemon-admin UI:
-      // - UI uses module id "provider-quota", but current runtime registers quota manager under id "quota".
-      // - When "provider-quota" module is absent, provide an explicit fallback that clears quotaView cooldown/blacklist
-      //   by calling quota.resetProvider(...) on all known providerKeys.
-      if (id === 'provider-quota') {
-        const rustMutator = getRustQuotaHostMutator(options);
-        const rustProviderKeys = readRustQuotaHostSnapshotProviderKeys(rustMutator);
-        if (rustMutator && typeof rustMutator.resetProviderQuota === 'function' && rustProviderKeys.length > 0) {
-          try {
-            for (const providerKey of rustProviderKeys) {
-              await Promise.resolve(rustMutator.resetProviderQuota(providerKey));
-            }
-            const quotaMod = daemon.getModule('quota') as
-              | (ManagerModule & {
-                  refreshNow?: () => Promise<unknown>;
-                })
-              | undefined;
-            const quotaRefresh = await quotaMod?.refreshNow?.().catch((error: unknown) => {
-              logDaemonStatusNonBlockingError('provider-quota.reset.refreshNow', error);
-              return null;
-            });
-            res.status(200).json({
-              ok: true,
-              id,
-              action: 'reset',
-              resetAt: Date.now(),
-              fallback: {
-                kind: 'rust-quota.reset-all',
-                providerCount: rustProviderKeys.length,
-                ...(quotaRefresh ? { quotaRefresh } : {})
-              }
-            });
-            return;
-          } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : String(error);
-            res.status(500).json({ error: { message, code: 'module_reset_failed' } });
-            return;
-          }
-        }
-        const quotaMod = daemon.getModule('quota') as
-          | (ManagerModule & {
-              getAdminSnapshot?: () => Record<string, unknown>;
-              resetProvider?: (providerKey: string) => unknown;
-              persistNow?: () => Promise<unknown>;
-              refreshNow?: () => Promise<unknown>;
-            })
-          | undefined;
-        const canResetAll =
-          quotaMod &&
-          typeof quotaMod.getAdminSnapshot === 'function' &&
-          typeof quotaMod.resetProvider === 'function';
-        if (canResetAll) {
-          try {
-            const snapshot = (quotaMod as any).getAdminSnapshot?.() ?? {};
-            const providerKeys = Object.keys(snapshot);
-            for (const providerKey of providerKeys) {
-              await Promise.resolve((quotaMod as any).resetProvider(providerKey));
-            }
-            await (quotaMod as any).persistNow?.().catch((error: unknown) => {
-              logDaemonStatusNonBlockingError('provider-quota.reset.persistNow', error);
-            });
-            const quotaRefresh = await (quotaMod as any).refreshNow?.().catch((error: unknown) => {
-              logDaemonStatusNonBlockingError('provider-quota.reset.refreshNow', error);
-              return null;
-            });
-            res.status(200).json({
-              ok: true,
-              id,
-              action: 'reset',
-              resetAt: Date.now(),
-              fallback: {
-                kind: 'quota.reset-all',
-                providerCount: providerKeys.length,
-                ...(quotaRefresh ? { quotaRefresh } : {})
-              }
-            });
-            return;
-          } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : String(error);
-            res.status(500).json({ error: { message, code: 'module_reset_failed' } });
-            return;
-          }
-        }
-      }
       res.status(404).json({ error: { message: 'module not found', code: 'not_found' } });
       return;
     }
     try {
       if (typeof mod.reset === 'function') {
         const result = await mod.reset({ persist: true });
-        // Special-case: resetting provider-quota should immediately trigger a quota refresh
-        // so quota-aware providers are re-fetched instead of staying stale.
-        if (id === 'provider-quota') {
-          try {
-            const quotaMod = daemon.getModule('quota') as unknown as { refreshNow?: () => Promise<unknown> } | undefined;
-            if (quotaMod && typeof quotaMod.refreshNow === 'function') {
-              const quotaRefresh = await quotaMod.refreshNow();
-              res.status(200).json({
-                ok: true,
-                id,
-                action: 'reset',
-                resetAt: Date.now(),
-                result,
-                meta: { quotaRefresh }
-              });
-              return;
-            }
-          } catch {
-            // ignore quota refresh failures on provider-quota reset
-          }
-        }
         res.status(200).json({ ok: true, id, action: 'reset', resetAt: Date.now(), result });
         return;
       }

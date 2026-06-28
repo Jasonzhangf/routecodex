@@ -69,7 +69,6 @@ export {
   prepareResponsesJsonSseDispatchPlanForHttp,
   requireResponsesHandlerCoreDist,
   resolveRelayResponsesClientSseStreamForHttp,
-  resolveResponsesClientPayloadFinishReasonForHttp,
   resolveResponsesRequestContextForHttp,
   shouldDispatchResponsesSseToClientForHttp,
   shouldDropClientSseFrameForHttp,

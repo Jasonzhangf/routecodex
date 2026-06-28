@@ -19,4 +19,6 @@ pub(crate) use types::{
     ContinuationContext, MetadataCenter, RequestTruth, RuntimeControl, StopMessageControl,
     StoplessControl,
 };
-pub(crate) use write_plan::{build_stopless_metadata_center_write_plan, StoplessMetadataCenterWritePlan};
+pub(crate) use write_plan::{
+    build_stopless_metadata_center_write_plan, StoplessMetadataCenterWritePlan,
+};

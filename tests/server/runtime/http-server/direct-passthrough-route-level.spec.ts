@@ -1,32 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { readRuntimeControlProjection } from '../../../../src/server/runtime/http-server/metadata-center/request-truth-readers.js';
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', async () => {
-  const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.js');
-  return {
-    ...actual,
-    resolveProviderRetryExecutionPolicyNative: jest.fn((input: {
-      classification?: string;
-      isStreamingRequest?: boolean;
-      hostContractFailure?: boolean;
-      forceExcludeCurrentProviderOnRetry?: boolean;
-      promptTooLong?: boolean;
-      existingExclusion?: boolean;
-    }) => {
-      if (input.hostContractFailure) {
-        return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
-      }
-      if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) {
-        return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
-      }
-      if (input.classification === 'recoverable' && !input.promptTooLong) {
-        return { excludeCurrentProvider: true, reason: 'recoverable_reroute' };
-      }
-      return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
-    })
-  };
-});
-
 describe('direct passthrough route-level', () => {
   it('HTTP BLACKBOX: provider-mode keyless chat binding preserves client model', async () => {
     jest.resetModules();

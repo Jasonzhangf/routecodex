@@ -19,6 +19,7 @@ mod chat_web_search_tool_schema;
 mod compat_field_mapping;
 mod compat_harvest_tool_calls_from_text;
 mod compat_tool_schema;
+mod direct_decision;
 mod failure_policy;
 mod followup_mainline_blocks;
 mod gemini_openai_codec;
@@ -58,10 +59,9 @@ mod hub_text_markup_normalizer;
 mod hub_tool_session_compat;
 mod metadata_center;
 mod openai_openai_codec;
+mod primary_exhausted_to_default_pool_blocks;
 mod provider_response_shared_pure_blocks;
 mod provider_response_tool_validation_blocks;
-mod direct_decision;
-mod primary_exhausted_to_default_pool_blocks;
 mod req_executor_pipeline_attempt;
 mod req_outbound_stage3_compat;
 mod req_process_stage1_tool_governance;
@@ -2672,7 +2672,9 @@ pub fn as_flat_record_json(input_json: String) -> NapiResult<Option<String>> {
 
 #[napi]
 pub fn extract_first_balanced_json_object_json(raw_string: String) -> NapiResult<Option<String>> {
-    Ok(payload_extraction::extract_first_balanced_json_object(&raw_string))
+    Ok(payload_extraction::extract_first_balanced_json_object(
+        &raw_string,
+    ))
 }
 
 #[napi]
@@ -2685,7 +2687,9 @@ pub fn try_parse_json_like_string_json(raw_string: String) -> NapiResult<Option<
 pub fn extract_content_text_for_stopless_scan_json(input_json: String) -> NapiResult<String> {
     let raw: serde_json::Value = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
-    Ok(payload_extraction::extract_content_text_for_stopless_scan(&raw))
+    Ok(payload_extraction::extract_content_text_for_stopless_scan(
+        &raw,
+    ))
 }
 
 #[napi]
@@ -2717,7 +2721,9 @@ pub fn find_nested_error_marker_json(input_json: String) -> NapiResult<String> {
 }
 
 #[napi]
-pub fn extract_bridge_provider_response_payload_json(input_json: String) -> NapiResult<Option<String>> {
+pub fn extract_bridge_provider_response_payload_json(
+    input_json: String,
+) -> NapiResult<Option<String>> {
     let raw: serde_json::Value = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
     let result = payload_extraction::extract_bridge_provider_response_payload(&raw);

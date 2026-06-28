@@ -1,27 +1,5 @@
 import { jest } from '@jest/globals';
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', async () => {
-  const actual = await import('../../../src/modules/llmswitch/bridge/native-exports.js');
-  return {
-    ...actual,
-    resolveProviderRetryExecutionPolicyNative: jest.fn((input: {
-      classification?: string;
-      isStreamingRequest?: boolean;
-      hostContractFailure?: boolean;
-      forceExcludeCurrentProviderOnRetry?: boolean;
-      promptTooLong?: boolean;
-      existingExclusion?: boolean;
-    }) => {
-      if (input.hostContractFailure) return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
-      if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
-      if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
-        return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
-      }
-      return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
-    })
-  };
-});
-
 const mockBridgeWithStoplessStateStubs = async () => {
   const routing = await import('../../../src/modules/llmswitch/bridge/routing-integrations.ts');
   return {
@@ -42,6 +20,7 @@ const mockBridgeWithStoplessStateStubs = async () => {
     resumeLatestResponsesContinuationByScope: jest.fn(async () => null),
     createResponsesSseToJsonConverter: jest.fn(async () => ({ convertSseToJson: async () => ({}) })),
     resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
+    reprojectDirectChatToolCallStreamForHttp: jest.fn(async () => undefined),
     reportProviderErrorToRouterPolicy: jest.fn(async (event: unknown) => event),
     reportProviderSuccessToRouterPolicy: jest.fn(async (event: unknown) => event),
     mapChatToolsToBridgeJson: jest.fn(async () => []),
@@ -266,6 +245,7 @@ describe('responses provider-owned continuation reroute blackbox', () => {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
+            model: 'gpt-test',
             tool_outputs: [
               { call_id: 'call_1', output: 'ok' }
             ]

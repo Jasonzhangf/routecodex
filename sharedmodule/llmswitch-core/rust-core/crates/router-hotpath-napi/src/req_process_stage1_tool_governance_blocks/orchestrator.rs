@@ -15,9 +15,7 @@ use crate::req_process_stage1_tool_governance_blocks::request_sanitizer::{
     apply_anthropic_tool_alias_semantics, apply_post_governed_media_cleanup,
     resolve_governance_context,
 };
-use crate::req_process_stage1_tool_governance_blocks::servertool_injection::{
-    maybe_apply_servertool_orchestration,
-};
+use crate::req_process_stage1_tool_governance_blocks::servertool_injection::maybe_apply_servertool_orchestration;
 use crate::shared_json_utils::{normalize_record, normalize_record_ref};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,6 +49,7 @@ const STOPLESS_SYSTEM_INSTRUCTION: &str = concat!(
     "当你准备结束当前轮时，必须使用唯一 stop schema 合同。\n",
     "优先路径：直接调用名为 reasoningStop 的 function tool，并把完整 JSON schema 放进该 tool call 的 arguments。\n",
     "禁止把 reasoningStop 当成 shell / CLI 命令；不要输出或执行 exec_command(cmd=\"reasoningStop\")。\n",
+    "字段不是全局必填，而是关系必填：stopreason/reason/has_evidence 是基线；has_evidence=1 时 evidence 必填；stopreason=0/1 表示停止，必须 has_evidence=1 且 evidence 非空；stopreason=2 表示继续，必须写 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。\n",
     "如果你直接 finish_reason=stop，正文末尾必须附：\n",
     "<rcc_stop_schema>\n",
     "{\"stopreason\":2,\"reason\":\"当前状态原因\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"如果仍需继续，写立刻执行的下一步；否则写无\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}\n",
@@ -59,6 +58,7 @@ const STOPLESS_SYSTEM_INSTRUCTION: &str = concat!(
     "stopreason 取值：0=finished，1=blocked，2=continue_needed。\n",
     "finished：表示已经完成，可停止；blocked：表示确实卡住且需要停止；continue_needed：表示还不能停，必须继续推进并给 next_step。\n",
     "needs_user_input 只能是 true/false；true 只用于真的需要向用户提一个问题。\n",
+    "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"运行下一条验证命令\",\"needs_user_input\":false}。\n",
     "无 arguments 且无 <rcc_stop_schema> 时，不允许停止。"
 );
 
@@ -305,9 +305,11 @@ fn parse_stopless_cli_output(value: &Value) -> Option<Map<String, Value>> {
         .or_else(|| read_trimmed_string(row.get("flow_id")))
         .or_else(|| read_nested_string_field(&row, "input", "flowId", "flow_id"));
     let has_stopless_counter = read_u64_field(&row, "repeatCount", "repeat_count")
-        .or_else(|| row.get("input").and_then(Value::as_object).and_then(|input| {
-            read_u64_field(input, "repeatCount", "repeat_count")
-        }))
+        .or_else(|| {
+            row.get("input")
+                .and_then(Value::as_object)
+                .and_then(|input| read_u64_field(input, "repeatCount", "repeat_count"))
+        })
         .is_some();
     if tool_name.as_deref() != Some("stop_message_auto")
         && !(flow_id.as_deref() == Some("stop_message_flow") && has_stopless_counter)
@@ -369,18 +371,24 @@ fn read_nested_string_field<'a>(
 ) -> Option<String> {
     row.get(owner)
         .and_then(Value::as_object)
-        .and_then(|nested| read_trimmed_string(nested.get(camel)).or_else(|| read_trimmed_string(nested.get(snake))))
+        .and_then(|nested| {
+            read_trimmed_string(nested.get(camel))
+                .or_else(|| read_trimmed_string(nested.get(snake)))
+        })
 }
 
 fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<Value> {
-    let repeat_count = read_u64_field(row, "repeatCount", "repeat_count")
-        .or_else(|| row.get("input").and_then(Value::as_object).and_then(|input| {
-            read_u64_field(input, "repeatCount", "repeat_count")
-        }))?;
+    let repeat_count = read_u64_field(row, "repeatCount", "repeat_count").or_else(|| {
+        row.get("input")
+            .and_then(Value::as_object)
+            .and_then(|input| read_u64_field(input, "repeatCount", "repeat_count"))
+    })?;
     let max_repeats = read_u64_field(row, "maxRepeats", "max_repeats")
-        .or_else(|| row.get("input").and_then(Value::as_object).and_then(|input| {
-            read_u64_field(input, "maxRepeats", "max_repeats")
-        }))
+        .or_else(|| {
+            row.get("input")
+                .and_then(Value::as_object)
+                .and_then(|input| read_u64_field(input, "maxRepeats", "max_repeats"))
+        })
         .unwrap_or(3);
     let flow_id = read_trimmed_string(row.get("flowId"))
         .or_else(|| read_trimmed_string(row.get("flow_id")))
@@ -416,7 +424,10 @@ fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<V
 
     let mut stopless = Map::new();
     stopless.insert("flowId".to_string(), Value::String(flow_id));
-    stopless.insert("repeatCount".to_string(), Value::Number(repeat_count.into()));
+    stopless.insert(
+        "repeatCount".to_string(),
+        Value::Number(repeat_count.into()),
+    );
     stopless.insert("maxRepeats".to_string(), Value::Number(max_repeats.into()));
     stopless.insert("active".to_string(), Value::Bool(true));
     stopless.insert("updatedAt".to_string(), Value::Number(now_millis().into()));
@@ -465,13 +476,15 @@ fn build_reasoning_stop_tool() -> Value {
             "description": concat!(
                 "Use this tool every time you want to stop. ",
                 "Schema means the structured JSON contract for the stop result: it tells the system what is finished, what is blocked, and what still needs to continue. ",
-                "Provide the real stop schema as JSON arguments and fill every field with concrete content. ",
+                "Provide the real stop schema as JSON arguments. Fields are conditionally required, not globally required: stopreason/reason/has_evidence are baseline; has_evidence=1 requires evidence; terminal stopreason=0 or 1 requires has_evidence=1 and non-empty evidence; stopreason=2 requires next_step; needs_user_input=true requires next_step to be the exact user question. ",
                 "If you do not call this tool and still stop, the assistant text must end with <rcc_stop_schema>...</rcc_stop_schema>. ",
                 "stopreason values: 0=finished, 1=blocked, 2=continue_needed. ",
                 "If work remains, use stopreason=2 and write next_step. ",
                 "Field meanings: stopreason, reason, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned. ",
-                "示例 finished payload: ",
-                "{\"stopreason\":0,\"reason\":\"已完成并验证\",\"has_evidence\":1,\"evidence\":\"列出已验证日志/测试/文件\",\"issue_cause\":\"问题已修复\",\"excluded_factors\":\"无\",\"diagnostic_order\":\"1.定位 2.修复 3.验证\",\"done_steps\":\"概述已完成动作\",\"next_step\":\"无\",\"next_suggested_path\":\"无\",\"needs_user_input\":false,\"learned\":\"补充本轮结论\"}"
+                "Minimal continue sample: ",
+                "{\"stopreason\":2,\"reason\":\"当前还在推进\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"运行下一条验证命令\",\"needs_user_input\":false}. ",
+                "Minimal finished sample: ",
+                "{\"stopreason\":0,\"reason\":\"已完成并验证\",\"has_evidence\":1,\"evidence\":\"列出已验证日志/测试/文件\",\"needs_user_input\":false}"
             ),
             "parameters": {
                 "type": "object",
@@ -531,16 +544,7 @@ fn build_reasoning_stop_tool() -> Value {
                 "required": [
                     "stopreason",
                     "reason",
-                    "has_evidence",
-                    "evidence",
-                    "issue_cause",
-                    "excluded_factors",
-                    "diagnostic_order",
-                    "done_steps",
-                    "next_step",
-                    "next_suggested_path",
-                    "needs_user_input",
-                    "learned"
+                    "has_evidence"
                 ]
             }
         }

@@ -25,7 +25,6 @@ const CHAIN_WIKI_MAP = [
   { chainId: 'response.mainline', page: 'docs/architecture/wiki/response-mainline-call-graph.md' },
   { chainId: 'error.mainline', page: 'docs/architecture/wiki/error-mainline-call-graph.md' },
   { chainId: 'runtime.lifecycle.mainline', page: 'docs/architecture/wiki/runtime-lifecycle-call-graph.md' },
-  { chainId: 'runtime.tmux_client_binding.mainline', page: 'docs/architecture/wiki/mainline-call-graph.md' },
   { chainId: 'stopless.session.mainline', page: 'docs/architecture/wiki/stopless-session-mainline-source.md' },
   { chainId: 'metadata.center.mainline', page: 'docs/architecture/wiki/metadata-center-mainline-source.md' },
 ];

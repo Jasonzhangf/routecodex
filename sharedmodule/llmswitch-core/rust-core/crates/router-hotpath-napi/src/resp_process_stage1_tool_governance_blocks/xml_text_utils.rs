@@ -241,18 +241,18 @@ pub(crate) fn normalize_dsml_tool_markup(raw: &str) -> String {
     let mut normalized = raw;
     let replacements = [
         (
-            r#"(?is)<\s*\|?\s*dsml\s*\|\s*tool_calls\s*>"#,
+            r#"(?is)<\s*\|*\s*dsml\s*\|*\s*tool_calls\s*>"#,
             "<tool_calls>",
         ),
         (
-            r#"(?is)</\s*\|?\s*dsml\s*\|\s*tool_calls\s*>"#,
+            r#"(?is)</\s*\|*\s*dsml\s*\|*\s*tool_calls\s*>"#,
             "</tool_calls>",
         ),
-        (r#"(?is)<\s*\|?\s*dsml\s*\|\s*invoke\b"#, "<invoke"),
-        (r#"(?is)</\s*\|?\s*dsml\s*\|\s*invoke\s*>"#, "</invoke>"),
-        (r#"(?is)<\s*\|?\s*dsml\s*\|\s*parameter\b"#, "<parameter"),
+        (r#"(?is)<\s*\|*\s*dsml\s*\|*\s*invoke\b"#, "<invoke"),
+        (r#"(?is)</\s*\|*\s*dsml\s*\|*\s*invoke\s*>"#, "</invoke>"),
+        (r#"(?is)<\s*\|*\s*dsml\s*\|*\s*parameter\b"#, "<parameter"),
         (
-            r#"(?is)</\s*\|?\s*dsml\s*\|\s*parameter\s*>"#,
+            r#"(?is)</\s*\|*\s*dsml\s*\|*\s*parameter\s*>"#,
             "</parameter>",
         ),
     ];

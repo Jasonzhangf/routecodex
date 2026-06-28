@@ -1595,7 +1595,12 @@ pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResul
     let stop_hook_match = stop_eligible
         && matches!(
             stop_gateway_reason,
-            Some("finish_reason_stop" | "finish_reason_tool_calls_internal_stop_tool")
+            Some(
+                "finish_reason_stop"
+                    | "finish_reason_tool_calls_internal_stop_tool"
+                    | "status_completed"
+                    | "responses_output_completed"
+            )
         );
     let (intercept_kind, schema_source) = match stop_gateway_reason {
         Some("finish_reason_stop") => (
@@ -1605,6 +1610,10 @@ pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResul
         Some("finish_reason_tool_calls_internal_stop_tool") => (
             Some("internal_tool_reasoning_stop".to_string()),
             Some("reasoning_stop_arguments".to_string()),
+        ),
+        Some("status_completed" | "responses_output_completed") => (
+            Some("responses_status_completed_text".to_string()),
+            Some("assistant_stop_text".to_string()),
         ),
         _ => (None, None),
     };
@@ -3191,7 +3200,10 @@ mod tests {
         assert!(output["followup"].is_null());
         assert_eq!(output["flowId"].as_str(), Some("stop_message_flow"));
         assert_eq!(output["stoplessRuntimeState"]["used"].as_u64(), Some(1));
-        assert_eq!(output["stoplessRuntimeState"]["maxRepeats"].as_u64(), Some(3));
+        assert_eq!(
+            output["stoplessRuntimeState"]["maxRepeats"].as_u64(),
+            Some(3)
+        );
         assert!(output["stoplessRuntimeState"]["text"]
             .as_str()
             .unwrap_or_default()
@@ -3374,7 +3386,9 @@ mod tests {
                 Some(3),
                 "used={used} stoplessRuntimeState.maxRepeats must stay stable"
             );
-            let text = output["stoplessRuntimeState"]["text"].as_str().unwrap_or_default();
+            let text = output["stoplessRuntimeState"]["text"]
+                .as_str()
+                .unwrap_or_default();
             assert!(
                 !text.is_empty(),
                 "used={used} stoplessRuntimeState.text must keep client-visible stopless guidance"
@@ -3443,7 +3457,9 @@ mod tests {
                 &run_stop_message_auto_handler_json(input.to_string()).expect("handler output"),
             )
             .expect("json output");
-            let text = output["stoplessRuntimeState"]["text"].as_str().unwrap_or_default();
+            let text = output["stoplessRuntimeState"]["text"]
+                .as_str()
+                .unwrap_or_default();
             assert!(
                 text.contains(expected_fragment),
                 "reason_code={reason_code} must select matching prompt fragment, got: {text}"
@@ -3786,6 +3802,60 @@ mod tests {
         assert_eq!(
             value["schemaSource"],
             Value::String("reasoning_stop_arguments".to_string())
+        );
+        assert_eq!(value.get("skipReason"), None);
+    }
+
+    #[test]
+    fn plan_servertool_response_stage_gate_runs_stopless_for_responses_completed_empty_text() {
+        let raw = plan_servertool_response_stage_gate_json(
+            json!({
+                "payload": {
+                    "status": "completed",
+                    "output_text": "",
+                    "output": [
+                        {
+                            "type": "reasoning",
+                            "summary": [{
+                                "type": "summary_text",
+                                "text": "I should provide stop schema."
+                            }]
+                        },
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [{ "type": "output_text", "text": "" }]
+                        }
+                    ]
+                },
+                "adapterContext": {},
+                "runtimeControl": {},
+                "allowFollowup": false,
+                "hasServertoolSupport": true
+            })
+            .to_string(),
+        )
+        .expect("gate");
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["shouldBypass"], Value::Bool(false));
+        assert_eq!(
+            value["nextAction"],
+            Value::String("run_auto_hooks".to_string())
+        );
+        assert_eq!(value["responseHookMatched"], Value::Bool(true));
+        assert_eq!(value["responseHookRequired"], Value::Bool(true));
+        assert_eq!(
+            value["responseHookName"],
+            Value::String("stop_message_auto".to_string())
+        );
+        assert_eq!(
+            value["interceptKind"],
+            Value::String("responses_status_completed_text".to_string())
+        );
+        assert_eq!(
+            value["schemaSource"],
+            Value::String("assistant_stop_text".to_string())
         );
         assert_eq!(value.get("skipReason"), None);
     }

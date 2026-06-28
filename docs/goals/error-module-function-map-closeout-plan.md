@@ -96,7 +96,6 @@ Owner：
 - `src/server/runtime/http-server/executor/request-executor-error-action-queue.ts`
 - `src/server/runtime/http-server/executor/request-executor-global-error-backoff.ts`
 - `src/server/runtime/http-server/executor/request-executor-session-storm-backoff.ts`
-- `src/providers/core/runtime/provider-failure-policy-backoff.ts`
 
 必须修正：
 

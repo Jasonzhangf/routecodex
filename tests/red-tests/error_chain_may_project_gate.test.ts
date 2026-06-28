@@ -27,7 +27,6 @@ import {
   isEarlyProjectionBlockedError,
   project_error_err_06_client_from_error_err_05_execution_decision,
 } from '../../src/server/utils/http-error-mapper.js';
-import { resolveProviderFailureExclusionDecision } from '../../src/providers/core/runtime/provider-failure-policy.js';
 
 const FEATURE_ID = ERROR_EXECUTION_DECISION_CONSUMER_FEATURE_ID;
 
@@ -118,34 +117,4 @@ describe(`${FEATURE_ID} — ErrorErr05 mayProject gate`, () => {
     expect(payload.body.error).toBeDefined();
   });
 
-  it('401 without alternative must not force exclusion by status shortcut alone', () => {
-    const decision = resolveProviderFailureExclusionDecision({
-      hasAlternativeCandidate: false,
-    });
-    expect(decision.excludeCurrentProvider).toBe(false);
-  });
-
-  it('403 and auth/quota codes with alternatives must still take exclusion+rerroute path', () => {
-    const viaStatus = resolveProviderFailureExclusionDecision({
-      hasAlternativeCandidate: true,
-    });
-    const viaInvalidApiKey = resolveProviderFailureExclusionDecision({
-      hasAlternativeCandidate: true,
-    });
-    const viaInsufficientQuota = resolveProviderFailureExclusionDecision({
-      hasAlternativeCandidate: true,
-    });
-    expect(viaStatus).toMatchObject({
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative',
-    });
-    expect(viaInvalidApiKey).toMatchObject({
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative',
-    });
-    expect(viaInsufficientQuota).toMatchObject({
-      excludeCurrentProvider: true,
-      retryAction: 'reroute_explicit_alternative',
-    });
-  });
 });

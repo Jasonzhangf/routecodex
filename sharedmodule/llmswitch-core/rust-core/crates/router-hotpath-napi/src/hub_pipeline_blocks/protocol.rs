@@ -92,27 +92,7 @@ pub(crate) fn apply_outbound_stream_preference(
     Value::Object(out)
 }
 
-pub(crate) fn resolve_sse_protocol_from_metadata(metadata: &Value) -> Option<String> {
-    let row = metadata.as_object()?;
-    for key in ["sseProtocol", "clientSseProtocol", "routeSseProtocol"] {
-        let raw = match row.get(key).and_then(|v| v.as_str()) {
-            Some(v) => v.trim(),
-            None => continue,
-        };
-        if raw.is_empty() {
-            continue;
-        }
-        if let Ok(protocol) = resolve_provider_protocol(raw) {
-            return Some(protocol);
-        }
-    }
-    None
-}
-
-pub(crate) fn resolve_sse_protocol(metadata: &Value, provider_protocol: &str) -> String {
-    if let Some(protocol) = resolve_sse_protocol_from_metadata(metadata) {
-        return protocol;
-    }
+pub(crate) fn resolve_sse_protocol(_metadata: &Value, provider_protocol: &str) -> String {
     let fallback = provider_protocol.trim();
     if fallback.is_empty() {
         return "openai-chat".to_string();

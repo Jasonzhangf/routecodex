@@ -25,7 +25,6 @@ Key owners:
 - `hub.servertool_followup`
 - `hub.servertool_cli_projection`
 - `hub.servertool_stopless_cli_continuation`
-- `hub.servertool_backend_route_runtime`
 - `hub.servertool_orchestration_policy`
 
 ## Main Rule
@@ -92,7 +91,6 @@ flowchart LR
 | `hub.servertool_followup` | followup orchestration + post-followup governed truth | `run_servertool_response_stage_json`, `plan_servertool_outcome_json`, `project_hub_resp_outbound_04_from_hub_resp_chatprocess_03` | `src/providers`, `src/server` |
 | `hub.servertool_cli_projection` | generic servertool -> client `exec_command` projection | `build_servertool_cli_projection_01_from_hub_resp_chatprocess_03` | provider runtime / executor local projection |
 | `hub.servertool_stopless_cli_continuation` | stopless runtime-metadata + current-turn tool-output continuation planning | `plan_stopless_orchestration_action`, `resolve_runtime_stop_message_state_from_adapter_context`, `plan_client_exec_cli_projection_output` | handler-local stopless logic / TS reenter |
-| `hub.servertool_backend_route_runtime` | backend-route runtime target / transport shell | see function-map owner | provider/client layer second runtime owner |
 | `hub.servertool_orchestration_policy` | timeout, disconnect, provider pin, followup error policy | `resolve_adapter_context_provider_key`, `compact_followup_error_reason` | scattered handler/executor policy |
 
 ## Followup vs CLI
@@ -136,7 +134,6 @@ flowchart TD
 | `followup-gap-02` | Split visibility | function-map 有 owner，但 followup 与 CLI 的分流边界未在单页显式对比 | 容易把 CLI 路径误补成 followup |
 | `followup-gap-03` | Stopless isolation | 文档已写 stopless 不可 server-side reenter，但 wiki 之前没有单独标红 | 旧 stopless/followup 语义容易复活 |
 | `followup-gap-04` | Post-followup truth | 之前缺一张图强调 `ServertoolResp03FollowupResult -> HubRespOutbound04ClientSemantic` 的唯一出口 | 容易重新用 pre-followup payload 投影 SSE/JSON |
-| `followup-gap-05` | Backend/runtime boundary | backend-route/runtime 只应是 transport shell，但专题 review 面还不够集中 | handler/runtime 最容易重新长逻辑 |
 
 ## Verification Anchors
 

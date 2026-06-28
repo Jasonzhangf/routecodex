@@ -298,6 +298,8 @@ describe('request-executor-provider-failure-plan', () => {
     });
 
     expect(plan.requestLocalProviderRetryState).toBeUndefined();
-    expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(false);
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
+    expect(plan.retryExecutionPlan.retrySwitchPlan).toBeUndefined();
   });
 });

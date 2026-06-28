@@ -2,7 +2,7 @@
 //! This module does NOT expose NAPI directly. The NAPI entry point is in `lib.rs`.
 
 use stop_message_core::{
-    decide, evaluate_stopless_loop_guard, evaluate_stop_schema_gate, StopMessageDecision,
+    decide, evaluate_stop_schema_gate, evaluate_stopless_loop_guard, StopMessageDecision,
     StopMessageDecisionContext, StopSchemaGateDecision, StoplessLoopGuardDecision,
     StoplessLoopGuardInput,
 };

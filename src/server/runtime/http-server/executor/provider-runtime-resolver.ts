@@ -25,13 +25,6 @@ export async function resolveProviderRuntimeOrThrow(options: {
   void routeName;
   void dependencies;
   let runtimeKey = runtimeManager.resolveRuntimeKey(target.providerKey, undefined, metadata);
-  if (!runtimeKey && typeof target.providerKey === 'string') {
-    const providerKeyParts = target.providerKey.split('.');
-    if (providerKeyParts.length >= 3) {
-      const aliasScopedKey = `${providerKeyParts[0]}.${providerKeyParts[1]}`;
-      runtimeKey = runtimeManager.resolveRuntimeKey(aliasScopedKey, undefined, metadata);
-    }
-  }
   if (!runtimeKey) {
     runtimeKey = runtimeKeyHint;
   }
@@ -53,14 +46,6 @@ export async function resolveProviderRuntimeOrThrow(options: {
     const directHandle = runtimeManager.getHandleByRuntimeKey(target.providerKey, metadata);
     if (directHandle) {
       return { runtimeKey: target.providerKey, handle: directHandle };
-    }
-    const providerKeyParts = target.providerKey.split('.');
-    if (providerKeyParts.length >= 3) {
-      const modelScopedRuntimeKey = `${providerKeyParts[0]}.${providerKeyParts[1]}.${providerKeyParts[2]}`;
-      const modelScopedHandle = runtimeManager.getHandleByRuntimeKey(modelScopedRuntimeKey, metadata);
-      if (modelScopedHandle) {
-        return { runtimeKey: modelScopedRuntimeKey, handle: modelScopedHandle };
-      }
     }
     const normalizedProviderKey = target.providerKey.replace(/\.key(\d+)\./i, '.$1.');
     if (normalizedProviderKey !== target.providerKey) {

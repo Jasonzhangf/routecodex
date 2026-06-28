@@ -41,7 +41,6 @@ const chainToWikiPage = {
   'response.mainline':          'docs/architecture/wiki/response-mainline-call-graph.md',
   'error.mainline':             'docs/architecture/wiki/error-mainline-call-graph.md',
   'runtime.lifecycle.mainline':  'docs/architecture/wiki/runtime-lifecycle-call-graph.md',
-  'runtime.tmux_client_binding.mainline': 'docs/architecture/wiki/stopless-session-mainline-source.md',
   'stopless.session.mainline':  'docs/architecture/wiki/stopless-session-mainline-source.md',
   'metadata.center.mainline':   'docs/architecture/wiki/metadata-center-mainline-source.md',
 };

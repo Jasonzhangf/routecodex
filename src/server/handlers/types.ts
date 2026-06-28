@@ -26,6 +26,7 @@ export interface PipelineExecutionResult {
     providerKey?: string;
     model?: string;
     requestModel?: string;
+    providerProtocol?: string;
     routeName?: string;
     poolId?: string;
     entryPort?: number;

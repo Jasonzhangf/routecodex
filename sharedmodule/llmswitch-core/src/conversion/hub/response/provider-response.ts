@@ -31,6 +31,7 @@ import {
   materializeProviderResponseSsePayloadWithNative,
   projectPostServertoolHubRespOutbound04ClientSemanticWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { applyStoplessMetadataCenterWritePlan } from '../../../servertool/stopless-metadata-center-writer.js';
 
 function runProviderResponseRustHubPipeline(options: ProviderResponseConversionOptions): {
   payload?: JsonObject;
@@ -41,6 +42,7 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
   const providerProtocol = readProviderProtocolWithinCore({
     metadata: options.context as Record<string, unknown> | undefined
   });
+  const metadataCenterSnapshot = readMetadataCenterSnapshotForRust(options.context);
   const nativeResponsePlan = executeHubPipelineWithNative({
     config: {},
     request: {
@@ -57,9 +59,10 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
         runtimeEffects: {
           providerInvoker: false,
           reenterPipeline: false,
-          clientInjectDispatch: false
+          clientInjectDispatch: typeof options.clientInjectDispatch === 'function'
         }
       },
+      ...(metadataCenterSnapshot ? { metadataCenterSnapshot } : {}),
       stream: options.wantsStream,
       processMode: 'chat',
       direction: 'response',
@@ -84,6 +87,24 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
     runtimeEffects: normalizeProviderResponseEffectPlanWithNative({ effects }),
     diagnostics: nativeResponsePlan.diagnostics
   };
+}
+
+function readMetadataCenterSnapshotForRust(context: AdapterContext): Record<string, unknown> | null {
+  const contextRecord = context as unknown as Record<string, unknown>;
+  const boundCenter = readBoundMetadataCenter(contextRecord);
+  if (boundCenter) {
+    return {
+      requestTruth: boundCenter.readRequestTruth() ?? {},
+      continuationContext: boundCenter.readContinuationContext() ?? {},
+      runtimeControl: boundCenter.readRuntimeControl() ?? {},
+    };
+  }
+  const direct = asRecord(contextRecord.metadataCenterSnapshot);
+  if (direct) {
+    return direct;
+  }
+  const nestedMetadata = asRecord(contextRecord.metadata);
+  return nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) ?? null : null;
 }
 
 function readNativeStreamPipeEffect(runtimeEffects: ProviderResponseRuntimeEffectPlan): {
@@ -149,6 +170,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
   context: AdapterContext;
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
+  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
   stageRecorder?: StageRecorder;
 }): Promise<HubRespProcessEffectResult> {
   let payload = args.payload;
@@ -157,7 +179,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
     servertoolRuntimeActions: readNativeServertoolRuntimeActionEffects(args.runtimeEffects),
     providerInvoker: false,
     reenterPipeline: false,
-    clientInjectDispatch: false
+    clientInjectDispatch: typeof args.clientInjectDispatch === 'function'
   });
   if (actionPlan.error) {
     throwServertoolRuntimeErrorDescriptor(actionPlan.error);
@@ -173,6 +195,9 @@ async function executeProviderResponseNativeServertoolEffects(args: {
       requestId: args.requestId,
       entryEndpoint: args.entryEndpoint,
       providerProtocol: args.providerProtocol,
+      ...(typeof args.clientInjectDispatch === 'function'
+        ? { clientInjectDispatch: args.clientInjectDispatch }
+        : {}),
       ...(executionPlan.allowFollowup ? { allowFollowup: true } : {}),
       stageRecorder: args.stageRecorder
     });
@@ -186,6 +211,10 @@ async function executeProviderResponseNativeServertoolEffects(args: {
 
 function readNativeRuntimeStateWriteEffect(runtimeEffects: ProviderResponseRuntimeEffectPlan): Record<string, unknown> | null {
   return runtimeEffects.runtimeStateWrite ?? null;
+}
+
+function readNativeStoplessMetadataCenterWriteEffect(runtimeEffects: ProviderResponseRuntimeEffectPlan): Record<string, unknown> | null {
+  return runtimeEffects.stoplessMetadataCenterWrite ?? null;
 }
 
 async function executeProviderResponseNativeRuntimeStateEffect(args: {
@@ -214,6 +243,21 @@ async function executeProviderResponseNativeRuntimeStateEffect(args: {
   saveChatProcessSessionActualUsage({
     context: args.context,
     usage,
+  });
+}
+
+function executeProviderResponseNativeStoplessMetadataEffect(args: {
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
+  context: AdapterContext;
+}): void {
+  const plan = readNativeStoplessMetadataCenterWriteEffect(args.runtimeEffects);
+  if (!plan) {
+    return;
+  }
+  applyStoplessMetadataCenterWritePlan({
+    adapterContext: args.context as Record<string, unknown>,
+    plan,
+    reason: 'servertool-resp-hook-chat-process'
   });
 }
 
@@ -408,6 +452,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
   requestSemantics?: JsonObject;
+  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
   stageRecorder?: StageRecorder;
 }): Promise<ProviderResponseConversionResult> {
   let hubRespOutbound04ClientSemantic = args.nativeResponsePlan.payload;
@@ -421,6 +466,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     context: args.context,
     entryEndpoint: args.entryEndpoint,
     providerProtocol: args.providerProtocol,
+    clientInjectDispatch: args.clientInjectDispatch,
     stageRecorder: args.stageRecorder
   });
   hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'
@@ -432,6 +478,10 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     }) as JsonObject
     : respProcessEffect.payload;
   const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.runtimeEffects);
+  executeProviderResponseNativeStoplessMetadataEffect({
+    runtimeEffects: args.nativeResponsePlan.runtimeEffects,
+    context: args.context
+  });
   await executeProviderResponseNativeRuntimeStateEffect({
     runtimeEffects: args.nativeResponsePlan.runtimeEffects,
     context: args.context,
@@ -488,6 +538,15 @@ interface ProviderResponseConversionOptions {
    */
   requestSemantics?: JsonObject;
   stageRecorder?: StageRecorder;
+  clientInjectDispatch?: (options: {
+    entryEndpoint: string;
+    requestId: string;
+    body?: JsonObject;
+    metadata?: JsonObject;
+  }) => Promise<{
+    ok: boolean;
+    reason?: string;
+  }>;
 }
 
 interface ProviderResponseConversionResult {
@@ -589,6 +648,7 @@ export async function convertProviderResponse(
     entryEndpoint: options.entryEndpoint,
     providerProtocol,
     requestSemantics: options.requestSemantics,
+    clientInjectDispatch: options.clientInjectDispatch,
     stageRecorder: options.stageRecorder
   });
 }

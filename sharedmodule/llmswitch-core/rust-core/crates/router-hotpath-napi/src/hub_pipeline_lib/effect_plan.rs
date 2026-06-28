@@ -45,6 +45,7 @@ pub enum HubPipelineEffectKind {
     SnapshotWrite,
     ClockRuntimeAction,
     ServertoolRuntimeAction,
+    StoplessMetadataCenterWrite,
     ProviderHttpDispatch,
     StreamPipe,
     RuntimeStateWrite,
@@ -165,6 +166,7 @@ pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, St
 
     let mut stream_pipe: Option<Value> = None;
     let mut runtime_state_write: Option<Value> = None;
+    let mut stopless_metadata_center_write: Option<Value> = None;
     let mut servertool_runtime_actions: Vec<Value> = Vec::new();
 
     for effect in effects {
@@ -200,6 +202,14 @@ pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, St
                     read_effect_payload(effect_record, "servertoolRuntimeAction")?,
                 )?);
             }
+            "stoplessMetadataCenterWrite" => {
+                if stopless_metadata_center_write.is_some() {
+                    return Err("Rust HubPipeline response effect plan returned duplicate stoplessMetadataCenterWrite effects".to_string());
+                }
+                stopless_metadata_center_write = Some(
+                    read_effect_payload(effect_record, "stoplessMetadataCenterWrite")?.clone(),
+                );
+            }
             _ => {
                 return Err(
                     "Rust HubPipeline response effect plan returned unsupported effect kind"
@@ -212,6 +222,7 @@ pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, St
     Ok(json!({
         "streamPipe": stream_pipe,
         "runtimeStateWrite": runtime_state_write,
+        "stoplessMetadataCenterWrite": stopless_metadata_center_write,
         "servertoolRuntimeActions": servertool_runtime_actions,
     }))
 }

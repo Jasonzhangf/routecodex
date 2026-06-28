@@ -26,7 +26,11 @@ pub fn read_session_like_token(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => {
             let trimmed = s.trim();
-            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
         }
         _ => None,
     }
@@ -157,7 +161,9 @@ pub fn extract_latest_user_text_for_stopless_scan(source: &Value) -> String {
         if role != "user" {
             continue;
         }
-        let content = row_map.get("content").map(|v| extract_content_text_for_stopless_scan(v));
+        let content = row_map
+            .get("content")
+            .map(|v| extract_content_text_for_stopless_scan(v));
         if let Some(text) = content {
             let trimmed = text.trim().to_string();
             if !trimmed.is_empty() {
@@ -173,8 +179,7 @@ pub fn extract_latest_user_text_for_stopless_scan(source: &Value) -> String {
 pub fn has_stopless_directive_in_request_payload(source: &Value) -> bool {
     let text = extract_latest_user_text_for_stopless_scan(source);
     // Pattern: <**stopless:*>
-    text.contains("<**stopless:")
-        && text.contains("**>")
+    text.contains("<**stopless:") && text.contains("**>")
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +313,10 @@ mod tests {
 
     #[test]
     fn session_token_trimmed() {
-        assert_eq!(read_session_like_token(&json!("  abc  ")), Some("abc".to_string()));
+        assert_eq!(
+            read_session_like_token(&json!("  abc  ")),
+            Some("abc".to_string())
+        );
     }
 
     #[test]
@@ -372,7 +380,10 @@ mod tests {
 
     #[test]
     fn content_from_string() {
-        assert_eq!(extract_content_text_for_stopless_scan(&json!("hello")), "hello");
+        assert_eq!(
+            extract_content_text_for_stopless_scan(&json!("hello")),
+            "hello"
+        );
     }
 
     #[test]
@@ -508,6 +519,9 @@ mod tests {
 
     #[test]
     fn payload_not_found() {
-        assert_eq!(extract_bridge_provider_response_payload(&json!("string")), None);
+        assert_eq!(
+            extract_bridge_provider_response_payload(&json!("string")),
+            None
+        );
     }
 }

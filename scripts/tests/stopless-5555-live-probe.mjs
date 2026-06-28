@@ -127,11 +127,53 @@ function extractExecCommand(responseBody) {
   if (typeof rawArgs !== 'string' || !rawArgs.trim()) {
     return null;
   }
-  const parsed = JSON.parse(rawArgs);
+  const parsed = parseExecCommandArguments(rawArgs);
   return {
     toolCallId: call.tool_call_id || call.id || null,
     command: typeof parsed?.cmd === 'string' ? parsed.cmd : null
   };
+}
+
+function parseExecCommandArguments(rawArgs) {
+  try {
+    return JSON.parse(rawArgs);
+  } catch {
+    const keyIndex = rawArgs.indexOf('"cmd"');
+    if (keyIndex < 0) {
+      throw new Error(`unable to parse exec_command arguments: ${rawArgs.slice(0, 500)}`);
+    }
+    const colonIndex = rawArgs.indexOf(':', keyIndex);
+    const firstQuoteIndex = rawArgs.indexOf('"', colonIndex + 1);
+    if (colonIndex < 0 || firstQuoteIndex < 0) {
+      throw new Error(`unable to parse exec_command arguments: ${rawArgs.slice(0, 500)}`);
+    }
+    let cursor = firstQuoteIndex + 1;
+    let escapedMode = false;
+    while (cursor < rawArgs.length) {
+      const ch = rawArgs[cursor];
+      if (escapedMode) {
+        escapedMode = false;
+        cursor += 1;
+        continue;
+      }
+      if (ch === '\\') {
+        escapedMode = true;
+        cursor += 1;
+        continue;
+      }
+      if (ch === '"') {
+        break;
+      }
+      cursor += 1;
+    }
+    if (cursor >= rawArgs.length) {
+      throw new Error(`unable to parse exec_command arguments: ${rawArgs.slice(0, 500)}`);
+    }
+    const escaped = rawArgs.slice(firstQuoteIndex, cursor + 1);
+    return {
+      cmd: JSON.parse(escaped)
+    };
+  }
 }
 
 function extractReasoningStop(responseBody) {

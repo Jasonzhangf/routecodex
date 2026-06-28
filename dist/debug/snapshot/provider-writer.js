@@ -6,6 +6,8 @@ import { coerceSnapshotPayloadForWrite, planSnapshotPayloadWrite } from '../../u
 import { writeUnifiedSnapshot } from './writer.js';
 import { resetProviderSnapshotErrorBufferForTests, } from './buffer.js';
 import { buildSnapshotPayload, resolveEndpoint, normalizeRequestId, normalizeProviderToken, logSnapshotNonBlockingError, } from './provider-utils.js';
+import { MetadataCenter } from '../../server/runtime/http-server/metadata-center/metadata-center.js';
+import { getCurrentPortRequestContext } from '../../server/runtime/http-server/port-log-context.js';
 import { enqueueSnapshotPersist, __flushProviderSnapshotQueueForTests as flushProviderSnapshotQueueForTests, __resetProviderSnapshotQueueForTests as resetProviderSnapshotQueueForTests, } from './provider-queue.js';
 import { shouldSuppressSnapshotFor429, schedule429ProviderSnapshotPurge, purge429ProviderSnapshotArtifacts, } from './provider-429.js';
 import { setWriteProviderSnapshot, shouldCaptureProviderStreamSnapshots, attachProviderSseSnapshotStream, } from './provider-sse.js';
@@ -22,20 +24,36 @@ export function __resetProviderSnapshotQueueForTests() {
 function isErrorPhase(phase) {
     return String(phase || '').trim().toLowerCase().includes('error');
 }
-function resolveProviderSnapshotEntryPort(metadata) {
+function resolveProviderSnapshotEntryPort(entryPort, metadata) {
+    if (typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0) {
+        return Math.floor(entryPort);
+    }
+    const portContext = getCurrentPortRequestContext();
+    const currentPort = typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort) && portContext.matchedPort > 0
+        ? Math.floor(portContext.matchedPort)
+        : typeof portContext?.localPort === 'number' && Number.isFinite(portContext.localPort) && portContext.localPort > 0
+            ? Math.floor(portContext.localPort)
+            : undefined;
+    if (typeof currentPort === 'number') {
+        return currentPort;
+    }
     if (!metadata || typeof metadata !== 'object') {
         return undefined;
     }
-    const portContext = metadata.portContext && typeof metadata.portContext === 'object'
-        ? metadata.portContext
-        : undefined;
+    const metadataCenter = MetadataCenter.read(metadata);
+    const requestTruthPortScope = metadataCenter?.readRequestTruth().portScope;
+    if (typeof requestTruthPortScope === 'string') {
+        const parsed = Number.parseInt(requestTruthPortScope, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
     const candidates = [
         metadata.entryPort,
         metadata.matchedPort,
         metadata.localPort,
         metadata.routecodexLocalPort,
-        portContext?.matchedPort,
-        portContext?.localPort
+        metadata.portScope
     ];
     for (const value of candidates) {
         const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
@@ -51,7 +69,7 @@ function buildProviderSnapshotPersistInput(options) {
     const requestId = normalizeRequestId(options.requestId);
     const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
     const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
-    const entryPort = resolveProviderSnapshotEntryPort(options.metadata);
+    const entryPort = resolveProviderSnapshotEntryPort(options.entryPort, options.metadata);
     const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
         stage,
         data: options.data,
@@ -124,7 +142,7 @@ export async function writeProviderSnapshot(options) {
             entryEndpoint: options.entryEndpoint,
             requestId: options.requestId,
             clientRequestId: options.clientRequestId,
-            entryPort: resolveProviderSnapshotEntryPort(options.metadata)
+            entryPort: resolveProviderSnapshotEntryPort(options.entryPort, options.metadata)
         };
         await purge429ProviderSnapshotArtifacts(purgeInput);
         schedule429ProviderSnapshotPurge(purgeInput);
@@ -134,6 +152,11 @@ export async function writeProviderSnapshot(options) {
         return;
     }
     const snapshot = buildProviderSnapshotPersistInput(options);
+    // Fail-fast: provider-* stage without entryPort must not enter the queue.
+    if (String(snapshot.stage || '').trim().toLowerCase().startsWith('provider-') && snapshot.entryPort === undefined) {
+        logSnapshotNonBlockingError(`writeProviderSnapshot:${snapshot.stage}`, new Error("entryPort missing"));
+        return;
+    }
     if (!runtimeFlags.snapshotsEnabled) {
         if (options.forceLocalDiskWriteWhenDisabled) {
             try {
@@ -176,7 +199,7 @@ export async function writeClientSnapshot(options) {
         const metadataSnapshot = options.metadata && typeof options.metadata === 'object'
             ? options.metadata
             : undefined;
-        const entryPort = resolveProviderSnapshotEntryPort(metadataSnapshot);
+        const entryPort = resolveProviderSnapshotEntryPort(undefined, metadataSnapshot);
         const snapshotPayload = typeof options.rawBodyText === 'string'
             ? options.rawBodyText
             : {

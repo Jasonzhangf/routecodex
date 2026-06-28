@@ -2,12 +2,12 @@ import type { Readable } from 'node:stream';
 /**
  * /v1/responses response-side handler bridge surface.
  *
- * Single projection-facing bridge entry for responses SSE/JSON projection and
- * transport-facing continuation close helpers on the response path.
+ * Single projection-facing bridge entry for Responses JSON projection and
+ * direct-continuation closeout IO.
  */
 
 // feature_id: server.responses_response_handler_bridge_surface
-// canonical_builders: resolveResponsesRequestContextForHttp, isToolCallContinuationResponseForHttp, inspectResponsesContinuationProbeForHttp, planResponsesContinuationCloseActionForHttp, rebindResponsesConversationRequestIdForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp, projectResponsesClientPayloadForClientForHttp
+// canonical_builders: resolveResponsesRequestContextForHttp, planResponsesContinuationCloseActionForHttp, rebindResponsesConversationRequestIdForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp
 
 import type { AnyRecord } from './module-loader.js';
 import {
@@ -24,11 +24,8 @@ import {
   buildResponsesPayloadFromChatNative,
   projectResponsesClientPayloadForClientNative,
 } from './native-exports.js';
-import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { normalizeUsage } from '../../../server/runtime/http-server/executor/usage-aggregator.js';
-import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 import {
-  readRuntimeControlProjection,
   readRuntimeRequestTruthIdentifiers,
 } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
@@ -44,38 +41,10 @@ export type ResponsesRequestContextForHttp = {
 
 export function resolveResponsesRequestContextForHttp(args: {
   metadata?: unknown;
+  fallback?: ResponsesRequestContextForHttp;
 }): ResponsesRequestContextForHttp | undefined {
-  const metadata =
-    args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
-      ? args.metadata as Record<string, unknown>
-      : undefined;
-  const fromMetadata = readMetadataCenterContinuationContextForHttp(metadata).responsesRequestContext;
-  if (fromMetadata && typeof fromMetadata === 'object' && !Array.isArray(fromMetadata)) {
-    const metadataContext = fromMetadata as ResponsesRequestContextForHttp;
-    return {
-      payload:
-        metadataContext.payload && typeof metadataContext.payload === 'object' && !Array.isArray(metadataContext.payload)
-          ? metadataContext.payload
-          : {},
-      context:
-        metadataContext.context && typeof metadataContext.context === 'object' && !Array.isArray(metadataContext.context)
-          ? metadataContext.context
-          : {},
-      ...(typeof metadataContext.sessionId === 'string' && metadataContext.sessionId.trim()
-        ? { sessionId: metadataContext.sessionId.trim() }
-        : {}),
-      ...(typeof metadataContext.conversationId === 'string' && metadataContext.conversationId.trim()
-        ? { conversationId: metadataContext.conversationId.trim() }
-        : {}),
-      ...(typeof metadataContext.matchedPort === 'number'
-        ? { matchedPort: metadataContext.matchedPort }
-        : {}),
-      ...(typeof metadataContext.routingPolicyGroup === 'string' && metadataContext.routingPolicyGroup.trim()
-        ? { routingPolicyGroup: metadataContext.routingPolicyGroup.trim() }
-        : {}),
-    };
-  }
-  return undefined;
+  void args.metadata;
+  return args.fallback;
 }
 
 type ChatUsageNormalizationResultForHttp = {
@@ -151,10 +120,6 @@ function asRecordForHttp(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-}
-
-function readMetadataCenterContinuationContextForHttp(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
-  return MetadataCenter.read(metadata)?.readContinuationContext() ?? {};
 }
 
 const RESPONSES_DEBUG = (process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() === '1';
@@ -247,48 +212,6 @@ export function buildClientSseKeepaliveFrameForHttp(entryEndpoint?: string): str
   return commentFrame;
 }
 
-export function shouldRequireResponsesTerminalEventForHttp(args: {
-  entryEndpoint?: string;
-  probe: unknown;
-}): boolean {
-  return (
-    Boolean(args.probe)
-    && (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
-  );
-}
-
-export function resolveResponsesTerminalProbeFinishReasonForHttp(args: {
-  finishReason?: string;
-  probe: unknown;
-}): string | undefined {
-  if (typeof args.finishReason === 'string' && args.finishReason.trim()) {
-    return args.finishReason.trim();
-  }
-  if (!args.probe || typeof args.probe !== 'object' || Array.isArray(args.probe)) {
-    return undefined;
-  }
-  const derived = deriveFinishReason(args.probe);
-  if (derived && derived.trim()) {
-    return derived.trim();
-  }
-  const probeRecord = args.probe as Record<string, unknown>;
-  const output = Array.isArray(probeRecord.output) ? probeRecord.output : [];
-  const sawCompletedAssistantMessage = output.some((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      return false;
-    }
-    const row = item as Record<string, unknown>;
-    return row.type === 'message'
-      && row.role === 'assistant'
-      && typeof row.status === 'string'
-      && row.status.trim().toLowerCase() === 'completed';
-  });
-  if (sawCompletedAssistantMessage) {
-    return 'stop';
-  }
-  return undefined;
-}
-
 export function shouldClearResponsesConversationOnClientCloseForHttp(args: {
   entryEndpoint?: string;
   closeBeforeStreamEnd: boolean;
@@ -328,55 +251,17 @@ export function resolveResponsesConversationClearReasonForHttp(
   }
 }
 
-export function isToolCallContinuationResponseForHttp(body: unknown): boolean {
-  return isToolCallContinuationResponseNative(body);
-}
-
-export function inspectResponsesContinuationProbeForHttp(args: {
+function isDirectResponsesToolCallContinuationForHttp(args: {
   entryEndpoint?: string;
-  probe: unknown;
-}): {
-  isToolCallContinuation: boolean;
-  hasRequiredAction: boolean;
-  hasHarvestableFunctionCallHistory: boolean;
-} {
+  responseBody: unknown;
+}): boolean {
   if (
     args.entryEndpoint !== '/v1/responses'
     && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
   ) {
-    return {
-      isToolCallContinuation: false,
-      hasRequiredAction: false,
-      hasHarvestableFunctionCallHistory: false,
-    };
+    return false;
   }
-  if (!args.probe || typeof args.probe !== 'object' || Array.isArray(args.probe)) {
-    return {
-      isToolCallContinuation: false,
-      hasRequiredAction: false,
-      hasHarvestableFunctionCallHistory: false,
-    };
-  }
-  const isToolCallContinuation = isToolCallContinuationResponseForHttp(args.probe);
-  const probeRecord = args.probe as Record<string, unknown>;
-  const output = Array.isArray(probeRecord.output) ? probeRecord.output : [];
-  return {
-    isToolCallContinuation,
-    hasRequiredAction:
-      isToolCallContinuation
-      && Boolean(
-        probeRecord.required_action
-        && typeof probeRecord.required_action === 'object'
-        && !Array.isArray(probeRecord.required_action)
-      ),
-    hasHarvestableFunctionCallHistory:
-      output.some((item) =>
-        item
-        && typeof item === 'object'
-        && !Array.isArray(item)
-        && (item as Record<string, unknown>).type === 'function_call'
-      ),
-  };
+  return isToolCallContinuationResponseNative(args.responseBody);
 }
 
 export function planResponsesContinuationCloseActionForHttp(args: {
@@ -387,11 +272,11 @@ export function planResponsesContinuationCloseActionForHttp(args: {
   action: 'persist_continuation' | 'clear_abandoned';
   keepForSubmitToolOutputs: boolean;
 } {
-  const probeState = inspectResponsesContinuationProbeForHttp({
+  const isToolCallContinuation = isDirectResponsesToolCallContinuationForHttp({
     entryEndpoint: args.entryEndpoint,
-    probe: args.probe,
+    responseBody: args.probe,
   });
-  if (args.requestContextPresent && probeState.isToolCallContinuation) {
+  if (args.requestContextPresent && isToolCallContinuation) {
     return {
       action: 'persist_continuation',
       keepForSubmitToolOutputs: true,
@@ -663,36 +548,6 @@ export async function buildResponsesPayloadFromChatForHttp(
   return buildResponsesPayloadFromChatNative(payload, context);
 }
 
-export async function projectResponsesClientPayloadForClientForHttp(args: {
-  payload: unknown;
-  toolsRaw: unknown[];
-  metadata?: Record<string, unknown>;
-}): Promise<Record<string, unknown>> {
-  return stripClientVisibleMetadataDeep(await projectResponsesClientPayloadForClientNative(args));
-}
-
-function readResponsesClientToolsRawForHttp(requestContext?: {
-  payload: AnyRecord;
-  context: AnyRecord;
-  sessionId?: string;
-  conversationId?: string;
-  matchedPort?: number;
-  routingPolicyGroup?: string;
-}): unknown[] {
-  const payloadTools = Array.isArray(requestContext?.payload?.tools) ? requestContext.payload.tools : undefined;
-  if (payloadTools?.length) {
-    return payloadTools;
-  }
-  const contextTools = Array.isArray(requestContext?.context?.toolsRaw) ? requestContext.context.toolsRaw : undefined;
-  if (contextTools?.length) {
-    return contextTools;
-  }
-  const contextClientTools = Array.isArray(requestContext?.context?.clientToolsRaw)
-    ? requestContext.context.clientToolsRaw
-    : undefined;
-  return contextClientTools?.length ? contextClientTools : [];
-}
-
 function readResponsesRequestModelForHttp(requestContext?: {
   payload: AnyRecord;
   context: AnyRecord;
@@ -743,6 +598,29 @@ function ensureResponsesJsonToSseRequiredFieldsForHttp(args: {
   };
 }
 
+function readResponsesClientToolsRawForHttp(requestContext?: {
+  payload: AnyRecord;
+  context: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}): unknown[] {
+  const contextToolsRaw = requestContext?.context?.toolsRaw;
+  if (Array.isArray(contextToolsRaw)) {
+    return contextToolsRaw;
+  }
+  const contextClientToolsRaw = requestContext?.context?.clientToolsRaw;
+  if (Array.isArray(contextClientToolsRaw)) {
+    return contextClientToolsRaw;
+  }
+  const payloadTools = requestContext?.payload?.tools;
+  if (Array.isArray(payloadTools)) {
+    return payloadTools;
+  }
+  return [];
+}
+
 export async function normalizeResponsesClientPayloadForHttp(args: {
   payload: unknown;
   entryEndpoint?: string;
@@ -765,19 +643,15 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
   if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
     return args.payload;
   }
-  const projectedPayload = await projectResponsesClientPayloadForClientForHttp({
+  const projectedPayload = projectResponsesClientPayloadForClientNative({
     payload: args.payload,
     toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
     metadata: args.metadata,
   });
   return ensureResponsesJsonToSseRequiredFieldsForHttp({
-    payload: projectedPayload,
+    payload: stripClientVisibleMetadataDeep(projectedPayload),
     requestContext: args.requestContext,
   });
-}
-
-export function resolveResponsesClientPayloadFinishReasonForHttp(payload: unknown): string | undefined {
-  return deriveFinishReason(payload);
 }
 
 export async function prepareResponsesJsonSseDispatchPlanForHttp(args: {
@@ -825,7 +699,6 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
 }): Promise<{
   clientBody: unknown;
   sanitizedBody: unknown;
-  finishReason?: string;
 }> {
   const normalizedJsonBody = await normalizeResponsesJsonBodyForHttp({
     body: args.body,
@@ -842,7 +715,6 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
   return {
     clientBody,
     sanitizedBody: stripInternalKeysDeep(clientBody),
-    finishReason: resolveResponsesClientPayloadFinishReasonForHttp(clientBody),
   };
 }
 

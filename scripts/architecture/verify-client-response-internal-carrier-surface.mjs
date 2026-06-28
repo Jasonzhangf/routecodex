@@ -17,11 +17,6 @@ const requiredAnchors = [
     snippet: 'assertClientResponseHasNoInternalCarriers',
     reason: 'JSON/SSE client response projection must keep a dedicated fail-fast carrier guard.',
   },
-  {
-    file: 'src/modules/llmswitch/bridge/responses-response-bridge.ts',
-    snippet: 'assertDirectPassthroughResponsesSseMetadataIsolationForHttp',
-    reason: 'Direct passthrough SSE must keep a dedicated metadata isolation guard.',
-  },
 ];
 
 const rules = [
@@ -30,7 +25,6 @@ const rules = [
     regex: /__routecodex[A-Za-z0-9_]*/g,
     allowedFiles: new Set([
       'src/server/handlers/handler-response-common.ts',
-      'src/modules/llmswitch/bridge/responses-response-bridge.ts',
     ]),
     reason: 'client-visible response/SSE layer must not grow ad hoc __routecodex* payload semantics outside the two fail-fast guard owners.',
   },
@@ -39,7 +33,6 @@ const rules = [
     regex: /\b__rt\b/g,
     allowedFiles: new Set([
       'src/server/handlers/handler-response-common.ts',
-      'src/modules/llmswitch/bridge/responses-response-bridge.ts',
     ]),
     reason: 'client-visible response/SSE layer must not inspect __rt outside the dedicated guard owners.',
   },
@@ -52,10 +45,8 @@ const rules = [
   {
     id: 'responses_metadata_event',
     regex: /\bresponse\.metadata\b/g,
-    allowedFiles: new Set([
-      'src/modules/llmswitch/bridge/responses-response-bridge.ts',
-    ]),
-    reason: 'response.metadata SSE protocol semantics must stay behind the direct passthrough responses bridge guard.',
+    allowedFiles: new Set(),
+    reason: 'response.metadata SSE protocol semantics must not be owned by server response bridges.',
   },
 ];
 

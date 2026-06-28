@@ -705,6 +705,18 @@ export function buildHandlerPipelineMetadata(
     : { ...internalMetadata };
   const metadataCenter = MetadataCenter.read(internalMetadata) ?? MetadataCenter.attach(merged);
   MetadataCenter.bind(merged, metadataCenter);
+  const portContext = internalMetadata.portContext && typeof internalMetadata.portContext === 'object' && !Array.isArray(internalMetadata.portContext)
+    ? (internalMetadata.portContext as Record<string, unknown>)
+    : undefined;
+  if (typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort)) {
+    merged.matchedPort = Math.floor(portContext.matchedPort);
+  }
+  if (typeof portContext?.localPort === 'number' && Number.isFinite(portContext.localPort)) {
+    merged.localPort = Math.floor(portContext.localPort);
+  }
+  if (typeof portContext?.routingPolicyGroup === 'string' && portContext.routingPolicyGroup.trim()) {
+    merged.portScope = portContext.routingPolicyGroup.trim();
+  }
   if (readRuntimeControlProjection(merged).streamIntent === undefined) {
     const streamIntent =
       internalMetadata.stream === true

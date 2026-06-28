@@ -7,6 +7,20 @@ import {
 } from '../../../../../src/server/runtime/http-server/executor/usage-aggregator.js';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
+function bindProviderProtocol(metadata: Record<string, unknown>, providerProtocol: string): Record<string, unknown> {
+  const center = MetadataCenter.attach(metadata);
+  center.writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    {
+      module: 'tests/server/runtime/http-server/executor/usage-aggregator.spec.ts',
+      symbol: 'bindProviderProtocol',
+      stage: 'test'
+    }
+  );
+  return metadata;
+}
+
 describe('usage log text', () => {
   it('caps cache hit ratio at 100 percent', () => {
     expect(computeCacheHitRatio({
@@ -86,9 +100,7 @@ describe('usage log text', () => {
           }
         }
       }
-    }, {
-      providerProtocol: 'anthropic'
-    });
+    }, bindProviderProtocol({}, 'anthropic'));
 
     expect(usage).toEqual({
       prompt_tokens: 107951,
@@ -114,9 +126,7 @@ describe('usage log text', () => {
           }
         }
       }
-    }, {
-      providerProtocol: 'openai-responses'
-    });
+    }, bindProviderProtocol({}, 'openai-responses'));
 
     expect(usage).toEqual({
       prompt_tokens: 306,
@@ -140,9 +150,7 @@ describe('usage log text', () => {
           ''
         ].join('\n')
       }
-    }, {
-      providerProtocol: 'openai-responses'
-    });
+    }, bindProviderProtocol({}, 'openai-responses'));
 
     expect(usage).toEqual({
       prompt_tokens: 306,
@@ -154,9 +162,7 @@ describe('usage log text', () => {
   });
 
   it('prefers metadata center runtime_control.providerProtocol over flat metadata providerProtocol', () => {
-    const metadata: Record<string, unknown> = {
-      providerProtocol: 'anthropic'
-    };
+    const metadata: Record<string, unknown> = {};
     const center = new MetadataCenter();
     center.writeRuntimeControl(
       'providerProtocol',
@@ -207,9 +213,7 @@ describe('usage log text', () => {
           ''
         ].join('\n')
       }
-    }, {
-      providerProtocol: 'anthropic'
-    });
+    }, bindProviderProtocol({}, 'anthropic'));
 
     expect(usage).toEqual({
       prompt_tokens: 88882,
@@ -230,9 +234,7 @@ describe('usage log text', () => {
           total_tokens: 115
         }
       }
-    }, {
-      providerProtocol: 'anthropic'
-    });
+    }, bindProviderProtocol({}, 'anthropic'));
 
     expect(usage).toEqual({
       prompt_tokens: 107021,

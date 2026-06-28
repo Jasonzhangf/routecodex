@@ -161,6 +161,24 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/req_outbound');
   });
 
+  it('req inbound semantic lift must not own continuation or resume restore semantics', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const source = fs.readFileSync(path.join(crateRoot, 'hub_req_inbound_semantic_lift.rs'), 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'builds continuation in req_inbound', pattern: /build_.*continuation|continuationOwner|continuationScope|toolContinuation/ },
+      { label: 'stores responses resume in req_inbound', pattern: /responses_resume|responsesResume|responses\.insert|toolOutputsDetailed|mapped_tool_outputs/ },
+      { label: 'maps resumed tool outputs in req_inbound', pattern: /ResumeToolOutput|map_resume_tool_outputs|payload\.insert\("toolOutputs"/ },
+      { label: 'reads session scope for continuation in req_inbound', pattern: /session_id|conversation_id/ },
+    ]);
+
+    expect(source).toContain('clientToolsRaw');
+    expect(source).toContain('toolNameAliasMap');
+    expect(findings).toEqual([]);
+  });
+
   it('req_process stage1 TS shell must be physically removed', () => {
     const stagePath = path.join(
       process.cwd(),
@@ -1484,7 +1502,7 @@ describe('hub pipeline stage residue audit', () => {
     const findings = collectMatches(source, [
       { label: 'checks chat tool_calls in TS', pattern: /message\?\.tool_calls|hasNonEmptyToolCalls|structured tool_calls/ },
       { label: 'checks responses function_call output in TS', pattern: /hasOutputFunctionCalls|function_call|tool_call/ },
-      { label: 'checks required_action tool_calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
+      { label: 'checks required_action in TS', pattern: /required_action/ },
       { label: 'checks tool-result-like response content in TS', pattern: /tool_result|function_call_output|tool_message/ },
     ]);
 
@@ -1494,41 +1512,59 @@ describe('hub pipeline stage residue audit', () => {
   it('server response handler must not classify response tool continuation in TS', () => {
     const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-response-bridge.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    const bodyStart = source.indexOf('export function isToolCallContinuationResponseForHttp');
-    expect(bodyStart).toBeGreaterThanOrEqual(0);
-    const body = source.slice(bodyStart, source.indexOf('\n}', bodyStart) + 2);
-    const findings = collectMatches(body, [
+    const helperStart = source.indexOf('function isDirectResponsesToolCallContinuationForHttp');
+    expect(helperStart).toBeGreaterThanOrEqual(0);
+    const helperEnd = source.indexOf('export async function rebindResponsesConversationRequestIdForHttp', helperStart);
+    expect(helperEnd).toBeGreaterThan(helperStart);
+    const helperBody = source.slice(helperStart, helperEnd);
+    const findings = collectMatches(helperBody, [
+      { label: 'exports TS response continuation classifier', pattern: /export function isToolCallContinuationResponseForHttp/ },
+      { label: 'exports TS response continuation probe inspector', pattern: /export function inspectResponsesContinuationProbeForHttp/ },
       { label: 'derives tool_calls finish reason in TS', pattern: /deriveFinishReason\([^)]*\)\s*===\s*['"]tool_calls['"]/ },
-      { label: 'checks required_action tool_calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
-      { label: 'checks output function/tool calls in TS', pattern: /function_call|tool_call/ },
+      { label: 'checks required_action in TS', pattern: /required_action/ },
+      { label: 'checks output function calls in TS', pattern: /function_call/ },
     ]);
-    expect(body).toContain('isToolCallContinuationResponseNative(body)');
+    expect(helperBody).toContain('isToolCallContinuationResponseNative(args.responseBody)');
     expect(findings).toEqual([]);
   });
 
   it('server response handler SSE contract probe must not classify response tool semantics in TS', () => {
-    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const bodyStart = source.indexOf('export function updateResponsesContractProbeFromSseChunkForHttp');
-    expect(bodyStart).toBeGreaterThanOrEqual(0);
-    const bodyEnd = source.indexOf('\nexport function inspectResponsesTerminalStateFromSseChunkForHttp', bodyStart);
-    expect(bodyEnd).toBeGreaterThan(bodyStart);
-    const body = source.slice(bodyStart, bodyEnd);
-    const findings = collectMatches(body, [
-      { label: 'checks required_action in TS SSE probe', pattern: /required_action|response\.required_action/ },
-      { label: 'maps output call_id in TS SSE probe', pattern: /call_id|output_item/ },
-      { label: 'deduplicates output items in TS SSE probe', pattern: /alreadyExists|existingCallId|existingId/ },
-    ]);
-    expect(body).toContain('return updateResponsesContractProbeFromSseChunkNative(chunk, probe);');
+    const retiredFilePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
+    const sseFiles = [
+      'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
+      'src/modules/llmswitch/bridge/responses-sse-transport.ts',
+    ];
+    const findings: string[] = [];
+    for (const relativePath of sseFiles) {
+      const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+      findings.push(...collectMatches(source, [
+        { label: `${relativePath}: restores SSE contract probe owner`, pattern: /updateResponsesContractProbeFromSseChunkForHttp|inspectResponsesTerminalStateFromSseChunkForHttp/ },
+        { label: `${relativePath}: imports native probe semantics directly`, pattern: /updateResponsesContractProbeFromSseChunkNative|buildResponsesTerminalSseFramesFromProbeNative/ },
+        { label: `${relativePath}: checks required_action in TS SSE probe`, pattern: /required_action|response\.required_action/ },
+        { label: `${relativePath}: maps output call_id in TS SSE probe`, pattern: /call_id|output_item/ },
+        { label: `${relativePath}: deduplicates output items in TS SSE probe`, pattern: /alreadyExists|existingCallId|existingId/ },
+      ]));
+    }
+    expect(fs.existsSync(retiredFilePath)).toBe(false);
     expect(findings).toEqual([]);
   });
 
-  it('server response handler terminal probe frames must be built by native', () => {
-    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    expect(source).not.toContain('function buildResponsesTerminalSseFramesFromProbe');
-    expect(source).not.toContain('buildResponsesTerminalSseFramesFromProbeForHttp(');
-    expect(source).toContain('buildResponsesTerminalSseFramesFromProbeNative(probe, args.requestLabel)');
+  it('server response handler terminal probe frames must not be owned by SSE transport', () => {
+    const retiredFilePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
+    const sseFiles = [
+      'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
+      'src/modules/llmswitch/bridge/responses-sse-transport.ts',
+    ];
+    const findings: string[] = [];
+    for (const relativePath of sseFiles) {
+      const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+      findings.push(...collectMatches(source, [
+        { label: `${relativePath}: terminal probe frame builder`, pattern: /buildResponsesTerminalSseFramesFromProbe/ },
+        { label: `${relativePath}: terminal probe state inspector`, pattern: /inspectResponsesTerminalStateFromSseChunk/ },
+      ]));
+    }
+    expect(fs.existsSync(retiredFilePath)).toBe(false);
+    expect(findings).toEqual([]);
   });
 
   it('server response handler Responses apply_patch client projection must stay native-owned', () => {

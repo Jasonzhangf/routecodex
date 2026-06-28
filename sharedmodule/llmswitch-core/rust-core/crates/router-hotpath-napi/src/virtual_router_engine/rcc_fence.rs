@@ -338,5 +338,4 @@ mod tests {
             .expect_err("should fail");
         assert_eq!(error, "RCC_FENCE_BODY_REQUIRED");
     }
-
 }

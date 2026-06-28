@@ -170,22 +170,10 @@ export function readProviderProtocolFromAnyBoundMetadataCenter(
   target: Record<string, unknown> | undefined
 ): string | undefined {
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(target);
-  const direct = runtimeControl?.providerProtocol;
-  if (typeof direct === 'string' && direct.trim()) {
-    return direct.trim();
-  }
-  const flat = target?.providerProtocol;
-  if (typeof flat === 'string' && flat.trim()) {
-    return flat.trim();
-  }
-  const nested = asRecord(target?.metadata);
-  const nestedRuntimeControl = readRuntimeControlFromBoundMetadataCenter(nested);
-  const nestedProtocol = nestedRuntimeControl?.providerProtocol;
-  if (typeof nestedProtocol === 'string' && nestedProtocol.trim()) {
-    return nestedProtocol.trim();
-  }
-  const nestedFlat = nested?.providerProtocol;
-  return typeof nestedFlat === 'string' && nestedFlat.trim() ? nestedFlat.trim() : undefined;
+  const providerProtocol = runtimeControl?.providerProtocol;
+  return typeof providerProtocol === 'string' && providerProtocol.trim()
+    ? providerProtocol.trim()
+    : undefined;
 }
 
 export function readRequestTruthSessionIdFromBoundMetadataCenter(

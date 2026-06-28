@@ -67,10 +67,18 @@ pub fn build_missing_fields(fields: &[Option<String>]) -> Option<Vec<String>> {
         .iter()
         .filter_map(|f| {
             let s = f.as_deref()?.trim();
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         })
         .collect();
-    if normalized.is_empty() { None } else { Some(normalized) }
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +339,11 @@ pub struct ValidationResult {
     pub normalized_args: Option<String>,
 }
 
-fn build_validation_failure(reason: &str, message: &str, missing_fields: Option<Vec<String>>) -> ValidationResult {
+fn build_validation_failure(
+    reason: &str,
+    message: &str,
+    missing_fields: Option<Vec<String>>,
+) -> ValidationResult {
     ValidationResult {
         ok: false,
         reason: Some(reason.to_string()),
@@ -392,7 +404,13 @@ pub fn validate_canonical_client_tool_call(name: &str, args_string: &str) -> Val
                     Some(vec!["path".to_string()]),
                 );
             }
-            let path = parsed.as_ref().unwrap().get("path").unwrap().as_str().unwrap();
+            let path = parsed
+                .as_ref()
+                .unwrap()
+                .get("path")
+                .unwrap()
+                .as_str()
+                .unwrap();
             let mut normalized = serde_json::Map::new();
             normalized.insert("path".to_string(), Value::String(path.to_string()));
             ValidationResult {
@@ -428,7 +446,9 @@ pub fn validate_canonical_client_tool_call(name: &str, args_string: &str) -> Val
                         reason: None,
                         message: None,
                         missing_fields: None,
-                        normalized_args: Some(serde_json::to_string(&normalized).unwrap_or_default()),
+                        normalized_args: Some(
+                            serde_json::to_string(&normalized).unwrap_or_default(),
+                        ),
                     }
                 }
                 None => build_validation_failure(
@@ -485,8 +505,7 @@ pub fn validate_canonical_client_tool_call(name: &str, args_string: &str) -> Val
                 reason: None,
                 message: None,
                 missing_fields: None,
-                normalized_args: parsed
-                    .map(|m| serde_json::to_string(&m).unwrap_or_default()),
+                normalized_args: parsed.map(|m| serde_json::to_string(&m).unwrap_or_default()),
             }
         }
         "shell" => {
@@ -508,8 +527,7 @@ pub fn validate_canonical_client_tool_call(name: &str, args_string: &str) -> Val
                 reason: None,
                 message: None,
                 missing_fields: None,
-                normalized_args: parsed
-                    .map(|m| serde_json::to_string(&m).unwrap_or_default()),
+                normalized_args: parsed.map(|m| serde_json::to_string(&m).unwrap_or_default()),
             }
         }
         "read_mcp_resource" => {
@@ -528,13 +546,33 @@ pub fn validate_canonical_client_tool_call(name: &str, args_string: &str) -> Val
                     "missing_server_or_uri",
                     "read_mcp_resource requires input.server and input.uri as strings.",
                     build_missing_fields(&[
-                        if !has_server { Some("server".to_string()) } else { None },
-                        if !has_uri { Some("uri".to_string()) } else { None },
+                        if !has_server {
+                            Some("server".to_string())
+                        } else {
+                            None
+                        },
+                        if !has_uri {
+                            Some("uri".to_string())
+                        } else {
+                            None
+                        },
                     ]),
                 );
             }
-            let server = parsed.as_ref().unwrap().get("server").unwrap().as_str().unwrap();
-            let uri = parsed.as_ref().unwrap().get("uri").unwrap().as_str().unwrap();
+            let server = parsed
+                .as_ref()
+                .unwrap()
+                .get("server")
+                .unwrap()
+                .as_str()
+                .unwrap();
+            let uri = parsed
+                .as_ref()
+                .unwrap()
+                .get("uri")
+                .unwrap()
+                .as_str()
+                .unwrap();
             let mut normalized = serde_json::Map::new();
             normalized.insert("server".to_string(), Value::String(server.to_string()));
             normalized.insert("uri".to_string(), Value::String(uri.to_string()));
@@ -559,8 +597,7 @@ pub fn validate_canonical_client_tool_call(name: &str, args_string: &str) -> Val
                 reason: None,
                 message: None,
                 missing_fields: None,
-                normalized_args: parsed
-                    .map(|m| serde_json::to_string(&m).unwrap_or_default()),
+                normalized_args: parsed.map(|m| serde_json::to_string(&m).unwrap_or_default()),
             }
         }
     }
@@ -577,11 +614,10 @@ pub fn validate_canonical_client_tool_call_json(input_json: String) -> Result<St
         name: String,
         args_string: String,
     }
-    let input: Input = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: Input =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let result = validate_canonical_client_tool_call(&input.name, &input.args_string);
-    serde_json::to_string(&result)
-        .map_err(|e| format!("serialize: {}", e))
+    serde_json::to_string(&result).map_err(|e| format!("serialize: {}", e))
 }
 
 pub fn contains_broad_kill_command_json(input_json: String) -> Result<String, String> {
@@ -589,8 +625,8 @@ pub fn contains_broad_kill_command_json(input_json: String) -> Result<String, St
     struct Input {
         cmd: String,
     }
-    let input: Input = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: Input =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let result = contains_broad_kill_command(&input.cmd);
     serde_json::to_string(&serde_json::json!({ "result": result }))
         .map_err(|e| format!("serialize: {}", e))
@@ -601,8 +637,8 @@ pub fn has_invalid_shell_wrapper_shape_json(input_json: String) -> Result<String
     struct Input {
         cmd: String,
     }
-    let input: Input = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: Input =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let result = has_invalid_shell_wrapper_shape(&input.cmd);
     serde_json::to_string(&serde_json::json!({ "result": result }))
         .map_err(|e| format!("serialize: {}", e))
@@ -657,7 +693,8 @@ mod tests {
 
     #[test]
     fn missing_fields_some() {
-        let result = build_missing_fields(&[Some("cmd".to_string()), None, Some("path".to_string())]);
+        let result =
+            build_missing_fields(&[Some("cmd".to_string()), None, Some("path".to_string())]);
         assert_eq!(result, Some(vec!["cmd".to_string(), "path".to_string()]));
     }
 
@@ -803,7 +840,10 @@ mod tests {
 
     #[test]
     fn validate_read_mcp_resource_ok() {
-        let r = validate_canonical_client_tool_call("read_mcp_resource", r#"{"server":"gh","uri":"github://issues"}"#);
+        let r = validate_canonical_client_tool_call(
+            "read_mcp_resource",
+            r#"{"server":"gh","uri":"github://issues"}"#,
+        );
         assert!(r.ok);
     }
 

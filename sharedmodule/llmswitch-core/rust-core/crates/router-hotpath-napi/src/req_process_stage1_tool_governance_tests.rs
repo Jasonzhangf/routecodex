@@ -112,15 +112,42 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
     assert!(instructions.contains("必须使用唯一 stop schema 合同"));
     assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"));
     assert!(instructions.contains("<rcc_stop_schema>"));
+    assert!(instructions.contains("字段不是全局必填，而是关系必填"));
+    assert!(instructions.contains("has_evidence=1 时 evidence 必填"));
+    assert!(instructions.contains("stopreason=2 表示继续，必须写 next_step"));
+    assert!(instructions.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
+    assert!(instructions.contains("最小可复制样本"));
     assert!(instructions.contains("不要输出或执行 exec_command(cmd=\"reasoningStop\")"));
     assert!(result.processed_request["input"].is_array());
     let tools = result.processed_request["tools"].as_array().expect("tools");
-    assert!(tools.iter().any(|tool| {
-        tool.get("function")
-            .and_then(|function| function.get("name"))
-            .and_then(|name| name.as_str())
-            == Some("reasoningStop")
-    }));
+    let reasoning_stop_tool = tools
+        .iter()
+        .find(|tool| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(|name| name.as_str())
+                == Some("reasoningStop")
+        })
+        .expect("reasoningStop tool");
+    let description = reasoning_stop_tool["function"]["description"]
+        .as_str()
+        .expect("reasoningStop description");
+    assert!(description.contains("Fields are conditionally required, not globally required"));
+    assert!(description.contains("stopreason=2 requires next_step"));
+    assert!(description.contains("needs_user_input=true requires next_step"));
+    assert!(description.contains("Minimal continue sample"));
+    assert!(!description.contains("fill every field"));
+    let required = reasoning_stop_tool["function"]["parameters"]["required"]
+        .as_array()
+        .expect("required");
+    assert_eq!(
+        required,
+        &vec![
+            serde_json::json!("stopreason"),
+            serde_json::json!("reason"),
+            serde_json::json!("has_evidence"),
+        ]
+    );
 }
 
 #[test]

@@ -27,7 +27,6 @@ use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatproc
 use crate::hub_resp_inbound_format_parse::{parse_resp_format_envelope, RespFormatParseInput};
 use crate::hub_resp_outbound_04_client_payload_boundary::build_hub_resp_outbound_04_client_payload_for_protocol;
 use crate::hub_resp_outbound_04_finalize_boundary::finalize_hub_resp_outbound_04_client_semantic;
-use crate::hub_resp_outbound_client_semantics::build_responses_payload_from_chat_core;
 use crate::hub_resp_outbound_sse_stream::{process_sse_stream, SseStreamInput};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -37,6 +36,9 @@ use crate::req_process_stage2_route_select::RouteSelectionApplyInput;
 use crate::resp_process_stage1_tool_governance::ToolGovernanceInput as RespToolGovernanceInput;
 use crate::resp_process_stage2_finalize::FinalizeInput;
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
+use crate::stopless_auto_handler_bridge::{
+    build_stopless_auto_cli_projection_from_engine_json, run_stopless_auto_handler_runtime_json,
+};
 use crate::vr_route_04_selection_boundary::apply_vr_route_04_selection;
 
 use super::diagnostics::{HubPipelineDiagnostic, HubPipelineDiagnosticStatus};
@@ -195,6 +197,7 @@ impl HubPipelineEngine {
                 normalized_payload,
                 normalized_metadata,
                 entry_provider_protocol,
+                metadata_center_snapshot,
                 diagnostics,
             );
         }
@@ -497,6 +500,7 @@ impl HubPipelineEngine {
         normalized_payload: Value,
         mut normalized_metadata: Value,
         provider_protocol: String,
+        metadata_center_snapshot: Value,
         mut diagnostics: Vec<HubPipelineDiagnostic>,
     ) -> HubPipelineResult<HubPipelineExecutionOutput> {
         diagnostics.push(diagnostic(
@@ -527,55 +531,85 @@ impl HubPipelineEngine {
             .map_err(|message| {
                 HubPipelineError::new("hub_pipeline_resp_inbound_02_failed", message)
             })?;
-        let governed = govern_hub_resp_chatprocess_03_response(RespToolGovernanceInput {
-            payload: canonical_payload,
-            client_protocol: normalized_metadata
-                .get("clientProtocol")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .ok_or_else(|| {
-                    HubPipelineError::new(
-                        "hub_pipeline_missing_client_protocol",
-                        "Rust HubPipeline resp governance requires metadata.clientProtocol",
-                    )
-                })?,
-            entry_endpoint: normalized_metadata
-                .get("entryEndpoint")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .ok_or_else(|| {
-                    HubPipelineError::new(
-                        "hub_pipeline_missing_entry_endpoint",
-                        "Rust HubPipeline resp governance requires metadata.entryEndpoint",
-                    )
-                })?,
-            request_id: output.request_id.clone(),
-        })
-        .map_err(|message| {
-            HubPipelineError::new("hub_pipeline_resp_tool_governance_failed", message)
-        })?;
-        diagnostics.push(diagnostic(
-            HubPipelineStageId::RespProcessToolGovernance,
-            HubPipelineDiagnosticStatus::Completed,
-            Some(serde_json::json!({
-                "summary": governed.summary,
-            })),
-        ));
-        let resp_chatprocess_03 = run_hub_resp_chatprocess_03_governed_entrypoint(
-            resp_inbound_02,
-            governed.governed_payload.clone(),
-        )
-        .map_err(|message| {
-            HubPipelineError::new("hub_pipeline_resp_chatprocess_03_failed", message)
-        })?;
-        let resp_chatprocess_payload = resp_chatprocess_03.payload().clone();
+        let client_protocol = normalized_metadata
+            .get("clientProtocol")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_client_protocol",
+                    "Rust HubPipeline resp governance requires metadata.clientProtocol",
+                )
+            })?;
+        let entry_endpoint = normalized_metadata
+            .get("entryEndpoint")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_entry_endpoint",
+                    "Rust HubPipeline resp governance requires metadata.entryEndpoint",
+                )
+            })?;
         let mut effects = Vec::new();
-        plan_resp_chatprocess_03_servertool_runtime_actions(
-            &mut effects,
+        let stopless_resp_hook = run_servertool_resp_stopless_hook_skeleton(
+            &canonical_payload,
             &normalized_metadata,
-            &resp_chatprocess_payload,
+            &metadata_center_snapshot,
             output.request_id.as_str(),
-        );
+        )?;
+        let governed_payload = if let Some(stopless_hook) = stopless_resp_hook {
+            if let Some(write_plan) = stopless_hook.metadata_write_plan {
+                effects.push(HubPipelineEffect {
+                    kind: HubPipelineEffectKind::StoplessMetadataCenterWrite,
+                    payload: write_plan,
+                });
+            }
+            diagnostics.push(diagnostic(
+                HubPipelineStageId::RespProcessToolGovernance,
+                HubPipelineDiagnosticStatus::Completed,
+                Some(serde_json::json!({
+                    "servertool": "stopless_response_hook_skeleton",
+                    "flowId": stopless_hook.flow_id,
+                })),
+            ));
+            stopless_hook.payload
+        } else {
+            let governed = govern_hub_resp_chatprocess_03_response(RespToolGovernanceInput {
+                payload: canonical_payload,
+                client_protocol,
+                entry_endpoint,
+                request_id: output.request_id.clone(),
+            })
+            .map_err(|message| {
+                HubPipelineError::new("hub_pipeline_resp_tool_governance_failed", message)
+            })?;
+            diagnostics.push(diagnostic(
+                HubPipelineStageId::RespProcessToolGovernance,
+                HubPipelineDiagnosticStatus::Completed,
+                Some(serde_json::json!({
+                    "summary": governed.summary,
+                })),
+            ));
+            governed.governed_payload
+        };
+        let resp_chatprocess_03 =
+            run_hub_resp_chatprocess_03_governed_entrypoint(resp_inbound_02, governed_payload)
+                .map_err(|message| {
+                    HubPipelineError::new("hub_pipeline_resp_chatprocess_03_failed", message)
+                })?;
+        let resp_chatprocess_payload = resp_chatprocess_03.payload().clone();
+        if !effects.iter().any(|effect| {
+            serde_json::to_value(&effect.kind).ok()
+                == Some(serde_json::json!("stoplessMetadataCenterWrite"))
+        }) {
+            plan_resp_chatprocess_03_servertool_runtime_actions(
+                &mut effects,
+                &normalized_metadata,
+                &resp_chatprocess_payload,
+                output.request_id.as_str(),
+            );
+        }
         diagnostics.push(diagnostic(
             HubPipelineStageId::RespProcessFinalize,
             HubPipelineDiagnosticStatus::Started,
@@ -734,6 +768,201 @@ fn response_has_tool_calls(payload: &Value) -> bool {
                     .is_some_and(|tool_calls| !tool_calls.is_empty())
             })
         })
+}
+
+struct ServertoolRespStoplessHookOutput {
+    payload: Value,
+    flow_id: Option<String>,
+    metadata_write_plan: Option<Value>,
+}
+
+fn run_servertool_resp_stopless_hook_skeleton(
+    chatprocess_payload: &Value,
+    metadata: &Value,
+    metadata_center_snapshot: &Value,
+    request_id: &str,
+) -> HubPipelineResult<Option<ServertoolRespStoplessHookOutput>> {
+    if !is_stopless_runtime_active(metadata, metadata_center_snapshot) {
+        return Ok(None);
+    }
+    let stop_gateway = inspect_stop_gateway_signal(&chatprocess_payload.to_string())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .unwrap_or(Value::Null);
+    let stop_gateway_eligible = stop_gateway
+        .get("eligible")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !stop_gateway_eligible {
+        return Ok(None);
+    }
+    let stop_gateway_reason = stop_gateway
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    if !matches!(
+        stop_gateway_reason,
+        "finish_reason_stop"
+            | "finish_reason_tool_calls_internal_stop_tool"
+            | "status_completed"
+            | "responses_output_completed"
+    ) {
+        return Ok(None);
+    }
+
+    let mut adapter_context = metadata
+        .as_object()
+        .cloned()
+        .map(Value::Object)
+        .unwrap_or(Value::Object(Default::default()));
+    if let Some(record) = adapter_context.as_object_mut() {
+        record.insert(
+            "metadataCenterSnapshot".to_string(),
+            metadata_center_snapshot.clone(),
+        );
+        let mut rt = record
+            .get("__rt")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        rt.insert("stopGatewayContext".to_string(), stop_gateway);
+        record.insert("__rt".to_string(), Value::Object(rt));
+    }
+
+    let runtime_input = serde_json::json!({
+        "adapterContext": adapter_context,
+        "base": chatprocess_payload,
+        "requestId": request_id,
+        "runtimeMetadata": {
+            "metadataCenterSnapshot": metadata_center_snapshot
+        }
+    });
+    let raw_runtime =
+        run_stopless_auto_handler_runtime_json(runtime_input.to_string()).map_err(|error| {
+            HubPipelineError::new("hub_pipeline_stopless_resp_hook_failed", error.reason)
+        })?;
+    let runtime_output: Value = serde_json::from_str(&raw_runtime).map_err(|error| {
+        HubPipelineError::new(
+            "hub_pipeline_stopless_resp_hook_invalid_output",
+            format!("Rust stopless response hook runtime returned invalid JSON: {error}"),
+        )
+    })?;
+    let action = runtime_output
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let flow_id = runtime_output
+        .get("flowId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let metadata_write_plan = runtime_output.get("metadataWritePlan").cloned();
+    match action {
+        "return_null" => Ok(None),
+        "throw_error" | "throw_goal_active_loop" => {
+            let message = runtime_output
+                .get("error")
+                .and_then(|value| value.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("Rust stopless inline runtime requested an error");
+            Err(HubPipelineError::new(
+                "hub_pipeline_stopless_resp_hook_runtime_error",
+                message.to_string(),
+            ))
+        }
+        "return_handler_result" => {
+            let handler_result = runtime_output.get("handlerResult").ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_stopless_resp_hook_missing_handler_result",
+                    "Rust stopless response hook runtime missing handlerResult",
+                )
+            })?;
+            let execution = handler_result.get("execution").cloned().ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_stopless_resp_hook_missing_execution",
+                    "Rust stopless response hook runtime missing handler execution",
+                )
+            })?;
+            let terminal_final = execution
+                .get("context")
+                .and_then(|context| context.get("stopMessageTerminalFinal"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let payload = if terminal_final {
+                handler_result
+                    .get("chatResponse")
+                    .cloned()
+                    .or_else(|| runtime_output.get("chatResponse").cloned())
+                    .unwrap_or_else(|| chatprocess_payload.clone())
+            } else {
+                let projection_input = serde_json::json!({
+                    "adapterContext": adapter_context,
+                    "execution": execution,
+                    "requestId": request_id
+                });
+                let raw_projection = build_stopless_auto_cli_projection_from_engine_json(
+                    projection_input.to_string(),
+                )
+                .map_err(|error| {
+                    HubPipelineError::new(
+                        "hub_pipeline_stopless_resp_hook_projection_failed",
+                        error.reason,
+                    )
+                })?;
+                let projection_output: Value =
+                    serde_json::from_str(&raw_projection).map_err(|error| {
+                        HubPipelineError::new(
+                            "hub_pipeline_stopless_resp_hook_projection_invalid_output",
+                            format!(
+                                "Rust stopless response hook projection returned invalid JSON: {error}"
+                            ),
+                        )
+                    })?;
+                projection_output
+                    .get("chatResponse")
+                    .cloned()
+                    .ok_or_else(|| {
+                        HubPipelineError::new(
+                            "hub_pipeline_stopless_resp_hook_projection_missing_chat_response",
+                            "Rust stopless response hook projection missing chatResponse",
+                        )
+                    })?
+            };
+            Ok(Some(ServertoolRespStoplessHookOutput {
+                payload,
+                flow_id,
+                metadata_write_plan,
+            }))
+        }
+        _ => Err(HubPipelineError::new(
+            "hub_pipeline_stopless_resp_hook_unknown_action",
+            format!("Rust stopless response hook runtime returned unsupported action: {action}"),
+        )),
+    }
+}
+
+fn is_stopless_runtime_active(metadata: &Value, metadata_center_snapshot: &Value) -> bool {
+    has_active_stopless_runtime_control(metadata_center_snapshot)
+        || metadata_center_snapshot
+            .get("requestTruth")
+            .is_some_and(has_active_stopless_runtime_control)
+        || has_active_stopless_runtime_control(metadata)
+        || metadata
+            .get("requestTruth")
+            .is_some_and(has_active_stopless_runtime_control)
+}
+
+fn has_active_stopless_runtime_control(value: &Value) -> bool {
+    value
+        .get("runtimeControl")
+        .and_then(|runtime| runtime.get("stopless"))
+        .and_then(|stopless| stopless.get("active"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn plan_resp_chatprocess_03_servertool_runtime_actions(

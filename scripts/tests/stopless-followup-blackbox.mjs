@@ -275,14 +275,20 @@ async function main() {
 
   let upstreamServer;
   let harnessServer;
+  let upstreamHits = [];
 
   try {
-    const upstreamHits = [];
-
     const upstreamApp = express();
     upstreamApp.use(express.json({ limit: '2mb' }));
-    upstreamApp.post('/responses', (req, res) => {
+    upstreamApp.use((req, _res, next) => {
+      console.error('[stopless-followup-blackbox] upstream request', req.method, req.path);
+      next();
+    });
+    upstreamApp.all('*', (req, res) => {
       upstreamHits.push(req.body);
+      if (String(req.path).includes('/models')) {
+        return res.json({ data: [{ id: 'gpt-5.3-codex' }] });
+      }
       const isFollowup = isExplicitServerFollowup(req.body);
       const authHeader = req.get('authorization') || '';
       const providerFromAuth = authHeader.includes('crs1-') ? 'crs1' : authHeader.includes('crs2-') ? 'crs2' : 'unknown';

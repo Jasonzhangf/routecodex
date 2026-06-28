@@ -87,4 +87,38 @@ describe('HubPipeline metadata center providerProtocol contract', () => {
       pipeline.dispose();
     }
   });
+
+  it('uses flat metadata providerProtocol when no MetadataCenter is bound', async () => {
+    const pipeline = new HubPipeline({
+      virtualRouter: {} as any
+    });
+
+    try {
+      await pipeline.execute({
+        id: 'req-flat-provider-protocol',
+        endpoint: '/v1/responses',
+        payload: {
+          model: 'gpt-test',
+          input: 'hi'
+        },
+        metadata: {
+          providerProtocol: 'openai-responses',
+          entryEndpoint: '/v1/responses',
+          direction: 'request',
+          stage: 'inbound'
+        }
+      } as any);
+
+      expect(executeRequestStagePipelineMock).toHaveBeenCalledWith(expect.objectContaining({
+        normalized: expect.objectContaining({
+          providerProtocol: 'openai-responses',
+          metadata: expect.objectContaining({
+            providerProtocol: 'openai-responses',
+          }),
+        }),
+      }));
+    } finally {
+      pipeline.dispose();
+    }
+  });
 });

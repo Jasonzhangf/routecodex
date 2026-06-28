@@ -100,11 +100,7 @@ pub fn build_stopless_metadata_center_write_plan(
                 .is_some()
         })
         .map(|note| {
-            let session_id = center
-                .request_truth
-                .session_id
-                .as_ref()
-                .map(|s| s.clone());
+            let session_id = center.request_truth.session_id.as_ref().map(|s| s.clone());
             let working_directory = resolve_working_directory_from_metadata(&center);
             LearnedNoteWrite {
                 request_id: request_id.to_string(),
@@ -115,10 +111,7 @@ pub fn build_stopless_metadata_center_write_plan(
                     .get("learned")
                     .and_then(Value::as_str)
                     .map(String::from),
-                reason: note
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map(String::from),
+                reason: note.get("reason").and_then(Value::as_str).map(String::from),
                 evidence: note
                     .get("evidence")
                     .and_then(Value::as_str)
@@ -128,7 +121,9 @@ pub fn build_stopless_metadata_center_write_plan(
 
     StoplessMetadataCenterWritePlan {
         stopless,
-        stop_message_compare_context: Some(serde_json::to_value(&handler_plan.compare_context).unwrap_or_default()),
+        stop_message_compare_context: Some(
+            serde_json::to_value(&handler_plan.compare_context).unwrap_or_default(),
+        ),
         learned_note,
     }
 }
@@ -146,8 +141,8 @@ fn resolve_working_directory_from_metadata(center: &MetadataCenter) -> Option<St
 mod tests {
     use super::*;
     use crate::metadata_center::types::MetadataCenter;
-    use servertool_core::stop_message_compare_context::StopMessageCompareContext;
     use serde_json::json;
+    use servertool_core::stop_message_compare_context::StopMessageCompareContext;
 
     #[test]
     fn builds_write_plan_from_handler_plan_with_decision() {
@@ -213,7 +208,8 @@ mod tests {
         let mut compare = StopMessageCompareContext::default();
         compare.decision = "skip".to_string();
         let plan = StopMessageAutoHandlerPlan {
-            action: servertool_core::stop_message_auto_handler::StopMessageAutoPlanAction::ReturnNull,
+            action:
+                servertool_core::stop_message_auto_handler::StopMessageAutoPlanAction::ReturnNull,
             compare_context: compare,
             terminal_chat_response: None,
             should_write_learned_note: None,
@@ -275,10 +271,7 @@ mod tests {
         assert!(write_plan.learned_note.is_some());
         let note = write_plan.learned_note.unwrap();
         assert_eq!(note.request_id, "req-3");
-        assert_eq!(
-            note.learned.as_deref(),
-            Some("observed that X is true")
-        );
+        assert_eq!(note.learned.as_deref(), Some("observed that X is true"));
         assert_eq!(note.session_id.as_deref(), Some("sess-learned"));
     }
 }

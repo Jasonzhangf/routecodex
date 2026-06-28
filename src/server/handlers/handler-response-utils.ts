@@ -14,7 +14,6 @@ import {
 import { sendSsePipelineResponse } from './handler-response-sse.js';
 import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
 import { logUsageSummary } from '../runtime/http-server/executor/usage-logger.js';
-import { deriveFinishReason } from '../utils/finish-reason.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
@@ -23,12 +22,8 @@ import { registerRequestLogContext } from '../utils/request-log-color.js';
 import {
   buildResponsesRequestLogContextForHttp,
   clearResponsesConversationRequestIdsForHttp,
-  importResponsesHandlerCoreDist,
   normalizeChatUsagePayloadForHttp,
-  prepareResponsesJsonBodyForSseBridgeForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
-  prepareResponsesJsonSseDispatchPlanForHttp,
-  resolveResponsesClientPayloadFinishReasonForHttp,
   resolveResponsesConversationClearReasonForHttp,
   resolveResponsesRequestContextForHttp,
   shouldDispatchResponsesSseToClientForHttp,
@@ -118,6 +113,7 @@ export async function sendPipelineResponse(
         providerKey: usageLogInfo.providerKey,
         model: usageLogInfo.model,
         requestModel: usageLogInfo.requestModel,
+        providerProtocol: usageLogInfo.providerProtocol,
         routeName: usageLogInfo.routeName,
         poolId: usageLogInfo.poolId,
         entryPort: usageLogInfo.entryPort,
@@ -181,24 +177,6 @@ export async function sendPipelineResponse(
   }
   const responseBody = chatUsageNormalized.payload;
 
-  if (
-    forceSSE
-    && result.sseStream === undefined
-    && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && responseBody
-    && typeof responseBody === 'object'
-    && !Array.isArray(responseBody)
-  ) {
-    const forceSseJsonDispatchPlan = await prepareResponsesJsonClientDispatchPlanForHttp({
-      body: responseBody,
-      entryEndpoint,
-      requestLabel,
-      requestContext: effectiveResponsesRequestContext,
-      metadata: resultMetadata,
-      resolveBridge: importResponsesHandlerCoreDist,
-    });
-  }
-
   const responseForDispatch =
     result.sseStream !== undefined
     && result.continuationOwner !== 'direct'
@@ -219,35 +197,6 @@ export async function sendPipelineResponse(
         body: responseBody,
       };
 
-  const preparedResponsesJsonSseDispatch =
-    forceSSE
-    && result.sseStream === undefined
-    && (entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs')
-    && responseBody
-    && typeof responseBody === 'object'
-    && !Array.isArray(responseBody)
-      ? await (async () => {
-        const responsesPayload = await prepareResponsesJsonBodyForSseBridgeForHttp({
-          body: responseBody,
-          entryEndpoint,
-          requestLabel,
-        });
-        if (!responsesPayload) {
-          return undefined;
-        }
-        const bridgePlan = await prepareResponsesJsonSseDispatchPlanForHttp({
-          responsesPayload,
-          entryEndpoint,
-          requestLabel,
-          metadata: resultMetadata,
-          requestContext: effectiveResponsesRequestContext,
-        });
-        return {
-          responsesPayload: bridgePlan.normalizedPayload,
-        };
-      })()
-      : undefined;
-
   // G6: sendSsePipelineResponse now returns boolean | Error.
   // Propagate Error upward so executor catch-chain can reroute provider.
   const sseResult = await sendSsePipelineResponse({
@@ -263,7 +212,6 @@ export async function sendPipelineResponse(
     snapshotGroupRequestId,
     snapshotEntryPort,
     sseTotalTimeoutMs: options?.sseTotalTimeoutMs,
-    preparedResponsesJsonSseDispatch,
     responsesRequestContext: effectiveResponsesRequestContext,
     logResponseCompleted,
   });
@@ -315,7 +263,6 @@ export async function sendPipelineResponse(
     requestLabel,
     requestContext: effectiveResponsesRequestContext,
     metadata: resultMetadata,
-    resolveBridge: importResponsesHandlerCoreDist,
   });
   const clientBody = jsonDispatchPlan.clientBody;
   assertClientResponseHasNoInternalCarriers(clientBody, requestLabel);
@@ -333,9 +280,7 @@ export async function sendPipelineResponse(
       onNonBlockingError: logResponseNonBlockingError,
     });
   }
-  const jsonFinishReason = chatUsageNormalized.normalized
-    ? resolveResponsesClientPayloadFinishReasonForHttp(clientBody)
-    : jsonDispatchPlan.finishReason;
+  const jsonFinishReason = result.usageLogInfo?.finishReason;
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (shouldCaptureClientResponseSnapshotStage('client-response')) {
     void writeServerSnapshot({

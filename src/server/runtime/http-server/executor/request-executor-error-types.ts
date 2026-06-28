@@ -34,7 +34,6 @@ export type ProviderRetryExclusionPlan = {
 
 export type ProviderRetryExecutionPlan = {
   shouldRetry: boolean;
-  blockingRecoverable: boolean;
   excludedCurrentProvider: boolean;
   retrySwitchPlan?: ProviderRetrySwitchPlan;
   retryExecutionPolicyReason?: string;
@@ -88,14 +87,6 @@ export type RequestExecutorProviderFailurePlan = {
   reportPlan: RequestExecutorProviderErrorReportPlan;
   retryExecutionPlan: ProviderRetryExecutionPlan;
   retryTelemetryPlan?: ProviderRetryTelemetryPlan;
-};
-
-export type BlockingRecoverableRouteHoldState = {
-  providerKey?: string;
-  runtimeKey?: string;
-  retryError: RetryErrorSnapshot;
-  explicitSingletonPool: boolean;
-  routePoolForSameProviderRetry?: string[];
 };
 
 export type ProviderErrorStageLogger = (

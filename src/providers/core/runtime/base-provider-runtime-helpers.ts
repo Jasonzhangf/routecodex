@@ -7,8 +7,7 @@ import {
 } from './provider-runtime-metadata.js';
 import {
   normalizeProviderFamily,
-  normalizeProviderType,
-  providerTypeToProtocol
+  normalizeProviderType
 } from '../utils/provider-type-utils.js';
 import { resolveProviderContextExtensions } from './provider-runtime-utils.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
@@ -118,9 +117,7 @@ export function createProviderContext(options: {
     options.configProviderId,
     options.configProviderType
   );
-  const providerProtocol =
-    runtimeMetadata?.providerProtocol ||
-    providerTypeToProtocol(providerType);
+  const providerProtocol = runtimeMetadata?.providerProtocol;
 
   const context: ProviderContext = {
     requestId: runtimeMetadata?.requestId || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,

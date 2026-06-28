@@ -304,6 +304,51 @@ function assertProviderFeedback(body, reasonCode, missingFields, label) {
   );
 }
 
+function assertProviderGuidance(body, reasonCode, missingFields, label) {
+  assertProviderFeedback(body, reasonCode, missingFields, label);
+  const text = JSON.stringify(body);
+  assert.ok(
+    text.includes('上一轮执行结果') && text.includes(`reasonCode=${reasonCode}`),
+    `${label}: provider request must include the prior round result snapshot: ${text}`
+  );
+  assert.ok(
+    text.includes(`missingFields=${missingFields.join(', ')}`),
+    `${label}: provider request must render exact missingFields order for the model: ${text}`
+  );
+  assert.ok(
+    text.includes('任务还没完成，但当前没有明确 next_step')
+      && text.includes('把下一步写成这轮立刻执行的最小动作'),
+    `${label}: provider request must include next_step repair guidance: ${text}`
+  );
+  assert.ok(
+    text.includes('按条件补齐这些字段') || text.includes('按字段之间的逻辑关系填写'),
+    `${label}: provider request must explain conditional schema fields: ${text}`
+  );
+  assert.ok(
+    text.includes('has_evidence=1 时 evidence 必须写证据'),
+    `${label}: provider request must include has_evidence/evidence relation: ${text}`
+  );
+  assert.ok(
+    text.includes('stopreason=2 必须写 next_step'),
+    `${label}: provider request must include stopreason=2 relation: ${text}`
+  );
+  assert.ok(
+    text.includes('needs_user_input=true 时 next_step 必须直接写要问用户的问题'),
+    `${label}: provider request must include user-decision relation: ${text}`
+  );
+  assert.ok(
+    text.includes('最小可复制样本')
+      && text.includes('next_step')
+      && text.includes('needs_user_input')
+      && text.includes('has_evidence'),
+    `${label}: provider request must include a complete minimal sample: ${text}`
+  );
+  assert.ok(
+    !text.includes('每个字段都要写具体内容') && !text.includes('样例：'),
+    `${label}: provider request must not regress to old all-fields/sample wording: ${text}`
+  );
+}
+
 async function buildRealCodexResponsesRequest(sessionId) {
   const raw = await fs.readFile(REAL_CODEX_REQUEST_FIXTURE, 'utf8');
   const payload = JSON.parse(raw);
@@ -451,7 +496,7 @@ async function main() {
     const submitText1 = await submit1.text();
     assert.equal(submit1.status, 200, `expected first submit 200, body=${submitText1}`);
     assert.equal(upstreamHits.length, 2, `expected second upstream hit after first invalid submit, hits=${JSON.stringify(upstreamHits)}`);
-    assertProviderFeedback(upstreamHits[1], 'stop_schema_next_step_missing', missingRound1, 'round1 provider feedback');
+    assertProviderGuidance(upstreamHits[1], 'stop_schema_next_step_missing', missingRound1, 'round1 provider guidance');
     assert.ok(!submitText1.includes('"reasoningStop"'), `client response leaked raw reasoningStop: ${submitText1}`);
 
     const submitBody1 = parseJsonOrSseResponse(submitText1);
@@ -496,7 +541,7 @@ async function main() {
     const submitText2 = await submit2.text();
     assert.equal(submit2.status, 200, `expected second submit 200, body=${submitText2}`);
     assert.equal(upstreamHits.length, 3, `expected third upstream hit after second invalid submit, hits=${JSON.stringify(upstreamHits)}`);
-    assertProviderFeedback(upstreamHits[2], 'stop_schema_next_step_missing', missingRound2, 'round2 provider feedback');
+    assertProviderGuidance(upstreamHits[2], 'stop_schema_next_step_missing', missingRound2, 'round2 provider guidance');
     assert.ok(!submitText2.includes('"reasoningStop"'), `terminal client response leaked raw reasoningStop: ${submitText2}`);
 
     const submitBody2 = parseJsonOrSseResponse(submitText2);

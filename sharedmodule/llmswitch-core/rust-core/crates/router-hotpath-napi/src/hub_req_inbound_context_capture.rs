@@ -690,7 +690,8 @@ pub(crate) fn normalize_responses_input_items(
                     payload_obj.insert("tools".to_string(), tools);
                 }
             }
-            if normalize_shell_like_tool_calls_before_governance(&mut pre_normalized_payload).is_err()
+            if normalize_shell_like_tool_calls_before_governance(&mut pre_normalized_payload)
+                .is_err()
             {
                 return None;
             }
@@ -739,8 +740,10 @@ pub(crate) fn normalize_responses_input_items(
                         .collect::<std::collections::HashSet<String>>()
                 })
                 .unwrap_or_default();
-            let call_id_rewrites =
-                build_duplicate_responses_call_id_rewrites(normalized_items.as_slice(), &allowed_tool_names);
+            let call_id_rewrites = build_duplicate_responses_call_id_rewrites(
+                normalized_items.as_slice(),
+                &allowed_tool_names,
+            );
 
             let mut normalized: Vec<Value> = Vec::with_capacity(items.len());
             let mut valid_call_ids = std::collections::HashSet::new();

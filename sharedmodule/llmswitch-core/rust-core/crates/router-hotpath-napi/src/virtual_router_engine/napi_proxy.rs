@@ -185,22 +185,20 @@ impl VirtualRouterEngineProxy {
 }
 
 fn resolve_runtime_path_overrides(metadata: &Value) -> RuntimePathOverrides {
-    let rt = metadata.get("__rt");
-    let runtime_path_overrides_read_only_from_rt_namespace = rt.and_then(|value| value.as_object());
-    let runtime_path_overrides_do_not_fallback_to_top_level_metadata =
-        runtime_path_overrides_read_only_from_rt_namespace;
+    let metadata_center_snapshot = metadata.get("metadataCenterSnapshot");
+    let snapshot_runtime_control = metadata_center_snapshot
+        .and_then(|snapshot| snapshot.as_object())
+        .and_then(|snapshot| snapshot.get("runtimeControl"))
+        .and_then(|runtime_control| runtime_control.as_object());
     RuntimePathOverrides {
-        rcc_user_dir: runtime_path_overrides_do_not_fallback_to_top_level_metadata
+        rcc_user_dir: snapshot_runtime_control
             .and_then(|metadata| read_runtime_string(metadata, &["rccUserDir", "rcc_user_dir"])),
-        session_dir: runtime_path_overrides_do_not_fallback_to_top_level_metadata
+        session_dir: snapshot_runtime_control
             .and_then(|metadata| read_runtime_string(metadata, &["sessionDir", "session_dir"])),
     }
 }
 
-fn read_runtime_string(
-    metadata: &serde_json::Map<String, Value>,
-    keys: &[&str],
-) -> Option<String> {
+fn read_runtime_string(metadata: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
     for key in keys {
         if let Some(value) = metadata
             .get(*key)

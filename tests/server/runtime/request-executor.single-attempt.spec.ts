@@ -16,26 +16,6 @@ import { setRuntimeFlag, runtimeFlags } from '../../../src/runtime/runtime-flags
 
 const nodeRequire = createRequire(import.meta.url);
 
-jest.unstable_mockModule(
-  '../../../src/modules/llmswitch/bridge/native-exports.js',
-  async () => {
-    const actual = await import('../../../src/modules/llmswitch/bridge/native-exports.js');
-    return {
-      ...actual,
-      resolveProviderRetryExecutionPolicyNative: (input: Record<string, unknown>) => {
-        const binding = nodeRequire(
-          path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
-        ) as { resolveProviderRetryExecutionPolicyJson?: (inputJson: string) => string };
-        const fn = binding.resolveProviderRetryExecutionPolicyJson;
-        if (typeof fn !== 'function') {
-          throw new Error('resolveProviderRetryExecutionPolicyJson native export missing');
-        }
-        return JSON.parse(fn(JSON.stringify(input)));
-      }
-    };
-  }
-);
-
 const {
   HubRequestExecutor,
   __requestExecutorTestables

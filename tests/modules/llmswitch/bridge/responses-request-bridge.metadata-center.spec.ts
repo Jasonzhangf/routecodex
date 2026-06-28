@@ -28,6 +28,7 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
 }));
 
 let buildResponsesPipelineMetadataForHttp: any;
+let planResponsesHandlerStreamForHttp: any;
 let attachResponsesRequestContextToResultForHttp: any;
 let MetadataCenter: any;
 let readRuntimeControlProjection: any;
@@ -35,6 +36,7 @@ let readRuntimeControlProjection: any;
 beforeAll(async () => {
   ({
     buildResponsesPipelineMetadataForHttp,
+    planResponsesHandlerStreamForHttp,
     attachResponsesRequestContextToResultForHttp
   } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.ts'));
   ({ MetadataCenter } = await import(
@@ -46,7 +48,23 @@ beforeAll(async () => {
 });
 
 describe('responses-request-bridge metadata center projection', () => {
-  it('writes request-side responses continuation context into metadata center', () => {
+  it('keeps responses submit without stream and without SSE accept on JSON outbound path', () => {
+    const streamPlan = planResponsesHandlerStreamForHttp({
+      payload: { model: 'gpt-5.4', tool_outputs: [] },
+      acceptsSse: false
+    });
+    expect(streamPlan.originalStream).toBe(false);
+    expect(streamPlan.outboundStream).toBe(false);
+    expect(streamPlan.inboundStream).toBe(false);
+    expect(streamPlan.requestStartMeta).toMatchObject({
+      inboundStream: false,
+      outboundStream: false,
+      clientAcceptsSse: false,
+      originalStream: false
+    });
+  });
+
+  it('writes request-side responses continuation control into metadata center', () => {
     const requestContext = {
       payload: { model: 'gpt-5.4', input: [] },
       context: { input: [] },
@@ -75,7 +93,6 @@ describe('responses-request-bridge metadata center projection', () => {
 
     const center = MetadataCenter.read(metadata);
     expect(center?.readContinuationContext()).toMatchObject({
-      responsesRequestContext: requestContext,
       responsesResume: resumeMeta
     });
     expect(center?.readRuntimeControl()).toMatchObject({
@@ -93,7 +110,7 @@ describe('responses-request-bridge metadata center projection', () => {
     });
   });
 
-  it('writes response-side responsesRequestContext attachment into metadata center', () => {
+  it('does not write response-side request context attachment into metadata center', () => {
     const requestContext = {
       payload: { model: 'gpt-5.4', input: [] },
       context: { input: [] },
@@ -108,9 +125,8 @@ describe('responses-request-bridge metadata center projection', () => {
     });
 
     const center = MetadataCenter.read(nextMetadata);
-    expect(center?.readContinuationContext().responsesRequestContext).toBe(requestContext);
+    expect(center).toBeUndefined();
     expect(nextMetadata?.responsesRequestContext).toBeUndefined();
-    expect(center?.readRequestTruth()).toEqual({});
   });
 
   it('RED: relay submit_tool_outputs pipeline metadata must expose resumed session scope and route pin through metadata center truth', () => {
@@ -146,7 +162,6 @@ describe('responses-request-bridge metadata center projection', () => {
 
     const center = MetadataCenter.read(metadata);
     expect(center?.readContinuationContext()).toMatchObject({
-      responsesRequestContext: requestContext,
       responsesResume: {
         responseId: 'resp_stopless_live_1',
         continuationOwner: 'relay',

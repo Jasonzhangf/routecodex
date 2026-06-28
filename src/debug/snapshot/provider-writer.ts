@@ -15,6 +15,8 @@ import {
   normalizeProviderToken,
   logSnapshotNonBlockingError,
 } from './provider-utils.js';
+import { MetadataCenter } from '../../server/runtime/http-server/metadata-center/metadata-center.js';
+import { getCurrentPortRequestContext } from '../../server/runtime/http-server/port-log-context.js';
 import {
   enqueueSnapshotPersist,
   __flushProviderSnapshotQueueForTests as flushProviderSnapshotQueueForTests,
@@ -97,19 +99,33 @@ function resolveProviderSnapshotEntryPort(
   if (typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0) {
     return Math.floor(entryPort);
   }
+  const portContext = getCurrentPortRequestContext();
+  const currentPort =
+    typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort) && portContext.matchedPort > 0
+      ? Math.floor(portContext.matchedPort)
+      : typeof portContext?.localPort === 'number' && Number.isFinite(portContext.localPort) && portContext.localPort > 0
+        ? Math.floor(portContext.localPort)
+        : undefined;
+  if (typeof currentPort === 'number') {
+    return currentPort;
+  }
   if (!metadata || typeof metadata !== 'object') {
     return undefined;
   }
-  const portContext = metadata.portContext && typeof metadata.portContext === 'object'
-    ? metadata.portContext as Record<string, unknown>
-    : undefined;
+  const metadataCenter = MetadataCenter.read(metadata);
+  const requestTruthPortScope = metadataCenter?.readRequestTruth().portScope;
+  if (typeof requestTruthPortScope === 'string') {
+    const parsed = Number.parseInt(requestTruthPortScope, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
   const candidates = [
     metadata.entryPort,
     metadata.matchedPort,
     metadata.localPort,
     metadata.routecodexLocalPort,
-    portContext?.matchedPort,
-    portContext?.localPort
+    metadata.portScope
   ];
   for (const value of candidates) {
     const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);

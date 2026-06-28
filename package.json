@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.3273",
+  "version": "0.90.3282",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -239,6 +239,8 @@
     "mock:clean": "node scripts/mock-provider/clean.mjs",
     "fix:cli-permission": "node scripts/ensure-cli-executable.mjs",
     "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs",
+    "verify:stopless-contract-blackbox": "node scripts/tests/stopless-contract-blackbox.mjs",
+    "verify:stopless-invalid-schema-blackbox": "node scripts/tests/stopless-invalid-schema-blackbox.mjs",
     "verify:servertool-rust-only": "node scripts/verify-servertool-rust-only.mjs",
     "verify:runtime-lifecycle-pid-rebase": "node scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs",
     "render:mainline-manifests": "node scripts/architecture/render-mainline-manifests.mjs",

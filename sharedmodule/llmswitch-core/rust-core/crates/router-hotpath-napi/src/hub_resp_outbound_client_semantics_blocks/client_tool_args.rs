@@ -5,7 +5,6 @@ use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
 use crate::shared_tool_mapping::build_flattened_namespace_child_alias;
-use servertool_core::stop_visible_text::strip_stop_schema_control_value;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ClientToolDefinition {
@@ -768,9 +767,7 @@ fn sanitize_responses_client_payload_for_replay_safety_deep(value: &Value) -> Va
                 );
             }
             sanitize_responses_output_item_for_replay_safety(&mut out);
-            let mut next = Value::Object(out);
-            strip_stop_schema_control_value(&mut next);
-            next
+            Value::Object(out)
         }
         _ => value.clone(),
     }

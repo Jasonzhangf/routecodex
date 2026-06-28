@@ -395,21 +395,31 @@ pub fn is_client_disconnect_like_error(
     if upper_code == "CLIENT_DISCONNECTED" {
         return true;
     }
-    if lower_message.contains("client_disconnected") || lower_message.contains("client disconnected") {
+    if lower_message.contains("client_disconnected")
+        || lower_message.contains("client disconnected")
+    {
         return true;
     }
     if status == Some(499) || upper_code == "HTTP_499" || lower_message.contains("http 499") {
-        if lower_message.contains("client abort request") || lower_message.contains("client closed request") {
+        if lower_message.contains("client abort request")
+            || lower_message.contains("client closed request")
+        {
             return true;
         }
-        if lower_upstream.contains("client abort request") || lower_upstream.contains("client closed request") {
+        if lower_upstream.contains("client abort request")
+            || lower_upstream.contains("client closed request")
+        {
             return true;
         }
     }
-    if lower_message.contains("client abort request") || lower_message.contains("client closed request") {
+    if lower_message.contains("client abort request")
+        || lower_message.contains("client closed request")
+    {
         return true;
     }
-    if lower_message.contains("client_request_aborted") || lower_message.contains("client_response_closed") {
+    if lower_message.contains("client_request_aborted")
+        || lower_message.contains("client_response_closed")
+    {
         return true;
     }
     false
@@ -453,8 +463,8 @@ pub fn is_context_length_exceeded_error_json(input_json: String) -> Result<Strin
         #[serde(default)]
         detail_reason: Option<String>,
     }
-    let input: Input = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: Input =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let result = is_context_length_exceeded_error(
         &input.message,
         input.upstream_code.as_deref(),
@@ -472,8 +482,8 @@ pub fn is_rate_limit_like_error_json(input_json: String) -> Result<String, Strin
         #[serde(default)]
         codes: Vec<String>,
     }
-    let input: Input = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: Input =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let codes: Vec<&str> = input.codes.iter().map(|s| s.as_str()).collect();
     let result = is_rate_limit_like_error(&input.message, &codes);
     serde_json::to_string(&IsErrorClassificationOutput { result })
@@ -490,8 +500,8 @@ pub fn is_retryable_network_sse_wrapper_error_json(input_json: String) -> Result
         #[serde(default)]
         status_code: Option<u16>,
     }
-    let input: Input = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: Input =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let result = is_retryable_network_sse_wrapper_error(
         &input.message,
         input.upstream_code.as_deref(),
@@ -514,8 +524,8 @@ pub fn is_client_disconnect_like_error_json(input_json: String) -> Result<String
         #[serde(default)]
         upstream_message: String,
     }
-    let input: Input = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: Input =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let result = is_client_disconnect_like_error(
         &input.code,
         &input.message,
@@ -526,7 +536,9 @@ pub fn is_client_disconnect_like_error_json(input_json: String) -> Result<String
         .map_err(|e| format!("serialize: {}", e))
 }
 
-pub fn is_generic_bridge_response_contract_error_json(input_json: String) -> Result<String, String> {
+pub fn is_generic_bridge_response_contract_error_json(
+    input_json: String,
+) -> Result<String, String> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Input {
@@ -537,8 +549,8 @@ pub fn is_generic_bridge_response_contract_error_json(input_json: String) -> Res
         #[serde(default)]
         message: String,
     }
-    let input: Input = serde_json::from_str(&input_json)
-        .map_err(|e| format!("parse input: {}", e))?;
+    let input: Input =
+        serde_json::from_str(&input_json).map_err(|e| format!("parse input: {}", e))?;
     let result = is_generic_bridge_response_contract_error(
         &input.error_code,
         &input.error_name,
@@ -640,22 +652,38 @@ mod tests {
 
     #[test]
     fn context_exceeded_via_upstream_code() {
-        assert!(is_context_length_exceeded_error("some msg", Some("context_length_exceeded"), None));
+        assert!(is_context_length_exceeded_error(
+            "some msg",
+            Some("context_length_exceeded"),
+            None
+        ));
     }
 
     #[test]
     fn context_exceeded_via_message() {
-        assert!(is_context_length_exceeded_error("Context length exceeded for model gpt-4", None, None));
+        assert!(is_context_length_exceeded_error(
+            "Context length exceeded for model gpt-4",
+            None,
+            None
+        ));
     }
 
     #[test]
     fn context_exceeded_false_for_normal() {
-        assert!(!is_context_length_exceeded_error("normal error", None, None));
+        assert!(!is_context_length_exceeded_error(
+            "normal error",
+            None,
+            None
+        ));
     }
 
     #[test]
     fn context_exceeded_via_detail_reason() {
-        assert!(is_context_length_exceeded_error("msg", None, Some("context_window_exceeded")));
+        assert!(is_context_length_exceeded_error(
+            "msg",
+            None,
+            Some("context_window_exceeded")
+        ));
     }
 
     #[test]
@@ -694,59 +722,109 @@ mod tests {
 
     #[test]
     fn retryable_network_via_status_502() {
-        assert!(is_retryable_network_sse_wrapper_error("msg", None, Some(502)));
+        assert!(is_retryable_network_sse_wrapper_error(
+            "msg",
+            None,
+            Some(502)
+        ));
     }
 
     #[test]
     fn retryable_network_via_status_503() {
-        assert!(is_retryable_network_sse_wrapper_error("msg", None, Some(503)));
+        assert!(is_retryable_network_sse_wrapper_error(
+            "msg",
+            None,
+            Some(503)
+        ));
     }
 
     #[test]
     fn retryable_network_via_message_timeout() {
-        assert!(is_retryable_network_sse_wrapper_error("request timed out", None, None));
+        assert!(is_retryable_network_sse_wrapper_error(
+            "request timed out",
+            None,
+            None
+        ));
     }
 
     #[test]
     fn retryable_network_via_upstream_code() {
-        assert!(is_retryable_network_sse_wrapper_error("msg", Some("network_error"), None));
+        assert!(is_retryable_network_sse_wrapper_error(
+            "msg",
+            Some("network_error"),
+            None
+        ));
     }
 
     #[test]
     fn retryable_network_false_for_normal() {
-        assert!(!is_retryable_network_sse_wrapper_error("normal", None, Some(200)));
+        assert!(!is_retryable_network_sse_wrapper_error(
+            "normal",
+            None,
+            Some(200)
+        ));
     }
 
     // -- is_client_disconnect_like_error --
 
     #[test]
     fn client_disconnect_via_code() {
-        assert!(is_client_disconnect_like_error("CLIENT_DISCONNECTED", "", None, ""));
+        assert!(is_client_disconnect_like_error(
+            "CLIENT_DISCONNECTED",
+            "",
+            None,
+            ""
+        ));
     }
 
     #[test]
     fn client_disconnect_via_499_with_abort() {
-        assert!(is_client_disconnect_like_error("HTTP_499", "client abort request", None, ""));
+        assert!(is_client_disconnect_like_error(
+            "HTTP_499",
+            "client abort request",
+            None,
+            ""
+        ));
     }
 
     #[test]
     fn client_disconnect_via_message() {
-        assert!(is_client_disconnect_like_error("", "client disconnected", None, ""));
+        assert!(is_client_disconnect_like_error(
+            "",
+            "client disconnected",
+            None,
+            ""
+        ));
     }
 
     #[test]
     fn client_disconnect_499_no_abort_returns_false() {
-        assert!(!is_client_disconnect_like_error("HTTP_499", "some other error", None, ""));
+        assert!(!is_client_disconnect_like_error(
+            "HTTP_499",
+            "some other error",
+            None,
+            ""
+        ));
     }
 
     #[test]
     fn client_disconnect_upstream_message() {
-        assert!(is_client_disconnect_like_error("", "", Some(499), "client closed request"));
+        assert!(is_client_disconnect_like_error(
+            "",
+            "",
+            Some(499),
+            "client closed request"
+        ));
     }
 
     #[test]
     fn client_disconnect_false_for_normal() {
-        assert!(!is_client_disconnect_like_error("", "normal error", None, ""));
+        assert!(!is_client_disconnect_like_error(
+            "",
+            "normal error",
+            None,
+            ""
+        ));
     }
 
     // -- is_generic_bridge_response_contract_error --

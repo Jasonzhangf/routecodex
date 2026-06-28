@@ -14,6 +14,7 @@ import {
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { Readable } from 'node:stream';
 import { sanitizeProviderOutboundPayload } from '../../../modules/llmswitch/bridge.js';
+import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 const formatUnknownError = (error: unknown): string => {
   if (error instanceof Error) {
@@ -64,36 +65,55 @@ function writePreparedRequestToLocalErrorMarker(error: unknown, requestInfo: Pre
 
 function readProviderSnapshotMetadata(context: ProviderContext): Record<string, unknown> | undefined {
   const metadata = (context as { metadata?: unknown }).metadata;
-  return metadata && typeof metadata === 'object'
+  const metadataRecord = metadata && typeof metadata === 'object'
     ? metadata as Record<string, unknown>
     : undefined;
+  const runtimeMetadataRecord =
+    context.runtimeMetadata?.metadata && typeof context.runtimeMetadata.metadata === 'object' && !Array.isArray(context.runtimeMetadata.metadata)
+      ? context.runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
+  if (runtimeMetadataRecord && metadataRecord) {
+    return {
+      ...runtimeMetadataRecord,
+      ...metadataRecord
+    };
+  }
+  return runtimeMetadataRecord ?? metadataRecord;
 }
 
 function readProviderSnapshotEntryPort(context: ProviderContext): number | undefined {
-  const metadata = readProviderSnapshotMetadata(context);
-  if (!metadata) {
-    return undefined;
-  }
-  const portContext =
-    metadata.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext)
-      ? metadata.portContext as Record<string, unknown>
-      : undefined;
-  for (const value of [
-    metadata.entryPort,
-    metadata.matchedPort,
-    metadata.routecodexLocalPort,
-    metadata.localPort,
-    metadata.portScope,
-    portContext?.matchedPort,
-    portContext?.localPort,
-    portContext?.port
-  ]) {
-    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
-    if (Number.isFinite(numeric) && numeric > 0) {
-      return Math.floor(numeric);
+  const readFromMetadata = (metadata: Record<string, unknown> | undefined): number | undefined => {
+    if (!metadata) {
+      return undefined;
     }
-  }
-  return undefined;
+    const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
+    if (typeof requestTruthPortScope === 'string') {
+      const parsed = Number.parseInt(requestTruthPortScope, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed);
+      }
+    }
+    for (const value of [
+      metadata.entryPort,
+      metadata.matchedPort,
+      metadata.routecodexLocalPort,
+      metadata.localPort,
+      metadata.portScope
+    ]) {
+      const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return Math.floor(numeric);
+      }
+    }
+    return undefined;
+  };
+  const runtimeMetadataRecord =
+    context.runtimeMetadata?.metadata && typeof context.runtimeMetadata.metadata === 'object' && !Array.isArray(context.runtimeMetadata.metadata)
+      ? context.runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
+  return readFromMetadata(
+    context.runtimeMetadata && typeof context.runtimeMetadata === 'object' ? context.runtimeMetadata as Record<string, unknown> : undefined
+  ) ?? readFromMetadata(runtimeMetadataRecord) ?? readFromMetadata(readProviderSnapshotMetadata(context));
 }
 
 function parseFirstSseDataPayload(frame: string): UnknownObject | undefined {

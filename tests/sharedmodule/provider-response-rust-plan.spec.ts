@@ -58,6 +58,28 @@ async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+function extractExecCommandFromResponsesBody(body: unknown): string {
+  const record = body && typeof body === 'object' && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : {};
+  const output = Array.isArray(record.output) ? record.output : [];
+  for (const item of output) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const itemRecord = item as Record<string, unknown>;
+    if (itemRecord.type !== 'function_call' || itemRecord.name !== 'exec_command') {
+      continue;
+    }
+    const argsText = typeof itemRecord.arguments === 'string' ? itemRecord.arguments : '';
+    const args = JSON.parse(argsText) as { cmd?: unknown };
+    if (typeof args.cmd === 'string') {
+      return args.cmd;
+    }
+  }
+  throw new Error('exec_command function_call not found in Responses body');
+}
+
 function buildMimoAnthropicStopSse(): string {
   return [
     ': PROCESSING',
@@ -261,6 +283,63 @@ describe('provider response Rust native plan', () => {
     expect(bodyText).toContain('exec_command');
     expect(bodyText).toContain('routecodex hook run reasoningStop');
     expect(bodyText).toContain('stop_message_flow');
+  });
+
+  it('projects stopless CLI command for OpenAI Chat stop schema continue response before client projection', async () => {
+    const suffix = `openai_chat_schema_continue_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const context: Record<string, unknown> = withMetadataCenter({
+      requestId: `req_provider_response_openai_chat_schema_continue_${suffix}`,
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      sessionId: `provider-response-openai-chat-schema-continue-${suffix}`,
+      stopMessageEnabled: true,
+      routecodexPortStopMessageEnabled: true
+    });
+    const center = MetadataCenter.attach(context);
+    center.writeRuntimeControl('stopless', {
+      active: true,
+      flowId: 'stop_message_flow',
+      repeatCount: 1,
+      maxRepeats: 3,
+      continuationPrompt: '请继续执行下一步：基于第二轮工具结果继续最终核对',
+      triggerHint: 'stop_schema_continue_next_step',
+      schemaFeedback: {
+        reasonCode: 'stop_schema_continue_next_step',
+        missingFields: []
+      }
+    }, TEST_METADATA_WRITER, 'test-stopless-runtime-control');
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_openai_chat_schema_continue',
+        object: 'chat.completion',
+        model: 'glm-5.2',
+        choices: [{
+          index: 0,
+          finish_reason: 'stop',
+          message: {
+            role: 'assistant',
+            content: '```json\n{\n  "stopreason": 2,\n  "reason": "第二轮还没做完",\n  "next_step": "基于第二轮工具结果继续最终核对"\n}\n```',
+            reasoning_content: 'Let me output that schema.'
+          }
+        }],
+        usage: { prompt_tokens: 585, completion_tokens: 128, total_tokens: 713 }
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false,
+      clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
+    });
+
+    expect(result.body?.object).toBe('response');
+    expect(result.body?.status).toBe('requires_action');
+    const bodyText = JSON.stringify(result.body);
+    expect(bodyText).toContain('exec_command');
+    const command = extractExecCommandFromResponsesBody(result.body);
+    expect(command).toContain('routecodex hook run reasoningStop');
+    expect(command).toContain('"repeatCount":2');
+    expect(bodyText).not.toContain('"output_text":""');
   });
 
   it('projects stopless CLI command for captured mimo Anthropic SSE stop shape', async () => {

@@ -1768,7 +1768,7 @@ describe('HubRequestExecutor failover', () => {
       promptTooLong: false,
       routePool: ['mimo.key1.mimo-v2.5-pro'],
       excludedProviderKeys: new Set<string>()
-    })).toEqual({ excludedCurrentProvider: false });
+    })).toEqual({ excludedCurrentProvider: true });
 
     expect(__requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'mimo.key1.mimo-v2.5-pro',
@@ -1783,7 +1783,7 @@ describe('HubRequestExecutor failover', () => {
       promptTooLong: false,
       routePool: ['mimo.key1.mimo-v2.5-pro'],
       excludedProviderKeys: new Set<string>()
-    })).toEqual({ excludedCurrentProvider: false });
+    })).toEqual({ excludedCurrentProvider: true });
 
     const promptTooLongPlan = resolveProviderFailureActionPlan({
       error: new Error('context exceeded'),

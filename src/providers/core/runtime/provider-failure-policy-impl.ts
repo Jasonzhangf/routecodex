@@ -693,7 +693,6 @@ export function resolveProviderFailureActionPlan(args: {
     return {
       classification,
       affectsHealth,
-      blockingRecoverable: false,
       shouldRetry: false,
       action: 'direct_return',
       decisionLabel: 'direct_return'
@@ -704,7 +703,6 @@ export function resolveProviderFailureActionPlan(args: {
   return {
     classification,
     affectsHealth,
-    blockingRecoverable: false,
     shouldRetry: true,
     action,
     decisionLabel: 'exclude_and_reroute'

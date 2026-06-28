@@ -25,6 +25,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integratio
 import type { OpenAIStandardConfig } from '../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { attachProviderRuntimeMetadata } from '../../../src/providers/core/runtime/provider-runtime-metadata.js';
+import { createProviderContext } from '../../../src/providers/core/runtime/base-provider-runtime-helpers.js';
 
 const { ResponsesProvider } = await import('../../../src/providers/core/runtime/responses-provider.js');
 
@@ -197,6 +198,46 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody.tool_choice).toBe('auto');
     expect(capturedBody.instructions).toBe('keep-original-instructions');
     expect(capturedBody.metadata).toBeUndefined();
+  });
+
+  test('keeps request metadata port hints when runtime metadata is attached', () => {
+    const inbound = {
+      model: 'gpt-5.4',
+      metadata: {
+        entryPort: 5520,
+        portContext: {
+          localPort: 5520
+        },
+        existingFlag: true
+      },
+      stream: false
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: {
+        requestScope: 'keep-me'
+      }
+    });
+
+    const { context } = createProviderContext({
+      request: inbound,
+      providerType: 'responses',
+      runtimeProfile: {
+        runtimeKey: 'test-runtime',
+        providerId: 'test',
+        providerType: 'responses',
+        endpoint: 'https://example.invalid/v1',
+        auth: { type: 'apikey' }
+      }
+    });
+
+    expect(context.metadata).toMatchObject({
+      entryPort: 5520,
+      portContext: {
+        localPort: 5520
+      },
+      existingFlag: true,
+      requestScope: 'keep-me'
+    });
   });
 
   test('direct submit_tool_outputs hits native upstream submit endpoint instead of plain /responses', async () => {

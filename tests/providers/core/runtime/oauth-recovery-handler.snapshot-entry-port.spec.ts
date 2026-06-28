@@ -10,7 +10,7 @@ describe('OAuthRecoveryHandler snapshot entryPort', () => {
     attachProviderSseSnapshotStream.mockClear();
   });
 
-  it('forwards portContext.port on non-stream retry provider-response snapshots', async () => {
+  it('forwards request_truth.portScope on non-stream retry provider-response snapshots', async () => {
     jest.unstable_mockModule('../../../../src/providers/core/utils/snapshot-writer.js', () => ({
       writeProviderSnapshot,
       attachProviderSseSnapshotStream
@@ -20,6 +20,9 @@ describe('OAuthRecoveryHandler snapshot entryPort', () => {
     }));
     const { OAuthRecoveryHandler } = await import(
       '../../../../src/providers/core/runtime/transport/oauth-recovery-handler.ts'
+    );
+    const { MetadataCenter } = await import(
+      '../../../../src/server/runtime/http-server/metadata-center/metadata-center.ts'
     );
 
     const handler = new OAuthRecoveryHandler({
@@ -60,7 +63,19 @@ describe('OAuthRecoveryHandler snapshot entryPort', () => {
         requestId: 'req-oauth-retry-entry-port',
         providerKey: 'deepseek.key1.deepseek-v4-pro',
         providerId: 'deepseek',
-        metadata: { portContext: { port: 5520 } }
+        metadata: (() => {
+          const metadata = { requestId: 'req-oauth-retry-entry-port' } as Record<string, unknown>;
+          MetadataCenter.attach(metadata).writeRequestTruth(
+            'portScope',
+            '5520',
+            {
+              module: 'tests/providers/core/runtime/oauth-recovery-handler.snapshot-entry-port.spec.ts',
+              symbol: 'forwards request_truth.portScope on non-stream retry provider-response snapshots',
+              stage: 'ServerReqInbound01ClientRaw'
+            }
+          );
+          return metadata;
+        })()
       } as any,
       wrapUpstreamSseResponse: async () => ({}),
       extra: { retry: true },

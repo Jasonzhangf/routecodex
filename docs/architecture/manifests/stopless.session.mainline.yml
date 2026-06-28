@@ -1,9 +1,10 @@
 lifecycle_id: stopless.session.mainline
-summary: "Stopless three-round contract: every request first injects stop
-  guidance plus internal reasoningStop, Round-1 response intercepts/normalizes
-  stop into terminal-or-CLI and saves canonical continuation truth, Round-2
-  request restores CLI result into guidance plus reasoningStop pair, and Round-3
-  no_schema guard stops endless stop->CLI rewriting."
+summary: "Stopless three-round contract inside Chat Process boundary: every
+  request first injects stop guidance plus internal reasoningStop, Round-1
+  response intercepts/normalizes stop into terminal-or-CLI and saves canonical
+  continuation truth, Round-2 request restores CLI result into guidance plus
+  reasoningStop pair, and Round-3 no_schema guard stops endless stop->CLI
+  rewriting."
 owner_feature_id: hub.servertool_stopless_cli_continuation
 entrypoint:
   node_id: StoplessResp01StopDetected

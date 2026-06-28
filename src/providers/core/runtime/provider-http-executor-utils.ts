@@ -11,24 +11,25 @@ import { OAuthRecoveryHandler } from './transport/oauth-recovery-handler.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
+import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 function readSnapshotEntryPort(metadata?: Record<string, unknown>): number | undefined {
   if (!metadata || typeof metadata !== 'object') {
     return undefined;
   }
-  const portContext =
-    metadata.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext)
-      ? metadata.portContext as Record<string, unknown>
-      : undefined;
+  const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
+  if (typeof requestTruthPortScope === 'string') {
+    const parsed = Number.parseInt(requestTruthPortScope, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
   for (const value of [
+    metadata.portScope,
     metadata.entryPort,
     metadata.matchedPort,
     metadata.routecodexLocalPort,
-    metadata.localPort,
-    metadata.portScope,
-    portContext?.matchedPort,
-    portContext?.localPort,
-    portContext?.port
+    metadata.localPort
   ]) {
     const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
     if (Number.isFinite(numeric) && numeric > 0) {
@@ -36,6 +37,14 @@ function readSnapshotEntryPort(metadata?: Record<string, unknown>): number | und
     }
   }
   return undefined;
+}
+
+function readProviderContextSnapshotEntryPort(context: ProviderContext): number | undefined {
+  const runtimeMetadataRecord =
+    context.runtimeMetadata?.metadata && typeof context.runtimeMetadata.metadata === 'object' && !Array.isArray(context.runtimeMetadata.metadata)
+      ? context.runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
+  return readSnapshotEntryPort(runtimeMetadataRecord) ?? readSnapshotEntryPort(context.metadata);
 }
 
 function summarizeUnknownError(error: unknown): string {
@@ -215,7 +224,7 @@ export async function normalizeProviderHttpError(options: {
       entryEndpoint:
         options.requestInfo.entryEndpoint
         ?? ProviderPayloadUtils.extractEntryEndpointFromPayload(options.processedRequest),
-      entryPort: readSnapshotEntryPort(options.context.metadata),
+      entryPort: readProviderContextSnapshotEntryPort(options.context),
       clientRequestId:
         options.requestInfo.clientRequestId
         ?? ProviderPayloadUtils.getClientRequestIdFromContext(options.context),

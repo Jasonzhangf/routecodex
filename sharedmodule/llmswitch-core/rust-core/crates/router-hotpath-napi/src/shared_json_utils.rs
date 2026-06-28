@@ -1373,7 +1373,7 @@ mod tests {
             "virtual_router_engine/routing/metadata.rs still owns local read_continuation_sticky_scope wrapper"
         );
         assert!(
-            source.contains(r#"read_trimmed_string(metadata.get("requestId"))"#)
+            source.contains(r#"read_trimmed_string(metadata_center_snapshot.get("requestId"))"#)
                 && source.contains(r#"continuation.get("continuationScope")"#),
             "virtual_router_engine/routing/metadata.rs must call shared read_trimmed_string truth directly"
         );

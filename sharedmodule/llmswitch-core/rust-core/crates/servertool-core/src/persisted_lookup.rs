@@ -417,9 +417,29 @@ pub fn resolve_runtime_stop_message_state_from_adapter_context(
 fn resolve_stopless_cli_result_snapshot_from_responses_resume(
     carrier: &Value,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
-    let record = carrier.as_object()?;
-    let resume = record.get("responsesResume").and_then(Value::as_object)?;
+    let resume = find_responses_resume_carrier(carrier)?;
     read_stopless_cli_result_snapshot_from_tool_output_details(resume.get("toolOutputsDetailed")?)
+}
+
+fn find_responses_resume_carrier(carrier: &Value) -> Option<&serde_json::Map<String, Value>> {
+    let record = carrier.as_object()?;
+    if let Some(resume) = record.get("responsesResume").and_then(Value::as_object) {
+        return Some(resume);
+    }
+    if let Some(resume) = record
+        .get("metadataCenterSnapshot")
+        .and_then(|snapshot| snapshot.get("continuationContext"))
+        .and_then(|continuation| continuation.get("responsesResume"))
+        .and_then(Value::as_object)
+    {
+        return Some(resume);
+    }
+    record
+        .get("metadata")
+        .and_then(|metadata| metadata.get("metadataCenterSnapshot"))
+        .and_then(|snapshot| snapshot.get("continuationContext"))
+        .and_then(|continuation| continuation.get("responsesResume"))
+        .and_then(Value::as_object)
 }
 
 fn resolve_stopless_cli_result_snapshot_from_runtime_metadata(
@@ -682,9 +702,9 @@ pub fn read_servertool_followup_flow_id(runtime_metadata: &Value) -> String {
         .or_else(|| {
             runtime_metadata
                 .as_object()
-        .and_then(|runtime| runtime.get("serverToolLoopState"))
-        .and_then(Value::as_object)
-        .and_then(|loop_state| read_trimmed_string(loop_state.get("flowId")))
+                .and_then(|runtime| runtime.get("serverToolLoopState"))
+                .and_then(Value::as_object)
+                .and_then(|loop_state| read_trimmed_string(loop_state.get("flowId")))
         })
         .unwrap_or_default()
 }
@@ -1975,7 +1995,7 @@ mod tests {
 
         assert_eq!(snapshot.text, "continue from stopless");
         assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.used, 2);
         assert_eq!(snapshot.trigger_hint.as_deref(), Some("invalid_schema"));
         assert_eq!(
             snapshot.schema_feedback,
@@ -1983,7 +2003,10 @@ mod tests {
                 "reasonCode": "stop_schema_next_step_missing"
             }))
         );
-        assert_eq!(snapshot.source.as_deref(), Some(STOP_MESSAGE_FOLLOWUP_SOURCE));
+        assert_eq!(
+            snapshot.source.as_deref(),
+            Some(STOP_MESSAGE_FOLLOWUP_SOURCE)
+        );
     }
 
     #[test]
@@ -2288,7 +2311,7 @@ mod tests {
             .expect("stopless cli result snapshot");
         assert_eq!(snapshot.text, "continue from result");
         assert_eq!(snapshot.max_repeats, 5);
-        assert_eq!(snapshot.used, 2);
+        assert_eq!(snapshot.used, 3);
         assert_eq!(snapshot.trigger_hint.as_deref(), None);
         assert!(snapshot.schema_feedback.is_none());
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
@@ -2320,7 +2343,7 @@ mod tests {
             .expect("current request stopless cli result snapshot");
         assert_eq!(snapshot.text, "continue from current tool output");
         assert_eq!(snapshot.max_repeats, 4);
-        assert_eq!(snapshot.used, 2);
+        assert_eq!(snapshot.used, 3);
         assert_eq!(snapshot.trigger_hint.as_deref(), None);
         assert!(snapshot.schema_feedback.is_none());
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
@@ -2345,7 +2368,7 @@ mod tests {
             .expect("responses input stopless cli result snapshot");
         assert_eq!(snapshot.text, "continue from responses input");
         assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.used, 2);
         assert_eq!(snapshot.trigger_hint.as_deref(), None);
         assert!(snapshot.schema_feedback.is_none());
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
@@ -2384,7 +2407,7 @@ mod tests {
             .expect("responses request context stopless cli result snapshot");
         assert_eq!(snapshot.text, "continue from relay responsesRequestContext");
         assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.used, 2);
         assert_eq!(snapshot.trigger_hint.as_deref(), None);
         assert!(snapshot.schema_feedback.is_none());
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
@@ -2425,9 +2448,44 @@ mod tests {
             .expect("responses resume tool output snapshot");
         assert_eq!(snapshot.text, "continue from relay submit output");
         assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.used, 2);
         assert_eq!(snapshot.trigger_hint.as_deref(), None);
         assert!(snapshot.schema_feedback.is_none());
+        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
+    }
+
+    #[test]
+    fn metadata_center_snapshot_responses_resume_restores_current_stopless_cli_result() {
+        let input = RuntimeStopMessageStateFromAdapterContextInput {
+            runtime_metadata: Some(json!({
+                "metadataCenterSnapshot": {
+                    "continuationContext": {
+                        "responsesResume": {
+                            "continuationOwner": "relay",
+                            "toolOutputsDetailed": [{
+                                "callId": "call_servertool_cli",
+                                "originalId": "call_servertool_cli",
+                                "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from metadata center resume\",\"repeatCount\":1,\"maxRepeats\":3}"
+                            }]
+                        }
+                    },
+                    "runtimeControl": {
+                        "stopless": {
+                            "used": 0,
+                            "maxRepeats": 3,
+                            "text": "stale"
+                        }
+                    }
+                }
+            })),
+            adapter_context: json!({}),
+        };
+
+        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
+            .expect("metadata center responses resume snapshot");
+        assert_eq!(snapshot.text, "continue from metadata center resume");
+        assert_eq!(snapshot.max_repeats, 3);
+        assert_eq!(snapshot.used, 1);
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
     }
 
@@ -2456,7 +2514,7 @@ mod tests {
             .expect("responses resume invalid schema snapshot");
         assert_eq!(snapshot.text, "continue from invalid schema");
         assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 0);
+        assert_eq!(snapshot.used, 1);
         assert_eq!(snapshot.trigger_hint.as_deref(), Some("invalid_schema"));
         assert_eq!(
             snapshot.schema_feedback,
@@ -2490,7 +2548,7 @@ mod tests {
             .expect("raw request stopless cli result snapshot");
         assert_eq!(snapshot.text, "continue from raw request");
         assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 2);
+        assert_eq!(snapshot.used, 3);
         assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
     }
 

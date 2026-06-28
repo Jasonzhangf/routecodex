@@ -256,6 +256,35 @@ fn convert_anthropic_tools_to_chat(raw_tools: Option<&Value>) -> Option<Value> {
     Some(Value::Array(out))
 }
 
+fn default_anthropic_tool_input_schema() -> Value {
+    Value::Object(Map::from_iter([
+        ("type".to_string(), Value::String("object".to_string())),
+        ("properties".to_string(), Value::Object(Map::new())),
+        ("additionalProperties".to_string(), Value::Bool(true)),
+    ]))
+}
+
+fn normalize_anthropic_tool_input_schema(raw: Option<&Value>) -> Value {
+    let candidate = match raw {
+        Some(Value::String(text)) => serde_json::from_str::<Value>(text).ok(),
+        Some(value) => Some(value.clone()),
+        None => None,
+    };
+
+    match candidate {
+        Some(Value::Object(mut map)) if !map.is_empty() => {
+            if !map.contains_key("type") {
+                map.insert("type".to_string(), Value::String("object".to_string()));
+            }
+            if !map.contains_key("properties") {
+                map.insert("properties".to_string(), Value::Object(Map::new()));
+            }
+            Value::Object(map)
+        }
+        _ => default_anthropic_tool_input_schema(),
+    }
+}
+
 fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value> {
     let rows = raw_tools.and_then(|v| v.as_array())?;
     if rows.is_empty() {
@@ -292,10 +321,7 @@ fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value>
                 "additionalProperties": true
             })
         } else {
-            function_row
-                .get("parameters")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(Map::new()))
+            normalize_anthropic_tool_input_schema(function_row.get("parameters"))
         };
         let mut tool = Map::<String, Value>::new();
         tool.insert("name".to_string(), Value::String(name));
@@ -341,6 +367,32 @@ mod apply_patch_tool_schema_tests {
         assert!(patch_desc.contains("not /tmp/"));
         assert!(patch_desc.contains("Do not use absolute paths"));
         assert!(!patch_desc.contains("filePath"));
+    }
+
+    #[test]
+    fn map_chat_tools_to_anthropic_tools_normalizes_missing_parameters_to_object_schema() {
+        let input = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "search the web"
+                }
+            },
+            {
+                "type": "function",
+                "name": "continue_execution"
+            }
+        ]);
+
+        let out = map_chat_tools_to_anthropic_tools(Some(&input)).unwrap();
+        let tools = out.as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        for tool in tools {
+            assert_eq!(tool["input_schema"]["type"], json!("object"));
+            assert_eq!(tool["input_schema"]["properties"], json!({}));
+            assert_eq!(tool["input_schema"]["additionalProperties"], json!(true));
+        }
     }
 }
 
@@ -435,8 +487,8 @@ fn should_merge_adjacent_anthropic_messages(role: &str, previous: &Value, next: 
                 };
                 let is_text = read_trimmed_string(row.get("type"))
                     .is_some_and(|block_type| block_type.eq_ignore_ascii_case("text"));
-                let has_text = read_trimmed_string(row.get("text"))
-                    .is_some_and(|text| !text.is_empty());
+                let has_text =
+                    read_trimmed_string(row.get("text")).is_some_and(|text| !text.is_empty());
                 is_text && has_text
             })
         });
@@ -1324,7 +1376,10 @@ mod tests {
         assert_eq!(messages[1]["content"][0]["name"], json!("exec_command"));
         assert_eq!(messages[2]["role"], json!("user"));
         assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
-        assert_eq!(messages[2]["content"][0]["tool_use_id"], json!("call_stopless_1"));
+        assert_eq!(
+            messages[2]["content"][0]["tool_use_id"],
+            json!("call_stopless_1")
+        );
         assert_eq!(
             payload["system"][0]["text"],
             json!("当你准备结束当前轮时，必须输出 stop schema JSON。")
@@ -1586,7 +1641,8 @@ mod tests {
     }
 
     #[test]
-    fn build_anthropic_from_openai_chat_keeps_tool_result_then_user_image_placeholder_in_one_user_turn() {
+    fn build_anthropic_from_openai_chat_keeps_tool_result_then_user_image_placeholder_in_one_user_turn(
+    ) {
         let payload = json!({
             "model": "MiniMax-M3",
             "messages": [

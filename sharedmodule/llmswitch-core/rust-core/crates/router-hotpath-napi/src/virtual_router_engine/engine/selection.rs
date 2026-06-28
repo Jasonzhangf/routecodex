@@ -660,7 +660,10 @@ impl VirtualRouterEngineCore {
                     available,
                     router_direct_inbound_protocol.as_deref(),
                 );
-                if route_name == DEFAULT_ROUTE && available.is_empty() && floor_candidates.len() == 1 {
+                if route_name == DEFAULT_ROUTE
+                    && available.is_empty()
+                    && floor_candidates.len() == 1
+                {
                     let mut default_floor_available = self.apply_standard_filters(
                         env,
                         &floor_candidates,
@@ -1384,8 +1387,8 @@ mod tests {
 
     #[test]
     fn singleton_route_pool_exhaustion_blocks_default_only_last_provider() {
-        let decision = evaluate_singleton_route_pool_exhaustion(
-            &SingletonRoutePoolExhaustionInput {
+        let decision =
+            evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
                 pipeline_error: json!({
                     "code": "PROVIDER_NOT_AVAILABLE",
                     "details": {
@@ -1397,8 +1400,7 @@ mod tests {
                 initial_route_pool_len: Some(1),
                 explicit_singleton_pool: false,
                 excluded_provider_count: 0,
-            },
-        );
+            });
         assert_eq!(
             decision,
             SingletonRoutePoolExhaustionDecision {
@@ -1436,8 +1438,8 @@ mod tests {
 
     #[test]
     fn singleton_route_pool_exhaustion_does_not_block_multi_candidate_pool() {
-        let decision = evaluate_singleton_route_pool_exhaustion(
-            &SingletonRoutePoolExhaustionInput {
+        let decision =
+            evaluate_singleton_route_pool_exhaustion(&SingletonRoutePoolExhaustionInput {
                 pipeline_error: json!({
                     "code": "PROVIDER_NOT_AVAILABLE",
                     "details": {
@@ -1449,8 +1451,7 @@ mod tests {
                 initial_route_pool_len: Some(2),
                 explicit_singleton_pool: false,
                 excluded_provider_count: 0,
-            },
-        );
+            });
         assert_eq!(
             decision,
             SingletonRoutePoolExhaustionDecision {

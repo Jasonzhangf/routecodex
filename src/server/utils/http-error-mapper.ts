@@ -167,6 +167,25 @@ function tryExtractNestedJsonErrorMessage(raw?: string): { message?: string; req
   }
 }
 
+function isInternalBadResponseStatusLike(args: {
+  baseMessage: string;
+  upstreamMessage?: string;
+  effectiveUpstreamMessage?: string;
+  code?: string;
+  upstreamCode?: string;
+}): boolean {
+  const codes = [args.code, args.upstreamCode]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim().toLowerCase());
+  if (codes.includes('bad_response_status_code')) {
+    return true;
+  }
+  const hints = [args.baseMessage, args.upstreamMessage, args.effectiveUpstreamMessage]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.toLowerCase());
+  return hints.some((hint) => hint.includes('openai_error') || hint.includes('bad_response_status_code'));
+}
+
 /**
  * Sentinel error thrown by `mapErrorToHttp` when the error represents a client_disconnect
  * transport cancellation (HTTP_499 / `client abort request` / `client closed request` /
@@ -289,6 +308,27 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     return formatPayload(status, {
       message: 'Upstream rejected the request',
       code: upstreamCode || effectiveCode || 'upstream_client_error',
+      request_id: requestId,
+      ...validationFields,
+      ...detailField
+    });
+  }
+
+  if (status === 502 && isInternalBadResponseStatusLike({
+    baseMessage,
+    upstreamMessage,
+    effectiveUpstreamMessage,
+    code: effectiveCode,
+    upstreamCode,
+  })) {
+    const internalCode =
+      extractString(error.response?.data?.error?.code)
+      || upstreamCode
+      || effectiveCode
+      || 'internal_provider_response_error';
+    return formatPayload(502, {
+      message: 'Internal provider response error',
+      code: internalCode,
       request_id: requestId,
       ...validationFields,
       ...detailField

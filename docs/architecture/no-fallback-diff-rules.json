@@ -111,20 +111,8 @@
       "textContains": "emittedApplyPatchDoneCallIds = projected.state.emittedApplyPatchDoneCallIds ?? []"
     },
     {
-      "pathContains": "src/modules/llmswitch/bridge/responses-sse-semantics.ts",
-      "textContains": "return false;"
-    },
-    {
       "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
       "textContains": "return undefined;"
-    },
-    {
-      "pathContains": "src/modules/llmswitch/bridge/responses-sse-semantics.ts",
-      "textContains": "return payload;"
-    },
-    {
-      "pathContains": "src/modules/llmswitch/bridge/responses-sse-semantics.ts",
-      "textContains": "continue;"
     },
     {
       "pathContains": "src/server/runtime/http-server/http-server-runtime-setup.ts",
@@ -458,11 +446,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/providers/core/runtime/base-provider-series-cooldown.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/providers/core/runtime/base-provider.ts",
       "textContains": ""
     },
@@ -603,21 +586,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/manager/quota/provider-quota-store.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/manager/modules/quota/quota-adapter.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/manager/modules/quota/quota-manager.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/debug/policy/violations.ts",
       "textContains": ""
     },
@@ -649,11 +617,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/commands/provider-update.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/commands/quota-daemon.ts",
       "textContains": ""
     },
     {
@@ -1803,7 +1766,7 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/providers/auth/oauth-repair-cooldown.ts",
+    "pathContains": "src/providers/auth/oauth-lifecycle.ts",
       "textContains": ""
     },
     {
@@ -1884,11 +1847,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/server/runtime/http-server/daemon-admin/control-handler.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/server/runtime/http-server/daemon-admin/quota-handler.ts",
       "textContains": ""
     },
     {

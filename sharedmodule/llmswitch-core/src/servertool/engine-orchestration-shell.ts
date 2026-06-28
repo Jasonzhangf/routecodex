@@ -37,7 +37,7 @@ function planServertoolEngineRuntimeActionWithNativeLocal(input: {
 }): { action: string } {
   const fn = readNativeFunction('planServertoolEngineRuntimeActionJson');
   if (!fn) {
-    return { action: 'return_servertool_cli_projection_final' };
+    throw new Error('planServertoolEngineRuntimeActionJson native unavailable');
   }
   const executionContext = input.executionContext ?? {};
   const hasServertoolCliProjectionContext = Boolean(
@@ -51,12 +51,13 @@ function planServertoolEngineRuntimeActionWithNativeLocal(input: {
     stoplessAction: input.stoplessAction
   }));
   if (typeof raw !== 'string') {
-    return { action: 'return_servertool_cli_projection_final' };
+    throw new Error(`planServertoolEngineRuntimeActionJson native returned non-string: ${typeof raw}`);
   }
   try {
     return JSON.parse(raw);
-  } catch {
-    return { action: 'return_servertool_cli_projection_final' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`planServertoolEngineRuntimeActionJson native parse failed: ${message}`);
   }
 }
 
@@ -82,25 +83,48 @@ function planServertoolEngineSkipWithNative(input: {
   }
 }
 
-function planStoplessOrchestrationActionWithNativeLocal(input: {
+function planStoplessExecutionWithNativeLocal(input: {
   flowId?: string;
   execution: Record<string, unknown>;
-}): { action: string; isStopMessageFlow: boolean; reason: string } {
-  const fn = readNativeFunction('planStoplessOrchestrationActionJson');
+  requestTruthSessionId?: string;
+  stoplessControl?: Record<string, unknown> | null;
+}): {
+  execution: Record<string, unknown>;
+  orchestrationPlan: { action: string; isStopMessageFlow: boolean; reason: string };
+} {
+  const fn = readNativeFunction('planStoplessExecutionJson');
   if (!fn) {
-    return { action: 'cli_projection', isStopMessageFlow: false, reason: 'native_unavailable' };
+    throw new Error('planStoplessExecutionJson native unavailable');
   }
   const raw = fn(JSON.stringify({
     flowId: input.flowId ?? null,
-    execution: input.execution
+    execution: input.execution,
+    requestTruthSessionId: input.requestTruthSessionId ?? null,
+    stoplessControl: input.stoplessControl ?? null
   }));
   if (typeof raw !== 'string') {
-    return { action: 'cli_projection', isStopMessageFlow: false, reason: 'native_returned_non_string' };
+    throw new Error(`planStoplessExecutionJson native returned non-string: ${typeof raw}`);
   }
   try {
-    return JSON.parse(raw);
-  } catch {
-    return { action: 'cli_projection', isStopMessageFlow: false, reason: 'native_parse_failed' };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('invalid stopless execution plan object');
+    }
+    const execution = (parsed as Record<string, unknown>).execution;
+    const orchestrationPlan = (parsed as Record<string, unknown>).orchestrationPlan;
+    if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
+      throw new Error('invalid stopless execution payload');
+    }
+    if (!orchestrationPlan || typeof orchestrationPlan !== 'object' || Array.isArray(orchestrationPlan)) {
+      throw new Error('invalid stopless orchestration plan');
+    }
+    return {
+      execution: execution as Record<string, unknown>,
+      orchestrationPlan: orchestrationPlan as { action: string; isStopMessageFlow: boolean; reason: string }
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`planStoplessExecutionJson native parse failed: ${message}`);
   }
 }
 
@@ -120,6 +144,15 @@ export interface ServerToolOrchestrationOptions {
     body?: JsonObject;
     sseStream?: unknown;
     format?: string;
+  }>;
+  clientInjectDispatch?: (options: {
+    entryEndpoint: string;
+    requestId: string;
+    body?: JsonObject;
+    metadata?: JsonObject;
+  }) => Promise<{
+    ok: boolean;
+    reason?: string;
   }>;
 }
 
@@ -200,6 +233,9 @@ export async function runServerToolOrchestrationShell(
     entryEndpoint: options.entryEndpoint,
     requestId: options.requestId,
     providerProtocol,
+    ...(typeof options.clientInjectDispatch === 'function'
+      ? { clientInjectDispatch: options.clientInjectDispatch }
+      : {}),
     onAutoHookTrace: logAutoHookTrace
   };
 
@@ -249,51 +285,28 @@ export async function runServerToolOrchestrationShell(
     execution: engineResult.execution
   });
   const totalSteps = 5;
-  const executionContext =
-    engineResult.execution?.context && typeof engineResult.execution.context === 'object' && !Array.isArray(engineResult.execution.context)
-      ? engineResult.execution.context as Record<string, unknown>
-      : undefined;
   const stoplessControl = readStoplessRuntimeControlFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
   const requestTruthSessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
-  const stoplessExecution = {
-    ...(engineResult.execution && typeof engineResult.execution === 'object' ? engineResult.execution : {}),
-    ...(flowId ? { flowId } : {}),
-    context: {
-      ...(executionContext ?? {}),
-      ...(requestTruthSessionId ? { sessionId: requestTruthSessionId } : {}),
-      ...(requestTruthSessionId ? { requestTruth: { sessionId: requestTruthSessionId } } : {}),
-      ...((stoplessControl || (executionContext?.stopless && typeof executionContext.stopless === 'object' && !Array.isArray(executionContext.stopless)))
-        ? {
-            stopless: {
-              ...(stoplessControl && typeof stoplessControl.flowId === 'string' ? { flowId: stoplessControl.flowId } : {}),
-              ...(stoplessControl && typeof stoplessControl.repeatCount === 'number' ? { repeatCount: stoplessControl.repeatCount } : {}),
-              ...(stoplessControl && typeof stoplessControl.maxRepeats === 'number' ? { maxRepeats: stoplessControl.maxRepeats } : {}),
-              ...(stoplessControl && typeof stoplessControl.triggerHint === 'string' ? { triggerHint: stoplessControl.triggerHint } : {}),
-              ...(stoplessControl?.schemaFeedback && typeof stoplessControl.schemaFeedback === 'object'
-                ? { schemaFeedback: stoplessControl.schemaFeedback }
-                : {}),
-              ...(flowId ? { flowId } : {}),
-              ...(executionContext?.stopless && typeof executionContext.stopless === 'object' && !Array.isArray(executionContext.stopless)
-                ? executionContext.stopless as Record<string, unknown>
-                : {})
-            }
-          }
-        : {})
-    }
-  };
-  const stoplessPlan = flowId === 'stop_message_flow'
-    ? planStoplessOrchestrationActionWithNativeLocal({
+  const stoplessExecutionPlan = planStoplessExecutionWithNativeLocal({
         flowId,
-        execution: stoplessExecution
-      })
-    : {
-        action: 'cli_projection',
-        isStopMessageFlow: false
-      };
+        execution: engineResult.execution && typeof engineResult.execution === 'object'
+          ? engineResult.execution as unknown as Record<string, unknown>
+          : {},
+        requestTruthSessionId,
+        stoplessControl: stoplessControl && typeof stoplessControl === 'object'
+          ? stoplessControl as Record<string, unknown>
+          : null
+      });
+  const stoplessExecution = stoplessExecutionPlan.execution;
+  const stoplessPlan = stoplessExecutionPlan.orchestrationPlan;
+  const executionContext =
+    stoplessExecution.context && typeof stoplessExecution.context === 'object' && !Array.isArray(stoplessExecution.context)
+      ? stoplessExecution.context as Record<string, unknown>
+      : undefined;
   const runtimeAction = planServertoolEngineRuntimeActionWithNativeLocal({
     hasPendingInjection: Boolean(engineResult.pendingInjection),
     isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
@@ -317,7 +330,7 @@ export async function runServerToolOrchestrationShell(
     },
     engineResult: {
       ...engineResult,
-      execution: stoplessExecution as typeof engineResult.execution
+      execution: stoplessExecution as unknown as typeof engineResult.execution
     },
     runtimeAction,
     flowId,

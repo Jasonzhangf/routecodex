@@ -167,4 +167,50 @@ describe('resolveReportedRouteErrorHttpResponse', () => {
     expect(rendered).not.toContain('insufficient_quota');
     expect(rendered).not.toContain('permission_error');
   });
+
+  it('projects internal bad_response_status_code 502 as internal provider response error', async () => {
+    mockReportRouteError.mockResolvedValueOnce({
+      http: {
+        status: 502,
+        body: {
+          error: {
+            code: 'bad_response_status_code',
+            message: 'openai_error'
+          }
+        }
+      }
+    });
+
+    const normalizedError = Object.assign(
+      new Error(
+        'HTTP 502: {"error":{"message":"openai_error","type":"bad_response_status_code","param":"","code":"bad_response_status_code"}}'
+      ),
+      {
+        code: 'HTTP_502',
+        status: 502,
+        statusCode: 502,
+        upstreamCode: 'bad_response_status_code',
+        rawErrorSnippet:
+          '{"error":{"message":"openai_error","type":"bad_response_status_code","param":"","code":"bad_response_status_code"}}'
+      }
+    ) as Error & Record<string, unknown>;
+
+    const mapped = await resolveReportedRouteErrorHttpResponse({
+      routePayload: {
+        code: 'HTTP_502',
+        message: normalizedError.message,
+        source: 'http-handler./v1/responses',
+        scope: 'http',
+        requestId: 'req_internal_bad_response_status_1',
+        endpoint: '/v1/responses',
+        originalError: normalizedError
+      },
+      normalizedError
+    });
+
+    expect(mapped.status).toBe(502);
+    expect(mapped.body?.error?.code).toBe('HTTP_502');
+    expect(mapped.body?.error?.message).toBe('Internal provider response error');
+    expect(mapped.body?.error?.request_id).toBe('req_internal_bad_response_status_1');
+  });
 });

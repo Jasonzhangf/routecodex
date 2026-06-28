@@ -129,6 +129,9 @@ export abstract class BaseProvider implements IProviderV2 {
     // 预处理请求
     const processedRequest = await this.preprocessRequest(request);
     reattachRuntimeMetadata(processedRequest, runtimeMetadata);
+    if (runtimeMetadata && runtimeMetadata.metadata && typeof runtimeMetadata.metadata === 'object') {
+      context.metadata = runtimeMetadata.metadata;
+    }
 
     // 发送请求 (子类实现)
     const response = await this.sendRequest(processedRequest);
@@ -173,6 +176,9 @@ export abstract class BaseProvider implements IProviderV2 {
       // 预处理请求
       processedRequest = await this.preprocessRequest(request as UnknownObject);
       reattachRuntimeMetadata(processedRequest, runtimeMetadata);
+      if (runtimeMetadata && runtimeMetadata.metadata && typeof runtimeMetadata.metadata === 'object') {
+        context.metadata = runtimeMetadata.metadata;
+      }
 
       // 发送请求 (子类实现)
       const response = await this.sendRequestInternal(processedRequest);

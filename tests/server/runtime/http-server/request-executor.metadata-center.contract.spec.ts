@@ -35,4 +35,23 @@ describe('request-executor metadata center contract', () => {
     expect(center.readRuntimeControl().providerProtocol).toBe('openai-responses');
     expect(metadata.providerProtocol).toBeUndefined();
   });
+
+  it('fails fast when a non-owner prewrites conflicting providerProtocol', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRuntimeControl(
+      'providerProtocol',
+      'openai-chat',
+      {
+        module: 'test',
+        symbol: 'fails fast when a non-owner prewrites conflicting providerProtocol',
+        stage: 'test'
+      },
+      'seed conflicting provider protocol'
+    );
+
+    expect(() => writeProviderProtocolRuntimeControl(metadata, 'anthropic-messages')).toThrow(
+      'MetadataCenter runtime_control.providerProtocol conflict: existing=openai-chat selected=anthropic-messages'
+    );
+  });
 });

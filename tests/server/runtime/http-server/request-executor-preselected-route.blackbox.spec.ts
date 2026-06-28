@@ -2,27 +2,6 @@ import { jest } from '@jest/globals';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
 
 jest.unstable_mockModule(
-  '../../../../src/modules/llmswitch/bridge/native-exports.js',
-  () => ({
-    resolveProviderRetryExecutionPolicyNative: jest.fn((input: {
-      forceExcludeCurrentProviderOnRetry?: boolean;
-      existingExclusion?: boolean;
-      classification?: string;
-      isStreamingRequest?: boolean;
-      promptTooLong?: boolean;
-    }) => {
-      if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) {
-        return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
-      }
-      if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
-        return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
-      }
-      return { excludeCurrentProvider: true, reason: 'test_force_exclude_for_reroute' };
-    })
-  })
-);
-
-jest.unstable_mockModule(
   '../../../../src/server/runtime/http-server/executor/provider-response-utils.js',
   () => ({
     extractProviderModel: (payload?: Record<string, unknown>) =>

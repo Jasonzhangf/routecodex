@@ -202,18 +202,12 @@ function buildSnapshotRuntimeMetadata(metadata) {
     if (continuation?.responsesResume && typeof continuation.responsesResume === 'object') {
         projected.responsesResume = continuation.responsesResume;
     }
-    if (continuation?.responsesRequestContext && typeof continuation.responsesRequestContext === 'object') {
-        projected.responsesRequestContext = continuation.responsesRequestContext;
-    }
     if (runtimeControl.routeHint) {
         projected.routeHint = runtimeControl.routeHint;
     }
     const runtimeControlSummary = {};
     for (const key of [
-        'serverToolFollowup',
-        'serverToolFollowupSource',
-        'stopless',
-        'stoplessGoalStatus'
+        'stopless'
     ]) {
         if (runtimeControl[key] !== undefined) {
             runtimeControlSummary[key] = runtimeControl[key];

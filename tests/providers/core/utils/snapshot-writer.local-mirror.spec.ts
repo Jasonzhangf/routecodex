@@ -7,6 +7,8 @@ import {
   __resetSnapshotLocalDiskGateForTests,
   allowSnapshotLocalDiskWrite
 } from '../../../../src/utils/snapshot-local-disk-gate.js';
+import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+import { runWithPortRequestContext } from '../../../../src/server/runtime/http-server/port-log-context.js';
 
 const writeSnapshotViaHooksMock = jest.fn(async () => undefined);
 
@@ -61,7 +63,7 @@ describe('provider snapshot writer local mirror', () => {
       clientRequestId: requestId,
       entryEndpoint: '/v1/responses',
       providerKey,
-      metadata: { matchedPort: 5555, routingPolicyGroup: 'gateway_priority_5555' },
+      metadata: { portScope: 5555, routingPolicyGroup: 'gateway_priority_5555' },
       data: {
         mode: 'sse',
         captureSse: true,
@@ -75,7 +77,6 @@ describe('provider snapshot writer local mirror', () => {
       'openai-responses',
       'ports',
       '5555',
-      providerKey,
       requestId,
       'provider-response.json'
     );
@@ -84,7 +85,6 @@ describe('provider snapshot writer local mirror', () => {
       'openai-responses',
       'ports',
       '5555',
-      providerKey,
       requestId,
       '__runtime.json'
     );
@@ -145,7 +145,6 @@ describe('provider snapshot writer local mirror', () => {
       'openai-responses',
       'ports',
       '5555',
-      providerKey,
       requestId,
       'provider-request.json'
     );
@@ -192,7 +191,6 @@ describe('provider snapshot writer local mirror', () => {
       'openai-responses',
       'ports',
       '5555',
-      providerKey,
       requestId,
       'provider-error.json'
     );
@@ -203,6 +201,91 @@ describe('provider snapshot writer local mirror', () => {
     expect(parsed.meta?.matchedPort).toBe(5555);
     expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
       entryPort: 5555
+    }));
+  });
+
+  it('reads provider snapshot entryPort from MetadataCenter request_truth.portScope', async () => {
+    const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
+    const requestId = 'req_provider_snapshot_metadata_center_port_scope';
+    const providerKey = 'glm-router.key1';
+
+    allowSnapshotLocalDiskWrite(requestId);
+
+    const metadata = {};
+    MetadataCenter.attach(metadata).writeRequestTruth(
+      'portScope',
+      '5555',
+      {
+        module: 'tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts',
+        symbol: 'reads provider snapshot entryPort from MetadataCenter request_truth.portScope',
+        stage: 'test'
+      }
+    );
+
+    await writeProviderSnapshot({
+      phase: 'provider-response',
+      requestId,
+      clientRequestId: requestId,
+      entryEndpoint: '/v1/responses',
+      providerKey,
+      metadata,
+      data: { mode: 'sse', transport: 'upstream-stream' }
+    });
+    await __flushProviderSnapshotQueueForTests();
+
+    const filePath = path.join(
+      tempDir,
+      'openai-responses',
+      'ports',
+      '5555',
+      requestId,
+      'provider-response.json'
+    );
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(raw) as { meta?: Record<string, unknown> };
+
+    expect(parsed.meta?.entryPort).toBe(5555);
+    expect(parsed.meta?.matchedPort).toBe(5555);
+    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
+      entryPort: 5555
+    }));
+  });
+
+  it('reads provider snapshot entryPort from current port request context before metadata', async () => {
+    const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
+    const requestId = 'req_provider_snapshot_current_port_context';
+    const providerKey = 'glm-router.key1';
+
+    await runWithPortRequestContext({ localPort: 5520, matchedPort: 5520 }, async () => {
+      allowSnapshotLocalDiskWrite(requestId);
+
+      await writeProviderSnapshot({
+        phase: 'provider-response',
+        requestId,
+        clientRequestId: requestId,
+        entryEndpoint: '/v1/responses',
+        providerKey,
+        metadata: {},
+        data: { mode: 'sse', transport: 'upstream-stream' }
+      });
+    });
+    await __flushProviderSnapshotQueueForTests();
+
+    const filePath = path.join(
+      tempDir,
+      'openai-responses',
+      'ports',
+      '5520',
+      requestId,
+      'provider-response.json'
+    );
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(raw) as { meta?: Record<string, unknown> };
+
+    expect(parsed.meta?.entryPort).toBe(5520);
+    expect(parsed.meta?.matchedPort).toBe(5520);
+    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
+      entryPort: 5520
     }));
   });
 });

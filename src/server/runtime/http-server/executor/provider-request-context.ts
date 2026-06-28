@@ -31,7 +31,24 @@ export function resolveProviderRequestContext(options: {
     providerPayload,
     mergedMetadata
   } = options;
-  const providerProtocol = handle.providerProtocol || (target.outboundProfile as ProviderProtocol);
+  const providerProtocol = handle.providerProtocol;
+  if (!providerProtocol) {
+    throw Object.assign(new Error('Provider handle missing initialized providerProtocol'), {
+      code: 'ERR_PROVIDER_PROTOCOL_MISSING',
+      requestId: providerRequestId
+    });
+  }
+  if (target.outboundProfile && target.outboundProfile !== providerProtocol) {
+    throw Object.assign(
+      new Error(
+        `Provider protocol mismatch: handle=${providerProtocol} target=${target.outboundProfile}`
+      ),
+      {
+        code: 'ERR_PROVIDER_PROTOCOL_MISMATCH',
+        requestId: providerRequestId
+      }
+    );
+  }
   const providerObservation = readRuntimeProviderObservationProjection(mergedMetadata);
   const targetMetadata = providerObservation.target;
   const metadataModel =

@@ -71,11 +71,13 @@ pub(crate) fn is_continuation_request(metadata_center_snapshot: &Value) -> bool 
 }
 
 pub(crate) fn resolve_routing_state_key(metadata_center_snapshot: &Value) -> String {
-    if let Some(request_chain_key) = resolve_continuation_request_chain_key(metadata_center_snapshot)
+    if let Some(request_chain_key) =
+        resolve_continuation_request_chain_key(metadata_center_snapshot)
     {
         return request_chain_key;
     }
-    if let Some(sticky_scope_key) = resolve_continuation_sticky_scope_key(metadata_center_snapshot) {
+    if let Some(sticky_scope_key) = resolve_continuation_sticky_scope_key(metadata_center_snapshot)
+    {
         return sticky_scope_key;
     }
 
@@ -277,7 +279,10 @@ mod tests {
                 "sessionId": "session_1"
             }
         });
-        assert_eq!(is_continuation_request(&metadata["metadataCenterSnapshot"]), false);
+        assert_eq!(
+            is_continuation_request(&metadata["metadataCenterSnapshot"]),
+            false
+        );
     }
 
     #[test]
@@ -289,7 +294,10 @@ mod tests {
                 "responsesResume": { "previousRequestId": "req_1" }
             }
         });
-        assert_eq!(is_continuation_request(&metadata["metadataCenterSnapshot"]), true);
+        assert_eq!(
+            is_continuation_request(&metadata["metadataCenterSnapshot"]),
+            true
+        );
     }
 
     #[test]
@@ -339,7 +347,10 @@ mod tests {
             }
         });
 
-        assert_eq!(resolve_stop_message_scope(&metadata["metadataCenterSnapshot"]), None);
+        assert_eq!(
+            resolve_stop_message_scope(&metadata["metadataCenterSnapshot"]),
+            None
+        );
     }
 
     #[test]
@@ -365,22 +376,28 @@ mod tests {
 
     #[test]
     fn servertool_followup_request_reads_runtime_control_only() {
-        assert!(is_server_tool_followup_request(&json!({
-            "metadataCenterSnapshot": {
-                "runtime_control": { "serverToolFollowup": true }
-            },
-            "serverToolFollowup": false,
-            "__rt": { "serverToolFollowup": false }
-        })["metadataCenterSnapshot"]));
-        assert!(!is_server_tool_followup_request(&json!({
-            "metadataCenterSnapshot": {},
-            "serverToolFollowup": true,
-            "__rt": { "serverToolFollowup": true }
-        })["metadataCenterSnapshot"]));
-        assert!(!is_server_tool_followup_request(&json!({
-            "metadataCenterSnapshot": {
-                "runtime_control": { "serverToolFollowup": "true" }
-            }
-        })["metadataCenterSnapshot"]));
+        assert!(is_server_tool_followup_request(
+            &json!({
+                "metadataCenterSnapshot": {
+                    "runtime_control": { "serverToolFollowup": true }
+                },
+                "serverToolFollowup": false,
+                "__rt": { "serverToolFollowup": false }
+            })["metadataCenterSnapshot"]
+        ));
+        assert!(!is_server_tool_followup_request(
+            &json!({
+                "metadataCenterSnapshot": {},
+                "serverToolFollowup": true,
+                "__rt": { "serverToolFollowup": true }
+            })["metadataCenterSnapshot"]
+        ));
+        assert!(!is_server_tool_followup_request(
+            &json!({
+                "metadataCenterSnapshot": {
+                    "runtime_control": { "serverToolFollowup": "true" }
+                }
+            })["metadataCenterSnapshot"]
+        ));
     }
 }

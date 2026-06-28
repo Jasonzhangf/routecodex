@@ -4,7 +4,6 @@ import type { Application, Request, Response, NextFunction } from 'express';
 import { registerDaemonAuthRoutes } from './daemon-admin/auth-handler.js';
 import { registerStatusRoutes } from './daemon-admin/status-handler.js';
 import { registerCredentialRoutes } from './daemon-admin/credentials-handler.js';
-import { registerQuotaRoutes } from './daemon-admin/quota-handler.js';
 import { registerProviderRoutes } from './daemon-admin/providers-handler.js';
 import { registerRestartRoutes } from './daemon-admin/restart-handler.js';
 import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
@@ -31,10 +30,6 @@ export interface DaemonAdminRouteOptions {
    */
   getVirtualRouterArtifacts: () => unknown | null;
   /**
-   * 返回当前 HubPipeline；quota/admin 只读面可借此读取 Virtual Router runtime status。
-   */
-  getHubPipeline?: () => unknown | null;
-  /**
    * Return the config path used to bootstrap this server instance (best-effort).
    * Control-plane mutate uses this path as the single write target.
    */
@@ -50,7 +45,7 @@ export interface DaemonAdminRouteOptions {
   getServerHost?: () => string;
   /**
    * Return the primary business port (= config.server.port).
-   * Used to lock /daemon, /admin, /quota, /daemon/credentials to this port only.
+   * Used to lock /daemon, /admin, /daemon/credentials to this port only.
    * If absent, isolation is disabled (legacy behavior).
    */
   getServerPort?: () => number | undefined;
@@ -253,12 +248,12 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
 
   // Per-port guard: control-plane mutate paths must be reachable only on the
   // primary business port (== config.server.port). Non-primary ports (10000/5555)
-  // must not be able to mutate the server (add/remove ports, refresh quota,
-  // reload config, reset auth, change routing). Read-only auth/cookie/setup
+  // must not be able to mutate the server (add/remove ports, reload config,
+  // reset auth, change routing). Read-only auth/cookie/setup
   // and per-port diagnostics stay open on every port. This middleware must
   // be installed BEFORE any route registration below.
   if (typeof primaryPort === 'number' && primaryPort > 0) {
-    const CONTROL_MUTATE_PATH_REGEX = /^\/(?:admin\/ports(?:\/\d+)?|quota\/refresh|quota\/providers\/[^/]+\/(?:reset|recover|disable)|config\/(?:providers\/v2(?:\/[^/]+)?|routing(?:\/[^/]+)?|settings)|daemon\/control\/mutate|daemon\/auth\/reset-password|daemon\/credentials\/[^/]+\/(?:verify|refresh))(?:$|\/)/;
+    const CONTROL_MUTATE_PATH_REGEX = /^\/(?:admin\/ports(?:\/\d+)?|config\/(?:providers\/v2(?:\/[^/]+)?|routing(?:\/[^/]+)?|settings)|daemon\/control\/mutate|daemon\/auth\/reset-password|daemon\/credentials\/[^/]+\/(?:verify|refresh))(?:$|\/)/;
     app.use((req: Request, res: Response, next: NextFunction) => {
       const path = String(req.path || req.url || '').split('?')[0];
       if (CONTROL_MUTATE_PATH_REGEX.test(path)) {
@@ -293,9 +288,6 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
 
   // Credentials / token 视图
   registerCredentialRoutes(app, options);
-
-  // Quota / 429 冷却视图
-  registerQuotaRoutes(app, options);
 
   // Providers 运行时 + Config V2 视图
   registerProviderRoutes(app, options);

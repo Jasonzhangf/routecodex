@@ -20,7 +20,6 @@ export type ProviderFailureRetryAction =
 export type ProviderFailureActionPlan = {
   classification?: ProviderFailureClassification;
   affectsHealth: boolean;
-  blockingRecoverable: boolean;
   shouldRetry: boolean;
   action: 'direct_return' | ProviderFailureRetryAction;
   decisionLabel: 'direct_return' | 'exclude_and_reroute';

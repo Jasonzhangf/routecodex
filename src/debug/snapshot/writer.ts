@@ -249,9 +249,6 @@ function buildSnapshotRuntimeMetadata(
   if (continuation?.responsesResume && typeof continuation.responsesResume === 'object') {
     projected.responsesResume = continuation.responsesResume;
   }
-  if (continuation?.responsesRequestContext && typeof continuation.responsesRequestContext === 'object') {
-    projected.responsesRequestContext = continuation.responsesRequestContext;
-  }
   if (runtimeControl.routeHint) {
     projected.routeHint = runtimeControl.routeHint;
   }

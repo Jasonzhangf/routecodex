@@ -563,14 +563,6 @@ export async function waitForRuntimeReady(server: any): Promise<void> {
   await Promise.race([server.runtimeReadyPromise, timeoutPromise]);
 }
 
-export function isQuotaRoutingEnabled(server: any): boolean {
-  const flag = (server.config.server as { quotaRoutingEnabled?: unknown }).quotaRoutingEnabled;
-  if (typeof flag === 'boolean') {
-    return flag;
-  }
-  return true;
-}
-
 export function shouldStartManagerDaemon(_server: any): boolean {
   const mockFlag = String(process.env.ROUTECODEX_USE_MOCK || '').trim();
   if (mockFlag === '1' || mockFlag.toLowerCase() === 'true') {

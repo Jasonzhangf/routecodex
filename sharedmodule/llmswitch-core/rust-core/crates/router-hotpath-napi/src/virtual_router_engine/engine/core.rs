@@ -120,8 +120,7 @@ impl VirtualRouterEngineCore {
 
     pub(crate) fn refresh_provider_health_from_store(&mut self) {
         if let Some(raw) = load_provider_health_state() {
-            self.health_manager
-                .import_persistable_state(&raw, now_ms());
+            self.health_manager.import_persistable_state(&raw, now_ms());
         }
     }
 

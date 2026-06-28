@@ -968,7 +968,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     clearTimers();
     detachOutboundStream();
     recordSseTransportClientClose(requestLabel, {
-      finishReason: result.usageLogInfo?.finishReason,
+      finishReason: undefined,
       terminal: false,
       closeBeforeStreamEnd: !streamEnded
     });
@@ -1020,7 +1020,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     streamEnded = true;
     clearTimers();
     recordSseTransportStreamEnd(requestLabel, {
-      finishReason: result.usageLogInfo?.finishReason,
+      finishReason: undefined,
       terminal: false
     });
     ended = true;
@@ -1038,7 +1038,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     if (!ended && !streamEnded) {
       abortSourceStreamForClientClose();
       recordSseTransportClientClose(requestLabel, {
-        finishReason: result.usageLogInfo?.finishReason,
+        finishReason: undefined,
         terminal: false,
         closeBeforeStreamEnd: true
       });

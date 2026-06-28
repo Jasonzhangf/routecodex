@@ -27,3 +27,4 @@ pub(crate) use engine::{
 };
 #[allow(unused_imports)]
 pub use napi_proxy::VirtualRouterEngineProxy;
+pub(crate) use provider_registry::derive_model_id;

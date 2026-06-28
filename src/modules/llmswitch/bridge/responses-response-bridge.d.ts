@@ -1,9 +1,8 @@
-import { type Readable } from 'node:stream';
 /**
  * /v1/responses response-side handler bridge surface.
  *
- * Single projection-facing bridge entry for responses SSE/JSON projection and
- * continuation lifecycle writes on the response path.
+ * Single projection-facing bridge entry for Responses JSON projection and
+ * direct-continuation closeout IO.
  */
 import type { AnyRecord } from './module-loader.js';
 import { createResponsesJsonToSseConverter } from './index.js';
@@ -17,6 +16,7 @@ export type ResponsesRequestContextForHttp = {
 };
 export declare function resolveResponsesRequestContextForHttp(args: {
     metadata?: unknown;
+    fallback?: ResponsesRequestContextForHttp;
 }): ResponsesRequestContextForHttp | undefined;
 type ChatUsageNormalizationResultForHttp = {
     payload: unknown;
@@ -37,14 +37,6 @@ export declare function shouldDispatchResponsesSseToClientForHttp(args: {
     metadata?: Record<string, unknown>;
 }): boolean;
 export declare function buildClientSseKeepaliveFrameForHttp(entryEndpoint?: string): string;
-export declare function shouldRequireResponsesTerminalEventForHttp(args: {
-    entryEndpoint?: string;
-    probe: unknown;
-}): boolean;
-export declare function resolveResponsesTerminalProbeFinishReasonForHttp(args: {
-    finishReason?: string;
-    probe: unknown;
-}): string | undefined;
 export declare function shouldClearResponsesConversationOnClientCloseForHttp(args: {
     entryEndpoint?: string;
     closeBeforeStreamEnd: boolean;
@@ -55,15 +47,6 @@ export declare function shouldClearResponsesConversationOnFailureForHttp(args: {
     phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json';
 }): boolean;
 export declare function resolveResponsesConversationClearReasonForHttp(phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json'): 'sse-stream-error' | 'sse-incomplete' | 'json-empty-error' | 'json-error';
-export declare function isToolCallContinuationResponseForHttp(body: unknown): boolean;
-export declare function inspectResponsesContinuationProbeForHttp(args: {
-    entryEndpoint?: string;
-    probe: unknown;
-}): {
-    isToolCallContinuation: boolean;
-    hasRequiredAction: boolean;
-    hasHarvestableFunctionCallHistory: boolean;
-};
 export declare function planResponsesContinuationCloseActionForHttp(args: {
     entryEndpoint?: string;
     requestContextPresent: boolean;
@@ -73,44 +56,6 @@ export declare function planResponsesContinuationCloseActionForHttp(args: {
     keepForSubmitToolOutputs: boolean;
 };
 export declare function rebindResponsesConversationRequestIdForHttp(oldId?: string, newId?: string): Promise<void>;
-type PersistResponsesConversationLifecycleForHttpArgs = {
-    entryEndpoint?: string;
-    requestLabel: string;
-    timingRequestIds?: string[];
-    providerKey?: string;
-    continuationOwner?: 'direct' | 'relay';
-    sessionId?: unknown;
-    conversationId?: unknown;
-    usageLogInfo?: {
-        providerKey?: string;
-        timingRequestIds?: string[];
-        sessionId?: unknown;
-        conversationId?: unknown;
-    };
-    metadata?: Record<string, unknown>;
-    requestContext?: ResponsesRequestContextForHttp;
-    body: unknown;
-    onTrace?: (stage: string, details?: Record<string, unknown>) => void;
-    onNonBlockingError?: (operation: string, error: unknown) => void;
-};
-export type PersistResponsesConversationLifecycleResultForHttp = {
-    recorded: true;
-    responseId: string;
-} | {
-    recorded: false;
-    reason: 'not_responses_endpoint' | 'not_continuation' | 'missing_response_id' | 'no_recorded_request_context' | 'already_persisted';
-};
-export declare function attachResponsesConversationLifecycleStreamForHttp(args: {
-    stream: Readable;
-    entryEndpoint?: string;
-    requestLabel: string;
-    usageLogInfo?: PersistResponsesConversationLifecycleForHttpArgs['usageLogInfo'];
-    metadata?: Record<string, unknown>;
-    requestContext?: ResponsesRequestContextForHttp;
-    onTrace?: (stage: string, details?: Record<string, unknown>) => void;
-    onNonBlockingError?: (operation: string, error: unknown) => void;
-}): Readable;
-export declare function persistResponsesConversationLifecycleForHttp(args: PersistResponsesConversationLifecycleForHttpArgs): Promise<PersistResponsesConversationLifecycleResultForHttp>;
 export declare function clearResponsesConversationRequestIdsForHttp(args: {
     requestLabel: string;
     timingRequestIds?: string[];
@@ -162,11 +107,6 @@ export declare function normalizeResponsesJsonBodyForHttp(args: {
 export declare function requireResponsesHandlerCoreDist<TModule extends object>(specifier: string): TModule;
 export declare function importResponsesHandlerCoreDist<TModule extends object>(specifier: string): Promise<TModule>;
 export declare function buildResponsesPayloadFromChatForHttp(payload: unknown, context?: Record<string, unknown>): Promise<unknown>;
-export declare function projectResponsesClientPayloadForClientForHttp(args: {
-    payload: unknown;
-    toolsRaw: unknown[];
-    metadata?: Record<string, unknown>;
-}): Promise<Record<string, unknown>>;
 export declare function normalizeResponsesClientPayloadForHttp(args: {
     payload: unknown;
     entryEndpoint?: string;
@@ -180,7 +120,6 @@ export declare function normalizeResponsesClientPayloadForHttp(args: {
     };
     metadata?: Record<string, unknown>;
 }): Promise<unknown>;
-export declare function resolveResponsesClientPayloadFinishReasonForHttp(payload: unknown): string | undefined;
 export declare function prepareResponsesJsonSseDispatchPlanForHttp(args: {
     responsesPayload: Record<string, unknown>;
     entryEndpoint?: string;
@@ -215,16 +154,5 @@ export declare function prepareResponsesJsonClientDispatchPlanForHttp(args: {
 }): Promise<{
     clientBody: unknown;
     sanitizedBody: unknown;
-    finishReason?: string;
 }>;
-export declare function persistResponsesConversationLifecycleAtChatProcessExitForHttp(args: {
-    entryEndpoint?: string;
-    requestLabel: string;
-    usageLogInfo?: Record<string, unknown> | null;
-    metadata?: Record<string, unknown>;
-    requestContext?: ResponsesRequestContextForHttp;
-    body: unknown;
-    onTrace?: (stage: string, details?: Record<string, unknown>) => void;
-    onNonBlockingError?: (operation: string, error: unknown) => void;
-}): Promise<PersistResponsesConversationLifecycleResultForHttp>;
 export {};

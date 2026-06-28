@@ -331,6 +331,51 @@ fn test_govern_response_coerces_responses_shape_and_harvests_dsml_wrapper() {
 }
 
 #[test]
+fn test_govern_response_harvests_double_pipe_fullwidth_dsml_reasoning_stop() {
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"reasoningStop\">\n<｜｜DSML｜｜parameter name=\"next_step\" string=\"true\">等待第二轮工具结果后继续验证</｜｜DSML｜｜parameter>\n<｜｜DSML｜｜parameter name=\"reason\" string=\"true\">第二轮还没做完</｜｜DSML｜｜parameter>\n<｜｜DSML｜｜parameter name=\"stopreason\" string=\"false\">2</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>"
+                }
+            }],
+            "model": "glm-5.2",
+            "object": "chat.completion",
+            "__rcc_tool_governance": {
+                "requestedToolNames": ["reasoningStop"]
+            }
+        }),
+        client_protocol: "openai-responses".to_string(),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_stage1_dsml_reasoning_stop".to_string(),
+    };
+
+    let governed = govern_response(input).unwrap();
+    assert!(governed.summary.applied);
+    assert_eq!(governed.summary.tool_calls_normalized, 1);
+    assert_eq!(
+        governed.governed_payload["choices"][0]["finish_reason"],
+        "tool_calls"
+    );
+    assert_eq!(
+        governed.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "reasoningStop"
+    );
+    let args: Value = serde_json::from_str(
+        governed.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]
+            ["arguments"]
+            .as_str()
+            .unwrap_or("{}"),
+    )
+    .unwrap_or(Value::Null);
+    assert_eq!(args["stopreason"], 2);
+    assert_eq!(args["reason"], "第二轮还没做完");
+}
+
+#[test]
 fn test_govern_response_harvests_dsml_wrapper_inside_ran_transcript_with_right_gutter_noise() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
@@ -1243,9 +1288,14 @@ fn test_structured_tool_calls_strip_plain_visible_content_from_chat_message() {
 
     let result = govern_response(input).unwrap();
     let message = &result.governed_payload["choices"][0]["message"];
-    assert_eq!(message["tool_calls"][0]["function"]["name"], "search_content");
+    assert_eq!(
+        message["tool_calls"][0]["function"]["name"],
+        "search_content"
+    );
     assert!(
-        message.get("content").is_none() || message["content"].is_null() || message["content"] == "",
+        message.get("content").is_none()
+            || message["content"].is_null()
+            || message["content"] == "",
         "tool_calls round must not leak plain assistant content to chat clients"
     );
 }

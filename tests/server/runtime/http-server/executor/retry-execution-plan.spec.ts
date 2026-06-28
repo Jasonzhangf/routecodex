@@ -1,32 +1,6 @@
 import { jest } from '@jest/globals';
 import { resetRequestExecutorRetryStateForTests } from '../../../../../src/server/runtime/http-server/executor/request-executor-retry-state.js';
 
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/native-exports.js', async () => {
-  const actual = await import('../../../../../src/modules/llmswitch/bridge/native-exports.js');
-  return {
-    ...actual,
-    resolveProviderRetryExecutionPolicyNative: jest.fn((input: {
-      classification?: string;
-      isStreamingRequest?: boolean;
-      hostContractFailure?: boolean;
-      forceExcludeCurrentProviderOnRetry?: boolean;
-      promptTooLong?: boolean;
-      existingExclusion?: boolean;
-    }) => {
-      if (input.hostContractFailure) {
-        return { excludeCurrentProvider: false, reason: 'host_contract_failure' };
-      }
-      if (input.forceExcludeCurrentProviderOnRetry || input.existingExclusion) {
-        return { excludeCurrentProvider: true, reason: 'existing_exclusion' };
-      }
-      if (input.isStreamingRequest && input.classification === 'recoverable' && !input.promptTooLong) {
-        return { excludeCurrentProvider: true, reason: 'streaming_recoverable_pre_response' };
-      }
-      return { excludeCurrentProvider: false, reason: 'preserve_existing_policy' };
-    })
-  };
-});
-
 const { resolveProviderRetryExecutionPlan } = await import(
   '../../../../../src/server/runtime/http-server/executor/request-executor-retry-execution-plan.js'
 );
@@ -300,9 +274,8 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       isStreamingRequest: false
     });
 
-    expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(plan.retrySwitchPlan?.decisionLabel).toBe('exclude_and_reroute');
+    expect(plan.shouldRetry).toBe(false);
+    expect(plan.retrySwitchPlan).toBeUndefined();
     expect(plan.excludedCurrentProvider).toBe(false);
     expect(Array.from(excludedProviderKeys)).toEqual([]);
   });

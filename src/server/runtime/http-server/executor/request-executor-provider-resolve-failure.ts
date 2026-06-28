@@ -7,8 +7,7 @@ import {
   resolveRequestExecutorProviderFailurePlan
 } from './request-executor-provider-failure-plan.js';
 import type {
-  RetryErrorSnapshot,
-  BlockingRecoverableRouteHoldState
+  RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
 type RequestExecutorProviderResolveFailureArgs = {
@@ -54,8 +53,6 @@ type RequestExecutorProviderResolveFailureArgs = {
 
 export type RequestExecutorProviderResolveFailureResult = {
   lastError: unknown;
-  blockingRecoverableRouteHoldState: BlockingRecoverableRouteHoldState | null;
-  allowBlockingRecoverableRetryBeyondAttemptBudget: boolean;
 };
 
 export async function processProviderResolveFailure(
@@ -107,21 +104,6 @@ export async function processProviderResolveFailure(
     throw args.error;
   }
 
-  const blockingRecoverableRouteHoldState =
-    retryExecutionPlan.blockingRecoverable
-      ? {
-        providerKey: args.providerKey,
-        runtimeKey: args.runtimeKey,
-        retryError,
-        explicitSingletonPool: Array.isArray(args.routePoolForAttempt) && args.routePoolForAttempt.length === 1,
-        routePoolForSameProviderRetry: undefined
-      }
-      : null;
-  const allowBlockingRecoverableRetryBeyondAttemptBudget =
-    args.maxAttempts <= 1
-    && args.attempt >= args.maxAttempts
-    && retryExecutionPlan.retrySwitchPlan.switchAction === 'exclude_and_reroute';
-
   emitRequestExecutorProviderRetryTelemetry({
     requestId: args.requestId,
     retryTelemetryPlan: providerFailurePlan.retryTelemetryPlan,
@@ -131,7 +113,5 @@ export async function processProviderResolveFailure(
 
   return {
     lastError: args.error,
-    blockingRecoverableRouteHoldState,
-    allowBlockingRecoverableRetryBeyondAttemptBudget
   };
 }
