@@ -45,6 +45,7 @@ families:
       - providerProtocol
       - retryProviderKey
       - preselectedRoute
+      - stopGatewayContext
       - stopless
       - stopMessageCompareContext
       - stopMessageEnabled

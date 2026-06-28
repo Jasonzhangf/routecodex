@@ -678,16 +678,21 @@ fn read_followup_source_from_gate_input(
         })
 }
 
-fn read_stop_eligible_from_gate_input(payload: &Value, adapter_context: Option<&Value>) -> bool {
-    let adapter_truth = adapter_context
+fn read_stop_eligible_from_gate_input(payload: &Value, runtime_control: Option<&Value>) -> bool {
+    let control_truth = runtime_control
         .and_then(Value::as_object)
-        .and_then(|row| row.get("__rt"))
-        .and_then(Value::as_object)
-        .and_then(|rt| rt.get("stopGatewayContext"))
+        .and_then(|row| row.get("stopGatewayContext"))
         .and_then(servertool_core::stop_gateway_context::normalize_stop_gateway_context)
         .map(|context| context.eligible);
-    adapter_truth
+    control_truth
         .unwrap_or_else(|| servertool_core::stop_gateway_context::is_stop_eligible(payload))
+}
+
+fn read_stop_gateway_context_from_runtime_control(runtime_control: Option<&Value>) -> Option<Value> {
+    runtime_control
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("stopGatewayContext"))
+        .cloned()
 }
 
 fn resolve_provider_response_request_semantics_value(
@@ -1576,14 +1581,14 @@ pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResul
         followup_source.as_deref(),
         Some("servertool.reasoning_stop_guard" | "servertool.reasoning_stop_continue")
     );
-    let stop_eligible = read_stop_eligible_from_gate_input(&input.payload, adapter_context);
+    let stop_eligible = read_stop_eligible_from_gate_input(&input.payload, runtime_control);
     let has_empty_assistant_payload_contract_signal =
         detect_empty_assistant_payload_contract_signal(&input.payload).is_some();
-    let stop_gateway_raw = inspect_stop_gateway_signal(&input.payload.to_string()).ok();
-    let stop_gateway: Option<Value> = match stop_gateway_raw {
-        Some(raw) => serde_json::from_str::<Value>(raw.as_str()).ok(),
-        None => None,
-    };
+    let stop_gateway = read_stop_gateway_context_from_runtime_control(runtime_control).or_else(|| {
+        inspect_stop_gateway_signal(&input.payload.to_string())
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(raw.as_str()).ok())
+    });
     let stop_gateway_reason: Option<&str> = match stop_gateway.as_ref() {
         Some(value) => value
             .get("reason")
@@ -3723,6 +3728,83 @@ mod tests {
             Value::String("assistant_stop_text".to_string())
         );
         assert_eq!(value.get("skipReason"), None);
+    }
+
+    #[test]
+    fn plan_servertool_response_stage_gate_reads_stop_gateway_from_runtime_control() {
+        let raw = plan_servertool_response_stage_gate_json(
+            json!({
+                "payload": {
+                    "choices": [{
+                        "index": 0,
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{ "id": "call_1" }]
+                        }
+                    }]
+                },
+                "adapterContext": {},
+                "runtimeControl": {
+                    "stopGatewayContext": {
+                        "observed": true,
+                        "eligible": true,
+                        "source": "chat",
+                        "reason": "finish_reason_stop"
+                    }
+                },
+                "allowFollowup": false,
+                "hasServertoolSupport": true
+            })
+            .to_string(),
+        )
+        .expect("gate");
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["shouldBypass"], Value::Bool(false));
+        assert_eq!(
+            value["nextAction"],
+            Value::String("run_auto_hooks".to_string())
+        );
+        assert_eq!(value["responseHookMatched"], Value::Bool(true));
+    }
+
+    #[test]
+    fn plan_servertool_response_stage_gate_ignores_legacy_rt_stop_gateway_context() {
+        let raw = plan_servertool_response_stage_gate_json(
+            json!({
+                "payload": {
+                    "choices": [{
+                        "index": 0,
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{ "id": "call_1" }]
+                        }
+                    }]
+                },
+                "adapterContext": {
+                    "__rt": {
+                        "stopGatewayContext": {
+                            "observed": true,
+                            "eligible": true,
+                            "source": "chat",
+                            "reason": "finish_reason_stop"
+                        }
+                    }
+                },
+                "runtimeControl": {},
+                "allowFollowup": false,
+                "hasServertoolSupport": true
+            })
+            .to_string(),
+        )
+        .expect("gate");
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            value["nextAction"],
+            Value::String("continue_to_execution".to_string())
+        );
+        assert_eq!(value["responseHookMatched"], Value::Bool(false));
     }
 
     #[test]

@@ -265,6 +265,7 @@ export class MetadataCenter {
       preselectedRoute: this.state.runtimeControl.preselectedRoute?.value as Record<string, unknown> | undefined,
       responsesContinuationSavedAtChatProcessExit:
         this.state.runtimeControl.responsesContinuationSavedAtChatProcessExit?.value as boolean | undefined,
+      stopGatewayContext: this.state.runtimeControl.stopGatewayContext?.value as Record<string, unknown> | undefined,
       stopless: this.state.runtimeControl.stopless?.value as MetadataCenterRuntimeControl['stopless'] | undefined,
       stopMessageCompareContext: this.state.runtimeControl.stopMessageCompareContext?.value as MetadataCenterRuntimeControl['stopMessageCompareContext'] | undefined,
       stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,

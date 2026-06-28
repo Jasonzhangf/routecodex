@@ -148,22 +148,25 @@ function throwServertoolRuntimeErrorDescriptor(descriptor: ProviderResponseServe
   });
 }
 
-function attachRustStopGatewayContextToRuntimeMetadata(args: {
+function writeRustStopGatewayContextToMetadataCenter(args: {
   context: AdapterContext;
   stopGateway?: Record<string, unknown> | null;
 }): void {
   if (!args.stopGateway || typeof args.stopGateway !== 'object' || Array.isArray(args.stopGateway)) {
     return;
   }
-  const contextRecord = args.context as unknown as Record<string, unknown>;
-  const rt =
-    contextRecord.__rt && typeof contextRecord.__rt === 'object' && !Array.isArray(contextRecord.__rt)
-      ? (contextRecord.__rt as Record<string, unknown>)
-      : {};
-  contextRecord.__rt = {
-    ...rt,
-    stopGatewayContext: args.stopGateway
-  };
+  applyNativeRuntimeControlWritePlan({
+    metadata: args.context as unknown as Record<string, unknown>,
+    runtimeControl: {
+      stopGatewayContext: args.stopGateway
+    },
+    writer: {
+      module: 'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+      symbol: 'writeRustStopGatewayContextToMetadataCenter',
+      stage: 'HubRespChatProcess03Governed'
+    },
+    reason: 'rust stop gateway control signal'
+  });
 }
 
 async function executeProviderResponseNativeServertoolEffects(args: {
@@ -187,7 +190,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
     throwServertoolRuntimeErrorDescriptor(actionPlan.error);
   }
   for (const executionPlan of actionPlan.executionPlans) {
-    attachRustStopGatewayContextToRuntimeMetadata({
+    writeRustStopGatewayContextToMetadataCenter({
       context: args.context,
       stopGateway: executionPlan.stopGateway
     });

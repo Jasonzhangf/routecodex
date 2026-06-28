@@ -106,6 +106,7 @@ export type MetadataCenterRuntimeControl = {
   retryProviderKey?: string;
   preselectedRoute?: Record<string, unknown>;
   responsesContinuationSavedAtChatProcessExit?: boolean;
+  stopGatewayContext?: Record<string, unknown>;
   stopless?: MetadataCenterStoplessRuntimeControl;
   stopMessageCompareContext?: MetadataCenterStopMessageCompareContext;
   stopMessageEnabled?: boolean;

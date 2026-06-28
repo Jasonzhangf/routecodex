@@ -214,7 +214,7 @@ describe('stop_message_auto continuation routing state key', () => {
 
   test('uses Rust-owned implicit Gemini empty responses snapshot resolver', () => {
     const adapterContext = {
-      __rt: {
+      runtimeControl: {
         stopGatewayContext: {
           observed: true,
           eligible: true,

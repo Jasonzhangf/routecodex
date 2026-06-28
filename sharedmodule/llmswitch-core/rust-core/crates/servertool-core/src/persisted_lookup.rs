@@ -779,10 +779,20 @@ fn is_stop_eligible_for_servertool(base: &Value, adapter_context: Option<&Value>
 fn read_stop_gateway_eligible_from_adapter_context(
     adapter_context: Option<&Value>,
 ) -> Option<bool> {
-    let raw = adapter_context?
-        .as_object()?
-        .get("__rt")
-        .and_then(|runtime| runtime.get("stopGatewayContext"))?;
+    let record = adapter_context?.as_object()?;
+    let raw = record
+        .get("runtimeControl")
+        .or_else(|| record.get("runtime_control"))
+        .and_then(Value::as_object)
+        .and_then(|runtime| runtime.get("stopGatewayContext"))
+        .or_else(|| {
+            record
+                .get("metadataCenterSnapshot")
+                .and_then(Value::as_object)
+                .and_then(|snapshot| snapshot.get("runtimeControl"))
+                .and_then(Value::as_object)
+                .and_then(|runtime| runtime.get("stopGatewayContext"))
+        })?;
     let context = raw.as_object()?;
     let _observed = context.get("observed").and_then(Value::as_bool)?;
     let eligible = context.get("eligible").and_then(Value::as_bool)?;
@@ -2226,7 +2236,36 @@ mod tests {
     }
 
     #[test]
-    fn default_stop_message_snapshot_respects_adapter_metadata_context() {
+    fn default_stop_message_snapshot_respects_runtime_control_stop_gateway_context() {
+        let snapshot = resolve_default_stop_message_snapshot(&StopMessageDefaultSnapshotInput {
+            base: json!({
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [{ "id": "call_1" }]
+                    }
+                }]
+            }),
+            adapter_context: Some(json!({
+                "runtimeControl": {
+                    "stopGatewayContext": {
+                        "observed": true,
+                        "eligible": true,
+                        "source": "chat",
+                        "reason": "cached"
+                    }
+                }
+            })),
+            options: None,
+        })
+        .expect("metadata cached eligibility");
+
+        assert_eq!(snapshot.source.as_deref(), Some("default"));
+    }
+
+    #[test]
+    fn default_stop_message_snapshot_ignores_legacy_rt_stop_gateway_context() {
         let snapshot = resolve_default_stop_message_snapshot(&StopMessageDefaultSnapshotInput {
             base: json!({
                 "choices": [{
@@ -2243,15 +2282,14 @@ mod tests {
                         "observed": true,
                         "eligible": true,
                         "source": "chat",
-                        "reason": "cached"
+                        "reason": "legacy"
                     }
                 }
             })),
             options: None,
-        })
-        .expect("metadata cached eligibility");
+        });
 
-        assert_eq!(snapshot.source.as_deref(), Some("default"));
+        assert!(snapshot.is_none());
     }
 
     #[test]
@@ -2282,7 +2320,7 @@ mod tests {
                     "output": []
                 }),
                 adapter_context: Some(json!({
-                    "__rt": {
+                    "runtimeControl": {
                         "stopGatewayContext": {
                             "observed": true,
                             "eligible": true,
@@ -2311,7 +2349,7 @@ mod tests {
             &StopMessageImplicitGeminiSnapshotInput {
                 base: json!({ "status": "completed", "output": [] }),
                 adapter_context: Some(json!({
-                    "__rt": {
+                    "runtimeControl": {
                         "stopGatewayContext": {
                             "observed": true,
                             "eligible": true,
@@ -2329,7 +2367,7 @@ mod tests {
             &StopMessageImplicitGeminiSnapshotInput {
                 base: json!({ "status": "completed", "output": [] }),
                 adapter_context: Some(json!({
-                    "__rt": {
+                    "runtimeControl": {
                         "stopGatewayContext": {
                             "observed": true,
                             "eligible": true,
@@ -2356,7 +2394,7 @@ mod tests {
                 }]
             }),
             adapter_context: Some(json!({
-                "__rt": {
+                "runtimeControl": {
                     "stopGatewayContext": {
                         "observed": true,
                         "eligible": true,

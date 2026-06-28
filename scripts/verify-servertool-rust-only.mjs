@@ -5376,6 +5376,86 @@ function checkDeletedStopMessageTsOwnersAbsent() {
   );
 }
 
+function checkStopGatewayMetadataCenterOnly() {
+  const stopGatewayContext = readRequired(`${SERVERTOOL_TS_DIR}/stop-gateway-context.ts`);
+  for (const marker of [
+    "from '../conversion/runtime-metadata.js'",
+    'ensureRuntimeMetadata',
+    'readRuntimeMetadata',
+    '__rt',
+  ]) {
+    if (stopGatewayContext.includes(marker)) {
+      fail(
+        'stop-gateway-metadata-center-only',
+        `stop-gateway-context.ts must not use legacy runtime metadata marker ${marker}; stopGatewayContext belongs to MetadataCenter runtime_control`
+      );
+    }
+  }
+  for (const marker of [
+    'writeRuntimeControlToBoundMetadataCenter',
+    "key: 'stopGatewayContext'",
+    'readRuntimeControlFromAnyBoundMetadataCenter',
+  ]) {
+    if (!stopGatewayContext.includes(marker)) {
+      fail(
+        'stop-gateway-metadata-center-only',
+        `stop-gateway-context.ts must use MetadataCenter runtime_control marker ${marker}`
+      );
+    }
+  }
+
+  const providerResponse = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`);
+  for (const marker of [
+    'attachRustStopGatewayContextToRuntimeMetadata',
+    'contextRecord.__rt',
+  ]) {
+    if (providerResponse.includes(marker)) {
+      fail(
+        'stop-gateway-metadata-center-only',
+        `provider-response.ts must not revive legacy stop-gateway runtime metadata marker ${marker}`
+      );
+    }
+  }
+  if (!providerResponse.includes('writeRustStopGatewayContextToMetadataCenter')) {
+    fail(
+      'stop-gateway-metadata-center-only',
+      'provider-response.ts must write Rust stopGatewayContext through MetadataCenter runtime_control'
+    );
+  }
+
+  const routerGate = readRequired(`${RUST_SRC_DIR}/chat_servertool_orchestration.rs`).split('#[cfg(test)]')[0];
+  const stopEligibleStart = routerGate.indexOf('fn read_stop_eligible_from_gate_input');
+  const stopEligibleEnd = routerGate.indexOf('fn read_stop_gateway_context_from_runtime_control', stopEligibleStart);
+  const stopEligibleBlock = stopEligibleStart >= 0 && stopEligibleEnd > stopEligibleStart
+    ? routerGate.slice(stopEligibleStart, stopEligibleEnd)
+    : '';
+  if (stopEligibleBlock.includes('rt.get("stopGatewayContext")') || stopEligibleBlock.includes('get("__rt")')) {
+    fail(
+      'stop-gateway-metadata-center-only',
+      'chat_servertool_orchestration.rs must not read stopGatewayContext from adapterContext.__rt'
+    );
+  }
+  if (!stopEligibleBlock.includes('row.get("stopGatewayContext")')) {
+    fail(
+      'stop-gateway-metadata-center-only',
+      'chat_servertool_orchestration.rs must read stopGatewayContext from runtime_control'
+    );
+  }
+
+  const persistedLookup = readRequired(RUST_SERVERTOOL_CORE_LOOKUP).split('#[cfg(test)]')[0];
+  if (persistedLookup.includes('get("__rt")') && persistedLookup.includes('stopGatewayContext')) {
+    fail(
+      'stop-gateway-metadata-center-only',
+      'persisted_lookup.rs must not read stopGatewayContext from legacy __rt'
+    );
+  }
+
+  pass(
+    'stop-gateway-metadata-center-only',
+    'stopGatewayContext uses MetadataCenter runtime_control, not __rt/runtime-metadata carriers'
+  );
+}
+
 function checkStoplessNoTsRuntimeControlSpecialization() {
   const scanFiles = [
     `${SERVERTOOL_TS_DIR}/metadata-center-carrier.ts`,
@@ -6436,6 +6516,7 @@ checkServertoolCliResultGuardRustOwner();
 checkStoplessNoContextDataPlane();
 checkDeletedStoplessMetadataWriterAbsent();
 checkDeletedStopMessageTsOwnersAbsent();
+checkStopGatewayMetadataCenterOnly();
 checkStoplessNoTsRuntimeControlSpecialization();
 checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
