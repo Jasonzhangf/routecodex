@@ -296,12 +296,15 @@ chains:
       - step_id: rct-03
         from_node: ChatProcReqContinuation03CanonicalRestored
         to_node: ChatProcReqContinuation04HookRestored
+        caller_symbol: buildCapturedRelayResumeRequestContextForHttp
+        caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
+        callee_symbol: captureReqInboundResponsesContextSnapshot
+        callee_file: src/modules/llmswitch/bridge/native-exports.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "canonical restored current-turn request truth including payload/input/tools and request-scoped continuation metadata"
         semantic_output: "request truth after current-turn client exec_command result has been restored back to model-visible reasoningStop semantics/guidance"
-        status: binding pending
-        binding_pending: true
-        note: "This edge is the required request-side stopless restore boundary. Current code only has partial continuation restore/tool retention surfaces; do not fake caller/callee symbols until the Chat Process hook-restore builder is real. Tests must not stop at payload.tools; they must prove exec_command CLI output is restored into model-visible reasoningStop semantics after continuation restore."
+        status: anchored
+        note: "Relay materialization now anchors request-side restore before hook restore. Tests must prove exec_command CLI output is restored into model-visible reasoningStop semantics after continuation restore."
       - step_id: rct-04
         from_node: ChatProcReqContinuation04HookRestored
         to_node: ChatProcReqContinuation05Governed
@@ -312,7 +315,7 @@ chains:
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "restored current-turn request semantic"
         semantic_output: "normal governed Hub request path resumes"
-        status: partial
+        status: anchored
       - step_id: rct-05
         from_node: ChatProcReqContinuation05Governed
         to_node: ChatProcRespContinuation06ResponseGoverned

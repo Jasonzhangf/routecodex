@@ -75,6 +75,11 @@ for (const forbiddenLocalDefinition of [
 }
 
 for (const forbiddenLifecycleBridgeExport of [
+  'export function planResponsesContinuationCloseActionForHttp(',
+  'function isDirectResponsesToolCallContinuationForHttp(',
+  'export async function prepareResponsesJsonBodyForSseBridgeForHttp(',
+  'export function normalizeResponsesJsonBodyForHttp(',
+  'function ensureResponsesJsonToSseRequiredFieldsForHttp(',
   'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
   'export function planResponsesStreamEndRepairForHttp(',
   'export async function createResponsesJsonToSseConverterForHttp(',
@@ -97,6 +102,21 @@ expectNotContains(
   sseTransportSource,
   'response.required_action',
   'responses-sse-transport.ts must not special-case response.required_action semantics'
+);
+expectNotContains(
+  responseLifecycleBridgeSource,
+  "record.object === 'chat.completion'",
+  'responses-response-bridge.ts must not convert chat.completion into Responses payload; projection belongs to Rust RespOutbound owner'
+);
+expectNotContains(
+  responseLifecycleBridgeSource,
+  'isToolCallContinuationResponseNative(',
+  'responses-response-bridge.ts must not probe response body for continuation persist/clear decisions'
+);
+expectNotContains(
+  handlerSource,
+  'shouldDropClientSseFrameForHttp(frame, entryEndpoint)',
+  'handler-response-sse.ts must not decide semantic frame drop in the transport loop; SSE bridge may only frame already-finalized payload'
 );
 
 for (const forbiddenDirectNativeImport of [

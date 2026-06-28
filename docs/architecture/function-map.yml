@@ -271,7 +271,7 @@ owners:
       - "Stopless must not activate on same-protocol direct/provider-direct response paths; existing runtime metadata routeName is the only allowed discriminator for this bypass."
       - "If `finish_reason=stop` arrives without schema, RouteCodex must auto-project the same stop hook (internal `stop_message_auto`, public CLI alias `reasoningStop`) with no schema input and use the hook result to tell the model it must provide the schema / call the same hook before terminal stop."
       - "If `finish_reason=stop` arrives with schema but the schema is non-terminal, invalid, or argument-malformed, RouteCodex must auto-project the same stop hook with schema-derived input so the hook can explain why stop is denied and what must be fixed."
-      - "Stop schema fields are conditionally required, not globally required: `reason` and `has_evidence` are required for attempted schema, `evidence` is required when `has_evidence=1`, terminal `stopreason=0|1` requires `has_evidence=1` plus non-empty `evidence`, and `stopreason=2` requires `next_step`; diagnostic fields are optional unless a future rule explicitly makes them conditional."
+      - "Stop schema fields are conditionally required, not globally required: `stopreason` is the only unconditional field; `stopreason=0` requires `has_evidence=1` plus non-empty `evidence`; `stopreason=1` requires non-empty `reason` and may stop with reason only; `stopreason=2` requires `next_step`; diagnostic fields are optional unless a future rule explicitly makes them conditional."
       - "For `stopreason=2`, the provider-facing continuation text must be the `next_step` content itself. For `blocked + needs_user_input=true`, the finalized client response must include the summary plus the user decision question and stop with `finish_reason=stop`."
       - "For invalid/malformed schema, the stop hook must return concise structured feedback (`reasonCode`, `missingFields`) plus schemaGuidance, and req_chatprocess must rewrite the paired tool result into natural-language corrective guidance instead of replaying raw tool history."
       - "If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook."
@@ -3395,6 +3395,8 @@ owners:
       - "Responses handler must not locally read/strip request-body `metadata` or introspect `clientAbortSignal`; request-body preprocessing and abort-signal extraction must stay behind the single request bridge surface."
       - "Protocol truth is write-once at request entry and VR selection; handler/bridge code must only read MetadataCenter truth and must not infer `providerProtocol` / `clientProtocol` from payload shape or endpoint fallbacks."
       - "Current repo truth: request-executor request-route owner writes `runtime_control.providerProtocol`; Rust mainline readers with `metadataCenterSnapshot` must prefer `runtimeControl.providerProtocol`, while top-level `providerProtocol` remains a transitional transport shell where no center input is available yet."
+      - "Request bridge and req_inbound may capture explicit current-request evidence and do non-destructive entry normalization only; they must not restore, convert, clean, or patch continuation history before request Chat Process entry."
+      - "Control-plane values such as continuation owner, route/protocol pins, stream intent, and port/group/request truth must be written to MetadataCenter families, never into request payload or restored history."
 
   - feature_id: hub.chat_process_responses_continuation
     status: active
@@ -3448,6 +3450,11 @@ owners:
       - "SSE is transport-only. No continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic may live in `handler-response-sse.ts` or `responses-sse-bridge.ts`."
       - "Responses handler/bridge may prepare request body and continuation carrier IO, but must not synthesize stopless instructions or request-side governance text. Chat Process Rust remains the semantic owner."
       - "Canonical builders above are current partial TS/bridge adjacency anchors only; final Chat Process Rust adjacent builders are still pending and must not be faked in the mainline call map."
+      - "Continuation is a `/v1/responses` save/restore boundary only. It must not own response governance, request governance, history conversion, stopless/schema judgment, tool governance, SSE transport, or provider/client projection."
+      - "After response Chat Process saves canonical continuation truth and before the next request Chat Process restores it, no layer may mutate request/response history: no cleanup, conversion, reordering, shape patching, semantic repair, or lossy normalization."
+      - "All response/request content-changing logic must happen before continuation save in response Chat Process or after continuation restore in request Chat Process."
+      - "Continuation store save/restore may persist and return canonical truth, but must not rewrite it to compensate for downstream shape expectations."
+      - "Control semantics required across the boundary must be carried in MetadataCenter; payload/history are data-plane truth and must not receive route/provider/protocol/control pins."
 
   - feature_id: server.responses_sse_bridge_surface
     status: active
@@ -3504,6 +3511,8 @@ owners:
       - "Neither `handler-response-sse.ts` nor `responses-response-bridge.ts` may keep `response.*` semantic event allowlists, required_action frame parsing, terminal-state parsing, client-close continuation gating, probe finish_reason resolution, stream-end semantic repair decisions, or SSE frame projector helpers."
       - "Client-visible Responses SSE must stay on the standard protocol surface: transport keepalive may only be SSE comments, never synthetic business events like `event: ping`."
       - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, finish_reason derivation, protocol-hint parsing, or `__sse_responses` dispatch-entry detection; those stay behind the dedicated SSE owner or disappear with TS semantic deletion."
+      - "SSE and response bridge surfaces must not alter continuation history or response truth between continuation save and next restore; they may only frame already-finalized client semantic payloads."
+      - "If JSON/SSE projection is wrong, fix the Rust response projection owner before server frame writing; do not patch frames in `handler-response-sse.ts` or `responses-sse-bridge.ts`."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
     summary: "/v1/responses response bridge is an opaque continuation/conversation facade only; continuation save truth lives in core Chat Process closeout"
@@ -3544,6 +3553,8 @@ owners:
       - "Responses response->history persistence must not replay provider/client-only reasoning payload fields into next request history; illegal `reasoning.content` must be stripped before continuation/materialize so direct/relay followup requests never send non-empty reasoning content arrays upstream."
       - "Responses response->history persistence must also strip internal stopless/servertool CLI projection artifacts and protocol-illegal pending fields before record/replay, otherwise next `/v1/responses` request will inherit poisoned history."
       - "Responses continuation/restore/materialize must collapse completed stopless `function_call + function_call_output` pairs into one user-guidance message and keep only the latest guidance; historical stopless tool pairs must never survive into later turns."
+      - "Response lifecycle bridge may not clean, convert, or repair saved continuation history after response Chat Process save; any content-changing response governance must complete before save."
+      - "Response lifecycle bridge may pass opaque continuation/conversation-store IO and release signals only; control state belongs in MetadataCenter and data-plane truth belongs in canonical response/request store records."
   - feature_id: cli.command_surface
     status: active
     summary: "CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics"

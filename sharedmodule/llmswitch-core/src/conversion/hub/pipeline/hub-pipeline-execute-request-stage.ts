@@ -128,38 +128,6 @@ function syncRequestStageStoplessRuntimeControlToMetadataCenter(args: {
   );
 }
 
-function projectRouterInputMetadata(args: {
-  metadata: Record<string, unknown>;
-  runtimeControl: Record<string, unknown>;
-  continuationContext: Record<string, unknown>;
-}): Record<string, unknown> {
-  const metadata = { ...args.metadata };
-  const runtimeControl = args.runtimeControl;
-  const continuationContext = args.continuationContext;
-  const responsesResume =
-    continuationContext.responsesResume
-    && typeof continuationContext.responsesResume === 'object'
-    && !Array.isArray(continuationContext.responsesResume)
-      ? { ...(continuationContext.responsesResume as Record<string, unknown>) }
-      : undefined;
-  const resumeContinuationOwner =
-    typeof responsesResume?.continuationOwner === 'string'
-      ? responsesResume.continuationOwner.trim()
-      : undefined;
-  const retryProviderKey = typeof runtimeControl.retryProviderKey === 'string' && runtimeControl.retryProviderKey.trim()
-    ? runtimeControl.retryProviderKey.trim()
-    : resumeContinuationOwner !== 'relay'
-      && responsesResume
-      && typeof responsesResume.providerKey === 'string'
-      && responsesResume.providerKey.trim()
-      ? responsesResume.providerKey.trim()
-      : undefined;
-  if (retryProviderKey) {
-    metadata.retryProviderKey = retryProviderKey;
-  }
-  return metadata;
-}
-
 function buildMetadataCenterSnapshot(args: {
   requestTruth: Record<string, unknown>;
   continuationContext: Record<string, unknown>;
@@ -201,7 +169,7 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   config: HubPipelineConfig;
   entryMode?: "request_stage" | "chat_process";
 }): Promise<HubPipelineResult> {
-  const { normalized, config, routerEngine } = args;
+  const { normalized, config } = args;
   const entryMode = args.entryMode ?? "request_stage";
   const runtimeControlPayload = readRuntimeControlPayload(normalized.metadata);
   const requestTruthPayload = readRequestTruthFromMetadataCenter(normalized.metadata);
@@ -222,21 +190,10 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     runtimeControl: metadataCenterRuntimeControl,
     providerProtocol: normalized.providerProtocol,
   });
-  const routerMetadata = projectRouterInputMetadata({
-    metadata: metadataBase,
-    runtimeControl: mergedRuntimeControl,
-    continuationContext: continuationContextPayload,
-  });
-  if (metadataCenterSnapshot) {
-    routerMetadata.metadataCenterSnapshot = metadataCenterSnapshot;
-  }
-  const route = mergedRuntimeControl.preselectedRoute
-    ?? routerEngine.route(normalized.payload as never, routerMetadata as never);
   const metadata = {
     ...metadataBase,
     runtime_control: {
       ...mergedRuntimeControl,
-      preselectedRoute: route,
     },
     ...nativeTopLevelRuntimeControl,
   } as Record<string, unknown>;

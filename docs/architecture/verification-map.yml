@@ -158,7 +158,7 @@ verification:
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
       - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
       - "For malformed/invalid schema, validation must prove the hook result includes parse/interpretation feedback plus explicit field/value/shape errors, not only a generic deny-stop message."
-      - "Validation must prove stop schema missingFields are conditional, not all-fields-required: `stopreason=2` needs `next_step`, `has_evidence=1` needs `evidence`, terminal `stopreason=0|1` needs evidence, and diagnostic fields are not globally mandatory."
+      - "Validation must prove stop schema missingFields are conditional, not all-fields-required: `stopreason` is unconditional; `stopreason=0` needs `has_evidence=1` plus `evidence`; `stopreason=1` needs `reason` only; `stopreason=2` needs `next_step`; diagnostic fields are not globally mandatory."
       - "Validation must prove `stopreason=2 + next_step` sends the next_step content back to the model as the continuation text, while `blocked + needs_user_input=true` returns summary plus the user decision question to the client and terminates with stop."
       - "If stop arrives with valid terminal schema, validation must prove stop is allowed even when the model did not proactively call the stop hook."
       - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
@@ -1329,6 +1329,8 @@ verification:
       - "Validation must prove this continuation block is `/v1/responses`-only and is skipped by chat/messages/non-responses protocol paths."
       - "Responses continuation is a Chat Process boundary block: request restore runs after `HubReqInbound02Standardized` and before `HubReqChatProcess03Governed`; response save runs after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`."
       - "Req/Resp inbound and outbound are normalization/projection-only nodes; all continuation, tool governance, and semantic recovery must happen in Chat Process before save/restore."
+      - "Validation must prove the save->restore interval is immutable: no handler, bridge, req_inbound, resp_outbound, SSE, or store helper may clean, convert, reorder, patch, or otherwise mutate saved request/response history between canonical save and canonical restore."
+      - "Validation must prove cross-boundary control state is carried by MetadataCenter families, not by request/response payload or history fields."
       - "Tests must lock current-request explicit evidence, owner resolution, canonical restore, stopless CLI result restore, response schema judgment/projection, post-projection canonical save, stale transient request-id clearing, and released retained state."
       - "SSE tests are not continuation gates. `handler-response-sse.ts` and `responses-sse-bridge.ts` must not contain continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic."
 
@@ -1892,6 +1894,7 @@ verification:
       - "request-side protocol-scoped pipeline metadata assembly (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream carrier) is covered by the same request-bridge gate plus accept-header/submit_tool_outputs handler regressions."
       - "request-side request-body metadata strip/read and `clientAbortSignal` extraction are covered by the same request-bridge gate plus request-timeout blackbox regressions."
       - "Validation must prove `runtime_control.providerProtocol` is written into the bound MetadataCenter on the request-executor request-route path; top-level protocol-shell transport may remain transitional, but it is no longer the only owner evidence."
+      - "Validation must prove request bridge / req_inbound do not restore or mutate continuation history; they may only capture explicit request evidence and pass opaque MetadataCenter/store inputs to Chat Process owners."
   - feature_id: server.responses_sse_bridge_surface
     change_risk: high
     unit:
@@ -1919,6 +1922,7 @@ verification:
       - "Response SSE bridge must stay facade-only and must not grow TS response protocol semantics."
       - "SSE transport, frame normalization, terminal/incomplete repair decisions, force-SSE JSON bridge, and direct-passthrough metadata guard are all locked behind the dedicated SSE bridge surface."
       - "Locked business-module rule: any drift of terminal-state parse, probe synthesis, or stream-end repair back into `handler-response-sse.ts` must fail static gate and red-test before runtime."
+      - "Validation must prove SSE code is transport-only and cannot patch continuation history, request restore data, response save data, required_action semantics, or stopless/servertool governance."
   - feature_id: server.responses_response_handler_bridge_surface
     change_risk: high
     unit:
@@ -1941,6 +1945,7 @@ verification:
       - "responses-continuation-store contract must lock both message-content legalization (`output_text/commentary -> input_text`) and reasoning-history legalization (`reasoning.content` must not replay into next request payload)."
       - "responses-continuation-store contract must also lock replay-safe persistence: internal stopless/servertool CLI projection artifacts and protocol-illegal pending fields must not survive record/replay."
       - "responses-continuation-store contract must also prove completed stopless tool pairs are collapsed to the latest guidance only during resume/restore/materialize, so old stopless `function_call/function_call_output` history cannot poison later turns."
+      - "Validation must prove response lifecycle bridge does not mutate saved continuation truth after response Chat Process save; all content-changing governance must happen before save."
 
   - feature_id: cli.command_surface
     change_risk: medium

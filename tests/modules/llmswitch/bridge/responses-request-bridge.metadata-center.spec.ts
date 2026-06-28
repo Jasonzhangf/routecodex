@@ -129,7 +129,7 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(nextMetadata?.responsesRequestContext).toBeUndefined();
   });
 
-  it('RED: relay submit_tool_outputs pipeline metadata must expose resumed session scope and route pin through metadata center truth', () => {
+  it('relay submit_tool_outputs pipeline metadata must not carry route pin in continuation context', () => {
     const requestContext = {
       payload: { model: 'gpt-5.5', input: [] },
       context: { input: [] },
@@ -164,14 +164,12 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(center?.readContinuationContext()).toMatchObject({
       responsesResume: {
         responseId: 'resp_stopless_live_1',
-        continuationOwner: 'relay',
-        routeHint: 'search',
-        providerKey: 'minimonth.key1.MiniMax-M2.7'
+        continuationOwner: 'relay'
       }
     });
-    expect(readRuntimeControlProjection(metadata)).toMatchObject({
-      routeHint: 'search'
-    });
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('routeHint');
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('providerKey');
+    expect(readRuntimeControlProjection(metadata).routeHint).toBeUndefined();
     expect(readRuntimeControlProjection(metadata).retryProviderKey).toBeUndefined();
     expect(center?.readRequestTruth()).toEqual({});
   });
@@ -208,13 +206,12 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(center?.readContinuationContext()).toMatchObject({
       responsesResume: {
         responseId: 'resp_resume_only_1',
-        continuationOwner: 'relay',
-        routeHint: 'thinking'
+        continuationOwner: 'relay'
       }
     });
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('routeHint');
     expect(center?.readRequestTruth()).toEqual({});
-    expect(readRuntimeControlProjection(metadata)).toMatchObject({
-      routeHint: 'thinking'
-    });
+    expect(readRuntimeControlProjection(metadata).routeHint).toBeUndefined();
+    expect(readRuntimeControlProjection(metadata).retryProviderKey).toBeUndefined();
   });
 });

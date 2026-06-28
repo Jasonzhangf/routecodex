@@ -86,7 +86,6 @@ import { resolveSessionLogColorKey } from '../../../utils/session-log-color.js';
 import {
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
-  planResponsesContinuationCloseActionForHttp,
   recordResponsesResponseForRequest,
 } from '../../../modules/llmswitch/bridge.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
@@ -1223,6 +1222,12 @@ export class RouteCodexHttpServer {
       entryPort: typeof portConfig?.port === 'number' ? portConfig.port : localPort,
       ...(allowedProviders ? { allowedProviders } : {}),
     };
+    if (input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)) {
+      const inputCenter = MetadataCenter.read(input.metadata as Record<string, unknown>);
+      if (inputCenter) {
+        MetadataCenter.bind(metadata, inputCenter);
+      }
+    }
     if (routeHint) {
       writeMetadataCenterRuntimeControl(
         metadata,
@@ -1927,15 +1932,7 @@ export class RouteCodexHttpServer {
     routingPolicyGroup?: string;
   }): Promise<void> {
     if (!args.requestId) return;
-    const closeAction = planResponsesContinuationCloseActionForHttp({
-      entryEndpoint: args.entryEndpoint,
-      requestContextPresent: true,
-      probe: args.responseBody,
-    });
-    if (closeAction.action !== 'persist_continuation') {
-      await clearResponsesConversationByRequestId(args.requestId);
-      return;
-    }
+    void args.entryEndpoint;
     await recordResponsesResponseForRequest({
       requestId: args.requestId,
       response: args.responseBody as Record<string, unknown>,
@@ -1946,7 +1943,7 @@ export class RouteCodexHttpServer {
       allowScopeContinuation: true,
     });
     await finalizeResponsesConversationRequestRetention(args.requestId, {
-      keepForSubmitToolOutputs: closeAction.keepForSubmitToolOutputs,
+      keepForSubmitToolOutputs: false,
     });
   }
 

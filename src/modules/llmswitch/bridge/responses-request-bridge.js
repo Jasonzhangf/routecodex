@@ -25,7 +25,6 @@ export function buildResponsesPipelineMetadataForHttp(args) {
     const metadata = {
         clientRequestId: args.clientRequestId,
         clientStream: args.streamPlan.acceptsSse || undefined,
-        providerProtocol: 'openai-responses',
         clientHeaders: args.clientHeaders,
         clientConnectionState: args.clientConnectionState,
         ...(responsesResume ? { responsesResume } : {}),
@@ -57,25 +56,6 @@ export function buildResponsesPipelineMetadataForHttp(args) {
         stage: 'MetaReq04RuntimeControlBound'
     }, 'responses handler client abort state');
     if (args.resumeMeta) {
-        if (typeof args.resumeMeta.routeHint === 'string' && args.resumeMeta.routeHint.trim()) {
-            center.writeRuntimeControl('routeHint', args.resumeMeta.routeHint.trim(), {
-                module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-                symbol: 'buildResponsesPipelineMetadataForHttp',
-                stage: 'MetaReq04RuntimeControlBound'
-            }, 'responses relay resumed route hint');
-        }
-        const continuationOwner = typeof args.resumeMeta.continuationOwner === 'string'
-            ? args.resumeMeta.continuationOwner.trim()
-            : undefined;
-        if (continuationOwner !== 'relay'
-            && typeof args.resumeMeta.providerKey === 'string'
-            && args.resumeMeta.providerKey.trim()) {
-            center.writeRuntimeControl('retryProviderKey', args.resumeMeta.providerKey.trim(), {
-                module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-                symbol: 'buildResponsesPipelineMetadataForHttp',
-                stage: 'MetaReq04RuntimeControlBound'
-            }, 'responses relay resumed provider pin');
-        }
         if (responsesResume) {
             center.writeContinuationContext('responsesResume', responsesResume, {
                 module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',

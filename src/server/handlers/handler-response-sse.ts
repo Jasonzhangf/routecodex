@@ -28,7 +28,6 @@ import {
   buildResponsesSseErrorPayloadForHttp,
   buildResponsesStructuredSseErrorPayloadForHttp,
   createResponsesJsonToSseConverterForHttp,
-  shouldDropClientSseFrameForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
 import {
   createChatJsonToSseConverterForHttp,
@@ -719,12 +718,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       logPipelineStage('response.sse.write_frame.skipped_closed_response', requestLabel, {
         errorLabel,
       });
-      return;
-    }
-    if (
-      result.continuationOwner !== 'direct'
-      && shouldDropClientSseFrameForHttp(frame, entryEndpoint)
-    ) {
       return;
     }
     if (options?.recordSnapshot !== false) {

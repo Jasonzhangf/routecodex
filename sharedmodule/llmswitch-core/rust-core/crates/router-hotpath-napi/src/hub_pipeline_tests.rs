@@ -1151,14 +1151,22 @@ fn test_build_router_metadata_input_extracts_runtime_flags_and_stop_message_fiel
         "processMode": "passthrough",
         "stream": true,
         "direction": "request",
-        "providerProtocol": "openai-responses",
-        "routeHint": "tools",
         "stage": "inbound",
-        "responsesResume": { "response_id": "resp_123" },
         "serverToolRequired": true,
-        "sessionId": "sess-1",
-        "conversationId": "conv-1",
         "includeEstimatedInputTokens": true,
+        "metadataCenterSnapshot": {
+            "runtimeControl": {
+                "providerProtocol": "openai-responses",
+                "routeHint": "tools"
+            },
+            "requestTruth": {
+                "sessionId": "sess-1",
+                "conversationId": "conv-1"
+            },
+            "continuationContext": {
+                "responsesResume": { "response_id": "resp_123" }
+            }
+        },
         "metadata": {
             "estimatedInputTokens": 88,
             "runtime_control": {
@@ -1323,9 +1331,14 @@ fn test_build_router_metadata_input_prefers_snapshot_retry_provider_key() {
 fn test_build_router_metadata_input_prefers_runtime_control_retry_provider_key() {
     let input = json!({
         "requestId": "req-runtime-control-retry",
+        "metadataCenterSnapshot": {
+            "runtimeControl": {
+                "retryProviderKey": " runtime.provider.gpt-5.5 "
+            }
+        },
         "metadata": {
             "runtime_control": {
-                "retryProviderKey": " runtime.provider.gpt-5.5 "
+                "retryProviderKey": " payload.provider.gpt-5.5 "
             },
             "__rt": {
                 "retryProviderKey": " legacy.provider.gpt-5.5 "
@@ -1356,22 +1369,23 @@ fn test_build_router_metadata_input_ignores_legacy_rt_retry_provider_key_without
 }
 
 #[test]
-fn test_build_router_metadata_input_uses_responses_resume_provider_key_as_retry_pin() {
+fn test_build_router_metadata_input_ignores_responses_resume_provider_key_as_retry_pin() {
     let input = json!({
         "requestId": "req-responses-resume-retry-pin",
-        "responsesResume": {
-            "providerKey": " XLC.key1.glm-5.2 ",
-            "restoredFromResponseId": "resp_prev_1",
-            "previousRequestId": "req_prev_1"
+        "metadataCenterSnapshot": {
+            "continuationContext": {
+                "responsesResume": {
+                    "providerKey": " XLC.key1.glm-5.2 ",
+                    "restoredFromResponseId": "resp_prev_1",
+                    "previousRequestId": "req_prev_1"
+                }
+            }
         },
         "metadata": {}
     });
     let output = build_router_metadata_input(&input).expect("router metadata input");
     let row = output.as_object().expect("output object");
-    assert_eq!(
-        row.get("retryProviderKey").and_then(|v| v.as_str()),
-        Some("XLC.key1.glm-5.2")
-    );
+    assert_eq!(row.get("retryProviderKey"), None);
 }
 
 #[test]
@@ -1418,36 +1432,28 @@ fn test_build_router_metadata_input_prefers_snapshot_provider_protocol() {
 }
 
 #[test]
-fn test_build_router_metadata_input_uses_metadata_responses_resume_for_route_scope_and_retry_pin() {
+fn test_build_router_metadata_input_ignores_metadata_responses_resume_for_route_scope_and_retry_pin(
+) {
     let input = json!({
         "requestId": "req-responses-resume-metadata-route-scope",
-        "metadata": {
-            "responsesResume": {
-                "providerKey": " minimonth.key1.MiniMax-M2.7 ",
-                "routeHint": " search ",
-                "sessionId": " stopless-live-123 ",
-                "conversationId": " stopless-live-123 "
+        "metadataCenterSnapshot": {
+            "continuationContext": {
+                "responsesResume": {
+                    "providerKey": " minimonth.key1.MiniMax-M2.7 ",
+                    "routeHint": " search ",
+                    "sessionId": " stopless-live-123 ",
+                    "conversationId": " stopless-live-123 "
+                }
             }
-        }
+        },
+        "metadata": {}
     });
     let output = build_router_metadata_input(&input).expect("router metadata input");
     let row = output.as_object().expect("output object");
-    assert_eq!(
-        row.get("retryProviderKey").and_then(|v| v.as_str()),
-        Some("minimonth.key1.MiniMax-M2.7")
-    );
-    assert_eq!(
-        row.get("routeHint").and_then(|v| v.as_str()),
-        Some("search")
-    );
-    assert_eq!(
-        row.get("sessionId").and_then(|v| v.as_str()),
-        Some("stopless-live-123")
-    );
-    assert_eq!(
-        row.get("conversationId").and_then(|v| v.as_str()),
-        Some("stopless-live-123")
-    );
+    assert_eq!(row.get("retryProviderKey"), None);
+    assert_eq!(row.get("routeHint"), None);
+    assert_eq!(row.get("sessionId"), None);
+    assert_eq!(row.get("conversationId"), None);
 }
 
 #[test]
@@ -1459,6 +1465,15 @@ fn test_build_router_metadata_input_keeps_relay_continuation_scope_without_retry
         "stream": false,
         "direction": "request",
         "providerProtocol": "openai-responses",
+        "metadataCenterSnapshot": {
+            "runtimeControl": {
+                "routeHint": " search "
+            },
+            "requestTruth": {
+                "sessionId": " stopless-live-123 ",
+                "conversationId": " stopless-live-123 "
+            }
+        },
         "requestSemantics": {
             "continuation": {
                 "chainId": "req_prev_1",

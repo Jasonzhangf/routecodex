@@ -42,12 +42,6 @@ fn resolve_continuation_sticky_scope_key(metadata_center_snapshot: &Value) -> Op
     }
 }
 
-fn resolve_legacy_responses_request_chain_key(metadata_center_snapshot: &Value) -> Option<String> {
-    metadata_center_snapshot
-        .get("responsesResume")
-        .and_then(|resume| read_trimmed_string(resume.get("previousRequestId")))
-}
-
 fn read_provider_protocol(metadata_center_snapshot: &Value) -> Option<String> {
     metadata_center_snapshot
         .get("runtimeControl")
@@ -56,18 +50,10 @@ fn read_provider_protocol(metadata_center_snapshot: &Value) -> Option<String> {
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .or_else(|| {
-            metadata_center_snapshot
-                .get("providerProtocol")
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
 }
 
 pub(crate) fn is_continuation_request(metadata_center_snapshot: &Value) -> bool {
     resolve_continuation_request_chain_key(metadata_center_snapshot).is_some()
-        || resolve_legacy_responses_request_chain_key(metadata_center_snapshot).is_some()
 }
 
 pub(crate) fn resolve_routing_state_key(metadata_center_snapshot: &Value) -> String {
@@ -81,17 +67,9 @@ pub(crate) fn resolve_routing_state_key(metadata_center_snapshot: &Value) -> Str
         return sticky_scope_key;
     }
 
-    if let Some(protocol) = read_provider_protocol(metadata_center_snapshot) {
-        if protocol == "openai-responses" {
-            if let Some(previous_request_id) =
-                resolve_legacy_responses_request_chain_key(metadata_center_snapshot)
-            {
-                return previous_request_id;
-            }
-            if let Some(request_id) = read_trimmed_string(metadata_center_snapshot.get("requestId"))
-            {
-                return request_id;
-            }
+    if read_provider_protocol(metadata_center_snapshot).as_deref() == Some("openai-responses") {
+        if let Some(request_id) = read_trimmed_string(metadata_center_snapshot.get("requestId")) {
+            return request_id;
         }
     }
     read_trimmed_string(metadata_center_snapshot.get("requestId"))
@@ -162,7 +140,9 @@ mod tests {
     fn prefers_unified_continuation_request_chain_key() {
         let metadata = json!({
             "metadataCenterSnapshot": {
-                "providerProtocol": "openai-chat",
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat"
+                },
                 "requestId": "req_chat_cont_1",
                 "sessionId": "session_should_lose",
                 "continuation": {
@@ -236,14 +216,20 @@ mod tests {
     }
 
     #[test]
-    fn prefers_responses_resume_chain_over_session_scope() {
+    fn prefers_continuation_chain_over_session_scope() {
         let metadata = json!({
             "metadataCenterSnapshot": {
-                "providerProtocol": "openai-responses",
+                "runtimeControl": {
+                    "providerProtocol": "openai-responses"
+                },
                 "requestId": "req_responses_2",
                 "sessionId": "session_wins",
-                "responsesResume": {
-                    "previousRequestId": "req_chain_root"
+                "continuation": {
+                    "chainId": "req_chain_root",
+                    "continuationScope": "request_chain",
+                    "resumeFrom": {
+                        "requestId": "req_chain_root"
+                    }
                 }
             }
         });
@@ -258,7 +244,9 @@ mod tests {
     fn falls_back_to_session_scope_for_non_responses_protocol() {
         let metadata = json!({
             "metadataCenterSnapshot": {
-                "providerProtocol": "openai-chat",
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat"
+                },
                 "requestId": "req_chat_1",
                 "sessionId": "session_1"
             }
@@ -274,7 +262,9 @@ mod tests {
     fn non_continuation_request_is_not_continuation() {
         let metadata = json!({
             "metadataCenterSnapshot": {
-                "providerProtocol": "openai-responses",
+                "runtimeControl": {
+                    "providerProtocol": "openai-responses"
+                },
                 "requestId": "req_1",
                 "sessionId": "session_1"
             }
@@ -286,12 +276,17 @@ mod tests {
     }
 
     #[test]
-    fn responses_resume_is_continuation_request() {
+    fn request_chain_continuation_is_continuation_request() {
         let metadata = json!({
             "metadataCenterSnapshot": {
-                "providerProtocol": "openai-responses",
+                "runtimeControl": {
+                    "providerProtocol": "openai-responses"
+                },
                 "requestId": "req_2",
-                "responsesResume": { "previousRequestId": "req_1" }
+                "continuation": {
+                    "continuationScope": "request_chain",
+                    "resumeFrom": { "requestId": "req_1" }
+                }
             }
         });
         assert_eq!(
@@ -304,7 +299,9 @@ mod tests {
     fn stop_message_scope_falls_back_to_plain_session_scope() {
         let metadata = json!({
             "metadataCenterSnapshot": {
-                "providerProtocol": "openai-chat",
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat"
+                },
                 "requestId": "req_chat_cont_1",
                 "sessionId": "session_should_not_become_stop_scope"
             }
@@ -320,7 +317,9 @@ mod tests {
     fn stop_message_scope_ignores_tmux_and_inject_fallbacks() {
         let metadata = json!({
             "metadataCenterSnapshot": {
-                "providerProtocol": "openai-chat",
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat"
+                },
                 "requestId": "req_chat_tmux_scope_1",
                 "sessionId": "session_should_lose",
                 "tmuxSessionId": "tmux-session-1",
@@ -339,7 +338,9 @@ mod tests {
     fn stop_message_scope_requires_session_id() {
         let metadata = json!({
             "metadataCenterSnapshot": {
-                "providerProtocol": "openai-chat",
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat"
+                },
                 "requestId": "req_chat_tmux_scope_2",
                 "tmuxSessionId": "tmux-session-2",
                 "conversationId": "conversation-2",
@@ -362,8 +363,9 @@ mod tests {
                 "runtimeControl": {
                     "providerProtocol": "openai-responses"
                 },
-                "responsesResume": {
-                    "previousRequestId": "req_chain_runtime_control"
+                "continuation": {
+                    "chainId": "req_chain_runtime_control",
+                    "continuationScope": "request_chain"
                 }
             }
         });

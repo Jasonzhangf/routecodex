@@ -3,8 +3,8 @@ use crate::hub_pipeline_blocks::metadata::{
 };
 // feature_id: hub.route_metadata_surface
 use crate::hub_pipeline_blocks::responses_resume::{
-    read_continuation_from_semantics_node, read_responses_resume_from_metadata,
-    read_responses_resume_from_semantics_node, synthesize_continuation_from_responses_resume,
+    read_continuation_from_semantics_node, read_responses_resume_from_semantics_node,
+    synthesize_continuation_from_responses_resume,
 };
 use serde_json::{Map, Value};
 
@@ -36,6 +36,27 @@ fn read_snapshot_runtime_control_route_hint(row: &Map<String, Value>) -> Option<
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn read_snapshot_request_truth_string(row: &Map<String, Value>, key: &str) -> Option<String> {
+    row.get("metadataCenterSnapshot")
+        .and_then(|value| value.as_object())
+        .and_then(|snapshot| snapshot.get("requestTruth"))
+        .and_then(|value| value.as_object())
+        .and_then(|request_truth| request_truth.get(key))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn read_snapshot_continuation_context_responses_resume(row: &Map<String, Value>) -> Option<Value> {
+    row.get("metadataCenterSnapshot")
+        .and_then(|value| value.as_object())
+        .and_then(|snapshot| snapshot.get("continuationContext"))
+        .and_then(|value| value.as_object())
+        .and_then(|continuation_context| continuation_context.get("responsesResume"))
+        .filter(|value| value.is_object())
+        .cloned()
 }
 
 fn read_continuation_owner(value: Option<&Value>) -> Option<String> {
@@ -75,14 +96,7 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
         .map(|v| v.trim().to_ascii_lowercase())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "request".to_string());
-    let provider_protocol = read_snapshot_runtime_control_provider_protocol(row)
-        .or_else(|| {
-            row.get("providerProtocol")
-                .and_then(|v| v.as_str())
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        })
-        .unwrap_or_else(|| "openai-chat".to_string());
+    let provider_protocol = read_snapshot_runtime_control_provider_protocol(row);
     let stream = row.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
     let metadata_node = row.get("metadata").unwrap_or(&Value::Null);
     let request_semantics = row.get("requestSemantics");
@@ -94,23 +108,13 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
         .unwrap_or(false);
     let responses_resume_from_semantics =
         read_responses_resume_from_semantics_node(request_semantics);
-    let responses_resume_from_metadata = read_responses_resume_from_metadata(metadata_node);
-    let responses_resume_from_input = row.get("responsesResume").cloned().and_then(|value| {
-        if value.is_null() {
-            None
-        } else {
-            Some(value)
-        }
-    });
-    let responses_resume_for_output = responses_resume_from_input
+    let responses_resume_from_snapshot = read_snapshot_continuation_context_responses_resume(row);
+    let responses_resume_for_output = responses_resume_from_snapshot
         .clone()
-        .or_else(|| responses_resume_from_metadata.clone())
         .or_else(|| responses_resume_from_semantics.clone());
     let continuation = read_continuation_from_semantics_node(request_semantics).or_else(|| {
         synthesize_continuation_from_responses_resume(responses_resume_for_output.as_ref())
     });
-    let continuation_owner = read_continuation_owner(continuation.as_ref());
-    let responses_resume_owner = read_continuation_owner(responses_resume_for_output.as_ref());
 
     let mut out = Map::<String, Value>::new();
     out.insert("requestId".to_string(), Value::String(request_id));
@@ -118,37 +122,14 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
     out.insert("processMode".to_string(), Value::String(process_mode));
     out.insert("stream".to_string(), Value::Bool(stream));
     out.insert("direction".to_string(), Value::String(direction));
-    out.insert(
-        "providerProtocol".to_string(),
-        Value::String(provider_protocol),
-    );
+    if let Some(provider_protocol) = provider_protocol {
+        out.insert(
+            "providerProtocol".to_string(),
+            Value::String(provider_protocol),
+        );
+    }
 
-    if let Some(route_hint) = read_snapshot_runtime_control_route_hint(row)
-        .or_else(|| {
-            row.get("routeHint")
-                .and_then(|v| v.as_str())
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        })
-        .or_else(|| {
-            continuation
-                .as_ref()
-                .and_then(|value| value.as_object())
-                .and_then(|cont| cont.get("routeHint"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-        .or_else(|| {
-            responses_resume_for_output
-                .as_ref()
-                .and_then(|value| value.as_object())
-                .and_then(|resume| resume.get("routeHint"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-    {
+    if let Some(route_hint) = read_snapshot_runtime_control_route_hint(row) {
         out.insert("routeHint".to_string(), Value::String(route_hint));
     }
     if let Some(stage) = row
@@ -159,56 +140,10 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
     {
         out.insert("stage".to_string(), Value::String(stage));
     }
-    if let Some(session_id) = row
-        .get("sessionId")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            continuation
-                .as_ref()
-                .and_then(|value| value.as_object())
-                .and_then(|cont| cont.get("sessionId"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-        .or_else(|| {
-            responses_resume_for_output
-                .as_ref()
-                .and_then(|value| value.as_object())
-                .and_then(|resume| resume.get("sessionId"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-    {
+    if let Some(session_id) = read_snapshot_request_truth_string(row, "sessionId") {
         out.insert("sessionId".to_string(), Value::String(session_id));
     }
-    if let Some(conversation_id) = row
-        .get("conversationId")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            continuation
-                .as_ref()
-                .and_then(|value| value.as_object())
-                .and_then(|cont| cont.get("conversationId"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-        .or_else(|| {
-            responses_resume_for_output
-                .as_ref()
-                .and_then(|value| value.as_object())
-                .and_then(|resume| resume.get("conversationId"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-    {
+    if let Some(conversation_id) = read_snapshot_request_truth_string(row, "conversationId") {
         out.insert("conversationId".to_string(), Value::String(conversation_id));
     }
     if row
@@ -235,43 +170,9 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
     }
 
     if let Some(retry_provider_key) = read_snapshot_runtime_control_retry_provider_key(row)
-        .or_else(|| {
-            metadata_node.as_object().and_then(|metadata_obj| {
-                metadata_obj
-                    .get("runtime_control")
-                    .and_then(|value| value.as_object())
-                    .and_then(|rt| rt.get("retryProviderKey"))
-            })
-        })
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-        .or_else(|| {
-            if continuation_owner.as_deref() == Some("relay") {
-                None
-            } else {
-                continuation
-                    .as_ref()
-                    .and_then(|value| value.as_object())
-                    .and_then(|cont| cont.get("providerKey"))
-                    .and_then(|value| value.as_str())
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
-            }
-        })
-        .or_else(|| {
-            if responses_resume_owner.as_deref() == Some("relay") {
-                None
-            } else {
-                responses_resume_for_output
-                    .as_ref()
-                    .and_then(|value| value.as_object())
-                    .and_then(|resume| resume.get("providerKey"))
-                    .and_then(|value| value.as_str())
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
-            }
-        })
     {
         out.insert(
             "retryProviderKey".to_string(),

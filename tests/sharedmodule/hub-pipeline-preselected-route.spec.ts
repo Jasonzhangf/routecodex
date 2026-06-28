@@ -454,8 +454,6 @@ describe('HubPipeline preselected route ownership', () => {
       .toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.responsesResume)
       .toBeUndefined();
-    expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.routeHint)
-      .toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.retryProviderKey)
       .toBeUndefined();
   });
@@ -476,9 +474,9 @@ describe('HubPipeline preselected route ownership', () => {
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
     });
 
-    expect(routerEngine.route).toHaveBeenCalledTimes(1);
+    expect(routerEngine.route).not.toHaveBeenCalled();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.preselectedRoute)
-      .toEqual(preselectedRoute);
+      .toBeUndefined();
   });
 
   it('does not project legacy __rt fields back into native request metadata', async () => {
@@ -505,21 +503,15 @@ describe('HubPipeline preselected route ownership', () => {
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
     });
 
-    expect(routerEngine.route).toHaveBeenCalledTimes(1);
+    expect(routerEngine.route).not.toHaveBeenCalled();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.__rt).toBeUndefined();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata?.runtime_control?.stopless)
       .toBeUndefined();
   });
 
-  it('hydrates resumed continuation session scope and provider pin before routerEngine.route consumes metadata', async () => {
-    const routedMetadataSnapshots: Record<string, unknown>[] = [];
+  it('hydrates resumed continuation session scope and provider pin into native metadata without bridge routing', async () => {
     const routerEngine = {
-      route: jest.fn((_payload: unknown, metadata: unknown) => {
-        if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
-          routedMetadataSnapshots.push({ ...(metadata as Record<string, unknown>) });
-        }
-        return preselectedRoute;
-      })
+      route: jest.fn(() => preselectedRoute)
     };
 
     await executeRequestStagePipeline({
@@ -549,13 +541,7 @@ describe('HubPipeline preselected route ownership', () => {
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
     });
 
-    expect(routerEngine.route).toHaveBeenCalledTimes(1);
-    expect(routedMetadataSnapshots[0]).toEqual(expect.objectContaining({
-      retryProviderKey: 'minimonth.key1.MiniMax-M2.7',
-    }));
-    expect(routedMetadataSnapshots[0]?.sessionId).toBeUndefined();
-    expect(routedMetadataSnapshots[0]?.conversationId).toBeUndefined();
-    expect(routedMetadataSnapshots[0]?.responsesResume).toBeUndefined();
+    expect(routerEngine.route).not.toHaveBeenCalled();
     expect(mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadataCenterSnapshot?.runtimeControl).toEqual(
       expect.objectContaining({
         routeHint: 'search/gateway-priority-5555-priority-search',

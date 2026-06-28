@@ -36,14 +36,14 @@ edges:
   - step_id: rct-03
     from_node: ChatProcReqContinuation03CanonicalRestored
     to_node: ChatProcReqContinuation04HookRestored
-    status: binding pending
+    status: anchored
     owner_feature_id: hub.chat_process_responses_continuation
-    binding_pending: true
+    binding_pending: null
     split_binding_id: null
   - step_id: rct-04
     from_node: ChatProcReqContinuation04HookRestored
     to_node: ChatProcReqContinuation05Governed
-    status: partial
+    status: anchored
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null

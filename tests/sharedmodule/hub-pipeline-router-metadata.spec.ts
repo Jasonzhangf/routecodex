@@ -11,6 +11,11 @@ describe('hub pipeline router metadata builder', () => {
       direction: 'request',
       providerProtocol: 'openai-responses',
       includeEstimatedInputTokens: true,
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          providerProtocol: 'openai-responses',
+        },
+      },
       metadata: {
         __shadowCompareForcedProviderKey: 'ali-coding-plan.key1.kimi-k2.5',
         disabledProviderKeyAliases: ['qwen.1', 'qwen.2'],
@@ -35,6 +40,11 @@ describe('hub pipeline router metadata builder', () => {
       stream: false,
       direction: 'request',
       providerProtocol: 'openai-chat',
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          providerProtocol: 'openai-chat',
+        },
+      },
       metadata: {
         routecodexPortMode: 'provider',
         routecodexPortBinding: 'anthropic.claude',
@@ -59,6 +69,11 @@ describe('hub pipeline router metadata builder', () => {
       stream: false,
       direction: 'request',
       providerProtocol: 'openai-chat',
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          providerProtocol: 'openai-chat',
+        },
+      },
       sessionId: 'session-should-not-win',
       requestSemantics: {
         continuation: {
@@ -91,7 +106,7 @@ describe('hub pipeline router metadata builder', () => {
     expect(resolveRoutingStateKey(output as any)).toBe('chain_from_semantics');
   });
 
-  it('preserves responses relay continuation scope fields from request semantics for resumed submit_tool_outputs', () => {
+  it('keeps responses relay continuation residue nested without promoting route truth to the top level', () => {
     const output = buildRouterMetadataInputWithNative({
       requestId: 'req-responses-relay-cont-router-meta',
       entryEndpoint: '/v1/responses',
@@ -99,6 +114,11 @@ describe('hub pipeline router metadata builder', () => {
       stream: false,
       direction: 'request',
       providerProtocol: 'openai-responses',
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          providerProtocol: 'openai-responses',
+        },
+      },
       requestSemantics: {
         continuation: {
           chainId: 'req_prev_1',
@@ -127,10 +147,10 @@ describe('hub pipeline router metadata builder', () => {
       }
     });
 
+    expect(output).not.toHaveProperty('routeHint');
+    expect(output).not.toHaveProperty('sessionId');
+    expect(output).not.toHaveProperty('conversationId');
     expect(output).toMatchObject({
-      routeHint: 'search',
-      sessionId: 'stopless-live-123',
-      conversationId: 'stopless-live-123',
       continuation: {
         continuationOwner: 'relay',
         routeHint: 'search',
@@ -149,6 +169,11 @@ describe('hub pipeline router metadata builder', () => {
       stream: false,
       direction: 'request',
       providerProtocol: 'openai-responses',
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          providerProtocol: 'openai-responses',
+        },
+      },
       metadata: {
         __rt: {
           retryProviderKey: 'legacy.provider.gpt-5.5'
@@ -170,7 +195,8 @@ describe('hub pipeline router metadata builder', () => {
       routeHint: 'payload-search',
       metadataCenterSnapshot: {
         runtimeControl: {
-          routeHint: 'snapshot-search'
+          providerProtocol: 'openai-responses',
+          routeHint: 'snapshot-search',
         }
       },
       metadata: {

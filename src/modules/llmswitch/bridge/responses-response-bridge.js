@@ -1,4 +1,4 @@
-import { createResponsesJsonToSseConverter, importCoreDist, isToolCallContinuationResponseNative, rebindResponsesConversationRequestId, requireCoreDist, } from './index.js';
+import { createResponsesJsonToSseConverter, importCoreDist, rebindResponsesConversationRequestId, requireCoreDist, } from './index.js';
 import { clearResponsesConversationByRequestId, } from './runtime-integrations.js';
 import { buildResponsesPayloadFromChatNative, projectResponsesClientPayloadForClientNative, } from './native-exports.js';
 import { normalizeUsage } from '../../../server/runtime/http-server/executor/usage-aggregator.js';
@@ -157,29 +157,6 @@ export function resolveResponsesConversationClearReasonForHttp(phase) {
         case 'json':
             return 'json-error';
     }
-}
-function isDirectResponsesToolCallContinuationForHttp(args) {
-    if (args.entryEndpoint !== '/v1/responses'
-        && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
-        return false;
-    }
-    return isToolCallContinuationResponseNative(args.responseBody);
-}
-export function planResponsesContinuationCloseActionForHttp(args) {
-    const isToolCallContinuation = isDirectResponsesToolCallContinuationForHttp({
-        entryEndpoint: args.entryEndpoint,
-        responseBody: args.probe,
-    });
-    if (args.requestContextPresent && isToolCallContinuation) {
-        return {
-            action: 'persist_continuation',
-            keepForSubmitToolOutputs: true,
-        };
-    }
-    return {
-        action: 'clear_abandoned',
-        keepForSubmitToolOutputs: false,
-    };
 }
 export async function rebindResponsesConversationRequestIdForHttp(oldId, newId) {
     await rebindResponsesConversationRequestId(oldId, newId);

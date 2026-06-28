@@ -119,12 +119,11 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   requestContext: ResponsesRequestContextForHttp;
 }): Record<string, unknown> {
   const responsesResume = args.resumeMeta
-    ? sanitizeResponsesResumeForContinuationContextForHttp(args.resumeMeta)
+    ? buildResponsesResumeControlForContinuationContextForHttp(args.resumeMeta)
     : undefined;
   const metadata: Record<string, unknown> = {
     clientRequestId: args.clientRequestId,
     clientStream: args.streamPlan.acceptsSse || undefined,
-    providerProtocol: 'openai-responses',
     clientHeaders: args.clientHeaders,
     clientConnectionState: args.clientConnectionState,
     ...(responsesResume ? { responsesResume } : {}),
@@ -151,38 +150,6 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     'responses handler client abort state'
   );
   if (args.resumeMeta) {
-    if (typeof args.resumeMeta.routeHint === 'string' && args.resumeMeta.routeHint.trim()) {
-      center.writeRuntimeControl(
-        'routeHint',
-        args.resumeMeta.routeHint.trim(),
-        {
-          module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-          symbol: 'buildResponsesPipelineMetadataForHttp',
-          stage: 'MetaReq04RuntimeControlBound'
-        },
-        'responses relay resumed route hint'
-      );
-    }
-    const continuationOwner =
-      typeof args.resumeMeta.continuationOwner === 'string'
-        ? args.resumeMeta.continuationOwner.trim()
-        : undefined;
-    if (
-      continuationOwner !== 'relay'
-      && typeof args.resumeMeta.providerKey === 'string'
-      && args.resumeMeta.providerKey.trim()
-    ) {
-      center.writeRuntimeControl(
-        'retryProviderKey',
-        args.resumeMeta.providerKey.trim(),
-        {
-          module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-          symbol: 'buildResponsesPipelineMetadataForHttp',
-          stage: 'MetaReq04RuntimeControlBound'
-        },
-        'responses relay resumed provider pin'
-      );
-    }
     if (responsesResume) {
       center.writeContinuationContext(
         'responsesResume',
@@ -198,15 +165,42 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   return metadata;
 }
 
-function sanitizeResponsesResumeForContinuationContextForHttp(
+function buildResponsesResumeControlForContinuationContextForHttp(
   resumeMeta: Record<string, unknown>
 ): Record<string, unknown> {
-  const sanitized = { ...resumeMeta };
-  delete sanitized.sessionId;
-  delete sanitized.session_id;
-  delete sanitized.conversationId;
-  delete sanitized.conversation_id;
-  return sanitized;
+  const out: Record<string, unknown> = {};
+  const copyString = (from: string, to = from): void => {
+    const value = resumeMeta[from];
+    if (typeof value === 'string' && value.trim()) {
+      out[to] = value.trim();
+    }
+  };
+  const copyBoolean = (key: string): void => {
+    if (typeof resumeMeta[key] === 'boolean') {
+      out[key] = resumeMeta[key];
+    }
+  };
+  const copyNumber = (key: string): void => {
+    if (typeof resumeMeta[key] === 'number' && Number.isFinite(resumeMeta[key])) {
+      out[key] = resumeMeta[key];
+    }
+  };
+  copyString('responseId');
+  copyString('restoredFromResponseId');
+  copyString('previousRequestId');
+  copyString('requestId');
+  copyString('scopeKey');
+  copyString('entryKind');
+  copyString('continuationOwner');
+  copyString('materializedMode');
+  copyBoolean('restored');
+  copyBoolean('materialized');
+  copyNumber('deltaInputItems');
+  copyNumber('toolOutputs');
+  copyNumber('incomingInputItems');
+  copyNumber('continuationDeltaItems');
+  copyNumber('fullInputItems');
+  return out;
 }
 
 export function buildResponsesConversationPortScopeForHttp(
@@ -476,27 +470,6 @@ function isProviderOwnedSubmitToolOutputsResumePayload(payload: AnyRecord): bool
   return Boolean(responseId && toolOutputs.length > 0);
 }
 
-function isRelayMaterializedSubmitToolOutputsResumePayload(
-  payload: AnyRecord,
-  resumeMeta?: Record<string, unknown>
-): boolean {
-  if (
-    !resumeMeta
-    || typeof resumeMeta !== 'object'
-    || Array.isArray(resumeMeta)
-    || resumeMeta.continuationOwner !== 'relay'
-  ) {
-    return false;
-  }
-  const previousResponseId =
-    typeof payload.previous_response_id === 'string' && payload.previous_response_id.trim()
-      ? payload.previous_response_id.trim()
-      : undefined;
-  const fullInput = Array.isArray(resumeMeta.fullInput) ? resumeMeta.fullInput : undefined;
-  const hasInputHistory = Array.isArray(payload.input) && payload.input.length > 0;
-  return Boolean(previousResponseId && hasInputHistory && fullInput && fullInput.length > 0);
-}
-
 async function buildCapturedRelayResumeRequestContextForHttp(args: {
   payload: AnyRecord;
   requestId?: string;
@@ -548,52 +521,6 @@ export async function buildResponsesRequestContextForHttp(args: {
       ? (args.payload.metadata as Record<string, unknown>)
       : undefined;
   const payloadForPersistence = stripRequestBodyMetadataForPipelineForHttp(args.payload);
-  const relayResumeFullInput =
-    Array.isArray(args.resumeMeta?.fullInput) ? args.resumeMeta.fullInput : undefined;
-  const relayResumeTools =
-    Array.isArray(args.resumeMeta?.restoredTools) ? args.resumeMeta.restoredTools : undefined;
-  const relayOwnedSubmitToolOutputsResume =
-    args.resumeMeta
-    && typeof args.resumeMeta === 'object'
-    && !Array.isArray(args.resumeMeta)
-    && args.resumeMeta.continuationOwner === 'relay'
-    && isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)
-    && Array.isArray(relayResumeFullInput)
-    && relayResumeFullInput.length > 0;
-  const relayOwnedMaterializedSubmitToolOutputsResume =
-    isRelayMaterializedSubmitToolOutputsResumePayload(payloadForPersistence, args.resumeMeta);
-  if (relayOwnedSubmitToolOutputsResume) {
-    const relayResumePayload: AnyRecord = {
-      ...payloadForPersistence,
-      ...(typeof args.resumeMeta?.responseId === 'string' && args.resumeMeta.responseId.trim()
-        ? { previous_response_id: args.resumeMeta.responseId.trim() }
-        : {}),
-      input: relayResumeFullInput,
-      ...(relayResumeTools?.length ? { tools: relayResumeTools } : {}),
-    };
-    delete relayResumePayload.response_id;
-    delete relayResumePayload.tool_outputs;
-    return buildCapturedRelayResumeRequestContextForHttp({
-      payload: relayResumePayload,
-      requestId: args.requestId,
-      metadata: args.metadata,
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup,
-    });
-  }
-  if (relayOwnedMaterializedSubmitToolOutputsResume) {
-    return buildCapturedRelayResumeRequestContextForHttp({
-      payload: {
-        ...payloadForPersistence,
-        input: relayResumeFullInput ?? [],
-        ...(relayResumeTools?.length ? { tools: relayResumeTools } : {}),
-      },
-      requestId: args.requestId,
-      metadata: args.metadata,
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup,
-    });
-  }
   if (isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)) {
     const providerOwnedInput = Array.isArray(payloadForPersistence.input) && payloadForPersistence.input.length > 0
       ? payloadForPersistence.input

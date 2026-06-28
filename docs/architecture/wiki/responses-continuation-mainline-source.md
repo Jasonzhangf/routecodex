@@ -34,6 +34,28 @@ Canonical sources:
 - SSE 只属于 `ServerRespOutbound05ClientFrame` 传输层；它只能封装已经完成的 client semantic body，禁止承载 stopless schema judgment、continuation save/restore、tool list injection、hook restore 或任何逻辑修复
 - response closeout 只允许保留 canonical `response.id` continuation truth；router/provider attempt 等 transient request ids 必须在同一 closeout 清掉
 
+## Immutable Save/Restore Interval
+
+Continuation 只负责 `/v1/responses` 协议的保存与恢复，不负责转换请求历史或响应内容。
+
+固定边界：
+
+```text
+HubRespChatProcess03Governed exit
+  -> save canonical continuation truth
+  -> immutable store interval
+  -> restore canonical continuation truth
+  -> HubReqChatProcess03Governed entry
+```
+
+在 `save` 之后到下一次 `restore` 之前，中间任何层都不得转换、清理、裁剪、重排、补偿或推导 request/response history。所有会改变历史、工具、tool output、stopless guidance、servertool state、response body 的逻辑，只能发生在 response chat process 保存之前，或 request chat process 恢复之后。
+
+`req_inbound` 只能做入口协议解析、raw evidence 捕获和非破坏性语义归一化；不得恢复历史、补工具结果、注入 stopless/servertool guidance 或重建 continuation payload。
+
+`resp_outbound` 只能做 client protocol projection / frame handoff；不得保存 continuation、修 required_action、清理历史、准备下一轮 request data 或改写 response truth。
+
+控制语义必须进入 `MetadataCenter`，不能进入 request/response payload 或 history。典型控制语义包括 continuation owner、protocol owner、routeHint、retry/provider pin、stream intent、port/group/request truth。payload、response body、normalized input、tool history mirror、request context 这类数据面对象不得写入 `MetadataCenter`。
+
 ## Standard Order
 
 ```mermaid
@@ -109,6 +131,17 @@ Round 3 loop guard:
 | `rct-05` | governed -> response governed | process normal response plus tool/stopless governance | saving pre-projection provider/raw shell |
 | `rct-06` | response governed -> canonical saved | persist finalized canonical continuation truth | save before hook/stopless projection |
 | `rct-07` | canonical saved -> released | keep canonical `response.id` continuation truth, release payload, and clear stale transient request ids | leaking request truth / metadata into next unrelated loop |
+
+## Normalization / Conversion Fix Location
+
+| problem | legal fix owner | forbidden fix owner |
+| --- | --- | --- |
+| request entry evidence capture wrong | `HubReqInbound02Standardized` / native req-inbound capture | handler-local continuation patch |
+| continuation save/restore wrong | Chat Process continuation boundary / canonical store owner | SSE, resp_outbound, req_inbound history rewrite |
+| provider raw SSE/body parse wrong | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` Rust owner | handler/SSE frame repair |
+| client JSON/SSE projection wrong | Rust response projection owner before server frame | `handler-response-sse.ts` / `responses-sse-bridge.ts` business patch |
+| tool/history/stopless semantics wrong | request/response Chat Process governance | continuation store mutation |
+| control state missing | MetadataCenter owner / runtime-control family | payload/history/provider body field injection |
 
 ## Field Lock Matrix
 

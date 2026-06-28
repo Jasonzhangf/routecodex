@@ -47,14 +47,6 @@ export declare function shouldClearResponsesConversationOnFailureForHttp(args: {
     phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json';
 }): boolean;
 export declare function resolveResponsesConversationClearReasonForHttp(phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json'): 'sse-stream-error' | 'sse-incomplete' | 'json-empty-error' | 'json-error';
-export declare function planResponsesContinuationCloseActionForHttp(args: {
-    entryEndpoint?: string;
-    requestContextPresent: boolean;
-    probe: unknown;
-}): {
-    action: 'persist_continuation' | 'clear_abandoned';
-    keepForSubmitToolOutputs: boolean;
-};
 export declare function rebindResponsesConversationRequestIdForHttp(oldId?: string, newId?: string): Promise<void>;
 export declare function clearResponsesConversationRequestIdsForHttp(args: {
     requestLabel: string;

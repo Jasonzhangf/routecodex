@@ -41,6 +41,7 @@ description: RouteCodex 调试与架构路由入口
 | servertool hook 骨架 | `references/22-servertool-hook-skeleton-workflow.md` | servertool/stopless CLI lifecycle + hook-governed 请求/响应骨架、测试闭环 |
 | servertool 开发/调试流 | `references/23-servertool-hook-dev-debug-flow.md` | servertool hook skeleton 的实施顺序、debug 切段、证据链与删 TS 前置条件 |
 | 节点合同调试法 | `references/24-node-contract-debug-method.md` | 高优先级方法：先生命周期/节点合同，再设计白盒与两端黑盒，最后才 debug/改代码 |
+| 协议/SSE/continuation 边界 | `references/25-protocol-sse-continuation-boundary.md` | `/v1/responses` continuation save/restore 不可变区、SSE transport-only、归一化/转换修复落点 |
 | 唯一功能块 | `references/30-unique-block-index.md` | 快速锁唯一功能块 |
 | owner / feature / gate | `references/40-owner-registry.md` | function map / verification map / source anchor |
 | `~/.rcc` / provider 配置 | `references/50-rcc-config-ssot.md` | runtime 配置真源、schema、排障命令 |
@@ -69,6 +70,7 @@ description: RouteCodex 调试与架构路由入口
 
 ### servertool 专项必经流
 - 只要任务涉及 `servertool / stopless / reasoning_stop / hook run / followup / reenter / schema validation / tool injection`，必须先读 `22` 再读 `23`。
+- 只要任务涉及 `/v1/responses` continuation、SSE、req_inbound/resp_outbound、history/tool loss、JSON/SSE parity，必须先读 `25`，再回 function map/mainline 锁 owner。
 - `22` 锁目标骨架、主线顺序、case matrix、黑盒闭环。
 - `23` 锁实施顺序、debug 切段、证据链、删 TS 准入条件。
 - `24` 锁高优先级方法：任何复杂 debug/设计先画生命周期，逐节点定义输入/输出/正常/错误/超预期，再补白盒节点测试和 provider/client 两端黑盒，最后才允许改代码。

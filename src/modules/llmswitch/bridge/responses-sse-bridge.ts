@@ -18,7 +18,6 @@ import {
   createChatJsonToSseConverterForHttp as createChatJsonToSseConverterForHttpImpl,
   importResponsesHandlerCoreDist as importResponsesHandlerCoreDistImpl,
   normalizeChatUsagePayloadForHttp as normalizeChatUsagePayloadForHttpImpl,
-  prepareResponsesJsonBodyForSseBridgeForHttp as prepareResponsesJsonBodyForSseBridgeForHttpImpl,
   prepareResponsesJsonClientDispatchPlanForHttp as prepareResponsesJsonClientDispatchPlanForHttpImpl,
   prepareResponsesJsonSseDispatchPlanForHttp as prepareResponsesJsonSseDispatchPlanForHttpImpl,
   requireResponsesHandlerCoreDist as requireResponsesHandlerCoreDistImpl,
@@ -45,7 +44,6 @@ export const createChatJsonToSseConverterForHttp = createChatJsonToSseConverterF
 export const createResponsesJsonToSseConverterForHttp = createResponsesJsonToSseConverterForHttpImpl;
 export const importResponsesHandlerCoreDist = importResponsesHandlerCoreDistImpl;
 export const normalizeChatUsagePayloadForHttp = normalizeChatUsagePayloadForHttpImpl;
-export const prepareResponsesJsonBodyForSseBridgeForHttp = prepareResponsesJsonBodyForSseBridgeForHttpImpl;
 export const prepareResponsesJsonClientDispatchPlanForHttp = prepareResponsesJsonClientDispatchPlanForHttpImpl;
 export const prepareResponsesJsonSseDispatchPlanForHttp = prepareResponsesJsonSseDispatchPlanForHttpImpl;
 export const requireResponsesHandlerCoreDist = requireResponsesHandlerCoreDistImpl;
@@ -54,6 +52,32 @@ export const resolveRelayResponsesClientSseStreamForHttp = resolveRelayResponses
 export const shouldDispatchResponsesSseToClientForHttp = shouldDispatchResponsesSseToClientForHttpImpl;
 export const shouldDropClientSseFrameForHttp = shouldDropClientSseFrameForHttpImpl;
 export const shouldReprojectRelayResponsesSseForHttp = shouldReprojectRelayResponsesSseForHttpImpl;
+
+export async function prepareResponsesJsonBodyForSseBridgeForHttp(args: {
+  body: unknown;
+  entryEndpoint?: string;
+  requestLabel?: string;
+}): Promise<Record<string, unknown> | null> {
+  void args.requestLabel;
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
+    return null;
+  }
+  const record = args.body as Record<string, unknown>;
+  const isResponsesEndpoint =
+    args.entryEndpoint === '/v1/responses'
+    || args.entryEndpoint === '/v1/responses.submit_tool_outputs';
+  if (
+    isResponsesEndpoint
+    && (
+      record.object === 'response'
+      || typeof record.output === 'object'
+      || typeof record.status === 'string'
+    )
+  ) {
+    return record;
+  }
+  return null;
+}
 
 export async function reprojectDirectChatToolCallStreamForHttp(args: {
   body: Record<string, unknown>;

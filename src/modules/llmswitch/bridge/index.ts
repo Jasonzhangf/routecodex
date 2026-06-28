@@ -55,7 +55,6 @@ export {
   resolveResponsesConversationClearReasonForHttp,
   shouldClearResponsesConversationOnClientCloseForHttp,
   shouldClearResponsesConversationOnFailureForHttp,
-  planResponsesContinuationCloseActionForHttp,
   normalizeResponsesClientPayloadForHttp,
   rebindResponsesConversationRequestIdForHttp,
 } from './responses-response-bridge.js';

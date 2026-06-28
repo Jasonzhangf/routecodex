@@ -3,17 +3,16 @@ import type { Readable } from 'node:stream';
  * /v1/responses response-side handler bridge surface.
  *
  * Single projection-facing bridge entry for Responses JSON projection and
- * direct-continuation closeout IO.
+ * direct-continuation response projection IO.
  */
 
 // feature_id: server.responses_response_handler_bridge_surface
-// canonical_builders: resolveResponsesRequestContextForHttp, planResponsesContinuationCloseActionForHttp, rebindResponsesConversationRequestIdForHttp, normalizeResponsesJsonBodyForHttp, buildResponsesPayloadFromChatForHttp
+// canonical_builders: resolveResponsesRequestContextForHttp, rebindResponsesConversationRequestIdForHttp, normalizeResponsesClientPayloadForHttp, buildResponsesPayloadFromChatForHttp
 
 import type { AnyRecord } from './module-loader.js';
 import {
   createResponsesJsonToSseConverter,
   importCoreDist,
-  isToolCallContinuationResponseNative,
   rebindResponsesConversationRequestId,
   requireCoreDist,
 } from './index.js';
@@ -251,43 +250,6 @@ export function resolveResponsesConversationClearReasonForHttp(
   }
 }
 
-function isDirectResponsesToolCallContinuationForHttp(args: {
-  entryEndpoint?: string;
-  responseBody: unknown;
-}): boolean {
-  if (
-    args.entryEndpoint !== '/v1/responses'
-    && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
-  ) {
-    return false;
-  }
-  return isToolCallContinuationResponseNative(args.responseBody);
-}
-
-export function planResponsesContinuationCloseActionForHttp(args: {
-  entryEndpoint?: string;
-  requestContextPresent: boolean;
-  probe: unknown;
-}): {
-  action: 'persist_continuation' | 'clear_abandoned';
-  keepForSubmitToolOutputs: boolean;
-} {
-  const isToolCallContinuation = isDirectResponsesToolCallContinuationForHttp({
-    entryEndpoint: args.entryEndpoint,
-    responseBody: args.probe,
-  });
-  if (args.requestContextPresent && isToolCallContinuation) {
-    return {
-      action: 'persist_continuation',
-      keepForSubmitToolOutputs: true,
-    };
-  }
-  return {
-    action: 'clear_abandoned',
-    keepForSubmitToolOutputs: false,
-  };
-}
-
 export async function rebindResponsesConversationRequestIdForHttp(
   oldId?: string,
   newId?: string
@@ -472,63 +434,6 @@ export function buildResponsesStreamIncompleteErrorPayloadForHttp(requestLabel: 
   });
 }
 
-export async function prepareResponsesJsonBodyForSseBridgeForHttp(args: {
-  body: unknown;
-  entryEndpoint?: string;
-  requestLabel?: string;
-}): Promise<Record<string, unknown> | null> {
-  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
-    return null;
-  }
-  const record = args.body as Record<string, unknown>;
-  const isResponsesEndpoint =
-    args.entryEndpoint === '/v1/responses'
-    || args.entryEndpoint === '/v1/responses.submit_tool_outputs';
-  if (
-    isResponsesEndpoint
-    && (
-      record.object === 'response'
-      || typeof record.output === 'object'
-      || typeof record.status === 'string'
-    )
-  ) {
-    return record;
-  }
-  if (args.entryEndpoint !== '/v1/responses' || record.object !== 'chat.completion') {
-    return null;
-  }
-  return await buildResponsesPayloadFromChatForHttp(args.body, {
-    requestId: args.requestLabel
-  }) as Record<string, unknown>;
-}
-
-export function normalizeResponsesJsonBodyForHttp(args: {
-  body: unknown;
-  entryEndpoint?: string;
-  requestLabel?: string;
-  resolveBridge?: typeof importResponsesHandlerCoreDist;
-}): Promise<unknown> {
-  if (args.entryEndpoint !== '/v1/responses') {
-    return Promise.resolve(args.body);
-  }
-  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
-    return Promise.resolve(args.body);
-  }
-  if ((args.body as Record<string, unknown>).object !== 'chat.completion') {
-    return Promise.resolve(args.body);
-  }
-  return (args.resolveBridge ?? importResponsesHandlerCoreDist)<{
-    buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown
-  }>('conversion/responses/responses-openai-bridge').then((mod) => {
-    if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
-      throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
-    }
-    return mod.buildResponsesPayloadFromChat(args.body, {
-      requestId: args.requestLabel
-    });
-  });
-}
-
 export function requireResponsesHandlerCoreDist<TModule extends object>(
   specifier: string
 ): TModule {
@@ -565,37 +470,6 @@ function readResponsesRequestModelForHttp(requestContext?: {
     return contextModel.trim();
   }
   return undefined;
-}
-
-function ensureResponsesJsonToSseRequiredFieldsForHttp(args: {
-  payload: unknown;
-  requestContext?: {
-    payload: AnyRecord;
-    context: AnyRecord;
-    sessionId?: string;
-    conversationId?: string;
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-  };
-}): unknown {
-  if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
-    return args.payload;
-  }
-  const payload = args.payload as Record<string, unknown>;
-  if (payload.object !== 'response') {
-    return args.payload;
-  }
-  if (typeof payload.model === 'string' && payload.model.trim()) {
-    return args.payload;
-  }
-  const model = readResponsesRequestModelForHttp(args.requestContext);
-  if (!model) {
-    return args.payload;
-  }
-  return {
-    ...payload,
-    model,
-  };
 }
 
 function readResponsesClientToolsRawForHttp(requestContext?: {
@@ -648,10 +522,7 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
     toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
     metadata: args.metadata,
   });
-  return ensureResponsesJsonToSseRequiredFieldsForHttp({
-    payload: stripClientVisibleMetadataDeep(projectedPayload),
-    requestContext: args.requestContext,
-  });
+  return stripClientVisibleMetadataDeep(projectedPayload);
 }
 
 export async function prepareResponsesJsonSseDispatchPlanForHttp(args: {
@@ -671,10 +542,7 @@ export async function prepareResponsesJsonSseDispatchPlanForHttp(args: {
   normalizedPayload: Record<string, unknown>;
   sanitizedPayload: Record<string, unknown>;
 }> {
-  const normalizedPayload = ensureResponsesJsonToSseRequiredFieldsForHttp({
-    payload: args.responsesPayload,
-    requestContext: args.requestContext,
-  }) as Record<string, unknown>;
+  const normalizedPayload = args.responsesPayload;
   const sanitizedPayload = stripInternalKeysDeep(normalizedPayload);
   return {
     normalizedPayload,
@@ -700,14 +568,8 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
   clientBody: unknown;
   sanitizedBody: unknown;
 }> {
-  const normalizedJsonBody = await normalizeResponsesJsonBodyForHttp({
-    body: args.body,
-    entryEndpoint: args.entryEndpoint,
-    requestLabel: args.requestLabel,
-    resolveBridge: args.resolveBridge,
-  });
   const clientBody = await normalizeResponsesClientPayloadForHttp({
-    payload: normalizedJsonBody,
+    payload: args.body,
     entryEndpoint: args.entryEndpoint,
     requestContext: args.requestContext,
     metadata: args.metadata,
