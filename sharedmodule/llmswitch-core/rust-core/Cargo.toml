@@ -4,7 +4,8 @@ members = [
   "crates/stop-message-core",
   "crates/followup-core",
   "crates/servertool-core",
-  "crates/servertool-cli"
+  "crates/servertool-cli",
+  "crates/traffic-governor-core"
 ]
 resolver = "2"
 
