@@ -107,12 +107,8 @@ fn strip_html_tags(text: &str) -> String {
     }
 }
 
-fn resolve_c4m_instruction_max_len() -> Option<usize> {
-    const CANDIDATES: [&str; 3] = [
-        "ROUTECODEX_C4M_INSTRUCTIONS_MAX",
-        "RCC_C4M_INSTRUCTIONS_MAX",
-        "ROUTECODEX_COMPAT_INSTRUCTIONS_MAX",
-    ];
+fn resolve_compat_instruction_max_len() -> Option<usize> {
+    const CANDIDATES: [&str; 1] = ["ROUTECODEX_COMPAT_INSTRUCTIONS_MAX"];
     for env_name in CANDIDATES {
         let Ok(raw) = std::env::var(env_name) else {
             continue;
@@ -142,7 +138,7 @@ pub(crate) fn apply_responses_instructions_to_input(root: &mut Map<String, Value
     };
 
     let mut text = strip_html_tags(&raw_text);
-    if let Some(max_len) = resolve_c4m_instruction_max_len() {
+    if let Some(max_len) = resolve_compat_instruction_max_len() {
         if text.chars().count() > max_len {
             text = truncate_by_chars(&text, max_len);
         }
@@ -173,21 +169,6 @@ pub(crate) fn apply_responses_instructions_to_input(root: &mut Map<String, Value
         Value::Array(vec![Value::Object(content)]),
     );
     input_array.insert(0, Value::Object(message));
-}
-
-// feature_id: responses.token_limit_field_normalization
-pub(crate) fn apply_responses_token_limit_field_normalization(root: &mut Map<String, Value>) {
-    root.remove("max_tokens");
-    root.remove("maxTokens");
-    root.remove("max_output_tokens");
-    root.remove("maxOutputTokens");
-}
-
-// feature_id: responses.c4m_request_compat
-pub(crate) fn apply_responses_c4m_request_compat(root: &mut Map<String, Value>) {
-    normalize_responses_function_tools(root);
-    apply_responses_token_limit_field_normalization(root);
-    apply_responses_instructions_to_input(root);
 }
 
 // feature_id: responses.crs_request_compat

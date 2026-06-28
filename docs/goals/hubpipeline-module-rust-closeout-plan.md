@@ -322,7 +322,7 @@
 #### 必收内容
 
 - provider semantic outbound payload
-- `responses:c4m` / `responses:crs` compat
+- `responses:crs` compat
 - tool normalization / parameters normalization
 - `instructions -> input` normalization
 

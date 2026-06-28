@@ -154,16 +154,6 @@ export function enforceLmstudioResponsesFcToolCallIdsWithNative(
   ]);
 }
 
-export function applyAnthropicClaudeCodeUserIdWithNative(
-  payload: Record<string, unknown>,
-  adapterContext?: Record<string, unknown>,
-): Record<string, unknown> {
-  return invokeRecordCapability('applyAnthropicClaudeCodeUserIdJson', [
-    payload,
-    adapterContext ?? {},
-  ]);
-}
-
 export function applyGeminiWebSearchRequestCompatWithNative(
   payload: Record<string, unknown>,
   adapterContext?: Record<string, unknown>,

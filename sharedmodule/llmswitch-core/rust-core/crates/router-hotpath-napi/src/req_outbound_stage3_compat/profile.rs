@@ -32,7 +32,6 @@ pub(super) fn build_compat_result(payload: Value, profile: Option<String>) -> Co
         payload: strip_top_level_provider_internal_fields(payload),
         applied_profile: profile,
         native_applied: true,
-        rate_limit_detected: None,
     }
 }
 
@@ -40,29 +39,12 @@ fn profile_matches(profile: &str, expected: &str) -> bool {
     profile.trim().eq_ignore_ascii_case(expected)
 }
 
-pub(super) fn is_claude_code_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:claude-code")
-        || profile_matches(profile, "anthropic:claude-code")
-}
-
-pub(super) fn is_responses_c4m_profile(profile: &str) -> bool {
-    profile_matches(profile, "responses:c4m")
-}
-
 pub(super) fn is_responses_crs_profile(profile: &str) -> bool {
     profile_matches(profile, "responses:crs")
 }
 
-pub(super) fn is_responses_output2choices_profile(profile: &str) -> bool {
-    profile_matches(profile, "responses:output2choices-test")
-}
-
 pub(super) fn is_lmstudio_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:lmstudio")
-}
-
-pub(super) fn is_deepseek_web_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:deepseek-web")
 }
 
 pub(super) fn is_gemini_profile(profile: &str) -> bool {
@@ -76,10 +58,6 @@ pub(super) fn is_glm_profile(profile: &str) -> bool {
 pub(super) fn is_single_tool_call_history_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:single-tool-call-history")
         || profile_matches(profile, "openai-chat:single-tool-call-history")
-}
-
-pub(super) fn has_request_stage(profile: &str) -> bool {
-    !is_responses_output2choices_profile(profile)
 }
 
 pub(super) fn provider_protocol_matches(protocol: Option<&String>, expected: &str) -> bool {

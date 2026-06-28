@@ -1065,11 +1065,11 @@ owners:
       - src/server/runtime/http-server/executor/retry-engine.ts
       - src/server/runtime/http-server/executor-provider.ts
       - src/server/runtime/http-server/executor/servertool-followup-dispatch.ts
-      - src/server/runtime/http-server/provider-traffic-governor.ts
+      - src/modules/traffic-governor/index.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
-      - tests/server/runtime/http-server/provider-traffic-governor.spec.ts
+      - tests/server/runtime/request-executor.single-attempt.spec.ts
       - tests/red-tests/server_module_help_contract.test.ts
       - docs
     forbidden_paths:
@@ -1079,7 +1079,7 @@ owners:
       - sharedmodule/llmswitch-core/src/servertool
     required_tests:
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
-      - tests/server/runtime/http-server/provider-traffic-governor.spec.ts
+      - tests/server/runtime/request-executor.single-attempt.spec.ts
       - tests/red-tests/server_module_help_contract.test.ts
       - tests/sharedmodule/server-module-help.live.spec.ts
     required_gates:
@@ -1116,7 +1116,6 @@ owners:
     required_tests:
       - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
-      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
     required_gates:
@@ -1296,7 +1295,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
-      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
       - docs
     forbidden_paths:
@@ -1305,7 +1303,6 @@ owners:
       - src/client
     required_tests:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
-      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
     required_gates:
       - npm run verify:vr-no-ts-runtime
@@ -1446,7 +1443,6 @@ owners:
     required_tests:
       - tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
-      - tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts
       - tests/server/handlers/responses-handler.routing-empty-pool.spec.ts
     required_gates:
       - npm run verify:vr-no-ts-runtime
@@ -1736,32 +1732,6 @@ owners:
       - "Current implementation also merges center-backed `provider_observation` from pipeline-result/request-local carriers; `target` / `compatibilityProfile` must not be revived as flat request metadata fields."
       - "Effective relay `/v1/responses` provider pin must be proven on the request-executor path before Hub execution; handler/bridge request shells alone are not sufficient owner evidence for `runtime_control.retryProviderKey`."
       - "Single-use `runtime_control.preselectedRoute` is currently written by router-direct relay handoff and released here on retry-attempt preparation; TS request-stage transport may carry it, but must not become its semantic owner."
-
-  - feature_id: hub.metadata_center_servertool_context
-    status: active
-    summary: "servertool adapter context projection from request-local metadata center"
-    owner_kind: transitional
-    owner_scope: "servertool adapter context projection from metadata-center request truth and captured origin request"
-    owner_module: src/server/runtime/http-server/executor/servertool-adapter-context.ts
-    canonical_types:
-      - MetaResp07ServertoolContextProjected
-    canonical_builders:
-      - buildServerToolAdapterContext
-    allowed_paths:
-      - src/server/runtime/http-server/executor/servertool-adapter-context.ts
-      - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
-      - docs
-    forbidden_paths:
-      - src/providers/core/runtime
-      - src/server/handlers
-      - src/client
-    required_tests:
-      - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
-    required_gates:
-      - npm run verify:function-map-compile-gate
-    migration_target: rust
-    notes:
-      - "This owner may project request-local truth into servertool followup adapter context, but must not grow independent continuation/session truth."
 
   - feature_id: hub.runtime_ingress_bridge
     status: active
@@ -2601,62 +2571,6 @@ owners:
     notes:
       - "`instructions -> input[0]=system/input_text` plus HTML strip and truncation must stay in Rust only; provider/server TS must not reconstruct it."
 
-  - feature_id: responses.token_limit_field_normalization
-    status: active
-    summary: "Responses c4m token-limit compatibility fields must strip in Rust only"
-    owner_kind: rust_ssot
-    owner_scope: "Responses c4m token-limit compatibility fields must strip in Rust only"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-    canonical_types:
-      - HubReqOutbound05ProviderSemantic
-      - ProviderReqOutbound06WirePayload
-    canonical_builders:
-      - apply_responses_token_limit_field_normalization
-    allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
-    forbidden_paths:
-      - src/providers/core/runtime
-      - src/server/runtime/http-server
-      - src/modules/llmswitch
-    required_tests:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
-    required_gates:
-      - npm run verify:responses-token-limit-field-normalization-rust-only
-    migration_target: rust
-    notes:
-      - "`max_tokens/maxTokens/max_output_tokens/maxOutputTokens` stripping must stay in Rust only; provider/server TS must not sanitize these fields."
-
-  - feature_id: responses.c4m_request_compat
-    status: active
-    summary: "responses:c4m request compat must normalize instructions and token-limit fields only in Rust"
-    owner_kind: rust_ssot
-    owner_scope: "responses:c4m request compat must normalize instructions and token-limit fields only in Rust"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
-    canonical_types:
-      - HubReqOutbound05ProviderSemantic
-      - ProviderReqOutbound06WirePayload
-    canonical_builders:
-      - apply_responses_c4m_request_compat
-    allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
-    forbidden_paths:
-      - src/providers/core/runtime
-      - src/server/runtime/http-server
-      - src/modules/llmswitch
-    required_tests:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
-    required_gates:
-      - npm run verify:responses-c4m-request-compat-rust-only
-    migration_target: rust
-    notes:
-      - "Shared token-limit stripping truth lives in `responses.token_limit_field_normalization`."
-      - "Shared instructions lift truth lives in `responses.instructions_to_input_normalization`."
-      - "Shared function tool normalization truth lives in `responses.function_tool_normalization`."
-      - "Shared parameters normalization truth lives in `responses.tool_parameters_normalization`."
   - feature_id: responses.crs_request_compat
     status: active
     summary: "responses:crs request compat must strip temperature only in Rust"
@@ -2953,36 +2867,6 @@ owners:
     notes:
       - "Cross-restart cooldown persistence is disabled; TS HealthManagerModule is jsonl persistence bridge only and must not redefine cooldown/runtime semantics."
       - "Runtime cooldown ladder truth stays in Rust health.rs; this TS owner only manages local snapshot persistence and accessors."
-  - feature_id: manager.token_runtime
-    status: active
-    summary: "OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin"
-    owner_kind: ts_runtime_owner
-    owner_scope: "OAuth token daemon lifecycle / leader-lock / history-store managed by TS token-daemon as the unique owner; no Rust twin"
-    owner_module: src/token-daemon
-    canonical_types:
-      - TokenManagerLeaderInfo
-      - TokenHistoryStore
-    canonical_builders:
-      - tryAcquireTokenManagerLeader
-      - releaseTokenManagerLeader
-    allowed_paths:
-      - src/token-daemon
-      - src/manager/modules/token
-    forbidden_paths:
-      - src/server/runtime/http-server/daemon-admin
-      - src/server/runtime/http-server/executor
-      - src/providers/core/runtime
-      - src/manager/modules/routing
-      - src/manager/modules/health
-    required_tests:
-      - tests/token-daemon/leader-lock.spec.ts
-      - tests/token-daemon/token-daemon.refresh-ahead.spec.ts
-    required_gates:
-      - npm run verify:architecture-ci
-    migration_target: ts
-    notes:
-      - "token-daemon is the unique owner of token leader-lock + history-store semantics."
-      - "Must not be co-located with quota/health/routing; forbids cross-module mutation."
   - feature_id: daemon_admin.command_handlers
     status: active
     summary: "daemon-admin HTTP surface (auth/credentials/ports/providers/restart/stats/status) is projection shell over manager/llmswitch-core truth"
@@ -3000,7 +2884,6 @@ owners:
       - registerStatsRoutes
       - registerStatusRoutes
       - registerPortsRoutes
-      - registerCredentialRoutes
     allowed_paths:
       - src/server/runtime/http-server/daemon-admin
       - src/server/runtime/http-server/daemon-admin-routes.ts
@@ -3055,13 +2938,11 @@ owners:
       - writeServerPidCache
       - readServerPidCache
       - unlinkServerPidCacheBestEffort
-      - resolveTokenDaemonPidPath
     allowed_paths:
       - src/utils/server-runtime-pid.ts
       - src/cli/commands/start.ts
       - src/index.ts
       - src/cli.ts
-      - src/commands/token-daemon.ts
       - scripts/cleanup-stale-server-pids.mjs
     forbidden_paths:
       - src/providers
@@ -3571,7 +3452,6 @@ owners:
       - createCodeCommand
       - createCodexCommand
       - createClaudeCommand
-      - createCamoufoxCommand
       - createGuardianDaemonCommand
       - createInitCommand
       - createRestartCommand

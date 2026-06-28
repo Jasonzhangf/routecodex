@@ -3,6 +3,8 @@ import type { JsonObject } from '../../types/json.js';
 import type { NativeReqOutboundCompatAdapterContextInput } from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 import { readRuntimeControlFromBoundMetadataCenter } from '../../../../servertool/metadata-center-carrier.js';
 
+// Thin TS bridge only carries metadata center bound context into native compat.
+
 export function buildNativeReqOutboundCompatAdapterContext(
   adapterContext?: AdapterContext
 ): NativeReqOutboundCompatAdapterContextInput {
@@ -52,7 +54,6 @@ export function buildNativeReqOutboundCompatAdapterContext(
     routeId: readString('routeId') ?? adapterContext?.routeId,
     capturedChatRequest: readRecord('capturedChatRequest') as JsonObject | undefined,
     deepseek: readRecord('deepseek'),
-    claudeCode: readRecord('claudeCode'),
     anthropicThinkingConfig: readRecord('anthropicThinkingConfig'),
     anthropicThinking: readString('anthropicThinking'),
     anthropicThinkingBudgets: readRecord('anthropicThinkingBudgets'),

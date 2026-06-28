@@ -1,17 +1,14 @@
-use super::claude_code::apply_anthropic_claude_code_system_prompt_compat;
-use super::deepseek_web::apply_deepseek_web_request_compat;
 use super::gemini::apply_gemini_request_compat;
 use super::glm::apply_glm_request_compat;
 use super::lmstudio::apply_lmstudio_request_compat;
 use super::profile::{
-    build_compat_result, has_request_stage, is_claude_code_profile, is_deepseek_web_profile,
-    is_gemini_profile, is_glm_profile, is_lmstudio_profile, is_responses_c4m_profile,
+    build_compat_result, is_gemini_profile, is_glm_profile, is_lmstudio_profile,
     is_responses_crs_profile, is_single_tool_call_history_profile, pick_compat_profile,
     provider_protocol_matches,
 };
 use super::responses::{
-    apply_responses_c4m_request_compat, apply_responses_crs_request_compat,
-    normalize_responses_function_tools, strip_responses_reasoning_content_for_provider_wire,
+    apply_responses_crs_request_compat, normalize_responses_function_tools,
+    strip_responses_reasoning_content_for_provider_wire,
 };
 use super::single_tool_call_history::split_parallel_tool_call_assistant_history;
 use super::thinking_history::{
@@ -123,42 +120,6 @@ pub fn run_req_outbound_stage3_compat(
     }
 
     if let Some(profile_id) = profile.as_deref() {
-        if is_claude_code_profile(profile_id) {
-            if provider_protocol_matches(
-                adapter_context.provider_protocol.as_ref(),
-                "anthropic-messages",
-            ) {
-                if let Some(root) = payload.as_object_mut() {
-                    apply_anthropic_claude_code_system_prompt_compat(root, &adapter_context);
-                }
-                return Ok(CompatResult {
-                    payload,
-                    applied_profile: Some(profile_id.to_string()),
-                    native_applied: true,
-                    rate_limit_detected: None,
-                });
-            }
-            return Ok(build_compat_result(payload, None));
-        }
-
-        if is_responses_c4m_profile(profile_id) {
-            if provider_protocol_matches(
-                adapter_context.provider_protocol.as_ref(),
-                "openai-responses",
-            ) {
-                if let Some(root) = payload.as_object_mut() {
-                    apply_responses_c4m_request_compat(root);
-                }
-                return Ok(CompatResult {
-                    payload,
-                    applied_profile: Some(profile_id.to_string()),
-                    native_applied: true,
-                    rate_limit_detected: None,
-                });
-            }
-            return Ok(build_compat_result(payload, None));
-        }
-
         if is_responses_crs_profile(profile_id) {
             if provider_protocol_matches(
                 adapter_context.provider_protocol.as_ref(),
@@ -171,7 +132,6 @@ pub fn run_req_outbound_stage3_compat(
                     payload,
                     applied_profile: Some(profile_id.to_string()),
                     native_applied: true,
-                    rate_limit_detected: None,
                 });
             }
             return Ok(build_compat_result(payload, None));
@@ -185,7 +145,6 @@ pub fn run_req_outbound_stage3_compat(
                 payload,
                 applied_profile: Some(profile_id.to_string()),
                 native_applied: true,
-                rate_limit_detected: None,
             });
         }
 
@@ -197,20 +156,6 @@ pub fn run_req_outbound_stage3_compat(
                     payload,
                     applied_profile: Some(profile_id.to_string()),
                     native_applied: true,
-                    rate_limit_detected: None,
-                });
-            }
-            return Ok(build_compat_result(payload, None));
-        }
-
-        if is_deepseek_web_profile(profile_id) {
-            if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
-            {
-                return Ok(CompatResult {
-                    payload: apply_deepseek_web_request_compat(payload, &adapter_context),
-                    applied_profile: Some(profile_id.to_string()),
-                    native_applied: true,
-                    rate_limit_detected: None,
                 });
             }
             return Ok(build_compat_result(payload, None));
@@ -223,7 +168,6 @@ pub fn run_req_outbound_stage3_compat(
                     payload: apply_gemini_request_compat(payload, &adapter_context),
                     applied_profile: Some(profile_id.to_string()),
                     native_applied: true,
-                    rate_limit_detected: None,
                 });
             }
             return Ok(build_compat_result(payload, None));
@@ -239,15 +183,11 @@ pub fn run_req_outbound_stage3_compat(
                     payload,
                     applied_profile: Some(profile_id.to_string()),
                     native_applied: true,
-                    rate_limit_detected: None,
                 });
             }
             return Ok(build_compat_result(payload, None));
         }
 
-        if !has_request_stage(profile_id) {
-            return Ok(build_compat_result(payload, None));
-        }
     }
 
     Ok(build_compat_result(payload, None))

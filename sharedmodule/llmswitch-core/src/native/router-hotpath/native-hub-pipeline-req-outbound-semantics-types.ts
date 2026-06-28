@@ -16,7 +16,6 @@ export interface NativeReqOutboundCompatAdapterContextInput {
   routeId?: string;
   capturedChatRequest?: JsonObject;
   deepseek?: Record<string, unknown>;
-  claudeCode?: Record<string, unknown>;
   anthropicThinkingConfig?: Record<string, unknown>;
   anthropicThinking?: string;
   anthropicThinkingBudgets?: Record<string, unknown>;
@@ -41,7 +40,6 @@ export interface NativeReqOutboundStage3CompatOutput {
   payload: JsonObject;
   appliedProfile?: string;
   nativeApplied: boolean;
-  rateLimitDetected?: boolean;
 }
 
 export interface NativeRespInboundStage3CompatInput {

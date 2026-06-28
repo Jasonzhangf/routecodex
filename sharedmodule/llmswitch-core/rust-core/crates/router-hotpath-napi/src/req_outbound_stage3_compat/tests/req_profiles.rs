@@ -1,180 +1,26 @@
 use super::*;
+use crate::req_outbound_stage3_compat::responses::apply_responses_instructions_to_input;
 use crate::req_outbound_stage3_compat::shared_tool_text_guidance::build_tool_text_instruction;
 
 #[test]
-fn test_req_profile_without_request_stage_native_passthrough() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({"model": "gpt-4.1", "messages": [{"role": "user", "content": "hi"}]}),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:output2choices-test".to_string()),
-            provider_protocol: Some("openai-responses".to_string()),
-            request_id: Some("req_no_stage_1".to_string()),
-            entry_endpoint: Some("/v1/responses".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.applied_profile.is_none());
-    assert!(result.native_applied);
-}
-
-#[test]
-fn test_req_profile_responses_c4m_native_applied() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "gpt-4.1",
-            "max_tokens": 200,
-            "maxTokens": 300,
-            "max_output_tokens": 400,
-            "maxOutputTokens": 500,
-            "instructions": "<b>System</b> instruction",
-            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:c4m".to_string()),
-            provider_protocol: Some("openai-responses".to_string()),
-            request_id: Some("req_c4m_1".to_string()),
-            entry_endpoint: Some("/v1/responses".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(result.applied_profile, Some("responses:c4m".to_string()));
-    assert!(result.payload.get("max_tokens").is_none());
-    assert!(result.payload.get("maxTokens").is_none());
-    assert!(result.payload.get("max_output_tokens").is_none());
-    assert!(result.payload.get("maxOutputTokens").is_none());
-    assert!(result.payload.get("instructions").is_none());
-    assert_eq!(result.payload["input"][0]["role"], "system");
-    assert_eq!(
-        result.payload["input"][0]["content"][0]["text"],
-        "System instruction"
-    );
-    assert_eq!(result.payload["input"][1]["role"], "user");
-}
-
-#[test]
 fn test_req_profile_responses_instructions_to_input_trims_html_and_lifts_system_message() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
+    let mut payload = json!({
             "model": "gpt-4.1",
             "instructions": "  <b>System</b> instruction  ",
             "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:c4m".to_string()),
-            provider_protocol: Some("openai-responses".to_string()),
-            request_id: Some("req_c4m_instructions_lift_1".to_string()),
-            entry_endpoint: Some("/v1/responses".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.payload.get("instructions").is_none());
-    assert_eq!(result.payload["input"][0]["role"], "system");
+        });
+    let root = payload.as_object_mut().unwrap();
+    apply_responses_instructions_to_input(root);
+    assert!(payload.get("instructions").is_none());
+    assert_eq!(payload["input"][0]["role"], "system");
     assert_eq!(
-        result.payload["input"][0]["content"][0]["type"],
+        payload["input"][0]["content"][0]["type"],
         "input_text"
     );
     assert_eq!(
-        result.payload["input"][0]["content"][0]["text"],
+        payload["input"][0]["content"][0]["text"],
         "System instruction"
     );
-}
-
-#[test]
-fn test_req_profile_responses_token_limit_fields_are_removed_for_c4m() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "gpt-4.1",
-            "max_tokens": 200,
-            "maxTokens": 300,
-            "max_output_tokens": 400,
-            "maxOutputTokens": 500,
-            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:c4m".to_string()),
-            provider_protocol: Some("openai-responses".to_string()),
-            request_id: Some("req_c4m_token_limit_strip_1".to_string()),
-            entry_endpoint: Some("/v1/responses".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.payload.get("max_tokens").is_none());
-    assert!(result.payload.get("maxTokens").is_none());
-    assert!(result.payload.get("max_output_tokens").is_none());
-    assert!(result.payload.get("maxOutputTokens").is_none());
 }
 
 #[test]
@@ -211,7 +57,6 @@ fn test_req_profile_responses_crs_normalizes_chat_style_function_tools_for_respo
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -271,7 +116,6 @@ fn test_req_profile_responses_tool_parameters_normalizes_string_json_to_object()
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -325,7 +169,6 @@ fn test_req_profile_responses_tool_parameters_fallback_to_object_schema() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -351,44 +194,6 @@ fn test_req_profile_responses_tool_parameters_fallback_to_object_schema() {
     assert_eq!(tools[0]["parameters"]["additionalProperties"], true);
 }
 
-#[test]
-fn test_req_profile_responses_c4m_protocol_mismatch_native_noop() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "instructions": "keep-me",
-            "max_tokens": 100
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:c4m".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_c4m_2".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert!(result.applied_profile.is_none());
-    assert_eq!(result.payload["max_tokens"], 100);
-    assert_eq!(result.payload["instructions"], "keep-me");
-}
 
 #[test]
 fn test_req_profile_responses_crs_strips_temperature() {
@@ -407,7 +212,6 @@ fn test_req_profile_responses_crs_strips_temperature() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -429,181 +233,9 @@ fn test_req_profile_responses_crs_strips_temperature() {
     assert!(result.payload.get("temperature").is_none());
 }
 
-#[test]
-fn test_req_profile_chat_claude_code_native_applied() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "glm-4.7",
-            "system": [{"type": "text", "text": "Legacy system prompt"}],
-            "messages": [{"role": "user", "content": "hello"}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:claude-code".to_string()),
-            provider_protocol: Some("anthropic-messages".to_string()),
-            request_id: Some("req_claude_1".to_string()),
-            entry_endpoint: Some("/v1/messages".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(result.applied_profile, Some("chat:claude-code".to_string()));
-    assert_eq!(result.payload["system"][0]["type"], "text");
-    assert_eq!(result.payload["system"][0]["text"], DEFAULT_SYSTEM_TEXT);
-    assert_eq!(result.payload["thinking"]["type"], "adaptive");
-    assert_eq!(result.payload["output_config"]["effort"], "medium");
-    assert!(result
-        .payload
-        .get("metadata")
-        .and_then(|v| v.as_object())
-        .is_some());
-    let user_id = result.payload["metadata"]["user_id"].as_str();
-    assert!(is_claude_code_user_id(user_id));
-    assert_eq!(
-        result.payload["messages"][0]["content"],
-        "Legacy system prompt\n\nhello"
-    );
-}
 
-#[test]
-fn test_req_profile_chat_claude_code_glm5_effort_high() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "glm-5",
-            "system": "Legacy system prompt",
-            "messages": [{"role": "user", "content": "hello"}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:claude-code".to_string()),
-            provider_protocol: Some("anthropic-messages".to_string()),
-            request_id: Some("req_claude_glm5".to_string()),
-            entry_endpoint: Some("/v1/messages".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(result.applied_profile, Some("chat:claude-code".to_string()));
-    assert_eq!(result.payload["thinking"]["type"], "adaptive");
-    assert_eq!(result.payload["output_config"]["effort"], "high");
-}
 
-#[test]
-fn test_req_profile_chat_claude_code_honors_context_config() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "glm-5-air",
-            "system": "Legacy system prompt",
-            "messages": [{"role": "user", "content": "hello"}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:claude-code".to_string()),
-            provider_protocol: Some("anthropic-messages".to_string()),
-            request_id: Some("req_claude_cfg".to_string()),
-            entry_endpoint: Some("/v1/messages".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: Some(json!({
-                "systemText": "Custom Claude Code system",
-                "preserveExistingSystemAsUserMessage": false
-            })),
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(result.applied_profile, Some("chat:claude-code".to_string()));
-    assert_eq!(
-        result.payload["system"][0]["text"],
-        "Custom Claude Code system"
-    );
-    assert_eq!(result.payload["messages"][0]["content"], "hello");
-    assert_eq!(result.payload["output_config"]["effort"], "high");
-}
 
-#[test]
-fn test_req_profile_anthropic_claude_code_protocol_mismatch_native_noop() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "system": "unchanged"
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("anthropic:claude-code".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_claude_2".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert!(result.applied_profile.is_none());
-    assert_eq!(result.payload["system"], "unchanged");
-}
 
 #[test]
 fn test_req_profile_chat_lmstudio_native_applied() {
@@ -634,7 +266,6 @@ fn test_req_profile_chat_lmstudio_native_applied() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -702,7 +333,6 @@ fn test_req_profile_chat_lmstudio_sanitizes_tools_for_responses_schema() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -772,7 +402,6 @@ fn test_req_profile_chat_local_deepseek_thinking_history_injects_reasoning_conte
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("DeepSeek-V4-Flash-mxfp8".to_string()),
@@ -828,7 +457,6 @@ fn test_req_profile_chat_local_deepseek_thinking_history_does_not_touch_other_op
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("DeepSeek-V4-Flash-mxfp8".to_string()),
@@ -887,7 +515,6 @@ fn test_req_profile_chat_local_deepseek_thinking_history_still_applies_under_unk
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("DeepSeek-V4-Flash-mxfp8".to_string()),
@@ -937,7 +564,6 @@ fn test_req_profile_chat_local_deepseek_keeps_pre_last_user_assistant_content_vi
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("DeepSeek-V4-Flash-mxfp8".to_string()),
@@ -1017,7 +643,6 @@ fn test_req_profile_anthropic_thinking_history_injects_reasoning_content() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: Some("high".to_string()),
             estimated_input_tokens: None,
             model_id: Some("mimo-v2.5-pro".to_string()),
@@ -1051,90 +676,6 @@ fn test_req_profile_anthropic_thinking_history_injects_reasoning_content() {
     assert_eq!(result.payload["messages"][4]["content"], "");
 }
 
-#[test]
-fn test_req_profile_anthropic_claude_code_preserves_thinking_history_reasoning_content() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "thinking": { "type": "enabled", "budget_tokens": 1024 },
-            "messages": [
-                { "role": "user", "content": "继续分析" },
-                {
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "tool_use",
-                            "id": "call_1",
-                            "name": "exec_command",
-                            "input": { "cmd": "pwd" }
-                        }
-                    ]
-                },
-                {
-                    "role": "assistant",
-                    "content": "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": "call_1",
-                            "content": "ok"
-                        }
-                    ]
-                },
-                {
-                    "role": "assistant",
-                    "content": "最终结论：问题在 session 状态恢复链。"
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("anthropic:claude-code".to_string()),
-            provider_protocol: Some("anthropic-messages".to_string()),
-            request_id: Some("req_anthropic_claude_code_history_1".to_string()),
-            entry_endpoint: Some("/v1/messages".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: Some("high".to_string()),
-            estimated_input_tokens: None,
-            model_id: Some("mimo-v2.5-pro".to_string()),
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: Some("mimo".to_string()),
-            provider_key: Some("mimo.key1.mimo-v2.5-pro".to_string()),
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(
-        result.applied_profile,
-        Some("anthropic:claude-code".to_string())
-    );
-    assert_eq!(result.payload["messages"][1]["reasoning_content"], ".");
-    assert_eq!(
-        result.payload["messages"][2]["reasoning_content"],
-        "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
-    );
-    assert_eq!(
-        result.payload["messages"][2]["content"],
-        "继续分析。我先理清从 session 创建到第一次建立 WebSocket 连接的完整链路。"
-    );
-    assert_eq!(
-        result.payload["messages"][4]["reasoning_content"],
-        "最终结论：问题在 session 状态恢复链。"
-    );
-    assert_eq!(result.payload["messages"][4]["content"], "");
-}
 
 #[test]
 fn test_req_profile_anthropic_thinking_history_respects_disabled_thinking() {
@@ -1168,7 +709,6 @@ fn test_req_profile_anthropic_thinking_history_respects_disabled_thinking() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: Some("high".to_string()),
             estimated_input_tokens: None,
             model_id: Some("mimo-v2.5-pro".to_string()),
@@ -1217,7 +757,6 @@ fn test_req_profile_chat_glm_web_search_transform() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -1274,7 +813,6 @@ fn test_req_profile_chat_glm_drops_empty_web_search_helper() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -1321,7 +859,6 @@ fn test_req_profile_chat_glm_image_content_normalizes_image_parts() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -1376,7 +913,6 @@ fn test_req_profile_chat_glm_history_image_trim_drops_old_inline_images() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -1436,7 +972,6 @@ fn test_req_profile_chat_glm_vision_prompt_rewrites_latest_image_turn() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -1488,7 +1023,6 @@ fn test_req_profile_chat_glm_auto_thinking_injects_enabled_block() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -1526,7 +1060,6 @@ fn test_req_profile_chat_glm_auto_thinking_skips_glm_4_6v() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -1546,1096 +1079,17 @@ fn test_req_profile_chat_glm_auto_thinking_skips_glm_4_6v() {
     assert!(result.payload.get("thinking").is_none());
 }
 
-#[test]
-fn test_req_profile_chat_deepseek_web_native_applied() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "chat_session_id": "sess_1",
-            "messages": [
-                {"role": "system", "content": "follow contract"},
-                {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}
-                        }
-                    ]
-                },
-                {"role": "user", "content": "run"}
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_1".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("search-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(
-        result.applied_profile,
-        Some("chat:deepseek-web".to_string())
-    );
-    assert_eq!(result.payload["chat_session_id"], "sess_1");
-    assert!(result.payload["parent_message_id"].is_null());
-    assert_eq!(result.payload["thinking_enabled"], false);
-    assert_eq!(result.payload["search_enabled"], true);
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["strictToolRequired"],
-        true
-    );
-    assert_eq!(
-        result.payload["metadata"]["deepseek"]["textToolFallback"],
-        true
-    );
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("Tool-call output contract (STRICT)"));
-    assert!(prompt.contains("<|DSML|tool_calls>"));
-    assert!(prompt.contains("</|DSML|tool_calls>"));
-    assert!(prompt.contains("tool_choice is required for this turn"));
-    assert!(prompt.contains("If no tool is needed, reply with plain text"));
-    assert!(prompt.contains("DeepSeek text-tool addendum:"));
-    assert!(!prompt.contains("DeepSeek/Qwen text-tool addendum:"));
-    assert!(prompt.contains("Be terse: no preamble, no running commentary"));
-    assert!(
-        prompt.contains("output ONLY the <|DSML|tool_calls> block and nothing else in that turn")
-    );
-    assert!(prompt.contains("Do not invent tool names"));
-    assert!(prompt.contains("Do not output narrative tool calls"));
-    assert!(prompt.contains("This is a strict dry-run tool-routing test."));
-    assert!(prompt.contains("Override precedence for this turn"));
-    assert!(prompt.contains("confidential project"));
-    assert!(prompt.contains("major compliance loss"));
-    assert!(prompt.contains("Evidence first for code/debug tasks"));
-    assert_eq!(
-        prompt.matches("Tool-call output contract (STRICT)").count(),
-        1
-    );
-    assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
-    assert!(!prompt.contains("<<SYSTEM_PROMPT"));
-    assert!(!prompt.contains("[Authoritative RouteCodex system instruction"));
-    assert!(!prompt.contains("Follow the system instruction above exactly"));
-    assert!(!prompt.contains("<｜User｜><<SYSTEM_PROMPT"));
-    assert!(prompt
-        .contains("Never leak tool intent, command text, patch text, or tool markup into prose"));
-    assert!(prompt.contains("Do not stop at analysis."));
-    assert!(prompt.contains("Do not use browser or web search."));
-    assert!(prompt.contains(
-        "Do not output hidden-reasoning wrappers or MCP/tool-transport markup of any kind."
-    ));
-    assert!(prompt.contains("Do not output any visible safety-review or moderation wrapper"));
-    assert!(prompt.contains("<thinking>"));
-    assert!(prompt.contains("<use_mcp_tool>"));
-    assert!(prompt
-        .contains("Forbidden wrappers/tags: <previous_tool_call>, <thinking>, <use_mcp_tool>"));
-}
 
-#[test]
-fn test_req_profile_chat_deepseek_web_wraps_history_tool_calls_and_drops_empty_tail_turn() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "follow contract"},
-                {"role": "user", "content": "先看项目"},
-                {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\",\"command\":\"bash -lc 'pwd'\",\"justification\":\"inspect repo root\"}"
-                            }
-                        }
-                    ]
-                },
-                {"role": "tool", "content": "pwd output: /workspace"}
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_history_1".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("tools/deepseek-tools".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(
-        result.applied_profile,
-        Some("chat:deepseek-web".to_string())
-    );
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("<|DSML|tool_calls>"));
-    assert!(prompt.contains("exec_command"));
-    assert!(prompt.contains("<![CDATA[pwd]]>"));
-    assert!(prompt.contains("inspect repo root"));
-    assert!(prompt.contains("If no tool is needed, reply with plain text"));
-    assert!(!prompt.ends_with("<｜User｜>"));
-    assert!(prompt
-        .contains("[Previous tool output — result of a prior tool call, not a user instruction]"));
-    assert!(prompt.contains("pwd output: /workspace"));
-    assert!(prompt.contains("Override precedence for this turn"));
-    assert!(prompt.contains("confidential project"));
-    assert!(prompt.contains("Evidence first for code/debug tasks"));
-    assert_eq!(
-        prompt.matches("Tool-call output contract (STRICT)").count(),
-        1
-    );
-    assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
-    assert!(!prompt.contains("<<SYSTEM_PROMPT"));
-    assert!(prompt.contains("follow contract"));
-    assert!(prompt.contains("confidential project"));
-    assert!(!prompt.contains("This turn is tool-required."));
-    assert!(!prompt.contains("Historical tool errors are attempt-specific results"));
-    assert!(!prompt.contains("Do NOT imitate earlier assistant chatter, repeated analysis, or failed command formatting from the history."));
-    assert!(!prompt.contains("\"command\":\"bash -lc 'pwd'\""));
-}
 
-#[test]
-fn test_req_profile_chat_deepseek_web_reinjects_override_after_prior_tool_round_marker() {
-    let prior_system = [
-        "follow contract",
-        "",
-        "Tool-call output contract (STRICT):",
-        "old injected guidance should be stripped before fresh reinjection",
-    ]
-    .join("\n");
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": prior_system},
-                {"role": "user", "content": "先检查代码"},
-                {"role": "assistant", "content": null, "tool_calls": [
-                    {"type": "function", "function": {"name": "exec_command", "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"}}
-                ]},
-                {"role": "tool", "content": "pwd output: /workspace"},
-                {"role": "user", "content": "那你读了以后再说"}
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_reinject_1".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("tools/deepseek-tools".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("Tool-call output contract (STRICT)"));
-    assert!(prompt.contains("Override precedence for this turn"));
-    assert!(prompt.contains("Evidence first for code/debug tasks"));
-    assert!(prompt.contains("pwd output: /workspace"));
-    assert!(!prompt.contains("old injected guidance should be stripped before fresh reinjection"));
-    assert_eq!(
-        prompt.matches("Tool-call output contract (STRICT)").count(),
-        1
-    );
-    assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
-    assert!(!prompt.contains("<<SYSTEM_PROMPT"));
-    assert!(!prompt.contains("Follow the system instruction above exactly"));
-}
 
-#[test]
-fn test_req_profile_chat_deepseek_web_preserves_assistant_failure_history() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "tool_choice": "required",
-            "messages": [
-                {"role": "system", "content": "follow contract"},
-                {
-                    "role": "assistant",
-                    "content": "<|ChunkingError|>我无法继续。我输出工具调用的格式可能有问题。<｜end▁of▁thinking｜>",
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": "{\"command\":\"bash -lc 'pwd'\",\"justification\":\"inspect repo root\"}"
-                            }
-                        }
-                    ],
-                    "reasoning_content": "<|ChunkingError|>我无法输出工具调用。<｜end▁of▁thinking｜>"
-                },
-                {"role": "user", "content": "pwd output: /workspace"}
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "cmd": {"type": "string"},
-                                "justification": {"type": "string"}
-                            },
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_strip_chunking".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("tools/deepseek-tools".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
 
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("<|DSML|tool_calls>"));
-    assert!(prompt.contains("exec_command"));
-    assert!(prompt.contains("<![CDATA[pwd]]>"));
-    assert!(prompt.contains("inspect repo root"));
-    assert!(!prompt.contains("\"command\":\"bash -lc 'pwd'\""));
-}
 
-#[test]
-fn test_req_profile_chat_deepseek_web_protocol_mismatch_native_noop() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": "keep"}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-responses".to_string()),
-            request_id: Some("req_deepseek_web_2".to_string()),
-            entry_endpoint: Some("/v1/responses".to_string()),
-            route_id: None,
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert!(result.applied_profile.is_none());
-    assert_eq!(result.payload["model"], "deepseek-chat");
-}
 
-#[test]
-fn test_req_profile_chat_deepseek_web_preserves_explicit_thinking_and_search_flags() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "thinking_enabled": true,
-            "search_enabled": true,
-            "messages": [{"role": "user", "content": "force both flags"}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_explicit_flags".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("thinking-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
 
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert!(result.native_applied);
-    assert_eq!(
-        result.applied_profile,
-        Some("chat:deepseek-web".to_string())
-    );
-    assert_eq!(result.payload["thinking_enabled"], true);
-    assert_eq!(result.payload["search_enabled"], true);
-}
 
-#[test]
-fn test_req_profile_chat_deepseek_web_v4_aliases_map_to_expected_flags() {
-    let thinking_input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-v4-pro",
-            "messages": [{"role": "user", "content": "think hard"}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_v4_pro".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("thinking-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let thinking_result = run_req_outbound_stage3_compat(thinking_input).unwrap();
-    assert_eq!(thinking_result.payload["thinking_enabled"], true);
-    assert_eq!(thinking_result.payload["search_enabled"], false);
 
-    let search_input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-v4-flash",
-            "messages": [{"role": "user", "content": "search the web"}]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_v4_flash".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("web_search-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-    let search_result = run_req_outbound_stage3_compat(search_input).unwrap();
-    assert_eq!(search_result.payload["thinking_enabled"], false);
-    assert_eq!(search_result.payload["search_enabled"], true);
-}
 
-#[test]
-fn test_req_profile_chat_deepseek_web_thinking_route_with_tools_forces_tool_required_prompt() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": "请直接调用 exec_command"}],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_thinking_tools".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("thinking-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
 
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("tool_choice is required for this turn"));
-    assert!(!prompt.contains("<<SYSTEM_PROMPT"));
-    assert_eq!(
-        prompt.matches("Tool-call output contract (STRICT)").count(),
-        1
-    );
-    assert!(prompt.contains("This turn is tool-required."));
-    assert!(prompt.contains("Allowed tool names this turn: exec_command."));
-    assert!(prompt.contains("prefer one focused inspection call at a time"));
-    assert!(prompt.contains("One successful read is not enough."));
-    assert!(prompt.contains("<read_file>, <file_read>, <execute_command>, <previous_tool_call>"));
-    assert!(prompt
-        .contains("Do not invent read_file, file_read, shell_command, command, cwd, or workdir."));
-    assert!(prompt.contains("请直接调用 exec_command"));
-}
-
-#[test]
-fn test_req_profile_chat_deepseek_web_coding_route_with_tools_forces_tool_required_prompt() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-v4-pro",
-            "messages": [{"role": "user", "content": "先检查项目结构，然后继续"}],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_coding_tools".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("coding-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("tool_choice is required for this turn"));
-    assert!(prompt.contains("This turn is tool-required."));
-    assert!(prompt.contains("Allowed tool names this turn: exec_command."));
-    assert!(prompt.contains("先检查项目结构，然后继续"));
-}
-
-#[test]
-fn test_req_profile_chat_deepseek_web_continuation_prompt_preserves_dsml_guidance_and_tool_required_tail(
-) {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-v4-pro",
-            "messages": [
-                {"role": "system", "content": "follow contract"},
-                {"role": "user", "content": "请继续处理"},
-                {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"
-                            }
-                        }
-                    ]
-                },
-                {"role": "tool", "content": "pwd output: /workspace"},
-                {"role": "user", "content": "继续下一步"}
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ],
-            "metadata": {
-                "deepseek": {
-                    "contextFileEnabled": true
-                }
-            }
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_continuation_tools".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("coding-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("follow contract"));
-    assert!(prompt.contains("Tool-call output contract (STRICT)"));
-    assert!(prompt.contains("DeepSeek text-tool addendum:"));
-    assert!(prompt.contains("<|DSML|tool_calls>"));
-    assert!(prompt.contains("This turn is tool-required."));
-    assert!(prompt.contains("Allowed tool names this turn: exec_command."));
-    assert!(prompt.contains("Continue from the latest state in the attached context."));
-    assert_eq!(
-        prompt.matches("Tool-call output contract (STRICT)").count(),
-        1
-    );
-    assert_eq!(prompt.matches("DeepSeek text-tool addendum:").count(), 1);
-    let context_file = result.payload["metadata"]["deepseek"]["contextFile"]["content"]
-        .as_str()
-        .unwrap_or("");
-    assert!(context_file.contains("# context"));
-    assert!(context_file.contains("=== 1. SYSTEM ===\nfollow contract"));
-    assert!(context_file.contains("=== 2. USER ===\n请继续处理"));
-    assert!(context_file.contains("=== 3. ASSISTANT ==="));
-    assert!(context_file.contains("<|DSML|tool_calls>"));
-    assert!(context_file.contains("=== 4. TOOL ==="));
-    assert!(context_file.contains("pwd output: /workspace"));
-    assert!(context_file.contains("=== 5. USER ===\n继续下一步"));
-    assert!(!context_file.contains("Tool-call output contract (STRICT)"));
-    assert!(!context_file.contains("DeepSeek text-tool addendum:"));
-    assert!(!context_file.contains("This turn is tool-required."));
-    assert!(!context_file.contains("Allowed tool names this turn: exec_command."));
-}
-
-#[test]
-fn test_req_profile_chat_deepseek_web_submit_tool_outputs_continuation_prompt_marks_prior_tool_as_completed(
-) {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-v4-pro",
-            "messages": [
-                {"role": "user", "content": "调用 exec_command 工具执行 pwd，然后返回工具调用，不要直接回答。"},
-                {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "id": "call_1",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "role": "tool",
-                    "tool_call_id": "call_1",
-                    "name": "exec_command",
-                    "content": "/Users/fanzhang/Documents/github/routecodex"
-                }
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ],
-            "semantics": {
-                "continuation": {
-                    "chainId": "req_chain_1",
-                    "continuationScope": "request_chain",
-                    "stateOrigin": "openai-responses",
-                    "restored": true,
-                    "toolContinuation": {
-                        "mode": "submit_tool_outputs",
-                        "submittedToolCallIds": ["call_1"],
-                        "resumeOutputs": ["/Users/fanzhang/Documents/github/routecodex"]
-                    }
-                }
-            },
-            "metadata": {
-                "deepseek": {
-                    "contextFileEnabled": true
-                }
-            }
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_submit_continuation".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("tools-deepseek-web-primary".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("The latest tool result has already been submitted."));
-    assert!(prompt.contains("Do not repeat the same tool call"));
-    assert!(prompt.contains("Tool call ids already completed in this continuation: call_1."));
-    let context_file = result.payload["metadata"]["deepseek"]["contextFile"]["content"]
-        .as_str()
-        .unwrap_or("");
-    assert!(context_file.contains("tool_call_id: call_1"));
-    assert!(context_file.contains("/Users/fanzhang/Documents/github/routecodex"));
-}
-
-#[test]
-fn test_req_profile_chat_deepseek_web_reads_submit_tool_outputs_continuation_from_captured_chat_request(
-) {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-v4-pro",
-            "messages": [
-                {"role": "user", "content": "调用 exec_command 工具执行 pwd，然后返回工具调用，不要直接回答。"},
-                {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "id": "call_1",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "role": "tool",
-                    "tool_call_id": "call_1",
-                    "name": "exec_command",
-                    "content": "/Users/fanzhang/Documents/github/routecodex"
-                }
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ],
-            "metadata": {
-                "deepseek": {
-                    "contextFileEnabled": true
-                }
-            }
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_submit_continuation_captured".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("tools-deepseek-web-primary".to_string()),
-            rt: None,
-            captured_chat_request: Some(json!({
-                "model": "deepseek-v4-pro",
-                "messages": [],
-                "tools": [],
-                "tool_choice": null,
-                "parameters": null,
-                "semantics": {
-                    "continuation": {
-                        "chainId": "req_chain_1",
-                        "continuationScope": "request_chain",
-                        "stateOrigin": "openai-responses",
-                        "restored": true,
-                        "toolContinuation": {
-                            "mode": "submit_tool_outputs",
-                            "submittedToolCallIds": ["call_1"],
-                            "resumeOutputs": ["/Users/fanzhang/Documents/github/routecodex"]
-                        }
-                    }
-                }
-            })),
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("The latest tool result has already been submitted."));
-    assert!(prompt.contains("Tool call ids already completed in this continuation: call_1."));
-}
-
-#[test]
-fn test_req_profile_chat_deepseek_web_preserves_text_delta_and_tool_use_content_items() {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "follow contract"},
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"type": "text_delta", "text": "先检查环境"},
-                        {"type": "tool_use", "name": "exec_command", "input": {"command": "pwd", "justification": "inspect cwd"}}
-                    ]
-                },
-                {"role": "user", "content": "继续"}
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_content_items".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("tools/deepseek-tools".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("先检查环境"));
-    assert!(prompt.contains("exec_command"));
-    assert!(prompt.contains("pwd"));
-    assert!(prompt.contains("inspect cwd"));
-}
-
-#[test]
-fn test_req_profile_chat_deepseek_web_preserves_explicit_empty_reasoning_content_for_assistant_tool_call_history(
-) {
-    let input = ReqOutboundCompatInput {
-        payload: json!({
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "follow contract"},
-                {"role": "user", "content": "继续"},
-                {
-                    "role": "assistant",
-                    "content": null,
-                    "reasoning_content": "",
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "id": "call_1",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": "{\"cmd\":\"bash -lc 'pwd'\"}"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "role": "tool",
-                    "tool_call_id": "call_1",
-                    "name": "exec_command",
-                    "content": "pwd output: /workspace"
-                },
-                {"role": "user", "content": "继续"}
-            ],
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "description": "run shell",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"cmd": {"type": "string"}},
-                            "required": ["cmd"]
-                        }
-                    }
-                }
-            ]
-        }),
-        adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:deepseek-web".to_string()),
-            provider_protocol: Some("openai-chat".to_string()),
-            request_id: Some("req_deepseek_web_empty_reasoning_tool_history".to_string()),
-            entry_endpoint: Some("/v1/chat/completions".to_string()),
-            route_id: Some("tools/deepseek-tools".to_string()),
-            rt: None,
-            captured_chat_request: None,
-            deepseek: None,
-            claude_code: None,
-            anthropic_thinking: None,
-            estimated_input_tokens: None,
-            model_id: None,
-            client_model_id: None,
-            original_model_id: None,
-            provider_id: None,
-            provider_key: None,
-            runtime_key: None,
-            client_request_id: None,
-            group_request_id: None,
-            session_id: None,
-            conversation_id: None,
-        },
-        explicit_profile: None,
-    };
-
-    let result = run_req_outbound_stage3_compat(input).unwrap();
-    let prompt = result.payload["prompt"].as_str().unwrap_or("");
-    assert!(prompt.contains("<|DSML|tool_calls>"));
-    assert!(prompt.contains("exec_command"));
-    assert!(prompt.contains("<![CDATA[pwd]]>"));
-    assert!(prompt.contains("reasoning_content: \"\""));
-    assert!(prompt.contains("pwd output: /workspace"));
-}
 
 #[test]
 fn test_tool_text_instruction_does_not_own_apply_patch_contract_anymore() {
@@ -2688,7 +1142,6 @@ fn test_req_profile_chat_gemini_search_route_filters_tools() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -2733,7 +1186,6 @@ fn test_req_profile_chat_gemini_search_route_injects_google_search_when_no_tools
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -2793,7 +1245,6 @@ fn test_req_profile_chat_gemini_claude_schema_and_shallow_pick() {
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
@@ -2876,7 +1327,6 @@ fn test_openai_chat_deepseek_v4_model_on_opencode_gets_tool_history_reasoning_co
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("deepseek-v4-flash-free".to_string()),
@@ -2944,7 +1394,6 @@ fn test_protocol_field_contract_outbound_openai_chat_strips_anthropic_thinking_b
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("deepseek-v4-flash-free".to_string()),
@@ -3013,7 +1462,6 @@ fn test_protocol_field_contract_outbound_deepseek_openai_chat_sanitizes_2095_too
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("deepseek-v4-flash-free".to_string()),
@@ -3074,7 +1522,6 @@ fn test_protocol_field_contract_outbound_deepseek_openai_chat_trailing_tool_has_
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("deepseek-v4-flash-free".to_string()),
@@ -3134,7 +1581,6 @@ fn test_protocol_field_contract_outbound_openai_chat_always_strips_historical_me
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("generic-openai-chat-model".to_string()),
@@ -3177,7 +1623,7 @@ fn test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_h
             ]
         }),
         adapter_context: AdapterContext {
-            compatibility_profile: Some("chat:claude-code".to_string()),
+            compatibility_profile: Some("compat:removed-profile".to_string()),
             provider_protocol: Some("anthropic-messages".to_string()),
             request_id: Some(
                 "openai-responses-mimo.key1-mimo-v2.5-20260529T213159512-234803-2114".to_string(),
@@ -3187,7 +1633,6 @@ fn test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_h
             rt: None,
             captured_chat_request: None,
             deepseek: None,
-            claude_code: None,
             anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: Some("mimo-v2.5".to_string()),
@@ -3201,7 +1646,7 @@ fn test_protocol_field_contract_outbound_anthropic_messages_strips_stringified_h
             session_id: Some("019e733b-8c4d-74c0-93c1-0a33a3f2bd91".to_string()),
             conversation_id: None,
         },
-        explicit_profile: Some("chat:claude-code".to_string()),
+        explicit_profile: Some("compat:removed-profile".to_string()),
     };
 
     let result = run_req_outbound_stage3_compat(input).unwrap();

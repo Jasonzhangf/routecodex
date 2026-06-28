@@ -598,7 +598,6 @@ verification:
     integration:
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
-      - tests/server/runtime/http-server/provider-traffic-governor.spec.ts
       - tests/server/runtime/request-executor.single-attempt.spec.ts
       - tests/sharedmodule/server-module-help.live.spec.ts
     smoke:
@@ -618,7 +617,6 @@ verification:
       - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
     integration:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
-      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
     smoke:
       - npm run verify:vr-no-ts-runtime
@@ -703,7 +701,6 @@ verification:
       - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
     integration:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
-      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
     smoke:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
@@ -722,7 +719,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
     contract:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
-      - tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
     integration: []
     smoke:
@@ -809,7 +805,6 @@ verification:
       - tests/server/handlers/responses-handler.routing-empty-pool.spec.ts
     integration:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
-      - tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     smoke:
       - npm run verify:vr-no-ts-runtime
@@ -998,20 +993,6 @@ verification:
       - "Validation must prove provider target/model compatibility observation stays in `MetadataCenter.provider_observation` and is still readable by servertool/provider context readers without reviving flat `metadata.target` / `metadata.compatibilityProfile`."
       - "Validation must prove effective relay `/v1/responses` provider pin is present on the request-executor path before Hub execution, rather than inferred only from an earlier handler/bridge shell."
       - "Validation must prove single-use `preselectedRoute` is released before retry attempts and is not revived from `__rt` / top-level relay residue."
-
-  - feature_id: hub.metadata_center_servertool_context
-    change_risk: medium
-    unit:
-      - src/server/runtime/http-server/executor/servertool-adapter-context.ts
-    contract:
-      - tests/server/runtime/http-server/executor/servertool-adapter-context.spec.ts
-    integration: []
-    smoke:
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "Servertool adapter context must project request-local truth and captured origin request only; relay-only continuation state must not become request truth."
 
   - feature_id: hub.runtime_ingress_bridge
     change_risk: medium
@@ -1557,41 +1538,6 @@ verification:
     notes:
       - "Shared instructions-to-input normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
 
-  - feature_id: responses.token_limit_field_normalization
-    change_risk: high
-    unit:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts
-    contract:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
-    integration:
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    smoke:
-      - npm run verify:responses-token-limit-field-normalization-rust-only
-    build:
-      - npm run build:base
-    notes:
-      - "Shared token-limit field stripping must stay inside Rust request compat; TS bridge may only call the native stage runner."
-
-  - feature_id: responses.c4m_request_compat
-    change_risk: high
-    unit:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-    contract:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
-    integration:
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    smoke:
-      - npm run verify:responses-c4m-request-compat-rust-only
-    build:
-      - npm run build:base
-    notes:
-      - "c4m closeout is now a thin composition shell over shared token-limit/instructions/tool normalization units."
-      - "Shared token-limit stripping is verified under `responses.token_limit_field_normalization`."
-      - "Shared instructions lift is verified under `responses.instructions_to_input_normalization`."
-      - "Shared tool normalization is verified under `responses.function_tool_normalization`."
-      - "Shared parameters normalization is verified under `responses.tool_parameters_normalization`."
-
   - feature_id: config.path_resolution_surface
     change_risk: high
     unit:
@@ -1716,21 +1662,6 @@ verification:
       - npm run build:base
     notes:
       - "Provider health / cooldown / runtime 503 family must stay in Rust; TS is persistence bridge."
-
-  - feature_id: manager.token_runtime
-    change_risk: medium
-    unit:
-      - src/token-daemon/token-daemon.ts
-    contract:
-      - tests/token-daemon/leader-lock.spec.ts
-      - tests/token-daemon/token-daemon.refresh-ahead.spec.ts
-    integration: []
-    smoke:
-      - npm run verify:architecture-ci
-    build:
-      - npm run build:base
-    notes:
-      - "token-daemon is the unique owner; no Rust twin."
 
   - feature_id: daemon_admin.command_handlers
     change_risk: high

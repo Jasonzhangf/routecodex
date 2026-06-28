@@ -634,7 +634,7 @@ fn execute_hub_pipeline_json_applies_target_compatibility_profile_for_anthropic_
                         "endpoint": "mock://minimax",
                         "auth": { "type": "apikey", "apiKey": "minimax-key" },
                         "outboundProfile": "anthropic-messages",
-                        "compatibilityProfile": "anthropic:claude-code"
+                        "compatibilityProfile": "compat:passthrough"
                     }
                 },
                 "routing": {
@@ -679,7 +679,7 @@ fn execute_hub_pipeline_json_applies_target_compatibility_profile_for_anthropic_
                             "runtimeKey": "minimax.key1",
                             "modelId": "MiniMax-M3",
                             "outboundProfile": "anthropic-messages",
-                            "compatibilityProfile": "anthropic:claude-code"
+                            "compatibilityProfile": "compat:passthrough"
                         },
                         "decision": { "routeName": "thinking" },
                         "diagnostics": {}
@@ -698,24 +698,9 @@ fn execute_hub_pipeline_json_applies_target_compatibility_profile_for_anthropic_
         output.get("success").and_then(|value| value.as_bool()),
         Some(true)
     );
-    assert_eq!(
-        output
-            .pointer("/payload/system/0/text")
-            .and_then(|value| value.as_str()),
-        Some("You are Claude Code, Anthropic's official CLI for Claude.")
-    );
-    assert_eq!(
-        output
-            .pointer("/payload/thinking/type")
-            .and_then(|value| value.as_str()),
-        Some("adaptive")
-    );
-    assert_eq!(
-        output
-            .pointer("/payload/output_config/effort")
-            .and_then(|value| value.as_str()),
-        Some("medium")
-    );
+    assert!(output.pointer("/payload/system").is_none());
+    assert!(output.pointer("/payload/thinking").is_none());
+    assert!(output.pointer("/payload/output_config").is_none());
 }
 
 #[test]

@@ -14,13 +14,9 @@ import { buildNativeReqOutboundCompatAdapterContext } from './native-adapter-con
 // feature_id: responses.function_tool_normalization
 // feature_id: responses.tool_parameters_normalization
 // feature_id: responses.instructions_to_input_normalization
-// feature_id: responses.token_limit_field_normalization
-// Rust canonical builders: normalize_responses_tool_parameters / normalize_responses_function_tools / apply_responses_instructions_to_input / apply_responses_token_limit_field_normalization / apply_responses_c4m_request_compat / apply_responses_crs_request_compat
-// feature_id: responses.c4m_request_compat
+// Rust canonical builders: normalize_responses_tool_parameters / normalize_responses_function_tools / apply_responses_instructions_to_input / apply_responses_crs_request_compat
 // feature_id: responses.crs_request_compat
 // Rust aggregate builder: run_req_outbound_stage3_compat_json
-
-const RATE_LIMIT_ERROR = 'ERR_COMPAT_RATE_LIMIT_DETECTED';
 
 function assertCompatNativeBoundary(): void {
   normalizeProviderProtocolTokenWithNative('openai-responses');
@@ -71,13 +67,6 @@ export function applyResponseCompat(
     explicitProfile,
     adapterContext: buildNativeReqOutboundCompatAdapterContext(options?.adapterContext)
   });
-
-  if (nativeCompat.nativeApplied === true && nativeCompat.rateLimitDetected === true) {
-    const err = new Error('Provider returned rate limit notice');
-    (err as Error & { code?: string; statusCode?: number }).code = RATE_LIMIT_ERROR;
-    (err as Error & { code?: string; statusCode?: number }).statusCode = 429;
-    throw err;
-  }
 
   return toCompatResult(nativeCompat.payload, nativeCompat.appliedProfile);
 }

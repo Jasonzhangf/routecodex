@@ -58,9 +58,8 @@
 ### TABGLM（Anthropic Messages wire）
 
 - 样本：`configsamples/provider/tabglm/config.v1.json`
-- 关键点：`type: "anthropic"`（走 `/v1/messages` 协议）；`compatibilityProfile: "chat:claude-code"`（对齐 Claude Code 官方 system prompt 校验）
+- 关键点：`type: "anthropic"`（走 `/v1/messages` 协议）；默认 `compatibilityProfile: "compat:passthrough"`，不注入额外 system prompt 或兼容 header
 - 你需要：填写 `auth.apiKey`
-- 说明：详见 `docs/providers/tabglm-claude-code-compat.md`
 
 ### GLM（OpenAI-compatible）
 

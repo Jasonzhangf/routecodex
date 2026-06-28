@@ -19,7 +19,6 @@ fn empty_adapter_context() -> AdapterContext {
         rt: None,
         captured_chat_request: None,
         deepseek: None,
-        claude_code: None,
         anthropic_thinking: None,
         estimated_input_tokens: None,
         model_id: None,

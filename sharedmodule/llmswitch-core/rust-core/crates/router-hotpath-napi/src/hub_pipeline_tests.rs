@@ -505,7 +505,7 @@ fn test_execute_hub_pipeline_preserves_responses_tool_continuation_for_anthropic
                     "providerType": "anthropic",
                     "outboundProfile": "anthropic-messages",
                     "runtimeKey": "minimonth.key1.MiniMax-M2.7",
-                    "compatibilityProfile": "anthropic:claude-code"
+                    "compatibilityProfile": "compat:passthrough"
                 },
                 "routeName": "tools/gateway-priority-5555-weighted-tools"
             }
@@ -604,7 +604,7 @@ fn test_execute_hub_pipeline_restores_stopless_resume_as_reasoning_stop_pair_wit
                     "providerType": "anthropic",
                     "outboundProfile": "anthropic-messages",
                     "runtimeKey": "minimonth.key1.MiniMax-M2.7",
-                    "compatibilityProfile": "anthropic:claude-code"
+                    "compatibilityProfile": "compat:passthrough"
                 },
                 "routeName": "tools/gateway-priority-5555-weighted-tools"
             }
@@ -710,10 +710,7 @@ fn test_execute_hub_pipeline_restores_stopless_resume_as_reasoning_stop_pair_wit
         "provider payload must include the natural-language repair contract: {}",
         output["payload"]
     );
-    assert_eq!(
-        output["payload"]["system"][0]["text"],
-        json!("You are Claude Code, Anthropic's official CLI for Claude.")
-    );
+    assert!(output["payload"].get("system").is_none());
 }
 
 #[test]
@@ -727,7 +724,7 @@ fn test_execute_hub_pipeline_live_slice_keeps_public_catalog_tool_result_before_
                     "providerType": "anthropic",
                     "outboundProfile": "anthropic-messages",
                     "runtimeKey": "minimax.key1",
-                    "compatibilityProfile": "anthropic:claude-code"
+                    "compatibilityProfile": "compat:passthrough"
                 },
                 "routeName": "search/gateway-priority-5555-priority-search"
             }

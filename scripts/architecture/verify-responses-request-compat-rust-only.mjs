@@ -18,11 +18,8 @@ const verificationMap = read('docs/architecture/verification-map.yml');
 for (const required of [
   'normalize_responses_function_tools',
   'strip_responses_reasoning_content_for_provider_wire',
-  'apply_responses_c4m_request_compat',
   'apply_responses_crs_request_compat',
   'row.remove("content")',
-  'root.remove("max_tokens")',
-  'root.remove("max_output_tokens")',
   'root.remove("temperature")',
 ]) {
   if (!rustRequestCompat.includes(required)) {
@@ -41,6 +38,7 @@ for (const required of [
 
 for (const required of [
   'feature_id: responses.request_compat_normalization',
+  'feature_id: responses.crs_request_compat',
   'npm run verify:responses-request-compat-rust-only',
 ]) {
   if (!functionMap.includes(required) || !verificationMap.includes(required)) {
@@ -57,12 +55,9 @@ const forbiddenRuntimeFiles = [
 for (const relPath of forbiddenRuntimeFiles) {
   const source = read(relPath);
   for (const forbidden of [
-    'responses:c4m',
     'responses:crs',
     'instructions")',
     'instructions\')',
-    'max_output_tokens',
-    'maxTokens',
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath} must not own responses request compat truth: ${forbidden}`);

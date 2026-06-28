@@ -205,7 +205,7 @@
 - `scripts/architecture/verify-responses-direct-tool-shape-rust-first.mjs`
   - 检查 direct/provider 两条入口都显式先调用 Rust validator，防止回到纯 TS 校验
 - `scripts/architecture/verify-responses-request-compat-rust-only.mjs`
-  - 检查 `responses:c4m` / `responses:crs` request compat 与 function normalization 的唯一真源仍在 Rust `req_outbound_stage3_compat`，TS 只能通过 `runReqOutboundStage3CompatJson` 调用
+  - 检查 `responses:crs` request compat 与通用 Responses function/instructions normalization 的唯一真源仍在 Rust `req_outbound_stage3_compat`，TS 只能通过 `runReqOutboundStage3CompatJson` 调用
 
 ## 使用规则
 

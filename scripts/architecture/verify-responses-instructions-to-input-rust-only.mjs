@@ -19,7 +19,7 @@ for (const required of [
   'pub(crate) fn apply_responses_instructions_to_input(root: &mut Map<String, Value>)',
   '.remove("instructions")',
   'strip_html_tags(&raw_text)',
-  'resolve_c4m_instruction_max_len()',
+  'resolve_compat_instruction_max_len()',
   'input_array.insert(0, Value::Object(message));',
   'message.insert("role".to_string(), Value::String("system".to_string()));',
 ]) {
@@ -63,7 +63,7 @@ for (const relPath of forbiddenRuntimeFiles) {
   const source = read(relPath);
   for (const forbidden of [
     'strip_html_tags',
-    'resolve_c4m_instruction_max_len',
+    'resolve_compat_instruction_max_len',
     'input_array.insert(0, Value::Object(message))',
     '.remove("instructions")',
     'role".to_string(), Value::String("system".to_string())',

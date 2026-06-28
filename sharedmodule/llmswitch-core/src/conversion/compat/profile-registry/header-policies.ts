@@ -1,8 +1,8 @@
 /**
  * Header Policies — pure functions for config-driven header injection.
  *
- * Replaces the hardcoded maybeInjectQwenHeaders / maybeInjectClaudeCodeHeaders
- * functions in provider-normalization.ts. These functions are pure: they take
+ * Replaces hardcoded provider-normalization header injection helpers.
+ * These functions are pure: they take
  * data in, return data out, no global state, no side effects.
  */
 

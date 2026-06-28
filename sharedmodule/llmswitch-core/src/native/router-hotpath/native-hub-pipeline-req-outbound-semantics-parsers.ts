@@ -57,14 +57,10 @@ function parseReqOutboundCompatOutput(raw: string): NativeReqOutboundStage3Compa
     return null;
   }
   const nativeApplied = nativeAppliedRaw;
-  const rateLimitDetectedRaw = row.rateLimitDetected;
-  const rateLimitDetected =
-    typeof rateLimitDetectedRaw === 'boolean' ? rateLimitDetectedRaw : undefined;
   return {
     payload,
     ...(appliedProfile ? { appliedProfile } : {}),
-    nativeApplied,
-    ...(rateLimitDetected !== undefined ? { rateLimitDetected } : {})
+    nativeApplied
   };
 }
 

@@ -23,8 +23,6 @@ pub struct AdapterContext {
     #[serde(default)]
     pub deepseek: Option<Value>,
     #[serde(default)]
-    pub claude_code: Option<Value>,
-    #[serde(default)]
     pub anthropic_thinking: Option<String>,
     #[serde(default)]
     pub estimated_input_tokens: Option<f64>,
@@ -66,29 +64,8 @@ pub struct CompatResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applied_profile: Option<String>,
     pub native_applied: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rate_limit_detected: Option<bool>,
 }
 
-#[cfg(test)]
-const DEFAULT_SYSTEM_TEXT: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
-
-#[cfg(test)]
-fn is_claude_code_user_id(value: Option<&str>) -> bool {
-    let Some(raw) = value else {
-        return false;
-    };
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    regex::Regex::new(r"^user_[0-9a-f]{64}_account__session_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-        .map(|re| re.is_match(&trimmed.to_ascii_lowercase()))
-        .unwrap_or(false)
-}
-
-pub(crate) mod claude_code;
-mod deepseek_web;
 pub(crate) mod gemini;
 mod glm;
 mod lmstudio;
