@@ -100,14 +100,7 @@ describe('servertool CLI native bridge', () => {
     });
 
     expect(execution).toEqual({
-      flowId: 'servertool_cli_projection',
-      context: {
-        servertoolCliProjection: {
-          clientCallId: 'call_native_exec_context',
-          toolName: 'servertool_fixture',
-          requestId: 'req_native_exec_context'
-        }
-      }
+      flowId: 'servertool_cli_projection'
     });
   });
 
@@ -159,11 +152,7 @@ describe('servertool CLI native bridge', () => {
       planServertoolEngineRuntimeActionWithNative({
         hasPendingInjection: true,
         isStopMessageFlow: true,
-        executionContext: {
-          servertoolCliProjection: {
-            flowId: 'servertool_cli_projection'
-          }
-        },
+        hasServertoolCliProjectionContext: true,
         stoplessAction: 'terminal_final'
       })
     ).toEqual({
@@ -174,11 +163,7 @@ describe('servertool CLI native bridge', () => {
       planServertoolEngineRuntimeActionWithNative({
         hasPendingInjection: false,
         isStopMessageFlow: false,
-        executionContext: {
-          servertoolCliProjection: {
-            flowId: 'servertool_cli_projection'
-          }
-        },
+        hasServertoolCliProjectionContext: true,
         stoplessAction: 'cli_projection'
       })
     ).toEqual({

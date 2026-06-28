@@ -1,14 +1,11 @@
 // feature_id: hub.servertool_engine_runtime_action_contract
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolEngineRuntimeActionInput {
     pub has_pending_injection: bool,
     pub is_stop_message_flow: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub execution_context: Option<Value>,
     pub has_servertool_cli_projection_context: bool,
     pub stopless_action: String,
 }
@@ -31,20 +28,12 @@ pub struct ServertoolEngineRuntimeActionPlan {
 pub fn plan_servertool_engine_runtime_action(
     input: ServertoolEngineRuntimeActionInput,
 ) -> Result<ServertoolEngineRuntimeActionPlan, String> {
-    let has_servertool_cli_projection_context = match input.execution_context.as_ref() {
-        Some(Value::Object(context)) => context
-            .get("servertoolCliProjection")
-            .map(|value| !value.is_null())
-            .unwrap_or(false),
-        _ => input.has_servertool_cli_projection_context,
-    };
-
     if input.has_pending_injection {
         return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::PersistPendingInjectionAndReturn,
         });
     }
-    if !input.is_stop_message_flow && has_servertool_cli_projection_context {
+    if !input.is_stop_message_flow && input.has_servertool_cli_projection_context {
         return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal,
         });
@@ -64,7 +53,7 @@ pub fn plan_servertool_engine_runtime_action(
         input.is_stop_message_flow,
         input.stopless_action.trim(),
         input.has_pending_injection,
-        has_servertool_cli_projection_context
+        input.has_servertool_cli_projection_context
     ))
 }
 
@@ -77,7 +66,6 @@ mod tests {
         let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             has_pending_injection: true,
             is_stop_message_flow: true,
-            execution_context: None,
             has_servertool_cli_projection_context: true,
             stopless_action: "terminal_final".to_string(),
         })
@@ -93,7 +81,6 @@ mod tests {
         let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             has_pending_injection: false,
             is_stop_message_flow: false,
-            execution_context: None,
             has_servertool_cli_projection_context: true,
             stopless_action: "cli_projection".to_string(),
         })
@@ -109,7 +96,6 @@ mod tests {
         let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             has_pending_injection: false,
             is_stop_message_flow: true,
-            execution_context: None,
             has_servertool_cli_projection_context: false,
             stopless_action: "terminal_final".to_string(),
         })
@@ -125,7 +111,6 @@ mod tests {
         let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             has_pending_injection: false,
             is_stop_message_flow: true,
-            execution_context: None,
             has_servertool_cli_projection_context: false,
             stopless_action: "cli_projection".to_string(),
         })
@@ -141,31 +126,10 @@ mod tests {
         let err = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             has_pending_injection: false,
             is_stop_message_flow: false,
-            execution_context: None,
             has_servertool_cli_projection_context: false,
             stopless_action: "continue".to_string(),
         })
         .expect_err("residual reenter mainline must fail");
         assert!(err.contains("no reenter mainline"));
-    }
-
-    #[test]
-    fn derives_cli_projection_context_from_execution_context_object() {
-        let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
-            has_pending_injection: false,
-            is_stop_message_flow: false,
-            execution_context: Some(serde_json::json!({
-                "servertoolCliProjection": {
-                    "flowId": "servertool_cli_projection"
-                }
-            })),
-            has_servertool_cli_projection_context: false,
-            stopless_action: "continue".to_string(),
-        })
-        .expect("derived cli projection plan");
-        assert_eq!(
-            plan.action,
-            ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal
-        );
     }
 }

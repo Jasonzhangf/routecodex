@@ -1398,14 +1398,7 @@ pub fn build_servertool_cli_projection_execution_context(
     }
 
     Ok(serde_json::json!({
-        "flowId": "servertool_cli_projection",
-        "context": {
-            "servertoolCliProjection": {
-                "clientCallId": client_call_id,
-                "toolName": tool_name,
-                "requestId": request_id
-            }
-        }
+        "flowId": "servertool_cli_projection"
     }))
 }
 
@@ -2297,18 +2290,7 @@ mod tests {
         )
         .expect("cli projection execution context");
         assert_eq!(out["flowId"], "servertool_cli_projection");
-        assert_eq!(
-            out["context"]["servertoolCliProjection"]["clientCallId"],
-            "call_cli_projection_1"
-        );
-        assert_eq!(
-            out["context"]["servertoolCliProjection"]["toolName"],
-            "servertool_fixture"
-        );
-        assert_eq!(
-            out["context"]["servertoolCliProjection"]["requestId"],
-            "req_cli_projection"
-        );
+        assert!(out.get("context").is_none());
     }
 
     #[test]

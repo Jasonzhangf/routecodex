@@ -254,7 +254,6 @@ export interface ServertoolCliProjectionExecutionContextInput {
 
 export interface ServertoolCliProjectionExecutionContextOutput {
   flowId: string;
-  context: Record<string, unknown>;
 }
 
 export interface NativeServertoolExecutionSummary {
@@ -1803,17 +1802,11 @@ export function buildServertoolCliProjectionExecutionContextWithNative(
     throw new Error('buildServertoolCliProjectionExecutionContextJson native returned invalid projection context');
   }
   const record = parsed as Record<string, unknown>;
-  if (
-    record.flowId !== 'servertool_cli_projection' ||
-    !record.context ||
-    typeof record.context !== 'object' ||
-    Array.isArray(record.context)
-  ) {
+  if (record.flowId !== 'servertool_cli_projection') {
     throw new Error('buildServertoolCliProjectionExecutionContextJson native returned invalid projection context fields');
   }
   return {
-    flowId: 'servertool_cli_projection',
-    context: record.context as Record<string, unknown>
+    flowId: 'servertool_cli_projection'
   };
 }
 
@@ -2456,7 +2449,6 @@ export function planServertoolEnginePreflightWithNative(input: {
 export function planServertoolEngineRuntimeActionWithNative(input: {
   hasPendingInjection: boolean;
   isStopMessageFlow: boolean;
-  executionContext?: unknown;
   hasServertoolCliProjectionContext?: boolean;
   stoplessAction: string;
 }): ServertoolEngineRuntimeActionPlan {
@@ -2471,9 +2463,6 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
     hasServertoolCliProjectionContext: input.hasServertoolCliProjectionContext === true,
     stoplessAction: input.stoplessAction
   };
-  if (input.executionContext !== undefined) {
-    payload.executionContext = input.executionContext;
-  }
   const raw = fn(JSON.stringify(payload));
   const parsed = typeof raw === 'string' ? JSON.parse(raw) as unknown : raw;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

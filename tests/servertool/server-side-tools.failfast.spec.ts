@@ -400,14 +400,7 @@ jest.unstable_mockModule(
     }),
     extractTextFromChatLikeWithNative: jest.fn(() => ''),
     buildServertoolCliProjectionExecutionContextWithNative: jest.fn((input: any) => ({
-      flowId: 'servertool_cli_projection',
-      context: {
-        servertoolCliProjection: {
-          clientCallId: String(input?.clientCallId ?? ''),
-          toolName: String(input?.toolName ?? ''),
-          requestId: String(input?.requestId ?? '')
-        }
-      }
+      flowId: 'servertool_cli_projection'
     })),
     planServertoolExecutionBranchWithNative: planServertoolExecutionBranchWithNativeMock,
     planServertoolResponseStageRuntimeActionWithNative: planServertoolResponseStageRuntimeActionWithNativeMock,

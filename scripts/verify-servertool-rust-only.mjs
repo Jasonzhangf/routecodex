@@ -4865,6 +4865,9 @@ function checkStoplessOrchestrationActionRustOwner() {
     "readNativeFunction('planStoplessOrchestrationActionJson')",
     'requestTruth: { sessionId: requestTruthSessionId }',
     'stopless: {',
+    'executionContext',
+    'stoplessExecution.context',
+    '.servertoolCliProjection',
     'executionContext?.stopless',
     'function isStopMessageTerminalFinal',
     'stopMessageTerminalFinal === true',
@@ -5913,6 +5916,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
   }
   for (const marker of [
     'execution_context',
+    'executionContext',
+    'servertoolCliProjection',
     'serverToolLoopState',
     'stopSchemaTriggerHint',
     'stopSchemaFeedback',

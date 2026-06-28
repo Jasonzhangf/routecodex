@@ -32,22 +32,17 @@ import {
 function planServertoolEngineRuntimeActionWithNativeLocal(input: {
   hasPendingInjection: boolean;
   isStopMessageFlow: boolean;
-  executionContext?: Record<string, unknown>;
+  hasServertoolCliProjectionContext: boolean;
   stoplessAction: string;
 }): { action: string } {
   const fn = readNativeFunction('planServertoolEngineRuntimeActionJson');
   if (!fn) {
     throw new Error('planServertoolEngineRuntimeActionJson native unavailable');
   }
-  const executionContext = input.executionContext ?? {};
-  const hasServertoolCliProjectionContext = Boolean(
-    executionContext.servertoolCliProjection && typeof executionContext.servertoolCliProjection === 'object'
-  );
   const raw = fn(JSON.stringify({
     hasPendingInjection: input.hasPendingInjection,
     isStopMessageFlow: input.isStopMessageFlow,
-    executionContext: executionContext,
-    hasServertoolCliProjectionContext,
+    hasServertoolCliProjectionContext: input.hasServertoolCliProjectionContext,
     stoplessAction: input.stoplessAction
   }));
   if (typeof raw !== 'string') {
@@ -304,14 +299,11 @@ export async function runServerToolOrchestrationShell(
       });
   const stoplessExecution = stoplessExecutionPlan.execution;
   const stoplessPlan = stoplessExecutionPlan.orchestrationPlan;
-  const executionContext =
-    stoplessExecution.context && typeof stoplessExecution.context === 'object' && !Array.isArray(stoplessExecution.context)
-      ? stoplessExecution.context as Record<string, unknown>
-      : undefined;
+  const hasServertoolCliProjectionContext = stoplessExecution.flowId === 'servertool_cli_projection';
   const runtimeAction = planServertoolEngineRuntimeActionWithNativeLocal({
     hasPendingInjection: Boolean(engineResult.pendingInjection),
     isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
-    executionContext,
+    hasServertoolCliProjectionContext,
     stoplessAction: stoplessPlan.action
   });
   if (stopSignal.observed) {
