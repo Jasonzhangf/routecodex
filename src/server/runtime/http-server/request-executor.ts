@@ -232,15 +232,18 @@ import {
 } from './executor/retry-payload-snapshot.js';
 import {
   logProviderRetrySwitchCompact,
-  releaseProviderTrafficPermit,
   resolveStoplessLogState,
   type StoplessLogMode
 } from './executor/request-executor-runtime-blocks.js';
 import {
-  createNoopProviderTrafficGovernor,
-  getSharedProviderTrafficGovernor,
-  type ProviderTrafficGovernorLike,
-  type ProviderTrafficPermit
+  trafficGovernorAcquire,
+  trafficGovernorRelease,
+  trafficGovernorIsAtCapacity,
+  trafficGovernorObserveOutcome
+} from '../../../modules/traffic-governor/index.js';
+import type {
+  ProviderTrafficGovernorLike,
+  ProviderTrafficPermit
 } from './provider-traffic-governor.js';
 import {
   createRequestExecutorPayloadContractErrorsampleWriter,
@@ -359,27 +362,101 @@ function readEntryPort(metadataRecord: Record<string, unknown> | undefined): num
 }
 
 export class HubRequestExecutor implements RequestExecutor {
+  // traffic-governor: 已迁移到独立模块 src/modules/traffic-governor/
+  private readonly storeRoot: string;
   private readonly trafficGovernor: ProviderTrafficGovernorLike;
 
   constructor(private readonly deps: RequestExecutorDeps) {
-    if (deps.trafficGovernor) {
-      this.trafficGovernor = deps.trafficGovernor;
-      this.installTrafficGovernorConcurrencyCallback();
-      return;
-    }
-    if (process.env.NODE_ENV === 'test') {
-      this.trafficGovernor = createNoopProviderTrafficGovernor();
-      return;
-    }
-    const disableTrafficGovernor =
-      process.env.ROUTECODEX_PROVIDER_TRAFFIC_NOOP === '1'
-      || process.env.RCC_PROVIDER_TRAFFIC_NOOP === '1';
-    if (disableTrafficGovernor) {
-      this.trafficGovernor = createNoopProviderTrafficGovernor();
-      return;
-    }
-    this.trafficGovernor = getSharedProviderTrafficGovernor();
+    this.storeRoot = process.env.ROUTECODEX_TRAFFIC_STORE_ROOT || '/tmp/routecodex-traffic';
+    this.trafficGovernor = deps.trafficGovernor ?? this.createNativeTrafficGovernor();
     this.installTrafficGovernorConcurrencyCallback();
+  }
+
+  private createNativeTrafficGovernor(): ProviderTrafficGovernorLike {
+    let concurrencyBusyCallback: ((scopeKey: string, busy: boolean) => void) | null = null;
+    const storeRoot = this.storeRoot;
+    return {
+      async acquire(options) {
+        const acquired = trafficGovernorAcquire({
+          runtimeKey: options.runtimeKey,
+          providerKey: options.providerKey,
+          requestId: options.requestId,
+          maxInFlight: options.runtime.concurrency?.maxInFlight,
+          acquireTimeoutMs: options.runtime.concurrency?.acquireTimeoutMs,
+          staleLeaseMs: options.runtime.concurrency?.staleLeaseMs,
+          requestsPerMinute: options.runtime.rpm?.requestsPerMinute,
+          rpmTimeoutMs: options.runtime.rpm?.acquireTimeoutMs,
+          scopeKey: options.scopeKey,
+          storeRoot
+        });
+        const permit: ProviderTrafficPermit = {
+          runtimeKey: acquired.permit.runtimeKey,
+          providerKey: acquired.permit.providerKey,
+          requestId: acquired.permit.requestId,
+          leaseId: acquired.permit.leaseId,
+          stateKey: acquired.permit.stateKey,
+          scopeKey: acquired.permit.scopeKey,
+          maxInFlight: acquired.policy.maxInFlight
+        };
+        if (
+          typeof concurrencyBusyCallback === 'function'
+          && permit.scopeKey
+          && acquired.activeInFlight >= acquired.policy.maxInFlight
+        ) {
+          concurrencyBusyCallback(permit.scopeKey, true);
+        }
+        return {
+          permit,
+          policy: {
+            concurrency: {
+              maxInFlight: acquired.policy.maxInFlight,
+              acquireTimeoutMs: acquired.policy.acquireTimeoutMs,
+              staleLeaseMs: acquired.policy.staleLeaseMs
+            },
+            rpm: {
+              requestsPerMinute: acquired.policy.requestsPerMinute,
+              acquireTimeoutMs: acquired.policy.rpmTimeoutMs,
+              windowMs: acquired.policy.rpmWindowMs
+            }
+          },
+          waitedMs: acquired.waitedMs,
+          activeInFlight: acquired.activeInFlight,
+          rpmInWindow: acquired.rpmInWindow
+        };
+      },
+      async release(permit) {
+        const released = trafficGovernorRelease({
+          runtimeKey: permit.runtimeKey,
+          requestId: permit.requestId,
+          leaseId: permit.leaseId,
+          stateKey: permit.stateKey,
+          storeRoot
+        });
+        if (
+          typeof concurrencyBusyCallback === 'function'
+          && permit.scopeKey
+          && released.activeInFlight < permit.maxInFlight
+        ) {
+          concurrencyBusyCallback(permit.scopeKey, false);
+        }
+        return released;
+      },
+      async isProviderAtConcurrencyCapacity(runtimeKey) {
+        return trafficGovernorIsAtCapacity(runtimeKey, storeRoot);
+      },
+      isProviderAtConcurrencyCapacitySync(runtimeKey) {
+        return trafficGovernorIsAtCapacity(runtimeKey, storeRoot);
+      },
+      setConcurrencyBusyCallback(cb) {
+        concurrencyBusyCallback = cb ?? null;
+      },
+      async observeOutcome(event) {
+        trafficGovernorObserveOutcome({
+          ...event,
+          storeRoot
+        });
+      }
+    };
   }
 
   private installTrafficGovernorConcurrencyCallback(): void {
@@ -918,7 +995,7 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
         }
-        let trafficPermit: ProviderTrafficPermit | null = null;
+        let trafficPermit: Record<string, unknown> | null = null;
         let trafficPolicyMaxInFlight = 0;
         let trafficActiveInFlightAtAcquire = 0;
         let providerSendStartedAtMs = 0;
@@ -1366,15 +1443,37 @@ export class HubRequestExecutor implements RequestExecutor {
           retryAfterProviderFailure = true;
         } finally {
           if (trafficPermit) {
-            await releaseProviderTrafficPermit({
-              trafficPermit,
-              trafficGovernor: this.trafficGovernor,
-              requestId: input.requestId,
+            logStage('provider.traffic.release.start', input.requestId, {
               providerKey: target.providerKey,
               runtimeKey,
-              attempt,
-              logStage: (stage, requestId, details) => logStage(stage, requestId, details)
+              leaseId: (trafficPermit as any).leaseId,
+              attempt
             });
+            try {
+              const released = trafficGovernorRelease({
+                runtimeKey: runtimeKey || '',
+                requestId: input.requestId,
+                leaseId: (trafficPermit as any).leaseId || '',
+                stateKey: (trafficPermit as any).stateKey || runtimeKey || '',
+                storeRoot: this.storeRoot,
+              });
+              logStage('provider.traffic.release.completed', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                leaseId: (trafficPermit as any).leaseId,
+                released: released.released,
+                activeInFlight: released.activeInFlight,
+                attempt
+              });
+            } catch (releaseError) {
+              logStage('provider.traffic.release.error', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                leaseId: (trafficPermit as any).leaseId,
+                message: releaseError instanceof Error ? releaseError.message : String(releaseError ?? 'Unknown'),
+                attempt
+              });
+            }
             trafficPermit = null;
           }
         }
