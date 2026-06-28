@@ -72,7 +72,8 @@ fn stop_message_auto_outputs_rust_owned_schema() {
     assert_eq!(value["kind"], "stop_message_auto");
     assert_eq!(value["tool"], "stop_message_auto");
     assert_eq!(value["flowId"], "stop_message_flow");
-    assert_eq!(value["summary"], "stopless continuation ready");
+    assert_eq!(value["summary"], "停止检查需要继续");
+    assert!(!value["summary"].as_str().unwrap_or_default().contains("stopless"));
     let prompt = value["continuationPrompt"]
         .as_str()
         .expect("continuation prompt");

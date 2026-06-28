@@ -479,7 +479,7 @@ pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
                         "STOPLESS_CLI_RESULT_MALFORMED: schemaFeedback.reasonCode={reason_code} 没有注册的修复引导；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
                     ));
                 }
-            } else {
+            } else if !is_legal_minimal_no_schema_stopless_output(&row) {
                 parts.push(
                     "STOPLESS_CLI_RESULT_MALFORMED: 缺少 schemaGuidance，且 schemaFeedback.reasonCode/missingFields 不完整；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
                         .to_string(),
@@ -491,6 +491,20 @@ pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
         }
     }
     trimmed.to_string()
+}
+
+fn is_legal_minimal_no_schema_stopless_output(row: &Map<String, Value>) -> bool {
+    let trigger_hint = row
+        .get("input")
+        .or_else(|| row.get("input_json"))
+        .and_then(Value::as_object)
+        .and_then(|input| {
+            read_trimmed_string(input.get("triggerHint"))
+                .or_else(|| read_trimmed_string(input.get("trigger_hint")))
+        })
+        .or_else(|| read_trimmed_string(row.get("triggerHint")))
+        .or_else(|| read_trimmed_string(row.get("trigger_hint")));
+    trigger_hint.as_deref() == Some("no_schema")
 }
 
 fn read_stopless_schema_feedback_context(
@@ -517,7 +531,7 @@ fn read_stopless_schema_feedback_context(
         .filter(|value| !value.is_empty())
         .map(String::from)
         .collect::<Vec<_>>();
-    if missing_fields.is_empty() {
+    if missing_fields.is_empty() && reason_code != "stop_schema_continue_next_step" {
         return None;
     }
     Some((reason_code, missing_fields))
@@ -3013,6 +3027,62 @@ mod tests {
         assert!(text.contains("schemaFeedback.reasonCode/missingFields 不完整"));
         assert!(!text.contains("no_schema"));
         assert!(!text.contains("结尾按条件补齐这些字段：stopreason, reason, has_evidence"));
+    }
+
+    #[test]
+    fn stop_hook_guidance_text_accepts_minimal_no_schema_cli_output_without_malformed_warning() {
+        let text = build_stop_hook_guidance_text_from_output(
+            &json!({
+                "toolName": "stop_message_auto",
+                "flowId": "stop_message_flow",
+                "repeatCount": 1,
+                "maxRepeats": 3,
+                "continuationPrompt": "继续做下一步；先把手头能确认的结果拿回来。",
+                "input": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "triggerHint": "no_schema"
+                }
+            })
+            .to_string(),
+        );
+        assert!(text.contains("上一轮执行结果：repeatCount=1/3。"));
+        assert!(text.contains("继续做下一步；先把手头能确认的结果拿回来。"));
+        assert!(
+            !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
+            "minimal no_schema CLI output is legal and must not be treated as malformed: {text}"
+        );
+    }
+
+    #[test]
+    fn stop_hook_guidance_text_accepts_continue_next_step_with_empty_missing_fields() {
+        let text = build_stop_hook_guidance_text_from_output(
+            &json!({
+                "toolName": "stop_message_auto",
+                "flowId": "stop_message_flow",
+                "repeatCount": 1,
+                "maxRepeats": 3,
+                "continuationPrompt": "继续往下做。",
+                "schemaFeedback": {
+                    "reasonCode": "stop_schema_continue_next_step",
+                    "missingFields": []
+                },
+                "input": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "triggerHint": "non_terminal_schema"
+                }
+            })
+            .to_string(),
+        );
+        assert!(text.contains("reasonCode=stop_schema_continue_next_step"));
+        assert!(text.contains("任务还没收尾，继续执行你给出的 next_step"));
+        assert!(
+            !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
+            "continue_next_step with empty missing fields is legal: {text}"
+        );
     }
 
     #[test]

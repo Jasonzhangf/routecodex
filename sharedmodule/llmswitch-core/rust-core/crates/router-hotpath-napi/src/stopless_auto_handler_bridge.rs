@@ -97,14 +97,7 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
         .as_ref()
         .and_then(|value| value.get("metadataCenterSnapshot"))
         .and_then(|value| value.get("runtimeControl"))
-        .cloned()
-        .or_else(|| {
-            input
-                .adapter_context
-                .get("metadataCenterSnapshot")
-                .and_then(|value| value.get("runtimeControl"))
-                .cloned()
-        });
+        .cloned();
 
     let metadata_previous_compare = metadata_runtime_control
         .as_ref()
@@ -114,7 +107,7 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
     let decision_signals =
         stopless_decision_context_signals::plan_stopless_decision_context_signals(
             &StoplessDecisionContextSignalsInput {
-                adapter_context: input.adapter_context.clone(),
+                adapter_context: Value::Object(Map::new()),
                 runtime_metadata: input.runtime_metadata.clone(),
             },
         );
@@ -131,14 +124,14 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
     let effective_runtime_loop_state =
         persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context(
             &persisted_lookup::RuntimeStopMessageStateFromAdapterContextInput {
-                adapter_context: input.adapter_context.clone(),
+                adapter_context: Value::Object(Map::new()),
                 runtime_metadata: input.runtime_metadata.clone(),
             },
         )
         .and_then(|snapshot| serde_json::to_value(snapshot).ok());
 
     serde_json::json!({
-        "adapterContext": input.adapter_context,
+        "adapterContext": Value::Object(Map::new()),
         "base": input.base,
         "requestId": input.request_id,
         "followupFlowId": Value::Null,
@@ -160,14 +153,6 @@ fn resolve_request_truth_session_id(input: &StoplessAutoHandlerRuntimeInput) -> 
         .and_then(|value| value.get("metadataCenterSnapshot"))
         .and_then(|snapshot| snapshot.get("requestTruth"))
         .and_then(|truth| read_trimmed_string(truth.get("sessionId")))
-        .or_else(|| {
-            input
-                .adapter_context
-                .get("metadataCenterSnapshot")
-                .and_then(|snapshot| snapshot.get("requestTruth"))
-                .and_then(|truth| read_trimmed_string(truth.get("sessionId")))
-        })
-        .or_else(|| read_trimmed_string(input.adapter_context.get("sessionId")))
 }
 
 #[napi]
@@ -282,7 +267,6 @@ pub fn run_stopless_auto_handler_runtime_json(input_json: String) -> NapiResult<
         .as_ref()
         .and_then(|value| value.get("metadataCenterSnapshot"))
         .cloned()
-        .or_else(|| input.adapter_context.get("metadataCenterSnapshot").cloned())
         .unwrap_or(Value::Null);
     let center = build_metadata_center_from_snapshot(&center_snapshot);
     let timestamp_ms = current_timestamp_ms();
@@ -362,7 +346,7 @@ pub fn build_stopless_auto_cli_projection_json(input_json: String) -> NapiResult
 
     // Step 2: generate a client call id
     let client_call_id = format!(
-        "call_stopless_{}",
+        "call_reasoning_stop_{}",
         uuid::Uuid::new_v4().to_string().replace("-", "")
     );
 
@@ -882,68 +866,23 @@ mod tests {
     }
 
     #[test]
-    fn handler_input_hydrates_cli_snapshot_session_from_request_truth() {
+    fn handler_input_reads_stopless_state_from_runtime_control_only() {
         let input = StoplessAutoHandlerRuntimeInput {
-            adapter_context: json!({
-                "metadataCenterSnapshot": {
-                    "requestTruth": { "sessionId": "sess-from-truth" },
-                    "runtimeControl": {}
-                },
-                "__raw_request_body": {
-                    "input": [{
-                        "type": "function_call_output",
-                        "call_id": "call_stopless",
-                        "output": serde_json::to_string(&json!({
-                            "toolName": "stop_message_auto",
-                            "flowId": "stop_message_flow",
-                            "repeatCount": 2,
-                            "maxRepeats": 3
-                        })).unwrap()
-                    }]
-                }
-            }),
+            adapter_context: json!({}),
             base: json!({ "choices": [] }),
-            request_id: "req-hydrate-session".to_string(),
-            runtime_metadata: None,
-        };
-
-        let output = build_stopless_auto_handler_input_value(&input);
-        assert_eq!(
-            output["effectiveRuntimeLoopState"]["sessionId"],
-            json!("sess-from-truth")
-        );
-        assert_eq!(output["effectiveRuntimeLoopState"]["repeatCount"], json!(2));
-    }
-
-    #[test]
-    fn handler_input_restores_cli_snapshot_from_metadata_center_responses_resume() {
-        let input = StoplessAutoHandlerRuntimeInput {
-            adapter_context: json!({
-                "metadataCenterSnapshot": {
-                    "requestTruth": { "sessionId": "sess-from-truth" },
-                    "runtimeControl": {}
-                }
-            }),
-            base: json!({ "status": "completed", "output": [] }),
-            request_id: "req-metadata-center-resume".to_string(),
+            request_id: "req-runtime-control".to_string(),
             runtime_metadata: Some(json!({
                 "metadataCenterSnapshot": {
                     "requestTruth": { "sessionId": "sess-from-truth" },
-                    "continuationContext": {
-                        "responsesResume": {
-                            "toolOutputsDetailed": [{
-                                "callId": "call_stopless",
-                                "outputText": serde_json::to_string(&json!({
-                                    "toolName": "stop_message_auto",
-                                    "flowId": "stop_message_flow",
-                                    "continuationPrompt": "continue from metadata center",
-                                    "repeatCount": 1,
-                                    "maxRepeats": 3
-                                })).unwrap()
-                            }]
+                    "runtimeControl": {
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "continuationPrompt": "continue from runtime control",
+                            "repeatCount": 1,
+                            "maxRepeats": 3,
+                            "active": true
                         }
-                    },
-                    "runtimeControl": {}
+                    }
                 }
             })),
         };
@@ -952,8 +891,9 @@ mod tests {
         assert_eq!(output["effectiveRuntimeLoopState"]["used"], json!(1));
         assert_eq!(
             output["effectiveRuntimeLoopState"]["text"],
-            json!("continue from metadata center")
+            json!("continue from runtime control")
         );
+        assert_eq!(output["adapterContext"], json!({}));
     }
 
     #[test]

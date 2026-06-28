@@ -451,7 +451,7 @@ fn build_stop_message_auto_run_output(
         ok: true,
         kind: "stop_message_auto".to_string(),
         tool: "stop_message_auto".to_string(),
-        summary: "stopless continuation ready".to_string(),
+        summary: "停止检查需要继续".to_string(),
         model_guidance: String::new(),
         tool_name: input.tool_name,
         flow_id,
@@ -1542,6 +1542,8 @@ mod tests {
         .expect("stop_message_auto output");
         assert_eq!(output.tool_name, "stop_message_auto");
         assert_eq!(output.flow_id, "stop_message_flow");
+        assert_eq!(output.summary, "停止检查需要继续");
+        assert!(!output.summary.contains("stopless"));
         assert_eq!(output.repeat_count, 1);
         assert!(!output.continuation_prompt.is_empty());
         for forbidden in [
@@ -2846,7 +2848,8 @@ mod tests {
             Value::String("schema_pass".to_string())
         );
         assert!(output.schema_feedback.is_none());
-        assert_eq!(output.summary, "stopless continuation ready");
+        assert_eq!(output.summary, "停止检查需要继续");
+        assert!(!output.summary.contains("stopless"));
     }
 
     // projection_output_quotes_json_apostrophes already covers triggerHint in command JSON

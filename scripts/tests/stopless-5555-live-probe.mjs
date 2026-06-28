@@ -20,11 +20,11 @@ const sessionId = `stopless-live-${Date.now()}`;
 
 function buildFirstBody(model) {
   const firstTurnText = [
-    `这是 stopless 在线验证。probeTag=${probeTag}`,
+    `这是停止检查在线验证。probeTag=${probeTag}`,
     '禁止调用工具，禁止解释。',
     '如果当前没有任何 function_call_output 工具结果，就只输出 stop schema JSON：stopreason=2，reason="第一轮还没做完"，next_step="等待 stop_message_auto 工具结果后继续第二轮验证"。',
     '如果你看到最新 function_call_output 的 output 文本里包含 "\\"repeatCount\\":1"，就只输出 stop schema JSON：stopreason=2，reason="第二轮还没做完"，next_step="基于第二轮工具结果继续最终核对"。',
-    '如果你看到最新 function_call_output 的 output 文本里包含 "\\"repeatCount\\":2"，就输出 stop schema JSON：stopreason=0，reason="已完成两轮 stopless 恢复验证"，has_evidence=1，evidence="5555 live submit_tool_outputs"，issue_cause="无"，excluded_factors="已排除一轮即停回归"，diagnostic_order="首轮请求 -> 提交第一次工具输出 -> 提交第二次工具输出"，done_steps="完成首轮 continue、恢复轮次 continue、第二次恢复 allow-stop"，next_step=""，next_suggested_path=""，learned="summary must be markdown"。'
+    '如果你看到最新 function_call_output 的 output 文本里包含 "\\"repeatCount\\":2"，就输出 stop schema JSON：stopreason=0，reason="已完成两轮停止检查恢复验证"，has_evidence=1，evidence="5555 live submit_tool_outputs"，issue_cause="无"，excluded_factors="已排除一轮即停回归"，diagnostic_order="首轮请求 -> 提交第一次工具输出 -> 提交第二次工具输出"，done_steps="完成首轮 continue、恢复轮次 continue、第二次恢复 allow-stop"，next_step=""，next_suggested_path=""，learned="summary must be markdown"。'
   ].join('\n');
 
   if (probeMode === 'continuation') {
@@ -39,14 +39,14 @@ function buildFirstBody(model) {
         {
           type: 'message',
           role: 'user',
-          content: [{ type: 'input_text', text: `上一轮 stopless 在线验证。probeTag=${probeTag}` }]
+          content: [{ type: 'input_text', text: `上一轮停止检查在线验证。probeTag=${probeTag}` }]
         },
         {
           type: 'function_call',
           call_id: 'call_probe_prev_1',
           name: 'exec_command',
           arguments: JSON.stringify({
-            cmd: "routecodex servertool run stop_message_auto --input-json '{\"continuationPrompt\":\"继续 stopless live 验证\",\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1}'"
+            cmd: "routecodex servertool run stop_message_auto --input-json '{\"continuationPrompt\":\"继续停止检查 live 验证\",\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1}'"
           })
         },
         {
