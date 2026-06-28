@@ -6064,8 +6064,23 @@ function checkServertoolEngineStoplessSessionThinShell() {
     }
   }
   for (const marker of [
+    'function isBuiltinRuntimeSupported(',
+    'function readSkeletonOwnedRegistration(',
+    'getServertoolToolSpec',
+    'listServertoolToolSpecs',
+  ]) {
+    if (builtinHandlerCatalogSource.includes(marker)) {
+      fail(
+        'servertool-builtin-handler-catalog-rust-plan',
+        `builtin-handler-catalog.ts must not retain TS builtin catalog semantic marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
     "readNativeFunction('runStoplessAutoHandlerRuntimeJson')",
     "runtime.action !== 'return_handler_result'",
+    'planServertoolBuiltinHandlerEntry(',
+    'planServertoolBuiltinHandlerNames(',
   ]) {
     if (!builtinHandlerCatalogSource.includes(marker)) {
       fail(

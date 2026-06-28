@@ -72,6 +72,12 @@ export type NativeServertoolSkeletonDocument = Record<string, unknown>;
 export type NativeServertoolSkeletonDerivedConfig = Record<string, unknown>;
 export type NativeServertoolRegistrationSpec = Record<string, unknown>;
 export type NativeServertoolToolSpec = Record<string, unknown>;
+export type NativeServertoolBuiltinHandlerEntryPlan =
+  | { action: 'return_none' }
+  | { action: 'return_entry'; entry: Record<string, unknown> };
+export type NativeServertoolBuiltinHandlerNamesPlan = {
+  names: string[];
+};
 
 export type NativeServertoolNoopOutcome = {
   chatResponse: Record<string, unknown>;
@@ -530,6 +536,66 @@ export function resolveServertoolToolSpecWithNative(input: {
     const inputJson = encodeJsonArg(capability, input);
     const raw = invokeNativeStringCapability(capability, [inputJson]);
     return parseServertoolToolSpec(raw);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolBuiltinHandlerEntryWithNative(input: {
+  name: string;
+  document?: unknown;
+}): NativeServertoolBuiltinHandlerEntryPlan {
+  const capability = 'planServertoolBuiltinHandlerEntryJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolBuiltinHandlerEntryPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const record = parsed as Record<string, unknown>;
+    if (record.action === 'return_none') {
+      return { action: 'return_none' };
+    }
+    if (
+      record.action === 'return_entry' &&
+      record.entry &&
+      typeof record.entry === 'object' &&
+      !Array.isArray(record.entry)
+    ) {
+      return {
+        action: 'return_entry',
+        entry: record.entry as Record<string, unknown>
+      };
+    }
+    return fail('invalid action');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolBuiltinHandlerNamesWithNative(input: {
+  document?: unknown;
+} = {}): NativeServertoolBuiltinHandlerNamesPlan {
+  const capability = 'planServertoolBuiltinHandlerNamesJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolBuiltinHandlerNamesPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const names = (parsed as Record<string, unknown>).names;
+    if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || !name.trim())) {
+      return fail('invalid names');
+    }
+    return {
+      names: names.map((name) => name.trim().toLowerCase()).sort()
+    };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

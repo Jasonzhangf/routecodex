@@ -1,3 +1,13 @@
+# 2026-06-29 servertool builtin catalog Rust plan slice
+
+- 本轮目标：继续 servertool/stopless Rust-only 收口，把 builtin handler 注册/调度 catalog planning 从 TS 下沉到 Rust `servertool_skeleton_config`，TS `builtin-handler-catalog.ts` 只保留 native plan 消费和 stopless runtime IO 壳。
+- 改动：
+  - Rust/NAPI 新增 `plan_servertool_builtin_handler_entry_json`、`plan_servertool_builtin_handler_names_json`，由 skeleton config 真源生成 builtin handler entry/names plan。
+  - TS `builtin-handler-catalog.ts` 删除 `isBuiltinRuntimeSupported`、`readSkeletonOwnedRegistration`、`getServertoolToolSpec` / `listServertoolToolSpecs` catalog 语义，改为消费 Rust plan。
+  - `verify-servertool-rust-only` 增加 builtin catalog Rust plan gate，禁止 TS catalog 语义 marker 复活。
+- 验证已过：`cargo test -p router-hotpath-napi servertool_skeleton_config --lib -- --nocapture`、`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`、两个 TS typecheck、`npm run verify:servertool-rust-only`、`npm run verify:function-map-compile-gate`、focused Jest `registry-registration-shell + server-side-tools.auto-hook-config`、`npm run verify:stopless-invalid-schema-blackbox`、focused Jest `stopless-cli-continuation + cli/servertool-command`、scoped `git diff --check`。
+- 边界：本 slice 只证明 builtin catalog plan 已 Rust-owned；servertool 执行调度仍需继续下沉，不能宣称完整 servertool Rust-only 完成。
+
 # 2026-06-28 quota / camoufox auto-login removal audit
 
 - 任务目标：确认当前系统不再需要 quota 与 camoufox 自动登录后，物理删除相关代码、依赖、脚本/入口/测试/文档残留；禁止保留不接入的死代码。

@@ -1,8 +1,10 @@
 import type { ServerToolHandlerContext, ServerToolHandlerResult } from './types.js';
 import type { ServerToolHandlerEntry } from './registry-types.js';
-import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { getServertoolToolSpec, listServertoolToolSpecs } from './skeleton-config.js';
+import {
+  planServertoolBuiltinHandlerEntry,
+  planServertoolBuiltinHandlerNames
+} from './skeleton-config.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 
 type StoplessAutoHandlerRuntimeOutput = {
@@ -20,15 +22,6 @@ type StoplessAutoHandlerRuntimeOutput = {
   flowId?: string;
   handlerResult?: ServerToolHandlerResult;
 } & Record<string, unknown>;
-
-function isBuiltinRuntimeSupported(name: string): boolean {
-  switch (name.trim().toLowerCase()) {
-    case 'stop_message_auto':
-      return true;
-    default:
-      return false;
-  }
-}
 
 async function runStoplessAutoHandlerRuntimeNapi(
   ctx: ServerToolHandlerContext
@@ -114,63 +107,24 @@ export async function __executeBuiltinHandlerForRuntime(
   return runBuiltinHandler(name, ctx);
 }
 
-function readSkeletonOwnedRegistration(name: string): ServerToolHandlerRegistrationSpec | null {
-  const spec = getServertoolToolSpec(name);
-  if (!spec || spec.enabled === false) {
-    return null;
-  }
-  const autoHook =
-    spec.trigger.type === 'auto'
-      ? {
-          id: spec.name,
-          phase: spec.trigger.phase ?? 'default',
-          priority: spec.trigger.priority ?? 100
-        }
-      : undefined;
-  return {
-    name: spec.name,
-    enabled: true,
-    trigger: spec.trigger.type,
-    executionMode: spec.execution.mode,
-    stripAfterExecute: spec.execution.stripAfterExecute,
-    ...(autoHook ? { autoHook } : {})
-  };
-}
-
 export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | undefined {
-  const registration = readSkeletonOwnedRegistration(name);
-  if (!registration) {
+  const plan = planServertoolBuiltinHandlerEntry(name);
+  if (plan.action === 'return_none') {
     return undefined;
   }
-  if (!isBuiltinRuntimeSupported(registration.name)) {
-    return undefined;
+  if (
+    plan.action !== 'return_entry' ||
+    !plan.entry ||
+    typeof plan.entry !== 'object' ||
+    Array.isArray(plan.entry)
+  ) {
+    throw new Error(`[servertool] invalid Rust builtin handler entry plan for ${name}`);
   }
-  const entry: ServerToolHandlerEntry = {
-    name: registration.name,
-    trigger: registration.trigger,
-    execution: {
-      kind: 'builtin',
-      builtinName: registration.name
-    },
-    registration
-  };
-  if (registration.trigger === 'auto' && registration.autoHook) {
-    entry.autoHook = {
-      id: registration.autoHook.id,
-      phase: registration.autoHook.phase,
-      priority: registration.autoHook.priority,
-      order: -1
-    }
-  }
-  return entry;
+  return plan.entry as unknown as ServerToolHandlerEntry;
 }
 
 export function listBuiltinHandlerNames(): string[] {
-  return listServertoolToolSpecs()
-    .filter((spec) => spec.enabled !== false)
-    .map((spec) => spec.name.trim().toLowerCase())
-    .filter((name) => isBuiltinRuntimeSupported(name))
-    .sort();
+  return planServertoolBuiltinHandlerNames();
 }
 
 export function listBuiltinAutoHandlerEntries(): ServerToolHandlerEntry[] {

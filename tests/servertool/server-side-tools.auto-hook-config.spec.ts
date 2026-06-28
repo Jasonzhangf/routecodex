@@ -186,6 +186,42 @@ jest.unstable_mockModule(
       const name = String(input.name ?? '').trim().toLowerCase();
       return (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
     }),
+    planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
+      const name = String(input.name ?? '').trim().toLowerCase();
+      if (name !== 'stop_message_auto') {
+        return { action: 'return_none' };
+      }
+      const spec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name];
+      return {
+        action: 'return_entry',
+        entry: {
+          name,
+          trigger: spec.trigger.type,
+          execution: { kind: 'builtin', builtinName: name },
+          registration: {
+            name,
+            enabled: true,
+            trigger: spec.trigger.type,
+            executionMode: spec.execution.mode,
+            stripAfterExecute: spec.execution.stripAfterExecute,
+            autoHook: {
+              id: name,
+              phase: spec.trigger.phase ?? 'default',
+              priority: spec.trigger.priority ?? 100
+            }
+          },
+          autoHook: {
+            id: name,
+            phase: spec.trigger.phase ?? 'default',
+            priority: spec.trigger.priority ?? 100,
+            order: -1
+          }
+        }
+      };
+    }),
+    planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({
+      names: ['stop_message_auto']
+    })),
     extractCapturedChatSeedWithNative: jest.fn(() => null),
     normalizeFollowupParametersWithNative: jest.fn((value: any) => value ?? undefined),
     resolveFollowupModelWithNative: jest.fn((seedModel: any) => String(seedModel ?? 'gpt-test')),
@@ -325,6 +361,42 @@ jest.unstable_mockModule(
       const name = String(input.name ?? '').trim().toLowerCase();
       return (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
     }),
+    planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
+      const name = String(input.name ?? '').trim().toLowerCase();
+      if (name !== 'stop_message_auto') {
+        return { action: 'return_none' };
+      }
+      const spec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name];
+      return {
+        action: 'return_entry',
+        entry: {
+          name,
+          trigger: spec.trigger.type,
+          execution: { kind: 'builtin', builtinName: name },
+          registration: {
+            name,
+            enabled: true,
+            trigger: spec.trigger.type,
+            executionMode: spec.execution.mode,
+            stripAfterExecute: spec.execution.stripAfterExecute,
+            autoHook: {
+              id: name,
+              phase: spec.trigger.phase ?? 'default',
+              priority: spec.trigger.priority ?? 100
+            }
+          },
+          autoHook: {
+            id: name,
+            phase: spec.trigger.phase ?? 'default',
+            priority: spec.trigger.priority ?? 100,
+            order: -1
+          }
+        }
+      };
+    }),
+    planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({
+      names: ['stop_message_auto']
+    })),
     extractCapturedChatSeedWithNative: jest.fn(() => null),
     normalizeFollowupParametersWithNative: jest.fn((value: any) => value ?? undefined),
     resolveFollowupModelWithNative: jest.fn((seedModel: any) => String(seedModel ?? 'gpt-test')),

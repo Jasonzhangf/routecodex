@@ -13,6 +13,8 @@ import type {
 import {
   getDefaultServertoolSkeletonDocumentWithNative,
   normalizeServertoolRegistrationSpecWithNative,
+  planServertoolBuiltinHandlerEntryWithNative,
+  planServertoolBuiltinHandlerNamesWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
   resolveServertoolToolSpecWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
@@ -86,6 +88,14 @@ export function getDefaultServertoolSkeletonDocument(): ServertoolSkeletonDocume
 
 export function getServertoolToolSpec(name: string): ServertoolToolSpec | null {
   return resolveServertoolToolSpecWithNative({ name }) as unknown as ServertoolToolSpec | null;
+}
+
+export function planServertoolBuiltinHandlerEntry(name: string): Record<string, unknown> {
+  return planServertoolBuiltinHandlerEntryWithNative({ name }) as unknown as Record<string, unknown>;
+}
+
+export function planServertoolBuiltinHandlerNames(): string[] {
+  return planServertoolBuiltinHandlerNamesWithNative().names;
 }
 
 export function listServertoolToolSpecs(): ServertoolToolSpec[] {

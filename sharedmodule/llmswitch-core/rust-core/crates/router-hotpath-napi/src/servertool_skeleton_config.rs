@@ -208,12 +208,108 @@ fn get_tool_spec<'a>(document: &'a Value, name: &str) -> Option<&'a Value> {
     internal_tools(document)?.get(&canonical)
 }
 
+fn is_builtin_handler_runtime_supported(name: &str) -> bool {
+    matches!(name.trim().to_ascii_lowercase().as_str(), "stop_message_auto")
+}
+
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn build_builtin_handler_entry_plan(document: &Value, name: &str) -> Value {
+    let Some(canonical) = normalize_servertool_name(Some(&Value::String(name.to_string()))) else {
+        return json!({ "action": "return_none" });
+    };
+    if !is_builtin_handler_runtime_supported(&canonical) {
+        return json!({ "action": "return_none" });
+    }
+    let Some(spec) = get_tool_spec(document, &canonical) else {
+        return json!({ "action": "return_none" });
+    };
+    if spec.get("enabled").and_then(Value::as_bool) == Some(false) {
+        return json!({ "action": "return_none" });
+    }
+    let registration = normalize_registration_spec_from_tool_spec(spec, &canonical);
+    let mut entry = Map::new();
+    entry.insert("name".to_string(), Value::String(canonical.clone()));
+    entry.insert(
+        "trigger".to_string(),
+        registration
+            .get("trigger")
+            .cloned()
+            .unwrap_or_else(|| Value::String("tool_call".to_string())),
+    );
+    entry.insert(
+        "execution".to_string(),
+        json!({
+            "kind": "builtin",
+            "builtinName": canonical
+        }),
+    );
+    if let Some(auto_hook) = registration.get("autoHook").and_then(Value::as_object) {
+        entry.insert(
+            "autoHook".to_string(),
+            json!({
+                "id": auto_hook.get("id").cloned().unwrap_or_else(|| Value::String(canonical.clone())),
+                "phase": auto_hook.get("phase").cloned().unwrap_or_else(|| Value::String("default".to_string())),
+                "priority": auto_hook.get("priority").cloned().unwrap_or(Value::Number(100.into())),
+                "order": -1
+            }),
+        );
+    }
+    entry.insert("registration".to_string(), registration);
+    json!({
+        "action": "return_entry",
+        "entry": Value::Object(entry)
+    })
+}
+
+fn normalize_registration_spec_from_tool_spec(spec: &Value, canonical: &str) -> Value {
+    let trigger_node = spec.get("trigger");
+    let trigger = trigger_node
+        .and_then(|trigger| read_trimmed_string(trigger.get("type")))
+        .unwrap_or_else(|| "tool_call".to_string());
+    let execution = spec.get("execution");
+    let execution_mode = execution
+        .and_then(|value| read_trimmed_string(value.get("mode")))
+        .unwrap_or_else(|| {
+            if trigger == "auto" {
+                "auto_hook".to_string()
+            } else {
+                "guarded".to_string()
+            }
+        });
+    let strip_after_execute = execution
+        .and_then(|value| value.get("stripAfterExecute"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let mut output = Map::new();
+    output.insert("name".to_string(), Value::String(canonical.to_string()));
+    output.insert("enabled".to_string(), Value::Bool(true));
+    output.insert("trigger".to_string(), Value::String(trigger.clone()));
+    output.insert("executionMode".to_string(), Value::String(execution_mode));
+    output.insert(
+        "stripAfterExecute".to_string(),
+        Value::Bool(strip_after_execute),
+    );
+    if trigger == "auto" {
+        let phase = normalize_auto_hook_phase(trigger_node.and_then(|value| value.get("phase")));
+        let priority = normalize_integer(trigger_node.and_then(|value| value.get("priority")))
+            .unwrap_or(100);
+        output.insert(
+            "autoHook".to_string(),
+            json!({
+                "id": canonical,
+                "phase": phase,
+                "priority": priority
+            }),
+        );
+    }
+    Value::Object(output)
 }
 
 fn normalize_name_array(value: Option<&Value>) -> Vec<Value> {
@@ -710,6 +806,42 @@ pub fn resolve_servertool_tool_spec_json(input_json: String) -> NapiResult<Strin
 }
 
 #[napi]
+pub fn plan_servertool_builtin_handler_entry_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let name = read_trimmed_string(input.get("name")).unwrap_or_default();
+    let output = build_builtin_handler_entry_plan(&document, &name);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn plan_servertool_builtin_handler_names_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let mut names = Vec::new();
+    if let Some(tools) = internal_tools(&document) {
+        for (name, spec) in tools {
+            if spec.get("enabled").and_then(Value::as_bool) == Some(false) {
+                continue;
+            }
+            let Some(canonical) = normalize_servertool_name(Some(&Value::String(name.clone()))) else {
+                continue;
+            };
+            if is_builtin_handler_runtime_supported(&canonical) {
+                names.push(Value::String(canonical));
+            }
+        }
+    }
+    names.sort_by(|a, b| a.as_str().unwrap_or_default().cmp(b.as_str().unwrap_or_default()));
+    let output = json!({
+        "names": names
+    });
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn resolve_servertool_progress_tool_name_json(input_json: String) -> NapiResult<String> {
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -780,7 +912,8 @@ mod tests {
     use super::{
         build_servertool_dispatch_plan_input_json, build_servertool_outcome_plan_input_json,
         get_default_servertool_skeleton_document_json, normalize_servertool_registration_spec_json,
-        plan_servertool_backend_execution_json, plan_servertool_followup_runtime_json,
+        plan_servertool_backend_execution_json, plan_servertool_builtin_handler_entry_json,
+        plan_servertool_builtin_handler_names_json, plan_servertool_followup_runtime_json,
         plan_servertool_handler_contract_json, plan_servertool_skeleton_derived_config_json,
         resolve_servertool_followup_flow_profile, resolve_servertool_progress_tool_name_json,
         resolve_servertool_tool_spec_json, should_use_servertool_gold_progress_highlight_json,
@@ -1073,6 +1206,38 @@ mod tests {
             serde_json::from_str(&reasoning_stop).expect("parse reasoningStop tool spec");
         assert_eq!(reasoning_stop_parsed["name"], "reasoningStop");
         assert_eq!(reasoning_stop_parsed["execution"]["mode"], "guarded");
+    }
+
+    #[test]
+    fn builtin_handler_catalog_is_rust_planned() {
+        let names = plan_servertool_builtin_handler_names_json(json!({}).to_string())
+            .expect("builtin names");
+        let names_value: Value = serde_json::from_str(&names).expect("parse builtin names");
+        assert_eq!(names_value["names"], json!(["stop_message_auto"]));
+
+        let entry = plan_servertool_builtin_handler_entry_json(
+            json!({ "name": "stop_message_auto" }).to_string(),
+        )
+        .expect("builtin entry");
+        let entry_value: Value = serde_json::from_str(&entry).expect("parse builtin entry");
+        assert_eq!(entry_value["action"], "return_entry");
+        assert_eq!(entry_value["entry"]["name"], "stop_message_auto");
+        assert_eq!(entry_value["entry"]["trigger"], "auto");
+        assert_eq!(
+            entry_value["entry"]["execution"],
+            json!({ "kind": "builtin", "builtinName": "stop_message_auto" })
+        );
+        assert_eq!(entry_value["entry"]["registration"]["executionMode"], "auto_hook");
+        assert_eq!(entry_value["entry"]["autoHook"]["phase"], "default");
+        assert_eq!(entry_value["entry"]["autoHook"]["priority"], 40);
+        assert_eq!(entry_value["entry"]["autoHook"]["order"], -1);
+
+        let unsupported =
+            plan_servertool_builtin_handler_entry_json(json!({ "name": "web_search" }).to_string())
+                .expect("unsupported builtin entry");
+        let unsupported_value: Value =
+            serde_json::from_str(&unsupported).expect("parse unsupported builtin entry");
+        assert_eq!(unsupported_value["action"], "return_none");
     }
 
     #[test]
