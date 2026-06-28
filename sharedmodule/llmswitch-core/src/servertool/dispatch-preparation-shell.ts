@@ -32,7 +32,6 @@ export function prepareServertoolDispatchStage(args: {
   const runtimeMetadata = readRuntimeMetadata(args.options.adapterContext as unknown as Record<string, unknown>);
   const runtimePreCommandState = resolveServertoolRuntimePreCommandState({
     adapterContext: args.options.adapterContext,
-    runtimeMetadata,
     requestId: args.options.requestId,
     entryEndpoint: args.options.entryEndpoint,
     providerProtocol

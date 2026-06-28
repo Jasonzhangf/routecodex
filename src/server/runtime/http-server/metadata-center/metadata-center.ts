@@ -261,6 +261,7 @@ export class MetadataCenter {
       routeName: this.state.runtimeControl.routeName?.value as string | undefined,
       routeId: this.state.runtimeControl.routeId?.value as string | undefined,
       providerProtocol: this.state.runtimeControl.providerProtocol?.value as string | undefined,
+      preCommandState: this.state.runtimeControl.preCommandState?.value as Record<string, unknown> | undefined,
       retryProviderKey: this.state.runtimeControl.retryProviderKey?.value as string | undefined,
       preselectedRoute: this.state.runtimeControl.preselectedRoute?.value as Record<string, unknown> | undefined,
       responsesContinuationSavedAtChatProcessExit:

@@ -3297,6 +3297,42 @@ function checkPreCommandHooksRustOwner() {
     readRequired(`${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`),
     'planRuntimePreCommandStateRuntimeActionWithNative({'
   );
+  const preCommandRuntimeShell = readRequired(`${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`);
+  for (const keyword of [
+    'loadRoutingInstructionStateSync',
+    'resolveServertoolPersistentScopeKey',
+    'createServertoolProviderProtocolErrorFromPlan',
+    'readProviderProtocolFromAnyBoundMetadataCenter',
+    'readRuntimeMetadata',
+    'directRuntimePreCommandState',
+    'runtimeMetadataPreCommandState',
+    'persistedState',
+    'persistedLoad',
+    '.__rt',
+  ]) {
+    if (preCommandRuntimeShell.includes(keyword)) {
+      fail(
+        'servertool-pre-command-runtime-control-only',
+        `pre-command-runtime-state-shell.ts must not read ${keyword}; preCommandState belongs to MetadataCenter runtime_control`
+      );
+    }
+  }
+  for (const keyword of [
+    'readRuntimeControlFromAnyBoundMetadataCenter',
+    'runtimeControlPreCommandState',
+    'runtimeControl?.preCommandState',
+  ]) {
+    if (!preCommandRuntimeShell.includes(keyword)) {
+      fail(
+        'servertool-pre-command-runtime-control-only',
+        `pre-command-runtime-state-shell.ts must keep MetadataCenter runtime_control marker ${keyword}`
+      );
+    }
+  }
+  pass(
+    'servertool-pre-command-runtime-control-only',
+    'preCommandState reads only MetadataCenter runtime_control and never __rt/runtime-metadata/persisted state'
+  );
   for (const keyword of [
     'function normalizePreCommandHookRule',
     'function sanitizeHookId',
@@ -6302,14 +6338,8 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         "flowId: 'servertool_cli_projection'",
         'servertoolCliProjection: {',
         '[servertool] native execution-branch projected missing tool call id:',
-        "code: 'SERVERTOOL_STATE_LOAD_FAILED'",
-        '[servertool] sticky routing state load failed:',
-        'loadRoutingInstructionStateSync(',
-        'resolveServertoolPersistentScopeKey(',
-        'if (!persistentScopeKey) {',
-        'const runtimePreCommandState = (() => {',
-        'directRuntime?.preCommandState',
-        'runtimeMetadataPreCommandState:',
+        'readRuntimeControlFromAnyBoundMetadataCenter(',
+        'runtimeControlPreCommandState',
         'planRuntimePreCommandStateRuntimeActionWithNative({',
         "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
         'function getArray(value: unknown): JsonValue[] {',

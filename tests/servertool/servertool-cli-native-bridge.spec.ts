@@ -569,15 +569,13 @@ describe('servertool CLI native bridge', () => {
   it('uses Rust-owned pre-command runtime action planning', () => {
     expect(
       planRuntimePreCommandStateRuntimeActionWithNative({
-        runtimeMetadataPreCommandState: {
+        runtimeControlPreCommandState: {
           preCommandScriptPath: '/tmp/runtime-pre-command.sh'
-        },
-        hasPersistentScopeKey: false,
-        persistedLoadAttempted: false
+        }
       })
     ).toEqual({
       action: 'use_selected',
-      source: 'runtime_metadata',
+      source: 'runtime_control',
       state: {
         preCommandScriptPath: '/tmp/runtime-pre-command.sh'
       }
@@ -585,20 +583,11 @@ describe('servertool CLI native bridge', () => {
 
     expect(
       planRuntimePreCommandStateRuntimeActionWithNative({
-        hasPersistentScopeKey: true,
-        persistedLoadAttempted: true,
-        persistedLoadError: 'ENOENT no state',
-        requestId: 'req-1',
-        stickyKey: 'session:abc',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses'
+        runtimeControlPreCommandState: null
       })
-    ).toMatchObject({
-      action: 'throw_state_load_failed',
-      source: 'none',
-      errorPlan: {
-        code: 'SERVERTOOL_STATE_LOAD_FAILED'
-      }
+    ).toEqual({
+      action: 'use_selected',
+      source: 'none'
     });
   });
 

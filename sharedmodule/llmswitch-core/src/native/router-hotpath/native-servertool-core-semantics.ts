@@ -172,16 +172,15 @@ export interface PreCommandHooksConfigPlan {
 }
 
 export interface RuntimePreCommandStateSelectionPlan {
-  action: 'use_selected' | 'load_persisted';
-  source: 'direct_runtime' | 'runtime_metadata' | 'persisted' | 'none';
+  action: 'use_selected';
+  source: 'runtime_control' | 'none';
   state?: Record<string, unknown>;
 }
 
 export interface RuntimePreCommandStateRuntimeActionPlan {
-  action: 'use_selected' | 'load_persisted' | 'throw_state_load_failed';
-  source: 'direct_runtime' | 'runtime_metadata' | 'persisted' | 'none';
+  action: 'use_selected';
+  source: 'runtime_control' | 'none';
   state?: Record<string, unknown>;
-  errorPlan?: ServertoolErrorPlan;
 }
 
 export interface AutoHookExecutionDecisionPlan {
@@ -2148,11 +2147,7 @@ export function planRuntimePreCommandRuleWithNative(input: {
 }
 
 export function planRuntimePreCommandStateSelectionWithNative(input: {
-  directRuntimePreCommandState?: unknown;
-  runtimeMetadataPreCommandState?: unknown;
-  hasPersistentScopeKey?: boolean;
-  persistedState?: unknown;
-  persistedLoadAttempted: boolean;
+  runtimeControlPreCommandState?: unknown;
 }): RuntimePreCommandStateSelectionPlan {
   const capability = 'planRuntimePreCommandStateSelectionJson';
   const fn = readNativeFunction(capability);
@@ -2168,15 +2163,10 @@ export function planRuntimePreCommandStateSelectionWithNative(input: {
     throw new Error('planRuntimePreCommandStateSelectionJson native returned invalid plan');
   }
   const record = parsed as Record<string, unknown>;
-  if (record.action !== 'use_selected' && record.action !== 'load_persisted') {
+  if (record.action !== 'use_selected') {
     throw new Error('planRuntimePreCommandStateSelectionJson native returned invalid action');
   }
-  if (
-    record.source !== 'direct_runtime' &&
-    record.source !== 'runtime_metadata' &&
-    record.source !== 'persisted' &&
-    record.source !== 'none'
-  ) {
+  if (record.source !== 'runtime_control' && record.source !== 'none') {
     throw new Error('planRuntimePreCommandStateSelectionJson native returned invalid source');
   }
   const state = record.state;
@@ -2191,16 +2181,7 @@ export function planRuntimePreCommandStateSelectionWithNative(input: {
 }
 
 export function planRuntimePreCommandStateRuntimeActionWithNative(input: {
-  directRuntimePreCommandState?: unknown;
-  runtimeMetadataPreCommandState?: unknown;
-  hasPersistentScopeKey?: boolean;
-  persistedState?: unknown;
-  persistedLoadAttempted: boolean;
-  persistedLoadError?: string;
-  requestId?: string;
-  stickyKey?: string;
-  entryEndpoint?: string;
-  providerProtocol?: string;
+  runtimeControlPreCommandState?: unknown;
 }): RuntimePreCommandStateRuntimeActionPlan {
   const capability = 'planRuntimePreCommandStateRuntimeActionJson';
   const fn = readNativeFunction(capability);
@@ -2216,34 +2197,20 @@ export function planRuntimePreCommandStateRuntimeActionWithNative(input: {
     throw new Error('planRuntimePreCommandStateRuntimeActionJson native returned invalid plan');
   }
   const record = parsed as Record<string, unknown>;
-  if (
-    record.action !== 'use_selected' &&
-    record.action !== 'load_persisted' &&
-    record.action !== 'throw_state_load_failed'
-  ) {
+  if (record.action !== 'use_selected') {
     throw new Error('planRuntimePreCommandStateRuntimeActionJson native returned invalid action');
   }
-  if (
-    record.source !== 'direct_runtime' &&
-    record.source !== 'runtime_metadata' &&
-    record.source !== 'persisted' &&
-    record.source !== 'none'
-  ) {
+  if (record.source !== 'runtime_control' && record.source !== 'none') {
     throw new Error('planRuntimePreCommandStateRuntimeActionJson native returned invalid source');
   }
   const state = record.state;
   if (state !== undefined && (typeof state !== 'object' || state === null || Array.isArray(state))) {
     throw new Error('planRuntimePreCommandStateRuntimeActionJson native returned invalid state');
   }
-  const errorPlan =
-    record.errorPlan !== undefined
-      ? parseServertoolErrorPlan(JSON.stringify(record.errorPlan), 'planRuntimePreCommandStateRuntimeActionJson')
-      : undefined;
   return {
     action: record.action,
     source: record.source,
-    ...(state ? { state: state as Record<string, unknown> } : {}),
-    ...(errorPlan ? { errorPlan } : {})
+    ...(state ? { state: state as Record<string, unknown> } : {})
   };
 }
 

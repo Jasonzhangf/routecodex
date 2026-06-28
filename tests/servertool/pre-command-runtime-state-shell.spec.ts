@@ -1,51 +1,24 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
-import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
 function bindProviderProtocol(adapterContext: Record<string, unknown>, providerProtocol = 'openai-responses'): void {
-  const center = MetadataCenter.attach(adapterContext);
-  if (!center.readRuntimeControl().providerProtocol) {
-    center.writeRuntimeControl(
-      'providerProtocol',
-      providerProtocol,
-      {
-        module: 'tests/servertool/pre-command-runtime-state-shell.spec.ts',
-        symbol: 'bindProviderProtocol',
-        stage: 'test'
-      }
-    );
-  }
+  Reflect.set(adapterContext, METADATA_CENTER_SYMBOL, {
+    readRuntimeControl: () => ({ providerProtocol })
+  });
 }
 
-const loadRoutingInstructionStateSync = jest.fn();
-const planRuntimePreCommandStateRuntimeActionWithNative = jest.fn();
-const resolveServertoolPersistentScopeKey = jest.fn(() => null);
-const createServertoolProviderProtocolErrorFromPlan = jest.fn();
+function bindRuntimeControl(adapterContext: Record<string, unknown>, runtimeControl: Record<string, unknown>): void {
+  Reflect.set(adapterContext, METADATA_CENTER_SYMBOL, {
+    readRuntimeControl: () => runtimeControl
+  });
+}
 
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js',
-  () => ({
-    loadRoutingInstructionStateSync
-  })
-);
+const planRuntimePreCommandStateRuntimeActionWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
     planRuntimePreCommandStateRuntimeActionWithNative
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/state-scope.js',
-  () => ({
-    resolveServertoolPersistentScopeKey
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js',
-  () => ({
-    createServertoolProviderProtocolErrorFromPlan
   })
 );
 
@@ -57,152 +30,57 @@ describe('pre-command-runtime-state-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     planRuntimePreCommandStateRuntimeActionWithNative.mockImplementation((input: any) => {
-      const direct = input?.directRuntimePreCommandState;
-      if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
-        return { action: 'use_selected', state: direct };
-      }
-      const runtime = input?.runtimeMetadataPreCommandState;
-      if (runtime && typeof runtime === 'object' && !Array.isArray(runtime)) {
-        return { action: 'use_selected', state: runtime };
-      }
-      if (typeof input?.persistedLoadError === 'string' && input.persistedLoadError.trim()) {
-        return {
-          action: 'throw_state_load_failed',
-          errorPlan: {
-            code: 'SERVERTOOL_STATE_LOAD_FAILED',
-            category: 'INTERNAL_ERROR',
-            status: 500,
-            message: `[servertool] sticky routing state load failed: ${String(input?.stickyKey ?? '')}: ${String(input?.persistedLoadError ?? '')}`,
-            details: {
-              stickyKey: String(input?.stickyKey ?? ''),
-              requestId: String(input?.requestId ?? '')
-            }
-          }
-        };
-      }
-      if (!input?.persistedLoadAttempted && input?.hasPersistentScopeKey) {
-        return { action: 'load_persisted' };
-      }
+      const state = input?.runtimeControlPreCommandState;
       return {
         action: 'use_selected',
-        state:
-          input?.persistedState && typeof input.persistedState === 'object' && !Array.isArray(input.persistedState)
-            ? input.persistedState
-            : undefined
+        source: state && typeof state === 'object' && !Array.isArray(state) ? 'runtime_control' : 'none',
+        state: state && typeof state === 'object' && !Array.isArray(state) ? state : undefined
       };
-    });
-    createServertoolProviderProtocolErrorFromPlan.mockImplementation((plan: any) => {
-      const err = new Error(String(plan?.message ?? 'state load failed'));
-      (err as Error & { code?: string; status?: number; details?: unknown }).code = plan?.code;
-      (err as Error & { code?: string; status?: number; details?: unknown }).status = plan?.status;
-      (err as Error & { code?: string; status?: number; details?: unknown }).details = plan?.details;
-      return err;
     });
   });
 
-  test('uses direct runtime preCommandState without persisted load', () => {
+  test('uses metadata center runtime_control preCommandState', () => {
+    const adapterContext: Record<string, unknown> = {};
+    bindRuntimeControl(adapterContext, {
+      preCommandState: { routeHint: 'web_search' }
+    });
     const state = resolveServertoolRuntimePreCommandState({
-      adapterContext: { __rt: { preCommandState: { routeHint: 'web_search' } } },
-      runtimeMetadata: undefined,
+      adapterContext,
       requestId: 'req-direct'
     });
 
     expect(state).toEqual({ routeHint: 'web_search' });
-    expect(loadRoutingInstructionStateSync).not.toHaveBeenCalled();
     expect(planRuntimePreCommandStateRuntimeActionWithNative).toHaveBeenCalledWith({
-      directRuntimePreCommandState: { routeHint: 'web_search' },
-      runtimeMetadataPreCommandState: undefined,
-      hasPersistentScopeKey: false,
-      persistedLoadAttempted: false
+      runtimeControlPreCommandState: { routeHint: 'web_search' }
     });
   });
 
-  test('uses runtime metadata preCommandState without persisted load', () => {
+  test('ignores legacy __rt and runtime metadata preCommandState', () => {
     const state = resolveServertoolRuntimePreCommandState({
-      adapterContext: {},
-      runtimeMetadata: { preCommandState: { routeHint: 'multimodal' } },
+      adapterContext: { __rt: { preCommandState: { routeHint: 'web_search' } } },
       requestId: 'req-metadata'
-    });
+    } as any);
 
-    expect(state).toEqual({ routeHint: 'multimodal' });
-    expect(loadRoutingInstructionStateSync).not.toHaveBeenCalled();
+    expect(state).toBeUndefined();
+    expect(planRuntimePreCommandStateRuntimeActionWithNative).toHaveBeenCalledWith({
+      runtimeControlPreCommandState: undefined
+    });
   });
 
-  test('loads persisted state when native runtime action asks for it', () => {
+  test('does not load persisted routing state for preCommandState', () => {
     const adapterContext: Record<string, unknown> = {};
     bindProviderProtocol(adapterContext, 'openai-responses');
-    resolveServertoolPersistentScopeKey.mockReturnValue('session:pre-command');
-    loadRoutingInstructionStateSync.mockReturnValue({ routeHint: 'thinking' });
 
     const state = resolveServertoolRuntimePreCommandState({
       adapterContext,
-      runtimeMetadata: undefined,
       requestId: 'req-persisted',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
     });
 
-    expect(resolveServertoolPersistentScopeKey).toHaveBeenCalledWith(adapterContext);
-    expect(loadRoutingInstructionStateSync).toHaveBeenCalledWith('session:pre-command');
-    expect(planRuntimePreCommandStateRuntimeActionWithNative).toHaveBeenNthCalledWith(2, {
-      directRuntimePreCommandState: undefined,
-      runtimeMetadataPreCommandState: undefined,
-      hasPersistentScopeKey: true,
-      persistedState: { routeHint: 'thinking' },
-      persistedLoadAttempted: true
+    expect(planRuntimePreCommandStateRuntimeActionWithNative).toHaveBeenCalledWith({
+      runtimeControlPreCommandState: undefined
     });
-    expect(state).toEqual({ routeHint: 'thinking' });
-  });
-
-  test('throws wrapped state-load-failed error when persisted read crashes', () => {
-    const adapterContext: Record<string, unknown> = {};
-    bindProviderProtocol(adapterContext, 'openai');
-    resolveServertoolPersistentScopeKey.mockReturnValue('session:pre-command-fail');
-    loadRoutingInstructionStateSync.mockImplementation(() => {
-      throw new Error('disk unavailable');
-    });
-
-    expect(() =>
-      resolveServertoolRuntimePreCommandState({
-        adapterContext,
-        runtimeMetadata: undefined,
-        requestId: 'req-error',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai'
-      })
-    ).toThrow('[servertool] sticky routing state load failed: session:pre-command-fail: disk unavailable');
-    expect(planRuntimePreCommandStateRuntimeActionWithNative).toHaveBeenNthCalledWith(2, {
-      directRuntimePreCommandState: undefined,
-      runtimeMetadataPreCommandState: undefined,
-      hasPersistentScopeKey: true,
-      persistedLoadAttempted: true,
-      persistedLoadError: 'disk unavailable',
-      requestId: 'req-error',
-      stickyKey: 'session:pre-command-fail',
-      entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai'
-    });
-  });
-
-  test('prefers bound metadata center providerProtocol when persisted-load error plan is built', () => {
-    const adapterContext: Record<string, unknown> = {};
-    bindProviderProtocol(adapterContext, 'anthropic-messages');
-    resolveServertoolPersistentScopeKey.mockReturnValue('session:pre-command-fail');
-    loadRoutingInstructionStateSync.mockImplementation(() => {
-      throw new Error('disk unavailable');
-    });
-
-    expect(() =>
-      resolveServertoolRuntimePreCommandState({
-        adapterContext,
-        runtimeMetadata: undefined,
-        requestId: 'req-error',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat'
-      })
-    ).toThrow('[servertool] sticky routing state load failed: session:pre-command-fail: disk unavailable');
-    expect(planRuntimePreCommandStateRuntimeActionWithNative).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      providerProtocol: 'anthropic-messages'
-    }));
+    expect(state).toBeUndefined();
   });
 });

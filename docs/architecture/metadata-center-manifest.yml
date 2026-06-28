@@ -43,6 +43,7 @@ families:
       - routeName
       - routeId
       - providerProtocol
+      - preCommandState
       - retryProviderKey
       - preselectedRoute
       - stopGatewayContext

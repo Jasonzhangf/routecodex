@@ -103,6 +103,7 @@ export type MetadataCenterRuntimeControl = {
   routeName?: string;
   routeId?: string;
   providerProtocol?: string;
+  preCommandState?: Record<string, unknown>;
   retryProviderKey?: string;
   preselectedRoute?: Record<string, unknown>;
   responsesContinuationSavedAtChatProcessExit?: boolean;

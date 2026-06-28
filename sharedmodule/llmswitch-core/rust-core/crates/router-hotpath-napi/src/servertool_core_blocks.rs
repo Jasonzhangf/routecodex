@@ -2853,17 +2853,14 @@ mod tests {
 fn plans_runtime_pre_command_state_selection_via_servertool_core_bridge() {
     let plan = plan_runtime_pre_command_state_selection_json(
         &serde_json::json!({
-            "directRuntimePreCommandState": null,
-            "runtimeMetadataPreCommandState": { "preCommandScriptPath": "/tmp/runtime.sh" },
-            "hasPersistentScopeKey": false,
-            "persistedLoadAttempted": false
+            "runtimeControlPreCommandState": { "preCommandScriptPath": "/tmp/runtime.sh" }
         })
         .to_string(),
     )
     .expect("state selection plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
     assert_eq!(parsed["action"], "use_selected");
-    assert_eq!(parsed["source"], "runtime_metadata");
+    assert_eq!(parsed["source"], "runtime_control");
     assert_eq!(
         parsed["state"]["preCommandScriptPath"],
         serde_json::Value::String("/tmp/runtime.sh".to_string())
@@ -2871,10 +2868,7 @@ fn plans_runtime_pre_command_state_selection_via_servertool_core_bridge() {
 
     let skip = plan_runtime_pre_command_state_selection_json(
         &serde_json::json!({
-            "directRuntimePreCommandState": null,
-            "runtimeMetadataPreCommandState": null,
-            "hasPersistentScopeKey": false,
-            "persistedLoadAttempted": false
+            "runtimeControlPreCommandState": null
         })
         .to_string(),
     )
@@ -2889,44 +2883,31 @@ fn plans_runtime_pre_command_state_selection_via_servertool_core_bridge() {
 fn plans_runtime_pre_command_state_runtime_action_via_servertool_core_bridge() {
     let plan = plan_runtime_pre_command_state_runtime_action_json(
         &serde_json::json!({
-            "directRuntimePreCommandState": null,
-            "runtimeMetadataPreCommandState": { "preCommandScriptPath": "/tmp/runtime.sh" },
-            "hasPersistentScopeKey": false,
-            "persistedLoadAttempted": false
+            "runtimeControlPreCommandState": { "preCommandScriptPath": "/tmp/runtime.sh" }
         })
         .to_string(),
     )
     .expect("runtime action plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse runtime action");
     assert_eq!(parsed["action"], "use_selected");
-    assert_eq!(parsed["source"], "runtime_metadata");
+    assert_eq!(parsed["source"], "runtime_control");
     assert_eq!(
         parsed["state"]["preCommandScriptPath"],
         serde_json::Value::String("/tmp/runtime.sh".to_string())
     );
 
-    let error_plan = plan_runtime_pre_command_state_runtime_action_json(
+    let empty_plan = plan_runtime_pre_command_state_runtime_action_json(
         &serde_json::json!({
-            "directRuntimePreCommandState": null,
-            "runtimeMetadataPreCommandState": null,
-            "hasPersistentScopeKey": true,
-            "persistedLoadAttempted": true,
-            "persistedLoadError": "ENOENT no state",
-            "requestId": "req-1",
-            "stickyKey": "session:abc",
-            "entryEndpoint": "/v1/responses",
-            "providerProtocol": "openai-responses"
+            "runtimeControlPreCommandState": null
         })
         .to_string(),
     )
-    .expect("runtime action error plan");
-    let error_parsed: serde_json::Value =
-        serde_json::from_str(&error_plan).expect("parse runtime action error");
-    assert_eq!(error_parsed["action"], "throw_state_load_failed");
-    assert_eq!(
-        error_parsed["errorPlan"]["code"],
-        serde_json::Value::String("SERVERTOOL_STATE_LOAD_FAILED".to_string())
-    );
+    .expect("runtime action empty plan");
+    let empty_parsed: serde_json::Value =
+        serde_json::from_str(&empty_plan).expect("parse runtime action empty");
+    assert_eq!(empty_parsed["action"], "use_selected");
+    assert_eq!(empty_parsed["source"], "none");
+    assert!(empty_parsed.get("state").is_none() || empty_parsed["state"].is_null());
 }
 
 #[test]
