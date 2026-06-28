@@ -14,6 +14,7 @@ import {
   buildServertoolOutcomePlanInputWithNative,
   planServertoolOutcomeWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import { __executeBuiltinHandlerForRuntime } from './builtin-handler-catalog.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
@@ -261,19 +262,7 @@ export async function executeBuiltinServerToolHandler(args: {
   builtinName: string;
   ctx: ServerToolHandlerContext;
 }): Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null> {
-  const { getBuiltinHandlerEntry } = await import('./builtin-handler-catalog.js');
-  const entry = getBuiltinHandlerEntry(args.builtinName);
-  if (!entry || entry.execution.kind !== 'builtin') {
-    throw new Error(`[servertool] builtin handler missing execution descriptor: ${args.builtinName}`);
-  }
-  const builtinHandler = await import('./builtin-handler-catalog.js').then((mod) => {
-    const runtime = (mod as unknown as { __executeBuiltinHandlerForRuntime?: unknown }).__executeBuiltinHandlerForRuntime;
-    if (typeof runtime !== 'function') {
-      throw new Error('[servertool] builtin runtime executor export missing');
-    }
-    return runtime as (name: string, ctx: ServerToolHandlerContext) => Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null>;
-  });
-  return builtinHandler(args.builtinName, args.ctx);
+  return __executeBuiltinHandlerForRuntime(args.builtinName, args.ctx);
 }
 
 export const runServertoolHandler = async (

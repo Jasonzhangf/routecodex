@@ -5656,6 +5656,9 @@ function checkServertoolRustOutcomeCloseout() {
     '[servertool] vision_analysis backend requires reenterPipeline',
     '[servertool] unsupported backend plan kind:',
     "if (planHandlerMaterializationAction(planned, options) === 'handler_plan')",
+    "await import('./builtin-handler-catalog.js')",
+    'getBuiltinHandlerEntry(args.builtinName)',
+    'builtin handler missing execution descriptor',
   ]) {
     if (executionMaterializationShell.includes(marker)) {
       fail(
@@ -5669,6 +5672,12 @@ function checkServertoolRustOutcomeCloseout() {
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
     'planServertoolHandlerRuntimeActionWithNative'
+  );
+  assertContains(
+    'servertool-execution-handler-builtin-runtime-thin-shell',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    executionMaterializationShell,
+    '__executeBuiltinHandlerForRuntime(args.builtinName, args.ctx)'
   );
   assertContains(
     'servertool-execution-handler-contract-rust-owner',

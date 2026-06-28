@@ -1,3 +1,9 @@
+# 2026-06-29 servertool builtin execution shell catalog lookup removal
+
+- 本轮继续缩小 TS 执行壳：`execution-handler-materialization-shell.ts::executeBuiltinServerToolHandler` 不再 dynamic import `builtin-handler-catalog.ts`、不再二次 `getBuiltinHandlerEntry(args.builtinName)` 校验 execution descriptor。
+- 边界：builtin entry/启用/descriptor 已由 Rust `plan_servertool_builtin_handler_entry_json` 和 auto-hook/queue 上游 plan 决定；执行 shell 只直接调用 `__executeBuiltinHandlerForRuntime(args.builtinName, args.ctx)` 这个 IO 壳。
+- gate：`verify-servertool-rust-only` 增加禁止 `await import('./builtin-handler-catalog.js')`、`getBuiltinHandlerEntry(args.builtinName)`、`builtin handler missing execution descriptor` 复活，并要求 execution shell 保留直接 runtime 调用 marker。
+
 # 2026-06-29 servertool builtin catalog Rust plan slice
 
 - 本轮目标：继续 servertool/stopless Rust-only 收口，把 builtin handler 注册/调度 catalog planning 从 TS 下沉到 Rust `servertool_skeleton_config`，TS `builtin-handler-catalog.ts` 只保留 native plan 消费和 stopless runtime IO 壳。
