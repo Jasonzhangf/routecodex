@@ -173,7 +173,6 @@ async function executeProviderResponseNativeServertoolEffects(args: {
   context: AdapterContext;
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
-  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
   stageRecorder?: StageRecorder;
 }): Promise<HubRespProcessEffectResult> {
   let payload = args.payload;
@@ -182,7 +181,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
     servertoolRuntimeActions: readNativeServertoolRuntimeActionEffects(args.runtimeEffects),
     providerInvoker: false,
     reenterPipeline: false,
-    clientInjectDispatch: typeof args.clientInjectDispatch === 'function'
+    clientInjectDispatch: false
   });
   if (actionPlan.error) {
     throwServertoolRuntimeErrorDescriptor(actionPlan.error);
@@ -198,9 +197,6 @@ async function executeProviderResponseNativeServertoolEffects(args: {
       requestId: args.requestId,
       entryEndpoint: args.entryEndpoint,
       providerProtocol: args.providerProtocol,
-      ...(typeof args.clientInjectDispatch === 'function'
-        ? { clientInjectDispatch: args.clientInjectDispatch }
-        : {}),
       ...(executionPlan.allowFollowup ? { allowFollowup: true } : {}),
       stageRecorder: args.stageRecorder
     });
@@ -448,7 +444,6 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   context: AdapterContext;
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
-  clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
   stageRecorder?: StageRecorder;
 }): Promise<ProviderResponseConversionResult> {
   let hubRespOutbound04ClientSemantic = args.nativeResponsePlan.payload;
@@ -462,7 +457,6 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     context: args.context,
     entryEndpoint: args.entryEndpoint,
     providerProtocol: args.providerProtocol,
-    clientInjectDispatch: args.clientInjectDispatch,
     stageRecorder: args.stageRecorder
   });
   hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'
@@ -635,7 +629,6 @@ export async function convertProviderResponse(
     context: options.context,
     entryEndpoint: options.entryEndpoint,
     providerProtocol,
-    clientInjectDispatch: options.clientInjectDispatch,
     stageRecorder: options.stageRecorder
   });
 }

@@ -390,10 +390,19 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts',
-    forbidden: [],
-    required: [
+    forbidden: [
       'planServertoolRegistryRegistrationActionWithNative',
       'planServertoolRegistryLookupActionWithNative',
+      'builtinNameMatched',
+      'builtinEntryPresent',
+      'registrationAllowedByConfig',
+      'isServertoolEnabledByConfig',
+      'getServertoolToolSpec(name)?.enabled',
+    ],
+    required: [
+      'planServertoolRegistryRegistrationFromSkeleton(',
+      'planServertoolRegistryLookupFromSkeleton(',
+      'isServertoolRegisteredNameByConfig(',
       'registerServerToolHandlerViaNativePlan',
       'getServerToolHandlerViaNativePlan',
     ],
@@ -457,7 +466,8 @@ describe('stop-message-auto native-catalog audit', () => {
   test('builtin-handler-catalog delegates stop-message-auto execution to Rust-owned native runtime', () => {
     const source = fs.readFileSync(repoPath('sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts'), 'utf8');
 
-    expect(source).toContain('planStopMessageAutoHandlerWithNative');
+    expect(source).toContain('runStoplessAutoHandlerRuntimeJson');
+    expect(source).toContain('runStoplessAutoHandlerRuntimeNapi');
     expect(source).toContain('function runBuiltinHandler(');
     expect(source).toContain("case 'stop_message_auto'");
 

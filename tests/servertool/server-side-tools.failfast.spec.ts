@@ -720,6 +720,48 @@ jest.unstable_mockModule(
     visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
     visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
     resolveServertoolToolSpecWithNative: jest.fn(() => null),
+    planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
+      const name = String(input?.name ?? '').trim().toLowerCase();
+      return name === 'stop_message_auto'
+        ? {
+            action: 'return_entry',
+            entry: {
+              name,
+              trigger: 'auto',
+              execution: {
+                kind: 'builtin',
+                builtinName: name
+              },
+              autoHook: {
+                flowId: 'stop_message_flow',
+                trigger: { type: 'auto', phase: 'default', priority: 40 },
+                execution: { mode: 'auto_hook', stripAfterExecute: true }
+              },
+              registration: {
+                name,
+                enabled: true,
+                trigger: 'auto',
+                executionMode: 'auto_hook',
+                stripAfterExecute: true
+              }
+            }
+          }
+        : { action: 'return_none' };
+    }),
+    planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({ names: ['stop_message_auto'] })),
+    planServertoolRegistryRegistrationFromSkeletonWithNative: jest.fn((input: any) => {
+      const name = String(input?.name ?? '').trim().toLowerCase();
+      return name && input?.hasHandler === true
+        ? { action: 'register_adhoc', canonicalName: name }
+        : { action: 'ignore_invalid' };
+    }),
+    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn((input: any) => {
+      const name = String(input?.name ?? '').trim().toLowerCase();
+      return input?.adHocEntryPresent === true
+        ? { action: 'return_adhoc', canonicalName: name }
+        : { action: 'return_none', canonicalName: name };
+    }),
+    resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
     normalizeServertoolRegistrationSpecWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
       if (!name) {
@@ -771,7 +813,10 @@ jest.unstable_mockModule(
           continue;
         }
         try {
-          await entry.handler({ ...args.contextBase, base: args.baseForExecution, toolCall });
+          if (entry.execution?.kind !== 'adhoc' || typeof entry.execution.handler !== 'function') {
+            throw new Error('servertool test expected an ad-hoc handler entry');
+          }
+          await entry.execution.handler({ ...args.contextBase, base: args.baseForExecution, toolCall });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error ?? 'unknown');
           (args.baseForExecution as Record<string, unknown>).tool_outputs = [
@@ -823,6 +868,7 @@ jest.unstable_mockModule(
       }
     })),
     runServertoolHandler: jest.fn(async (handler: any, ctx: any) => await handler(ctx)),
+    executeBuiltinServerToolHandler: jest.fn(async () => null),
     createServertoolExecutionLoopStateFromNative: jest.fn(() => ({
       executedToolCalls: [],
       executedIds: new Set<string>(),
@@ -883,6 +929,20 @@ jest.unstable_mockModule(
 
 let runServerSideToolEngine: any;
 let registerServerToolHandler: any;
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+function bindTestMetadataCenter<T extends Record<string, unknown>>(
+  adapterContext: T,
+  providerProtocol = 'openai-responses'
+): T {
+  Reflect.set(adapterContext, METADATA_CENTER_SYMBOL, {
+    readRuntimeControl: () => ({ providerProtocol }),
+    readRequestTruth: () => ({
+      requestId: typeof adapterContext.requestId === 'string' ? adapterContext.requestId : undefined
+    })
+  });
+  return adapterContext;
+}
 
 beforeAll(async () => {
   const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry.js');
@@ -1000,12 +1060,12 @@ describe('server-side-tools tool-error closed loop', () => {
   });
 
   test('fails fast through native client-disconnect policy before servertool execution', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindTestMetadataCenter({
       requestId: 'req-servertool-disconnected-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
       clientDisconnected: ' true '
-    } as any;
+    } as any);
 
     await expect(
       runServerSideToolEngine({
@@ -1026,11 +1086,11 @@ describe('server-side-tools tool-error closed loop', () => {
   });
 
   test('returns passthrough through native entry preflight when chat response is not an object', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindTestMetadataCenter({
       requestId: 'req-servertool-non-object-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
-    } as any;
+    } as any);
 
     const result = await runServerSideToolEngine({
       chatResponse: 'not-an-object' as any,
@@ -1051,11 +1111,11 @@ describe('server-side-tools tool-error closed loop', () => {
   });
 
   test('returns retryable tool error output on servertool handler failure instead of aborting the whole request', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindTestMetadataCenter({
       requestId: 'req-servertool-failfast-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
-    } as any;
+    } as any);
 
     const result = await runServerSideToolEngine({
       chatResponse: makeToolCallResponse(),
@@ -1107,7 +1167,7 @@ describe('server-side-tools tool-error closed loop', () => {
   });
 
   test('uses direct runtime preCommandState without loading persisted routing state', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindTestMetadataCenter({
       requestId: 'req-servertool-precommand-direct-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -1116,7 +1176,7 @@ describe('server-side-tools tool-error closed loop', () => {
           preCommandScriptPath: '/tmp/direct-pre-command.sh'
         }
       }
-    } as any;
+    } as any);
 
     await runServerSideToolEngine({
       chatResponse: makeToolCallResponse(),
@@ -1150,11 +1210,11 @@ describe('server-side-tools tool-error closed loop', () => {
         preCommandScriptPath: '/tmp/runtime-pre-command.sh'
       }
     });
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindTestMetadataCenter({
       requestId: 'req-servertool-precommand-runtime-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
-    } as any;
+    } as any);
 
     await runServerSideToolEngine({
       chatResponse: makeToolCallResponse(),
@@ -1183,11 +1243,11 @@ describe('server-side-tools tool-error closed loop', () => {
   });
 
   test('does not load persisted routing state when native pre-command selection sees no scope key', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindTestMetadataCenter({
       requestId: 'req-servertool-precommand-no-scope-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
-    } as any;
+    } as any);
 
     await runServerSideToolEngine({
       chatResponse: makeToolCallResponse(),
@@ -1213,11 +1273,11 @@ describe('server-side-tools tool-error closed loop', () => {
   });
 
   test('does not pass legacy servertool support capability details into the native response-stage gate', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindTestMetadataCenter({
       requestId: 'req-servertool-response-stage-capabilities-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
-    } as any;
+    } as any);
 
     await runServerSideToolEngine({
       chatResponse: makeUnknownToolCallResponse(),
@@ -1239,9 +1299,7 @@ describe('server-side-tools tool-error closed loop', () => {
     expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(1, {
       responseStageGatePlan: {
         shouldBypass: false,
-        nextAction: 'continue_to_execution',
-        responseHookMatched: false,
-        responseHookRequired: false
+        nextAction: 'run_auto_hooks'
       },
       autoHookEvaluated: false,
       hasAutoHookResult: false,
@@ -1250,9 +1308,7 @@ describe('server-side-tools tool-error closed loop', () => {
     expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(2, {
       responseStageGatePlan: {
         shouldBypass: false,
-        nextAction: 'continue_to_execution',
-        responseHookMatched: false,
-        responseHookRequired: false
+        nextAction: 'run_auto_hooks'
       },
       autoHookEvaluated: true,
       hasAutoHookResult: false,
@@ -1303,11 +1359,11 @@ describe('server-side-tools tool-error closed loop', () => {
     loadRoutingInstructionStateSyncMock.mockReturnValue({
       preCommandScriptPath: '/tmp/persisted-pre-command.sh'
     });
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindTestMetadataCenter({
       requestId: 'req-servertool-precommand-persisted-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
-    } as any;
+    } as any);
 
     await runServerSideToolEngine({
       chatResponse: makeToolCallResponse(),
@@ -1351,11 +1407,11 @@ describe('server-side-tools tool-error closed loop', () => {
     await expect(
       runServerSideToolEngine({
         chatResponse: makeToolCallResponse(),
-        adapterContext: {
+        adapterContext: bindTestMetadataCenter({
           requestId: 'req-servertool-precommand-fail-1',
           entryEndpoint: '/v1/responses',
           providerProtocol: 'openai-responses'
-        } as any,
+        } as any),
         entryEndpoint: '/v1/responses',
         requestId: 'req-servertool-precommand-fail-1',
         providerProtocol: 'openai-responses'

@@ -15,7 +15,10 @@ import {
   normalizeServertoolRegistrationSpecWithNative,
   planServertoolBuiltinHandlerEntryWithNative,
   planServertoolBuiltinHandlerNamesWithNative,
+  planServertoolRegistryLookupFromSkeletonWithNative,
+  planServertoolRegistryRegistrationFromSkeletonWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
+  resolveServertoolRegisteredNameWithNative,
   resolveServertoolToolSpecWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
@@ -96,6 +99,24 @@ export function planServertoolBuiltinHandlerEntry(name: string): Record<string, 
 
 export function planServertoolBuiltinHandlerNames(): string[] {
   return planServertoolBuiltinHandlerNamesWithNative().names;
+}
+
+export function planServertoolRegistryRegistrationFromSkeleton(input: {
+  name: string;
+  hasHandler: boolean;
+}): ReturnType<typeof planServertoolRegistryRegistrationFromSkeletonWithNative> {
+  return planServertoolRegistryRegistrationFromSkeletonWithNative(input);
+}
+
+export function planServertoolRegistryLookupFromSkeleton(input: {
+  name: string;
+  adHocEntryPresent: boolean;
+}): ReturnType<typeof planServertoolRegistryLookupFromSkeletonWithNative> {
+  return planServertoolRegistryLookupFromSkeletonWithNative(input);
+}
+
+export function isServertoolRegisteredNameByConfig(name: string): boolean {
+  return resolveServertoolRegisteredNameWithNative({ name });
 }
 
 export function listServertoolToolSpecs(): ServertoolToolSpec[] {

@@ -1,6 +1,10 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{json, Map, Value};
+use servertool_core::registry_contract::{
+    plan_servertool_registry_lookup_action, plan_servertool_registry_registration_action,
+    ServertoolRegistryLookupActionInput, ServertoolRegistryRegistrationActionInput,
+};
 
 // feature_id: hub.servertool_flow_presentation
 
@@ -210,6 +214,27 @@ fn get_tool_spec<'a>(document: &'a Value, name: &str) -> Option<&'a Value> {
 
 fn is_builtin_handler_runtime_supported(name: &str) -> bool {
     matches!(name.trim().to_ascii_lowercase().as_str(), "stop_message_auto")
+}
+
+fn is_tool_spec_enabled(spec: Option<&Value>) -> bool {
+    spec.and_then(|value| value.get("enabled"))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn resolve_builtin_handler_flags(document: &Value, canonical: Option<&str>) -> (bool, bool, bool) {
+    let Some(canonical) = canonical else {
+        return (false, false, true);
+    };
+    let builtin_name_matched = is_builtin_handler_runtime_supported(canonical);
+    if !builtin_name_matched {
+        return (false, false, true);
+    }
+    let spec = get_tool_spec(document, canonical);
+    let enabled = spec
+        .map(|value| value.get("enabled").and_then(Value::as_bool) != Some(false))
+        .unwrap_or(false);
+    (true, enabled, enabled)
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
@@ -842,6 +867,63 @@ pub fn plan_servertool_builtin_handler_names_json(input_json: String) -> NapiRes
 }
 
 #[napi]
+pub fn plan_servertool_registry_registration_from_skeleton_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let name = read_trimmed_string(input.get("name")).unwrap_or_default();
+    let canonical = normalize_servertool_name(Some(&Value::String(name.clone())));
+    let (builtin_name_matched, builtin_entry_present, registration_allowed_by_config) =
+        resolve_builtin_handler_flags(&document, canonical.as_deref());
+    let output = plan_servertool_registry_registration_action(
+        ServertoolRegistryRegistrationActionInput {
+            name,
+            has_handler: input
+                .get("hasHandler")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            builtin_name_matched,
+            builtin_entry_present,
+            registration_allowed_by_config,
+        },
+    );
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn plan_servertool_registry_lookup_from_skeleton_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let name = read_trimmed_string(input.get("name")).unwrap_or_default();
+    let canonical = normalize_servertool_name(Some(&Value::String(name.clone())));
+    let (_, builtin_entry_present, _) =
+        resolve_builtin_handler_flags(&document, canonical.as_deref());
+    let output = plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
+        name,
+        builtin_entry_present,
+        ad_hoc_entry_present: input
+            .get("adHocEntryPresent")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    });
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn resolve_servertool_registered_name_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let name = read_trimmed_string(input.get("name")).unwrap_or_default();
+    let registered = is_tool_spec_enabled(get_tool_spec(&document, &name));
+    serde_json::to_string(&json!({ "registered": registered }))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn resolve_servertool_progress_tool_name_json(input_json: String) -> NapiResult<String> {
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -914,7 +996,9 @@ mod tests {
         get_default_servertool_skeleton_document_json, normalize_servertool_registration_spec_json,
         plan_servertool_backend_execution_json, plan_servertool_builtin_handler_entry_json,
         plan_servertool_builtin_handler_names_json, plan_servertool_followup_runtime_json,
-        plan_servertool_handler_contract_json, plan_servertool_skeleton_derived_config_json,
+        plan_servertool_handler_contract_json, plan_servertool_registry_lookup_from_skeleton_json,
+        plan_servertool_registry_registration_from_skeleton_json,
+        plan_servertool_skeleton_derived_config_json, resolve_servertool_registered_name_json,
         resolve_servertool_followup_flow_profile, resolve_servertool_progress_tool_name_json,
         resolve_servertool_tool_spec_json, should_use_servertool_gold_progress_highlight_json,
     };
@@ -1238,6 +1322,95 @@ mod tests {
         let unsupported_value: Value =
             serde_json::from_str(&unsupported).expect("parse unsupported builtin entry");
         assert_eq!(unsupported_value["action"], "return_none");
+    }
+
+    #[test]
+    fn registry_registration_and_lookup_are_skeleton_planned() {
+        let builtin = plan_servertool_registry_registration_from_skeleton_json(
+            json!({
+                "name": " stop_message_auto ",
+                "hasHandler": true
+            })
+            .to_string(),
+        )
+        .expect("builtin registration plan");
+        let builtin_value: Value = serde_json::from_str(&builtin).expect("parse builtin plan");
+        assert_eq!(builtin_value["action"], json!("ignore_builtin_override"));
+        assert_eq!(builtin_value["canonicalName"], json!("stop_message_auto"));
+
+        let disabled_document = json!({
+            "servertool": {
+                "internalTools": {
+                    "stop_message_auto": {
+                        "enabled": false,
+                        "trigger": { "type": "auto", "phase": "default", "priority": 40 },
+                        "execution": { "mode": "auto_hook", "stripAfterExecute": true }
+                    }
+                }
+            }
+        });
+        let disabled = plan_servertool_registry_registration_from_skeleton_json(
+            json!({
+                "document": disabled_document,
+                "name": "stop_message_auto",
+                "hasHandler": true
+            })
+            .to_string(),
+        )
+        .expect("disabled registration plan");
+        let disabled_value: Value = serde_json::from_str(&disabled).expect("parse disabled plan");
+        assert_eq!(disabled_value["action"], json!("ignore_disabled"));
+
+        let adhoc = plan_servertool_registry_registration_from_skeleton_json(
+            json!({
+                "name": " custom_tool ",
+                "hasHandler": true
+            })
+            .to_string(),
+        )
+        .expect("adhoc registration plan");
+        let adhoc_value: Value = serde_json::from_str(&adhoc).expect("parse adhoc plan");
+        assert_eq!(adhoc_value["action"], json!("register_adhoc"));
+        assert_eq!(adhoc_value["canonicalName"], json!("custom_tool"));
+
+        let lookup_builtin = plan_servertool_registry_lookup_from_skeleton_json(
+            json!({
+                "name": "STOP_MESSAGE_AUTO",
+                "adHocEntryPresent": true
+            })
+            .to_string(),
+        )
+        .expect("lookup builtin plan");
+        let lookup_builtin_value: Value =
+            serde_json::from_str(&lookup_builtin).expect("parse lookup builtin");
+        assert_eq!(lookup_builtin_value["action"], json!("return_builtin"));
+        assert_eq!(
+            lookup_builtin_value["canonicalName"],
+            json!("stop_message_auto")
+        );
+
+        let lookup_adhoc = plan_servertool_registry_lookup_from_skeleton_json(
+            json!({
+                "name": "custom_tool",
+                "adHocEntryPresent": true
+            })
+            .to_string(),
+        )
+        .expect("lookup adhoc plan");
+        let lookup_adhoc_value: Value =
+            serde_json::from_str(&lookup_adhoc).expect("parse lookup adhoc");
+        assert_eq!(lookup_adhoc_value["action"], json!("return_adhoc"));
+
+        let registered =
+            resolve_servertool_registered_name_json(json!({ "name": "web_search" }).to_string())
+                .expect("registered name");
+        let registered_value: Value = serde_json::from_str(&registered).expect("parse registered");
+        assert_eq!(registered_value["registered"], json!(true));
+        let missing =
+            resolve_servertool_registered_name_json(json!({ "name": "missing" }).to_string())
+                .expect("missing name");
+        let missing_value: Value = serde_json::from_str(&missing).expect("parse missing");
+        assert_eq!(missing_value["registered"], json!(false));
     }
 
     #[test]

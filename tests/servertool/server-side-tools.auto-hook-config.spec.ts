@@ -73,6 +73,39 @@ const runServertoolOrchestrationMutationWithNative = jest.fn((input: any) => {
   return input?.base ?? {};
 });
 
+function mockToolSpec(name: unknown): any | null {
+  const key = String(name ?? '').trim().toLowerCase();
+  return (skeletonDocument.servertool.internalTools as Record<string, any>)[key] ?? null;
+}
+
+function mockRegistryRegistrationFromSkeleton(input: any): any {
+  const name = String(input?.name ?? '').trim().toLowerCase();
+  if (!name || input?.hasHandler !== true) {
+    return { action: 'ignore_invalid' };
+  }
+  if (name === 'stop_message_auto') {
+    const spec = mockToolSpec(name);
+    return spec?.enabled === false
+      ? { action: 'ignore_disabled', canonicalName: name }
+      : { action: 'ignore_builtin_override', canonicalName: name };
+  }
+  return { action: 'register_adhoc', canonicalName: name };
+}
+
+function mockRegistryLookupFromSkeleton(input: any): any {
+  const name = String(input?.name ?? '').trim().toLowerCase();
+  if (!name) {
+    return { action: 'return_none' };
+  }
+  const spec = name === 'stop_message_auto' ? mockToolSpec(name) : null;
+  if (spec && spec.enabled !== false) {
+    return { action: 'return_builtin', canonicalName: name };
+  }
+  return input?.adHocEntryPresent === true
+    ? { action: 'return_adhoc', canonicalName: name }
+    : { action: 'return_none', canonicalName: name };
+}
+
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
@@ -183,9 +216,17 @@ jest.unstable_mockModule(
       };
     }),
     resolveServertoolToolSpecWithNative: jest.fn((input: any) => {
-      const name = String(input.name ?? '').trim().toLowerCase();
-      return (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
+      return mockToolSpec(input.name);
     }),
+    planServertoolRegistryRegistrationFromSkeletonWithNative: jest.fn(
+      mockRegistryRegistrationFromSkeleton
+    ),
+    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(
+      mockRegistryLookupFromSkeleton
+    ),
+    resolveServertoolRegisteredNameWithNative: jest.fn((input: any) =>
+      Boolean(mockToolSpec(input.name)?.enabled)
+    ),
     planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
       const name = String(input.name ?? '').trim().toLowerCase();
       if (name !== 'stop_message_auto') {
@@ -358,9 +399,17 @@ jest.unstable_mockModule(
       };
     }),
     resolveServertoolToolSpecWithNative: jest.fn((input: any) => {
-      const name = String(input.name ?? '').trim().toLowerCase();
-      return (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
+      return mockToolSpec(input.name);
     }),
+    planServertoolRegistryRegistrationFromSkeletonWithNative: jest.fn(
+      mockRegistryRegistrationFromSkeleton
+    ),
+    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(
+      mockRegistryLookupFromSkeleton
+    ),
+    resolveServertoolRegisteredNameWithNative: jest.fn((input: any) =>
+      Boolean(mockToolSpec(input.name)?.enabled)
+    ),
     planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
       const name = String(input.name ?? '').trim().toLowerCase();
       if (name !== 'stop_message_auto') {

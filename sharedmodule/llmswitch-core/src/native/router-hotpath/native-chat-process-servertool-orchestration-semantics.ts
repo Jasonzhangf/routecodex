@@ -78,6 +78,14 @@ export type NativeServertoolBuiltinHandlerEntryPlan =
 export type NativeServertoolBuiltinHandlerNamesPlan = {
   names: string[];
 };
+export type NativeServertoolRegistryRegistrationActionPlan = {
+  action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'register_adhoc';
+  canonicalName?: string;
+};
+export type NativeServertoolRegistryLookupActionPlan = {
+  action: 'return_builtin' | 'return_adhoc' | 'return_none';
+  canonicalName?: string;
+};
 
 export type NativeServertoolNoopOutcome = {
   chatResponse: Record<string, unknown>;
@@ -596,6 +604,99 @@ export function planServertoolBuiltinHandlerNamesWithNative(input: {
     return {
       names: names.map((name) => name.trim().toLowerCase()).sort()
     };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolRegistryRegistrationFromSkeletonWithNative(input: {
+  name: string;
+  hasHandler: boolean;
+  document?: unknown;
+}): NativeServertoolRegistryRegistrationActionPlan {
+  const capability = 'planServertoolRegistryRegistrationFromSkeletonJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolRegistryRegistrationActionPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      record.action !== 'ignore_invalid' &&
+      record.action !== 'ignore_builtin_override' &&
+      record.action !== 'ignore_disabled' &&
+      record.action !== 'register_adhoc'
+    ) {
+      return fail('invalid action');
+    }
+    return {
+      action: record.action,
+      ...(typeof record.canonicalName === 'string' && record.canonicalName.trim()
+        ? { canonicalName: record.canonicalName.trim() }
+        : {})
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolRegistryLookupFromSkeletonWithNative(input: {
+  name: string;
+  adHocEntryPresent: boolean;
+  document?: unknown;
+}): NativeServertoolRegistryLookupActionPlan {
+  const capability = 'planServertoolRegistryLookupFromSkeletonJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolRegistryLookupActionPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      record.action !== 'return_builtin' &&
+      record.action !== 'return_adhoc' &&
+      record.action !== 'return_none'
+    ) {
+      return fail('invalid action');
+    }
+    return {
+      action: record.action,
+      ...(typeof record.canonicalName === 'string' && record.canonicalName.trim()
+        ? { canonicalName: record.canonicalName.trim() }
+        : {})
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function resolveServertoolRegisteredNameWithNative(input: {
+  name: string;
+  document?: unknown;
+}): boolean {
+  const capability = 'resolveServertoolRegisteredNameJson';
+  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const registered = (parsed as Record<string, unknown>).registered;
+    if (typeof registered !== 'boolean') {
+      return fail('invalid registered flag');
+    }
+    return registered;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

@@ -3448,6 +3448,9 @@ function checkServertoolRegistryRustOwner() {
     'planServertoolRegistryLookupActionJson',
     'planServertoolRegistryAutoHookDescriptorsJson',
     'planServertoolRegistryProjectionJson',
+    'planServertoolRegistryRegistrationFromSkeletonJson',
+    'planServertoolRegistryLookupFromSkeletonJson',
+    'resolveServertoolRegisteredNameJson',
   ]) {
     assertContains('servertool-registry-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, needle);
   }
@@ -3456,6 +3459,28 @@ function checkServertoolRegistryRustOwner() {
     'planServertoolRegistryLookupActionWithNative',
   ]) {
     assertContains('servertool-registry-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, needle);
+  }
+  for (const marker of [
+    'planServertoolRegistryRegistrationActionWithNative',
+    'planServertoolRegistryLookupActionWithNative',
+    'builtinNameMatched',
+    'builtinEntryPresent',
+    'registrationAllowedByConfig',
+    'isServertoolEnabledByConfig',
+    'getServertoolToolSpec(name)?.enabled',
+  ]) {
+    if (registryRegistrationShell.includes(marker)) {
+      fail(
+        'servertool-registry-registration-shell',
+        `registry-registration-shell.ts must not retain TS registry action precondition marker ${marker}`
+      );
+    }
+  }
+  for (const needle of [
+    'planServertoolRegistryRegistrationFromSkeleton(',
+    'planServertoolRegistryLookupFromSkeleton(',
+    'isServertoolRegisteredNameByConfig(',
+  ]) {
     assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
   }
   for (const needle of [

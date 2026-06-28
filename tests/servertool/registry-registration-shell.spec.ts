@@ -1,22 +1,12 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
-const planServertoolRegistryRegistrationActionWithNativeMock = jest.fn();
-const planServertoolRegistryLookupActionWithNativeMock = jest.fn();
 const getBuiltinHandlerEntryMock = jest.fn();
 const listBuiltinHandlerNamesMock = jest.fn();
 const getAdHocHandlerEntryMock = jest.fn();
 const registerAdHocHandlerForTestsMock = jest.fn();
-const getServertoolToolSpecMock = jest.fn();
-const isServertoolEnabledByConfigMock = jest.fn();
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
-  () => ({
-    planServertoolRegistryRegistrationActionWithNative:
-      planServertoolRegistryRegistrationActionWithNativeMock,
-    planServertoolRegistryLookupActionWithNative: planServertoolRegistryLookupActionWithNativeMock,
-  })
-);
+const planServertoolRegistryRegistrationFromSkeletonMock = jest.fn();
+const planServertoolRegistryLookupFromSkeletonMock = jest.fn();
+const isServertoolRegisteredNameByConfigMock = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.js',
@@ -37,8 +27,10 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js',
   () => ({
-    getServertoolToolSpec: getServertoolToolSpecMock,
-    isServertoolEnabledByConfig: isServertoolEnabledByConfigMock,
+    isServertoolRegisteredNameByConfig: isServertoolRegisteredNameByConfigMock,
+    planServertoolRegistryLookupFromSkeleton: planServertoolRegistryLookupFromSkeletonMock,
+    planServertoolRegistryRegistrationFromSkeleton:
+      planServertoolRegistryRegistrationFromSkeletonMock,
   })
 );
 
@@ -54,23 +46,20 @@ describe('registry-registration-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     listBuiltinHandlerNamesMock.mockReturnValue([]);
-    isServertoolEnabledByConfigMock.mockReturnValue(true);
+    isServertoolRegisteredNameByConfigMock.mockReturnValue(true);
   });
 
   test('registers ad-hoc handler only when native registration plan allows it', () => {
     const handler = jest.fn();
-    planServertoolRegistryRegistrationActionWithNativeMock.mockReturnValue({
+    planServertoolRegistryRegistrationFromSkeletonMock.mockReturnValue({
       action: 'register_adhoc',
     });
 
     registerServerToolHandlerViaNativePlan(' Custom ', handler, { trigger: 'tool_call' });
 
-    expect(planServertoolRegistryRegistrationActionWithNativeMock).toHaveBeenCalledWith({
+    expect(planServertoolRegistryRegistrationFromSkeletonMock).toHaveBeenCalledWith({
       name: ' Custom ',
       hasHandler: true,
-      builtinNameMatched: false,
-      builtinEntryPresent: false,
-      registrationAllowedByConfig: true,
     });
     expect(registerAdHocHandlerForTestsMock).toHaveBeenCalledWith(
       ' Custom ',
@@ -80,7 +69,7 @@ describe('registry-registration-shell', () => {
   });
 
   test('does not register when native registration plan rejects the request', () => {
-    planServertoolRegistryRegistrationActionWithNativeMock.mockReturnValue({
+    planServertoolRegistryRegistrationFromSkeletonMock.mockReturnValue({
       action: 'ignore',
     });
 
@@ -96,30 +85,31 @@ describe('registry-registration-shell', () => {
     getBuiltinHandlerEntryMock.mockReturnValue(builtin);
     getAdHocHandlerEntryMock.mockReturnValue(adhoc);
 
-    planServertoolRegistryLookupActionWithNativeMock.mockReturnValueOnce({
+    planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
       action: 'return_builtin',
+      canonicalName: 'builtin',
     });
     expect(getServerToolHandlerViaNativePlan('Builtin')).toBe(builtin);
 
-    planServertoolRegistryLookupActionWithNativeMock.mockReturnValueOnce({
+    planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
       action: 'return_adhoc',
     });
     expect(getServerToolHandlerViaNativePlan('adhoc')).toBe(adhoc);
 
-    planServertoolRegistryLookupActionWithNativeMock.mockReturnValueOnce({
+    planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
       action: 'return_none',
     });
     expect(getServerToolHandlerViaNativePlan('missing')).toBeUndefined();
   });
 
   test('checks registered tool names through native skeleton config', () => {
-    getServertoolToolSpecMock.mockReturnValueOnce({ enabled: true });
+    isServertoolRegisteredNameByConfigMock.mockReturnValueOnce(true);
     expect(isRegisteredServerToolNameViaNativeConfig('alpha')).toBe(true);
 
-    getServertoolToolSpecMock.mockReturnValueOnce({ enabled: false });
+    isServertoolRegisteredNameByConfigMock.mockReturnValueOnce(false);
     expect(isRegisteredServerToolNameViaNativeConfig('beta')).toBe(false);
 
-    getServertoolToolSpecMock.mockReturnValueOnce(null);
+    isServertoolRegisteredNameByConfigMock.mockReturnValueOnce(false);
     expect(isRegisteredServerToolNameViaNativeConfig('missing')).toBe(false);
   });
 });

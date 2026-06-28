@@ -8,13 +8,10 @@ import {
   registerAdHocHandlerForTests
 } from './adhoc-handler-test-support.js';
 import {
-  getServertoolToolSpec,
-  isServertoolEnabledByConfig
+  isServertoolRegisteredNameByConfig,
+  planServertoolRegistryLookupFromSkeleton,
+  planServertoolRegistryRegistrationFromSkeleton
 } from './skeleton-config.js';
-import {
-  planServertoolRegistryLookupActionWithNative,
-  planServertoolRegistryRegistrationActionWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 type TriggerMode = 'tool_call' | 'auto';
 type AutoHookPhase = 'pre' | 'default' | 'post';
@@ -41,15 +38,9 @@ export const registerServerToolHandlerViaNativePlan = (
     };
   }
 ): void => {
-  const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
-  const builtinEntry = resolveBuiltinEntry(name);
-  const builtinNameMatched = Boolean(builtinEntry);
-  const actionPlan = planServertoolRegistryRegistrationActionWithNative({
+  const actionPlan = planServertoolRegistryRegistrationFromSkeleton({
     name: typeof name === 'string' ? name : '',
     hasHandler: typeof handler === 'function',
-    builtinNameMatched,
-    builtinEntryPresent: Boolean(builtinEntry),
-    registrationAllowedByConfig: canonicalName ? isServertoolEnabledByConfig(canonicalName) : true
   });
   if (actionPlan.action !== 'register_adhoc') {
     return;
@@ -61,15 +52,13 @@ export const getServerToolHandlerViaNativePlan = (
   name: string
 ): ServerToolHandlerEntry | undefined => {
   const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
-  const builtinEntry = resolveBuiltinEntry(name);
   const adHocEntry = canonicalName ? getAdHocHandlerEntry(canonicalName) : undefined;
-  const actionPlan = planServertoolRegistryLookupActionWithNative({
+  const actionPlan = planServertoolRegistryLookupFromSkeleton({
     name: typeof name === 'string' ? name : '',
-    builtinEntryPresent: Boolean(builtinEntry),
     adHocEntryPresent: Boolean(adHocEntry)
   });
   if (actionPlan.action === 'return_builtin') {
-    return builtinEntry;
+    return resolveBuiltinEntry(actionPlan.canonicalName ?? name);
   }
   if (actionPlan.action === 'return_adhoc') {
     return adHocEntry;
@@ -78,5 +67,5 @@ export const getServerToolHandlerViaNativePlan = (
 };
 
 export function isRegisteredServerToolNameViaNativeConfig(name: string): boolean {
-  return getServertoolToolSpec(name)?.enabled === true;
+  return isServertoolRegisteredNameByConfig(name);
 }
