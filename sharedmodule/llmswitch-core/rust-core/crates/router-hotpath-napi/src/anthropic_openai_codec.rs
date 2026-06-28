@@ -296,7 +296,7 @@ fn read_chat_tool_schema_source<'a>(
         .or_else(|| row.get("input_schema"))
 }
 
-fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value> {
+pub(crate) fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value> {
     let rows = raw_tools.and_then(|v| v.as_array())?;
     if rows.is_empty() {
         return None;

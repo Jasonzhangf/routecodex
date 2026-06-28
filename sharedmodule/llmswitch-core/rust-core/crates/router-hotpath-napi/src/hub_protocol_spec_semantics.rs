@@ -534,12 +534,21 @@ fn normalize_provider_outbound_tool(protocol: &str, tool: &Value) -> Vec<Value> 
 }
 
 fn normalize_provider_outbound_tools(protocol: &str, payload: &mut Map<String, Value>) {
-    if protocol != "openai-chat" && protocol != "openai-responses" {
-        return;
-    }
     let Some(Value::Array(tools)) = payload.get_mut("tools") else {
         return;
     };
+    if protocol == "anthropic-messages" {
+        let raw_tools = Value::Array(tools.clone());
+        if let Some(Value::Array(mapped_tools)) =
+            crate::anthropic_openai_codec::map_chat_tools_to_anthropic_tools(Some(&raw_tools))
+        {
+            *tools = mapped_tools;
+        }
+        return;
+    }
+    if protocol != "openai-chat" && protocol != "openai-responses" {
+        return;
+    }
     let normalized = tools
         .iter()
         .flat_map(|tool| normalize_provider_outbound_tool(protocol, tool))
@@ -1169,5 +1178,45 @@ mod tests {
             tools[0]["function"]["parameters"]["required"],
             serde_json::json!(["patch"])
         );
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_converts_openai_tools_for_anthropic_messages() {
+        let input = serde_json::json!({
+            "protocol": "anthropic-messages",
+            "payload": {
+                "model": "MiniMax-M3",
+                "messages": [{ "role": "user", "content": "read package.json" }],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "description": "Read a file",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "path": { "type": "string" } },
+                            "required": ["path"]
+                        }
+                    }
+                }],
+                "stream": true
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let tools = output["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], serde_json::json!("read_file"));
+        assert_eq!(tools[0]["description"], serde_json::json!("Read a file"));
+        assert_eq!(
+            tools[0]["input_schema"]["required"],
+            serde_json::json!(["path"])
+        );
+        assert!(tools[0].get("type").is_none());
+        assert!(tools[0].get("function").is_none());
+        assert!(tools[0].get("parameters").is_none());
     }
 }
