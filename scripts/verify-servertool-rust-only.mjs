@@ -5194,6 +5194,29 @@ function checkDeletedStoplessMetadataWriterAbsent() {
   );
 }
 
+function checkDeletedStopMessageTsOwnersAbsent() {
+  const deletedOwners = [
+    `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`,
+    `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/config.ts`,
+    `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/runtime-utils.ts`,
+    `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/routing-state.ts`,
+    `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/blocked-report.ts`,
+    `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`,
+  ];
+  for (const file of deletedOwners) {
+    if (existsSync(file)) {
+      fail(
+        'deleted-stop-message-ts-owners-absent',
+        `${file.replace(`${ROOT}/`, '')} must stay deleted; stopless runtime and counter semantics are Rust-owned`
+      );
+    }
+  }
+  pass(
+    'deleted-stop-message-ts-owners-absent',
+    'deleted stop-message TS owners stay absent'
+  );
+}
+
 function checkStoplessNoTsRuntimeControlSpecialization() {
   const scanFiles = [
     `${SERVERTOOL_TS_DIR}/metadata-center-carrier.ts`,
@@ -6227,6 +6250,7 @@ checkServertoolTextExtractionRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkStoplessNoContextDataPlane();
 checkDeletedStoplessMetadataWriterAbsent();
+checkDeletedStopMessageTsOwnersAbsent();
 checkStoplessNoTsRuntimeControlSpecialization();
 checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
