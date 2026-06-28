@@ -75,7 +75,7 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
   if (mode !== 'v2') {
     errors.push('RouteCodex only supports virtualrouterMode="v2"');
   }
-  const allowedTopLevel = new Set(['version', 'httpserver', 'virtualrouter', 'virtualrouterMode', 'servertool', 'oauthBrowser']);
+  const allowedTopLevel = new Set(['version', 'httpserver', 'virtualrouter', 'virtualrouterMode', 'servertool']);
   for (const key of Object.keys(userConfig)) {
     if (!allowedTopLevel.has(key)) {
       errors.push(`v2 config disallows top-level field "${key}"`);

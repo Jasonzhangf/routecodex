@@ -1,6 +1,7 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
+import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
   normalizeProviderFailureCodeKey,
@@ -239,12 +240,11 @@ import {
   trafficGovernorAcquire,
   trafficGovernorRelease,
   trafficGovernorIsAtCapacity,
-  trafficGovernorObserveOutcome
+  trafficGovernorObserveOutcome,
+  type TrafficGovernorAcquireResult,
+  type TrafficGovernorPermit,
+  type TrafficGovernorReleaseResult
 } from '../../../modules/traffic-governor/index.js';
-import type {
-  ProviderTrafficGovernorLike,
-  ProviderTrafficPermit
-} from './provider-traffic-governor.js';
 import {
   createRequestExecutorPayloadContractErrorsampleWriter,
   resolveRequestExecutorTrafficRuntimeProfile,
@@ -273,6 +273,56 @@ export type RequestExecutorDeps = {
   onRequestStart?: (args: { requestId: string; metadata: Record<string, unknown> }) => void | Promise<void>;
   onRequestEnd?: (args: { requestId: string }) => void | Promise<void>;
 };
+
+type ProviderTrafficPermit = Pick<
+  TrafficGovernorPermit,
+  'runtimeKey' | 'providerKey' | 'requestId' | 'leaseId' | 'stateKey' | 'scopeKey'
+> & {
+  maxInFlight: number;
+};
+
+type ProviderTrafficAcquireResult = Omit<TrafficGovernorAcquireResult, 'permit' | 'policy'> & {
+  permit: ProviderTrafficPermit;
+  policy: {
+    concurrency: {
+      maxInFlight: number;
+      acquireTimeoutMs: number;
+      staleLeaseMs: number;
+    };
+    rpm: {
+      requestsPerMinute: number;
+      acquireTimeoutMs: number;
+      windowMs: number;
+    };
+  };
+};
+
+type ProviderTrafficOutcomeEvent = {
+  runtimeKey: string;
+  providerKey?: string;
+  requestId?: string;
+  success: boolean;
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+  activeInFlight?: number;
+};
+
+interface ProviderTrafficGovernorLike {
+  acquire(options: {
+    runtimeKey: string;
+    providerKey?: string;
+    requestId: string;
+    runtime: ProviderRuntimeProfile;
+    scopeKey?: string;
+  }): Promise<ProviderTrafficAcquireResult>;
+  release(permit: ProviderTrafficPermit): Promise<TrafficGovernorReleaseResult>;
+  isProviderAtConcurrencyCapacity(runtimeKey: string, runtime: ProviderRuntimeProfile, scopeKey?: string): Promise<boolean>;
+  isProviderAtConcurrencyCapacitySync(runtimeKey: string, runtime: ProviderRuntimeProfile, scopeKey?: string): boolean;
+  setConcurrencyBusyCallback?(cb: ((scopeKey: string, busy: boolean) => void) | null): void;
+  observeOutcome?(event: ProviderTrafficOutcomeEvent): Promise<void>;
+}
 
 export interface RequestExecutor {
   execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
@@ -995,7 +1045,7 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
         }
-        let trafficPermit: Record<string, unknown> | null = null;
+        let trafficPermit: ProviderTrafficPermit | null = null;
         let trafficPolicyMaxInFlight = 0;
         let trafficActiveInFlightAtAcquire = 0;
         let providerSendStartedAtMs = 0;
@@ -1153,25 +1203,6 @@ export class HubRequestExecutor implements RequestExecutor {
             pipelineResult.standardizedRequest as Record<string, unknown> | undefined,
             mergedMetadata
           );
-          if (
-            typeof target.providerKey === 'string'
-            && target.providerKey.startsWith('deepseek-web.')
-            && input.entryEndpoint?.includes('/v1/responses')
-          ) {
-            const semanticsTrace = describeRequestSemanticsResolution(
-              pipelineResult.processedRequest as Record<string, unknown> | undefined,
-              pipelineResult.standardizedRequest as Record<string, unknown> | undefined,
-              mergedMetadata,
-              requestSemantics
-            );
-            logStage('provider.request_semantics.trace', input.requestId, {
-              providerKey: target.providerKey,
-              attempt,
-              ...semanticsTrace,
-              hasRequestedToolsInSemantics: await hasRequestedToolsInSemantics(requestSemantics),
-              isToolResultFollowupTurn: await isToolResultFollowupTurn(requestSemantics)
-            });
-          }
           logStage('provider.request_semantics.completed', input.requestId, {
             providerKey: target.providerKey,
             hasSemantics: Boolean(requestSemantics && Object.keys(requestSemantics).length),

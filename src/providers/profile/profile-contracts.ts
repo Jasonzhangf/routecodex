@@ -52,17 +52,6 @@ export interface PrepareStreamBodyInput {
   runtimeMetadata?: ProviderRuntimeMetadata;
 }
 
-export interface ResolveOAuthTokenFileInput {
-  oauthProviderId: string;
-  tokenFile?: string;
-  auth: {
-    clientId?: string;
-    tokenUrl?: string;
-    deviceCodeUrl?: string;
-  };
-  moduleType: string;
-}
-
 export interface ProviderFamilyProfile {
   id: string;
   providerFamily: string;
@@ -74,7 +63,6 @@ export interface ProviderFamilyProfile {
   resolveBusinessResponseError?(input: ResolveBusinessResponseErrorInput): Error | undefined;
   resolveStreamIntent?(input: ResolveStreamIntentInput): boolean | undefined;
   prepareStreamBody?(input: PrepareStreamBodyInput): void;
-  resolveOAuthTokenFileMode?(input: ResolveOAuthTokenFileInput): boolean | undefined;
 }
 
 export interface ProviderFamilyLookupInput {
@@ -82,5 +70,4 @@ export interface ProviderFamilyLookupInput {
   providerFamily?: string;
   providerKey?: string;
   providerType?: string;
-  oauthProviderId?: string;
 }

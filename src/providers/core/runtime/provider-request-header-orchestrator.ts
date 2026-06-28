@@ -6,10 +6,9 @@ import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import { DEFAULT_PROVIDER } from '../../../constants/index.js';
 import { isCodexUaMode } from './provider-runtime-utils.js';
-import { HeaderUtils, OAuthHeaderPreflight, RequestHeaderBuilder, SessionHeaderUtils } from './transport/index.js';
+import { HeaderUtils, RequestHeaderBuilder, SessionHeaderUtils } from './transport/index.js';
 
 type ProviderConfigInternal = OpenAIStandardConfig['config'];
-const AUTH_PREFLIGHT_FATAL_LOCAL_MARKER = Symbol.for('routecodex.provider.authPreflightFatal');
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -73,7 +72,6 @@ function resolveEffectiveProviderTimeoutMs(config: ProviderConfigInternal, servi
 export async function buildProviderRequestHeaders(options: {
   config: ProviderConfigInternal;
   authProvider: IAuthProvider | null;
-  oauthProviderId?: string;
   serviceProfile: ServiceProfile;
   runtimeMetadata?: ProviderRuntimeMetadata;
   runtimeHeaders?: Record<string, string>;
@@ -84,7 +82,6 @@ export async function buildProviderRequestHeaders(options: {
   const {
     config,
     authProvider,
-    oauthProviderId,
     serviceProfile,
     runtimeMetadata,
     runtimeHeaders = {},
@@ -116,30 +113,6 @@ export async function buildProviderRequestHeaders(options: {
   const overrideHeaders = config.overrides?.headers || {};
   if (isGeminiFamily) {
     RequestHeaderBuilder.buildGeminiDefaultHeaders(baseHeaders, runtimeMetadata);
-  }
-
-  try {
-    await OAuthHeaderPreflight.ensureTokenReady({
-      auth: config.auth,
-      authProvider,
-      oauthProviderId
-    });
-  } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      (error as { [AUTH_PREFLIGHT_FATAL_LOCAL_MARKER]?: unknown })[AUTH_PREFLIGHT_FATAL_LOCAL_MARKER] === true
-    ) {
-      throw error;
-    }
-  }
-
-  const authRawType =
-    typeof (config.auth as { rawType?: unknown }).rawType === 'string'
-      ? String((config.auth as { rawType?: string }).rawType).trim().toLowerCase()
-      : '';
-  if (authRawType === 'deepseek-account' && authProvider?.validateCredentials) {
-    await authProvider.validateCredentials();
   }
 
   const authHeaders = authProvider?.buildHeaders() || {};

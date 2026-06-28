@@ -16,19 +16,6 @@ import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { runWithPortRequestContext } from './port-log-context.js';
 
-type TokenPortalRenderModule = typeof import('../../../token-portal/render.js');
-type TokenPortalFingerprintModule = typeof import('../../../token-portal/fingerprint-summary.js');
-let renderTokenPortalPage: TokenPortalRenderModule['renderTokenPortalPage'] | undefined;
-let loadTokenPortalFingerprintSummary: TokenPortalFingerprintModule['loadTokenPortalFingerprintSummary'] | undefined;
-async function ensureTokenPortalDeps(): Promise<void> {
-  if (!renderTokenPortalPage || !loadTokenPortalFingerprintSummary) {
-    const renderMod = (await import('../../../token-portal/render.js')) as TokenPortalRenderModule;
-    const fingerprintMod = (await import('../../../token-portal/fingerprint-summary.js')) as TokenPortalFingerprintModule;
-    renderTokenPortalPage = renderMod.renderTokenPortalPage;
-    loadTokenPortalFingerprintSummary = fingerprintMod.loadTokenPortalFingerprintSummary;
-  }
-}
-
 function logRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
     const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
@@ -120,49 +107,6 @@ function resolvePortScopedHubPipeline(req: Request, options: RouteOptions): unkn
       : '';
   return routingPolicyGroup ? getHubPipeline(routingPolicyGroup) : getHubPipeline();
 }
-
-/**
- * Register OAuth Portal route early to support token authentication flow
- * This route must be available before provider initialization
- */
-export function registerOAuthPortalRoute(app: Application): void {
-  app.get('/token-auth/demo', async (req: Request, res: Response) => {
-    const provider = typeof req.query.provider === 'string' ? req.query.provider : 'unknown-provider';
-    const alias = typeof req.query.alias === 'string' ? req.query.alias : 'default';
-    const tokenFile =
-      typeof req.query.tokenFile === 'string' ? req.query.tokenFile : '~/.rcc/auth/unknown-token.json';
-    const oauthUrl =
-      typeof req.query.oauthUrl === 'string'
-        ? req.query.oauthUrl
-        : 'https://accounts.google.com/o/oauth2/v2/auth';
-    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : 'demo-session';
-    const displayName =
-      typeof req.query.displayName === 'string' && req.query.displayName.trim() ? req.query.displayName : undefined;
-    await ensureTokenPortalDeps();
-    const fingerprint = await loadTokenPortalFingerprintSummary!(provider, alias).catch((error) => {
-      logRoutesNonBlockingError('registerOAuthPortalRoute.loadTokenPortalFingerprintSummary', error, {
-        provider,
-        alias,
-        sessionId
-      });
-      return null;
-    });
-    await ensureTokenPortalDeps();
-    const html = renderTokenPortalPage!({
-      provider,
-      alias,
-      tokenFile,
-      oauthUrl,
-      sessionId,
-      displayName,
-      fingerprint: fingerprint || undefined
-    });
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
-  });
-}
-
-
 
 type ModelListItem = {
   id: string;

@@ -6,7 +6,6 @@
 
 import type { ModuleConfig } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderType } from './provider-types.js';
-import type { DeepSeekProviderRuntimeOptions } from '../contracts/deepseek-provider-contract.js';
 
 /**
  * 统一Provider配置接口 (与V1 ModuleConfig兼容)
@@ -29,7 +28,6 @@ export interface OpenAIStandardConfig extends ModuleConfig {
     | 'responses-http-provider'
     | 'anthropic-http-provider'
     | 'gemini-http-provider'
-    | 'deepseek-http-provider'
     | 'mimoweb-provider'
     | 'mock-provider';
   config: {
@@ -44,15 +42,13 @@ export interface OpenAIStandardConfig extends ModuleConfig {
     maxRetries?: number;
 
     // 认证配置 (必需)
-    auth: ApiKeyAuth | OAuthAuth;
+    auth: ApiKeyAuth;
 
     // 服务特定覆盖配置 (可选)
     overrides?: ServiceOverrides;
 
     // 扩展配置 (可选)
-    extensions?: Record<string, unknown> & {
-      deepseek?: Partial<DeepSeekProviderOverrides>;
-    };
+    extensions?: Record<string, unknown>;
   };
 }
 
@@ -83,28 +79,6 @@ export interface ApiKeyAuth {
 }
 
 /**
- * OAuth认证类型
- */
-export type OAuthAuthType = 'oauth' | `${string}-oauth`;
-
-/**
- * OAuth认证配置
- */
-export interface OAuthAuth {
-  type: OAuthAuthType;
-  clientId?: string;
-  clientSecret?: string;
-  tokenUrl?: string;
-  deviceCodeUrl?: string;
-  scopes?: string[];
-  tokenFile?: string;
-  refreshUrl?: string;
-  pkce?: boolean;          // 启用PKCE (默认false)
-  authorizationUrl?: string;
-  userInfoUrl?: string;
-}
-
-/**
  * 服务特定覆盖配置
  */
 export interface ServiceOverrides {
@@ -118,17 +92,10 @@ export interface ServiceOverrides {
   streamHeadersTimeoutMs?: number;
 }
 
-export interface DeepSeekProviderOverrides extends DeepSeekProviderRuntimeOptions {
-  mobile?: string;
-  password?: string;
-  accountFile?: string;
-  accountAlias?: string;
-}
-
 /**
  * 认证凭证类型
  */
-export type AuthCredentials = ApiKeyAuth | OAuthAuth;
+export type AuthCredentials = ApiKeyAuth;
 
 /**
  * 服务预设配置
@@ -137,8 +104,8 @@ export interface ServiceProfile {
   defaultBaseUrl: string;
   defaultEndpoint: string;
   defaultModel: string;
-  requiredAuth: Array<'apikey' | 'oauth'>;
-  optionalAuth: Array<'apikey' | 'oauth'>;
+  requiredAuth: Array<'apikey'>;
+  optionalAuth: Array<'apikey'>;
   headers?: Record<string, string>;
   timeout?: number;
   maxRetries?: number;

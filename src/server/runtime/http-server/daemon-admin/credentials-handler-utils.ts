@@ -1,21 +1,21 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { collectTokenSnapshot, resolveAuthDir } from '../../../../token-daemon/token-utils.js';
+import { resolveRccAuthDir } from '../../../../config/user-data-paths.js';
 
 export interface CredentialSummary {
   id: string;
-  kind: 'oauth' | 'apikey';
+  kind: 'apikey';
   provider: string;
   alias: string;
   tokenFile: string;
   displayName: string;
-  expiresAt: number | null;
-  expiresInSec: number | null;
+  expiresAt: null;
+  expiresInSec: null;
   status: string;
-  hasRefreshToken: boolean;
-  hasAccessToken: boolean;
+  hasRefreshToken: false;
+  hasAccessToken: false;
   hasApiKey: boolean;
-  noRefresh: boolean;
+  noRefresh: true;
   secretRef?: string;
 }
 
@@ -30,39 +30,12 @@ type ApiKeyMatch = {
 
 const APIKEY_FILE_PATTERN = /^(.+)-apikey-(\d+)(?:-(.+))?\.key$/i;
 
-export const SUPPORTED_OAUTH_PROVIDERS = new Set(['deepseek-account', 'ecodev']);
+export function resolveAuthDir(): string {
+  return resolveRccAuthDir();
+}
 
 export async function buildCredentialSummaries(): Promise<CredentialSummary[]> {
-  const snapshot = await collectTokenSnapshot();
   const results: CredentialSummary[] = [];
-  for (const providerSnapshot of snapshot.providers) {
-    for (const token of providerSnapshot.tokens) {
-      const id = path.basename(token.filePath).replace(/\.json$/i, '');
-      const expiresAt = token.state.expiresAt;
-      const expiresInSec =
-        token.state.msUntilExpiry !== null && token.state.msUntilExpiry !== undefined
-          ? Math.round(token.state.msUntilExpiry / 1000)
-          : null;
-      const kind: CredentialSummary['kind'] =
-        token.state.hasAccessToken || token.state.hasRefreshToken ? 'oauth' : 'apikey';
-      results.push({
-        id,
-        kind,
-        provider: providerSnapshot.provider,
-        alias: token.alias,
-        tokenFile: token.filePath,
-        displayName: token.displayName,
-        expiresAt,
-        expiresInSec,
-        status: token.state.status,
-        hasRefreshToken: token.state.hasRefreshToken,
-        hasAccessToken: token.state.hasAccessToken,
-        hasApiKey: token.state.hasApiKey,
-        noRefresh: token.state.noRefresh === true
-      });
-    }
-  }
-
   const apikeyMatches = await scanApiKeyAuthFiles();
   for (const match of apikeyMatches) {
     const hasApiKey = Boolean(match.hasApiKey);
@@ -104,14 +77,13 @@ async function scanApiKeyAuthFiles(): Promise<ApiKeyMatch[]> {
       }
       const filePath = path.join(authDir, entry);
       const content = await fs.readFile(filePath, 'utf8');
-      const hasApiKey = Boolean(content && content.trim());
       matches.push({
         filePath,
         providerPrefix,
         sequence,
         alias,
         id: path.basename(entry, '.key'),
-        hasApiKey
+        hasApiKey: Boolean(content && content.trim())
       });
     }
     matches.sort((a, b) => a.sequence - b.sequence);
@@ -134,6 +106,5 @@ export async function allocateApiKeyFileName(provider: string, alias: string): P
       maxSeq = entry.sequence;
     }
   }
-  const nextSeq = maxSeq + 1;
-  return `${safeProvider}-apikey-${nextSeq}-${safeAlias}.key`;
+  return `${safeProvider}-apikey-${maxSeq + 1}-${safeAlias}.key`;
 }

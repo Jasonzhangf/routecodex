@@ -7,7 +7,6 @@ const SNAPSHOT_DIR_ENV_KEYS = ['RCC_SNAPSHOT_DIR', 'ROUTECODEX_SNAPSHOT_DIR'];
 export const RCC_SUBDIRS = {
     auth: 'auth',
     tokens: 'tokens',
-    quota: 'quota',
     state: 'state',
     logs: 'logs',
     sessions: 'sessions',
@@ -19,13 +18,10 @@ export const RCC_SUBDIRS = {
     statics: 'statics',
     errorsamples: 'errorsamples',
     llmsShadow: 'llms-shadow',
-    camoufoxFingerprint: 'camoufox-fp',
-    camoufoxProfiles: 'camoufox-profiles',
     docs: 'docs',
     precommand: 'precommand',
     runtimeLifecycle: 'state/runtime-lifecycle',
-    run: 'run',
-    tokenStats: 'state/token-manager'
+    run: 'run'
 };
 function resolveHomeDir(homeDir) {
     const explicit = String(homeDir || '').trim();
@@ -103,12 +99,6 @@ export function resolveRccTokensDir(homeDir) {
 export function resolveRccTokensDirForRead(homeDir) {
     return resolveRccSubdirForRead('tokens', homeDir);
 }
-export function resolveRccQuotaDir(homeDir) {
-    return resolveRccSubdir('quota', homeDir);
-}
-export function resolveRccQuotaDirForRead(homeDir) {
-    return resolveRccSubdirForRead('quota', homeDir);
-}
 export function resolveRccStateDir(homeDir) {
     return resolveRccSubdir('state', homeDir);
 }
@@ -173,12 +163,6 @@ export function resolveRccErrorsamplesDir(homeDir) {
 export function resolveRccLlmsShadowDir(homeDir) {
     return resolveRccSubdir('llmsShadow', homeDir);
 }
-export function resolveRccCamoufoxFingerprintDir(homeDir) {
-    return resolveRccSubdir('camoufoxFingerprint', homeDir);
-}
-export function resolveRccCamoufoxProfilesDir(homeDir) {
-    return resolveRccSubdir('camoufoxProfiles', homeDir);
-}
 export function resolveRccDocsDir(homeDir) {
     return resolveRccSubdir('docs', homeDir);
 }
@@ -190,9 +174,6 @@ export function resolveRccRuntimeLifecycleDir(homeDir) {
 }
 export function resolveRccRunDir(homeDir) {
     return resolveRccSubdir('run', homeDir);
-}
-export function resolveRccTokenStatsDir(homeDir) {
-    return resolveRccSubdir('tokenStats', homeDir);
 }
 export function ensureRccUserDirEnvironment(homeDir) {
     const userDir = resolveRccUserDir(homeDir);

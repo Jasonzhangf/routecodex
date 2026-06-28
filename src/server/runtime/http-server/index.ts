@@ -25,7 +25,6 @@ import type { ProviderRuntimeProfile } from '../../../providers/core/api/provide
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import { isStageLoggingEnabled } from '../../utils/stage-logger.js';
 import { registerApiKeyAuthMiddleware, registerDefaultMiddleware } from './middleware.js';
-import { registerOAuthPortalRoute } from './routes.js';
 import { resolveRepoRoot } from './llmswitch-loader.js';
 import type {
   HubPipelineConfig,
@@ -74,8 +73,10 @@ import {
 } from '../../../providers/core/runtime/responses-direct-contract-error.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
+import { processProviderResolveFailure } from './executor/request-executor-provider-resolve-failure.js';
+import { processProviderSendFailure } from './executor/request-executor-provider-send-failure.js';
 import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
-import { decideDirectProviderRetry, decideDirectRouterRetry } from './direct-decision.js';
+import { decideDirectProviderRetry } from './direct-decision.js';
 import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
 import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
 import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
@@ -86,6 +87,7 @@ import { resolveSessionLogColorKey } from '../../../utils/session-log-color.js';
 import {
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
+  isToolCallContinuationResponseNative,
   recordResponsesResponseForRequest,
 } from '../../../modules/llmswitch/bridge.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
@@ -242,6 +244,18 @@ function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retry
     HTTP_RUNTIME_ENTRY_RUNTIME_CONTROL_WRITER,
     reason
   );
+}
+
+function bindExistingMetadataCenter(
+  source: Record<string, unknown> | undefined,
+  target: Record<string, unknown>
+): MetadataCenter {
+  const existing = source ? MetadataCenter.read(source) : undefined;
+  if (existing) {
+    MetadataCenter.bind(target, existing);
+    return existing;
+  }
+  return MetadataCenter.attach(target);
 }
 
 function buildMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
@@ -519,9 +533,7 @@ export class RouteCodexHttpServer {
 
     registerApiKeyAuthMiddleware(this.app, this.config);
     registerDefaultMiddleware(this.app, this.config);
-    registerOAuthPortalRoute(this.app);
     this.registerDaemonAdminUiRoute();
-    console.log('[RouteCodexHttpServer] OAuth Portal route registered (early initialization)');
     console.log('[RouteCodexHttpServer] Initialized (pipeline=hub)');
   }
 
@@ -1389,11 +1401,31 @@ export class RouteCodexHttpServer {
     const metadataForHub: Record<string, unknown> = {
       ...(input.metadata ?? {}),
       routecodexLocalPort: portConfig.port,
+      entryPort: portConfig.port,
+      matchedPort: portConfig.port,
       routecodexPortMode: portConfig.mode,
       routecodexPortBinding: portConfig.providerBinding,
       routecodexRoutingPolicyGroup: portConfig.routingPolicyGroup,
       ...(allowedProviders && allowedProviders.length > 0 ? { allowedProviders } : {}),
     };
+    const metadataCenter = bindExistingMetadataCenter(
+      input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+        ? (input.metadata as Record<string, unknown>)
+        : undefined,
+      metadataForHub
+    );
+    if (!metadataCenter.readRequestTruth().portScope) {
+      metadataCenter.writeRequestTruth(
+        'portScope',
+        String(portConfig.port),
+        {
+          module: 'src/server/runtime/http-server/index.ts',
+          symbol: 'executeRouterDirectPipelineForPort',
+          stage: 'ServerReqInbound01ClientRaw'
+        },
+        'router-direct request entry port scope'
+      );
+    }
     writeMetadataCenterRuntimeControl(
       metadataForHub,
       'stopMessageEnabled',
@@ -1420,8 +1452,6 @@ export class RouteCodexHttpServer {
         sessionDir: portSessionDir,
       };
     }
-    const metadataCenterSnapshot = buildMetadataCenterSnapshot(metadataForHub);
-    metadataForHub.metadataCenterSnapshot = metadataCenterSnapshot;
     if (retryState.retryProviderKey) {
       writeMetadataCenterRuntimeControl(
         metadataForHub,
@@ -1435,6 +1465,8 @@ export class RouteCodexHttpServer {
     } else {
       delete metadataForHub.excludedProviderKeys;
     }
+    const metadataCenterSnapshot = buildMetadataCenterSnapshot(metadataForHub);
+    metadataForHub.metadataCenterSnapshot = metadataCenterSnapshot;
 
     const rawDirectPayload = requireDirectPassthroughPayloadObject(input.body);
     const inboundProtocol = resolveInboundProtocolFromEntryPath(input.entryEndpoint);
@@ -1622,7 +1654,69 @@ export class RouteCodexHttpServer {
     const directProviderHandle = this.resolveProviderHandleForBinding(providerKey, metadataForHub)
       ?? this.resolveProviderHandleForBinding(runtimeKey, metadataForHub);
     if (!directProviderHandle) {
-      throw new Error(`Provider not found for runtimeKey: ${runtimeKey}`);
+      const resolveError = Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
+        code: 'ERR_PROVIDER_NOT_FOUND',
+        requestId: input.requestId,
+        retryable: true,
+        requestSent: false,
+        requestExecutorProviderErrorStage: 'provider.runtime_resolve',
+      });
+      const routingDecisionProviderPool = readRoutingDecisionProviderPool(
+        routingDecision,
+        providerKey
+      );
+      const routingDecisionRouteName =
+        typeof routingDecision?.routeName === 'string' ? routingDecision.routeName : undefined;
+      const routingDecisionTiers =
+        routingDecisionRouteName && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
+          ? extractRoutingTiersForRoutingGroupRoute(
+            this.userConfig,
+            metadataForHub.routecodexRoutingPolicyGroup,
+            routingDecisionRouteName,
+          )
+          : [];
+      const defaultTierAvailableForDecision = resolveDefaultTierAvailableForErrorErr05({
+        tiers: routingDecisionTiers,
+        routePool: routingDecisionProviderPool,
+        excludedProviderKeys: retryState.excludedProviderKeys,
+      });
+      await processProviderResolveFailure({
+        error: resolveError,
+        requestId: input.requestId,
+        providerKey,
+        providerType,
+        providerProtocol: inboundProtocol,
+        routeName: routingDecisionRouteName,
+        runtimeKey,
+        target: {
+          providerKey,
+          providerType,
+          runtimeKey,
+        },
+        dependencies: this.getModuleDependencies(),
+        attempt: directAttempt,
+        maxAttempts: retryState.maxAttempts,
+        logicalRequestChainKey: input.requestId,
+        routePoolForAttempt: routingDecisionProviderPool,
+        defaultTierAvailable: defaultTierAvailableForDecision,
+        excludedProviderKeys: retryState.excludedProviderKeys,
+        recordAttempt: () => {},
+        logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
+        logProviderRetrySwitch: (switchArgs) => logProviderRetrySwitchCompact({
+          ...switchArgs,
+          providerSwitchLogState: routerDirectProviderSwitchLogState,
+          throttleMs: ROUTER_DIRECT_PROVIDER_SWITCH_LOG_THROTTLE_MS,
+        }),
+        abortSignal: getClientConnectionAbortSignal(metadataForHub),
+        metadata: metadataForHub,
+        logNonBlockingError: logRouterDirectNonBlockingError,
+        extractRetryErrorSnapshot,
+      });
+      retryState.lastError = resolveError;
+      if (directAttempt < retryState.maxAttempts) {
+        return await this.executeRouterDirectPipelineForPort(portConfig, input, retryState, directAttempt + 1);
+      }
+      throw resolveError;
     }
     attachProviderRuntimeMetadata(requestPayload, {
       requestId: input.requestId,
@@ -1747,10 +1841,8 @@ export class RouteCodexHttpServer {
       },
       onProviderError: async (error, ctx) => {
         // feature_id: error.execution_decision_consumer
-        // 2026-06-14 D2: in-line `suppressRouterDirectRetry` and
-        // `exclude_and_reroute + isClientDisconnectLikeError` early-returns
-        // physically removed. Decision is delegated to
-        // `decideDirectRouterRetry` in ./direct-decision.ts.
+        // Router-direct only captures direct-path evidence here. Provider switching
+        // stays in processProviderSendFailure / ErrorErr04-05 owners.
         await captureRouterDirectFailureSnapshots({
           requestId: input.requestId,
           payload: ctx.payload,
@@ -1762,7 +1854,6 @@ export class RouteCodexHttpServer {
           requestCaptured: directProviderRequestCaptured,
         });
         directProviderRequestCaptured = true;
-        const runtimeScope = readRuntimeScopeFromMetadata(metadataForHub);
         const retryError = extractRetryErrorSnapshot(error);
         const statusCode = typeof retryError.statusCode === 'number'
           ? retryError.statusCode
@@ -1797,13 +1888,16 @@ export class RouteCodexHttpServer {
           message: publicErrorMessage,
           directAttempt,
         });
-        const directFailurePlan = await resolveRequestExecutorProviderFailurePlan({
+        await processProviderSendFailure({
           error,
-          retryError,
           requestId: input.requestId,
           providerKey: ctx.providerKey,
+          providerId: directProviderHandle.providerId,
           providerType,
+          providerFamily: directProviderHandle.providerFamily,
           providerProtocol: ctx.providerProtocol,
+          providerModel: typeof target.modelId === 'string' ? target.modelId : undefined,
+          providerLabel: buildProviderLabel(ctx.providerKey, typeof target.modelId === 'string' ? target.modelId : undefined),
           routeName: ctx.routingDecision?.routeName,
           runtimeKey,
           target: {
@@ -1812,74 +1906,56 @@ export class RouteCodexHttpServer {
             runtimeKey,
           },
           dependencies: this.getModuleDependencies(),
+          runtimeManager: {
+            resolveRuntimeKey: (bindingKey, fallback, scopedMetadata) =>
+              this.resolveRuntimeKeyForProviderBinding(bindingKey ?? fallback, scopedMetadata),
+          },
           attempt: directAttempt,
           maxAttempts: retryState.maxAttempts,
-          stage: 'provider.send',
           logicalRequestChainKey: input.requestId,
-          logicalChainRetryLimitStageRequestId: input.requestId,
-          routePool: routingDecisionProviderPool,
+          routePoolForAttempt: routingDecisionProviderPool,
           defaultTierAvailable: defaultTierAvailableForDecision,
           excludedProviderKeys: retryState.excludedProviderKeys,
           recordAttempt: () => {},
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
-          routeHint: readRuntimeControlProjection(metadataForHub).routeHint,
+          logProviderRetrySwitch: (switchArgs) => logProviderRetrySwitchCompact({
+            ...switchArgs,
+            providerSwitchLogState: routerDirectProviderSwitchLogState,
+            throttleMs: ROUTER_DIRECT_PROVIDER_SWITCH_LOG_THROTTLE_MS,
+          }),
+          bypassTrafficGovernor: true,
+          trafficActiveInFlightAtAcquire: 0,
+          trafficPolicyMaxInFlight: 0,
+          providerSendStartedAtMs: 0,
+          providerSendElapsedMs: 0,
+          cumulativeExternalLatencyMs: 0,
+          forcedRouteHint: readRuntimeControlProjection(metadataForHub).routeHint,
+          contextOverflowRetries: 0,
+          maxContextOverflowRetries: 0,
           isStreamingRequest: readRuntimeControlProjection(metadataForHub).streamIntent === 'stream',
+          providerOwnedContinuation: false,
+          abortSignal: getClientConnectionAbortSignal(metadataForHub),
+          metadata: metadataForHub,
+          phase: 'provider_send',
           logNonBlockingError: logRouterDirectNonBlockingError,
-          metadata: {
-            ...metadataForHub,
-            __rt: {
-              ...(metadataForHub.__rt && typeof metadataForHub.__rt === 'object' && !Array.isArray(metadataForHub.__rt)
-                ? (metadataForHub.__rt as Record<string, unknown>)
-                : {}),
-              ...runtimeScope,
-            },
-          },
-          extraDetails: {
-            source: 'router-direct',
-            directAttempt,
-            ...(typeof statusCode === 'number' ? { statusCode } : {}),
+          extractRetryErrorSnapshot,
+          writeProviderSnapshot: async (snapshotArgs) => {
+            await captureRouterDirectProviderResponseSnapshot({
+              requestId: snapshotArgs.requestId,
+              response: snapshotArgs.data,
+              entryEndpoint: input.entryEndpoint,
+              providerKey: ctx.providerKey,
+              providerId: directProviderHandle.providerId,
+              metadata: metadataForHub,
+            });
           },
         });
-        const retryPlan = directFailurePlan.retryExecutionPlan;
-        const retryDecision = decideDirectRouterRetry({
-          retryExecutionPlan: retryPlan,
-          excludedProviderKeys: retryState.excludedProviderKeys,
-          directAttempt,
-          maxAttempts: retryState.maxAttempts,
-          providerKey: ctx.providerKey,
-          pool: routingDecisionProviderPool,
-          error,
-        });
-        if (retryDecision.action === 'rethrow') {
-          return;
-        }
-        if (directFailurePlan.retryTelemetryPlan) {
-          emitRequestExecutorProviderRetryTelemetry({
-            requestId: input.requestId,
-            retryTelemetryPlan: directFailurePlan.retryTelemetryPlan,
-            logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
-            logProviderRetrySwitch: (switchArgs) => logProviderRetrySwitchCompact({
-              ...switchArgs,
-              providerSwitchLogState: routerDirectProviderSwitchLogState,
-              throttleMs: ROUTER_DIRECT_PROVIDER_SWITCH_LOG_THROTTLE_MS,
-            }),
-          });
-        }
         retryState.lastError = error;
-        retryState.excludedProviderKeys = new Set(retryDecision.mutatedExcluded);
-        directRetryRequested = retryDecision.shouldRecurse;
-        const switchAction = retryPlan.retrySwitchPlan?.switchAction ?? 'exclude_and_reroute';
+        directRetryRequested = true;
         retryState.retryProviderKey = undefined;
-        this.logStage('router-direct.unified_decision.applied', input.requestId, {
-          providerKey: ctx.providerKey,
-          switchAction,
-          excludedCurrentProvider: retryPlan.excludedCurrentProvider,
-          directAttempt,
-        });
         this.logStage('router-direct.retry.requested', input.requestId, {
           providerKey: ctx.providerKey,
           routeName: ctx.routingDecision?.routeName,
-          switchAction,
           excluded: Array.from(retryState.excludedProviderKeys),
           directAttempt,
           nextDirectAttempt: directAttempt + 1,
@@ -1933,6 +2009,7 @@ export class RouteCodexHttpServer {
   }): Promise<void> {
     if (!args.requestId) return;
     void args.entryEndpoint;
+    const keepForSubmitToolOutputs = isToolCallContinuationResponseNative(args.responseBody);
     await recordResponsesResponseForRequest({
       requestId: args.requestId,
       response: args.responseBody as Record<string, unknown>,
@@ -1943,7 +2020,7 @@ export class RouteCodexHttpServer {
       allowScopeContinuation: true,
     });
     await finalizeResponsesConversationRequestRetention(args.requestId, {
-      keepForSubmitToolOutputs: false,
+      keepForSubmitToolOutputs,
     });
   }
 

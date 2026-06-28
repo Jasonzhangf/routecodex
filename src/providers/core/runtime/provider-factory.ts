@@ -16,17 +16,12 @@ import {
   normalizeProviderType
 } from '../utils/provider-type-utils.js';
 import {
-  isDeepSeekRuntimeIdentity,
-  readDeepSeekProviderRuntimeOptions
-} from '../contracts/deepseek-provider-contract.js';
-import {
   getAuthSignature,
   instantiateProvider,
   mapProviderModule,
   mapRuntimeAuthToConfig,
   mapRuntimeResponsesConfig,
-  resolveProviderModule,
-  type RuntimeFactoryAuthConfig
+  resolveProviderModule
 } from './provider-factory-helpers.js';
 
 type RuntimeAwareProvider = IProviderV2 & { setRuntimeProfile?: (runtime: ProviderRuntimeProfile) => void };
@@ -254,38 +249,14 @@ export class ProviderFactory {
     const extensions: Record<string, unknown> = {
       ...(runtimeExtensions ?? {})
     };
-    if (runtime.auth?.oauthProviderId) {
-      extensions.oauthProviderId = runtime.auth.oauthProviderId;
-    }
     if (runtime.transportBackend) {
       extensions.transportBackend = runtime.transportBackend;
-    }
-    const deepseekOptions = readDeepSeekProviderRuntimeOptions({
-      runtimeOptions: runtime.deepseek,
-      extensions: runtimeExtensions,
-      metadata: (runtime as unknown as { metadata?: Record<string, unknown> }).metadata
-    });
-    const isDeepSeekAccountAuth = authConfig.rawType === 'deepseek-account';
-    if (
-      deepseekOptions &&
-      isDeepSeekAccountAuth &&
-      isDeepSeekRuntimeIdentity({
-        providerFamily,
-        providerId: runtime.providerId,
-        providerKey: runtime.providerKey,
-        compatibilityProfile: runtime.compatibilityProfile
-      })
-    ) {
-      extensions.deepseek = deepseekOptions;
     }
     if (runtime.providerProtocol) {
       extensions.providerProtocol = runtime.providerProtocol;
     }
-    const implicitModuleOverride = this.resolveImplicitProviderModule(runtime, authConfig);
     const explicitModuleOverride = resolveProviderModule(runtime.providerModule);
-    const moduleOverride =
-      implicitModuleOverride ??
-      explicitModuleOverride;
+    const moduleOverride = explicitModuleOverride;
 
     const timeoutMs =
       typeof runtime.timeoutMs === 'number' && Number.isFinite(runtime.timeoutMs) && runtime.timeoutMs > 0
@@ -315,63 +286,6 @@ export class ProviderFactory {
       type: moduleOverride ?? mapProviderModule(providerType),
       config: configNode
     };
-  }
-
-  private static resolveImplicitProviderModule(
-    runtime: ProviderRuntimeProfile,
-    authConfig: RuntimeFactoryAuthConfig
-  ): OpenAIStandardConfig['type'] | undefined {
-    const authRawType =
-      typeof (authConfig as { rawType?: unknown }).rawType === 'string'
-        ? String((authConfig as { rawType?: string }).rawType).trim().toLowerCase()
-        : '';
-
-    if (authRawType === 'deepseek-account') {
-      return 'deepseek-http-provider';
-    }
-
-    if (
-      this.shouldUseImplicitDeepSeekHttpProvider(runtime) &&
-      isDeepSeekRuntimeIdentity({
-        providerFamily: runtime.providerFamily,
-        providerId: runtime.providerId,
-        providerKey: runtime.providerKey,
-        compatibilityProfile: runtime.compatibilityProfile
-      })
-    ) {
-      return 'deepseek-http-provider';
-    }
-
-    return undefined;
-  }
-
-  private static shouldUseImplicitDeepSeekHttpProvider(runtime: ProviderRuntimeProfile): boolean {
-    const read = (value?: string): string => (typeof value === 'string' ? value.trim().toLowerCase() : '');
-    const providerId = read(runtime.providerId);
-    const providerKey = read(runtime.providerKey);
-    const runtimeKey = read(runtime.runtimeKey);
-    const compatibilityProfile = read(runtime.compatibilityProfile);
-
-    if (compatibilityProfile === 'chat:deepseek-web') {
-      return true;
-    }
-
-    if (
-      providerId === 'deepseek-web' ||
-      providerId.startsWith('deepseek-web.') ||
-      providerKey === 'deepseek-web' ||
-      providerKey.startsWith('deepseek-web.') ||
-      runtimeKey === 'deepseek-web' ||
-      runtimeKey.startsWith('deepseek-web.')
-    ) {
-      return true;
-    }
-
-    const endpointCandidates = [runtime.baseUrl, runtime.endpoint]
-      .map((value) => read(value))
-      .filter((value) => value.length > 0);
-
-    return endpointCandidates.some((value) => value.includes('chat.deepseek.com'));
   }
 
   private static applyRuntimeProfile(provider: IProviderV2, runtime: ProviderRuntimeProfile): void {

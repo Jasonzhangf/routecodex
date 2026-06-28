@@ -20,7 +20,6 @@ export type ProviderTemplateId =
   | 'responses'
   | 'anthropic'
   | 'gemini'
-  | 'deepseek-web'
   | 'custom';
 
 export interface ProviderTemplate {
@@ -109,18 +108,8 @@ export function buildProviderFromTemplate(
   };
   if (nextAuthType.toLowerCase().includes('apikey')) {
     auth.apiKey = apiKeyOrPlaceholder.trim() || readString(baseAuth.apiKey) || 'YOUR_API_KEY_HERE';
-  } else if (nextAuthType.toLowerCase().includes('oauth') || nextAuthType.toLowerCase().includes('cookie') || nextAuthType.toLowerCase().includes('account')) {
-    const resolvedTokenFile = tokenFile.trim() || readString(baseAuth.tokenFile) || readString(baseAuth.cookieFile);
-    if (resolvedTokenFile) {
-      if (nextAuthType.toLowerCase().includes('cookie')) {
-        auth.cookieFile = resolvedTokenFile;
-      } else if (nextAuthType.toLowerCase().includes('account') && Array.isArray(baseAuth.entries) && baseAuth.entries.length > 0) {
-        const [first, ...rest] = baseAuth.entries as UnknownRecord[];
-        auth.entries = [{ ...first, tokenFile: resolvedTokenFile }, ...rest];
-      } else {
-        auth.tokenFile = resolvedTokenFile;
-      }
-    }
+  } else {
+    throw new Error(`Unsupported provider auth type "${nextAuthType}". Only apikey is supported.`);
   }
   provider.auth = auth;
 

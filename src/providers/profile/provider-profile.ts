@@ -5,7 +5,6 @@
  * 该层仅关注用户配置的声明式信息，与 runtime profile 解密后的密钥/令牌相区分。
  */
 
-import type { DeepSeekProviderRuntimeOptions } from '../core/contracts/deepseek-provider-contract.js';
 import type { ProviderConcurrencyConfig, ProviderRpmConfig } from '../core/api/provider-types.js';
 
 export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini';
@@ -19,11 +18,6 @@ export interface ProviderTransportConfig {
   timeoutMs?: number;
   maxRetries?: number;
   backend?: ProviderTransportBackend;
-  /**
-   * Optional override for OAuth browser activation per provider.
-   * When set to 'camoufox', OAuth will prefer Camoufox launcher instead of the system default browser.
-   */
-  oauthBrowser?: 'camoufox' | 'default';
 }
 
 export interface ApiKeyAuthConfig {
@@ -71,24 +65,11 @@ export interface ApiKeyEntry {
   disabledUntil?: number;
 }
 
-export interface OAuthAuthConfig {
-  kind: 'oauth';
-  clientId?: string;
-  clientSecret?: string;
-  tokenUrl?: string;
-  deviceCodeUrl?: string;
-  scopes?: string[];
-  tokenFile?: string;
-  authorizationUrl?: string;
-  userInfoUrl?: string;
-  refreshUrl?: string;
-}
-
 export interface NoAuthConfig {
   kind: 'none';
 }
 
-export type ProviderAuthConfig = ApiKeyAuthConfig | OAuthAuthConfig | NoAuthConfig;
+export type ProviderAuthConfig = ApiKeyAuthConfig | NoAuthConfig;
 
 export interface ProviderProfile {
   id: string;
@@ -105,7 +86,6 @@ export interface ProviderProfile {
   metadata?: {
     defaultModel?: string;
     supportedModels?: string[];
-    deepseek?: Partial<DeepSeekProviderRuntimeOptions>;
     concurrency?: ProviderConcurrencyConfig;
     rpm?: ProviderRpmConfig;
   };

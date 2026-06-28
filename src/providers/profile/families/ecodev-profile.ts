@@ -3,8 +3,7 @@ import type {
   ApplyRequestHeadersInput,
   BuildRequestBodyInput,
   ProviderFamilyProfile,
-  ResolveEndpointInput,
-  ResolveOAuthTokenFileInput
+  ResolveEndpointInput
 } from '../profile-contracts.js';
 
 function readStreamIntent(request: unknown): boolean | undefined {
@@ -74,18 +73,6 @@ function buildEcoDevRequestBody(input: BuildRequestBodyInput): Record<string, un
 export const ecodevFamilyProfile: ProviderFamilyProfile = {
   id: 'ecodev/default',
   providerFamily: 'ecodev',
-
-  resolveOAuthTokenFileMode(input: ResolveOAuthTokenFileInput): boolean | undefined {
-    const provider = input.oauthProviderId.trim().toLowerCase();
-    const tokenFile = typeof input.tokenFile === 'string' ? input.tokenFile.trim() : '';
-    if (
-      provider === 'ecodev'
-      && tokenFile.length > 0
-    ) {
-      return true;
-    }
-    return undefined;
-  },
 
   resolveEndpoint(input: ResolveEndpointInput): string | undefined {
     void input;

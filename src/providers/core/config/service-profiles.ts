@@ -14,7 +14,6 @@ import {
   PROVIDER_TIMEOUTS
 } from "../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
-import { DEEPSEEK_UPSTREAM_USER_AGENT } from '../contracts/deepseek-provider-contract.js';
 
 /**
  * 动态服务配置档案构建器
@@ -79,9 +78,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     defaultBaseUrl: API_BASE_URLS.GEMINI,
     defaultEndpoint: '/models:generateContent',
     defaultModel: PROVIDER_DEFAULT_MODELS.GEMINI,
-    // 允许 apikey 与 oauth，两者都视为合法
-    requiredAuth: [],
-    optionalAuth: ['apikey', 'oauth'],
+    requiredAuth: ['apikey'],
+    optionalAuth: [],
     headers: {
       'Content-Type': 'application/json'
     },
@@ -102,26 +100,6 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'User-Agent': 'RouteCodex/2.0'
     },
     // 默认 Provider 请求超时时间：500s
-    timeout: PROVIDER_TIMEOUTS.OPENAI,
-    maxRetries: 3
-  },
-
-  deepseek: {
-    defaultBaseUrl: API_BASE_URLS.DEEPSEEK,
-    defaultEndpoint: '/api/v0/chat/completion',
-    defaultModel: PROVIDER_DEFAULT_MODELS.DEEPSEEK,
-    requiredAuth: ['apikey'],
-    optionalAuth: [],
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'Accept-Encoding': 'gzip',
-      'x-client-platform': 'android',
-      'x-client-version': '1.3.0-auto-resume',
-      'x-client-locale': 'zh_CN',
-      'accept-charset': 'UTF-8',
-      'User-Agent': DEEPSEEK_UPSTREAM_USER_AGENT
-    },
     timeout: PROVIDER_TIMEOUTS.OPENAI,
     maxRetries: 3
   },

@@ -31,21 +31,17 @@ describe('provider-profile-loader', () => {
     expect(result.byId.glm.metadata?.supportedModels).toEqual(['glm-4', 'glm-4.5']);
   });
 
-  it('maps responses aliases and extracts oauth config', () => {
+  it('maps responses aliases with api key auth', () => {
     const config: Record<string, unknown> = {
       providers: {
         responsesProxy: {
           type: 'responses-http-provider',
           baseUrl: 'https://proxy.example.com/v1',
           auth: {
-            type: 'oauth',
-            clientId: 'abc',
-            clientSecret: 'secret',
-            tokenUrl: 'https://proxy.example.com/oauth/token',
-            authorizationUrl: 'https://proxy.example.com/oauth/authorize',
-            scopes: ['responses.write']
+            type: 'apikey',
+            apiKey: '${RESPONSES_API_KEY}'
           },
-          compatibilityProfile: 'responses:c4m'
+          compatibilityProfile: 'responses:crs'
         }
       }
     };
@@ -53,87 +49,38 @@ describe('provider-profile-loader', () => {
     const result = buildProviderProfiles(config);
     const profile = result.byId.responsesProxy;
     expect(profile.protocol).toBe('responses');
-    expect(profile.auth.kind).toBe('oauth');
-    if (profile.auth.kind === 'oauth') {
-      expect(profile.auth.clientId).toBe('abc');
-      expect(profile.auth.scopes).toEqual(['responses.write']);
-    }
-    expect(profile.compatibilityProfile).toEqual('responses:c4m');
-  });
-
-  it('parses deepseek family as openai protocol with deepseek metadata', () => {
-    const config: Record<string, unknown> = {
-      providers: {
-        deepseek: {
-          type: 'deepseek',
-          baseUrl: 'https://chat.deepseek.com',
-          compatibilityProfile: 'chat:deepseek-web',
-          auth: {
-            type: 'deepseek-account',
-            mobile: '${DEEPSEEK_MOBILE}',
-            password: '${DEEPSEEK_PASSWORD}',
-            tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
-          },
-          deepseek: {
-            strictToolRequired: true,
-            toolProtocol: 'text',
-            powTimeoutMs: 9000,
-            powMaxAttempts: 3,
-            sessionReuseTtlMs: 120000,
-            contextFile: {
-              enabled: true
-            }
-          }
-        }
-      }
-    };
-
-    const result = buildProviderProfiles(config);
-    const profile = result.byId.deepseek;
-    expect(profile.protocol).toBe('openai');
-    expect(profile.compatibilityProfile).toBe('chat:deepseek-web');
-    expect(profile.metadata?.deepseek).toEqual({
-      strictToolRequired: true,
-      toolProtocol: 'text',
-      powTimeoutMs: 9000,
-      powMaxAttempts: 3,
-      sessionReuseTtlMs: 120000,
-      contextFileEnabled: true
-    });
     expect(profile.auth.kind).toBe('apikey');
     if (profile.auth.kind === 'apikey') {
-      expect(profile.auth.rawType).toBe('deepseek-account');
-      expect(profile.auth.mobile).toBe('${DEEPSEEK_MOBILE}');
-      expect(profile.auth.password).toBe('${DEEPSEEK_PASSWORD}');
-      expect(profile.auth.tokenFile).toBe('~/.routecodex/auth/deepseek-account-1.json');
+      expect(profile.auth.apiKey).toBe('${RESPONSES_API_KEY}');
     }
+    expect(profile.compatibilityProfile).toEqual('responses:crs');
   });
-  it('defaults deepseek-web profile to contextFileEnabled when omitted', () => {
+
+  it('rejects removed oauth auth config', () => {
     const config: Record<string, unknown> = {
       providers: {
-        deepseek: {
-          type: 'deepseek',
-          baseUrl: 'https://chat.deepseek.com',
-          compatibilityProfile: 'chat:deepseek-web',
+        responsesProxy: {
+          type: 'responses-http-provider',
           auth: {
-            type: 'deepseek-account',
-            tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
-          },
-          deepseek: {
-            strictToolRequired: true,
-            toolProtocol: 'text'
+            type: 'oauth'
           }
         }
       }
     };
 
-    const result = buildProviderProfiles(config);
-    const profile = result.byId.deepseek;
-    expect(profile.metadata?.deepseek).toMatchObject({
-      strictToolRequired: true,
-      toolProtocol: 'text',
-      contextFileEnabled: true
-    });
+    expect(() => buildProviderProfiles(config)).toThrow(/OAuth auth has been removed/);
+  });
+
+  it('rejects removed deepseek provider type', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        deepseek: {
+          type: 'deepseek'
+        }
+      }
+    };
+
+    expect(() => buildProviderProfiles(config)).toThrow(/unsupported type "deepseek"/i);
   });
 
   it('extracts transport backend from provider config', () => {

@@ -10,7 +10,7 @@ export { ProviderFactory, createHttpTransportProvider } from '../runtime/provide
 
 // 配置类型
 export type { OpenAIStandardConfig } from './provider-config.js';
-export type { ApiKeyAuth, OAuthAuth } from './provider-config.js';
+export type { ApiKeyAuth } from './provider-config.js';
 
 // 接口类型
 export type { IProviderV2, ProviderType, ProviderError, ProviderMetrics, ServiceProfile } from './provider-types.js';
@@ -20,7 +20,6 @@ export type { IProviderV2, ProviderType, ProviderError, ProviderMetrics, Service
 
 // 认证模块
 export { ApiKeyAuthProvider } from '../../auth/apikey-auth.js';
-export { OAuthAuthProvider } from '../../auth/oauth-auth.js';
 
 // 工具模块
 export { HttpClient } from '../utils/http-client.js';

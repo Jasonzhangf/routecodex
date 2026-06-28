@@ -8,7 +8,6 @@ import {
 import type {
   ProviderErrorEvent,
   ProviderFailureEvent,
-  ProviderQuotaView,
   ProviderSuccessEvent,
   RouterMetadataInput,
   RoutingDecision,
@@ -47,7 +46,6 @@ export type VirtualRouterRuntimeDeps = {
     saveAsync: (key: string, state: unknown) => void;
     saveSync?: (key: string, state: unknown) => void;
   };
-  quotaView?: ProviderQuotaView;
 };
 
 export type VirtualRouterRuntime = {
@@ -55,7 +53,6 @@ export type VirtualRouterRuntime = {
   updateDeps(deps: {
     healthStore?: VirtualRouterHealthStore | null;
     routingStateStore?: VirtualRouterRuntimeDeps['routingStateStore'] | null;
-    quotaView?: ProviderQuotaView | null;
   }): void;
   updateVirtualRouterConfig(config: VirtualRouterConfig): void;
   route(
@@ -97,7 +94,6 @@ export class VirtualRouterEngine implements VirtualRouterRuntime {
   updateDeps(deps: {
     healthStore?: VirtualRouterHealthStore | null;
     routingStateStore?: VirtualRouterRuntimeDeps['routingStateStore'] | null;
-    quotaView?: ProviderQuotaView | null;
   }): void {
     this.nativeProxy.updateDeps(deps as unknown as object);
   }

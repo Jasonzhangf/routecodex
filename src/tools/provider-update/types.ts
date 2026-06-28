@@ -1,16 +1,8 @@
 export type AuthConfig = {
-  type: 'apikey' | 'oauth';
+  type: 'apikey';
   apiKey?: string;
   headerName?: string;
   prefix?: string;
-
-  // OAuth-related fields (optional, used when type === 'oauth')
-  tokenFile?: string;
-  clientId?: string;
-  clientSecret?: string;
-  tokenUrl?: string;
-  deviceCodeUrl?: string;
-  scopes?: string[];
 };
 
 export type ProviderInputConfig = {

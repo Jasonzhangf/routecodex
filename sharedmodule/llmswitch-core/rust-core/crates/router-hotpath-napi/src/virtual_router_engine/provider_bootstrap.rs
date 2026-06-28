@@ -1,11 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::env;
-use std::fs;
-use std::path::PathBuf;
 
 use crate::shared_json_utils::read_trimmed_string as read_optional_string;
 use crate::virtual_router_engine::error::format_virtual_router_error;
@@ -15,10 +11,6 @@ use crate::virtual_router_engine::profile_utils::{
 
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS: i64 = 8192;
 const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
-const CLAUDE_CODE_DEFAULT_USER_AGENT: &str = "claude-cli/2.0.76 (external, cli)";
-const CLAUDE_CODE_DEFAULT_X_APP: &str = "claude-cli";
-const CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA: &str = "claude-code";
-const MULTI_TOKEN_OAUTH_PROVIDERS: &[&str] = &[];
 const MODEL_CAPABILITY_ALLOWLIST: &[&str] = &[
     "text",
     "reasoning",
@@ -39,34 +31,6 @@ struct ProviderAuthConfigJson {
     secret_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     value: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mobile: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    password: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    account_file: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    account_alias: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    token_file: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    token_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device_code_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    client_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    client_secret: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    scopes: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    authorization_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    user_info_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    refresh_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    oauth_provider_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     raw_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -252,26 +216,12 @@ struct ProviderAuthEntry {
 #[derive(Debug, Clone)]
 struct AuthTypeInfo {
     auth_type: String,
-    oauth_provider_id: Option<String>,
     raw: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct AuthFieldDefaults {
     secret_ref: Option<String>,
-    mobile: Option<String>,
-    password: Option<String>,
-    account_file: Option<String>,
-    account_alias: Option<String>,
-    token_file: Option<String>,
-    token_url: Option<String>,
-    device_code_url: Option<String>,
-    client_id: Option<String>,
-    client_secret: Option<String>,
-    authorization_url: Option<String>,
-    user_info_url: Option<String>,
-    refresh_url: Option<String>,
-    scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -280,27 +230,6 @@ struct AuthCandidate {
     raw_type: Option<String>,
     value: Option<String>,
     secret_ref: Option<String>,
-    mobile: Option<String>,
-    password: Option<String>,
-    account_file: Option<String>,
-    account_alias: Option<String>,
-    token_file: Option<String>,
-    token_url: Option<String>,
-    device_code_url: Option<String>,
-    client_id: Option<String>,
-    client_secret: Option<String>,
-    authorization_url: Option<String>,
-    user_info_url: Option<String>,
-    refresh_url: Option<String>,
-    scopes: Option<Vec<String>>,
-    oauth_provider_id: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct OAuthTokenFileMatch {
-    file_path: String,
-    sequence: i64,
-    alias: String,
 }
 
 #[derive(Debug, Clone)]
@@ -392,16 +321,6 @@ fn build_provider_runtime_entries(
         for entry in auth_entries {
             let runtime_key = build_runtime_key(provider_id, &entry.key_alias);
             let mut runtime_auth = entry.auth.clone();
-            if runtime_auth.token_file.is_none()
-                && (runtime_auth.auth_type == "oauth"
-                    || runtime_auth
-                        .raw_type
-                        .as_deref()
-                        .map(|value| value.to_lowercase().contains("oauth"))
-                        .unwrap_or(false))
-            {
-                runtime_auth.token_file = Some(entry.key_alias.clone());
-            }
             if runtime_auth.auth_type == "apiKey" && runtime_auth.secret_ref.is_none() {
                 runtime_auth.secret_ref = Some(format!("{}.{}", provider_id, entry.key_alias));
             }
@@ -637,12 +556,7 @@ fn normalize_provider(
         .or_else(|| read_optional_string(provider.get("baseUrl")))
         .unwrap_or_default();
     let compatibility_profile = resolve_compatibility_profile(provider_id, provider)?;
-    let headers = maybe_inject_claude_code_headers(
-        provider_id,
-        &provider_type,
-        &compatibility_profile,
-        normalize_headers(provider.get("headers")),
-    );
+    let headers = normalize_headers(provider.get("headers"));
     let responses_node = as_object(provider.get("responses"));
     let responses_config = normalize_responses_config(
         provider_id,
@@ -672,7 +586,7 @@ fn normalize_provider(
             None
         }
     });
-    let deepseek = normalize_deepseek_options(provider);
+    let deepseek = None;
     let server_tools_disabled = provider
         .get("serverToolsDisabled")
         .and_then(parse_bool_like)
@@ -972,32 +886,6 @@ fn extract_provider_auth_entries(
             value: read_optional_string(auth.get("value")),
             raw_type: base_raw_type_source.clone(),
             secret_ref: read_optional_string(auth.get("secretRef")),
-            mobile: read_optional_string(auth.get("mobile"))
-                .or_else(|| read_optional_string(auth.get("account")))
-                .or_else(|| read_optional_string(auth.get("username"))),
-            password: read_optional_string(auth.get("password")),
-            account_file: read_optional_string(auth.get("accountFile"))
-                .or_else(|| read_optional_string(auth.get("account_file"))),
-            account_alias: read_optional_string(auth.get("accountAlias"))
-                .or_else(|| read_optional_string(auth.get("account_alias"))),
-            token_file: read_optional_string(auth.get("tokenFile"))
-                .or_else(|| read_optional_string(auth.get("file"))),
-            token_url: read_optional_string(auth.get("tokenUrl"))
-                .or_else(|| read_optional_string(auth.get("token_url"))),
-            device_code_url: read_optional_string(auth.get("deviceCodeUrl"))
-                .or_else(|| read_optional_string(auth.get("device_code_url"))),
-            client_id: read_optional_string(auth.get("clientId"))
-                .or_else(|| read_optional_string(auth.get("client_id"))),
-            client_secret: read_optional_string(auth.get("clientSecret"))
-                .or_else(|| read_optional_string(auth.get("client_secret"))),
-            authorization_url: read_optional_string(auth.get("authorizationUrl"))
-                .or_else(|| read_optional_string(auth.get("authorization_url")))
-                .or_else(|| read_optional_string(auth.get("authUrl"))),
-            user_info_url: read_optional_string(auth.get("userInfoUrl"))
-                .or_else(|| read_optional_string(auth.get("user_info_url"))),
-            refresh_url: read_optional_string(auth.get("refreshUrl"))
-                .or_else(|| read_optional_string(auth.get("refresh_url"))),
-            scopes: normalize_scope_list(auth.get("scopes").or_else(|| auth.get("scope"))),
             ..Default::default()
         },
     );
@@ -1015,108 +903,17 @@ fn extract_provider_auth_entries(
         )?;
     }
 
-    let has_explicit_entries = !entries.is_empty();
-
-    if base_type_info.auth_type == "oauth" && !has_explicit_entries {
-        let mut scan_candidates = BTreeSet::new();
-        if let Some(value) = auth.get("oauthProviderId").and_then(Value::as_str) {
-            let trimmed = value.trim().to_lowercase();
-            if !trimmed.is_empty() {
-                scan_candidates.insert(trimmed);
-            }
-        }
-        if let Some(value) = base_type_info.oauth_provider_id.as_ref() {
-            let trimmed = value.trim().to_lowercase();
-            if !trimmed.is_empty() {
-                scan_candidates.insert(trimmed);
-            }
-        }
-        let provider_candidate = provider_id.trim().to_lowercase();
-        if !provider_candidate.is_empty() {
-            scan_candidates.insert(provider_candidate);
-        }
-
-        for candidate in scan_candidates {
-            if !MULTI_TOKEN_OAUTH_PROVIDERS.contains(&candidate.as_str()) {
-                continue;
-            }
-            let token_files = scan_oauth_token_files(&candidate);
-            if token_files.is_empty() {
-                continue;
-            }
-            let base_type_alias = base_type_info
-                .oauth_provider_id
-                .as_ref()
-                .map(|value| value.to_lowercase());
-            for matched in token_files {
-                let alias = if matched.alias != "default" {
-                    format!("{}-{}", matched.sequence, matched.alias)
-                } else {
-                    matched.sequence.to_string()
-                };
-                let type_hint = if base_type_source.is_some()
-                    && base_type_alias.as_deref() == Some(candidate.as_str())
-                {
-                    base_type_source.clone().unwrap()
-                } else {
-                    format!("{}-oauth", candidate)
-                };
-                let candidate_auth = build_auth_candidate(
-                    Some(type_hint),
-                    &base_type_info,
-                    AuthCandidate {
-                        token_file: Some(matched.file_path),
-                        oauth_provider_id: Some(candidate.clone()),
-                        ..Default::default()
-                    },
-                );
-                push_auth_entry(
-                    provider_id,
-                    Some(alias),
-                    candidate_auth,
-                    &base_type_info,
-                    &defaults,
-                    &mut entries,
-                    &mut alias_set,
-                )?;
-            }
-        }
-    }
-
     let base_raw_type = base_type_info
         .raw
         .as_deref()
         .unwrap_or_default()
         .trim()
         .to_lowercase();
-    if base_type_info.auth_type == "apiKey"
-        && base_raw_type == "deepseek-account"
-        && !has_explicit_entries
-    {
-        for matched in scan_deepseek_account_token_files() {
-            let candidate = build_auth_candidate(
-                base_type_source
-                    .clone()
-                    .or_else(|| Some("deepseek-account".to_string())),
-                &base_type_info,
-                AuthCandidate {
-                    raw_type: base_raw_type_source
-                        .clone()
-                        .or_else(|| Some("deepseek-account".to_string())),
-                    token_file: Some(matched.file_path),
-                    ..Default::default()
-                },
-            );
-            push_auth_entry(
-                provider_id,
-                Some(matched.alias),
-                candidate,
-                &base_type_info,
-                &defaults,
-                &mut entries,
-                &mut alias_set,
-            )?;
-        }
+    if base_raw_type == "deepseek-account" {
+        return Err(format!(
+            "Provider {} uses removed account auth; configure auth.type=apikey",
+            provider_id
+        ));
     }
 
     if entries.is_empty() && base_type_info.auth_type == "apiKey" {
@@ -1157,68 +954,14 @@ fn extract_provider_auth_entries(
 }
 
 fn auth_candidate_has_material(candidate: &AuthCandidate) -> bool {
-    candidate.value.is_some()
-        || candidate.secret_ref.is_some()
-        || candidate.mobile.is_some()
-        || candidate.password.is_some()
-        || candidate.account_file.is_some()
-        || candidate.account_alias.is_some()
-        || candidate.token_file.is_some()
-        || candidate.token_url.is_some()
-        || candidate.device_code_url.is_some()
-        || candidate.client_id.is_some()
-        || candidate.client_secret.is_some()
-        || candidate.authorization_url.is_some()
-        || candidate.user_info_url.is_some()
-        || candidate.refresh_url.is_some()
-        || candidate
-            .scopes
-            .as_ref()
-            .map(|items| !items.is_empty())
-            .unwrap_or(false)
+    candidate.value.is_some() || candidate.secret_ref.is_some()
 }
 
 fn auth_candidate_has_effective_material(
     candidate: &AuthCandidate,
     defaults: &AuthFieldDefaults,
 ) -> bool {
-    candidate.value.is_some()
-        || candidate.secret_ref.is_some()
-        || candidate.mobile.is_some()
-        || candidate.password.is_some()
-        || candidate.account_file.is_some()
-        || candidate.account_alias.is_some()
-        || candidate.token_file.is_some()
-        || candidate.token_url.is_some()
-        || candidate.device_code_url.is_some()
-        || candidate.client_id.is_some()
-        || candidate.client_secret.is_some()
-        || candidate.authorization_url.is_some()
-        || candidate.user_info_url.is_some()
-        || candidate.refresh_url.is_some()
-        || candidate
-            .scopes
-            .as_ref()
-            .map(|items| !items.is_empty())
-            .unwrap_or(false)
-        || defaults.secret_ref.is_some()
-        || defaults.mobile.is_some()
-        || defaults.password.is_some()
-        || defaults.account_file.is_some()
-        || defaults.account_alias.is_some()
-        || defaults.token_file.is_some()
-        || defaults.token_url.is_some()
-        || defaults.device_code_url.is_some()
-        || defaults.client_id.is_some()
-        || defaults.client_secret.is_some()
-        || defaults.authorization_url.is_some()
-        || defaults.user_info_url.is_some()
-        || defaults.refresh_url.is_some()
-        || defaults
-            .scopes
-            .as_ref()
-            .map(|items| !items.is_empty())
-            .unwrap_or(false)
+    candidate.value.is_some() || candidate.secret_ref.is_some() || defaults.secret_ref.is_some()
 }
 
 fn push_auth_entry_from_record(
@@ -1250,31 +993,6 @@ fn push_auth_entry_from_record(
             value: read_optional_string(record.get("value"))
                 .or_else(|| read_optional_string(record.get("apiKey"))),
             secret_ref: read_optional_string(record.get("secretRef")),
-            mobile: read_optional_string(record.get("mobile"))
-                .or_else(|| read_optional_string(record.get("account")))
-                .or_else(|| read_optional_string(record.get("username"))),
-            password: read_optional_string(record.get("password")),
-            account_file: read_optional_string(record.get("accountFile"))
-                .or_else(|| read_optional_string(record.get("account_file"))),
-            account_alias: read_optional_string(record.get("accountAlias"))
-                .or_else(|| read_optional_string(record.get("account_alias"))),
-            token_file: read_optional_string(record.get("tokenFile")),
-            token_url: read_optional_string(record.get("tokenUrl"))
-                .or_else(|| read_optional_string(record.get("token_url"))),
-            device_code_url: read_optional_string(record.get("deviceCodeUrl"))
-                .or_else(|| read_optional_string(record.get("device_code_url"))),
-            client_id: read_optional_string(record.get("clientId"))
-                .or_else(|| read_optional_string(record.get("client_id"))),
-            client_secret: read_optional_string(record.get("clientSecret"))
-                .or_else(|| read_optional_string(record.get("client_secret"))),
-            authorization_url: read_optional_string(record.get("authorizationUrl"))
-                .or_else(|| read_optional_string(record.get("authorization_url")))
-                .or_else(|| read_optional_string(record.get("authUrl"))),
-            user_info_url: read_optional_string(record.get("userInfoUrl"))
-                .or_else(|| read_optional_string(record.get("user_info_url"))),
-            refresh_url: read_optional_string(record.get("refreshUrl"))
-                .or_else(|| read_optional_string(record.get("refresh_url"))),
-            scopes: normalize_scope_list(record.get("scopes").or_else(|| record.get("scope"))),
             ..Default::default()
         },
     );
@@ -1311,9 +1029,6 @@ fn build_auth_candidate(
         .or_else(|| source.clone());
     extras.type_hint = type_info.raw.clone().or(source);
     extras.raw_type = raw_type;
-    if extras.oauth_provider_id.is_none() {
-        extras.oauth_provider_id = type_info.oauth_provider_id.clone();
-    }
     extras
 }
 
@@ -1340,75 +1055,28 @@ fn push_auth_entry(
         .unwrap_or_else(|| type_source.clone());
     let type_info = interpret_auth_type(Some(type_source.as_str()));
     let entry_type = type_info.auth_type;
-    let oauth_provider_id = candidate
-        .oauth_provider_id
-        .clone()
-        .or_else(|| type_info.oauth_provider_id.clone())
-        .or_else(|| base_type_info.oauth_provider_id.clone());
-
-    if entry_type == "oauth" && oauth_provider_id.is_none() {
+    if entry_type != "apiKey" {
         return Err(format!(
-            "Provider {} OAuth auth entries must declare provider-specific type",
+            "Provider {} auth.type must be apiKey",
             provider_id
         ));
     }
+    let raw_type_lower = raw_type_source.trim().to_lowercase();
+    if raw_type_lower.contains("oauth") || raw_type_lower == "deepseek-account" {
+        return Err(format!(
+            "Provider {} uses removed auth type {}; configure auth.type=apikey",
+            provider_id, raw_type_source
+        ));
+    }
 
-    let merged_scopes = merge_scopes(candidate.scopes.clone(), defaults.scopes.clone());
     let mut normalized = ProviderAuthConfigJson {
         auth_type: entry_type.clone(),
         raw_type: Some(raw_type_source.clone()),
-        oauth_provider_id,
         value: candidate.value.clone(),
-        mobile: candidate.mobile.clone().or_else(|| defaults.mobile.clone()),
-        password: candidate
-            .password
-            .clone()
-            .or_else(|| defaults.password.clone()),
-        account_file: candidate
-            .account_file
-            .clone()
-            .or_else(|| defaults.account_file.clone()),
-        account_alias: candidate
-            .account_alias
-            .clone()
-            .or_else(|| defaults.account_alias.clone()),
         secret_ref: candidate
             .secret_ref
             .clone()
             .or_else(|| defaults.secret_ref.clone()),
-        token_file: candidate
-            .token_file
-            .clone()
-            .or_else(|| defaults.token_file.clone()),
-        token_url: candidate
-            .token_url
-            .clone()
-            .or_else(|| defaults.token_url.clone()),
-        device_code_url: candidate
-            .device_code_url
-            .clone()
-            .or_else(|| defaults.device_code_url.clone()),
-        client_id: candidate
-            .client_id
-            .clone()
-            .or_else(|| defaults.client_id.clone()),
-        client_secret: candidate
-            .client_secret
-            .clone()
-            .or_else(|| defaults.client_secret.clone()),
-        scopes: merged_scopes,
-        authorization_url: candidate
-            .authorization_url
-            .clone()
-            .or_else(|| defaults.authorization_url.clone()),
-        user_info_url: candidate
-            .user_info_url
-            .clone()
-            .or_else(|| defaults.user_info_url.clone()),
-        refresh_url: candidate
-            .refresh_url
-            .clone()
-            .or_else(|| defaults.refresh_url.clone()),
         entries: None,
     };
 
@@ -1428,104 +1096,6 @@ fn collect_auth_defaults(auth: &Map<String, Value>) -> AuthFieldDefaults {
     AuthFieldDefaults {
         secret_ref: read_optional_string(auth.get("secretRef"))
             .or_else(|| read_optional_string(auth.get("file"))),
-        mobile: read_optional_string(auth.get("mobile"))
-            .or_else(|| read_optional_string(auth.get("account")))
-            .or_else(|| read_optional_string(auth.get("username"))),
-        password: read_optional_string(auth.get("password")),
-        account_file: read_optional_string(auth.get("accountFile"))
-            .or_else(|| read_optional_string(auth.get("account_file"))),
-        account_alias: read_optional_string(auth.get("accountAlias"))
-            .or_else(|| read_optional_string(auth.get("account_alias"))),
-        token_file: read_optional_string(auth.get("tokenFile"))
-            .or_else(|| read_optional_string(auth.get("file"))),
-        token_url: read_optional_string(auth.get("tokenUrl"))
-            .or_else(|| read_optional_string(auth.get("token_url"))),
-        device_code_url: read_optional_string(auth.get("deviceCodeUrl"))
-            .or_else(|| read_optional_string(auth.get("device_code_url"))),
-        client_id: read_optional_string(auth.get("clientId"))
-            .or_else(|| read_optional_string(auth.get("client_id"))),
-        client_secret: read_optional_string(auth.get("clientSecret"))
-            .or_else(|| read_optional_string(auth.get("client_secret"))),
-        authorization_url: read_optional_string(auth.get("authorizationUrl"))
-            .or_else(|| read_optional_string(auth.get("authorization_url")))
-            .or_else(|| read_optional_string(auth.get("authUrl"))),
-        user_info_url: read_optional_string(auth.get("userInfoUrl"))
-            .or_else(|| read_optional_string(auth.get("user_info_url"))),
-        refresh_url: read_optional_string(auth.get("refreshUrl"))
-            .or_else(|| read_optional_string(auth.get("refresh_url"))),
-        scopes: normalize_scope_list(auth.get("scopes").or_else(|| auth.get("scope"))),
-    }
-}
-
-fn normalize_scope_list(value: Option<&Value>) -> Option<Vec<String>> {
-    match value {
-        Some(Value::Array(items)) => {
-            let mut out = Vec::new();
-            let mut seen = HashSet::new();
-            for item in items {
-                if let Some(raw) = item.as_str() {
-                    let trimmed = raw.trim();
-                    if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
-                        out.push(trimmed.to_string());
-                    }
-                }
-            }
-            if out.is_empty() {
-                None
-            } else {
-                Some(out)
-            }
-        }
-        Some(Value::String(raw)) if !raw.trim().is_empty() => {
-            let mut out = Vec::new();
-            let mut seen = HashSet::new();
-            for item in raw.split(|ch: char| ch == ',' || ch.is_whitespace()) {
-                let trimmed = item.trim();
-                if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
-                    out.push(trimmed.to_string());
-                }
-            }
-            if out.is_empty() {
-                None
-            } else {
-                Some(out)
-            }
-        }
-        _ => None,
-    }
-}
-
-fn merge_scopes(
-    primary: Option<Vec<String>>,
-    fallback: Option<Vec<String>>,
-) -> Option<Vec<String>> {
-    if primary
-        .as_ref()
-        .map(|items| items.is_empty())
-        .unwrap_or(true)
-        && fallback
-            .as_ref()
-            .map(|items| items.is_empty())
-            .unwrap_or(true)
-    {
-        return None;
-    }
-    let mut merged = Vec::new();
-    let mut seen = HashSet::new();
-    for scope in primary
-        .into_iter()
-        .flatten()
-        .chain(fallback.into_iter().flatten())
-    {
-        let trimmed = scope.trim();
-        if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
-            merged.push(trimmed.to_string());
-        }
-    }
-    if merged.is_empty() {
-        None
-    } else {
-        Some(merged)
     }
 }
 
@@ -1533,7 +1103,6 @@ fn interpret_auth_type(value: Option<&str>) -> AuthTypeInfo {
     let Some(raw) = value.map(str::trim).filter(|value| !value.is_empty()) else {
         return AuthTypeInfo {
             auth_type: "apiKey".to_string(),
-            oauth_provider_id: None,
             raw: None,
         };
     };
@@ -1541,37 +1110,17 @@ fn interpret_auth_type(value: Option<&str>) -> AuthTypeInfo {
     if lower == "apikey" || lower == "api-key" {
         return AuthTypeInfo {
             auth_type: "apiKey".to_string(),
-            oauth_provider_id: None,
             raw: Some(raw.to_string()),
         };
     }
-    if lower == "oauth" {
+    if lower.contains("oauth") || lower == "deepseek-account" {
         return AuthTypeInfo {
-            auth_type: "oauth".to_string(),
-            oauth_provider_id: None,
-            raw: Some(raw.to_string()),
-        };
-    }
-    if let Some(captures) = Regex::new(r"^([a-z0-9._-]+)-oauth$")
-        .ok()
-        .and_then(|re| re.captures(&lower))
-    {
-        return AuthTypeInfo {
-            auth_type: "oauth".to_string(),
-            oauth_provider_id: captures.get(1).map(|m| m.as_str().to_string()),
-            raw: Some(raw.to_string()),
-        };
-    }
-    if lower.contains("oauth") {
-        return AuthTypeInfo {
-            auth_type: "oauth".to_string(),
-            oauth_provider_id: None,
+            auth_type: "removed".to_string(),
             raw: Some(raw.to_string()),
         };
     }
     AuthTypeInfo {
         auth_type: "apiKey".to_string(),
-        oauth_provider_id: None,
         raw: Some(raw.to_string()),
     }
 }
@@ -1708,291 +1257,37 @@ mod alias_tests {
             json!("compat:passthrough")
         );
     }
-}
 
-fn scan_oauth_token_files(oauth_provider_id: &str) -> Vec<OAuthTokenFileMatch> {
-    let provider = oauth_provider_id.trim().to_lowercase();
-    if provider.is_empty() {
-        return Vec::new();
-    }
-    let base_dir = resolve_auth_dir();
-    let pattern = Regex::new(r"(?i)^([a-z0-9_-]+)-oauth-(\d+)(?:-(.+))?\.json$").ok();
-    let Some(pattern) = pattern else {
-        return Vec::new();
-    };
-    let mut matches = Vec::new();
-    let Ok(entries) = fs::read_dir(&base_dir) else {
-        return Vec::new();
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let Some(captures) = pattern.captures(file_name) else {
-            continue;
-        };
-        let provider_prefix = captures
-            .get(1)
-            .map(|m| m.as_str().to_lowercase())
-            .unwrap_or_default();
-        if provider_prefix != provider {
-            continue;
-        }
-        let sequence = captures
-            .get(2)
-            .and_then(|m| m.as_str().parse::<i64>().ok())
-            .filter(|value| *value > 0);
-        let Some(sequence) = sequence else {
-            continue;
-        };
-        let alias = captures
-            .get(3)
-            .map(|m| m.as_str().to_string())
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "default".to_string());
-        matches.push(OAuthTokenFileMatch {
-            file_path: path.to_string_lossy().to_string(),
-            sequence,
-            alias,
-        });
-    }
-    matches.sort_by(|left, right| left.sequence.cmp(&right.sequence));
-    matches
-}
-
-fn scan_deepseek_account_token_files() -> Vec<OAuthTokenFileMatch> {
-    let base_dir = resolve_auth_dir();
-    let pattern = Regex::new(r"(?i)^deepseek-account-(.+)\.json$").ok();
-    let Some(pattern) = pattern else {
-        return Vec::new();
-    };
-    let mut matches: Vec<(String, String, Option<i64>)> = Vec::new();
-    let Ok(entries) = fs::read_dir(&base_dir) else {
-        return Vec::new();
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let Some(captures) = pattern.captures(file_name) else {
-            continue;
-        };
-        let alias = captures
-            .get(1)
-            .map(|m| m.as_str().trim().to_string())
-            .filter(|value| !value.is_empty());
-        let Some(alias) = alias else {
-            continue;
-        };
-        let numeric_prefix = Regex::new(r"^(\d+)(?:-|$)")
-            .ok()
-            .and_then(|re| re.captures(&alias))
-            .and_then(|caps| caps.get(1))
-            .and_then(|m| m.as_str().parse::<i64>().ok());
-        matches.push((path.to_string_lossy().to_string(), alias, numeric_prefix));
-    }
-    matches.sort_by(|left, right| {
-        let left_num = left.2.unwrap_or(i64::MAX);
-        let right_num = right.2.unwrap_or(i64::MAX);
-        left_num.cmp(&right_num).then(left.1.cmp(&right.1))
-    });
-    matches
-        .into_iter()
-        .enumerate()
-        .map(|(index, (file_path, alias, _))| OAuthTokenFileMatch {
-            file_path,
-            sequence: (index + 1) as i64,
-            alias,
-        })
-        .collect()
-}
-
-fn resolve_auth_dir() -> PathBuf {
-    for key in ["ROUTECODEX_AUTH_DIR", "RCC_AUTH_DIR"] {
-        let raw = env::var(key).unwrap_or_default();
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            return expand_home(trimmed);
-        }
-    }
-    resolve_rcc_user_dir().join("auth")
-}
-
-fn resolve_rcc_user_dir() -> PathBuf {
-    for key in ["RCC_HOME", "ROUTECODEX_USER_DIR", "ROUTECODEX_HOME"] {
-        let raw = env::var(key).unwrap_or_default();
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            return expand_home(trimmed);
-        }
-    }
-    let home = env::var("HOME").unwrap_or_default();
-    if !home.trim().is_empty() {
-        return PathBuf::from(home.trim()).join(".rcc");
-    }
-    PathBuf::from(".rcc")
-}
-
-fn expand_home(value: &str) -> PathBuf {
-    if let Some(stripped) = value.strip_prefix("~/") {
-        let home = env::var("HOME").unwrap_or_default();
-        if !home.trim().is_empty() {
-            return PathBuf::from(home.trim()).join(stripped);
-        }
-    }
-    PathBuf::from(value)
-}
-
-fn maybe_inject_claude_code_headers(
-    provider_id: &str,
-    provider_type: &str,
-    compatibility_profile: &str,
-    headers: Option<BTreeMap<String, String>>,
-) -> Option<BTreeMap<String, String>> {
-    let _ = provider_id;
-    let profile = compatibility_profile.trim().to_lowercase();
-    if profile != "anthropic:claude-code" && profile != "chat:claude-code" {
-        return headers;
-    }
-    if !provider_type.to_lowercase().contains("anthropic") {
-        return headers;
-    }
-    let mut base = headers.unwrap_or_default();
-    if !has_header(&base, "User-Agent") {
-        base.insert(
-            "User-Agent".to_string(),
-            CLAUDE_CODE_DEFAULT_USER_AGENT.to_string(),
-        );
-    }
-    if !has_header(&base, "X-App") {
-        base.insert("X-App".to_string(), CLAUDE_CODE_DEFAULT_X_APP.to_string());
-    }
-    if !has_header(&base, "X-App-Version") {
-        if let Some(version) = parse_claude_code_app_version_from_user_agent(
-            base.get("User-Agent")
-                .map(|value| value.as_str())
-                .unwrap_or_default(),
-        ) {
-            base.insert("X-App-Version".to_string(), version);
-        }
-    }
-    if !has_header(&base, "anthropic-beta") {
-        base.insert(
-            "anthropic-beta".to_string(),
-            CLAUDE_CODE_DEFAULT_ANTHROPIC_BETA.to_string(),
-        );
-    }
-    Some(base)
-}
-
-fn has_header(headers: &BTreeMap<String, String>, name: &str) -> bool {
-    let lowered = name.trim().to_lowercase();
-    if lowered.is_empty() {
-        return false;
-    }
-    headers
-        .iter()
-        .any(|(key, value)| key.trim().to_lowercase() == lowered && !value.trim().is_empty())
-}
-
-fn parse_claude_code_app_version_from_user_agent(user_agent: &str) -> Option<String> {
-    Regex::new(r"claude-cli/([\d.]+)")
-        .ok()
-        .and_then(|re| re.captures(user_agent.trim()))
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
-}
-
-fn normalize_provider_extensions(provider: &Map<String, Value>) -> Option<Value> {
-    let mut out = Map::new();
-    if let Some(deepseek) = normalize_deepseek_options(provider) {
-        out.insert("deepseek".to_string(), deepseek);
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(Value::Object(out))
-    }
-}
-
-fn normalize_deepseek_options(provider: &Map<String, Value>) -> Option<Value> {
-    let provider_id = provider
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let compatibility_profile = resolve_compatibility_profile(provider_id, provider)
-        .ok()
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    let direct = as_object(provider.get("deepseek"));
-    let ext = as_object(as_object(provider.get("extensions")).and_then(|ext| ext.get("deepseek")));
-    let source = if direct.map(|value| !value.is_empty()).unwrap_or(false) {
-        direct
-    } else {
-        ext
-    };
-    let Some(source) = source else {
-        if compatibility_profile == "chat:deepseek-web" {
-            let mut out = Map::new();
-            out.insert(
-                "toolProtocol".to_string(),
-                Value::String("text".to_string()),
-            );
-            out.insert("contextFileEnabled".to_string(), Value::Bool(true));
-            return Some(Value::Object(out));
-        }
-        return None;
-    };
-    let strict_tool_required = source.get("strictToolRequired").and_then(parse_bool_like);
-    let mut tool_protocol = source
-        .get("toolProtocol")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_lowercase())
-        .filter(|value| value == "text" || value == "native");
-    if tool_protocol.is_none() {
-        let legacy_text_tool_fallback = source.get("textToolFallback").and_then(parse_bool_like);
-        if let Some(enabled) = legacy_text_tool_fallback {
-            tool_protocol = Some(if enabled {
-                "text".to_string()
-            } else {
-                "native".to_string()
-            });
-        }
-    }
-    let context_file_enabled = source
-        .get("contextFileEnabled")
-        .and_then(parse_bool_like)
-        .or_else(|| {
-            source
-                .get("contextFile")
-                .and_then(Value::as_object)
-                .and_then(|node| node.get("enabled"))
-                .and_then(parse_bool_like)
-        })
-        .or_else(|| {
-            if compatibility_profile == "chat:deepseek-web" {
-                Some(true)
-            } else {
-                None
+    #[test]
+    fn provider_bootstrap_rejects_removed_oauth_and_account_auth() {
+        let oauth_provider = json!({
+            "P": {
+                "id": "P",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://example.invalid/v1",
+                "auth": { "type": "oauth" },
+                "models": { "m": {} }
             }
         });
-    if strict_tool_required.is_none() && tool_protocol.is_none() && context_file_enabled.is_none() {
-        return None;
+        assert!(bootstrap_virtual_router_providers_json(oauth_provider.to_string()).is_err());
+
+        let account_provider = json!({
+            "P": {
+                "id": "P",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://example.invalid/v1",
+                "auth": { "type": "deepseek-account" },
+                "models": { "m": {} }
+            }
+        });
+        assert!(bootstrap_virtual_router_providers_json(account_provider.to_string()).is_err());
     }
-    let mut out = Map::new();
-    if let Some(value) = strict_tool_required {
-        out.insert("strictToolRequired".to_string(), Value::Bool(value));
-    }
-    if let Some(value) = tool_protocol {
-        out.insert("toolProtocol".to_string(), Value::String(value));
-    }
-    if let Some(value) = context_file_enabled {
-        out.insert("contextFileEnabled".to_string(), Value::Bool(value));
-    }
-    Some(Value::Object(out))
+}
+
+fn normalize_provider_extensions(_provider: &Map<String, Value>) -> Option<Value> {
+    None
 }
 
 fn resolve_compatibility_profile(

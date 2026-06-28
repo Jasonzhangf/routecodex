@@ -253,18 +253,18 @@ export function createAddCommand(): Command {
         process.exit(1);
       }
 
-      const authTypeDefault = tpl.defaultAuthType ?? 'apikey';
-      const authType = await ask('Auth type (e.g. apikey, oauth, deepseek-account)', authTypeDefault);
+      const authTypeDefault = 'apikey';
+      const authType = await ask('Auth type', authTypeDefault);
 
       let apiKeyPlaceholder = '';
-      let tokenFile = '';
       if (authType.toLowerCase().includes('apikey')) {
         const envDefault = normalizeEnvVarName(providerId);
         const envName = await ask('API key env var name (config writes ${ENV_VAR})', envDefault);
         const resolved = envName.trim() || envDefault;
         apiKeyPlaceholder = `\${${resolved}}`;
-      } else if (authTypeUsesCredentialFile(authType)) {
-        tokenFile = await ask('Token/cookie file path or alias (leave empty to use default)', '');
+      } else {
+        console.error('Only apikey auth is supported');
+        process.exit(1);
       }
 
       const modelDefault = tpl.defaultModel ?? '';
@@ -282,7 +282,7 @@ export function createAddCommand(): Command {
         baseUrl,
         authType,
         apiKeyPlaceholder,
-        tokenFile,
+        '',
         modelIds[0],
         {
           additionalModelIds: modelIds.slice(1),
@@ -358,7 +358,11 @@ export function createChangeCommand(): Command {
         typeof authNode.type === 'string'
           ? authNode.type
           : 'apikey';
-      const authType = await ask('Auth type (e.g. apikey, oauth, deepseek-account)', currentAuthType);
+      const authType = await ask('Auth type', currentAuthType);
+      if (!authType.toLowerCase().includes('apikey')) {
+        console.error('Only apikey auth is supported');
+        process.exit(1);
+      }
       authNode.type = authType;
 
       let apiKeyPlaceholder = typeof (authNode as { apiKey?: unknown }).apiKey === 'string'

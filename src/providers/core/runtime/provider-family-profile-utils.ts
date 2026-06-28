@@ -20,7 +20,6 @@ export function resolveProviderFamilyProfile(options: {
   configProviderId?: unknown;
   configProviderType?: unknown;
   providerType?: string;
-  oauthProviderId?: string;
 }): ProviderFamilyProfile | undefined {
   const targetNode =
     options.runtimeMetadata?.target && typeof options.runtimeMetadata.target === 'object'
@@ -43,8 +42,6 @@ export function resolveProviderFamilyProfile(options: {
       normalizeIdentity(options.runtimeMetadata?.providerType) ??
       normalizeIdentity(targetNode?.providerType) ??
       normalizeIdentity(options.configProviderType) ??
-      normalizeIdentity(options.providerType),
-    oauthProviderId: normalizeIdentity(options.oauthProviderId)
+      normalizeIdentity(options.providerType)
   });
 }
-

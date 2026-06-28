@@ -3,7 +3,6 @@ import type { Application, Request, Response, NextFunction } from 'express';
 // feature_id: daemon_admin.auth_gate_shell
 import { registerDaemonAuthRoutes } from './daemon-admin/auth-handler.js';
 import { registerStatusRoutes } from './daemon-admin/status-handler.js';
-import { registerCredentialRoutes } from './daemon-admin/credentials-handler.js';
 import { registerProviderRoutes } from './daemon-admin/providers-handler.js';
 import { registerRestartRoutes } from './daemon-admin/restart-handler.js';
 import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
@@ -285,9 +284,6 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
 
   // Token usage / provider stats
   registerStatsRoutes(app, options);
-
-  // Credentials / token 视图
-  registerCredentialRoutes(app, options);
 
   // Providers 运行时 + Config V2 视图
   registerProviderRoutes(app, options);

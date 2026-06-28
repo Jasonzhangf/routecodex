@@ -8,16 +8,10 @@ import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 export { isRecord };
 
 export type ProviderUpdateAuth = {
-  type: 'apikey' | 'oauth';
+  type: 'apikey';
   apiKey?: string;
   headerName?: string;
   prefix?: string;
-  tokenFile?: string;
-  clientId?: string;
-  clientSecret?: string;
-  tokenUrl?: string;
-  deviceCodeUrl?: string;
-  scopes?: string[];
 };
 
 export type ProviderUpdateInput = {
@@ -166,15 +160,7 @@ export function normalizeAuthForProviderUpdate(authNodeValue: unknown): Provider
   const authType = authTypeRaw.toLowerCase();
 
   if (authType.includes('oauth')) {
-    return {
-      type: 'oauth',
-      tokenFile: readString(authNodeValue.tokenFile),
-      clientId: readString(authNodeValue.clientId),
-      clientSecret: readString(authNodeValue.clientSecret),
-      tokenUrl: readString(authNodeValue.tokenUrl),
-      deviceCodeUrl: readString(authNodeValue.deviceCodeUrl),
-      scopes: readStringArray(authNodeValue.scopes)
-    };
+    throw new Error('OAuth auth has been removed; provider-update supports auth.type="apikey" only.');
   }
 
   if (authType.includes('apikey') || authType === 'api_key' || authType === 'apikey') {
@@ -198,8 +184,8 @@ export function buildProviderUpdateInputFromV2(providerId: string, provider: Unk
 }
 
 export function authTypeUsesCredentialFile(authTypeRaw: string): boolean {
-  const authType = authTypeRaw.trim().toLowerCase();
-  return authType.includes('oauth') || authType.includes('cookie') || authType.includes('account');
+  void authTypeRaw;
+  return false;
 }
 
 export function readCredentialFileFromAuthNode(authNode: UnknownRecord): string {

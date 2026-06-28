@@ -1,7 +1,6 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { TokenFileAuthProvider } from '../providers/auth/tokenfile-auth.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 import {
@@ -82,13 +81,7 @@ async function resolveAuthHeaders(providerId: string, providerNode: UnknownRecor
   const authType = normalizeString(authNode.type).toLowerCase();
 
   if (authType.includes('oauth')) {
-    const oauthProvider = new TokenFileAuthProvider({
-      ...(authNode as Record<string, unknown>),
-      oauthProviderId: authType.replace(/-oauth$/, '') || providerId,
-      type: authType || 'oauth'
-    } as any);
-    await oauthProvider.initialize();
-    return oauthProvider.buildHeaders();
+    throw new Error(`Provider doctor no longer supports removed oauth/tokenfile auth: ${providerId}`);
   }
 
   const entries = Array.isArray(authNode.entries)

@@ -337,9 +337,6 @@ export function applyProviderProfileOverrides(server: any, runtime: ProviderRunt
   if (!patched.defaultModel && profile.metadata?.defaultModel) {
     patched.defaultModel = profile.metadata.defaultModel;
   }
-  if (!patched.deepseek && profile.metadata?.deepseek) {
-    patched.deepseek = profile.metadata.deepseek;
-  }
   if (!patched.concurrency && profile.metadata?.concurrency) {
     patched.concurrency = profile.metadata.concurrency;
   }
@@ -357,35 +354,7 @@ function resolveProfileModuleOverride(
   if (!raw) {
     return undefined;
   }
-  const normalized = raw.toLowerCase();
-  if (shouldPreserveImplicitDeepSeekWebModule(runtime) && isGenericOpenAiModuleHint(normalized)) {
-    return 'deepseek-http-provider';
-  }
   return raw;
-}
-
-function isGenericOpenAiModuleHint(value: string): boolean {
-  return ['openai', 'openai-standard', 'openai-http-provider'].includes(value);
-}
-
-function shouldPreserveImplicitDeepSeekWebModule(runtime: ProviderRuntimeProfile): boolean {
-  const read = (value?: string): string => (typeof value === 'string' ? value.trim().toLowerCase() : '');
-  const providerId = read(runtime.providerId);
-  const providerKey = read(runtime.providerKey);
-  const runtimeKey = read(runtime.runtimeKey);
-  const compatibilityProfile = read(runtime.compatibilityProfile);
-  const authRawType = read((runtime.auth as { rawType?: string } | undefined)?.rawType);
-
-  return (
-    compatibilityProfile === 'chat:deepseek-web' ||
-    providerId === 'deepseek-web' ||
-    providerId.startsWith('deepseek-web.') ||
-    providerKey === 'deepseek-web' ||
-    providerKey.startsWith('deepseek-web.') ||
-    runtimeKey === 'deepseek-web' ||
-    runtimeKey.startsWith('deepseek-web.') ||
-    authRawType === 'deepseek-account'
-  );
 }
 
 export function canonicalizeRuntimeProvider(runtime: ProviderRuntimeProfile): ProviderRuntimeProfile {
@@ -423,7 +392,7 @@ export function buildProviderLabel(_server: any, providerKey?: string, model?: s
 export function normalizeAuthType(_server: any, input: unknown): 'apikey' | 'oauth' {
   const value = typeof input === 'string' ? input.toLowerCase() : '';
   if (value.includes('oauth')) {
-    return 'oauth';
+    throw new Error('OAuth auth has been removed; use auth.type="apikey"');
   }
   return 'apikey';
 }

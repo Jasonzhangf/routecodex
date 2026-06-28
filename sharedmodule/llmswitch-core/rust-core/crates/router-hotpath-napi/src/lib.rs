@@ -2,7 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 mod chat_web_search_intent;
 use chat_process_media_semantics::{
     analyze_chat_process_media, strip_chat_process_historical_images,
@@ -114,37 +114,6 @@ use crate::virtual_router_engine::{
     evaluate_singleton_route_pool_exhaustion, SingletonRoutePoolExhaustionDecision,
     SingletonRoutePoolExhaustionInput,
 };
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaBucketInputEntry {
-    key: String,
-    order: i64,
-    has_quota: bool,
-    in_pool: bool,
-    cooldown_until: Option<f64>,
-    blacklist_until: Option<f64>,
-    priority_tier: Option<f64>,
-    selection_penalty: Option<f64>,
-}
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct QuotaBucketOutputEntry {
-    key: String,
-    penalty: i64,
-    order: i64,
-}
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaBucketOutput {
-    priorities: Vec<i64>,
-    buckets: Vec<QuotaBucketOutputTier>,
-}
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaBucketOutputTier {
-    priority: i64,
-    entries: Vec<QuotaBucketOutputEntry>,
-}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingToolSyncOutput {
@@ -188,82 +157,6 @@ fn parse_routing_instruction_parse_options(
     };
     serde_json::from_str(&raw).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
-fn read_priority(entry: &QuotaBucketInputEntry) -> i64 {
-    if let Some(raw) = entry.priority_tier {
-        if raw.is_finite() {
-            return raw.floor() as i64;
-        }
-    }
-    100
-}
-fn read_penalty(entry: &QuotaBucketInputEntry) -> i64 {
-    if let Some(raw) = entry.selection_penalty {
-        if raw.is_finite() && raw > 0.0 {
-            return raw.floor() as i64;
-        }
-    }
-    0
-}
-fn is_cooling(entry: &QuotaBucketInputEntry, now_ms: f64) -> bool {
-    entry
-        .cooldown_until
-        .map(|v| v.is_finite() && v > now_ms)
-        .unwrap_or(false)
-}
-fn is_blacklisted(entry: &QuotaBucketInputEntry, now_ms: f64) -> bool {
-    entry
-        .blacklist_until
-        .map(|v| v.is_finite() && v > now_ms)
-        .unwrap_or(false)
-}
-
-fn compute_quota_buckets(entries: Vec<QuotaBucketInputEntry>, now_ms: f64) -> QuotaBucketOutput {
-    let mut buckets: BTreeMap<i64, Vec<QuotaBucketOutputEntry>> = BTreeMap::new();
-
-    for entry in entries {
-        if !entry.has_quota {
-            buckets
-                .entry(100)
-                .or_default()
-                .push(QuotaBucketOutputEntry {
-                    key: entry.key,
-                    penalty: 0,
-                    order: entry.order,
-                });
-            continue;
-        }
-        if !entry.in_pool || is_cooling(&entry, now_ms) || is_blacklisted(&entry, now_ms) {
-            continue;
-        }
-        let priority = read_priority(&entry);
-        let penalty = read_penalty(&entry);
-        buckets
-            .entry(priority)
-            .or_default()
-            .push(QuotaBucketOutputEntry {
-                key: entry.key,
-                penalty,
-                order: entry.order,
-            });
-    }
-
-    let mut priorities: Vec<i64> = buckets.keys().cloned().collect();
-    priorities.sort_unstable();
-
-    let tiers = priorities
-        .iter()
-        .map(|priority| QuotaBucketOutputTier {
-            priority: *priority,
-            entries: buckets.get(priority).cloned().unwrap_or_default(),
-        })
-        .collect();
-
-    QuotaBucketOutput {
-        priorities,
-        buckets: tiers,
-    }
-}
-
 #[napi]
 pub fn resolve_virtual_router_routing_state_key_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
@@ -403,14 +296,6 @@ fn analyze_continue_execution_injection(
     ContinueExecutionInjectionOutput {
         has_directive: false,
     }
-}
-
-#[napi]
-pub fn compute_quota_buckets_json(entries_json: String, now_ms: f64) -> NapiResult<String> {
-    let parsed: Vec<QuotaBucketInputEntry> =
-        serde_json::from_str(&entries_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = compute_quota_buckets(parsed, now_ms);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi]
@@ -1242,17 +1127,6 @@ pub fn evaluate_stop_schema_gate_json(
         .map_err(|e| napi::Error::from_reason(format!("serialize StopSchemaGateDecision: {e}")))
 }
 
-#[napi(js_name = "evaluateStoplessLoopGuardJson")]
-pub fn evaluate_stopless_loop_guard_json(input_json: String) -> NapiResult<String> {
-    let input: stop_message_core::StoplessLoopGuardInput = serde_json::from_str(&input_json)
-        .map_err(|e| {
-            napi::Error::from_reason(format!("deserialize StoplessLoopGuardInput: {e}"))
-        })?;
-    let decision = stop_message_auto_blocks::evaluate_stopless_loop_guard_wrapper(&input);
-    serde_json::to_string(&decision)
-        .map_err(|e| napi::Error::from_reason(format!("serialize StoplessLoopGuardDecision: {e}")))
-}
-
 #[napi]
 pub fn build_followup_request_id(base: String, suffix: Option<String>) -> String {
     followup_mainline_blocks::build_request_id(&base, suffix.as_deref())
@@ -1436,12 +1310,6 @@ pub fn resolve_bd_working_directory_for_record_json(input_json: String) -> NapiR
 #[napi]
 pub fn resolve_stop_message_followup_provider_key_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::resolve_stop_message_followup_provider_key_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
-pub fn get_captured_request_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::get_captured_request_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -2289,17 +2157,6 @@ pub fn apply_universal_shape_request_filter_json(
     )
 }
 
-#[napi(js_name = "applyAnthropicClaudeCodeUserIdJson")]
-pub fn apply_anthropic_claude_code_user_id_json(
-    payload_json: String,
-    adapter_context_json: Option<String>,
-) -> NapiResult<String> {
-    req_outbound_stage3_compat::claude_code::apply_anthropic_claude_code_user_id_json(
-        payload_json,
-        adapter_context_json,
-    )
-}
-
 #[napi(js_name = "applyGeminiWebSearchRequestCompatJson")]
 pub fn apply_gemini_web_search_request_compat_json(
     payload_json: String,
@@ -2813,7 +2670,10 @@ pub fn traffic_governor_acquire_json(input_json: String) -> NapiResult<String> {
     let input: Input = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
 
-    let store_root = input.store_root.as_deref().unwrap_or("/tmp/routecodex-traffic");
+    let store_root = input
+        .store_root
+        .as_deref()
+        .unwrap_or("/tmp/routecodex-traffic");
     let governor = traffic_governor_core::TrafficGovernor::new(store_root);
 
     let ctx = traffic_governor_core::types::AcquireContext {
@@ -2828,7 +2688,8 @@ pub fn traffic_governor_acquire_json(input_json: String) -> NapiResult<String> {
         rpm_timeout_ms: input.rpm_timeout_ms,
     };
 
-    let result = governor.acquire(&ctx)
+    let result = governor
+        .acquire(&ctx)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     serde_json::to_string(&serde_json::json!({
@@ -2876,7 +2737,10 @@ pub fn traffic_governor_release_json(input_json: String) -> NapiResult<String> {
     let input: Input = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
 
-    let store_root = input.store_root.as_deref().unwrap_or("/tmp/routecodex-traffic");
+    let store_root = input
+        .store_root
+        .as_deref()
+        .unwrap_or("/tmp/routecodex-traffic");
     let governor = traffic_governor_core::TrafficGovernor::new(store_root);
 
     let permit = traffic_governor_core::types::Permit {
@@ -2893,7 +2757,8 @@ pub fn traffic_governor_release_json(input_json: String) -> NapiResult<String> {
         expires_at: 0,
     };
 
-    let result = governor.release(&permit)
+    let result = governor
+        .release(&permit)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     serde_json::to_string(&serde_json::json!({
@@ -2916,7 +2781,10 @@ pub fn traffic_governor_is_at_capacity_json(input_json: String) -> NapiResult<bo
     let input: Input = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
 
-    let store_root = input.store_root.as_deref().unwrap_or("/tmp/routecodex-traffic");
+    let store_root = input
+        .store_root
+        .as_deref()
+        .unwrap_or("/tmp/routecodex-traffic");
     let governor = traffic_governor_core::TrafficGovernor::new(store_root);
 
     Ok(governor.is_at_capacity(&input.runtime_key))
@@ -2950,7 +2818,10 @@ pub fn traffic_governor_observe_outcome_json(input_json: String) -> NapiResult<(
     let input: Input = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
 
-    let store_root = input.store_root.as_deref().unwrap_or("/tmp/routecodex-traffic");
+    let store_root = input
+        .store_root
+        .as_deref()
+        .unwrap_or("/tmp/routecodex-traffic");
     let governor = traffic_governor_core::TrafficGovernor::new(store_root);
 
     let event = traffic_governor_core::types::OutcomeEvent {

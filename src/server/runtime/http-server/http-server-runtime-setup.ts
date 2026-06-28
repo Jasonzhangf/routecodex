@@ -13,8 +13,6 @@ import { trafficGovernorIsAtCapacity } from '../../../modules/traffic-governor/i
 type RoutingProviderScope = {
   providerKeys: string[];
   providerIds: string[];
-  oauthProviderKeys: string[];
-  oauthProviderIds: string[];
 };
 
 const TRUTHY_FLAG_SET = new Set(['1', 'true', 'yes', 'on']);
@@ -368,8 +366,6 @@ function deriveRoutingProviderScope(
   const configuredProviderIds = collectConfiguredProviderIds(routerInput, userConfig);
   const providerKeys = new Set<string>();
   const providerIds = new Set<string>();
-  const oauthProviderKeys = new Set<string>();
-  const oauthProviderIds = new Set<string>();
   const runtimeMap = targetRuntime ?? {};
 
   for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
@@ -389,29 +385,11 @@ function deriveRoutingProviderScope(
     if (providerId) {
       providerIds.add(providerId);
     }
-
-    const authType = typeof runtime?.auth?.type === 'string' ? runtime.auth.type.trim().toLowerCase() : '';
-    const rawType = typeof runtime?.auth?.rawType === 'string' ? runtime.auth.rawType.trim().toLowerCase() : '';
-    const oauthLike =
-      authType.includes('oauth') ||
-      rawType.includes('oauth') ||
-      rawType.includes('account') ||
-      rawType.includes('cookie');
-    if (!oauthLike) {
-      continue;
-    }
-
-    oauthProviderKeys.add(providerKey);
-    if (providerId) {
-      oauthProviderIds.add(providerId);
-    }
   }
 
   return {
     providerKeys: Array.from(providerKeys),
-    providerIds: Array.from(providerIds),
-    oauthProviderKeys: Array.from(oauthProviderKeys),
-    oauthProviderIds: Array.from(oauthProviderIds)
+    providerIds: Array.from(providerIds)
   };
 }
 

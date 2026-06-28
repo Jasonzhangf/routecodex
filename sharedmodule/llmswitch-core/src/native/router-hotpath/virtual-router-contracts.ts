@@ -72,19 +72,9 @@ export type RoutingPools = Record<string, RoutePoolTier[]>;
 export type StreamingPreference = "auto" | "always" | "never";
 
 export interface ProviderAuthConfig {
-  type: "apiKey" | "oauth";
+  type: "apiKey";
   secretRef?: string;
   value?: string;
-  tokenFile?: string;
-  tokenUrl?: string;
-  deviceCodeUrl?: string;
-  clientId?: string;
-  clientSecret?: string;
-  scopes?: string[];
-  authorizationUrl?: string;
-  userInfoUrl?: string;
-  refreshUrl?: string;
-  oauthProviderId?: string;
   rawType?: string;
 }
 
@@ -229,7 +219,7 @@ export interface LoadBalancingPolicy {
 export interface HealthWeightedLoadBalancingConfig {
   /**
    * When false, health-weighted logic is disabled and the engine uses legacy behavior.
-   * When true/undefined, the engine uses health-weighted behavior if quotaView provides error metadata.
+   * When true/undefined, the engine uses health-weighted provider selection.
    */
   enabled?: boolean;
   /**
@@ -760,34 +750,3 @@ export interface VirtualRouterHealthStore {
    */
   recordProviderError?(event: ProviderErrorEvent): void;
 }
-
-export interface ProviderQuotaViewEntry {
-  providerKey: string;
-  inPool: boolean;
-  reason?: string;
-  priorityTier?: number;
-  /**
-   * Optional soft penalty hint for selection ordering.
-   * - 0 / undefined means no penalty
-   * - higher means less preferred (e.g. recent transient errors)
-   *
-   * This does NOT exclude the provider from the pool; exclusion is controlled by
-   * inPool/cooldownUntil/blacklistUntil.
-   */
-  selectionPenalty?: number;
-  /**
-   * Optional per-providerKey timestamp of the last error. Used for time-decayed recovery.
-   */
-  lastErrorAtMs?: number | null;
-  /**
-   * Optional per-providerKey consecutive error count. Resets to 0 on success.
-   */
-  consecutiveErrorCount?: number;
-  cooldownUntil?: number | null;
-  cooldownKeepsPool?: boolean;
-  blacklistUntil?: number | null;
-}
-
-export type ProviderQuotaView = (
-  providerKey: string,
-) => ProviderQuotaViewEntry | null;

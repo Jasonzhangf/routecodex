@@ -585,16 +585,9 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     if (reject(req, res)) {return;}
     try {
       const configPath = pickUserConfigPath();
-      const decoded = await decodeUserConfigFile(configPath);
-      const parsed = decoded.parsed;
-      const oauthBrowser =
-        typeof (parsed as { oauthBrowser?: unknown }).oauthBrowser === 'string'
-          ? ((parsed as { oauthBrowser?: string }).oauthBrowser as string)
-          : undefined;
       res.status(200).json({
         ok: true,
         path: configPath,
-        oauthBrowser: oauthBrowser && oauthBrowser.trim() ? oauthBrowser.trim() : null,
         providerDir: pickProviderRootDir(),
         authDir: resolveRccAuthDirForRead()
       });
@@ -604,24 +597,4 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     }
   });
 
-  app.put('/config/settings', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const body = req.body as Record<string, unknown>;
-    const oauthBrowser = typeof body?.oauthBrowser === 'string' ? body.oauthBrowser.trim() : '';
-    if (!oauthBrowser) {
-      res.status(400).json({ error: { message: 'oauthBrowser is required', code: 'bad_request' } });
-      return;
-    }
-    try {
-      const configPath = pickUserConfigPath();
-      await backupFile(configPath);
-      await updateUserConfigStringScalar({ configPath, tablePath: [], key: 'oauthBrowser', value: oauthBrowser });
-      // apply immediately for oauth flows without requiring restart
-      process.env.ROUTECODEX_OAUTH_BROWSER = oauthBrowser;
-      res.status(200).json({ ok: true, path: configPath, oauthBrowser });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message, code: 'internal_error' } });
-    }
-  });
 }

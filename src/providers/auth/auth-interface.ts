@@ -4,7 +4,7 @@
  * 定义统一的认证接口，支持API Key和OAuth认证
  */
 
-import type { ApiKeyAuth, OAuthAuth } from '../core/api/provider-config.js';
+import type { ApiKeyAuth } from '../core/api/provider-config.js';
 
 /**
  * 认证提供者接口
@@ -12,7 +12,7 @@ import type { ApiKeyAuth, OAuthAuth } from '../core/api/provider-config.js';
  * 统一的认证接口，支持不同类型的认证方式
  */
 export interface IAuthProvider {
-  readonly type: 'apikey' | 'oauth';
+  readonly type: 'apikey';
 
   /**
    * 初始化认证
@@ -69,7 +69,7 @@ export interface AuthResult {
 /**
  * 认证配置
  */
-export type AuthConfig = ApiKeyAuth | OAuthAuth;
+export type AuthConfig = ApiKeyAuth;
 
 /**
  * 认证凭证存储
@@ -106,60 +106,8 @@ export interface AuthError extends Error {
 }
 
 /**
- * OAuth客户端接口
- */
-export interface IOAuthClient {
-  /**
-   * 初始化OAuth客户端
-   */
-  initialize(): Promise<void>;
-
-  /**
-   * 获取访问令牌
-   */
-  getAccessToken(): Promise<string>;
-
-  /**
-   * 刷新访问令牌
-   */
-  refreshToken(refreshToken: string): Promise<TokenStorage>;
-
-  /**
-   * 完成OAuth流程
-   */
-  completeOAuthFlow(): Promise<TokenStorage>;
-
-  /**
-   * 保存令牌
-   */
-  saveToken(token: TokenStorage | null): Promise<void>;
-
-  /**
-   * 加载令牌
-   */
-  loadToken(): Promise<TokenStorage | null>;
-
-  /**
-   * 获取当前令牌
-   */
-  getToken(): TokenStorage | null;
-
-  /**
-   * 更新令牌存储
-   */
-  updateTokenStorage(storage: TokenStorage, tokenData: unknown): void;
-}
-
-/**
  * API Key认证工厂
  */
 export interface ApiKeyAuthFactory {
   create(config: ApiKeyAuth): IAuthProvider;
-}
-
-/**
- * OAuth认证工厂
- */
-export interface OAuthAuthFactory {
-  create(config: OAuthAuth, providerType: string): IAuthProvider;
 }

@@ -3,27 +3,19 @@ import type { Application, Request, Response } from 'express';
 import fs from 'node:fs/promises';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
-import { resolveRouteCodexConfigPath } from '../../../../config/config-paths.js';
-import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
-import { readTokenFile, evaluateTokenState, resolveAuthDir } from '../../../../token-daemon/token-utils.js';
-import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
-import { withOAuthRepairEnv } from '../../../../providers/auth/oauth-repair-env.js';
-import type { OAuthAuth, OAuthAuthType } from '../../../../providers/core/api/provider-config.js';
-import { isCamoufoxAvailable, openAuthInCamoufox } from '../../../../providers/core/config/camoufox-launcher.js';
 import {
   allocateApiKeyFileName,
   buildCredentialSummaries,
-  SUPPORTED_OAUTH_PROVIDERS
+  resolveAuthDir
 } from './credentials-handler-utils.js';
 
-export function registerCredentialRoutes(app: Application, options: DaemonAdminRouteOptions): void {
+export function registerCredentialRoutes(app: Application, _options: DaemonAdminRouteOptions): void {
   const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res);
 
   app.get('/daemon/credentials', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
+    if (reject(req, res)) { return; }
     try {
-      const items = await buildCredentialSummaries();
-      res.status(200).json(items);
+      res.status(200).json(await buildCredentialSummaries());
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'internal_error' } });
@@ -31,42 +23,19 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   });
 
   app.get('/daemon/credentials/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
+    if (reject(req, res)) { return; }
     const id = String(req.params.id || '').trim();
     if (!id) {
-      res.status(400).json({ error: { message: 'id is required' , code: 'bad_request' } });
+      res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
       return;
     }
     try {
-      const items = await buildCredentialSummaries();
-      const summary = items.find((c) => c.id === id);
+      const summary = (await buildCredentialSummaries()).find((credential) => credential.id === id);
       if (!summary) {
         res.status(404).json({ error: { message: 'credential not found', code: 'not_found' } });
         return;
       }
-      // 详细视图：在 summary 基础上补充少量非敏感字段（例如 email/projectId），如果存在的话。
-      const token = await readTokenFile(summary.tokenFile);
-      const now = Date.now();
-      const state = evaluateTokenState(token, now);
-      const email =
-        token && typeof (token as { email?: unknown }).email === 'string'
-          ? (token as { email?: string }).email
-          : undefined;
-      const projectId =
-        token && typeof (token as { project_id?: unknown }).project_id === 'string'
-          ? (token as { project_id?: string }).project_id
-          : undefined;
-      res.status(200).json({
-        ...summary,
-        expiresAt: state.expiresAt,
-        expiresInSec:
-          state.msUntilExpiry !== null && state.msUntilExpiry !== undefined
-            ? Math.round(state.msUntilExpiry / 1000)
-            : null,
-        status: state.status,
-        email,
-        projectId
-      });
+      res.status(200).json(summary);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'internal_error' } });
@@ -74,103 +43,24 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   });
 
   app.post('/daemon/credentials/:id/verify', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const id = String(req.params.id || '').trim();
-    if (!id) {
-      res.status(400).json({ error: { message: 'id is required' , code: 'bad_request' } });
-      return;
-    }
-    try {
-      const items = await buildCredentialSummaries();
-      const summary = items.find((c) => c.id === id);
-      if (!summary) {
-        res.status(404).json({ error: { message: 'credential not found', code: 'not_found' } });
-        return;
-      }
-      const token = await readTokenFile(summary.tokenFile);
-      const state = evaluateTokenState(token, Date.now());
-      res.status(200).json({
-        ok: true,
-        id: summary.id,
-        status: summary.kind === 'apikey' ? summary.status : state.status,
-        checkedAt: Date.now(),
-        message: 'Verified locally (token file parsed and evaluated); no upstream call performed.'
-      });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message, code: 'internal_error' } });
-    }
-  });
-
-  app.post('/daemon/credentials/:id/refresh', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
+    if (reject(req, res)) { return; }
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
       return;
     }
     try {
-      const items = await buildCredentialSummaries();
-      const summary = items.find((c) => c.id === id);
+      const summary = (await buildCredentialSummaries()).find((credential) => credential.id === id);
       if (!summary) {
         res.status(404).json({ error: { message: 'credential not found', code: 'not_found' } });
         return;
       }
-      if (summary.kind !== 'oauth') {
-        res.status(400).json({
-          error: {
-            message: 'credential refresh only supports oauth credentials',
-            code: 'bad_request'
-          }
-        });
-        return;
-      }
-
-      const provider = String(summary.provider || '').trim().toLowerCase();
-      const alias = String(summary.alias || 'default').trim() || 'default';
-      if (!provider || !SUPPORTED_OAUTH_PROVIDERS.has(provider)) {
-        res.status(400).json({
-          error: {
-            message: `unsupported oauth provider: ${provider || 'unknown'}`,
-            code: 'bad_request'
-          }
-        });
-        return;
-      }
-
-      const authType: OAuthAuthType = `${provider}-oauth` as OAuthAuthType;
-      const auth: OAuthAuth = {
-        type: authType,
-        tokenFile: alias
-      };
-
-      const beforeToken = await readTokenFile(summary.tokenFile);
-      const before = evaluateTokenState(beforeToken, Date.now());
-
-      await ensureValidOAuthToken(provider, auth, {
-        openBrowser: false,
-        forceReauthorize: false,
-        forceReacquireIfRefreshFails: false
-      });
-
-      const afterToken = await readTokenFile(summary.tokenFile);
-      const after = evaluateTokenState(afterToken, Date.now());
-      const refreshed =
-        (before.expiresAt ?? null) !== (after.expiresAt ?? null) ||
-        before.status !== after.status;
-
       res.status(200).json({
         ok: true,
-        id,
-        provider,
-        alias,
-        refreshed,
-        status: after.status,
-        expiresInSec:
-          after.msUntilExpiry !== null && after.msUntilExpiry !== undefined
-            ? Math.round(after.msUntilExpiry / 1000)
-            : null,
-        checkedAt: Date.now()
+        id: summary.id,
+        status: summary.status,
+        checkedAt: Date.now(),
+        message: 'Verified locally (API key file exists and is non-empty); no upstream call performed.'
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -179,7 +69,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   });
 
   app.post('/daemon/credentials/apikey', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
+    if (reject(req, res)) { return; }
     const body = req.body as Record<string, unknown>;
     const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
     const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : 'default';
@@ -211,237 +101,4 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
     }
   });
 
-  app.post('/daemon/oauth/authorize', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const body = req.body as Record<string, unknown>;
-    const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
-    const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : '';
-    const openBrowser = body?.openBrowser !== false;
-    const forceReauthorize = body?.forceReauthorize === true;
-    const modeRaw = typeof body?.mode === 'string' ? body.mode.trim().toLowerCase() : 'manual';
-    const mode: 'manual' | 'auto' = modeRaw === 'auto' ? 'auto' : 'manual';
-    const headful = body?.headful === true;
-    if (!provider) {
-      res.status(400).json({ error: { message: 'provider is required', code: 'bad_request' } });
-      return;
-    }
-    if (!alias) {
-      res.status(400).json({ error: { message: 'alias is required', code: 'bad_request' } });
-      return;
-    }
-    if (!SUPPORTED_OAUTH_PROVIDERS.has(provider)) {
-      res.status(400).json({ error: { message: `unsupported oauth provider: ${provider}`, code: 'bad_request' } });
-      return;
-    }
-    try {
-      const type: OAuthAuthType = `${provider}-oauth` as OAuthAuthType;
-      const auth: OAuthAuth = { type, tokenFile: alias };
-      // Best effort: allow UI-configured browser selection without requiring restart.
-      const browserHint = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim();
-      if (!browserHint) {
-        try {
-          const configPath = resolveRouteCodexConfigPath();
-          const parsed = (await decodeUserConfigFile(configPath)).parsed;
-          const oauthBrowser =
-            typeof (parsed as { oauthBrowser?: unknown }).oauthBrowser === 'string'
-              ? ((parsed as { oauthBrowser?: string }).oauthBrowser as string).trim()
-              : '';
-          if (oauthBrowser) {
-            process.env.ROUTECODEX_OAUTH_BROWSER = oauthBrowser;
-          }
-        } catch {
-          // ignore config read errors for browser hint
-        }
-      }
-
-      // WebUI-triggered authorization should not attempt to auto-install Camoufox.
-      // If Camoufox is missing, return an actionable error so user can install it explicitly.
-      const prevAutoInstall = process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;
-      process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL = '0';
-      try {
-        if (openBrowser && !isCamoufoxAvailable()) {
-          res.status(412).json({
-            error: {
-              code: 'camoufox_missing',
-              message:
-                'camo CLI is required for OAuth authorization. Install/enable `camo` first.'
-            }
-          });
-          return;
-        }
-      } finally {
-        if (prevAutoInstall === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL = prevAutoInstall;
-        }
-      }
-
-      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-      const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-      const prevAccountText = process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
-      const restoreDevMode = () => {
-        if (prevDevMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
-        }
-      };
-      const restoreOauthModeEnv = () => {
-        if (prevAutoMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
-        }
-        if (prevAutoConfirm === undefined) {
-          delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-        } else {
-          process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
-        }
-        if (prevAccountText === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT = prevAccountText;
-        }
-      };
-
-      // Manual mode must not carry auto flags from any previous flow.
-      if (mode === 'manual') {
-        delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-        delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
-      }
-
-      // Manual flow defaults to headed browser; auto flow only goes headed when debug is requested.
-      const shouldForceHeadful = openBrowser && (mode === 'manual' || headful);
-      if (shouldForceHeadful && !process.env.ROUTECODEX_CAMOUFOX_DEV_MODE) {
-        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
-      }
-      try {
-        const runEnsure = async () => {
-          await ensureValidOAuthToken(provider, auth, {
-            openBrowser,
-            forceReauthorize,
-            forceReacquireIfRefreshFails: true
-          });
-        };
-
-        if (mode === 'auto') {
-          await withOAuthRepairEnv(provider, runEnsure);
-        } else {
-          await runEnsure();
-        }
-      } finally {
-        restoreDevMode();
-        restoreOauthModeEnv();
-      }
-      res.status(200).json({
-        ok: true,
-        provider,
-        alias,
-        mode,
-        tokenFile: typeof auth.tokenFile === 'string' ? auth.tokenFile : null
-      });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message, code: 'internal_error' } });
-    }
-  });
-
-  /**
-   * Open an auth verification URL in Camoufox using the stable (provider+alias) profile.
-   * This is used by daemon-admin UI to handle Google "verify your account" flows without
-   * falling back to the system browser.
-   */
-  app.post('/daemon/oauth/open', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const body = req.body as Record<string, unknown>;
-    const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
-    const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : '';
-    const url = typeof body?.url === 'string' ? body.url.trim() : '';
-    if (!provider) {
-      res.status(400).json({ error: { message: 'provider is required', code: 'bad_request' } });
-      return;
-    }
-    if (!alias) {
-      res.status(400).json({ error: { message: 'alias is required', code: 'bad_request' } });
-      return;
-    }
-    if (!url) {
-      res.status(400).json({ error: { message: 'url is required', code: 'bad_request' } });
-      return;
-    }
-    if (!SUPPORTED_OAUTH_PROVIDERS.has(provider)) {
-      res.status(400).json({ error: { message: `unsupported oauth provider: ${provider}`, code: 'bad_request' } });
-      return;
-    }
-
-    // WebUI-triggered open should not attempt to auto-install Camoufox.
-    const prevAutoInstall = process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;
-    process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL = '0';
-    try {
-      if (!isCamoufoxAvailable()) {
-        res.status(412).json({
-          error: {
-            code: 'camoufox_missing',
-            message:
-              'camo CLI is required to open the verification URL. Install/enable `camo` first.'
-          }
-        });
-        return;
-      }
-
-      const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
-      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
-
-      process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
-      // Verification URLs are usually not the OAuth portal; disable auto-mode and force headed mode.
-      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
-      process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
-
-      try {
-        const ok = await openAuthInCamoufox({ url, provider, alias });
-        if (!ok) {
-          res.status(500).json({ error: { code: 'camoufox_launch_failed', message: 'Failed to open URL in Camoufox' } });
-          return;
-        }
-      } finally {
-        if (prevBrowser === undefined) {
-          delete process.env.ROUTECODEX_OAUTH_BROWSER;
-        } else {
-          process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
-        }
-        if (prevAutoMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
-        }
-        if (prevDevMode === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
-        }
-        if (prevOpenOnly === undefined) {
-          delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
-        } else {
-          process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
-        }
-      }
-
-      res.status(200).json({ ok: true, provider, alias });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message, code: 'internal_error' } });
-    } finally {
-      if (prevAutoInstall === undefined) {
-        delete process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;
-      } else {
-        process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL = prevAutoInstall;
-      }
-    }
-  });
 }

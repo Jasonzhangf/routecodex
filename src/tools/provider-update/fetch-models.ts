@@ -12,10 +12,6 @@ function resolveProviderType(inType?: string): string {
   return t;
 }
 
-async function buildOAuthHeaders(_provider: ProviderInputConfig, _providerKind: string, _verbose = false): Promise<Record<string, string>> {
-  return {};
-}
-
 export async function fetchModelsFromUpstream(provider: ProviderInputConfig, verbose = false): Promise<ModelsList> {
   const type = resolveProviderType(provider.type);
   const baseUrl = (provider.baseUrl || provider.baseURL || '').trim();
@@ -25,12 +21,7 @@ export async function fetchModelsFromUpstream(provider: ProviderInputConfig, ver
     'Accept': 'application/json',
     'Content-Type': 'application/json'
   };
-  if (provider.auth?.type === 'oauth') {
-    const oauthHeaders = await buildOAuthHeaders(provider, type, verbose);
-    Object.assign(headers, oauthHeaders);
-  } else {
-    Object.assign(headers, buildAuthHeaders(provider.auth));
-  }
+  Object.assign(headers, buildAuthHeaders(provider.auth));
   if (verbose) {
     // eslint-disable-next-line no-console
     console.log(`[provider-update] Fetching models: type=${type} url=${endpoint}`);

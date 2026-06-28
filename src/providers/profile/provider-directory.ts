@@ -40,9 +40,7 @@ export function resolveProviderFamilyFromDirectory(input: ProviderFamilyLookupIn
     normalizeToken(input.providerKey),
     extractTopLevel(input.providerKey),
     normalizeToken(input.providerType),
-    extractTopLevel(input.providerType),
-    normalizeToken(input.oauthProviderId),
-    extractTopLevel(input.oauthProviderId)
+    extractTopLevel(input.providerType)
   ];
 
   for (const candidate of candidates) {

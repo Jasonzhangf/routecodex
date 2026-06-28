@@ -14,30 +14,12 @@ async function ensureDir(p) {
   await fs.mkdir(p, { recursive: true }).catch(() => {});
 }
 
-async function assertFileExists(filePath, message) {
-  try {
-    const stats = await fs.stat(filePath);
-    if (!stats.isFile()) {
-      throw new Error(message);
-    }
-  } catch {
-    throw new Error(message);
-  }
-}
-
 async function main() {
   const PROMPT_SRC = path.resolve(process.cwd(), 'src/config/system-prompts');
   const PROMPT_DIST = path.resolve(process.cwd(), 'dist/config/system-prompts');
   const STOPLESS_PROMPT_SRC = path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/assets');
   const STOPLESS_PROMPT_DIST = path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/servertool/assets');
-  const CAMOUFOX_SRC = path.resolve(process.cwd(), 'scripts/camoufox');
-  const CAMOUFOX_DIST = path.resolve(process.cwd(), 'dist/scripts/camoufox');
-  const DEEPSEEK_SRC = path.resolve(process.cwd(), 'scripts/deepseek');
-  const DEEPSEEK_DIST = path.resolve(process.cwd(), 'dist/scripts/deepseek');
-  const REQUIRED_DEEPSEEK_ASSETS = ['pow-solver.mjs', 'sha3_wasm_bg.7b9ca65ddd.wasm'];
   const promptCopied = [];
-  const camoufoxCopied = [];
-  const deepseekCopied = [];
   try {
     // copy system prompt artifacts only; provider compat assets are owned by llmswitch-core
     try {
@@ -68,52 +50,7 @@ async function main() {
     } catch (stoplessPromptErr) {
       if (stoplessPromptErr && stoplessPromptErr.code !== 'ENOENT') throw stoplessPromptErr;
     }
-    // 不再复制 provider compat 资产；兼容层由 sharedmodule/llmswitch-core 提供
-    try {
-      for await (const file of walk(CAMOUFOX_SRC)) {
-        const stats = await fs.stat(file);
-        if (stats.isFile()) {
-          const rel = path.relative(CAMOUFOX_SRC, file);
-          const dest = path.join(CAMOUFOX_DIST, rel);
-          await ensureDir(path.dirname(dest));
-          await fs.copyFile(file, dest);
-          camoufoxCopied.push(rel);
-        }
-      }
-    } catch (camoufoxErr) {
-      if (camoufoxErr && camoufoxErr.code !== 'ENOENT') throw camoufoxErr;
-    }
-    try {
-      for await (const file of walk(DEEPSEEK_SRC)) {
-        const stats = await fs.stat(file);
-        if (stats.isFile()) {
-          const rel = path.relative(DEEPSEEK_SRC, file);
-          const dest = path.join(DEEPSEEK_DIST, rel);
-          await ensureDir(path.dirname(dest));
-          await fs.copyFile(file, dest);
-          deepseekCopied.push(rel);
-        }
-      }
-    } catch (deepseekErr) {
-      if (deepseekErr && deepseekErr.code !== 'ENOENT') throw deepseekErr;
-    }
-
-    for (const rel of REQUIRED_DEEPSEEK_ASSETS) {
-      const sourcePath = path.join(DEEPSEEK_SRC, rel);
-      const distPath = path.join(DEEPSEEK_DIST, rel);
-      await assertFileExists(
-        sourcePath,
-        `[copy-compat-assets] missing required deepseek source asset: ${sourcePath}`
-      );
-      await assertFileExists(
-        distPath,
-        `[copy-compat-assets] missing required deepseek dist asset after copy: ${distPath}`
-      );
-    }
-
     console.log(`[copy-compat-assets] prompts copied: ${promptCopied.length}`);
-    console.log(`[copy-compat-assets] camoufox assets copied: ${camoufoxCopied.length}`);
-    console.log(`[copy-compat-assets] deepseek assets copied: ${deepseekCopied.length}`);
   } catch (err) {
     console.error('[copy-compat-assets] failed:', err?.message || String(err));
     process.exit(1);

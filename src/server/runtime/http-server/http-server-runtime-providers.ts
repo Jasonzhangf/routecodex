@@ -1,33 +1,10 @@
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { emitProviderErrorAndWait } from '../../../providers/core/utils/provider-error-reporter.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
-import { resolveLegacyRouteCodexUserDir, resolveRccAuthDirForRead } from '../../../config/user-data-paths.js';
 import { resolveProviderRoutingScope } from './provider-routing-scope.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
-
-type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
-  token_file?: unknown;
-  token_url?: unknown;
-  device_code_url?: unknown;
-  client_id?: unknown;
-  client_secret?: unknown;
-  authorization_url?: unknown;
-  authUrl?: unknown;
-  user_info_url?: unknown;
-  refresh_url?: unknown;
-  scope?: unknown;
-  account?: unknown;
-  username?: unknown;
-  accountFile?: unknown;
-  account_file?: unknown;
-  accountAlias?: unknown;
-  account_alias?: unknown;
-};
 
 function logRuntimeProvidersNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
@@ -38,89 +15,6 @@ function logRuntimeProvidersNonBlockingError(stage: string, error: unknown, deta
   } catch {
     // Never throw from non-blocking logging.
   }
-}
-
-function resolveHomeDir(): string {
-  const envHome = String(process.env.HOME || '').trim();
-  if (envHome) {
-    return path.resolve(envHome);
-  }
-  return path.resolve(os.homedir());
-}
-
-function expandUserPath(rawPath: string): string {
-  if (rawPath.startsWith('~/')) {
-    return path.join(resolveHomeDir(), rawPath.slice(2));
-  }
-  return rawPath;
-}
-
-function normalizePath(rawPath: string): string {
-  return path.resolve(expandUserPath(rawPath));
-}
-
-function isPathWithinDir(targetPath: string, dirPath: string): boolean {
-  if (targetPath === dirPath) {
-    return true;
-  }
-  return targetPath.startsWith(`${dirPath}${path.sep}`);
-}
-
-async function hasUsableDeepSeekTokenAtPath(tokenFilePath: string): Promise<boolean> {
-  try {
-    const raw = await fs.readFile(tokenFilePath, 'utf8');
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      return false;
-    }
-    try {
-      const parsed = JSON.parse(raw);
-      if (typeof parsed === 'string') {
-        return parsed.trim().length > 0;
-      }
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const record = parsed as Record<string, unknown>;
-        const token = record.access_token ?? record.token;
-        return typeof token === 'string' && token.trim().length > 0;
-      }
-      return false;
-    } catch {
-      return !trimmed.startsWith('{') && !trimmed.startsWith('[');
-    }
-  } catch {
-    return false;
-  }
-}
-
-async function normalizeDeepSeekLegacyTokenFilePath(rawTokenFilePath: string): Promise<string> {
-  const normalizedInputPath = normalizePath(rawTokenFilePath);
-  const legacyAuthDir = path.resolve(path.join(resolveLegacyRouteCodexUserDir(), 'auth'));
-  if (!isPathWithinDir(normalizedInputPath, legacyAuthDir)) {
-    return rawTokenFilePath;
-  }
-
-  const candidatePath = path.resolve(path.join(resolveRccAuthDirForRead(), path.basename(normalizedInputPath)));
-  if (candidatePath === normalizedInputPath) {
-    return rawTokenFilePath;
-  }
-
-  const [legacyUsable, candidateUsable] = await Promise.all([
-    hasUsableDeepSeekTokenAtPath(normalizedInputPath),
-    hasUsableDeepSeekTokenAtPath(candidatePath)
-  ]);
-
-  if (!legacyUsable && candidateUsable) {
-    return candidatePath;
-  }
-  return rawTokenFilePath;
-}
-
-function resolveOAuthProviderIdFromType(rawType?: string): string | undefined {
-  if (typeof rawType !== 'string') {
-    return undefined;
-  }
-  const match = rawType.trim().toLowerCase().match(/^([a-z0-9._-]+)-oauth$/);
-  return match ? match[1] : undefined;
 }
 
 function isCredentialMissingInitError(error: unknown): { missing: boolean; reason: string } {
@@ -406,101 +300,20 @@ export function normalizeRuntimeBaseUrl(_server: any, runtime: ProviderRuntimePr
 }
 
 
-function deriveRuntimeAccountAlias(runtime: ProviderRuntimeProfile): string | undefined {
-  const read = (value: unknown): string | undefined => {
-    if (typeof value !== 'string') return undefined;
-    const trimmed = value.trim();
-    return trimmed || undefined;
-  };
-  const explicit = read((runtime as unknown as { keyAlias?: unknown }).keyAlias);
-  if (explicit) return explicit;
-  const runtimeKey = read(runtime.runtimeKey);
-  if (!runtimeKey) return undefined;
-  const parts = runtimeKey.split('.').map((part) => part.trim()).filter(Boolean);
-  return parts.length >= 2 ? parts[1] : undefined;
-}
-
 export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimeProfile): Promise<ProviderRuntimeProfile['auth']> {
   const auth = runtime.auth || { type: 'apikey' };
-  const authRecord = auth as LegacyAuthFields;
   const authType = server.normalizeAuthType(auth.type);
   const rawType = typeof auth.rawType === 'string' ? auth.rawType.trim().toLowerCase() : '';
-  const pickString = (...candidates: unknown[]): string | undefined => {
-    for (const candidate of candidates) {
-      if (typeof candidate === 'string') {
-        const trimmed = candidate.trim();
-        if (trimmed) {
-          return trimmed;
-        }
-      }
-    }
-    return undefined;
-  };
-  const runtimeAccountAlias = deriveRuntimeAccountAlias(runtime);
-  const pickStringArray = (value: unknown): string[] | undefined => {
-    if (!value) {
-      return undefined;
-    }
-    if (Array.isArray(value)) {
-      const normalized = value.map((item) => pickString(item)).filter((item): item is string => typeof item === 'string');
-      return normalized.length ? normalized : undefined;
-    }
-    if (typeof value === 'string' && value.trim()) {
-      const normalized = value
-        .split(/[,\s]+/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-      return normalized.length ? normalized : undefined;
-    }
-    return undefined;
-  };
 
   if (authType === 'apikey') {
     if (rawType === 'deepseek-account') {
-      const tokenFileRaw = pickString(authRecord.tokenFile, authRecord.token_file);
-      const tokenFile = tokenFileRaw
-        ? await normalizeDeepSeekLegacyTokenFilePath(tokenFileRaw)
-        : undefined;
-      const accountAlias = pickString(authRecord.accountAlias, authRecord.account_alias, runtimeAccountAlias);
-      return {
-        type: 'apikey',
-        rawType: auth.rawType ?? 'deepseek-account',
-        value: '',
-        ...(accountAlias ? { accountAlias } : {}),
-        ...(tokenFile ? { tokenFile } : {})
-      };
+      throw new Error(`[runtime-providers] deepseek-account auth has been removed for runtime ${runtime.runtimeKey || runtime.providerId}`);
     }
     const value = await server.resolveApiKeyValue(runtime, auth);
     return { ...auth, type: 'apikey', value };
   }
 
-  const resolved: ProviderRuntimeProfile['auth'] = {
-    type: 'oauth',
-    secretRef: auth.secretRef,
-    value: auth.value,
-    oauthProviderId:
-      pickString(auth.oauthProviderId) ??
-      resolveOAuthProviderIdFromType(pickString(auth.rawType, auth.type)) ??
-      pickString(runtime.providerId, runtime.providerFamily),
-    rawType: pickString(auth.rawType, auth.type),
-    tokenFile: pickString(authRecord.tokenFile, authRecord.token_file),
-    tokenUrl: pickString(authRecord.tokenUrl, authRecord.token_url),
-    deviceCodeUrl: pickString(authRecord.deviceCodeUrl, authRecord.device_code_url),
-    clientId: pickString(authRecord.clientId, authRecord.client_id),
-    clientSecret: pickString(authRecord.clientSecret, authRecord.client_secret),
-    authorizationUrl: pickString(authRecord.authorizationUrl, authRecord.authorization_url, authRecord.authUrl),
-    userInfoUrl: pickString(authRecord.userInfoUrl, authRecord.user_info_url),
-    refreshUrl: pickString(authRecord.refreshUrl, authRecord.refresh_url),
-    scopes: pickStringArray(authRecord.scopes ?? authRecord.scope)
-  };
-
-  let tokenFile = resolved.tokenFile;
-  if (!tokenFile && typeof auth.secretRef === 'string' && auth.secretRef.trim()) {
-    tokenFile = await server.resolveSecretValue(auth.secretRef.trim());
-  }
-  resolved.tokenFile = tokenFile;
-
-  return resolved;
+  throw new Error(`[runtime-providers] unsupported auth type "${authType}" for runtime ${runtime.runtimeKey || runtime.providerId}`);
 }
 
 export async function resolveApiKeyValue(
@@ -533,16 +346,6 @@ export async function resolveApiKeyValue(
           ? String((runtime as any).endpoint).trim()
           : '';
   if (server.isLocalBaseUrl(baseURL)) {
-    return '';
-  }
-
-  const rawType =
-    typeof (auth as { rawType?: unknown })?.rawType === 'string'
-      ? String((auth as { rawType?: string }).rawType).trim().toLowerCase()
-      : typeof (auth as { type?: unknown })?.type === 'string'
-        ? String((auth as { type?: string }).type).trim().toLowerCase()
-        : '';
-  if (rawType === 'qwenchat-guest') {
     return '';
   }
 

@@ -194,16 +194,9 @@ function inferRuntimeOnlyBinding(
   providerType: string,
   authType: string
 ): ProviderCatalogSdkBinding | undefined {
-  const runtimeOnlyAuths = new Set([
-    'deepseek-account'
-  ]);
-  if (runtimeOnlyAuths.has(authType)) {
-    return {
-      family: 'custom-runtime',
-      supported: false,
-      notes: `Provider auth "${authType}" requires the existing RouteCodex runtime path.`
-    };
-  }
+  void providerId;
+  void providerType;
+  void authType;
   return undefined;
 }
 

@@ -14,8 +14,6 @@ import { fileURLToPath } from 'url';
 import { DEFAULT_CONFIG } from './constants/index.js';
 import { buildInfo } from './build-info.js';
 import { ensureRccUserDirEnvironment } from './config/user-data-paths.js';
-import { resolveTokenDaemonPidPath } from './utils/server-runtime-pid.js';
-import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
 import {
   ensurePortAvailableImpl,
   findListeningPidsImpl,
@@ -34,7 +32,6 @@ import { registerStartCommand } from './cli/register/start-command.js';
 import { registerCodeCommand } from './cli/register/code-command.js';
 import { registerClaudeCommand } from './cli/register/claude-command.js';
 import { registerCodexCommand } from './cli/register/codex-command.js';
-import { registerCamoufoxCommand } from './cli/register/camoufox-command.js';
 import { registerGuardianDaemonCommand } from './cli/register/guardian-daemon-command.js';
 import { listManagedServerZombieChildrenByPort } from './utils/managed-server-pids.js';
 import { logProcessLifecycle } from './utils/process-lifecycle-logger.js';
@@ -104,7 +101,6 @@ const pkgName: string = (() => {
 const IS_DEV_PACKAGE = pkgName === 'routecodex';
 const IS_WINDOWS = process.platform === 'win32';
 const DEFAULT_DEV_PORT = 5555;
-const TOKEN_DAEMON_PID_FILE = resolveTokenDaemonPidPath();
 
 function logCliNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const message = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -182,21 +178,6 @@ Note:
 `
 );
 
-async function ensureTokenDaemonAutoStart(): Promise<void> {
-  // Token 刷新逻辑已经在服务器进程内通过 ManagerDaemon/TokenManagerModule 执行。
-  // 为避免重复启动独立的 token-daemon 进程，这里不再自动拉起后台守护，仅保留显式 CLI 命令。
-  const disabledEnv = String(
-    process.env.ROUTECODEX_TOKEN_DAEMON_DISABLED || process.env.RCC_TOKEN_DAEMON_DISABLED || ''
-  )
-    .trim()
-    .toLowerCase();
-  if (disabledEnv !== '1' && disabledEnv !== 'true' && disabledEnv !== 'yes') {
-    logger.info(
-      'Token manager is now integrated into the server process; automatic external token-daemon auto-start is disabled.'
-    );
-  }
-}
-
 function killPidBestEffort(pid: number, opts: { force: boolean }): void {
   return killPidBestEffortImpl({
     pid,
@@ -204,58 +185,6 @@ function killPidBestEffort(pid: number, opts: { force: boolean }): void {
     isWindows: IS_WINDOWS,
     spawnSyncImpl: spawnSync
   });
-}
-
-async function stopTokenDaemonIfRunning(): Promise<void> {
-  try {
-    if (!fs.existsSync(TOKEN_DAEMON_PID_FILE)) {
-      return;
-    }
-    const txt = fs.readFileSync(TOKEN_DAEMON_PID_FILE, 'utf8');
-    const parsed = Number(String(txt || '').trim());
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return;
-    }
-    const pid = parsed;
-    let running = false;
-    try {
-      process.kill(pid, 0);
-      running = true;
-    } catch (error) {
-      logCliNonBlocking('stop_token_daemon_probe_running', error, { pid });
-      running = false;
-    }
-    if (!running) {
-      try {
-        fs.unlinkSync(TOKEN_DAEMON_PID_FILE);
-      } catch (error) {
-        logCliNonBlocking('stop_token_daemon_unlink_stale_pid_file', error, { pidFile: TOKEN_DAEMON_PID_FILE });
-      }
-      return;
-    }
-    try {
-      killPidBestEffort(pid, { force: false });
-    } catch (error) {
-      logCliNonBlocking('stop_token_daemon_signal', error, { pid });
-    }
-    const deadline = Date.now() + 2000;
-    while (Date.now() < deadline) {
-      try {
-        process.kill(pid, 0);
-      } catch (error) {
-        logCliNonBlocking('stop_token_daemon_wait_for_exit', error, { pid });
-        break;
-      }
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    try {
-      fs.unlinkSync(TOKEN_DAEMON_PID_FILE);
-    } catch (error) {
-      logCliNonBlocking('stop_token_daemon_unlink_pid_file', error, { pidFile: TOKEN_DAEMON_PID_FILE });
-    }
-  } catch (error) {
-    logCliNonBlocking('stop_token_daemon_if_running', error);
-  }
 }
 
 // Provider command group - update models and generate minimal provider config
@@ -266,31 +195,6 @@ try {
   logCliNonBlocking('load_optional_command_provider_update', error);
 }
 
-
-// Camoufox fingerprint backfill command (optional)
-try {
-  const { createCamoufoxBackfillCommand } = await import('./commands/camoufox-backfill.js');
-  program.addCommand(createCamoufoxBackfillCommand());
-} catch (error) {
-  logCliNonBlocking('load_optional_command_camoufox_backfill', error);
-}
-
-// Token daemon command group - manage OAuth tokens
-try {
-  const { createTokenDaemonCommand } = await import('./commands/token-daemon.js');
-  program.addCommand(createTokenDaemonCommand());
-} catch (error) {
-  logCliNonBlocking('load_optional_command_token_daemon', error);
-}
-
-
-// OAuth command - force re-auth for a specific token (Camoufox-aware when enabled)
-try {
-  const { createOauthCommand } = await import('./commands/oauth.js');
-  program.addCommand(createOauthCommand());
-} catch (error) {
-  logCliNonBlocking('load_optional_command_oauth', error);
-}
 
 // Validate command - auto start server then run E2E checks
 try {
@@ -383,17 +287,6 @@ registerBasicCommands(program, {
   }
 });
 
-// Camoufox command - open a profile by token file (养号/verify)
-registerCamoufoxCommand(program, {
-  env: process.env,
-  fsImpl: fs,
-  pathImpl: path,
-  homedir,
-  log: (line) => console.log(line),
-  error: (line) => console.error(line),
-  exit: (code) => process.exit(code)
-});
-
 // Start command
 registerStartCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
@@ -408,9 +301,6 @@ registerStartCommand(program, {
   homedir,
   tmpdir,
   sleep,
-  ensureLocalTokenPortalEnv,
-  ensureTokenDaemonAutoStart,
-  stopTokenDaemonIfRunning,
   ensureGuardianDaemon: ensureGlobalGuardian,
   registerGuardianProcess: registerGuardianLifecycle,
   reportGuardianLifecycle,
@@ -457,7 +347,6 @@ registerStopCommand(program, {
   findListeningPids,
   killPidBestEffort,
   sleep,
-  stopTokenDaemonIfRunning,
   stopGuardianDaemon: stopGlobalGuardian,
   reportGuardianLifecycle,
   fetchImpl: fetch,

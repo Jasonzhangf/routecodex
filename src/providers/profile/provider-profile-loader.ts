@@ -19,7 +19,6 @@ import type { ApiKeyEntry, ApiKeyAuthConfig } from './provider-profile.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
-type DeepSeekMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['deepseek']>;
 type ConcurrencyMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['concurrency']>;
 type RpmMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['rpm']>;
 
@@ -87,8 +86,6 @@ const protocolAliases = {
     'openai',
     'glm',
     'lmstudio',
-    'deepseek',
-    'deepseek-http',
     'chat',
     'openai-http',
     'openai-standard',
@@ -109,16 +106,6 @@ function sanitizeType(value?: string): string | undefined {
 function extractTransport(raw: UnknownRecord): ProviderTransportConfig {
   const headers = extractHeaders(raw.headers) ?? extractHeaders(raw.defaultHeaders);
   const transportNode = isRecord(raw.transport) ? (raw.transport as UnknownRecord) : undefined;
-  const oauthBrowserRaw = pickString((raw as UnknownRecord).oauthBrowser ?? (raw as UnknownRecord).oauth_browser);
-  let oauthBrowser: ProviderTransportConfig['oauthBrowser'] | undefined;
-  if (oauthBrowserRaw) {
-    const normalized = oauthBrowserRaw.trim().toLowerCase();
-    if (normalized === 'camoufox') {
-      oauthBrowser = 'camoufox';
-    } else if (normalized === 'default') {
-      oauthBrowser = 'default';
-    }
-  }
   const backendRaw = pickString(raw.transportBackend ?? transportNode?.backend);
   const normalizedBackend = backendRaw?.trim().toLowerCase();
   const backend =
@@ -135,7 +122,6 @@ function extractTransport(raw: UnknownRecord): ProviderTransportConfig {
     timeoutMs: pickNumber(raw.timeout ?? raw.timeoutMs),
     maxRetries: pickNumber(raw.retryAttempts ?? raw.retry_attempts),
     headers,
-    oauthBrowser,
     backend
   };
 }
@@ -168,21 +154,6 @@ function extractAuth(raw: UnknownRecord): ProviderAuthConfig {
   const secretRefValue = pickString(authNode?.secretRef ?? raw.secretRef);
   const envRefValue = pickString(authNode?.env ?? raw.apiKeyEnv ?? raw.env);
   const normalizedType = normalizeAuthType(typeHint, oauthNode, apiKeyValue, secretRefValue, envRefValue);
-  if (normalizedType === 'oauth') {
-    const scopes = pickStringArray(oauthNode?.scopes ?? authNode?.scopes ?? raw.scopes);
-    return {
-      kind: 'oauth',
-      clientId: pickString(oauthNode?.clientId ?? authNode?.clientId ?? raw.clientId),
-      clientSecret: pickString(oauthNode?.clientSecret ?? authNode?.clientSecret ?? raw.clientSecret),
-      tokenUrl: pickString(oauthNode?.tokenUrl ?? authNode?.tokenUrl ?? raw.tokenUrl),
-      deviceCodeUrl: pickString(oauthNode?.deviceCodeUrl ?? authNode?.deviceCodeUrl ?? raw.deviceCodeUrl),
-      authorizationUrl: pickString(oauthNode?.authorizationUrl ?? authNode?.authorizationUrl ?? raw.authorizationUrl),
-      userInfoUrl: pickString(oauthNode?.userInfoUrl ?? authNode?.userInfoUrl ?? raw.userInfoUrl),
-      refreshUrl: pickString(oauthNode?.refreshUrl ?? authNode?.refreshUrl ?? raw.refreshUrl),
-      tokenFile: pickString(authNode?.tokenFile ?? raw.tokenFile),
-      scopes
-    };
-  }
  if (normalizedType === 'apikey') {
    return {
      kind: 'apikey',
@@ -246,13 +217,13 @@ function normalizeAuthType(
 ): 'oauth' | 'apikey' | 'none' {
   const normalized = authType?.trim().toLowerCase();
   if (normalized && (normalized.includes('oauth') || normalized === 'bearer-oauth')) {
-    return 'oauth';
+    throw new Error('[provider-profiles] OAuth auth has been removed. Use auth.type="apikey".');
   }
   if (normalized && (normalized === 'apikey' || normalized === 'bearer')) {
     return 'apikey';
   }
   if (oauthNode) {
-    return 'oauth';
+    throw new Error('[provider-profiles] OAuth auth has been removed. Remove the oauth block.');
   }
   if (apiKey || secretRef || envRef) {
     return 'apikey';
@@ -292,14 +263,10 @@ function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): Pro
   const defaultModel = pickString(raw.defaultModel ?? raw.default_model);
   const modelsNode = isRecord(raw.models) ? raw.models : undefined;
   const supportedModels = modelsNode ? Object.keys(modelsNode) : undefined;
-  const deepseek = extractDeepSeekMetadata(
-    raw.deepseek ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).deepseek : undefined),
-    compatibilityProfile
-  );
   const concurrency = extractConcurrencyMetadata(raw.concurrency ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).concurrency : undefined));
   const rpm = extractRpmMetadata(raw.rpm ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).rpm : undefined));
 
-  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !deepseek && !concurrency && !rpm) {
+  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !concurrency && !rpm) {
     return undefined;
   }
 
@@ -310,9 +277,6 @@ function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): Pro
   if (supportedModels && supportedModels.length > 0) {
     metadata.supportedModels = supportedModels;
   }
-  if (deepseek) {
-    metadata.deepseek = deepseek;
-  }
   if (concurrency) {
     metadata.concurrency = concurrency;
   }
@@ -320,57 +284,6 @@ function extractMetadata(raw: UnknownRecord, compatibilityProfile?: string): Pro
     metadata.rpm = rpm;
   }
   return Object.keys(metadata).length ? metadata : undefined;
-}
-
-function extractDeepSeekMetadata(raw: unknown, compatibilityProfile?: string): DeepSeekMetadata | undefined {
-  const node = isRecord(raw) ? (raw as UnknownRecord) : {};
-  const toBool = (value: unknown): boolean | undefined => {
-    if (typeof value === 'boolean') {
-      return value;
-    }
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') {
-        return true;
-      }
-      if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') {
-        return false;
-      }
-    }
-    return undefined;
-  };
-  const toToolProtocol = (value: unknown): 'native' | 'text' | undefined => {
-    if (typeof value !== 'string') {
-      return undefined;
-    }
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'native' || normalized === 'text') {
-      return normalized as 'native' | 'text';
-    }
-    return undefined;
-  };
-
-  const legacyFallback = toBool(node.textToolFallback);
-  const contextFileNode = isRecord(node.contextFile) ? node.contextFile : undefined;
-  const toolProtocol =
-    toToolProtocol(node.toolProtocol) ??
-    (legacyFallback !== undefined ? (legacyFallback ? 'text' : 'native') : undefined);
-  const contextFileEnabled =
-    toBool(node.contextFileEnabled) ??
-    toBool(contextFileNode?.enabled) ??
-    (compatibilityProfile === 'chat:deepseek-web' ? true : undefined);
-
-  const normalized = {
-    strictToolRequired: toBool(node.strictToolRequired),
-    toolProtocol,
-    powTimeoutMs: pickNumber(node.powTimeoutMs),
-    powMaxAttempts: pickNumber(node.powMaxAttempts),
-    sessionReuseTtlMs: pickNumber(node.sessionReuseTtlMs),
-    contextFileEnabled
-  } as Record<string, unknown>;
-
-  const pruned = Object.fromEntries(Object.entries(normalized).filter(([, value]) => value !== undefined));
-  return Object.keys(pruned).length ? (pruned as DeepSeekMetadata) : undefined;
 }
 
 function extractConcurrencyMetadata(raw: unknown): ConcurrencyMetadata | undefined {
@@ -458,26 +371,6 @@ function pickPositiveInt(value: unknown): number | undefined {
   const normalized = Math.floor(parsed);
   return normalized > 0 ? normalized : undefined;
 }
-
-function pickStringArray(value: unknown): string[] | undefined {
-  if (!value) {
-    return undefined;
-  }
-  if (Array.isArray(value)) {
-    const normalized = value
-      .map((entry) => pickString(entry))
-      .filter((entry): entry is string => typeof entry === 'string');
-    return normalized.length ? Array.from(new Set(normalized)) : undefined;
-  }
-  if (typeof value === 'string' && value.trim()) {
-    return value
-      .split(/[,\s]+/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-  }
-  return undefined;
-}
-
 
 // ==================== ProviderForwarder loader ====================
 

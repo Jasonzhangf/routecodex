@@ -1,20 +1,18 @@
-import { DeepSeekHttpProvider } from './deepseek-http-provider.js';
 import { GeminiHttpProvider } from './gemini-http-provider.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
 import { ResponsesProvider } from './responses-provider.js';
 import { AnthropicProtocolClient } from '../../../client/anthropic/anthropic-protocol-client.js';
 import { MockProvider } from '../../mock/index.js';
 import { MimowebProvider } from './mimoweb/mimoweb-provider.js';
-import type { OpenAIStandardConfig, ApiKeyAuth, OAuthAuth, OAuthAuthType } from '../api/provider-config.js';
+import type { OpenAIStandardConfig, ApiKeyAuth } from '../api/provider-config.js';
 import type { IProviderV2, ProviderRuntimeAuth, ProviderRuntimeProfile, ProviderType } from '../api/provider-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
 type ApiKeyAuthExtended = ApiKeyAuth & { secretRef?: string; rawType?: string; accountAlias?: string };
-type OAuthAuthExtended = OAuthAuth & { oauthProviderId?: string; rawType?: string };
 
-export type RuntimeFactoryAuthConfig = ApiKeyAuthExtended | OAuthAuthExtended;
+export type RuntimeFactoryAuthConfig = ApiKeyAuthExtended;
 
 function isOpenCodeZenProviderId(providerId?: string): boolean {
   const normalized = typeof providerId === 'string' ? providerId.trim().toLowerCase() : '';
@@ -109,24 +107,21 @@ export function mapRuntimeAuthToConfig(
         ? openCodeZenResolved.apiKey
         : (isNonEmptyString(auth.value) ? auth.value.trim() : '');
 
-    if (rawType !== 'deepseek-account' && !resolvedApiKey) {
+    if (!resolvedApiKey) {
       const baseUrl =
         runtime && typeof (runtime as any).baseUrl === 'string'
           ? String((runtime as any).baseUrl).trim()
           : runtime && typeof (runtime as any).endpoint === 'string'
             ? String((runtime as any).endpoint).trim()
             : '';
-      const allowEmpty = isLocalBaseUrl(baseUrl) || rawType === 'deepseek-account';
+      const allowEmpty = isLocalBaseUrl(baseUrl);
       if (!allowEmpty) {
         throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing inline apiKey value`);
       }
     }
     const apiKeyAuth: ApiKeyAuthExtended = {
       type: 'apikey',
-      apiKey:
-        rawType === 'deepseek-account'
-          ? ''
-          : resolvedApiKey,
+      apiKey: resolvedApiKey,
       rawType: openCodeZenResolved?.rawType ?? (rawType || auth.rawType),
       accountAlias: auth.accountAlias,
       tokenFile: auth.tokenFile,
@@ -139,28 +134,7 @@ export function mapRuntimeAuthToConfig(
     return apiKeyAuth;
   }
 
-  const oauthType: OAuthAuthType = isNonEmptyString(auth.rawType)
-    ? (auth.rawType.trim() as OAuthAuthType)
-    : 'oauth';
-
-  const oauthAuth: OAuthAuthExtended = {
-    type: oauthType,
-    clientId: auth.clientId,
-    clientSecret: auth.clientSecret,
-    scopes: auth.scopes,
-    tokenFile: auth.tokenFile,
-    tokenUrl: auth.tokenUrl,
-    deviceCodeUrl: auth.deviceCodeUrl,
-    authorizationUrl: auth.authorizationUrl,
-    userInfoUrl: auth.userInfoUrl,
-    refreshUrl: auth.refreshUrl
-  };
-
-  if (auth.oauthProviderId) {
-    oauthAuth.oauthProviderId = auth.oauthProviderId;
-  }
-
-  return oauthAuth;
+  throw new Error(`[ProviderFactory] runtime ${runtimeKey} uses unsupported auth type '${auth.type}'`);
 }
 
 export function resolveProviderModule(value?: string): OpenAIStandardConfig['type'] | undefined {
@@ -174,12 +148,9 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
     case 'responses-http-provider':
     case 'anthropic-http-provider':
     case 'gemini-http-provider':
-    case 'deepseek-http-provider':
     case 'mimoweb-provider':
     case 'mock-provider':
      return trimmed as OpenAIStandardConfig['type'];
-    case 'deepseek':
-      return 'deepseek-http-provider';
     case 'anthropic':
       return 'anthropic-http-provider';
     case 'openai':
@@ -228,9 +199,6 @@ export function instantiateProvider(
   }
   if (moduleType === 'gemini-http-provider') {
     return new GeminiHttpProvider(config, dependencies);
-  }
-  if (moduleType === 'deepseek-http-provider') {
-    return new DeepSeekHttpProvider(config, dependencies);
   }
   switch (providerType) {
     case 'openai':
@@ -283,24 +251,10 @@ export function instantiateProvider(
   throw error;
 }
 
-export function getAuthSignature(auth: ApiKeyAuth | OAuthAuth): string {
-  if (auth.type === 'apikey') {
-    const apiKeyAuth = auth as ApiKeyAuthExtended;
-    if (isNonEmptyString(apiKeyAuth.secretRef)) {
-      return apiKeyAuth.secretRef.trim();
-    }
-    return apiKeyAuth.apiKey.trim();
+export function getAuthSignature(auth: ApiKeyAuth): string {
+  const apiKeyAuth = auth as ApiKeyAuthExtended;
+  if (isNonEmptyString(apiKeyAuth.secretRef)) {
+    return apiKeyAuth.secretRef.trim();
   }
-
-  const tokenFile = isNonEmptyString(auth.tokenFile) ? auth.tokenFile.trim() : '';
-  if (tokenFile) {
-    return tokenFile;
-  }
-  if (isNonEmptyString(auth.clientId)) {
-    return auth.clientId.trim();
-  }
-  if (isNonEmptyString(auth.authorizationUrl)) {
-    return auth.authorizationUrl.trim();
-  }
-  return auth.type;
+  return apiKeyAuth.apiKey.trim();
 }

@@ -33,11 +33,6 @@ import {
 } from './init/basic.js';
 import { buildInteractivePrompt } from './init/prompt-utils.js';
 import {
-  maybePrepareCamoufoxEnvironment,
-  shouldPrepareCamoufoxForProviderMap,
-  shouldPrepareCamoufoxForTemplates
-} from './init/camoufox.js';
-import {
   interactiveHostPort,
   interactivePickDefaultProvider,
   interactiveRoutingWizard,
@@ -65,7 +60,6 @@ export function createInitCommand(program: Command, ctx: InitCommandContext): vo
 Examples:
   ${bin} init
   ${bin} init default
-  ${bin} init --camoufox
   ${bin} init --list-providers
   ${bin} init --list-current-providers
   ${bin} init --providers openai,glm --default-provider glm
@@ -73,7 +67,6 @@ Examples:
     )
     .option('-c, --config <config>', 'Configuration file path')
     .option('-f, --force', 'Force overwrite existing configuration during fresh setup')
-    .option('--camoufox', 'Force Camoufox environment preparation')
     .option('--providers <ids>', 'Providers (comma-separated), e.g. openai,glm')
     .option('--default-provider <id>', 'Default provider id for routing.default')
     .option('--default-model <id>', 'Default model id for default provider routing target')
@@ -111,8 +104,6 @@ Examples:
         return;
       }
       const useBundledProviderProfile = profile === 'default';
-      const forceCamoufoxPrep = Boolean(options.camoufox);
-      const autoCamoufoxPrep = !forceCamoufoxPrep;
       const providerRoot = getProviderRoot(pathImpl, home());
 
       const catalog = getBootstrapProviderTemplates();
@@ -161,10 +152,6 @@ Examples:
       };
 
       try {
-        if (forceCamoufoxPrep) {
-          maybePrepareCamoufoxEnvironment(ctx, ctx.logger, true, { force: true });
-        }
-
         const state = inspectConfigState(fsImpl, configPath);
         if (state.kind === 'invalid') {
           spinner.fail('Failed to initialize configuration');
@@ -225,7 +212,6 @@ Examples:
             ctx.logger.info(`Providers: ${defaultTemplate.id}`);
             ctx.logger.info(`Default provider: ${defaultTemplate.id}`);
             ctx.logger.info(`Provider root: ${providerRoot}`);
-            maybePrepareCamoufoxEnvironment(ctx, ctx.logger, autoCamoufoxPrep);
             const installedDocs = installBundledDocsBestEffort({ fsImpl, pathImpl });
             if (installedDocs.ok) {
               ctx.logger.info(`Docs installed: ${installedDocs.targetDir}`);
@@ -385,11 +371,6 @@ Examples:
             ctx.logger.info(`Default model override: ${defaultModelOverride}`);
           }
           ctx.logger.info(`Provider root: ${providerRoot}`);
-          maybePrepareCamoufoxEnvironment(
-            ctx,
-            ctx.logger,
-            autoCamoufoxPrep && shouldPrepareCamoufoxForTemplates(selectedTemplates)
-          );
           const installed = installBundledDocsBestEffort({ fsImpl, pathImpl });
           if (installed.ok) {
             ctx.logger.info(`Docs installed: ${installed.targetDir}`);
@@ -432,12 +413,6 @@ Examples:
           }
           ctx.logger.info(`Migrated providers: ${migrated.convertedProviders.join(', ')}`);
           ctx.logger.info(`Provider root: ${providerRoot}`);
-          const migratedProviderMap = loadProviderV2Map(fsImpl, pathImpl, providerRoot);
-          maybePrepareCamoufoxEnvironment(
-            ctx,
-            ctx.logger,
-            autoCamoufoxPrep && shouldPrepareCamoufoxForProviderMap(migratedProviderMap)
-          );
 
           if (promptBundle) {
             safeSpinnerStop();

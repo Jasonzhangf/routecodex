@@ -35,10 +35,6 @@ export const DEFAULT_CONFIG = {
   // 网络配置
   TIMEOUT: 30000,
   
-  // OAuth 配置
-  OAUTH_CALLBACK_PORT: 8080,
-  OAUTH_CALLBACK_HOST: LOCAL_HOSTS.LOCALHOST,
-  
   // LM Studio 默认配置
   LM_STUDIO_HOST: LOCAL_HOSTS.LOCALHOST,
   LM_STUDIO_PORT: 1234,
@@ -80,7 +76,6 @@ export const API_PATHS = {
   HEALTH: '/health',
   SHUTDOWN: '/shutdown',
   CONFIG: '/config',
-  OAUTH_CALLBACK: '/oauth2callback',
 } as const;
 
 // Provider 默认配置
@@ -95,19 +90,6 @@ export const DEFAULT_PROVIDER = {
   // SSE 流式响应超时
   STREAM_IDLE_TIMEOUT_MS: DEFAULT_TIMEOUTS.PROVIDER_STREAM_IDLE_CAP_MS,
   STREAM_HEADERS_TIMEOUT_MS: DEFAULT_TIMEOUTS.PROVIDER_STREAM_HEADERS_CAP_MS,
-
-} as const;
-
-// Token Daemon 默认配置
-export const DEFAULT_TOKEN_DAEMON = {
-  // 轮询间隔
-  INTERVAL_MS: 60_000,              // 60 秒
-
-  // ���新窗口：在 token 到期前多久开始刷新
-  REFRESH_AHEAD_MINUTES: 30,        // 30 分钟
-
-  // 最小刷新间隔：避免频繁刷新
-  MIN_REFRESH_INTERVAL_MS: 5 * 60_000,  // 5 分钟
 
 } as const;
 
@@ -164,9 +146,7 @@ export const API_BASE_URLS = {
   OPENAI: 'https://api.openai.com/v1',
   ANTHROPIC: 'https://api.anthropic.com',
   GEMINI: 'https://generativelanguage.googleapis.com/v1beta',
-  GLM: 'https://open.bigmodel.cn/api/coding/paas/v4',
-  QWEN: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  DEEPSEEK: 'https://chat.deepseek.com'
+  GLM: 'https://open.bigmodel.cn/api/coding/paas/v4'
 } as const;
 
 export const PROVIDER_TIMEOUTS = {
@@ -174,8 +154,6 @@ export const PROVIDER_TIMEOUTS = {
   ANTHROPIC: 300_000,
   GEMINI: 240_000,
   GLM: 240_000,
-  QWEN: 120_000,
-  DEEPSEEK: 240_000,
   RESPONSES: 240_000
 } as const;
 
@@ -183,9 +161,7 @@ export const PROVIDER_DEFAULT_MODELS = {
   OPENAI_CHAT: 'gpt-4',
   ANTHROPIC: 'claude-3-haiku-20240307',
   GEMINI: 'models/gemini-2.0-flash',
-  GLM: 'glm-4',
-  QWEN: 'coder-model',
-  DEEPSEEK: 'deepseek-chat'
+  GLM: 'glm-4'
 } as const;
 
 export const SSE_DEFAULT_CAPS = {

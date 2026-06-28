@@ -12,7 +12,6 @@ const CANONICAL_PROVIDER_TYPES = new Set<CanonicalProviderType>([
 const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
   openai: 'openai',
   glm: 'openai',
-  deepseek: 'openai',
   lmstudio: 'openai',
   chat: 'openai',
   responses: 'responses',
@@ -72,9 +71,6 @@ export function mapProviderModule(providerType: string): string {
   if (normalized === 'gemini') {
     return 'gemini-http-provider';
   }
-  if (normalized === 'deepseek') {
-    return 'deepseek-http-provider';
-  }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'lmstudio') {
     return 'openai-http-provider';
   }
@@ -96,7 +92,7 @@ export function mapProviderProtocol(providerType?: string, providerFamily?: stri
   if (normalized === 'gemini') {
     return 'gemini-chat';
   }
-  if (normalized === 'openai' || normalized === 'glm' || normalized === 'lmstudio' || normalized === 'deepseek') {
+  if (normalized === 'openai' || normalized === 'glm' || normalized === 'lmstudio') {
     return 'openai-chat';
   }
   if (normalized === 'mock') {
@@ -116,7 +112,7 @@ export function defaultEndpointForProvider(providerType?: string): string {
   if (normalized === 'gemini') {
     return '/v1beta/models';
   }
-  if (normalized === 'openai' || normalized === 'glm' || normalized === 'lmstudio' || normalized === 'deepseek') {
+  if (normalized === 'openai' || normalized === 'glm' || normalized === 'lmstudio') {
     return '/v1/chat/completions';
   }
   if (normalized === 'mock') {
