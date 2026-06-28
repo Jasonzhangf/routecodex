@@ -1806,38 +1806,6 @@ pub fn write_stopless_learned_note_json_bridge(input_json: String) -> NapiResult
     stopless_auto_handler_bridge::write_stopless_learned_note_json(input_json)
 }
 
-/// Build a stopless MetadataCenter write plan — Rust-built, TS-applied.
-/// Input: { handlerPlan: StopMessageAutoHandlerPlan JSON, center: MetadataCenter JSON, requestId, timestampMs }
-/// Output: StoplessMetadataCenterWritePlan JSON
-#[napi(js_name = "buildStoplessMetadataCenterWritePlanJson")]
-pub fn build_stopless_metadata_center_write_plan_json_bridge(
-    input_json: String,
-) -> NapiResult<String> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct WritePlanInput {
-        handler_plan: serde_json::Value,
-        center: serde_json::Value,
-        request_id: String,
-        timestamp_ms: u64,
-    }
-    let input: WritePlanInput = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("deserialize WritePlanInput: {e}")))?;
-    let handler_plan: servertool_core::stop_message_auto_handler::StopMessageAutoHandlerPlan =
-        serde_json::from_value(input.handler_plan)
-            .map_err(|e| napi::Error::from_reason(format!("deserialize handler plan: {e}")))?;
-    let center: crate::metadata_center::MetadataCenter = serde_json::from_value(input.center)
-        .map_err(|e| napi::Error::from_reason(format!("deserialize center: {e}")))?;
-    let plan = crate::metadata_center::write_plan::build_stopless_metadata_center_write_plan(
-        &handler_plan,
-        &center,
-        &input.request_id,
-        input.timestamp_ms,
-    );
-    serde_json::to_string(&plan)
-        .map_err(|e| napi::Error::from_reason(format!("serialize write plan: {e}")))
-}
-
 /// Run stop_message_auto — Rust-native entry point for stopless runtime execution.
 #[napi(js_name = "runStopMessageAutoHandlerJson")]
 pub fn run_stop_message_auto_handler_json_bridge(input_json: String) -> NapiResult<String> {

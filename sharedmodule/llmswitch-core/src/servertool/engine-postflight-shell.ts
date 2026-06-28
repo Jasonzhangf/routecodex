@@ -10,10 +10,39 @@ import {
   readRequestTruthSessionIdFromAnyBoundMetadataCenter,
   readRuntimeControlFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
+import {
+  applyNativeRuntimeControlWritePlan,
+  projectNativeMetadataWritePlanToRuntimeControl
+} from '../conversion/hub/metadata-center-runtime-control-writer.js';
 
 type EnginePostflightAction = {
   action: string;
 };
+
+const SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER = {
+  module: 'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
+  symbol: 'applyServertoolPostflightMetadataWritePlan',
+  stage: 'HubRespChatProcess03Governed',
+} as const;
+
+function applyServertoolPostflightMetadataWritePlan(args: {
+  adapterContext: AdapterContext;
+  metadataWritePlan?: JsonObject;
+}): void {
+  if (!args.metadataWritePlan || typeof args.metadataWritePlan !== 'object') {
+    return;
+  }
+  const runtimeControl = projectNativeMetadataWritePlanToRuntimeControl(args.metadataWritePlan);
+  if (Object.keys(runtimeControl).length === 0) {
+    return;
+  }
+  applyNativeRuntimeControlWritePlan({
+    metadata: args.adapterContext as unknown as Record<string, unknown>,
+    runtimeControl,
+    writer: SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER,
+    reason: 'rust servertool postflight runtime control'
+  });
+}
 
 function buildStoplessProjectionMetadataCenterSnapshot(
   adapterContext: AdapterContext
@@ -51,6 +80,10 @@ export async function runServertoolEnginePostflight(args: {
   | undefined
 > {
   const { engineResult, runtimeAction, options, flowId, totalSteps } = args;
+  applyServertoolPostflightMetadataWritePlan({
+    adapterContext: options.adapterContext,
+    metadataWritePlan: engineResult.metadataWritePlan
+  });
 
   if (args.stageRecorder) {
     try {

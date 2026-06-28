@@ -5157,6 +5157,43 @@ function checkStoplessNoContextDataPlane() {
   );
 }
 
+function checkDeletedStoplessMetadataWriterAbsent() {
+  const deletedWriter = `${SERVERTOOL_TS_DIR}/stopless-metadata-center-writer.ts`;
+  if (existsSync(deletedWriter)) {
+    fail(
+      'deleted-stopless-metadata-writer-absent',
+      `${deletedWriter.replace(`${ROOT}/`, '')} must stay deleted; MetadataCenter writes use the generic runtime_control writer`
+    );
+  }
+
+  const scanFiles = [
+    ...listFiles(SERVERTOOL_TS_DIR),
+    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+  ].filter((file) => existsSync(file));
+  for (const file of scanFiles) {
+    const content = readFileSync(file, 'utf8');
+    for (const marker of [
+      'applyStoplessMetadataCenterWritePlan',
+      'buildStoplessMetadataCenterWritePlanJson',
+      'build_stopless_metadata_center_write_plan_json_bridge',
+      'stopless-metadata-center-writer',
+    ]) {
+      if (content.includes(marker)) {
+        fail(
+          'deleted-stopless-metadata-writer-absent',
+          `Forbidden stopless-specific MetadataCenter writer marker "${marker}" found in ${file.replace(`${ROOT}/`, '')}`
+        );
+      }
+    }
+  }
+
+  pass(
+    'deleted-stopless-metadata-writer-absent',
+    'stopless-specific TS MetadataCenter writer and NAPI export stay deleted'
+  );
+}
+
 function checkServertoolRustOutcomeCloseout() {
   const rustOutcome = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const rustCli = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
@@ -6149,6 +6186,7 @@ checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkServertoolCliResultGuardRustOwner();
 checkStoplessNoContextDataPlane();
+checkDeletedStoplessMetadataWriterAbsent();
 checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
 checkServertoolAutoHookCallerThinShell();

@@ -1,7 +1,7 @@
-//! MetadataCenter write plan — built by Rust, consumed by TS.
+//! MetadataCenter runtime_control write plan — built by Rust.
 //!
-//! This module produces the JSON write plan that TS-side `stopless-metadata-carrier.ts`
-//! applies to the MetadataCenter via `Symbol.for('routecodex.metadataCenter')`.
+//! This module produces the Rust runtime effect that the generic MetadataCenter
+//! runtime_control writer applies at the Chat Process boundary.
 //!
 //! Feature: hub.servertool_stopless_cli_continuation
 
@@ -49,9 +49,8 @@ pub struct LearnedNoteWrite {
 
 /// Build a MetadataCenter write plan from a StopMessageAutoHandlerPlan.
 ///
-/// Called from the TS handler after receiving the Rust plan. The resulting
-/// JSON is passed to `applyStoplessMetadataCenterWritePlan()` which performs
-/// the actual `Reflect.set` on `Symbol.for('routecodex.metadataCenter')`.
+/// Called from Rust stopless runtime assembly. The resulting value is returned
+/// with the Chat Process runtime effects and applied only as runtime_control.
 pub fn build_stopless_metadata_center_write_plan(
     handler_plan: &StopMessageAutoHandlerPlan,
     center: &MetadataCenter,

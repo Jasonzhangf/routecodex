@@ -4,9 +4,6 @@ import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { getServertoolToolSpec, listServertoolToolSpecs } from './skeleton-config.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
-import {
-  applyStoplessMetadataCenterWritePlan,
-} from './stopless-metadata-center-writer.js';
 
 type StoplessAutoHandlerRuntimeOutput = {
   action: 'return_null' | 'throw_error' | 'return_handler_result';
@@ -121,7 +118,7 @@ async function runStoplessAutoHandlerRuntimeNapi(
       }
     : null;
   const raw = fn(JSON.stringify({
-    adapterContext: ctx.adapterContext,
+    adapterContext: {},
     base: ctx.base,
     requestId: ctx.requestId,
     runtimeMetadata,
@@ -138,16 +135,7 @@ async function runStoplessAutoHandlerRuntimeNapi(
 async function runBuiltinStopMessageAutoHandler(
   ctx: ServerToolHandlerContext
 ): Promise<{ flowId: string; finalize: () => Promise<ServerToolHandlerResult> } | null> {
-  const record = ctx.adapterContext as Record<string, unknown>;
   const runtime = await runStoplessAutoHandlerRuntimeNapi(ctx);
-
-  if (runtime.metadataWritePlan && typeof runtime.metadataWritePlan === 'object' && !Array.isArray(runtime.metadataWritePlan)) {
-    applyStoplessMetadataCenterWritePlan({
-      adapterContext: record,
-      plan: runtime.metadataWritePlan,
-      reason: 'stop-message-runtime'
-    });
-  }
 
   if (runtime.action === 'return_null') {
     return null;

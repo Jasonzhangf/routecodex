@@ -31,7 +31,10 @@ import {
   materializeProviderResponseSsePayloadWithNative,
   projectPostServertoolHubRespOutbound04ClientSemanticWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
-import { applyStoplessMetadataCenterWritePlan } from '../../../servertool/stopless-metadata-center-writer.js';
+import {
+  applyNativeRuntimeControlWritePlan,
+  projectNativeMetadataWritePlanToRuntimeControl
+} from '../metadata-center-runtime-control-writer.js';
 
 function runProviderResponseRustHubPipeline(options: ProviderResponseConversionOptions): {
   payload?: JsonObject;
@@ -213,7 +216,7 @@ function readNativeRuntimeStateWriteEffect(runtimeEffects: ProviderResponseRunti
   return runtimeEffects.runtimeStateWrite ?? null;
 }
 
-function readNativeStoplessMetadataCenterWriteEffect(runtimeEffects: ProviderResponseRuntimeEffectPlan): Record<string, unknown> | null {
+function readNativeMetadataCenterWriteEffect(runtimeEffects: ProviderResponseRuntimeEffectPlan): Record<string, unknown> | null {
   return runtimeEffects.stoplessMetadataCenterWrite ?? null;
 }
 
@@ -228,11 +231,6 @@ async function executeProviderResponseNativeRuntimeStateEffect(args: {
   const usage = runtimeEffect?.usage && typeof runtimeEffect.usage === 'object' && !Array.isArray(runtimeEffect.usage)
     ? runtimeEffect.usage as Record<string, unknown>
     : undefined;
-  if (runtimeEffect) {
-    finalizeResponsesConversationRequestRetention(args.context.requestId, {
-      keepForSubmitToolOutputs: runtimeEffect.keepForSubmitToolOutputs === true
-    });
-  }
   await persistResponsesConversationLifecycleAtChatProcessExitWithinCore({
     entryEndpoint: args.entryEndpoint,
     requestLabel: args.requestId,
@@ -240,24 +238,46 @@ async function executeProviderResponseNativeRuntimeStateEffect(args: {
     metadata: args.context as Record<string, unknown>,
     body: args.body,
   });
+  if (runtimeEffect) {
+    finalizeResponsesConversationRequestRetention(
+      resolveResponsesConversationRequestLabelWithinCore({
+        metadata: args.context as Record<string, unknown>,
+        requestLabel: args.requestId,
+      }),
+      {
+        keepForSubmitToolOutputs: runtimeEffect.keepForSubmitToolOutputs === true
+      }
+    );
+  }
   saveChatProcessSessionActualUsage({
     context: args.context,
     usage,
   });
 }
 
-function executeProviderResponseNativeStoplessMetadataEffect(args: {
+const RESPONSE_STAGE_RUNTIME_CONTROL_WRITER = {
+  module: 'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+  symbol: 'executeProviderResponseNativeMetadataEffect',
+  stage: 'HubRespChatProcess03Governed',
+} as const;
+
+function executeProviderResponseNativeMetadataEffect(args: {
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
   context: AdapterContext;
 }): void {
-  const plan = readNativeStoplessMetadataCenterWriteEffect(args.runtimeEffects);
+  const plan = readNativeMetadataCenterWriteEffect(args.runtimeEffects);
   if (!plan) {
     return;
   }
-  applyStoplessMetadataCenterWritePlan({
-    adapterContext: args.context as Record<string, unknown>,
-    plan,
-    reason: 'servertool-resp-hook-chat-process'
+  const runtimeControl = projectNativeMetadataWritePlanToRuntimeControl(plan);
+  if (Object.keys(runtimeControl).length === 0) {
+    return;
+  }
+  applyNativeRuntimeControlWritePlan({
+    metadata: args.context as Record<string, unknown>,
+    runtimeControl,
+    writer: RESPONSE_STAGE_RUNTIME_CONTROL_WRITER,
+    reason: 'rust response chatprocess runtime control'
   });
 }
 
@@ -454,7 +474,7 @@ async function executeProviderResponseNativeOutboundEffects(args: {
     }) as JsonObject
     : respProcessEffect.payload;
   const streamEffect = readNativeStreamPipeEffect(args.nativeResponsePlan.runtimeEffects);
-  executeProviderResponseNativeStoplessMetadataEffect({
+  executeProviderResponseNativeMetadataEffect({
     runtimeEffects: args.nativeResponsePlan.runtimeEffects,
     context: args.context
   });
