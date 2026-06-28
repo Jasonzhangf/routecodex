@@ -1,7 +1,6 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import type { ProviderHandle } from '../types.js';
 import type { ProviderRuntimeProfile } from '../../../../providers/core/api/provider-types.js';
-import type { ProviderTrafficGovernorLike, ProviderTrafficPermit } from '../provider-traffic-governor.js';
 import { writeErrorsampleJson } from '../../../../utils/errorsamples.js';
 import { readRuntimeControlProjection } from '../metadata-center/request-truth-readers.js';
 import { truncateReason } from './request-executor-error-shared.js';
@@ -321,50 +320,7 @@ export function logProviderRetrySwitchCompact(args: {
   console.warn(`${retryTag} ${details.join(' ')}`);
 }
 
-export async function releaseProviderTrafficPermit(args: {
-  trafficPermit: ProviderTrafficPermit | null;
-  trafficGovernor: ProviderTrafficGovernorLike;
-  requestId: string;
-  providerKey: string;
-  runtimeKey?: string;
-  attempt: number;
-  logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
-}): Promise<void> {
-  if (!args.trafficPermit) {
-    return;
-  }
-  const releaseStartedAtMs = Date.now();
-  args.logStage('provider.traffic.release.start', args.requestId, {
-    providerKey: args.providerKey,
-    runtimeKey: args.runtimeKey,
-    leaseId: args.trafficPermit.leaseId,
-    attempt: args.attempt
-  });
-  try {
-    const released = await args.trafficGovernor.release(args.trafficPermit);
-    args.logStage('provider.traffic.release.completed', args.requestId, {
-      providerKey: args.providerKey,
-      runtimeKey: args.runtimeKey,
-      leaseId: args.trafficPermit.leaseId,
-      released: released.released,
-      activeInFlight: released.activeInFlight,
-      elapsedMs: Date.now() - releaseStartedAtMs,
-      attempt: args.attempt
-    });
-  } catch (releaseError) {
-    args.logStage('provider.traffic.release.error', args.requestId, {
-      providerKey: args.providerKey,
-      runtimeKey: args.runtimeKey,
-      leaseId: args.trafficPermit.leaseId,
-      message:
-        releaseError instanceof Error
-          ? releaseError.message
-          : String(releaseError ?? 'Unknown release error'),
-      elapsedMs: Date.now() - releaseStartedAtMs,
-      attempt: args.attempt
-    });
-  }
-}
+
 
 export function queueRequestExecutorPayloadContractErrorsample(args: {
   phase: 'provider-request' | 'provider-response';

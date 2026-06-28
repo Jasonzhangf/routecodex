@@ -1,9 +1,7 @@
-import fs from 'fs';
 // feature_id: server.responses_handler_family
 // feature_id: server.responses_request_handler_bridge_surface
 // feature_id: hub.chat_process_responses_continuation
 // canonical_builders: buildResponsesConversationPortScopeForHttp, buildResponsesPipelineMetadataForHttp, captureResponsesPipelineRequestContextForHttp, prepareResponsesRequestBodyForHttp
-import path from 'path';
 import type { Request, Response } from 'express';
 import type { HandlerContext } from './types.js';
 import {
@@ -35,6 +33,7 @@ import { markClientConnectionDisconnected, trackClientConnectionState } from '..
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
+import { writeDebugErrorDiagArtifact } from '../../debug/diag/index.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -354,22 +353,18 @@ export async function handleResponses(
     }
     logRequestError(entryEndpoint, requestId, error);
     try {
-      const diagDir = path.join(process.env.HOME || '/tmp', '.rcc', 'diag');
-      fs.mkdirSync(diagDir, { recursive: true });
-      const errRec = error as Record<string, unknown>;
-      fs.writeFileSync(path.join(diagDir, `error-${requestId}.json`), JSON.stringify({
+      await writeDebugErrorDiagArtifact({
         endpoint: entryEndpoint,
         requestId,
         requestBody: req.body,
-        message: error instanceof Error ? error.message : String(error),
-        code: typeof errRec?.code === 'string' ? errRec.code : undefined,
-        statusCode: typeof errRec?.statusCode === 'number' ? errRec.statusCode : undefined,
-        status: typeof errRec?.status === 'number' ? errRec.status : undefined,
-        details: errRec?.details,
-        stack: error instanceof Error ? error.stack : undefined,
-        timestamp: new Date().toISOString(),
-      }, null, 2));
-    } catch {}
+        error,
+      });
+    } catch (diagError) {
+      logResponsesHandlerNonBlockingError('debug_diag_error_artifact.write', diagError, {
+        requestId,
+        entryEndpoint
+      });
+    }
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const failureStreamPlan = planResponsesHandlerStreamForHttp({

@@ -1,7 +1,9 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import type { UsageMetrics } from './usage-aggregator.js';
 import type { StatsManager } from '../stats-manager.js';
-import type { ProviderTrafficGovernorLike } from '../provider-traffic-governor.js';
+import {
+  trafficGovernorObserveOutcome
+} from '../../../../modules/traffic-governor/index.js';
 import {
   detectAssistantSanitizationPlaceholder,
   detectRetryableEmptyAssistantResponse,
@@ -149,24 +151,21 @@ export function buildProviderExecutionSuccessResult(args: {
 }
 
 type ObserveSuccessArgs = {
-  governor: ProviderTrafficGovernorLike;
   runtimeKey: string;
   providerKey: string;
   requestId: string;
   statusCode?: number;
   activeInFlight?: number;
-  configuredMaxInFlight?: number;
 };
 
 async function observeSuccessfulOutcome(args: ObserveSuccessArgs): Promise<void> {
-  await args.governor.observeOutcome?.({
+  trafficGovernorObserveOutcome({
     runtimeKey: args.runtimeKey,
     providerKey: args.providerKey,
     requestId: args.requestId,
     success: true,
     statusCode: args.statusCode,
-    activeInFlight: args.activeInFlight,
-    configuredMaxInFlight: args.configuredMaxInFlight
+    activeInFlight: args.activeInFlight
   });
 }
 
@@ -333,7 +332,6 @@ export async function processSuccessfulProviderResponse(args: {
   requestSemantics?: Record<string, unknown>;
   mergedMetadata: Record<string, unknown>;
   bypassTrafficGovernor: boolean;
-  trafficGovernor: ProviderTrafficGovernorLike;
   runtimeKey: string;
   trafficActiveInFlightAtAcquire?: number;
   trafficPolicyMaxInFlight?: number;
@@ -403,13 +401,11 @@ export async function processSuccessfulProviderResponse(args: {
   if (!args.bypassTrafficGovernor) {
     try {
       await observeSuccessfulOutcome({
-        governor: args.trafficGovernor,
         runtimeKey: args.runtimeKey,
         providerKey: args.providerKey,
         requestId: args.inputRequestId,
         statusCode: convertedStatus,
-        activeInFlight: args.trafficActiveInFlightAtAcquire,
-        configuredMaxInFlight: args.trafficPolicyMaxInFlight || undefined
+        activeInFlight: args.trafficActiveInFlightAtAcquire
       });
     } catch (observeError) {
       args.logStage('provider.traffic.observe_outcome.error', args.inputRequestId, {
