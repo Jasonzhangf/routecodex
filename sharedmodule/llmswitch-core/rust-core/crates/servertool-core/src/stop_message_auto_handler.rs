@@ -39,7 +39,6 @@ pub struct StopMessageAutoHandlerInput {
     pub metadata_previous_compare: Option<Value>,
     pub default_config: StopMessageDefaultConfigPlan,
     pub decision_signals: StoplessDecisionContextSignals,
-    pub captured_request: Option<Value>,
     pub effective_runtime_loop_state: Option<Value>,
     pub provider_key: Option<String>,
 }
@@ -51,7 +50,6 @@ pub struct StopMessageAutoHandlerInput {
 pub enum StopMessageAutoPlanAction {
     ReturnNull,
     ReturnTerminalFinal,
-    ThrowStoplessLoop,
     ReturnSchemaFailFast,
     ReturnSchemaAllowStop,
     ReturnHandlerPlan,
@@ -68,16 +66,6 @@ pub struct StopMessageAutoHandlerPlan {
     pub should_write_learned_note: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub learned_note: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stopless_loop_error_message: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stopless_loop_error_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stopless_loop_repeat_count: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stopless_loop_threshold: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stopless_loop_goal_context_count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flow_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,11 +103,6 @@ impl Default for StopMessageAutoHandlerPlan {
             terminal_chat_response: None,
             should_write_learned_note: None,
             learned_note: None,
-            stopless_loop_error_message: None,
-            stopless_loop_error_code: None,
-            stopless_loop_repeat_count: None,
-            stopless_loop_threshold: None,
-            stopless_loop_goal_context_count: None,
             flow_id: None,
             effective_decision: None,
             schema_gate: None,
@@ -168,15 +151,6 @@ struct SchemaGateResult {
     parsed: Option<Value>,
 }
 
-#[derive(Debug, Clone)]
-struct StoplessLoopResult {
-    loop_detected: bool,
-    repeat_count: i64,
-    threshold: i64,
-    goal_context_count: i64,
-    reason_code: Option<String>,
-}
-
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /// Plan the full stop_message_auto handler execution.
@@ -202,7 +176,6 @@ pub fn plan_stop_message_auto_handler(
         let stop_gateway = stop_gateway_context::inspect(&input.base);
         let mut compare = StopMessageCompareContext::default_skip();
         compare.stop_eligible = stop_gateway.eligible;
-        compare.has_captured_request = input.captured_request.is_some();
         compare.decision = "skip".to_string();
         compare.reason = "skip_servertool_followup_hop".to_string();
         return StopMessageAutoHandlerPlan {
@@ -216,7 +189,6 @@ pub fn plan_stop_message_auto_handler(
     let stop_gateway = stop_gateway_context::inspect(&input.base);
     let default_config = &input.default_config;
     let decision_signals = &input.decision_signals;
-    let captured = input.captured_request.as_ref();
 
     let effective_loop = input.effective_runtime_loop_state.as_ref();
     let loop_repeat = effective_loop
@@ -250,7 +222,6 @@ pub fn plan_stop_message_auto_handler(
     let decision_ctx = build_decision_context(
         decision_signals,
         &stop_gateway,
-        captured,
         metadata_center_stopless,
         snap_repeat,
         snap_max,
@@ -263,7 +234,7 @@ pub fn plan_stop_message_auto_handler(
     let decision = decide_from_context(&decision_ctx);
 
     // ── Phase 4: Compare ─────────────────────────────────────────────────────
-    let mut compare = build_compare_from_decision(&decision, &stop_gateway, captured);
+    let mut compare = build_compare_from_decision(&decision, &stop_gateway);
 
     // ── Phase 5: Route ───────────────────────────────────────────────────────
     match decision.action.as_str() {
@@ -272,16 +243,9 @@ pub fn plan_stop_message_auto_handler(
             &decision,
             &mut compare,
             &assistant_stop_text,
-            captured,
             default_config,
         ),
-        _ => handle_skip(
-            input,
-            &decision,
-            &mut compare,
-            &assistant_stop_text,
-            captured,
-        ),
+        _ => handle_skip(input, &decision, &mut compare),
     }
 }
 
@@ -291,8 +255,6 @@ fn handle_skip(
     input: &StopMessageAutoHandlerInput,
     decision: &StopMessageDecision,
     compare: &mut StopMessageCompareContext,
-    assistant_stop_text: &str,
-    captured: Option<&Value>,
 ) -> StopMessageAutoHandlerPlan {
     // Budget exhausted
     if decision.skip_reason.as_deref() == Some("skip_reached_max_repeats") {
@@ -306,39 +268,6 @@ fn handle_skip(
         };
     }
 
-    // Goal active guard
-    if matches!(
-        decision.skip_reason.as_deref(),
-        Some("skip_no_stopmessage_snapshot") | Some("skip_goal_active")
-    ) {
-        if !assistant_stop_text.is_empty() {
-            if let Some(captured_req) = captured {
-                let stopless_loop =
-                    evaluate_stopless_loop_guard(captured_req, assistant_stop_text, 3);
-                if stopless_loop.loop_detected {
-                    compare.reason = stopless_loop
-                        .reason_code
-                        .clone()
-                        .unwrap_or_else(|| "stopless_repeated_stop".to_string());
-                    let short_text: String = assistant_stop_text.chars().take(160).collect();
-                    return StopMessageAutoHandlerPlan {
-            action: StopMessageAutoPlanAction::ThrowStoplessLoop,
-                        compare_context: compare.clone(),
-                        stopless_loop_error_message: Some(format!(
-                            "[servertool] stopless stop loop detected: repeat={}/{}; assistant repeatedly stopped without tool progress: {short_text}",
-                            stopless_loop.repeat_count, stopless_loop.threshold
-                        )),
-                        stopless_loop_error_code: Some("STOPLESS_STOP_LOOP_DETECTED".to_string()),
-                        stopless_loop_repeat_count: Some(stopless_loop.repeat_count),
-                        stopless_loop_threshold: Some(stopless_loop.threshold),
-                        stopless_loop_goal_context_count: Some(stopless_loop.goal_context_count),
-                        ..Default::default()
-                    };
-                }
-            }
-        }
-    }
-
     null_plan(compare.clone())
 }
 
@@ -349,7 +278,6 @@ fn handle_trigger(
     decision: &StopMessageDecision,
     compare: &mut StopMessageCompareContext,
     assistant_stop_text: &str,
-    _captured: Option<&Value>,
     default_config: &StopMessageDefaultConfigPlan,
 ) -> StopMessageAutoHandlerPlan {
     // Read previous compare context from metadata (passed through from TS shell)
@@ -396,11 +324,15 @@ fn handle_trigger(
             .as_deref()
             .map(resolve_fail_fast_summary_prefix)
             .unwrap_or_default();
-        let replaced = build_terminal_visible_payload_replace(&input.base, &summary_prefix);
+        let terminal = if summary_prefix.trim().is_empty() {
+            build_terminal_visible_payload(&input.base, "")
+        } else {
+            build_terminal_visible_payload_replace(&input.base, &summary_prefix)
+        };
         return StopMessageAutoHandlerPlan {
             action: StopMessageAutoPlanAction::ReturnSchemaFailFast,
             compare_context: compare.clone(),
-            terminal_chat_response: Some(replaced),
+            terminal_chat_response: Some(terminal),
             schema_gate: Some(serialize_schema_gate(&schema_gate)),
             ..Default::default()
         };
@@ -451,12 +383,7 @@ fn handle_trigger(
         effective_decision.stop_schema_trigger_hint = schema_gate.reason_code.clone();
     }
 
-    let handler_result = run_stop_message_auto_handler_native(
-        &effective_decision,
-        &input.adapter_context,
-        &input.base,
-        &input.followup_flow_id,
-    );
+    let handler_result = run_stop_message_auto_handler_native(&effective_decision, &input.base);
 
     let stopless_runtime_state = handler_result
         .get("stoplessRuntimeState")
@@ -487,10 +414,7 @@ fn handle_trigger(
         return StopMessageAutoHandlerPlan {
             action: StopMessageAutoPlanAction::ReturnTerminalFinal,
             compare_context: compare.clone(),
-            terminal_chat_response: Some(build_terminal_visible_payload_replace(
-                &input.base,
-                "stopless budget exhausted",
-            )),
+            terminal_chat_response: Some(build_terminal_visible_payload(&input.base, "")),
             ..Default::default()
         };
     }
@@ -664,31 +588,11 @@ fn schema_gate_from_core(decision: StopSchemaGateDecision) -> SchemaGateResult {
     }
 }
 
-// ── Stopless loop guard (local) ─────────────────────────────────────────────
-
-fn evaluate_stopless_loop_guard(
-    _captured: &Value,
-    _assistant_text: &str,
-    threshold: i64,
-) -> StoplessLoopResult {
-    // Simplified: the full implementation delegates to stop_message_core.
-    // For the handler plan, no-detected is the safe default.
-    // The NAPI path handles the real evaluation.
-    StoplessLoopResult {
-        loop_detected: false,
-        repeat_count: 0,
-        threshold,
-        goal_context_count: 0,
-        reason_code: None,
-    }
-}
-
 // ── Compare context ─────────────────────────────────────────────────────────
 
 fn build_compare_from_decision(
     decision: &StopMessageDecision,
     stop_gateway: &StopGatewayContext,
-    captured: Option<&Value>,
 ) -> StopMessageCompareContext {
     let is_trigger = decision.action == "trigger";
     StopMessageCompareContext {
@@ -709,7 +613,6 @@ fn build_compare_from_decision(
         remaining: (decision.max_repeats as i64 - decision.used as i64).max(0) as i32,
         active: is_trigger,
         stop_eligible: stop_gateway.eligible,
-        has_captured_request: captured.is_some(),
         compaction_request: false,
         has_seed: false,
         decision: if is_trigger {
@@ -750,11 +653,8 @@ fn build_terminal_visible_payload_replace(base: &Value, prefix: &str) -> Value {
 }
 
 fn resolve_fail_fast_summary_prefix(reason_code: &str) -> String {
-    if reason_code == "stop_schema_budget_exhausted" {
-        "stopless budget exhausted".to_string()
-    } else {
-        "".to_string()
-    }
+    let _ = reason_code;
+    "".to_string()
 }
 
 fn normalize_trigger_hint(reason_code: Option<&str>) -> Option<String> {
@@ -847,7 +747,6 @@ fn build_finalize_context(
 fn build_decision_context(
     signals: &StoplessDecisionContextSignals,
     stop_gateway: &StopGatewayContext,
-    captured: Option<&Value>,
     metadata_center_stopless: Option<&Value>,
     snap_repeat: Option<i64>,
     snap_max: Option<i64>,
@@ -970,9 +869,7 @@ fn serialize_schema_gate(gate: &SchemaGateResult) -> Value {
 
 fn run_stop_message_auto_handler_native(
     decision: &StopMessageDecision,
-    adapter_context: &Value,
     base: &Value,
-    followup_flow_id: &Option<String>,
 ) -> Value {
     // This mirrors the logic from the existing run_stop_message_auto_handler_json
     // in chat_servertool_orchestration.rs. In production the NAPI call is used;
@@ -1033,11 +930,6 @@ fn empty_plan() -> StopMessageAutoHandlerPlan {
         terminal_chat_response: None,
         should_write_learned_note: Some(false),
         learned_note: None,
-        stopless_loop_error_message: None,
-        stopless_loop_error_code: None,
-        stopless_loop_repeat_count: None,
-        stopless_loop_threshold: None,
-        stopless_loop_goal_context_count: None,
         flow_id: None,
         effective_decision: None,
         schema_gate: None,
@@ -1077,7 +969,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: None,
             provider_key: None,
         });
@@ -1105,7 +996,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: None,
             provider_key: None,
         });
@@ -1144,7 +1034,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: None,
             provider_key: None,
         });
@@ -1174,7 +1063,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: None,
             provider_key: None,
         });
@@ -1210,7 +1098,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: None,
             provider_key: None,
         });
@@ -1249,7 +1136,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 1,
                 "maxRepeats": 3,
@@ -1308,7 +1194,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 1,
                 "maxRepeats": 3,
@@ -1316,10 +1201,13 @@ mod tests {
             })),
             provider_key: None,
         });
-        // prev_no_change_count=2 + same schema reaches the stopless guard and
-        // materializes as the terminal budget response in the handler.
-        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnTerminalFinal);
-        assert_eq!(plan.compare_context.reason, "stop_schema_budget_exhausted");
+        // Valid stopreason=2 + next_step is progress control. Even if the
+        // observation is stable, it must not materialize as a budget terminal.
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
+        assert_eq!(
+            plan.compare_context.reason,
+            "stop_schema_continue_next_step"
+        );
     }
 
     #[test]
@@ -1357,7 +1245,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 1,
                 "maxRepeats": 3,
@@ -1408,7 +1295,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: None,
             provider_key: None,
         });
@@ -1416,10 +1302,7 @@ mod tests {
         let persist_plan = plan.persist_plan.as_ref().expect("persist plan");
         assert_eq!(persist_plan.next_used, 1);
         assert_eq!(persist_plan.next_max_repeats, 3);
-        assert_eq!(
-            plan.stopless_trigger_hint.as_deref(),
-            Some("no_schema")
-        );
+        assert_eq!(plan.stopless_trigger_hint.as_deref(), Some("no_schema"));
         assert_eq!(plan.compare_context.reason, "stop_schema_missing");
     }
 
@@ -1471,7 +1354,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: true,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 1,
                 "maxRepeats": 3,
@@ -1481,10 +1363,7 @@ mod tests {
         });
 
         assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
-        assert_eq!(
-            plan.stopless_trigger_hint.as_deref(),
-            Some("no_schema")
-        );
+        assert_eq!(plan.stopless_trigger_hint.as_deref(), Some("no_schema"));
         assert_eq!(plan.compare_context.reason, "stop_schema_missing");
         let persist_plan = plan.persist_plan.as_ref().expect("persist plan");
         assert_eq!(persist_plan.next_used, 2);
@@ -1492,7 +1371,7 @@ mod tests {
     }
 
     #[test]
-    fn budget_exhausted_followup_path_replaces_provider_text_with_terminal_summary() {
+    fn budget_exhausted_followup_path_preserves_original_visible_text() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             adapter_context: json!({}),
             base: json!({
@@ -1531,15 +1410,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: true,
                 plan_mode_active: false,
             },
-            captured_request: Some(json!({
-                "input": [
-                    {
-                        "type": "function_call_output",
-                        "call_id": "call_stop_budget",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"summary\":\"继续执行\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
-                    }
-                ]
-            })),
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 2,
                 "maxRepeats": 3,
@@ -1557,29 +1427,24 @@ mod tests {
             .as_str()
             .unwrap_or("");
         assert!(
-            content.contains("stopless budget exhausted"),
-            "terminal budget exhausted path must replace provider text, got: {content}"
+            content.contains("继续执行中"),
+            "terminal budget exhausted path must preserve original visible text, got: {content}"
         );
-        assert!(
-            !content.contains("继续执行中"),
-            "provider raw text must not leak through budget exhausted terminal path, got: {content}"
-        );
+        assert!(!content.contains("stopless"));
         let output_text = terminal["output_text"].as_str().unwrap_or("");
         assert!(
-            output_text.contains("stopless budget exhausted"),
-            "responses output_text must report budget exhaustion, got: {output_text}"
+            output_text.contains("继续执行中"),
+            "responses output_text must preserve original visible text, got: {output_text}"
         );
-        assert!(
-            !output_text.contains("继续执行中"),
-            "provider raw output_text must not leak through budget exhausted terminal path, got: {output_text}"
-        );
+        assert!(!output_text.contains("stopless"));
         let nested_output_text = terminal["output"][0]["content"][0]["text"]
             .as_str()
             .unwrap_or("");
         assert!(
-            nested_output_text.contains("stopless budget exhausted"),
-            "responses nested output must report budget exhaustion, got: {nested_output_text}"
+            nested_output_text.contains("继续执行中"),
+            "responses nested output must preserve original visible text, got: {nested_output_text}"
         );
+        assert!(!nested_output_text.contains("stopless"));
     }
 
     #[test]
@@ -1625,13 +1490,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: true,
                 plan_mode_active: false,
             },
-            captured_request: Some(json!({
-                "input": [{
-                    "type": "function_call_output",
-                    "call_id": "call_stop_invalid_round2",
-                    "output": "{\"toolName\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"invalid_schema\"},\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[\"next_step\"]}}"
-                }]
-            })),
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 2,
                 "maxRepeats": 3,
@@ -1689,7 +1547,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 1,
                 "maxRepeats": 3,
@@ -1740,7 +1597,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 1,
                 "maxRepeats": 3,
@@ -1795,7 +1651,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: false,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 1,
                 "maxRepeats": 3,
@@ -1877,7 +1732,6 @@ mod tests {
                 has_responses_submit_tool_outputs_resume: true,
                 plan_mode_active: false,
             },
-            captured_request: None,
             effective_runtime_loop_state: Some(json!({
                 "repeatCount": 1,
                 "maxRepeats": 3,

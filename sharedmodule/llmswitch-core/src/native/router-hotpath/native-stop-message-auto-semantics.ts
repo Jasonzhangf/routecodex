@@ -88,14 +88,6 @@ export type StopSchemaGateDecision = {
   parsed?: Record<string, unknown>;
 };
 
-export type StoplessLoopGuardDecision = {
-  loopDetected: boolean;
-  repeatCount: number;
-  threshold: number;
-  goalContextCount: number;
-  reasonCode: string;
-};
-
 export function runStopMessageAutoHandlerWithNative(input: {
   decision: StopMessageDecision;
   adapterContext: Record<string, unknown>;
@@ -222,29 +214,6 @@ export function evaluateStopSchemaGateWithNative(args: {
         : {})
     };
     return normalized;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function evaluateStoplessLoopGuardWithNative(args: {
-  capturedRequest: Record<string, unknown>;
-  assistantText: string;
-  threshold?: number;
-}): StoplessLoopGuardDecision {
-  const capability = 'evaluateStoplessLoopGuardJson';
-  const fail = (reason?: string) => failNativeRequired<StoplessLoopGuardDecision>(capability, reason);
-  try {
-    const fn = readNativeFunction(capability);
-    if (!fn) {
-      return fail('native_unavailable');
-    }
-    const raw = fn(JSON.stringify(args));
-    if (typeof raw !== 'string') {
-      return fail(`native_returned_non_string: ${typeof raw}`);
-    }
-    return JSON.parse(raw) as StoplessLoopGuardDecision;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

@@ -71,6 +71,14 @@ fn evaluate_responses_direct_route_decision(
             }));
         }
     }
+    if inbound_protocol == "openai-responses" && stop_message_requires_hub_relay(metadata) {
+        return Ok(serde_json::json!({
+            "providerWireValid": true,
+            "requiresHubRelay": true,
+            "reason": "servertool_followup_requires_hub_relay",
+            "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
+        }));
+    }
     Ok(serde_json::json!({
         "providerWireValid": true,
         "requiresHubRelay": false,
@@ -79,7 +87,7 @@ fn evaluate_responses_direct_route_decision(
     }))
 }
 
-fn stop_message_excludes_direct(metadata: &Value) -> bool {
+fn stop_message_requires_hub_relay(metadata: &Value) -> bool {
     let Some(root) = metadata.as_object() else {
         return false;
     };
@@ -93,10 +101,10 @@ fn stop_message_excludes_direct(metadata: &Value) -> bool {
     if !stop_message_enabled {
         return false;
     }
-    center
+    !center
         .as_ref()
         .and_then(MetadataCenterReader::stop_message_exclude_direct)
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 fn read_trimmed_lower(value: Option<&Value>) -> Option<String> {
@@ -267,7 +275,7 @@ mod responses_direct_route_decision_tests {
     }
 
     #[test]
-    fn responses_request_stays_direct_when_stop_message_is_enabled() {
+    fn responses_request_requires_hub_relay_when_stop_message_includes_direct() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -293,11 +301,11 @@ mod responses_direct_route_decision_tests {
             "openai-responses",
             "client",
         )
-        .expect("direct requests must stay direct even when stopless is enabled");
+        .expect("stopless includeDirect requires relay into Hub Chat Process");
 
         assert_eq!(decision["providerWireValid"], true);
-        assert_eq!(decision["requiresHubRelay"], false);
-        assert_eq!(decision["reason"], Value::Null);
+        assert_eq!(decision["requiresHubRelay"], true);
+        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
     }
 
     #[test]

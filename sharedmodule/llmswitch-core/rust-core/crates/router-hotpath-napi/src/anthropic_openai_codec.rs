@@ -285,6 +285,17 @@ fn normalize_anthropic_tool_input_schema(raw: Option<&Value>) -> Value {
     }
 }
 
+fn read_chat_tool_schema_source<'a>(
+    row: &'a Map<String, Value>,
+    function_row: &'a Map<String, Value>,
+) -> Option<&'a Value> {
+    function_row
+        .get("parameters")
+        .or_else(|| function_row.get("input_schema"))
+        .or_else(|| row.get("parameters"))
+        .or_else(|| row.get("input_schema"))
+}
+
 fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value> {
     let rows = raw_tools.and_then(|v| v.as_array())?;
     if rows.is_empty() {
@@ -321,7 +332,7 @@ fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Option<Value>
                 "additionalProperties": true
             })
         } else {
-            normalize_anthropic_tool_input_schema(function_row.get("parameters"))
+            normalize_anthropic_tool_input_schema(read_chat_tool_schema_source(row, function_row))
         };
         let mut tool = Map::<String, Value>::new();
         tool.insert("name".to_string(), Value::String(name));
@@ -393,6 +404,49 @@ mod apply_patch_tool_schema_tests {
             assert_eq!(tool["input_schema"]["properties"], json!({}));
             assert_eq!(tool["input_schema"]["additionalProperties"], json!(true));
         }
+    }
+
+    #[test]
+    fn map_chat_tools_to_anthropic_tools_preserves_top_level_input_schema() {
+        let input = json!([
+            {
+                "type": "function",
+                "name": "read_file",
+                "description": "read a file",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" }
+                    },
+                    "required": ["path"]
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_directory",
+                    "description": "list files"
+                },
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" }
+                    }
+                }
+            }
+        ]);
+
+        let out = map_chat_tools_to_anthropic_tools(Some(&input)).unwrap();
+        let tools = out.as_array().unwrap();
+        assert_eq!(tools[0]["input_schema"]["required"], json!(["path"]));
+        assert_eq!(
+            tools[0]["input_schema"]["properties"]["path"]["type"],
+            json!("string")
+        );
+        assert_eq!(
+            tools[1]["input_schema"]["properties"]["path"]["type"],
+            json!("string")
+        );
     }
 }
 

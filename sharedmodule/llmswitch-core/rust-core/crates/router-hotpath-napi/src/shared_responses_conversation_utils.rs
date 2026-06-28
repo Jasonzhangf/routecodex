@@ -479,7 +479,7 @@ fn render_stopless_schema_guidance_text(schema_guidance: &Value) -> Option<Strin
         ));
     }
     lines.push(
-        "必填关系：stopreason 必须是数字 0/1/2；reason 必须说明当前状态；has_evidence 必须是 0 或 1；has_evidence=1 时 evidence 必须写证据；stopreason=0/1 是停止条件，必须 has_evidence=1 且 evidence 非空；stopreason=2 必须写 next_step，下一轮只执行 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。".to_string(),
+        "必填关系：stopreason 必须是数字 0/1/2；stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空；stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止；stopreason=2 必须写 next_step，下一轮只执行 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。".to_string(),
     );
     if !field_descriptions.is_empty() {
         lines.push(format!(
@@ -2606,7 +2606,7 @@ mod tests {
     #[test]
     fn stopless_resume_guidance_for_first_missing_schema_round_stays_short() {
         let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"continuationPrompt\":\"继续推进当前任务。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"continuationPrompt\":\"继续推进当前任务。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
         );
         assert_eq!(text, "继续执行，完成既定目标。");
         assert!(!text.contains("上一轮执行结果"));
@@ -2620,15 +2620,14 @@ mod tests {
     #[test]
     fn stopless_resume_guidance_for_second_missing_schema_round_must_expand_branching() {
         let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"continuationPrompt\":\"继续推进当前任务。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"sample\":\"{\\\"stopreason\\\":2,\\\"reason\\\":\\\"继续执行\\\",\\\"has_evidence\\\":0,\\\"evidence\\\":\\\"\\\",\\\"next_step\\\":\\\"运行下一条验证\\\",\\\"needs_user_input\\\":false}\",\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"continuationPrompt\":\"继续推进当前任务。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\"],\"sample\":\"{\\\"stopreason\\\":2,\\\"reason\\\":\\\"继续执行\\\",\\\"has_evidence\\\":0,\\\"evidence\\\":\\\"\\\",\\\"next_step\\\":\\\"运行下一条验证\\\",\\\"needs_user_input\\\":false}\",\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
         );
-        assert!(text.contains("上一轮执行结果：repeatCount=2；reasonCode=stop_schema_missing；missingFields=stopreason, reason, next_step。"));
-        assert!(text.contains(
-            "如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"
-        ));
+        assert!(text.contains("上一轮执行结果：repeatCount=2；reasonCode=stop_schema_missing；missingFields=stopreason。"));
+        assert!(text.contains("如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason"));
         assert!(text.contains("如果任务还没完成，不要停，继续执行当前任务"));
         assert!(text.contains("按字段之间的逻辑关系填写，不是每个字段都必填"));
-        assert!(text.contains("stopreason=0/1 是停止条件"));
+        assert!(text.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
+        assert!(text.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
         assert!(text.contains("stopreason=2 必须写 next_step"));
         assert!(text.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
         assert!(text.contains("最小可复制样本："));
@@ -3058,6 +3057,7 @@ mod tests {
             Some("session:sess-1")
         );
     }
+
     #[test]
     fn restore_preserves_current_delta_without_history_normalization() {
         let current_delta = json!({
@@ -3097,7 +3097,6 @@ mod tests {
         let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
         assert_eq!(full_input[2], current_delta);
     }
-
 
     #[test]
     fn direct_owned_scope_restore_does_not_reinject_tools() {
@@ -3237,6 +3236,7 @@ mod tests {
         assert_eq!(entry["basePayload"]["model"].as_str(), Some("cached-model"));
         assert_eq!(entry["input"][0], first_prefix_before);
     }
+
     #[test]
     fn materialize_preserves_saved_prefix_and_current_delta_without_history_normalization() {
         let saved_prefix = json!({
@@ -3285,7 +3285,6 @@ mod tests {
         assert_eq!(full_input[1], saved_prefix);
         assert_eq!(full_input[2], current_delta);
     }
-
 
     #[test]
     fn does_not_materialize_plain_continuation_when_prefix_has_pending_tool_call_without_leading_output(

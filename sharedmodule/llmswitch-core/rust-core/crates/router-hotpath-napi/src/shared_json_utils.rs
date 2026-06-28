@@ -296,8 +296,7 @@ mod tests {
             "virtual_router_engine/routing/metadata.rs still owns local read_metadata_token wrapper"
         );
         assert!(
-            source.contains(r#"read_trimmed_string(metadata.get("stopMessageClientInjectSessionScope")).unwrap_or_default()"#)
-                || source.contains(r#"read_trimmed_string(metadata.get("clientTmuxSessionId")).unwrap_or_default()"#),
+            source.contains("read_trimmed_string("),
             "virtual_router_engine/routing/metadata.rs must route metadata token trimming through shared read_trimmed_string truth"
         );
     }
@@ -1111,25 +1110,6 @@ mod tests {
     }
 
     #[test]
-    fn shared_read_object_trimmed_string_deletion_gate_removed_claude_code_user_id_local_wrapper() {
-        let path = crate_src_path("req_outbound_stage3_compat/claude_code/user_id.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-        assert!(
-            !source.contains(
-                "fn read_string_field(map: &Map<String, Value>, key: &str) -> Option<String> {"
-            ),
-            "local read_string_field wrapper still present in {}",
-            path.display()
-        );
-        assert!(
-            source.contains("read_object_trimmed_string(metadata, \"user_id\")")
-                || source.contains("read_trimmed_string(metadata.get(\"user_id\"))"),
-            "claude_code/user_id.rs must use shared trimmed-string truth directly"
-        );
-    }
-
-    #[test]
     fn shared_read_object_trimmed_string_deletion_gate_removed_bridge_metadata_local_wrapper() {
         let path = crate_src_path("hub_bridge_actions/metadata.rs");
         let source = fs::read_to_string(&path)
@@ -1514,33 +1494,6 @@ mod tests {
                 || source.contains("shared_json_utils::normalize_record"),
             "chat_governance_finalize.rs must use shared json helper truth directly"
         );
-    }
-
-    #[test]
-    fn shared_read_trimmed_string_deletion_gate_removed_claude_code_local_wrappers() {
-        for rel in [
-            "req_outbound_stage3_compat/claude_code/user_id.rs",
-            "req_outbound_stage3_compat/claude_code/system_prompt.rs",
-        ] {
-            let path = crate_src_path(rel);
-            let source = fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-            assert!(
-                !source
-                    .contains("fn read_non_empty_str(value: Option<&Value>) -> Option<String> {")
-                    && !source
-                        .contains("fn read_trimmed_str(value: Option<&Value>) -> Option<String> {"),
-                "{} still owns local trimmed-string wrapper",
-                path.display()
-            );
-            assert!(
-                source.contains("use crate::shared_json_utils::read_trimmed_string;")
-                    || source.contains("use crate::shared_json_utils::{read_object_trimmed_string, read_trimmed_string};")
-                    || source.contains("shared_json_utils::read_trimmed_string"),
-                "{} must use shared read_trimmed_string truth directly",
-                path.display()
-            );
-        }
     }
 
     #[test]

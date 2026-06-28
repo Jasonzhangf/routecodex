@@ -50,7 +50,6 @@ export interface StopMessageCompareContext {
   remaining: number;
   active: boolean;
   stopEligible: boolean;
-  hasCapturedRequest: boolean;
   compactionRequest: boolean;
   hasSeed: boolean;
   decision: 'trigger' | 'skip';
@@ -398,18 +397,15 @@ export interface StoplessLearnedNoteWritePlan {
   evidence?: string;
 }
 
-export interface StoplessCliProjectionContextRuntimeSnapshot {
-  used?: number;
-  maxRepeats?: number;
-  triggerHint?: string;
-  schemaFeedback?: JsonObject;
+export interface StoplessCliProjectionMetadataWritePlan {
+  stopless?: JsonObject;
 }
 
 export interface StoplessCliProjectionContextPlan {
   reasoningText: string;
   repeatCount: number;
   maxRepeats: number;
-  triggerHint?: string;
+  publicTriggerHint?: string;
   schemaFeedback?: JsonObject;
   sessionId?: string;
   requestId?: string;
@@ -978,7 +974,6 @@ function parseStopMessageCompareContextPayload(resultJson: string, capability: s
     'allowModeOnly',
     'active',
     'stopEligible',
-    'hasCapturedRequest',
     'compactionRequest',
     'hasSeed',
   ]) {
@@ -1004,7 +999,6 @@ function parseStopMessageCompareContextPayload(resultJson: string, capability: s
     remaining: record.remaining as number,
     active: record.active as boolean,
     stopEligible: record.stopEligible as boolean,
-    hasCapturedRequest: record.hasCapturedRequest as boolean,
     compactionRequest: record.compactionRequest as boolean,
     hasSeed: record.hasSeed as boolean,
     decision,
@@ -1300,7 +1294,6 @@ export function planStopMessageRoutingStateClearWithNative(
 export function planStoplessDecisionContextSignalsWithNative(input: {
   adapterContext: unknown;
   runtimeMetadata?: unknown;
-  capturedRequest?: unknown;
 }): StoplessDecisionContextSignals {
   const capability = 'planStoplessDecisionContextSignalsJson';
   const fn = readNativeFunction(capability);
@@ -1558,9 +1551,8 @@ export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string
 }
 
 export function planStoplessCliProjectionContextWithNative(input: {
-  executionContext?: unknown;
+  metadataWritePlan?: StoplessCliProjectionMetadataWritePlan | null;
   stoplessControl?: unknown;
-  runtimeSnapshot?: StoplessCliProjectionContextRuntimeSnapshot;
   chatStopText?: string;
   adapterStopText?: string;
   sessionId?: string;
@@ -1589,8 +1581,8 @@ export function planStoplessCliProjectionContextWithNative(input: {
   if (typeof record.maxRepeats !== 'number' || !Number.isFinite(record.maxRepeats) || record.maxRepeats < 1) {
     throw new Error('planStoplessCliProjectionContextJson native returned invalid maxRepeats');
   }
-  if (record.triggerHint !== undefined && typeof record.triggerHint !== 'string') {
-    throw new Error('planStoplessCliProjectionContextJson native returned invalid triggerHint');
+  if (record.publicTriggerHint !== undefined && typeof record.publicTriggerHint !== 'string') {
+    throw new Error('planStoplessCliProjectionContextJson native returned invalid publicTriggerHint');
   }
   if (
     record.schemaFeedback !== undefined &&
@@ -1602,8 +1594,8 @@ export function planStoplessCliProjectionContextWithNative(input: {
     reasoningText: record.reasoningText,
     repeatCount: record.repeatCount,
     maxRepeats: record.maxRepeats,
-    ...(typeof record.triggerHint === 'string' && record.triggerHint.trim()
-      ? { triggerHint: record.triggerHint }
+    ...(typeof record.publicTriggerHint === 'string' && record.publicTriggerHint.trim()
+      ? { publicTriggerHint: record.publicTriggerHint }
       : {}),
     ...(record.schemaFeedback && typeof record.schemaFeedback === 'object' && !Array.isArray(record.schemaFeedback)
       ? { schemaFeedback: record.schemaFeedback as JsonObject }
@@ -1883,22 +1875,6 @@ export function resolveStopMessageFollowupProviderKeyWithNative(
   }
   const parsed = JSON.parse(resultJson) as string;
   return typeof parsed === 'string' ? parsed : '';
-}
-
-export function getCapturedRequestWithNative(adapterContext: unknown): Record<string, unknown> | null {
-  const capability = 'getCapturedRequestJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('getCapturedRequestJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(adapterContext));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`getCapturedRequestJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? parsed as Record<string, unknown>
-    : null;
 }
 
 export function resolveClientConnectionStateWithNative(value: unknown): { disconnected?: boolean } | null {

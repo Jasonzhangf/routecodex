@@ -386,204 +386,12 @@ fn resolve_runtime_stopless_control_snapshot(
 pub fn resolve_runtime_stop_message_state_from_adapter_context(
     input: &RuntimeStopMessageStateFromAdapterContextInput,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
-    if let Some(snapshot) =
-        resolve_stopless_cli_result_snapshot_from_request(&input.adapter_context)
-    {
-        return Some(snapshot);
-    }
-    if let Some(snapshot) =
-        resolve_stopless_cli_result_snapshot_from_responses_resume(&input.adapter_context)
-    {
-        return Some(snapshot);
-    }
-    if let Some(snapshot) =
-        resolve_stopless_cli_result_snapshot_from_responses_resume(input.runtime_metadata.as_ref()?)
-    {
-        return Some(snapshot);
-    }
-    if let Some(snapshot) =
-        resolve_stopless_cli_result_snapshot_from_runtime_metadata(input.runtime_metadata.as_ref())
-    {
-        return Some(snapshot);
-    }
     if let Some(runtime) = input.runtime_metadata.as_ref() {
         if let Some(snapshot) = resolve_runtime_stop_message_state(runtime) {
             return Some(snapshot);
         }
     }
     None
-}
-
-fn resolve_stopless_cli_result_snapshot_from_responses_resume(
-    carrier: &Value,
-) -> Option<RuntimeStopMessageStateSnapshot> {
-    let resume = find_responses_resume_carrier(carrier)?;
-    read_stopless_cli_result_snapshot_from_tool_output_details(resume.get("toolOutputsDetailed")?)
-}
-
-fn find_responses_resume_carrier(carrier: &Value) -> Option<&serde_json::Map<String, Value>> {
-    let record = carrier.as_object()?;
-    if let Some(resume) = record.get("responsesResume").and_then(Value::as_object) {
-        return Some(resume);
-    }
-    if let Some(resume) = record
-        .get("metadataCenterSnapshot")
-        .and_then(|snapshot| snapshot.get("continuationContext"))
-        .and_then(|continuation| continuation.get("responsesResume"))
-        .and_then(Value::as_object)
-    {
-        return Some(resume);
-    }
-    record
-        .get("metadata")
-        .and_then(|metadata| metadata.get("metadataCenterSnapshot"))
-        .and_then(|snapshot| snapshot.get("continuationContext"))
-        .and_then(|continuation| continuation.get("responsesResume"))
-        .and_then(Value::as_object)
-}
-
-fn resolve_stopless_cli_result_snapshot_from_runtime_metadata(
-    runtime_metadata: Option<&Value>,
-) -> Option<RuntimeStopMessageStateSnapshot> {
-    let runtime_record = runtime_metadata?.as_object()?;
-    let responses_context = runtime_record
-        .get("responsesRequestContext")
-        .and_then(Value::as_object)?;
-    for candidate in [
-        responses_context.get("payload"),
-        responses_context.get("context"),
-    ] {
-        if let Some(snapshot) = candidate.and_then(read_stopless_cli_result_snapshot_from_request) {
-            return Some(snapshot);
-        }
-    }
-    None
-}
-
-fn resolve_stopless_cli_result_snapshot_from_request(
-    adapter_context: &Value,
-) -> Option<RuntimeStopMessageStateSnapshot> {
-    let record = adapter_context.as_object()?;
-    if let Some(raw_request) = record.get("__raw_request_body") {
-        if let Some(snapshot) = read_stopless_cli_result_snapshot_from_request(raw_request) {
-            return Some(snapshot);
-        }
-    }
-    if let Some(captured_request) = get_captured_request(adapter_context) {
-        if let Some(snapshot) = read_stopless_cli_result_snapshot_from_request(&captured_request) {
-            return Some(snapshot);
-        }
-    }
-    None
-}
-
-fn read_stopless_cli_result_snapshot_from_tool_output_details(
-    details: &Value,
-) -> Option<RuntimeStopMessageStateSnapshot> {
-    let rows = details.as_array()?;
-    for row_value in rows {
-        let row = row_value.as_object()?;
-        let raw_output = read_trimmed_string(row.get("outputText"))
-            .or_else(|| read_trimmed_string(row.get("output")))?;
-        if let Some(snapshot) = read_stopless_cli_result_snapshot_from_output_text(&raw_output) {
-            return Some(snapshot);
-        }
-    }
-    None
-}
-
-fn read_stopless_cli_result_snapshot_from_request(
-    request: &Value,
-) -> Option<RuntimeStopMessageStateSnapshot> {
-    let request_obj = request.as_object()?;
-    let mut candidate_outputs: Vec<&Value> = Vec::new();
-    if let Some(tool_outputs) = request_obj.get("tool_outputs").and_then(Value::as_array) {
-        candidate_outputs.extend(tool_outputs.iter());
-    }
-    if let Some(input_items) = request_obj.get("input").and_then(Value::as_array) {
-        for item in input_items {
-            let Some(row) = item.as_object() else {
-                continue;
-            };
-            let item_type = read_trimmed_string(row.get("type"))
-                .map(|value| value.to_ascii_lowercase())
-                .unwrap_or_default();
-            if matches!(
-                item_type.as_str(),
-                "function_call_output" | "tool_result" | "tool_message"
-            ) {
-                candidate_outputs.push(item);
-            }
-        }
-    }
-    for output in candidate_outputs {
-        let output_record = output.as_object()?;
-        let raw_output = read_trimmed_string(output_record.get("output"))?;
-        if let Some(snapshot) = read_stopless_cli_result_snapshot_from_output_text(&raw_output) {
-            return Some(snapshot);
-        }
-    }
-    None
-}
-
-fn read_stopless_cli_result_snapshot_from_output_text(
-    raw_output: &str,
-) -> Option<RuntimeStopMessageStateSnapshot> {
-    let parsed: Value = serde_json::from_str(raw_output).ok()?;
-    let row = parsed.as_object()?;
-    if read_trimmed_string(row.get("toolName")).as_deref() != Some("stop_message_auto") {
-        return None;
-    }
-    if read_trimmed_string(row.get("flowId")).as_deref() != Some(STOP_MESSAGE_FOLLOWUP_FLOW_ID) {
-        return None;
-    }
-    let repeat_count = read_js_nonnegative_integer(row.get("repeatCount"))?;
-    let max_repeats = read_js_nonnegative_integer(row.get("maxRepeats"))?;
-    if max_repeats <= 0 {
-        return None;
-    }
-    let text = read_trimmed_string(row.get("continuationPrompt"))
-        .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
-    Some(RuntimeStopMessageStateSnapshot {
-        text,
-        provider_key: None,
-        max_repeats,
-        used: repeat_count,
-        trigger_hint: read_trimmed_string(
-            row.get("triggerHint")
-                .or_else(|| row.get("trigger_hint"))
-                .or_else(|| {
-                    row.get("schemaGuidance")
-                        .or_else(|| row.get("schema_guidance"))
-                        .and_then(Value::as_object)
-                        .and_then(|guidance| {
-                            guidance
-                                .get("triggerHint")
-                                .or_else(|| guidance.get("trigger_hint"))
-                        })
-                })
-                .or_else(|| {
-                    row.get("input")
-                        .or_else(|| row.get("input_json"))
-                        .and_then(Value::as_object)
-                        .and_then(|input| {
-                            input
-                                .get("triggerHint")
-                                .or_else(|| input.get("trigger_hint"))
-                        })
-                }),
-        ),
-        schema_feedback: row
-            .get("schemaFeedback")
-            .or_else(|| row.get("schema_feedback"))
-            .filter(|value| value.is_object())
-            .cloned(),
-        source: Some("client_exec_result".to_string()),
-        updated_at: None,
-        last_used_at: None,
-        stage_mode: Some("on".to_string()),
-        ai_mode: None,
-    })
 }
 
 pub fn read_runtime_stop_message_stage_mode(runtime_metadata: &Value) -> Option<String> {
@@ -737,19 +545,6 @@ pub fn resolve_stop_message_followup_provider_key(
                 .and_then(read_provider_key_from_metadata)
         })
         .unwrap_or_default()
-}
-
-pub fn get_captured_request(adapter_context: &Value) -> Option<Value> {
-    let record = adapter_context.as_object()?;
-    for key in ["capturedEntryRequest", "capturedChatRequest"] {
-        let Some(candidate) = record.get(key) else {
-            continue;
-        };
-        if candidate.is_object() {
-            return Some(candidate.clone());
-        }
-    }
-    None
 }
 
 pub fn resolve_client_connection_state(value: &Value) -> Option<Value> {
@@ -2147,28 +1942,6 @@ mod tests {
     }
 
     #[test]
-    fn captured_request_uses_entry_then_chat_request() {
-        assert_eq!(
-            get_captured_request(&json!({
-                "capturedEntryRequest": { "input": "entry" },
-                "capturedChatRequest": { "messages": [] }
-            })),
-            Some(json!({ "input": "entry" }))
-        );
-        assert_eq!(
-            get_captured_request(&json!({
-                "capturedEntryRequest": [],
-                "capturedChatRequest": { "messages": [] }
-            })),
-            Some(json!({ "messages": [] }))
-        );
-        assert_eq!(
-            get_captured_request(&json!({ "capturedEntryRequest": [] })),
-            None
-        );
-    }
-
-    #[test]
     fn runtime_context_helpers_match_ts_contracts() {
         assert_eq!(
             resolve_client_connection_state(&json!({ "disconnected": true })),
@@ -2285,236 +2058,88 @@ mod tests {
     }
 
     #[test]
-    fn adapter_context_restores_stopless_cli_result_from_request_record() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
-            runtime_metadata: None,
-            adapter_context: json!({
-                "capturedEntryRequest": {
-                    "input": [{
-                        "type": "function_call",
-                        "call_id": "call_servertool_cli",
-                        "name": "exec_command",
-                        "arguments": json!({
-                            "cmd": "routecodex servertool run stop_message_auto --input-json '{}'"
-                        }).to_string()
-                    }],
-                    "tool_outputs": [{
-                        "type": "function_call_output",
-                        "call_id": "call_servertool_cli",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from result\",\"repeatCount\":3,\"maxRepeats\":5}"
-                    }]
-                }
-            }),
-        };
-
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("stopless cli result snapshot");
-        assert_eq!(snapshot.text, "continue from result");
-        assert_eq!(snapshot.max_repeats, 5);
-        assert_eq!(snapshot.used, 3);
-        assert_eq!(snapshot.trigger_hint.as_deref(), None);
-        assert!(snapshot.schema_feedback.is_none());
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
-    }
-
-    #[test]
-    fn current_request_stopless_cli_result_wins_over_stale_runtime_snapshot() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
-            runtime_metadata: Some(json!({
-                "stopMessageState": {
-                    "stopMessageText": " stale runtime text ",
-                    "stopMessageStageMode": "on",
-                    "stopMessageMaxRepeats": 4,
-                    "stopMessageUsed": 0
-                }
-            })),
-            adapter_context: json!({
-                "__raw_request_body": {
-                    "input": [{
-                        "type": "function_call_output",
-                        "call_id": "call_servertool_cli",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from current tool output\",\"repeatCount\":3,\"maxRepeats\":4}"
-                    }]
-                }
-            }),
-        };
-
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("current request stopless cli result snapshot");
-        assert_eq!(snapshot.text, "continue from current tool output");
-        assert_eq!(snapshot.max_repeats, 4);
-        assert_eq!(snapshot.used, 3);
-        assert_eq!(snapshot.trigger_hint.as_deref(), None);
-        assert!(snapshot.schema_feedback.is_none());
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
-    }
-
-    #[test]
-    fn adapter_context_restores_stopless_cli_result_from_responses_input_only() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
-            runtime_metadata: None,
-            adapter_context: json!({
-                "__raw_request_body": {
-                    "input": [{
-                        "type": "function_call_output",
-                        "call_id": "call_servertool_cli",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from responses input\",\"repeatCount\":2,\"maxRepeats\":3}"
-                    }]
-                }
-            }),
-        };
-
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("responses input stopless cli result snapshot");
-        assert_eq!(snapshot.text, "continue from responses input");
-        assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 2);
-        assert_eq!(snapshot.trigger_hint.as_deref(), None);
-        assert!(snapshot.schema_feedback.is_none());
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
-    }
-
-    #[test]
-    fn runtime_metadata_responses_request_context_restores_stopless_cli_result() {
+    fn adapter_context_does_not_restore_stopless_state_from_context_or_raw_request() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: Some(json!({
                 "responsesRequestContext": {
-                    "payload": {
-                        "model": "gpt-5.5",
-                        "previous_response_id": "resp_prev_stopless_1"
-                    },
                     "context": {
                         "input": [{
                             "type": "function_call_output",
-                            "call_id": "call_servertool_cli",
-                            "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from relay responsesRequestContext\",\"repeatCount\":2,\"maxRepeats\":3}"
+                            "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"from responsesRequestContext\",\"repeatCount\":2,\"maxRepeats\":3}"
                         }]
                     }
                 }
             })),
             adapter_context: json!({
+                "capturedEntryRequest": {
+                    "tool_outputs": [{
+                        "type": "function_call_output",
+                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"from captured\",\"repeatCount\":3,\"maxRepeats\":5}"
+                    }]
+                },
+                "capturedChatRequest": {
+                    "messages": [{ "role": "tool", "content": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}" }]
+                },
                 "__raw_request_body": {
                     "input": [{
-                        "type": "message",
-                        "role": "user",
-                        "content": [{ "type": "input_text", "text": "current resumed user turn" }]
+                        "type": "function_call_output",
+                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"from raw\",\"repeatCount\":1,\"maxRepeats\":3}"
                     }]
-                }
-            }),
-        };
-
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("responses request context stopless cli result snapshot");
-        assert_eq!(snapshot.text, "continue from relay responsesRequestContext");
-        assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 2);
-        assert_eq!(snapshot.trigger_hint.as_deref(), None);
-        assert!(snapshot.schema_feedback.is_none());
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
-    }
-
-    #[test]
-    fn adapter_context_responses_resume_tool_outputs_restore_current_stopless_cli_result() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
-            runtime_metadata: Some(json!({
-                "stopMessageState": {
-                    "stopMessageText": " stale runtime text ",
-                    "stopMessageStageMode": "on",
-                    "stopMessageMaxRepeats": 3,
-                    "stopMessageUsed": 0
-                }
-            })),
-            adapter_context: json!({
+                },
                 "responsesResume": {
-                    "continuationOwner": "relay",
                     "toolOutputsDetailed": [{
-                        "callId": "call_servertool_cli",
-                        "originalId": "call_servertool_cli",
-                        "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from relay submit output\",\"repeatCount\":2,\"maxRepeats\":3}"
-                    }],
-                    "fullInput": [{
-                        "type": "message",
-                        "role": "user",
-                        "content": [{
-                            "type": "input_text",
-                            "text": "上一轮执行结果：repeatCount=2/3。"
-                        }]
+                        "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"from resume\",\"repeatCount\":2,\"maxRepeats\":3}"
                     }]
                 }
             }),
         };
 
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("responses resume tool output snapshot");
-        assert_eq!(snapshot.text, "continue from relay submit output");
-        assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 2);
-        assert_eq!(snapshot.trigger_hint.as_deref(), None);
-        assert!(snapshot.schema_feedback.is_none());
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
+        assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
     }
 
     #[test]
-    fn metadata_center_snapshot_responses_resume_restores_current_stopless_cli_result() {
+    fn runtime_control_stopless_is_the_only_context_state_source() {
         let input = RuntimeStopMessageStateFromAdapterContextInput {
             runtime_metadata: Some(json!({
                 "metadataCenterSnapshot": {
                     "continuationContext": {
                         "responsesResume": {
-                            "continuationOwner": "relay",
                             "toolOutputsDetailed": [{
-                                "callId": "call_servertool_cli",
-                                "originalId": "call_servertool_cli",
-                                "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from metadata center resume\",\"repeatCount\":1,\"maxRepeats\":3}"
+                                "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"must not win\",\"repeatCount\":1,\"maxRepeats\":3}"
                             }]
                         }
                     },
                     "runtimeControl": {
                         "stopless": {
-                            "used": 0,
+                            "active": true,
+                            "flowId": "stop_message_flow",
+                            "repeatCount": 2,
                             "maxRepeats": 3,
-                            "text": "stale"
+                            "triggerHint": "invalid_schema",
+                            "continuationPrompt": "from metadata center runtime control",
+                            "schemaFeedback": {
+                                "reasonCode": "stop_schema_next_step_missing",
+                                "missingFields": ["next_step"]
+                            }
                         }
                     }
                 }
             })),
-            adapter_context: json!({}),
-        };
-
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("metadata center responses resume snapshot");
-        assert_eq!(snapshot.text, "continue from metadata center resume");
-        assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 1);
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
-    }
-
-    #[test]
-    fn adapter_context_restores_stopless_cli_result_trigger_hint_and_schema_feedback() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
-            runtime_metadata: None,
             adapter_context: json!({
-                "responsesResume": {
-                    "continuationOwner": "relay",
-                    "toolOutputsDetailed": [{
-                        "callId": "call_servertool_cli",
-                        "originalId": "call_servertool_cli",
-                        "outputText": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from invalid schema\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaGuidance\":{\"triggerHint\":\"invalid_schema\"},\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[\"next_step\"]}}"
-                    }],
-                    "fullInput": [{
-                        "type": "message",
-                        "role": "user",
-                        "content": [{ "type": "input_text", "text": "上一轮执行结果：repeatCount=1/3。" }]
+                "__raw_request_body": {
+                    "input": [{
+                        "type": "function_call_output",
+                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"must not win either\",\"repeatCount\":3,\"maxRepeats\":3}"
                     }]
                 }
             }),
         };
 
         let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("responses resume invalid schema snapshot");
-        assert_eq!(snapshot.text, "continue from invalid schema");
+            .expect("runtime control stopless snapshot");
+        assert_eq!(snapshot.text, "from metadata center runtime control");
         assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 1);
+        assert_eq!(snapshot.used, 2);
         assert_eq!(snapshot.trigger_hint.as_deref(), Some("invalid_schema"));
         assert_eq!(
             snapshot.schema_feedback,
@@ -2523,33 +2148,7 @@ mod tests {
                 "missingFields": ["next_step"]
             }))
         );
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
-    }
-
-    #[test]
-    fn adapter_context_prefers_raw_request_tool_output_over_captured_chat_request() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
-            runtime_metadata: None,
-            adapter_context: json!({
-                "capturedChatRequest": {
-                    "messages": [{ "role": "user", "content": "stale captured request" }]
-                },
-                "__raw_request_body": {
-                    "input": [{
-                        "type": "function_call_output",
-                        "call_id": "call_servertool_cli",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from raw request\",\"repeatCount\":3,\"maxRepeats\":3}"
-                    }]
-                }
-            }),
-        };
-
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("raw request stopless cli result snapshot");
-        assert_eq!(snapshot.text, "continue from raw request");
-        assert_eq!(snapshot.max_repeats, 3);
-        assert_eq!(snapshot.used, 3);
-        assert_eq!(snapshot.source.as_deref(), Some("client_exec_result"));
+        assert_eq!(snapshot.source.as_deref(), Some(STOP_MESSAGE_FOLLOWUP_SOURCE));
     }
 
     #[test]

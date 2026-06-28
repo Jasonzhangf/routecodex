@@ -500,7 +500,7 @@ fn build_stopless_cli_model_guidance(
         "怎么理解这个 schema：它是 stop result 的结构化 JSON 约定，不是普通总结。".to_string(),
     );
     parts.push(
-        "字段怎么写：stopreason=0/1/2；reason 写当前状态；has_evidence 用 0/1；evidence 写证据；issue_cause 写卡点；next_step 写下一步具体动作。".to_string(),
+        "字段怎么写：stopreason 是唯一无条件必填；完成 stopreason=0 时 has_evidence=1 且 evidence 非空；阻塞 stopreason=1 时 reason 非空即可停；继续 stopreason=2 时 next_step 写下一步具体动作。".to_string(),
     );
     parts.push(
         "怎么填：按字段之间的逻辑关系填写；不是每个字段都必填，但触发条件下的字段不能留空。"
@@ -756,20 +756,7 @@ pub fn stopless_schema_guidance_with_trigger(
     StoplessSchemaGuidance {
         schema_overview: "stop schema 是模型在准备结束或暂停时返回的结构化 JSON 收尾报告。它不是普通文本总结，而是一份固定字段的结果，用来告诉系统这轮是已完成、被阻塞，还是还要继续执行。".to_string(),
         schema_purpose: "它的作用是把结束原因、证据、排查顺序、下一步动作固定成可机器判断的结构，并把每个字段的含义说清楚，避免模型只写泛泛的总结或漏字段。".to_string(),
-        required_fields: vec![
-            "stopreason".to_string(),
-            "reason".to_string(),
-            "has_evidence".to_string(),
-            "evidence".to_string(),
-            "issue_cause".to_string(),
-            "excluded_factors".to_string(),
-            "diagnostic_order".to_string(),
-            "done_steps".to_string(),
-            "next_step".to_string(),
-            "next_suggested_path".to_string(),
-            "needs_user_input".to_string(),
-            "learned".to_string(),
-        ],
+        required_fields: vec!["stopreason".to_string()],
         field_descriptions: vec![
             StoplessSchemaFieldDescription {
                 field: "stopreason".to_string(),
@@ -777,15 +764,15 @@ pub fn stopless_schema_guidance_with_trigger(
             },
             StoplessSchemaFieldDescription {
                 field: "reason".to_string(),
-                meaning: "用一句话说明现在为什么停、为什么继续或为什么阻塞".to_string(),
+                meaning: "stopreason=1 阻塞时必填；其它情况可写当前状态说明".to_string(),
             },
             StoplessSchemaFieldDescription {
                 field: "has_evidence".to_string(),
-                meaning: "0/1，表示这次结论是不是有文件、日志、命令或测试证据".to_string(),
+                meaning: "stopreason=0 完成时必须写 1；其它情况可按真实情况写 0/1".to_string(),
             },
             StoplessSchemaFieldDescription {
                 field: "evidence".to_string(),
-                meaning: "把真正用来支撑结论的证据写出来".to_string(),
+                meaning: "stopreason=0 完成时必填；只检查是否提供，不判断证据真假".to_string(),
             },
             StoplessSchemaFieldDescription {
                 field: "issue_cause".to_string(),
@@ -2761,7 +2748,7 @@ mod tests {
             Value::String("budget_exhausted".to_string())
         );
         let feedback = output.schema_feedback.as_ref().expect("schema feedback");
-        assert_missing_fields_eq(&feedback.missing_fields, &["has_evidence", "next_step"]);
+        assert_missing_fields_eq(&feedback.missing_fields, &["next_step"]);
         assert!(output.input.get("schemaFeedback").is_none());
         assert_eq!(
             output

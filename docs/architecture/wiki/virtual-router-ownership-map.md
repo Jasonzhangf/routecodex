@@ -50,7 +50,6 @@ Forbidden paths:
 Required tests:
 - `tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts`
 - `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
-- `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
 - `tests/servertool/virtual-router-servertool-routing.spec.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs`
 
@@ -131,7 +130,6 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs`
 - `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
-- `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
 - `tests/servertool/virtual-router-servertool-routing.spec.ts`
 - `docs`
 
@@ -142,7 +140,6 @@ Forbidden paths:
 
 Required tests:
 - `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
-- `tests/sharedmodule/virtual-router-quota-shadow-compare-native.spec.ts`
 - `tests/servertool/virtual-router-servertool-routing.spec.ts`
 
 Required gates:
@@ -235,7 +232,6 @@ Forbidden paths:
 Required tests:
 - `tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts`
 - `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
-- `tests/sharedmodule/virtual-router-quota-health-shadow-regression.spec.ts`
 - `tests/server/handlers/responses-handler.routing-empty-pool.spec.ts`
 
 Required gates:

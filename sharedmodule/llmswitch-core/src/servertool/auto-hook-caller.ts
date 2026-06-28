@@ -147,7 +147,8 @@ export async function runServertoolAutoHookCaller(args: {
       return {
         mode: 'tool_flow',
         finalChatResponse: queueResult.chatResponse,
-        execution: queueResult.execution
+        execution: queueResult.execution,
+        ...(queueResult.metadataWritePlan ? { metadataWritePlan: queueResult.metadataWritePlan } : {})
       };
     }
     if (progressPlan.action === 'continue_next_queue') {

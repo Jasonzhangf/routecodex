@@ -1,6 +1,7 @@
 import type { ServerToolHandlerContext, ServerToolHandlerResult } from './types.js';
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
+import type { JsonObject } from '../conversion/hub/types/json.js';
 import { getServertoolToolSpec, listServertoolToolSpecs } from './skeleton-config.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import {
@@ -9,7 +10,7 @@ import {
 
 type StoplessAutoHandlerRuntimeOutput = {
   action: 'return_null' | 'throw_error' | 'return_handler_result';
-  metadataWritePlan?: Record<string, unknown>;
+  metadataWritePlan?: JsonObject;
   learnedNoteWrite?: Record<string, unknown>;
   error?: {
     message: string;
@@ -178,7 +179,12 @@ async function runBuiltinStopMessageAutoHandler(
   }
   return {
     flowId: runtime.flowId ?? runtime.handlerResult.execution.flowId,
-    finalize: async (): Promise<ServerToolHandlerResult> => runtime.handlerResult as ServerToolHandlerResult
+    finalize: async (): Promise<ServerToolHandlerResult> => ({
+      ...(runtime.handlerResult as ServerToolHandlerResult),
+      ...(runtime.metadataWritePlan && typeof runtime.metadataWritePlan === 'object'
+        ? { metadataWritePlan: runtime.metadataWritePlan }
+        : {})
+    })
   };
 }
 

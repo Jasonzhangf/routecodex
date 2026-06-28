@@ -41,7 +41,7 @@ description: RouteCodex 调试与架构路由入口
 | servertool hook 骨架 | `references/22-servertool-hook-skeleton-workflow.md` | servertool/stopless CLI lifecycle + hook-governed 请求/响应骨架、测试闭环 |
 | servertool 开发/调试流 | `references/23-servertool-hook-dev-debug-flow.md` | servertool hook skeleton 的实施顺序、debug 切段、证据链与删 TS 前置条件 |
 | 节点合同调试法 | `references/24-node-contract-debug-method.md` | 高优先级方法：先生命周期/节点合同，再设计白盒与两端黑盒，最后才 debug/改代码 |
-| 协议/SSE/continuation 边界 | `references/25-protocol-sse-continuation-boundary.md` | `/v1/responses` continuation save/restore 不可变区、SSE transport-only、归一化/转换修复落点 |
+| 协议/SSE/continuation 边界 | `references/25-protocol-sse-continuation-boundary.md` | `/v1/responses` continuation Chat Process save/restore 不可变区、SSE transport-only、inbound/outbound 只归一化 |
 | 唯一功能块 | `references/30-unique-block-index.md` | 快速锁唯一功能块 |
 | owner / feature / gate | `references/40-owner-registry.md` | function map / verification map / source anchor |
 | `~/.rcc` / provider 配置 | `references/50-rcc-config-ssot.md` | runtime 配置真源、schema、排障命令 |
@@ -71,6 +71,8 @@ description: RouteCodex 调试与架构路由入口
 ### servertool 专项必经流
 - 只要任务涉及 `servertool / stopless / reasoning_stop / hook run / followup / reenter / schema validation / tool injection`，必须先读 `22` 再读 `23`。
 - 只要任务涉及 `/v1/responses` continuation、SSE、req_inbound/resp_outbound、history/tool loss、JSON/SSE parity，必须先读 `25`，再回 function map/mainline 锁 owner。
+- **Continuation 不可变区高优先级**：`resp_chatprocess save -> immutable store interval -> req_chatprocess restore` 之间禁止任何语义转换、上下文恢复、history/tool 修补、required_action 推断、stopless/servertool guidance 注入。`req_inbound` / `resp_outbound` / SSE / handler / adapter / store transport 只能做语义等价归一化、投影、传输、scope 校验和释放。
+- 如果看到 `entryOriginRequest` / `capturedChatRequest` / `requestSemantics` / session-only scope 在保存后到恢复前被用来补上下文或 history，先判定为越界 owner shortcut；修复方式是删除该逻辑并回 Chat Process continuation owner，而不是在 inbound/outbound/handler 再补一层。
 - `22` 锁目标骨架、主线顺序、case matrix、黑盒闭环。
 - `23` 锁实施顺序、debug 切段、证据链、删 TS 准入条件。
 - `24` 锁高优先级方法：任何复杂 debug/设计先画生命周期，逐节点定义输入/输出/正常/错误/超预期，再补白盒节点测试和 provider/client 两端黑盒，最后才允许改代码。
@@ -78,7 +80,7 @@ description: RouteCodex 调试与架构路由入口
 - `23` 也是 servertool 开发 + debug 的执行真源：每轮新增的稳定 slice 顺序、串行验证顺序、黑盒口径、删 TS 前置条件，都必须回写到 `23` 或当月 lessons，不能只留在聊天或 `note.md`。
 - servertool 相关开发/调试一旦形成稳定动作序列、切段法、反模式或验证口径，必须同步回写 `23` 或当月 lessons；禁止只留在 `note.md` 或聊天上下文里。
 - 若 `mainline-call-map` 仍是 `binding pending`，只能宣称“目标/骨架已锁定”，不能宣称 runtime 已 Rust-only 落地。
-- 发现 inbound/outbound 里混入逻辑时，先查真源 owner 是否应上移到 chat process，再做唯一修改点修复；修复后必须物理删除错误 helper / 重复实现，禁止在 outbound 留第二套语义补丁。
+- 发现 inbound/outbound 里混入逻辑时，先查真源 owner 是否应上移到 Chat Process；尤其 continuation save/restore 只能在 Chat Process 响应出口/请求入口。修复后必须物理删除错误 helper / 重复实现，禁止在 outbound/inbound/handler 留第二套语义补丁。
 - SSE / transport 日志只可作为证据，不可作为语义 owner；当日志类测试与更高层 regression 重叠时，优先删重复断言，不要在 handler/outbound 里再补一套“日志即真相”的测试语义。
 
 ### 2. 再做三问

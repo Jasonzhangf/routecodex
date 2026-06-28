@@ -6,6 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import express from 'express';
+import { MetadataCenter } from '../../dist/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const REAL_CODEX_REQUEST_FIXTURE = path.resolve(
   'tests/fixtures/errorsamples/responses-request-standardization/2026-06-13-duplicate-replay-wrapper-noise/request-body.json'
@@ -52,6 +53,42 @@ function makeProvider(id, upstreamBase) {
     endpoint: upstreamBase,
     auth: { type: 'apikey', apiKey: `${id}-`.padEnd(24, 'x') },
     models: { 'gpt-5.3-codex': {} }
+  };
+}
+
+const STOPLESS_HARNESS_ROUTE_CONTROL = {
+  providerProtocol: 'openai-responses',
+  preselectedRoute: {
+    target: {
+      providerKey: 'crs1.key1',
+      runtimeKey: 'crs1.key1',
+      modelId: 'gpt-5.3-codex',
+      outboundProfile: 'openai-responses',
+      providerType: 'responses'
+    },
+    decision: { routeName: 'thinking' },
+    diagnostics: {}
+  }
+};
+
+function withStoplessHarnessRouteControl(input) {
+  const metadata = input?.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+    ? input.metadata
+    : {};
+  const center = MetadataCenter.read(metadata) ?? MetadataCenter.attach(metadata);
+  center.writeRuntimeControl('providerProtocol', STOPLESS_HARNESS_ROUTE_CONTROL.providerProtocol, {
+    module: 'scripts/tests/stopless-followup-blackbox.mjs',
+    symbol: 'withStoplessHarnessRouteControl',
+    stage: 'test'
+  }, 'stopless followup blackbox provider protocol truth');
+  center.writeRuntimeControl('preselectedRoute', STOPLESS_HARNESS_ROUTE_CONTROL.preselectedRoute, {
+    module: 'scripts/tests/stopless-followup-blackbox.mjs',
+    symbol: 'withStoplessHarnessRouteControl',
+    stage: 'test'
+  }, 'stopless followup blackbox preselected route');
+  return {
+    ...input,
+    metadata
   };
 }
 
@@ -330,11 +367,11 @@ async function main() {
     const app = express();
     app.use(express.json({ limit: '2mb' }));
     app.post('/v1/responses', (req, res) => handleResponses(req, res, {
-      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input),
+      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, withStoplessHarnessRouteControl(input)),
       errorHandling: routeCodex.errorHandling
     }));
     app.post('/v1/responses/:id/submit_tool_outputs', (req, res) => handleResponses(req, res, {
-      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input),
+      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, withStoplessHarnessRouteControl(input)),
       errorHandling: routeCodex.errorHandling
     }, {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
@@ -426,8 +463,9 @@ async function main() {
     assert.ok(!execTool3, `expected terminal stopless result after third round, body=${submitText2}`);
     assert.ok(
       typeof submitBody2?.output_text === 'string'
-        && submitBody2.output_text.includes('stopless budget exhausted'),
-      `expected terminal stopless body to report budget exhaustion, body=${submitText2}`
+        && submitBody2.output_text.includes('继续执行中')
+        && !submitBody2.output_text.includes('stopless budget exhausted'),
+      `expected terminal stopless body to preserve original visible text without internal budget text, body=${submitText2}`
     );
 
     console.log('✅ stopless blackbox passed', JSON.stringify({

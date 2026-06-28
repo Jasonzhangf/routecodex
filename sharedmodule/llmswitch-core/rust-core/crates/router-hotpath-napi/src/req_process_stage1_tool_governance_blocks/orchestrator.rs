@@ -49,7 +49,7 @@ const STOPLESS_SYSTEM_INSTRUCTION: &str = concat!(
     "当你准备结束当前轮时，必须使用唯一 stop schema 合同。\n",
     "优先路径：直接调用名为 reasoningStop 的 function tool，并把完整 JSON schema 放进该 tool call 的 arguments。\n",
     "禁止把 reasoningStop 当成 shell / CLI 命令；不要输出或执行 exec_command(cmd=\"reasoningStop\")。\n",
-    "字段不是全局必填，而是关系必填：stopreason/reason/has_evidence 是基线；has_evidence=1 时 evidence 必填；stopreason=0/1 表示停止，必须 has_evidence=1 且 evidence 非空；stopreason=2 表示继续，必须写 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。\n",
+    "字段不是全局必填，而是关系必填：stopreason 是唯一无条件必填字段；stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空；stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止；stopreason=2 表示继续，必须写 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。\n",
     "如果你直接 finish_reason=stop，正文末尾必须附：\n",
     "<rcc_stop_schema>\n",
     "{\"stopreason\":2,\"reason\":\"当前状态原因\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"如果仍需继续，写立刻执行的下一步；否则写无\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}\n",
@@ -566,7 +566,7 @@ fn build_reasoning_stop_tool() -> Value {
             "description": concat!(
                 "Use this tool every time you want to stop. ",
                 "Schema means the structured JSON contract for the stop result: it tells the system what is finished, what is blocked, and what still needs to continue. ",
-                "Provide the real stop schema as JSON arguments. Fields are conditionally required, not globally required: stopreason/reason/has_evidence are baseline; has_evidence=1 requires evidence; terminal stopreason=0 or 1 requires has_evidence=1 and non-empty evidence; stopreason=2 requires next_step; needs_user_input=true requires next_step to be the exact user question. ",
+                "Provide the real stop schema as JSON arguments. Fields are conditionally required, not globally required: stopreason is the only unconditional required field; stopreason=0 finished requires has_evidence=1 and non-empty evidence; stopreason=1 blocked requires non-empty reason and may stop with reason only; stopreason=2 continue_needed requires next_step; needs_user_input=true requires next_step to be the exact user question. ",
                 "If you do not call this tool and still stop, the assistant text must end with <rcc_stop_schema>...</rcc_stop_schema>. ",
                 "stopreason values: 0=finished, 1=blocked, 2=continue_needed. ",
                 "If work remains, use stopreason=2 and write next_step. ",
@@ -587,16 +587,16 @@ fn build_reasoning_stop_tool() -> Value {
                     },
                     "reason": {
                         "type": "string",
-                        "description": "Real current state summary."
+                        "description": "Required for blocked stopreason=1; optional summary for other stopreason values."
                     },
                     "has_evidence": {
                         "type": "integer",
                         "enum": [0, 1],
-                        "description": "Whether concrete evidence is available."
+                        "description": "Required as 1 only when stopreason=0 finished."
                     },
                     "evidence": {
                         "type": "string",
-                        "description": "Concrete logs, tests, files, outputs, or observations."
+                        "description": "Required only when stopreason=0 finished or has_evidence=1."
                     },
                     "issue_cause": {
                         "type": "string",
@@ -616,7 +616,7 @@ fn build_reasoning_stop_tool() -> Value {
                     },
                     "next_step": {
                         "type": "string",
-                        "description": "Required next action. Use \"无\" only when truly finished or blocked."
+                        "description": "Required when stopreason=2 continue_needed, or when needs_user_input=true as the exact user question."
                     },
                     "next_suggested_path": {
                         "type": "string",
@@ -632,9 +632,7 @@ fn build_reasoning_stop_tool() -> Value {
                     }
                 },
                 "required": [
-                    "stopreason",
-                    "reason",
-                    "has_evidence"
+                    "stopreason"
                 ]
             }
         }

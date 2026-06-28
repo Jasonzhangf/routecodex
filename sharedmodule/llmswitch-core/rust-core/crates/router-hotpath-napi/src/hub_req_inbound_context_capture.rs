@@ -93,6 +93,17 @@ fn normalize_tool_parameters(name: &str, value: Option<&Value>) -> Option<Value>
     enforce_builtin_tool_schema(name, value)
 }
 
+fn read_tool_schema_source<'a>(
+    function_row: Option<&'a Map<String, Value>>,
+    tool_row: &'a Map<String, Value>,
+) -> Option<&'a Value> {
+    function_row
+        .and_then(|v| v.get("parameters"))
+        .or_else(|| function_row.and_then(|v| v.get("input_schema")))
+        .or_else(|| tool_row.get("parameters"))
+        .or_else(|| tool_row.get("input_schema"))
+}
+
 fn responses_input_contains_tool_history(items: &[Value]) -> bool {
     for entry in items {
         let Some(row) = entry.as_object() else {
@@ -544,9 +555,7 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
                             }
                             if let Some(parameters) = normalize_tool_parameters(
                                 child_name.as_str(),
-                                child_function
-                                    .and_then(|v| v.get("parameters"))
-                                    .or_else(|| child_row.get("parameters")),
+                                read_tool_schema_source(child_function, child_row),
                             ) {
                                 child_out.insert("parameters".to_string(), parameters);
                             }
@@ -620,9 +629,7 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
         }
         if let Some(parameters) = normalize_tool_parameters(
             name_value.as_str(),
-            function_row
-                .and_then(|v| v.get("parameters"))
-                .or_else(|| tool_row.get("parameters")),
+            read_tool_schema_source(function_row, tool_row),
         ) {
             function_out.insert("parameters".to_string(), parameters);
         }
@@ -1944,6 +1951,28 @@ mod tests {
             mapped[0]["function"]["name"],
             "mcp__computer_use__get_app_state"
         );
+    }
+
+    #[test]
+    fn map_bridge_tools_to_chat_preserves_top_level_input_schema_as_parameters() {
+        let raw_tools = vec![json!({
+          "type": "function",
+          "name": "read_file",
+          "description": "Read file",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" }
+            },
+            "required": ["path"]
+          }
+        })];
+
+        let mapped = map_bridge_tools_to_chat(raw_tools.as_slice());
+        assert_eq!(mapped.len(), 1);
+        let parameters = &mapped[0]["function"]["parameters"];
+        assert_eq!(parameters["properties"]["path"]["type"], "string");
+        assert_eq!(parameters["required"], json!(["path"]));
     }
 
     #[test]

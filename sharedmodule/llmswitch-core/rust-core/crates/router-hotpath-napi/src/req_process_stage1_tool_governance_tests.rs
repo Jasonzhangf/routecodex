@@ -123,7 +123,8 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
     assert!(instructions.contains("直接调用名为 reasoningStop 的 function tool"));
     assert!(instructions.contains("<rcc_stop_schema>"));
     assert!(instructions.contains("字段不是全局必填，而是关系必填"));
-    assert!(instructions.contains("has_evidence=1 时 evidence 必填"));
+    assert!(instructions.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
+    assert!(instructions.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
     assert!(instructions.contains("stopreason=2 表示继续，必须写 next_step"));
     assert!(instructions.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
     assert!(instructions.contains("最小可复制样本"));
@@ -143,21 +144,16 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
         .as_str()
         .expect("reasoningStop description");
     assert!(description.contains("Fields are conditionally required, not globally required"));
-    assert!(description.contains("stopreason=2 requires next_step"));
+    assert!(description.contains("stopreason=1 blocked requires non-empty reason"));
+    assert!(description.contains("may stop with reason only"));
+    assert!(description.contains("stopreason=2 continue_needed requires next_step"));
     assert!(description.contains("needs_user_input=true requires next_step"));
     assert!(description.contains("Minimal continue sample"));
     assert!(!description.contains("fill every field"));
     let required = reasoning_stop_tool["function"]["parameters"]["required"]
         .as_array()
         .expect("required");
-    assert_eq!(
-        required,
-        &vec![
-            serde_json::json!("stopreason"),
-            serde_json::json!("reason"),
-            serde_json::json!("has_evidence"),
-        ]
-    );
+    assert_eq!(required, &vec![serde_json::json!("stopreason")]);
 }
 
 #[test]
@@ -993,10 +989,10 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
     assert!(required
         .iter()
         .any(|value| value.as_str() == Some("stopreason")));
-    assert!(required
+    assert!(!required
         .iter()
         .any(|value| value.as_str() == Some("reason")));
-    assert!(required
+    assert!(!required
         .iter()
         .any(|value| value.as_str() == Some("has_evidence")));
     assert!(!required

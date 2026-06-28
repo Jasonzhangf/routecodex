@@ -18,7 +18,6 @@ import {
 import {
   recordResponsesResponse,
   finalizeResponsesConversationRequestRetention,
-  captureResponsesRequestContext,
 } from '../../shared/responses-conversation-store.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
 import {
@@ -261,15 +260,6 @@ function executeProviderResponseNativeStoplessMetadataEffect(args: {
   });
 }
 
-type ResponsesRequestContextForCore = {
-  payload: Record<string, unknown>;
-  context: Record<string, unknown>;
-  sessionId?: string;
-  conversationId?: string;
-  matchedPort?: number;
-  routingPolicyGroup?: string;
-};
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -313,10 +303,6 @@ function readMetadataCenterRequestTruth(metadata?: Record<string, unknown>): Rec
   return asRecord(readBoundMetadataCenter(metadata)?.readRequestTruth()) ?? {};
 }
 
-function readMetadataCenterContinuationContext(metadata?: Record<string, unknown>): Record<string, unknown> {
-  return asRecord(readBoundMetadataCenter(metadata)?.readContinuationContext()) ?? {};
-}
-
 function readMetadataCenterRuntimeControl(metadata?: Record<string, unknown>): Record<string, unknown> {
   return asRecord(readBoundMetadataCenter(metadata)?.readRuntimeControl()) ?? {};
 }
@@ -333,32 +319,6 @@ function readProviderProtocolWithinCore(args: {
     throw new Error('Provider response conversion requires metadata center runtime_control.providerProtocol');
   }
   return providerProtocol as ProviderProtocol;
-}
-
-function readResponsesRequestContextWithinCore(args: {
-  metadata?: Record<string, unknown>;
-}): ResponsesRequestContextForCore | undefined {
-  const continuationContext = readMetadataCenterContinuationContext(args.metadata);
-  const raw = asRecord(continuationContext?.responsesRequestContext);
-  if (!raw) {
-    return undefined;
-  }
-  const payload = asRecord(raw.payload) ?? {};
-  const context = asRecord(raw.context) ?? {};
-  const sessionId = typeof raw.sessionId === 'string' && raw.sessionId.trim() ? raw.sessionId.trim() : undefined;
-  const conversationId =
-    typeof raw.conversationId === 'string' && raw.conversationId.trim() ? raw.conversationId.trim() : undefined;
-  const matchedPort = typeof raw.matchedPort === 'number' && Number.isFinite(raw.matchedPort) ? raw.matchedPort : undefined;
-  const routingPolicyGroup =
-    typeof raw.routingPolicyGroup === 'string' && raw.routingPolicyGroup.trim() ? raw.routingPolicyGroup.trim() : undefined;
-  return {
-    payload,
-    context,
-    ...(sessionId ? { sessionId } : {}),
-    ...(conversationId ? { conversationId } : {}),
-    ...(matchedPort !== undefined ? { matchedPort } : {}),
-    ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
-  };
 }
 
 function markResponsesContinuationSavedWithinCore(metadata?: Record<string, unknown>): void {
@@ -398,25 +358,16 @@ async function persistResponsesConversationLifecycleAtChatProcessExitWithinCore(
   if (readResponsesContinuationSavedWithinCore(args.metadata)) {
     return;
   }
-  const requestContext = readResponsesRequestContextWithinCore({ metadata: args.metadata });
-  if (!requestContext) {
-    return;
-  }
   const requestTruth = readMetadataCenterRequestTruth(args.metadata);
   const runtimeControl = readMetadataCenterRuntimeControl(args.metadata);
-  captureResponsesRequestContext({
-    requestId: args.requestLabel,
-    payload: requestContext.payload,
-    context: requestContext.context,
-    ...(requestContext.sessionId ? { sessionId: requestContext.sessionId } : {}),
-    ...(requestContext.conversationId ? { conversationId: requestContext.conversationId } : {}),
-    ...(typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
-      ? { routeHint: runtimeControl.routeHint.trim() }
-      : {}),
-    entryKind: 'responses',
-    ...(requestContext.matchedPort !== undefined ? { matchedPort: requestContext.matchedPort } : {}),
-    ...(requestContext.routingPolicyGroup ? { routingPolicyGroup: requestContext.routingPolicyGroup } : {}),
-  });
+  const matchedPort =
+    typeof requestTruth.matchedPort === 'number' && Number.isFinite(requestTruth.matchedPort)
+      ? requestTruth.matchedPort
+      : undefined;
+  const routingPolicyGroup =
+    typeof requestTruth.routingPolicyGroup === 'string' && requestTruth.routingPolicyGroup.trim()
+      ? requestTruth.routingPolicyGroup.trim()
+      : undefined;
   recordResponsesResponse({
     requestId: args.requestLabel,
     response: args.body,
@@ -431,8 +382,8 @@ async function persistResponsesConversationLifecycleAtChatProcessExitWithinCore(
       : {}),
     entryKind: 'responses',
     continuationOwner: 'relay',
-    ...(requestContext.matchedPort !== undefined ? { matchedPort: requestContext.matchedPort } : {}),
-    ...(requestContext.routingPolicyGroup ? { routingPolicyGroup: requestContext.routingPolicyGroup } : {}),
+    ...(matchedPort !== undefined ? { matchedPort } : {}),
+    ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
     allowScopeContinuation: true,
     ...(typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
       ? { routeHint: runtimeControl.routeHint.trim() }
@@ -451,7 +402,6 @@ async function executeProviderResponseNativeOutboundEffects(args: {
   context: AdapterContext;
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
-  requestSemantics?: JsonObject;
   clientInjectDispatch?: ProviderResponseConversionOptions['clientInjectDispatch'];
   stageRecorder?: StageRecorder;
 }): Promise<ProviderResponseConversionResult> {
@@ -529,14 +479,6 @@ interface ProviderResponseConversionOptions {
   context: AdapterContext;
   entryEndpoint: string;
   wantsStream: boolean;
-  /**
-   * Canonical chat semantics from the request-side chat_process output.
-   * This is the only allowed carrier for mappable cross-protocol semantics
-   * (tool alias maps, client tool schemas, responses resume, etc.).
-   *
-   * Must not be stuffed into metadata/AdapterContext.
-   */
-  requestSemantics?: JsonObject;
   stageRecorder?: StageRecorder;
   clientInjectDispatch?: (options: {
     entryEndpoint: string;
@@ -647,7 +589,6 @@ export async function convertProviderResponse(
     context: options.context,
     entryEndpoint: options.entryEndpoint,
     providerProtocol,
-    requestSemantics: options.requestSemantics,
     clientInjectDispatch: options.clientInjectDispatch,
     stageRecorder: options.stageRecorder
   });

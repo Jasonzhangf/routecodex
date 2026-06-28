@@ -21,7 +21,6 @@ use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use servertool_core::cli_contract::{self, ClientExecCliProjectionInput};
-use servertool_core::cli_result_guard;
 use servertool_core::persisted_lookup;
 use servertool_core::stop_message_auto_handler::{self, StopMessageAutoHandlerInput};
 use servertool_core::stop_message_default_config::{self, StopMessageDefaultConfigInput};
@@ -35,11 +34,11 @@ use servertool_core::stopless_orchestration_contract::{self, StoplessOrchestrati
 fn build_stopless_exec_command(
     repeat_count: u32,
     max_repeats: u32,
-    trigger_hint: Option<&str>,
+    public_trigger_hint: Option<&str>,
     session_id: Option<&str>,
     request_id: Option<&str>,
 ) -> String {
-    let trigger = trigger_hint.unwrap_or("no_schema");
+    let trigger = cli_contract::normalize_stopless_trigger_hint_for_metadata(public_trigger_hint);
     let input_json = serde_json::json!({
         "flowId": "stop_message_flow",
         "repeatCount": repeat_count,
@@ -112,13 +111,11 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
         .and_then(|value| value.get("stopMessageCompareContext"))
         .cloned();
 
-    let captured_request = persisted_lookup::get_captured_request(&input.adapter_context);
     let decision_signals =
         stopless_decision_context_signals::plan_stopless_decision_context_signals(
             &StoplessDecisionContextSignalsInput {
                 adapter_context: input.adapter_context.clone(),
                 runtime_metadata: input.runtime_metadata.clone(),
-                captured_request: captured_request.clone(),
             },
         );
     let default_config = stop_message_default_config::plan_stop_message_default_config(
@@ -131,24 +128,14 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
             env_max_repeats: None,
         },
     );
-    let current_tool_output_snapshot = hydrate_current_tool_output_snapshot(
-        cli_result_guard::extract_stop_message_auto_cli_result_snapshot_from_request(
-            &serde_json::json!({
-                "adapterContext": input.adapter_context,
-                "runtimeMetadata": input.runtime_metadata,
-            }),
-        ),
-        input,
-    );
-    let effective_runtime_loop_state = current_tool_output_snapshot.or_else(|| {
+    let effective_runtime_loop_state =
         persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context(
             &persisted_lookup::RuntimeStopMessageStateFromAdapterContextInput {
                 adapter_context: input.adapter_context.clone(),
                 runtime_metadata: input.runtime_metadata.clone(),
             },
         )
-        .and_then(|snapshot| serde_json::to_value(snapshot).ok())
-    });
+        .and_then(|snapshot| serde_json::to_value(snapshot).ok());
 
     serde_json::json!({
         "adapterContext": input.adapter_context,
@@ -161,33 +148,9 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
         "metadataPreviousCompare": metadata_previous_compare,
         "defaultConfig": default_config,
         "decisionSignals": decision_signals,
-        "capturedRequest": captured_request,
         "effectiveRuntimeLoopState": effective_runtime_loop_state,
         "providerKey": Value::Null,
     })
-}
-
-fn hydrate_current_tool_output_snapshot(
-    snapshot: Option<Value>,
-    input: &StoplessAutoHandlerRuntimeInput,
-) -> Option<Value> {
-    let mut snapshot = snapshot?;
-    let Some(record) = snapshot.as_object_mut() else {
-        return Some(snapshot);
-    };
-    if record
-        .get("sessionId")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some()
-    {
-        return Some(snapshot);
-    }
-    if let Some(session_id) = resolve_request_truth_session_id(input) {
-        record.insert("sessionId".to_string(), Value::String(session_id));
-    }
-    Some(snapshot)
 }
 
 fn resolve_request_truth_session_id(input: &StoplessAutoHandlerRuntimeInput) -> Option<String> {
@@ -354,9 +317,8 @@ pub fn run_stopless_auto_handler_runtime_json(input_json: String) -> NapiResult<
 /// ```json
 /// {
 ///   "adapterContext": { ... },
-///   "executionContext": { "stopless": { ... } },
+///   "metadataWritePlan": { "stopless": { ... } },
 ///   "stoplessControl": { ... },
-///   "runtimeSnapshot": { ... },
 ///   "chatStopText": "...",
 ///   "sessionId": "...",
 ///   "requestId": "..."
@@ -381,16 +343,15 @@ pub fn build_stopless_auto_cli_projection_json(input_json: String) -> NapiResult
     })?;
 
     // Step 1: plan CLI projection context (resolution priority chain)
-    let runtime_snapshot = input.runtime_snapshot.and_then(|v| {
+    let metadata_write_plan = input.metadata_write_plan.and_then(|v| {
         serde_json::from_value::<
-            stopless_cli_projection_context_contract::StoplessCliProjectionRuntimeSnapshotInput,
+            stopless_cli_projection_context_contract::StoplessCliProjectionMetadataWritePlanInput,
         >(v)
         .ok()
     });
     let ctx_input = stopless_cli_projection_context_contract::StoplessCliProjectionContextInput {
-        execution_context: input.execution_context,
+        metadata_write_plan,
         stopless_control: input.stopless_control,
-        runtime_snapshot,
         chat_stop_text: input.chat_stop_text.clone(),
         adapter_stop_text: input.chat_stop_text,
         session_id: input.session_id,
@@ -418,7 +379,7 @@ pub fn build_stopless_auto_cli_projection_json(input_json: String) -> NapiResult
                 "flowId": "stop_message_flow",
                 "repeatCount": ctx.repeat_count,
                 "maxRepeats": ctx.max_repeats,
-                "triggerHint": ctx.trigger_hint,
+                "triggerHint": ctx.public_trigger_hint,
                 "schemaFeedback": ctx.schema_feedback,
             }),
             ctx.repeat_count,
@@ -435,7 +396,7 @@ pub fn build_stopless_auto_cli_projection_json(input_json: String) -> NapiResult
         let cmd = build_stopless_exec_command(
             ctx.repeat_count,
             ctx.max_repeats,
-            ctx.trigger_hint.as_deref(),
+            ctx.public_trigger_hint.as_deref(),
             ctx.session_id.as_deref(),
             ctx.request_id.as_deref(),
         );
@@ -482,7 +443,7 @@ pub fn build_stopless_auto_cli_projection_json(input_json: String) -> NapiResult
             reasoning_text: ctx.reasoning_text,
             repeat_count: ctx.repeat_count,
             max_repeats: ctx.max_repeats,
-            trigger_hint: ctx.trigger_hint,
+            public_trigger_hint: ctx.public_trigger_hint,
             schema_feedback: ctx.schema_feedback,
         },
         execution_context: exec_ctx,
@@ -501,35 +462,30 @@ pub fn build_stopless_auto_cli_projection_from_engine_json(
                 "deserialize StoplessAutoCliProjectionFromEngineInput: {e}"
             ))
         })?;
-    let execution_context = input
+    let context_record = input
         .execution
         .get("context")
         .filter(|value| value.is_object() && !value.is_array())
-        .cloned();
-    let context_record = execution_context.as_ref().and_then(Value::as_object);
-    let stopless_control = context_record
-        .and_then(|context| context.get("stopless"))
-        .filter(|value| value.is_object() && !value.is_array())
-        .cloned();
-    let runtime_snapshot = context_record
-        .and_then(|context| context.get("stoplessRuntimeState"))
+        .and_then(Value::as_object);
+    let adapter_record = input.adapter_context.as_ref().and_then(Value::as_object);
+    let metadata_center_snapshot = adapter_record
+        .and_then(|adapter| adapter.get("metadataCenterSnapshot"))
+        .and_then(Value::as_object);
+    let stopless_control = metadata_center_snapshot
+        .and_then(|snapshot| snapshot.get("runtimeControl"))
+        .and_then(|runtime| runtime.get("stopless"))
         .filter(|value| value.is_object() && !value.is_array())
         .cloned();
     let chat_stop_text =
         context_record.and_then(|context| read_trimmed_string(context.get("assistantStopText")));
-    let session_id = context_record.and_then(|context| {
-        read_trimmed_string(context.get("sessionId")).or_else(|| {
-            context
-                .get("requestTruth")
-                .and_then(Value::as_object)
-                .and_then(|truth| read_trimmed_string(truth.get("sessionId")))
-        })
-    });
+    let session_id = metadata_center_snapshot
+        .and_then(|snapshot| snapshot.get("requestTruth"))
+        .and_then(Value::as_object)
+        .and_then(|truth| read_trimmed_string(truth.get("sessionId")));
     let projection_input = StoplessAutoCliProjectionInput {
         adapter_context: input.adapter_context,
-        execution_context,
+        metadata_write_plan: input.metadata_write_plan,
         stopless_control,
-        runtime_snapshot,
         chat_stop_text,
         session_id,
         request_id: input.request_id,
@@ -681,9 +637,6 @@ fn build_runtime_output(
         stop_message_auto_handler::StopMessageAutoPlanAction::ReturnTerminalFinal => {
             "return_handler_result"
         }
-        stop_message_auto_handler::StopMessageAutoPlanAction::ThrowStoplessLoop => {
-            "throw_goal_active_loop"
-        }
         stop_message_auto_handler::StopMessageAutoPlanAction::ReturnSchemaFailFast => {
             "return_handler_result"
         }
@@ -703,28 +656,6 @@ fn build_runtime_output(
                 flow_id: Some(flow_id),
                 metadata_write_plan: Some(metadata_write_plan),
                 learned_note_write,
-                ..Default::default()
-            }
-        }
-        stop_message_auto_handler::StopMessageAutoPlanAction::ThrowStoplessLoop => {
-            StoplessAutoHandlerRuntimeOutput {
-                action,
-                flow_id: Some(flow_id),
-                metadata_write_plan: Some(metadata_write_plan),
-                learned_note_write,
-                error: Some(StoplessRuntimeError {
-                    message: plan.stopless_loop_error_message.clone().unwrap_or_else(|| {
-                        "[servertool] goal active stop loop detected".to_string()
-                    }),
-                    code: plan
-                        .stopless_loop_error_code
-                        .clone()
-                        .unwrap_or_else(|| "GOAL_ACTIVE_STOP_LOOP_DETECTED".to_string()),
-                    status: 500,
-                    repeat_count: plan.stopless_loop_repeat_count,
-                    threshold: plan.stopless_loop_threshold,
-                    goal_context_count: plan.stopless_loop_goal_context_count,
-                }),
                 ..Default::default()
             }
         }
@@ -807,9 +738,8 @@ pub struct StoplessExecutionPlanInput {
 #[serde(rename_all = "camelCase")]
 pub struct StoplessAutoCliProjectionInput {
     pub adapter_context: Option<Value>,
-    pub execution_context: Option<Value>,
+    pub metadata_write_plan: Option<Value>,
     pub stopless_control: Option<Value>,
-    pub runtime_snapshot: Option<Value>,
     pub chat_stop_text: Option<String>,
     pub session_id: Option<String>,
     pub request_id: Option<String>,
@@ -820,6 +750,7 @@ pub struct StoplessAutoCliProjectionInput {
 pub struct StoplessAutoCliProjectionFromEngineInput {
     pub adapter_context: Option<Value>,
     pub execution: Value,
+    pub metadata_write_plan: Option<Value>,
     pub request_id: Option<String>,
 }
 
@@ -849,7 +780,7 @@ pub struct StoplessProjectionContextOutput {
     pub reasoning_text: String,
     pub repeat_count: u32,
     pub max_repeats: u32,
-    pub trigger_hint: Option<String>,
+    pub public_trigger_hint: Option<String>,
     pub schema_feedback: Option<Value>,
 }
 
@@ -935,8 +866,8 @@ mod tests {
     fn build_stopless_auto_cli_projection_basic_happy_path() {
         let input = json!({
             "adapterContext": { "sessionId": "sess-proj" },
-            "executionContext": {
-                "stopless": { "repeatCount": 1, "maxRepeats": 3 }
+            "metadataWritePlan": {
+                "stopless": { "repeatCount": 1, "maxRepeats": 3, "triggerHint": "stop_schema_missing" }
             },
             "chatStopText": "继续推进当前任务",
             "requestId": "req-proj-1"

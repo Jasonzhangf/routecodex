@@ -232,10 +232,10 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
   };
 }
 
-function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'routeHint' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
+function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'routeHint' | 'providerProtocol' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
   metadata: Record<string, unknown>,
   key: K,
-  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' | 'routeHint' ? string : boolean,
+  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' | 'routeHint' | 'providerProtocol' ? string : boolean,
   reason: string
 ): void {
   MetadataCenter.attach(metadata).writeRuntimeControl(
@@ -263,10 +263,9 @@ function buildMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<
   if (!center) {
     return {};
   }
-  const snapshot = center.snapshot();
-  const requestTruth = snapshot.requestTruth ?? {};
-  const continuationContext = snapshot.continuationContext ?? {};
-  const runtimeControl = snapshot.runtimeControl ?? {};
+  const requestTruth = center.readRequestTruth();
+  const continuationContext = center.readContinuationContext();
+  const runtimeControl = center.readRuntimeControl();
   const hasRequestTruth = Object.keys(requestTruth).length > 0;
   const hasContinuationContext = Object.keys(continuationContext).length > 0;
   const hasRuntimeControl = Object.keys(runtimeControl).length > 0;
@@ -1340,6 +1339,23 @@ export class RouteCodexHttpServer {
             directResult.preselectedRoute,
             'router-direct relay preselected route'
           );
+          const preselectedTarget = directResult.preselectedRoute.target;
+          const preselectedProviderProtocol =
+            preselectedTarget
+            && typeof preselectedTarget === 'object'
+            && !Array.isArray(preselectedTarget)
+            && typeof (preselectedTarget as Record<string, unknown>).outboundProfile === 'string'
+            && ((preselectedTarget as Record<string, unknown>).outboundProfile as string).trim()
+              ? ((preselectedTarget as Record<string, unknown>).outboundProfile as string).trim()
+              : undefined;
+          if (preselectedProviderProtocol) {
+            writeMetadataCenterRuntimeControl(
+              relayMetadata,
+              'providerProtocol',
+              preselectedProviderProtocol,
+              'router-direct relay preselected provider protocol'
+            );
+          }
           return await this.executePipeline({
             ...nextInput,
             metadata: relayMetadata,

@@ -310,13 +310,6 @@ pub fn resolve_stop_message_followup_provider_key_json(input_json: &str) -> Resu
         .map_err(|e| format!("serialize stop-message followup provider key: {e}"))
 }
 
-pub fn get_captured_request_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize captured request input: {e}"))?;
-    serde_json::to_string(&persisted_lookup::get_captured_request(&input))
-        .map_err(|e| format!("serialize captured request: {e}"))
-}
-
 pub fn resolve_client_connection_state_json(input_json: &str) -> Result<String, String> {
     let input: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize client connection state input: {e}"))?;
@@ -1480,7 +1473,6 @@ mod tests {
                 "used": 1.9,
                 "active": true,
                 "stopEligible": true,
-                "hasCapturedRequest": true,
                 "compactionRequest": false,
                 "hasSeed": true,
                 "decision": " TRIGGER ",
@@ -2290,19 +2282,6 @@ mod tests {
 
     #[test]
     fn resolves_runtime_context_helpers_via_servertool_core_bridge() {
-        let captured = get_captured_request_json(
-            &json!({
-                "capturedEntryRequest": { "input": "entry" },
-                "capturedChatRequest": { "messages": [] }
-            })
-            .to_string(),
-        )
-        .expect("captured request");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&captured).expect("json"),
-            json!({ "input": "entry" })
-        );
-
         let connection =
             resolve_client_connection_state_json(&json!({ "disconnected": true }).to_string())
                 .expect("connection");
@@ -2718,9 +2697,6 @@ mod tests {
                     "responsesResume": {
                         "toolOutputsDetailed": [{ "tool_call_id": "call_1" }]
                     }
-                },
-                "capturedRequest": {
-                    "system": "<collaboration_mode>Collaboration Mode: Plan</collaboration_mode>"
                 }
             })
             .to_string(),
@@ -2730,7 +2706,7 @@ mod tests {
             serde_json::from_str(&output).expect("stopless decision context signals json");
         assert_eq!(plan["portStopMessageDisabled"], true);
         assert_eq!(plan["hasResponsesSubmitToolOutputsResume"], true);
-        assert_eq!(plan["planModeActive"], true);
+        assert_eq!(plan["planModeActive"], false);
     }
 
     #[test]

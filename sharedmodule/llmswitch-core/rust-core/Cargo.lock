@@ -564,6 +564,7 @@ dependencies = [
  "servertool-core",
  "sha2",
  "stop-message-core",
+ "traffic-governor-core",
  "uuid",
 ]
 
@@ -682,6 +683,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "traffic-governor-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

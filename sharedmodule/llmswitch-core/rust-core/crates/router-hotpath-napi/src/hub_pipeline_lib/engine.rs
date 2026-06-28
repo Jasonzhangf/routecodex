@@ -383,10 +383,6 @@ impl HubPipelineEngine {
         )?;
         let routing_decision = vr_route_04.clone().into_decision();
         if let Some(metadata) = routed.normalized_metadata.as_object_mut() {
-            metadata.insert(
-                "capturedEntryRequest".to_string(),
-                entry_origin_request.clone(),
-            );
             metadata.insert("routingDecision".to_string(), routing_decision);
             if let Some(diagnostics_value) = route_output.get("diagnostics").cloned() {
                 metadata.insert("routingDiagnostics".to_string(), diagnostics_value);
@@ -863,7 +859,7 @@ fn run_servertool_resp_stopless_hook_skeleton(
     let metadata_write_plan = runtime_output.get("metadataWritePlan").cloned();
     match action {
         "return_null" => Ok(None),
-        "throw_error" | "throw_goal_active_loop" => {
+        "throw_error" => {
             let message = runtime_output
                 .get("error")
                 .and_then(|value| value.get("message"))
@@ -902,6 +898,7 @@ fn run_servertool_resp_stopless_hook_skeleton(
                 let projection_input = serde_json::json!({
                     "adapterContext": adapter_context,
                     "execution": execution,
+                    "metadataWritePlan": metadata_write_plan,
                     "requestId": request_id
                 });
                 let raw_projection = build_stopless_auto_cli_projection_from_engine_json(
@@ -1262,7 +1259,6 @@ fn build_adapter_context(
             .and_then(Value::as_str)
             .map(str::to_string),
         rt: metadata.get("__rt").cloned(),
-        claude_code: read_metadata_value(metadata, "claudeCode"),
         anthropic_thinking: read_trimmed_metadata_string_with_target_fallback(
             metadata,
             "anthropicThinking",
@@ -1306,25 +1302,8 @@ fn build_adapter_context(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_adapter_context, read_preselected_route};
+    use super::read_preselected_route;
     use serde_json::json;
-
-    #[test]
-    fn build_adapter_context_does_not_backfill_session_identifiers_from_responses_request_context()
-    {
-        let metadata = json!({
-            "entryEndpoint": "/v1/responses",
-            "responsesRequestContext": {
-                "sessionId": "sess-relay-stopless",
-                "conversationId": "conv-relay-stopless"
-            }
-        });
-
-        let adapter_context =
-            build_adapter_context(&metadata, "anthropic-messages", "req-stopless");
-        assert_eq!(adapter_context.session_id.as_deref(), None);
-        assert_eq!(adapter_context.conversation_id.as_deref(), None);
-    }
 
     #[test]
     fn read_preselected_route_prefers_snapshot_route_pin() {

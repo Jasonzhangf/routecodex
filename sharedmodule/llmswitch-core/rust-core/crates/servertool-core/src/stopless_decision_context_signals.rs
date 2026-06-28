@@ -6,7 +6,6 @@ use serde_json::Value;
 pub struct StoplessDecisionContextSignalsInput {
     pub adapter_context: Value,
     pub runtime_metadata: Option<Value>,
-    pub captured_request: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,7 +25,7 @@ pub fn plan_stopless_decision_context_signals(
         has_responses_submit_tool_outputs_resume: has_responses_submit_tool_outputs_resume(
             metadata,
         ),
-        plan_mode_active: is_plan_mode_active(input.captured_request.as_ref()),
+        plan_mode_active: false,
     }
 }
 
@@ -85,19 +84,6 @@ fn resume_has_tool_outputs(value: &Value) -> bool {
         .is_some_and(|items| !items.is_empty())
 }
 
-fn is_plan_mode_active(captured_request: Option<&Value>) -> bool {
-    let Some(captured_request) = captured_request else {
-        return false;
-    };
-    let Ok(text) = serde_json::to_string(captured_request) else {
-        return false;
-    };
-    let lower = text.to_lowercase();
-    lower.contains("<collaboration_mode>")
-        && lower.contains("collaboration mode: plan")
-        && !lower.contains("collaboration mode: default")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,7 +101,6 @@ mod tests {
                 }
             }),
             runtime_metadata: None,
-            captured_request: None,
         });
 
         assert!(plan.port_stop_message_disabled);
@@ -139,7 +124,6 @@ mod tests {
                 }
             }),
             runtime_metadata: None,
-            captured_request: None,
         });
 
         assert!(plan.port_stop_message_disabled);
@@ -158,25 +142,23 @@ mod tests {
                 }
             }),
             runtime_metadata: None,
-            captured_request: None,
         });
 
         assert!(plan.has_responses_submit_tool_outputs_resume);
     }
 
     #[test]
-    fn detects_plan_mode_from_captured_request_only() {
+    fn does_not_derive_plan_mode_from_request_context() {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
-            adapter_context: json!({}),
-            runtime_metadata: Some(json!({ "stopMessageEnabled": true })),
-            captured_request: Some(json!({
+            adapter_context: json!({
                 "system": "<collaboration_mode># Collaboration Mode: Plan\n</collaboration_mode>"
-            })),
+            }),
+            runtime_metadata: Some(json!({ "stopMessageEnabled": true })),
         });
 
         assert!(!plan.port_stop_message_disabled);
         assert!(!plan.has_responses_submit_tool_outputs_resume);
-        assert!(plan.plan_mode_active);
+        assert!(!plan.plan_mode_active);
     }
 
     #[test]
@@ -198,7 +180,6 @@ mod tests {
                     "toolOutputsDetailed": [{ "tool_call_id": "call_ignored_runtime" }]
                 }
             })),
-            captured_request: None,
         });
 
         assert!(plan.port_stop_message_disabled);
@@ -206,13 +187,12 @@ mod tests {
     }
 
     #[test]
-    fn default_mode_suppresses_plan_mode_signal() {
+    fn plan_mode_signal_requires_metadata_center_control_not_context_text() {
         let plan = plan_stopless_decision_context_signals(&StoplessDecisionContextSignalsInput {
-            adapter_context: json!({}),
-            runtime_metadata: None,
-            captured_request: Some(json!({
+            adapter_context: json!({
                 "system": "<collaboration_mode># Collaboration Mode: Plan\n# Collaboration Mode: Default</collaboration_mode>"
-            })),
+            }),
+            runtime_metadata: None,
         });
 
         assert!(!plan.plan_mode_active);

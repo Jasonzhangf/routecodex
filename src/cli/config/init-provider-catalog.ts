@@ -88,65 +88,6 @@ const CATALOG: InitProviderTemplate[] = [
     defaultModel: 'gpt-5.2'
   },
   {
-    id: 'deepseek-web',
-    label: 'DeepSeek Web (Account)',
-    description: 'DeepSeek Web account provider (chat:deepseek-web compatibility)',
-    sdkBinding: {
-      family: 'custom-runtime',
-      supported: false,
-      notes: 'Requires the DeepSeek web-account runtime path rather than direct Vercel AI SDK auth.'
-    },
-    capabilities: { supportsReasoning: true, supportsTools: true, supportsMultimodal: true },
-    webSearch: {
-      engineId: 'deepseek:web_search',
-      providerKey: 'deepseek-web.deepseek-v4-flash-search-nothinking',
-      routeTarget: 'deepseek-web.deepseek-v4-flash-search-nothinking',
-      modelId: 'deepseek-v4-flash-search-nothinking',
-      description: 'DeepSeek native web_search route backend',
-      executionMode: 'direct',
-      directActivation: 'route',
-      default: true
-    },
-    multimodalRouteTarget: 'deepseek-web.deepseek-v4-vision',
-    provider: {
-      id: 'deepseek-web',
-      enabled: true,
-      type: 'openai',
-      baseURL: 'https://chat.deepseek.com',
-      compatibilityProfile: 'chat:deepseek-web',
-      auth: {
-        type: 'deepseek-account',
-        entries: [
-          {
-            alias: '1',
-            type: 'deepseek-account',
-            tokenFile: '~/.rcc/auth/deepseek-account-1.json'
-          }
-        ]
-      },
-      deepseek: {
-        strictToolRequired: true,
-        toolProtocol: 'text',
-        powTimeoutMs: 15000,
-        powMaxAttempts: 2,
-        sessionReuseTtlMs: 1800000
-      },
-      models: {
-        'deepseek-chat': {
-          supportsStreaming: true,
-          capabilities: ['web_search', 'multimodal'],
-          aliases: ['deepseek-v3', 'deepseek-chat-search', 'deepseek-v3-search', 'deepseek-v4-flash', 'deepseek-v4-flash-nothinking', 'deepseek-v4-flash-search', 'deepseek-v4-flash-search-nothinking', 'deepseek-v4-vision', 'deepseek-v4-vision-nothinking']
-        },
-        'deepseek-reasoner': {
-          supportsStreaming: true,
-          capabilities: ['web_search', 'multimodal'],
-          aliases: ['deepseek-r1', 'deepseek-reasoner-search', 'deepseek-r1-search', 'deepseek-v4-pro', 'deepseek-v4-pro-nothinking', 'deepseek-v4-pro-search', 'deepseek-v4-pro-search-nothinking']
-        }
-      }
-    },
-    defaultModel: 'deepseek-chat'
-  },
-  {
     id: 'glm',
     label: 'GLM (OpenAI-compatible)',
     description: 'Zhipu/BigModel OpenAI-compatible endpoint',

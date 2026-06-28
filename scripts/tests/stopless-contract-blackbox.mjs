@@ -6,6 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import express from 'express';
+import { MetadataCenter } from '../../dist/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const REAL_CODEX_REQUEST_FIXTURE = path.resolve(
   'tests/fixtures/errorsamples/responses-request-standardization/2026-06-13-duplicate-replay-wrapper-noise/request-body.json'
@@ -52,6 +53,42 @@ function makeProvider(id, upstreamBase) {
     endpoint: upstreamBase,
     auth: { type: 'apikey', apiKey: `${id}-`.padEnd(24, 'x') },
     models: { 'gpt-5.3-codex': {} }
+  };
+}
+
+const STOPLESS_HARNESS_ROUTE_CONTROL = {
+  providerProtocol: 'openai-responses',
+  preselectedRoute: {
+    target: {
+      providerKey: 'crs1.key1',
+      runtimeKey: 'crs1.key1',
+      modelId: 'gpt-5.3-codex',
+      outboundProfile: 'openai-responses',
+      providerType: 'responses'
+    },
+    decision: { routeName: 'thinking' },
+    diagnostics: {}
+  }
+};
+
+function withStoplessHarnessRouteControl(input) {
+  const metadata = input?.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+    ? input.metadata
+    : {};
+  const center = MetadataCenter.read(metadata) ?? MetadataCenter.attach(metadata);
+  center.writeRuntimeControl('providerProtocol', STOPLESS_HARNESS_ROUTE_CONTROL.providerProtocol, {
+    module: 'scripts/tests/stopless-contract-blackbox.mjs',
+    symbol: 'withStoplessHarnessRouteControl',
+    stage: 'test'
+  }, 'stopless blackbox provider protocol truth');
+  center.writeRuntimeControl('preselectedRoute', STOPLESS_HARNESS_ROUTE_CONTROL.preselectedRoute, {
+    module: 'scripts/tests/stopless-contract-blackbox.mjs',
+    symbol: 'withStoplessHarnessRouteControl',
+    stage: 'test'
+  }, 'stopless blackbox preselected route');
+  return {
+    ...input,
+    metadata
   };
 }
 
@@ -185,8 +222,12 @@ function assertStoplessSystemInstructionContract(text, label) {
     `${label} missing conditional-field system guidance: ${value}`
   );
   assert.ok(
-    value.includes('has_evidence=1') && value.includes('evidence'),
+    value.includes('stopreason=0') && value.includes('has_evidence=1') && value.includes('evidence'),
     `${label} missing has_evidence/evidence relation: ${value}`
+  );
+  assert.ok(
+    value.includes('stopreason=1') && value.includes('reason') && value.includes('提供 reason 即可停止'),
+    `${label} missing blocked/reason relation: ${value}`
   );
   assert.ok(
     value.includes('stopreason=2') && value.includes('next_step'),
@@ -208,7 +249,12 @@ function assertReasoningStopToolContract(tool, label) {
     `${label} missing conditional-field tool description: ${description}`
   );
   assert.ok(
-    description.includes('stopreason=2 requires next_step'),
+    description.includes('stopreason=1 blocked requires non-empty reason')
+      && description.includes('may stop with reason only'),
+    `${label} missing blocked/reason tool description: ${description}`
+  );
+  assert.ok(
+    description.includes('stopreason=2 continue_needed requires next_step'),
     `${label} missing continue/next_step tool description: ${description}`
   );
   assert.ok(
@@ -223,8 +269,8 @@ function assertReasoningStopToolContract(tool, label) {
   const required = fn.parameters?.required ?? fn.input_schema?.required ?? [];
   assert.deepEqual(
     [...required].sort(),
-    ['has_evidence', 'reason', 'stopreason'].sort(),
-    `${label} reasoningStop required fields must be baseline only`
+    ['stopreason'],
+    `${label} reasoningStop required fields must be unconditional baseline only`
   );
 }
 
@@ -337,7 +383,7 @@ const CASES = [
     expectedTriggerHint: 'no_schema',
     expectCliSchemaFeedback: false,
     expectedProviderText: 'stop_schema_missing',
-    expectedMissingFields: ['stopreason', 'reason', 'next_step']
+    expectedMissingFields: ['stopreason']
   },
   {
     id: 'invalid_schema',
@@ -460,11 +506,11 @@ async function runCase(testCase) {
     const app = express();
     app.use(express.json({ limit: '2mb' }));
     app.post('/v1/responses', (req, res) => handleResponses(req, res, {
-      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input),
+      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, withStoplessHarnessRouteControl(input)),
       errorHandling: routeCodex.errorHandling
     }));
     app.post('/v1/responses/:id/submit_tool_outputs', (req, res) => handleResponses(req, res, {
-      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input),
+      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, withStoplessHarnessRouteControl(input)),
       errorHandling: routeCodex.errorHandling
     }, {
       entryEndpoint: '/v1/responses.submit_tool_outputs',

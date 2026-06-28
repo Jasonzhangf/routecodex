@@ -647,7 +647,7 @@ fn render_stopless_schema_guidance_text(
         )
     };
     let conditional_rules =
-        "必填关系：stopreason 必须是数字 0/1/2；reason 必须说明当前状态；has_evidence 必须是 0 或 1；has_evidence=1 时 evidence 必须写证据；stopreason=0/1 是停止条件，必须 has_evidence=1 且 evidence 非空；stopreason=2 必须写 next_step，下一轮只执行 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。"
+        "必填关系：stopreason 必须是数字 0/1/2；stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空；stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止；stopreason=2 必须写 next_step，下一轮只执行 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。"
             .to_string();
     let hint = match trigger_hint {
         "no_schema" => {
@@ -2869,7 +2869,7 @@ mod tests {
                 },
                 "schemaGuidance": {
                     "triggerHint": "invalid_schema",
-                    "requiredFields": ["stopreason", "reason", "next_step"],
+                    "requiredFields": ["reason"],
                     "stopreasonValues": {
                         "finished": 0,
                         "blocked": 1,
@@ -2889,7 +2889,8 @@ mod tests {
         assert!(text.contains("next_step"));
         assert!(text.contains("0=finished"));
         assert!(text.contains("按条件补齐这些字段"));
-        assert!(text.contains("has_evidence=1 时 evidence 必须写证据"));
+        assert!(text.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
+        assert!(text.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
         assert!(text.contains("stopreason=2 必须写 next_step"));
         assert!(text.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
         assert!(text.contains("最小可复制样本："));
@@ -2911,10 +2912,10 @@ mod tests {
                 "repeatCount": 1,
                 "schemaFeedback": {
                     "reasonCode": "stop_schema_missing",
-                    "missingFields": ["stopreason", "reason", "next_step"]
+                    "missingFields": ["stopreason"]
                 },
                 "schemaGuidance": {
-                    "requiredFields": ["stopreason", "reason", "next_step"],
+                    "requiredFields": ["stopreason"],
                     "stopreasonValues": {
                         "finished": 0,
                         "blocked": 1,
@@ -2926,11 +2927,14 @@ mod tests {
             .to_string(),
         );
         assert!(text.contains("继续执行；如果任务已经完成，就按下面 schema 补齐收尾字段"));
-        assert!(text.contains("继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"));
+        assert!(
+            text.contains("继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason")
+        );
         assert!(!text.contains("如果任务还没完成，不要停，继续执行当前任务"));
         assert!(text.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
         assert!(text.contains("按条件补齐这些字段"));
-        assert!(text.contains("has_evidence=1 时 evidence 必须写证据"));
+        assert!(text.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
+        assert!(text.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
         assert!(text.contains("stopreason=2 必须写 next_step"));
         assert!(text.contains("最小可复制样本："));
         assert!(text.contains("\"needs_user_input\":false"));
@@ -2946,10 +2950,10 @@ mod tests {
                 "repeatCount": 2,
                 "schemaFeedback": {
                     "reasonCode": "stop_schema_missing",
-                    "missingFields": ["stopreason", "reason", "next_step"]
+                    "missingFields": ["stopreason"]
                 },
                 "schemaGuidance": {
-                    "requiredFields": ["stopreason", "reason", "next_step"],
+                    "requiredFields": ["stopreason"],
                     "stopreasonValues": {
                         "finished": 0,
                         "blocked": 1,
@@ -2961,11 +2965,10 @@ mod tests {
             .to_string(),
         );
         assert!(text.contains("如果当前任务已经完成，就按下面 schema 补齐收尾字段"));
-        assert!(text.contains(
-            "如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason, reason, next_step"
-        ));
+        assert!(text.contains("如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason"));
         assert!(text.contains("如果任务还没完成，不要停，继续执行当前任务"));
-        assert!(text.contains("has_evidence=1 时 evidence 必须写证据"));
+        assert!(text.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
+        assert!(text.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
         assert!(text.contains("stopreason=2 必须写 next_step"));
         assert!(text.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
         assert!(text.contains("最小可复制样本："));

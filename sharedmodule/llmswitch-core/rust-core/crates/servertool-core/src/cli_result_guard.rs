@@ -41,27 +41,14 @@ pub fn extract_stop_message_auto_cli_result_snapshot_from_request(
 }
 
 fn collect_scan_roots(payload: &Value) -> Vec<&Value> {
-    let adapter = payload.get("adapterContext").and_then(Value::as_object);
-    let runtime = payload.get("runtimeMetadata").and_then(Value::as_object);
-    let responses_context = adapter
-        .and_then(|record| record.get("responsesRequestContext"))
-        .and_then(Value::as_object)
-        .or_else(|| {
-            runtime
-                .and_then(|record| record.get("responsesRequestContext"))
-                .and_then(Value::as_object)
-        });
-
-    [
-        adapter.and_then(|record| record.get("__raw_request_body")),
-        adapter.and_then(|record| record.get("capturedChatRequest")),
-        responses_context.and_then(|record| record.get("payload")),
-        responses_context.and_then(|record| record.get("context")),
-        runtime.and_then(|record| record.get("capturedChatRequest")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+    let Some(record) = payload.as_object() else {
+        return vec![payload];
+    };
+    let roots = ["input", "tool_outputs", "messages"]
+        .into_iter()
+        .filter_map(|key| record.get(key))
+        .collect::<Vec<_>>();
+    roots
 }
 
 fn scan_value(value: &Value, depth: usize, seen: &mut usize) -> bool {
@@ -375,17 +362,13 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn detects_stop_message_auto_cli_json_output_in_raw_request() {
+    fn detects_stop_message_auto_cli_json_output_in_current_request() {
         let payload = json!({
-            "adapterContext": {
-                "__raw_request_body": {
-                    "input": [{
-                        "type": "function_call_output",
-                        "call_id": "call_servertool",
-                        "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
-                    }]
-                }
-            }
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_servertool",
+                "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
+            }]
         });
 
         assert!(has_stop_message_auto_cli_result_in_request(&payload));
@@ -394,21 +377,31 @@ mod tests {
     #[test]
     fn detects_stop_message_auto_command_marker_in_nested_content() {
         let payload = json!({
-            "runtimeMetadata": {
-                "responsesRequestContext": {
-                    "payload": {
-                        "messages": [{
-                            "role": "tool",
-                            "content": [{
-                                "text": "routecodex hook run reasoning_stop --input-json '{}' --session-id 'session-a' --request-id 'req-a'"
-                            }]
-                        }]
-                    }
-                }
-            }
+            "messages": [{
+                "role": "tool",
+                "content": [{
+                    "text": "routecodex hook run reasoning_stop --input-json '{}' --session-id 'session-a' --request-id 'req-a'"
+                }]
+            }]
         });
 
         assert!(has_stop_message_auto_cli_result_in_request(&payload));
+    }
+
+    #[test]
+    fn extracts_stopless_snapshot_from_current_request_input() {
+        let payload = json!({
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_stopless_round1",
+                "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}"
+            }]
+        });
+
+        let snapshot = extract_stop_message_auto_cli_result_snapshot_from_request(&payload)
+            .expect("stopless snapshot");
+        assert_eq!(snapshot["repeatCount"], json!(1));
+        assert_eq!(snapshot["maxRepeats"], json!(3));
     }
 
     #[test]
@@ -428,16 +421,46 @@ mod tests {
     }
 
     #[test]
-    fn rejects_web_search_cli_result_json() {
+    fn rejects_stopless_result_hidden_in_raw_context_carriers() {
         let payload = json!({
             "adapterContext": {
+                "__raw_request_body": {
+                    "input": [{
+                        "type": "function_call_output",
+                        "call_id": "call_stopless_round1",
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}"
+                    }]
+                },
                 "capturedChatRequest": {
                     "messages": [{
                         "role": "tool",
-                        "content": "{\"toolName\":\"web_search\",\"flowId\":\"stop_message_flow\"}"
+                        "content": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
                     }]
                 }
+            },
+            "runtimeMetadata": {
+                "responsesRequestContext": {
+                    "payload": {
+                        "input": [{
+                            "type": "function_call_output",
+                            "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
+                        }]
+                    }
+                }
             }
+        });
+
+        assert!(!has_stop_message_auto_cli_result_in_request(&payload));
+        assert!(extract_stop_message_auto_cli_result_snapshot_from_request(&payload).is_none());
+    }
+
+    #[test]
+    fn rejects_web_search_cli_result_json() {
+        let payload = json!({
+            "messages": [{
+                "role": "tool",
+                "content": "{\"toolName\":\"web_search\",\"flowId\":\"stop_message_flow\"}"
+            }]
         });
 
         assert!(!has_stop_message_auto_cli_result_in_request(&payload));

@@ -305,26 +305,18 @@ describe('servertool CLI native bridge', () => {
   it('uses Rust-owned stopless CLI projection context planning', () => {
     expect(
       planStoplessCliProjectionContextWithNative({
-        executionContext: {
+        metadataWritePlan: {
           stopless: {
             repeatCount: 4,
             maxRepeats: 6,
-            triggerHint: 'loop-hint',
+            triggerHint: 'stop_schema_continue_next_step',
             schemaFeedback: {
-              reason_code: 'loop_feedback'
+              reasonCode: 'stop_schema_continue_next_step'
             }
-          },
-          stopSchemaTriggerHint: 'context-hint',
-          stopSchemaFeedback: {
-            reason_code: 'context_feedback'
           }
         },
         stoplessControl: {
           triggerHint: 'control-hint'
-        },
-        runtimeSnapshot: {
-          used: 1,
-          maxRepeats: 3
         },
         chatStopText: '来自 chat 的 stop 文本',
         adapterStopText: '来自 adapter 的 stop 文本'
@@ -333,40 +325,22 @@ describe('servertool CLI native bridge', () => {
       reasoningText: '来自 chat 的 stop 文本',
       repeatCount: 4,
       maxRepeats: 6,
-      triggerHint: 'loop-hint',
+      publicTriggerHint: 'non_terminal_schema',
       schemaFeedback: {
-        reason_code: 'loop_feedback'
+        reasonCode: 'stop_schema_continue_next_step'
       }
     });
   });
 
-  it('keeps serverToolLoopState only as fallback when execution.stopless is absent', () => {
+  it('does not read legacy execution context or serverToolLoopState as stopless control', () => {
     expect(
       planStoplessCliProjectionContextWithNative({
-        executionContext: {
-          serverToolLoopState: {
-            repeatCount: 4,
-            maxRepeats: 6,
-            triggerHint: 'loop-hint',
-            schemaFeedback: {
-              reason_code: 'loop_feedback'
-            }
-          }
-        },
-        runtimeSnapshot: {
-          used: 1,
-          maxRepeats: 3
-        },
         chatStopText: '来自 chat 的 stop 文本'
       })
     ).toEqual({
       reasoningText: '来自 chat 的 stop 文本',
-      repeatCount: 4,
-      maxRepeats: 6,
-      triggerHint: 'loop-hint',
-      schemaFeedback: {
-        reason_code: 'loop_feedback'
-      }
+      repeatCount: 1,
+      maxRepeats: 1
     });
   });
 

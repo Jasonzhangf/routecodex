@@ -467,7 +467,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           type: 'anthropic',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'anthropic:claude-code',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -580,7 +580,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           type: 'anthropic',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'anthropic:claude-code',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -689,7 +689,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           type: 'anthropic',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'anthropic:claude-code',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -801,7 +801,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           type: 'anthropic',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'anthropic:claude-code',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -922,7 +922,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           type: 'anthropic',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'anthropic:claude-code',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -1048,7 +1048,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           type: 'anthropic',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'anthropic:claude-code',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -1195,7 +1195,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           type: 'anthropic',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'anthropic:claude-code',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -1287,7 +1287,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           type: 'anthropic',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'anthropic:claude-code',
+          compatibilityProfile: 'compat:passthrough',
           models: { 'MiniMax-M3': {} }
         }
       },

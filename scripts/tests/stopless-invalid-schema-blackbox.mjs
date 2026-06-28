@@ -6,6 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import express from 'express';
+import { MetadataCenter } from '../../dist/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const REAL_CODEX_REQUEST_FIXTURE = path.resolve(
   'tests/fixtures/errorsamples/responses-request-standardization/2026-06-13-duplicate-replay-wrapper-noise/request-body.json'
@@ -52,6 +53,42 @@ function makeProvider(id, upstreamBase) {
     endpoint: upstreamBase,
     auth: { type: 'apikey', apiKey: `${id}-`.padEnd(24, 'x') },
     models: { 'gpt-5.3-codex': {} }
+  };
+}
+
+const STOPLESS_HARNESS_ROUTE_CONTROL = {
+  providerProtocol: 'openai-responses',
+  preselectedRoute: {
+    target: {
+      providerKey: 'crs1.key1',
+      runtimeKey: 'crs1.key1',
+      modelId: 'gpt-5.3-codex',
+      outboundProfile: 'openai-responses',
+      providerType: 'responses'
+    },
+    decision: { routeName: 'thinking' },
+    diagnostics: {}
+  }
+};
+
+function withStoplessHarnessRouteControl(input) {
+  const metadata = input?.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+    ? input.metadata
+    : {};
+  const center = MetadataCenter.read(metadata) ?? MetadataCenter.attach(metadata);
+  center.writeRuntimeControl('providerProtocol', STOPLESS_HARNESS_ROUTE_CONTROL.providerProtocol, {
+    module: 'scripts/tests/stopless-invalid-schema-blackbox.mjs',
+    symbol: 'withStoplessHarnessRouteControl',
+    stage: 'test'
+  }, 'stopless invalid-schema blackbox provider protocol truth');
+  center.writeRuntimeControl('preselectedRoute', STOPLESS_HARNESS_ROUTE_CONTROL.preselectedRoute, {
+    module: 'scripts/tests/stopless-invalid-schema-blackbox.mjs',
+    symbol: 'withStoplessHarnessRouteControl',
+    stage: 'test'
+  }, 'stopless invalid-schema blackbox preselected route');
+  return {
+    ...input,
+    metadata
   };
 }
 
@@ -325,7 +362,8 @@ function assertProviderGuidance(body, reasonCode, missingFields, label) {
     `${label}: provider request must explain conditional schema fields: ${text}`
   );
   assert.ok(
-    text.includes('has_evidence=1 时 evidence 必须写证据'),
+    text.includes('has_evidence=1 时 evidence 必须写证据')
+      || text.includes('stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空'),
     `${label}: provider request must include has_evidence/evidence relation: ${text}`
   );
   assert.ok(
@@ -437,11 +475,11 @@ async function main() {
     const app = express();
     app.use(express.json({ limit: '2mb' }));
     app.post('/v1/responses', (req, res) => handleResponses(req, res, {
-      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input),
+      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, withStoplessHarnessRouteControl(input)),
       errorHandling: routeCodex.errorHandling
     }));
     app.post('/v1/responses/:id/submit_tool_outputs', (req, res) => handleResponses(req, res, {
-      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input),
+      executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, withStoplessHarnessRouteControl(input)),
       errorHandling: routeCodex.errorHandling
     }, {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
@@ -469,7 +507,7 @@ async function main() {
 
     const firstProjectionInput = extractInputJson(execTool1.command);
     assert.equal(firstProjectionInput.repeatCount, 1, `expected first repeatCount=1, command=${execTool1.command}`);
-    const missingRound1 = ['has_evidence', 'next_step'];
+    const missingRound1 = ['next_step'];
     const cliOutput1 = runCliCommand(buildReasoningStopCommand({
       stopreason: 2,
       reason: '还没完成'

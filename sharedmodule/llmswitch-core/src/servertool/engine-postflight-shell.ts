@@ -6,10 +6,29 @@ import type {
 } from './types.js';
 import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
+import {
+  readRequestTruthSessionIdFromAnyBoundMetadataCenter,
+  readRuntimeControlFromAnyBoundMetadataCenter
+} from './metadata-center-carrier.js';
 
 type EnginePostflightAction = {
   action: string;
 };
+
+function buildStoplessProjectionMetadataCenterSnapshot(
+  adapterContext: AdapterContext
+): Record<string, unknown> | undefined {
+  const adapterRecord = adapterContext as unknown as Record<string, unknown>;
+  const sessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(adapterRecord);
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterRecord);
+  if (!sessionId && !runtimeControl) {
+    return undefined;
+  }
+  return {
+    requestTruth: sessionId ? { sessionId } : {},
+    runtimeControl: runtimeControl ?? {}
+  };
+}
 
 export async function runServertoolEnginePostflight(args: {
   options: {
@@ -142,9 +161,17 @@ export async function runServertoolEnginePostflight(args: {
     if (!fn) {
       throw new Error('buildStoplessAutoCliProjectionFromEngineJson native unavailable');
     }
+    const metadataCenterSnapshot = buildStoplessProjectionMetadataCenterSnapshot(options.adapterContext);
+    const adapterContextForRust = metadataCenterSnapshot
+      ? {
+          ...(options.adapterContext as Record<string, unknown>),
+          metadataCenterSnapshot
+        }
+      : options.adapterContext as Record<string, unknown>;
     const inputJson = JSON.stringify({
-      adapterContext: options.adapterContext as Record<string, unknown>,
+      adapterContext: adapterContextForRust,
       execution: engineResult.execution ?? null,
+      metadataWritePlan: engineResult.metadataWritePlan ?? null,
       requestId: options.requestId ?? null
     });
     const raw = fn(inputJson);

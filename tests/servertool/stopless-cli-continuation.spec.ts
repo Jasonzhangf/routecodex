@@ -105,6 +105,34 @@ function bindRequestTruth(metadata: Record<string, unknown>, requestId: string, 
   }
 }
 
+function writeStoplessRuntimeControl(
+  metadata: Record<string, unknown>,
+  state: Record<string, unknown>
+): void {
+  const stopless: Record<string, unknown> = {
+    flowId: 'stop_message_flow',
+    repeatCount: state.repeatCount,
+    maxRepeats: state.maxRepeats,
+    ...(typeof state.continuationPrompt === 'string'
+      ? { continuationPrompt: state.continuationPrompt }
+      : {}),
+    ...(typeof state.triggerHint === 'string' ? { triggerHint: state.triggerHint } : {}),
+    ...(state.schemaFeedback && typeof state.schemaFeedback === 'object'
+      ? { schemaFeedback: state.schemaFeedback }
+      : {})
+  };
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'stopless',
+    stopless,
+    {
+      module: 'tests/servertool/stopless-cli-continuation.spec.ts',
+      symbol: 'writeStoplessRuntimeControl',
+      stage: 'test'
+    },
+    'test stopless runtime control'
+  );
+}
+
 function extractExecCommand(resultChat: any): string {
   const toolCall = resultChat?.choices?.[0]?.message?.tool_calls?.[0];
   expect(toolCall?.function?.name).toBe('exec_command');
@@ -253,61 +281,14 @@ describe('stopless CLI continuation', () => {
       capturedChatRequest: {
         model: 'gpt-5.5',
         messages: [{ role: 'user', content: '继续执行' }]
-      },
-      __raw_request_body: {
-        tool_outputs: [
-          {
-            tool_call_id: 'call_servertool_cli',
-            output: JSON.stringify({
-              ok: true,
-              kind: 'stop_message_auto',
-              tool: 'stop_message_auto',
-              toolName: 'stop_message_auto',
-              flowId: 'stop_message_flow',
-              continuationPrompt: '继续执行原任务',
-              repeatCount: 1,
-              maxRepeats: 3
-            })
-          }
-        ]
       }
     });
     bindRequestTruth(adapterContext, adapterContext.requestId, adapterContext.sessionId);
-    const center = MetadataCenter.read(adapterContext)!;
-    center.writeContinuationContext(
-      'responsesResume',
-      {
-        continuationOwner: 'relay',
-        toolOutputsDetailed: [
-          {
-            callId: 'call_servertool_cli',
-            originalId: 'call_servertool_cli',
-            outputText: JSON.stringify({
-              ok: true,
-              kind: 'stop_message_auto',
-              tool: 'stop_message_auto',
-              toolName: 'stop_message_auto',
-              flowId: 'stop_message_flow',
-              continuationPrompt: '继续执行原任务',
-              repeatCount: 2,
-              maxRepeats: 3
-            })
-          }
-        ],
-        fullInput: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: '上一轮执行结果：repeatCount=2/3。' }]
-          }
-        ]
-      },
-      {
-        module: 'tests/servertool/stopless-cli-continuation.spec.ts',
-        symbol: 'responses_resume_repeat_count_reproject',
-        stage: 'test'
-      }
-    );
+    writeStoplessRuntimeControl(adapterContext, {
+      continuationPrompt: '继续执行原任务',
+      repeatCount: 1,
+      maxRepeats: 3
+    });
 
     const result = await runServerToolOrchestration({
       chat: buildStopChatResponse('stopless continuation ready'),
@@ -370,17 +351,10 @@ describe('stopless CLI continuation', () => {
       capturedChatRequest: {
         model: 'gpt-5.5',
         messages: [{ role: 'user', content: '继续执行 stopless 在线验证' }]
-      },
-      __raw_request_body: {
-        tool_outputs: [
-          {
-            tool_call_id: 'call_servertool_cli_round1',
-            output: JSON.stringify(stdout1)
-          }
-        ]
       }
     });
     bindRequestTruth(round2Context, requestId2, sessionId);
+    writeStoplessRuntimeControl(round2Context, stdout1);
 
     const round2 = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
@@ -411,17 +385,10 @@ describe('stopless CLI continuation', () => {
       capturedChatRequest: {
         model: 'gpt-5.5',
         messages: [{ role: 'user', content: '继续执行 stopless 在线验证' }]
-      },
-      __raw_request_body: {
-        tool_outputs: [
-          {
-            tool_call_id: 'call_servertool_cli_round2',
-            output: JSON.stringify(stdout2)
-          }
-        ]
       }
     });
     bindRequestTruth(round3Context, requestId3, sessionId);
+    writeStoplessRuntimeControl(round3Context, stdout2);
 
     const round3 = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
@@ -436,8 +403,8 @@ describe('stopless CLI continuation', () => {
     expect(round3.executed).toBe(true);
     expect(maybeExtractExecCommand(round3.chat)).toBeUndefined();
     expect((round3.chat as any).choices?.[0]?.finish_reason).toBe('stop');
-    expect(JSON.stringify(round3.chat)).toContain('stopless budget exhausted');
-    expect(JSON.stringify(round3.chat)).not.toContain('need more evidence');
+    expect(JSON.stringify(round3.chat)).toContain('need more evidence');
+    expect(JSON.stringify(round3.chat)).not.toContain('stopless budget exhausted');
   });
 
   test('missing request truth sessionId keeps stopless terminal', async () => {
@@ -607,10 +574,10 @@ describe('stopless CLI continuation', () => {
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses',
         sessionId: sessionA
-      }),
-      __raw_request_body: buildResponsesToolOutputRequest(stdoutA1)
+      })
     } as any);
     bindRequestTruth(adapterA2, requestA2, sessionA);
+    writeStoplessRuntimeControl(adapterA2, stdoutA1);
     const secondA = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
       adapterContext: adapterA2,
@@ -640,10 +607,10 @@ describe('stopless CLI continuation', () => {
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses',
         sessionId: sessionA
-      }),
-      __raw_request_body: buildResponsesToolOutputRequest(stdoutA2)
+      })
     } as any);
     bindRequestTruth(adapterA3, requestA3, sessionA);
+    writeStoplessRuntimeControl(adapterA3, stdoutA2);
     const thirdA = await runServerToolOrchestration({
       chat: buildStopChatResponse('need more evidence'),
       adapterContext: adapterA3,
@@ -779,14 +746,18 @@ describe('stopless CLI continuation', () => {
       flowId: 'stop_message_flow',
       repeatCount: 1,
       maxRepeats: 3,
-      triggerHint: 'stop_schema_reason_missing'
+      triggerHint: 'invalid_schema'
     });
     expect(center?.readRuntimeControl().stopless).toEqual(
       expect.objectContaining({
         flowId: 'stop_message_flow',
         repeatCount: 1,
         maxRepeats: 3,
-        triggerHint: 'stop_schema_reason_missing',
+        triggerHint: 'stop_schema_terminal_missing_fields',
+        schemaFeedback: {
+          reasonCode: 'stop_schema_terminal_missing_fields',
+          missingFields: ['has_evidence', 'evidence']
+        },
         active: true
       })
     );

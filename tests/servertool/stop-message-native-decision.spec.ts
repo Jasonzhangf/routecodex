@@ -10,7 +10,6 @@
 import { describe, test, expect } from '@jest/globals';
 import {
   decideStopMessageActionWithNative,
-  evaluateStoplessLoopGuardWithNative,
   evaluateStopSchemaGateWithNative,
   type StopMessageDecisionContext,
   type StopMessageDecision
@@ -177,12 +176,8 @@ describe('stop-message native decision (blackbox)', () => {
     expect(gate.followup_text).toContain('stopreason');
     expect(gate.followup_text).toContain('reason');
     expect(gate.followup_text).toContain('evidence');
-    expect(gate.followup_text).toContain('issue_cause');
-    expect(gate.followup_text).toContain('excluded_factors');
-    expect(gate.followup_text).toContain('diagnostic_order');
-    expect(gate.missing_fields).toEqual(
-      expect.arrayContaining(['stopreason', 'reason', 'evidence', 'next_step'])
-    );
+    expect(gate.followup_text).not.toContain('每个字段都要写具体内容');
+    expect(gate.missing_fields).toEqual(['stopreason']);
   });
 
   test('malformed schema returns parse feedback and explicit field guidance', () => {
@@ -265,19 +260,17 @@ describe('stop-message native decision (blackbox)', () => {
     expect(decision.skip_reason).toBe('skip_reached_max_repeats');
   });
 
-  test('stop schema gate requires evidence and diagnostics before terminal stop', () => {
+  test('stop schema gate allows blocked with reason only', () => {
     const shallow = evaluateStopSchemaGateWithNative({
       assistantText:
         '<rcc_stop_schema>{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":0,"evidence":"","next_step":""}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
     });
-    expect(shallow.action).toBe('followup');
-    expect(shallow.reason_code).toBe('stop_schema_terminal_missing_fields');
-    expect(shallow.count_budget).toBe(true);
-    expect(shallow.missing_fields).toEqual(
-      expect.arrayContaining(['issue_cause', 'excluded_factors', 'diagnostic_order', 'done_steps'])
-    );
+    expect(shallow.action).toBe('allow_stop');
+    expect(shallow.reason_code).toBe('stop_schema_blocked');
+    expect(shallow.count_budget).toBe(false);
+    expect(shallow.missing_fields).toEqual([]);
 
     const gate = evaluateStopSchemaGateWithNative({
       assistantText:
@@ -401,29 +394,4 @@ describe('stop-message native decision (blackbox)', () => {
     expect(valid.count_budget).toBe(false);
   });
 
-  test('stopless repeated text stop loop is detected from active goal context', () => {
-    const decision = evaluateStoplessLoopGuardWithNative({
-      threshold: 3,
-      assistantText: '立刻跑全测试 + 远端验证。',
-      capturedRequest: {
-        input: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: '<codex_internal_context source="goal">\nContinue working toward the active thread goal.\n<objective>完成测试验证</objective>'
-              }
-            ]
-          },
-          { role: 'assistant', content: [{ type: 'output_text', text: '立刻跑全测试 + 远端验证。' }] },
-          { role: 'assistant', content: [{ type: 'output_text', text: '立刻跑全测试 + 远端验证。' }] }
-        ]
-      }
-    });
-
-    expect(decision.loopDetected).toBe(true);
-    expect(decision.repeatCount).toBe(3);
-    expect(decision.reasonCode).toBe('stopless_repeated_stop');
-  });
 });

@@ -12,12 +12,10 @@ const OPTIONAL_POLICY_KEYS = [
 ] as const;
 
 const LEGACY_TOP_LEVEL_KEYS = [
-  'oauthBrowser',
   'loadBalancing',
   'classifier',
   'providers',
   'routing',
-  'quota',
   'session',
   'webSearch'
 ] as const;
@@ -66,10 +64,6 @@ export function buildWeightedRoutePool(id: string, targets: string[]): Record<st
 
 export function resolveDefaultToolsTarget(defaultTarget: string): string {
   const normalizedDefaultTarget = defaultTarget.trim();
-  // Per Jason 2026-06-20, model aliases are display-only and must not become
-  // VR route targets. Historically deepseek-web substituted
-  // `deepseek-v4-flash-nothinking` here, but that is an alias, not a canonical
-  // provider model key. Keep the canonical default target unchanged.
   return normalizedDefaultTarget;
 }
 

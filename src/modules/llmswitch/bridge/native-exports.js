@@ -712,3 +712,35 @@ export function getNetworkErrorCodes() {
     }
     return fn();
 }
+export function normalizeExplicitRoutePoolNative(value) {
+    const parsed = invokeRouterHotpathJsonCapability('normalizeExplicitRoutePoolJson', [value]);
+    const result = assertNativeObject('normalizeExplicitRoutePoolJson', parsed);
+    return Array.isArray(result.pool) ? result.pool : [];
+}
+export function mergeObservedRoutePoolChainNative(existing, observed) {
+    const existingJson = existing !== null ? JSON.stringify(existing) : null;
+    const observedJson = JSON.stringify(observed);
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding.mergeObservedRoutePoolChainJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] mergeObservedRoutePoolChainJson not available');
+    }
+    const raw = fn(existingJson, observedJson);
+    if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {
+        return null;
+    }
+    try {
+        return JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+}
+export function resolveEntryProtocolFromEndpointNative(entryEndpoint) {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding.resolveEntryProtocolFromEndpointJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] resolveEntryProtocolFromEndpointJson not available');
+    }
+    return fn(entryEndpoint);
+}

@@ -165,6 +165,7 @@ export interface ServerSideToolEngineResult {
   mode: 'passthrough' | 'tool_flow';
   finalChatResponse: JsonObject;
   execution?: ServerToolExecution;
+  metadataWritePlan?: JsonObject;
   /**
    * When present, indicates a "mixed tools" flow:
    * - servertools were executed and their tool results are persisted
@@ -195,6 +196,7 @@ export interface ServerToolHandlerContext {
 export interface ServerToolHandlerResult {
   chatResponse: JsonObject;
   execution: ServerToolExecution;
+  metadataWritePlan?: JsonObject;
 }
 
 /**

@@ -1,8 +1,7 @@
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
 use crate::hub_req_inbound_context_capture::normalize_responses_input_items;
 use crate::hub_req_inbound_tool_call_normalization::{
-    build_responses_reasoning_stop_function_call_item, build_stop_hook_guidance_text_from_output,
-    build_stop_hook_reasoning_stop_output_text,
+    build_stop_hook_guidance_text_from_output, build_stop_hook_reasoning_stop_output_text,
 };
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 use crate::shared_json_utils::read_trimmed_string;
@@ -51,16 +50,17 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
                 .map(normalize_tool_definition)
                 .collect::<Vec<_>>()
         });
+    let submit_tool_outputs_input = payload
+        .get("tool_outputs")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .map(normalize_submit_tool_outputs_as_responses_input);
     let messages =
         if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()).cloned() {
             messages
         } else if let Some(input_items) = payload.get("input").and_then(|v| v.as_array()).cloned() {
             let normalized_input_items =
                 normalize_responses_input_items(payload).unwrap_or_else(|| input_items.clone());
-            let normalized_input_items = append_stopless_resume_outputs_from_metadata(
-                normalized_input_items,
-                metadata_from_normalized.as_ref(),
-            );
             let allow_output_only_resume_tool_result =
                 is_output_only_resume_tool_result(payload, normalized_input_items.as_slice());
             convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
@@ -72,13 +72,9 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
                 allow_orphan_tool_result: Some(allow_output_only_resume_tool_result),
             })?
             .messages
-        } else if let Some(tool_outputs) = payload
-            .get("tool_outputs")
-            .and_then(|v| v.as_array())
-            .cloned()
-        {
+        } else if let Some(input_items) = submit_tool_outputs_input.clone() {
             convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-                input: normalize_submit_tool_outputs_as_responses_input(tool_outputs),
+                input: input_items,
                 tools: tools.clone(),
                 tool_result_fallback_text: None,
                 normalize_function_name: Some("responses".to_string()),
@@ -212,6 +208,10 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         if !input_array.is_empty() && !semantics.contains_key("input") {
             semantics.insert("input".to_string(), Value::Array(input_array.clone()));
         }
+    } else if let Some(input_array) = submit_tool_outputs_input.as_ref() {
+        if !input_array.is_empty() && !semantics.contains_key("input") {
+            semantics.insert("input".to_string(), Value::Array(input_array.clone()));
+        }
     }
 
     let mut standardized_request = Map::<String, Value>::new();
@@ -314,100 +314,6 @@ fn normalize_submit_tool_outputs_as_responses_input(tool_outputs: Vec<Value>) ->
             Value::Object(normalized)
         })
         .collect()
-}
-
-fn append_stopless_resume_outputs_from_metadata(
-    mut input_items: Vec<Value>,
-    metadata: Option<&Map<String, Value>>,
-) -> Vec<Value> {
-    let Some(metadata) = metadata else {
-        return input_items;
-    };
-    let Some(resume) = metadata.get("responsesResume").and_then(Value::as_object) else {
-        return input_items;
-    };
-    let Some(tool_outputs) = resume.get("toolOutputsDetailed").and_then(Value::as_array) else {
-        return input_items;
-    };
-    if tool_outputs.is_empty() {
-        return input_items;
-    }
-
-    let existing_output_call_ids = input_items
-        .iter()
-        .filter_map(responses_tool_output_call_id)
-        .collect::<std::collections::HashSet<_>>();
-    let existing_function_call_ids = input_items
-        .iter()
-        .filter_map(|entry| {
-            if !is_responses_function_call_item(entry) {
-                return None;
-            }
-            entry.as_object().and_then(|row| {
-                read_trimmed_string(row.get("call_id"))
-                    .or_else(|| read_trimmed_string(row.get("tool_call_id")))
-                    .or_else(|| read_trimmed_string(row.get("id")))
-            })
-        })
-        .collect::<std::collections::HashSet<_>>();
-
-    for (index, entry) in tool_outputs.iter().enumerate() {
-        let Some(row) = entry.as_object() else {
-            continue;
-        };
-        let call_id = read_trimmed_string(row.get("callId"))
-            .or_else(|| read_trimmed_string(row.get("originalId")))
-            .unwrap_or_else(|| format!("stopless_resume_tool_{}", index + 1));
-        if existing_output_call_ids.contains(call_id.as_str())
-            || existing_function_call_ids.contains(call_id.as_str())
-        {
-            continue;
-        }
-        let Some(output_text) = read_trimmed_string(row.get("outputText")) else {
-            continue;
-        };
-        if !is_stopless_cli_output(output_text.as_str()) {
-            continue;
-        }
-
-        input_items.push(build_responses_reasoning_stop_function_call_item(
-            call_id.as_str(),
-            output_text.as_str(),
-        ));
-        input_items.push(serde_json::json!({
-            "type": "function_call_output",
-            "call_id": call_id,
-            "output": build_stop_hook_reasoning_stop_output_text(output_text.as_str())
-        }));
-        let guidance = build_stop_hook_guidance_text_from_output(output_text.as_str())
-            .trim()
-            .to_string();
-        if !guidance.is_empty() {
-            input_items.push(serde_json::json!({
-                "type": "message",
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": guidance
-                    }
-                ]
-            }));
-        }
-    }
-
-    input_items
-}
-
-fn is_stopless_cli_output(raw: &str) -> bool {
-    let Ok(Value::Object(row)) = serde_json::from_str::<Value>(raw.trim()) else {
-        return false;
-    };
-    read_trimmed_string(row.get("toolName"))
-        .or_else(|| read_trimmed_string(row.get("tool_name")))
-        .or_else(|| read_trimmed_string(row.get("tool")))
-        .map(|tool_name| tool_name == "stop_message_auto")
-        .unwrap_or(false)
 }
 
 fn copy_optional_payload_fields(
@@ -603,7 +509,11 @@ fn normalize_tool_definition(tool: &Value) -> Value {
     if let Some(description) = tool_map.get("description").cloned() {
         function.insert("description".to_string(), description);
     }
-    if let Some(parameters) = tool_map.get("parameters").cloned() {
+    if let Some(parameters) = tool_map
+        .get("parameters")
+        .or_else(|| tool_map.get("input_schema"))
+        .cloned()
+    {
         function.insert("parameters".to_string(), parameters);
     }
     let mut normalized = Map::new();
@@ -616,6 +526,32 @@ fn normalize_tool_definition(tool: &Value) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn normalize_tool_definition_preserves_top_level_input_schema_as_parameters() {
+        let normalized = normalize_tool_definition(&json!({
+            "type": "function",
+            "name": "read_file",
+            "description": "Read file",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" }
+                },
+                "required": ["path"]
+            }
+        }));
+
+        assert_eq!(normalized["function"]["name"], "read_file");
+        assert_eq!(
+            normalized["function"]["parameters"]["properties"]["path"]["type"],
+            "string"
+        );
+        assert_eq!(
+            normalized["function"]["parameters"]["required"],
+            json!(["path"])
+        );
+    }
 
     #[test]
     fn responses_standardization_drops_mixed_orphan_tool_result_even_with_previous_response_id() {
@@ -677,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_standardization_restores_stopless_resume_tool_output_from_metadata() {
+    fn responses_standardization_does_not_restore_stopless_resume_tool_output_from_metadata() {
         let stopless_output = json!({
             "ok": true,
             "kind": "stop_message_auto",
@@ -733,18 +669,18 @@ mod tests {
             .expect("standardized messages");
         let serialized = serde_json::to_string(messages).unwrap();
         assert!(
-            serialized.contains("reasoningStop"),
-            "request standardization must restore stopless resume output as reasoningStop pair: {}",
+            !serialized.contains("reasoningStop"),
+            "request standardization must not restore stopless resume output from continuation metadata: {}",
             serialized
         );
         assert!(
-            serialized.contains("repeatCount=1/3"),
-            "request standardization must render stopless guidance from resume output: {}",
+            !serialized.contains("repeatCount=1/3"),
+            "request standardization must not render stopless guidance from continuation metadata: {}",
             serialized
         );
         assert!(
             !serialized.contains("stop_message_auto"),
-            "provider-facing restored tool result must not leak stop_message_auto identity: {}",
+            "continuation metadata stopless identity must not be projected by request standardization: {}",
             serialized
         );
     }
@@ -773,6 +709,34 @@ mod tests {
             .expect("semantics input");
         assert_eq!(semantics_input.len(), 2);
         assert_eq!(semantics_input[1]["type"], json!("function_call_output"));
+    }
+
+    #[test]
+    fn responses_standardization_preserves_submit_tool_outputs_in_semantics_input() {
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "previous_response_id": "resp_prev",
+                "tool_outputs": [{
+                    "tool_call_id": "call_stopless_round1",
+                    "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}"
+                }]
+            },
+            "normalized": {
+                "id": "req_submit_tool_outputs",
+                "entryEndpoint": "/v1/responses.submit_tool_outputs",
+                "stream": false,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        let semantics_input = output["standardizedRequest"]["semantics"]["input"]
+            .as_array()
+            .expect("semantics input");
+        assert_eq!(semantics_input.len(), 1);
+        assert_eq!(semantics_input[0]["type"], json!("function_call_output"));
+        assert_eq!(semantics_input[0]["tool_call_id"], json!("call_stopless_round1"));
     }
 
     #[test]

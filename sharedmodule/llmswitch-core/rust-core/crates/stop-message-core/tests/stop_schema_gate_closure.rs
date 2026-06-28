@@ -48,7 +48,7 @@ fn t1_continue_with_next_step_follows_up() {
     assert_eq!(d.reason_code, "stop_schema_continue_next_step");
     assert_eq!(d.missing_fields, Vec::<String>::new());
     assert_eq!(d.followup_text.as_deref(), Some("运行 cargo test 验证修复"));
-    assert!(d.count_budget);
+    assert!(!d.count_budget);
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn t1_continue_with_json_code_fence_follows_up() {
     let d = evaluate_stop_schema_gate(input, 0, 3, "", 0);
     assert_eq!(d.action, StopSchemaGateAction::Followup);
     assert_eq!(d.reason_code, "stop_schema_continue_next_step");
-    assert!(d.count_budget);
+    assert!(!d.count_budget);
 }
 
 // ── T2: 缺失 schema → Followup + 字段提示 ───────────────────────────────────
@@ -322,7 +322,8 @@ fn t6_continue_with_has_evidence_one_requires_evidence_only() {
     let d = evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(input), 0, 3, "", 0);
     assert_eq!(d.action, StopSchemaGateAction::Followup);
     assert_eq!(d.reason_code, "stop_schema_continue_next_step");
-    assert_eq!(d.missing_fields, vec!["evidence".to_string()]);
+    assert_eq!(d.missing_fields, Vec::<String>::new());
+    assert!(!d.count_budget);
 }
 
 #[test]
@@ -339,12 +340,10 @@ fn t6_terminal_without_evidence_reports_only_evidence_contract_fields() {
     let input =
         r#"{"stopreason":1,"reason":"被外部凭证阻塞","has_evidence":0,"needs_user_input":false}"#;
     let d = evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(input), 0, 3, "", 0);
-    assert_eq!(d.action, StopSchemaGateAction::Followup);
-    assert_eq!(d.reason_code, "stop_schema_terminal_missing_fields");
-    assert_eq!(
-        d.missing_fields,
-        vec!["has_evidence".to_string(), "evidence".to_string()]
-    );
+    assert_eq!(d.action, StopSchemaGateAction::AllowStop);
+    assert_eq!(d.reason_code, "stop_schema_blocked");
+    assert!(d.missing_fields.is_empty());
+    assert!(!d.count_budget);
 }
 
 #[test]

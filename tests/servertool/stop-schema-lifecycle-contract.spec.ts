@@ -42,7 +42,7 @@ describe('stop schema lifecycle contract', () => {
     });
     expect(gate.action).toBe('followup');
     expect(gate.reason_code).toBe('stop_schema_continue_next_step');
-    expect(gate.count_budget).toBe(true);
+    expect(gate.count_budget).toBe(false);
     expect(gate.parsed).toMatchObject({
       stopreason: 2,
       next_step: 'rerun failing command',

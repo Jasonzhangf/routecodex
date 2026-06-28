@@ -1055,7 +1055,6 @@ function checkLegacyStopMessageRuntimeMirrorsRemoved() {
     'stopMessageStageMode',
   ];
   const cleanupAllowlist = new Set([
-    `${ROOT}/src/server/runtime/http-server/executor/servertool-adapter-context.ts`,
     `${ROOT}/src/server/runtime/http-server/executor/servertool-followup-metadata.ts`,
   ]);
   const files = listFiles(`${ROOT}/src/server/runtime/http-server`);
@@ -1301,7 +1300,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'pub fn read_servertool_followup_flow_id',
     'pub fn resolve_bd_working_directory_for_record',
     'pub fn resolve_stop_message_followup_provider_key',
-    'pub fn get_captured_request',
     'pub fn resolve_client_connection_state',
     'pub fn has_compaction_flag',
     'pub fn resolve_entry_endpoint',
@@ -1403,7 +1401,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'readServertoolFollowupFlowIdWithNative',
     'resolveBdWorkingDirectoryForRecordWithNative',
     'resolveStopMessageFollowupProviderKeyWithNative',
-    'getCapturedRequestWithNative',
     'resolveClientConnectionStateWithNative',
     'hasCompactionFlagWithNative',
     'resolveEntryEndpointWithNative',
@@ -1434,7 +1431,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"readServertoolFollowupFlowIdJson"',
     '"resolveBdWorkingDirectoryForRecordJson"',
     '"resolveStopMessageFollowupProviderKeyJson"',
-    '"getCapturedRequestJson"',
     '"resolveClientConnectionStateJson"',
     '"hasCompactionFlagJson"',
     '"resolveEntryEndpointJson"',
@@ -1592,6 +1588,9 @@ function checkStopMessagePersistedLookupRustOwner() {
     'function hasResponsesSubmitToolOutputsResume',
     'function isStopMessageDisabledByPort',
     'function isPlanModeActiveFromCapturedRequest',
+    'function getCapturedRequest',
+    'getCapturedRequestWithNative',
+    'getCapturedRequestJson',
     'toolOutputsDetailed.length',
     'routecodexPortStopMessageEnabled',
     'collaboration mode: plan',
@@ -1849,26 +1848,6 @@ function checkStopMessagePersistedLookupRustOwner() {
       fail(
         'stop-message-runtime-utils-no-ts-metadata-walker',
         `runtime-utils.ts must not restore TS metadata walker "${keyword}"`
-      );
-    }
-  }
-
-  const capturedRequestBlock = extractFunctionBlock(runtimeUtils, 'getCapturedRequest');
-  if (!capturedRequestBlock.includes('getCapturedRequestWithNative')) {
-    fail(
-      'servertool-captured-request-ts-thin-shell',
-      'runtime-utils.ts getCapturedRequest must call getCapturedRequestWithNative'
-    );
-  }
-  for (const keyword of [
-    'capturedEntryRequest',
-    'capturedChatRequest',
-    'Array.isArray',
-  ]) {
-    if (capturedRequestBlock.includes(keyword)) {
-      fail(
-        'servertool-captured-request-ts-thin-shell',
-        `runtime-utils.ts getCapturedRequest must not contain TS captured-request semantic "${keyword}"`
       );
     }
   }
@@ -5122,6 +5101,62 @@ function checkServertoolCliResultGuardRustOwner() {
   pass('servertool-cli-result-guard-rust-owner', 'servertool-core owns CLI result guard scanning; deleted TS shell stays absent');
 }
 
+function checkStoplessNoContextDataPlane() {
+  const runtimeFiles = [
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/types.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_auto_handler.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_compare_context.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs`,
+    `${ROOT}/sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`,
+    `${ROOT}/src/server/runtime/http-server/executor/provider-response-converter.ts`,
+  ];
+  const forbidden = [
+    'requestSemantics',
+    'request_semantics',
+    'capturedRequest',
+    'captured_request',
+    'hasCapturedRequest',
+    'has_captured_request',
+    '__raw_request_body',
+    'capturedChatRequest',
+    'capturedEntryRequest',
+    'responsesRequestContext',
+  ];
+  for (const file of runtimeFiles) {
+    const raw = readRequired(file);
+    const runtimeSource = file.endsWith('.rs') ? raw.split('#[cfg(test)]')[0] : raw;
+    for (const marker of forbidden) {
+      if (!runtimeSource.includes(marker)) continue;
+      fail(
+        'stopless-no-context-data-plane',
+        `${file.replace(`${ROOT}/`, '')} must not use context/data-plane marker ${marker}; stopless/servertool state must come from MetadataCenter runtime_control only`
+      );
+    }
+  }
+  const persistedLookup = readRequired(RUST_SERVERTOOL_CORE_LOOKUP).split('#[cfg(test)]')[0];
+  for (const marker of [
+    'resolve_stopless_cli_result_snapshot_from_request',
+    'resolve_stopless_cli_result_snapshot_from_responses_resume',
+    'resolve_stopless_cli_result_snapshot_from_runtime_metadata',
+    'read_stopless_cli_result_snapshot_from_tool_output_details',
+  ]) {
+    if (persistedLookup.includes(marker)) {
+      fail(
+        'stopless-no-context-data-plane',
+        `persisted_lookup.rs must not restore stopless state from request/continuation data-plane helper ${marker}`
+      );
+    }
+  }
+  pass(
+    'stopless-no-context-data-plane',
+    'stopless/servertool runtime path does not carry requestSemantics/raw/context payload state'
+  );
+}
+
 function checkServertoolRustOutcomeCloseout() {
   const rustOutcome = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const rustCli = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
@@ -6113,6 +6148,7 @@ checkServertoolFlowPresentationRustOwner();
 checkBackendRoutePolicyRustOwner();
 checkServertoolTextExtractionRustOwner();
 checkServertoolCliResultGuardRustOwner();
+checkStoplessNoContextDataPlane();
 checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
 checkServertoolAutoHookCallerThinShell();

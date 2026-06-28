@@ -16,7 +16,6 @@ pub struct StopMessageCompareContext {
     pub remaining: i32,
     pub active: bool,
     pub stop_eligible: bool,
-    pub has_captured_request: bool,
     pub compaction_request: bool,
     pub has_seed: bool,
     pub decision: String,
@@ -77,7 +76,6 @@ pub fn normalize_stop_message_compare_context(
         remaining,
         active: read_truthy(record, "active", "active"),
         stop_eligible: read_truthy(record, "stopEligible", "stop_eligible"),
-        has_captured_request: read_truthy(record, "hasCapturedRequest", "has_captured_request"),
         compaction_request: read_truthy(record, "compactionRequest", "compaction_request"),
         has_seed: read_truthy(record, "hasSeed", "has_seed"),
         decision: decision_raw,
@@ -112,7 +110,6 @@ pub fn format_stop_message_compare_context(value: Option<&serde_json::Value>) ->
         format!("left={}", context.remaining),
         format!("active={}", context.active),
         format!("stopEligible={}", context.stop_eligible),
-        format!("captured={}", context.has_captured_request),
         format!("compaction={}", context.compaction_request),
         format!("seed={}", context.has_seed),
     ];
@@ -212,7 +209,6 @@ mod tests {
             "used": 1.8,
             "active": true,
             "stopEligible": true,
-            "hasCapturedRequest": true,
             "compactionRequest": false,
             "hasSeed": true,
             "decision": " TRIGGER ",
@@ -255,7 +251,6 @@ mod tests {
             "used": 4,
             "active": false,
             "stopEligible": false,
-            "hasCapturedRequest": false,
             "compactionRequest": true,
             "hasSeed": false,
             "decision": "skip",
@@ -265,7 +260,7 @@ mod tests {
         })));
         assert_eq!(
             summary,
-            "decision=skip reason=skip_reached_max_repeats armed=false mode=off allowModeOnly=true max=3 used=4 left=0 active=false stopEligible=false captured=false compaction=true seed=false obs=abc stable=n/a toolSig=sig"
+            "decision=skip reason=skip_reached_max_repeats armed=false mode=off allowModeOnly=true max=3 used=4 left=0 active=false stopEligible=false compaction=true seed=false obs=abc stable=n/a toolSig=sig"
         );
     }
 }

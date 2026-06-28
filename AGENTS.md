@@ -21,8 +21,9 @@
 17. **错误链唯一入口锁**：provider/runtime/direct/executor 错误必须单向进入 `ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`；`router-direct` / `RequestExecutor` / provider runtime 只能作为 source/caller，不得本地实现 retry/reroute/cooldown/health policy，不得手拼 provider error event。
 18. **红测→绿化→旧样本在线复测锁**：每次开发新功能或修复缺陷，必须先固化最小 failing sample / red test 并确认当前为红，再修改唯一真源让其转绿；绿化后必须在线重放旧错误样本或同入口真实样本，证明不是只对单测修好的虚假修复。没有“先红”证据或没有旧样本在线复测证据，不得宣称闭环完成。
 19. **Responses continuation 三重隔离锁**：Responses continuation / submit_tool_outputs / scope materialize 必须同时按 `entry protocol(or endpoint)`、`continuationOwner(direct|relay)`、`session/conversation(+port/group)` 建立恢复隔离键。禁止普通 chat/messages 入口命中 responses continuation scope；禁止 direct continuation 续到 relay；禁止 relay continuation 伪装成 direct remote continuation；禁止仅凭 session/scope 命中历史自动续接。
-20. **live debug 样本/日志入口锁**：运行时排障先看 `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`，再看 `~/.rcc/logs/server-<port>.log`；`port-unknown`、根目录 `req_*`、裸 provider 目录都不是允许长期增长的主路径，验证 canonical `ports/<port>/` 后必须物理清理旧样本。
-21. **live 重启/验证命令锁**：受管端口 live 验证只允许使用全局安装版本 `routecodex restart --port <port>` + `/health`；禁止把 repo-local `node dist/cli.js start ...`、`routecodex start ...` 或其他 start/node-dist 口径当作交付验证真相。
+20. **Responses continuation 不可变区硬锁（高优先级）**：`/v1/responses` continuation 只允许在 **response Chat Process 出口 save**，只允许在 **下一轮 request Chat Process 入口 restore**。从 `resp_chatprocess save` 之后，到下一轮 `req_chatprocess restore` 之前，所有 `resp_outbound` / SSE / server handler / adapter / store transport / `req_inbound` 只能做语义等价归一化、投影、传输、scope 校验和释放；禁止做任何语义转换、上下文恢复、history/tool 修补、tool_call/tool_output 重排、stopless/servertool guidance 注入、required_action 推断、response repair、request rebuild、payload cleanup。这个区间内任何逻辑操作都会造成下一轮中间操作丢失，必须视为架构违规并物理删除。
+21. **live debug 样本/日志入口锁**：运行时排障先看 `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`，再看 `~/.rcc/logs/server-<port>.log`；`port-unknown`、根目录 `req_*`、裸 provider 目录都不是允许长期增长的主路径，验证 canonical `ports/<port>/` 后必须物理清理旧样本。
+22. **live 重启/验证命令锁**：受管端口 live 验证只允许使用全局安装版本 `routecodex restart --port <port>` + `/health`；禁止把 repo-local `node dist/cli.js start ...`、`routecodex start ...` 或其他 start/node-dist 口径当作交付验证真相。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。
@@ -32,6 +33,7 @@
 5. **闭环释放**：请求/响应闭环完成后 metadata 不得进入全局 singleton、provider health/quota、session cache、port-shared cache、snapshot replay normal path。
 6. **错误模式**：禁止从 `metadata.context` 补 provider payload；禁止从 `metadata.user_id/session_id/conversation_id` 生成上游 body/options；禁止跨端口或跨 session 复用 metadata 对象；禁止把 debug/snapshot metadata 当作 live runtime metadata。
 7. **Responses continuation 隔离模式**：禁止把 `/v1/responses` continuation state 当作普通 chat/messages 会话历史复用；禁止只靠 `sessionId` / `conversationId` 命中旧 continuation；恢复必须同时校验入口协议、continuation owner、port/group scope 与会话 scope。
+8. **Responses continuation 不可变区**：Chat Process 保存后的 continuation 真相到下一轮 Chat Process 恢复前不得被任何 handler/SSE/outbound/inbound/adapter/store transport 改写。这个区间只能传输、投影、释放和做非破坏性 scope/协议校验；不得用 metadata、entryOriginRequest、capturedChatRequest、requestSemantics、session scope 或 response body 去补 history/context/tool 状态。
 
 ## 标准接口契约流水线图（醒目）
 
@@ -117,17 +119,18 @@ client-visible error
 - direct passthrough 仍必须遵守 provider wire / hooks 边界，禁止重入 Hub response conversion 或 fallback reroute。
 
 ## Hub Pipeline 节点职责硬边界（醒目）
-1. **req_inbound**：只做入口协议解析、上下文捕获、原始语义保留；不得伪造工具结果、不得吞非法工具顺序。
-2. **req_chatprocess**：请求侧工具治理唯一入口；工具声明注入/裁剪、文本工具 harvest、apply_patch/servertool/MCP/native 工具治理必须 Rust-only。
+1. **req_inbound**：只做入口协议解析、上下文捕获、原始语义保留和非破坏性归一化；不得恢复 continuation/history/context，不得伪造工具结果，不得吞非法工具顺序，不得注入 stopless/servertool guidance。
+2. **req_chatprocess**：请求侧工具治理和 continuation restore 唯一入口；工具声明注入/裁剪、文本工具 harvest、apply_patch/servertool/MCP/native 工具治理、下一轮 Responses continuation 恢复必须 Rust-only。
 3. **virtual_router**：只做路由分类与目标选择；不得修补 payload、不得处理工具结果、不得读取别的端口或别的路由池状态。
 4. **req_outbound**：只把 Hub 规范语义编码成 provider 协议；不得把 `tool_calls` / `function_call_output` / servertool 语义降级为普通文本。
 5. **provider_runtime**：只做 transport/auth/provider 内部协议兼容；不得承担 Hub 工具治理，provider-specific 差异不得写入 Hub Pipeline。
 6. **resp_inbound**：只把 provider 原始响应解析回 Hub 规范响应；SSE/JSON 解析失败必须显式错误。
-7. **resp_chatprocess**：响应侧工具治理唯一入口；文本工具收割、servertool followup、apply_patch 逆向转换、internal tool 剥离必须 Rust-only。
-8. **resp_outbound**：只把 Hub 响应投影回客户端入口协议；不得修复请求侧历史污染、不得 provider 特例、不得吞上游错误。
+7. **resp_chatprocess**：响应侧工具治理和 continuation save 唯一入口；文本工具收割、servertool followup、apply_patch 逆向转换、internal tool 剥离、Responses continuation 保存必须 Rust-only，且必须在进入 `resp_outbound` 前完成。
+8. **resp_outbound**：只把 Hub 响应投影回客户端入口协议；不得保存 continuation，不得恢复/修复请求侧历史污染，不得 provider 特例，不得 required_action/tool_call 语义判断，不得吞上游错误。
 9. **servertool_followup**：只能基于 origin snapshot 重建 followup；只能走 relay Hub Pipeline 单次复入；不得进入 router-direct/provider-direct 预跑或直通；不得从当前污染 payload 猜测补偿。servertool 只代客户端执行本地工具，不拥有专用响应出口；followup 响应必须按 provider/model -> `RespInbound` -> `HubRespChatProcess03Governed` -> `HubRespOutbound04ClientSemantic` -> client 的正常响应链返回。
 10. **审计真源**：完整执行文档见 `docs/goals/hubpipeline-tool-boundary-audit-goal.md`。
-11. **Responses continuation owner**：`buildChatRequestFromResponses` 等 bridge 只负责已确认的 Responses continuation 协议转换，不负责 scope/owner 判定。entry/owner 隔离必须在 continuation store / restore / materialize owner 层完成；桥层收到 owner 不匹配或缺失 `fullInput` 时必须 fail-fast。
+11. **Responses continuation owner**：`buildChatRequestFromResponses` 等 bridge 只负责已确认的 Responses continuation 协议转换，不负责 scope/owner 判定。entry/owner 隔离必须在 Chat Process continuation store / restore / materialize owner 层完成；桥层收到 owner 不匹配或缺失 `fullInput` 时必须 fail-fast。
+12. **Responses continuation 不可变区 owner**：`resp_chatprocess save -> immutable store interval -> req_chatprocess restore` 是唯一合法生命周期。`resp_outbound`、SSE、server handler、provider-response converter、adapter context、`req_inbound`、store transport 都不得在这个区间做语义转换或上下文恢复；发现 `entryOriginRequest` / `capturedChatRequest` / `requestSemantics` / session-only scope 被用作 continuation 恢复依据时，先按越界逻辑删除，再回 Chat Process owner 修正。
 
 ## 全局流水线类型拓扑（醒目）
 1. **双向链条固定**：请求链必须从 `ServerReqInbound01ClientRaw` 单向进入 Hub/VR/Provider；响应链必须从模型/provider 端的 `ProviderRespInbound01Raw` 单向进入 Hub，再经 `HubRespOutbound04ClientSemantic` 出到 `ServerRespOutbound05ClientFrame`；`RespInbound/RespOutbound` 均以 Hub 为参照。错误链必须从发生点进入统一错误 pipeline，不得反向补请求 payload。
@@ -155,6 +158,7 @@ client-visible error
 ## Debug 优先级（强制）
 1. 任何 debug / 设计 / 生命周期问题，先读 `.agents/skills/rcc-dev-skills/SKILL.md`。
 2. 若涉及 `servertool / stopless / continuation / reasoningStop / tool governance / hook restore / schema gate`，必须按优先级继续读：
+   - `references/25-protocol-sse-continuation-boundary.md`
    - `references/24-node-contract-debug-method.md`
    - `references/22-servertool-hook-skeleton-workflow.md`
    - `references/23-servertool-hook-dev-debug-flow.md`
