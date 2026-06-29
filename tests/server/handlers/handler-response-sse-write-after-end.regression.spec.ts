@@ -62,7 +62,7 @@ describe('handler-response SSE write-after-end regression', () => {
     }
   });
 
-  it('does not raise uncaughtException when client closes after response.done and upstream writes late', async () => {
+  it('does not classify client close after response.completed as before-terminal when upstream writes late', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -97,13 +97,14 @@ describe('handler-response SSE write-after-end regression', () => {
     const upstream = new PassThrough();
     let output = '';
     let uncaught: Error | undefined;
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const onUncaught = (error: Error) => {
       uncaught = error;
     };
     process.prependOnceListener('uncaughtException', onUncaught);
     res.on('data', (chunk) => {
       output += String(chunk);
-      if (output.includes('event: response.done')) {
+      if (output.includes('event: response.completed')) {
         res.destroy();
       }
     });
@@ -181,10 +182,14 @@ describe('handler-response SSE write-after-end regression', () => {
 
       await new Promise<void>((resolve) => setTimeout(resolve, 120));
 
-      expect(output).toContain('event: response.done');
+      expect(output).toContain('event: response.completed');
       expect(uncaught?.message ?? '').not.toContain('write after end');
+      expect(
+        warnSpy.mock.calls.map((call) => call.join(' ')).join('\n')
+      ).not.toContain('response.sse.client_close');
     } finally {
       process.removeListener('uncaughtException', onUncaught);
+      warnSpy.mockRestore();
       upstream.destroy();
       res.destroy();
     }

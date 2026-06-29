@@ -734,6 +734,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   let ended = false;
   let cleanupLogged = false;
   let streamEnded = false;
+  let sawTerminalEvent = false;
   let totalTimer: NodeJS.Timeout | null = null;
   let keepaliveTimer: NodeJS.Timeout | null = null;
 
@@ -822,6 +823,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     abortSourceStreamForClientClose();
     logResponsesSseTransportTrace('client_close.transport_only', requestLabel, {
       closeBeforeStreamEnd,
+      sawTerminalEvent,
       detectedBeforeStreamStart: !streamEnded
     });
   };
@@ -897,11 +899,12 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
     clearTimers();
     detachOutboundStream();
-    const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
+    const closeBeforeStreamEnd = trigger === 'close' && !streamEnded && !sawTerminalEvent;
     const details = {
       status,
       trigger,
       streamEnded,
+      sawTerminalEvent,
     };
     finalizeSseTransportCloseout({
       metadata: resultMetadata,
@@ -946,6 +949,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       : chunk instanceof Uint8Array ? Buffer.from(chunk).toString('utf8')
       : '';
     if (!text) return;
+    if (text.includes('event: response.completed') || text.includes('event: response.done')) {
+      sawTerminalEvent = true;
+    }
     writeClientSseFrame(text, 'response.sse.stream.write_frame', { recordSnapshot: false });
   });
 
@@ -962,8 +968,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     detachOutboundStream();
     recordSseTransportClientClose(requestLabel, {
       finishReason: undefined,
-      terminal: false,
-      closeBeforeStreamEnd: !streamEnded
+      terminal: sawTerminalEvent,
+      closeBeforeStreamEnd: !streamEnded && !sawTerminalEvent
     });
     logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
     writeSseDiagnosticSnapshot(
@@ -1029,12 +1035,14 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
 
   res.on('close', () => {
     if (!ended && !streamEnded) {
-      abortSourceStreamForClientClose();
       recordSseTransportClientClose(requestLabel, {
         finishReason: undefined,
-        terminal: false,
-        closeBeforeStreamEnd: true
+        terminal: sawTerminalEvent,
+        closeBeforeStreamEnd: !sawTerminalEvent
       });
+      if (!sawTerminalEvent) {
+        abortSourceStreamForClientClose();
+      }
       void cleanup('close');
     }
   });
