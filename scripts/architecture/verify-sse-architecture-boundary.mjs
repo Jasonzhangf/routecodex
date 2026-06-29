@@ -167,6 +167,7 @@ for (const relPath of providerNeutralProjectionFiles) {
     'getSalvageResult',
     'const salvaged =',
     'return salvaged',
+    'best effort',
     'Ignore non-JSON lines so valid partial frames can still be recovered.',
     '忽略解析错误',
     'keep raw payload only',

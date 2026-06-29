@@ -384,13 +384,9 @@ export class ChatSseToJsonConverter {
       if (!dataValue) {
         return undefined;
       }
-      try {
-        const parsed = JSON.parse(dataValue);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed as Record<string, unknown>;
-        }
-      } catch {
-        // best effort
+      const parsed = JSON.parse(dataValue);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
       }
       return undefined;
     })();

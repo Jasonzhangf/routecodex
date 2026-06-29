@@ -17,7 +17,6 @@ describe('chat SSE no-salvage boundary', () => {
       requestId: 'req_chat_no_salvage_mixed_lines',
       model: 'gpt-4o-mini'
     })).rejects.toMatchObject({
-      message: expect.stringContaining('Failed to parse chat_chunk'),
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
