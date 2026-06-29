@@ -49,6 +49,7 @@ const bootstrapWrapperPaths = [
   'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts',
   'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts',
 ];
+const tokenEstimatorWrapperPath = 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts';
 
 function exists(relPath) {
   return fs.existsSync(path.join(root, relPath));
@@ -200,6 +201,22 @@ for (const bootstrapWrapperPath of bootstrapWrapperPaths) {
   for (const pattern of forbiddenBootstrapWrapperPatterns) {
     if (pattern.test(src)) {
       failures.push(`${bootstrapWrapperPath}: local native bootstrap call/error plumbing revived (${pattern})`);
+    }
+  }
+}
+
+if (exists(tokenEstimatorWrapperPath)) {
+  const src = fs.readFileSync(path.join(root, tokenEstimatorWrapperPath), 'utf8');
+  const forbiddenTokenEstimatorPatterns = [
+    /loadNativeRouterHotpathBindingForInternalUse/,
+    /function\s+readNativeFunction/,
+  ];
+  if (!src.includes('callNativeJson(')) {
+    failures.push(`${tokenEstimatorWrapperPath}: token estimator wrapper must delegate native JSON call to the shared thin wrapper helper`);
+  }
+  for (const pattern of forbiddenTokenEstimatorPatterns) {
+    if (pattern.test(src)) {
+      failures.push(`${tokenEstimatorWrapperPath}: local native token-estimator binding plumbing revived (${pattern})`);
     }
   }
 }

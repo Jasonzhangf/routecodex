@@ -32,7 +32,7 @@ import {
   parseVirtualRouterNativeError,
   VIRTUAL_ROUTER_ERROR_PREFIX
 } from './native-router-hotpath-loader.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { callNativeJson } from './native-router-hotpath.js';
 import { failNativeRequired } from './native-router-hotpath-policy.js';
 
 type TokenEstimateOutput = {
@@ -215,34 +215,30 @@ export function createVirtualRouterRuntime(deps?: VirtualRouterRuntimeDeps): Vir
   return new VirtualRouterEngine(deps);
 }
 
-function readNativeFunction(name: string): (inputJson: string) => unknown {
-  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
-  const fn = binding?.[name];
-  if (typeof fn !== 'function') {
-    return failNativeRequired<(inputJson: string) => unknown>(name, 'missing native virtual router token estimator export');
-  }
-  return fn as (inputJson: string) => unknown;
-}
-
 function invokeTokenEstimator(request: StandardizedRequest | ProcessedRequest | Record<string, unknown>): number {
-  const fn = readNativeFunction('estimateVirtualRouterRequestTokensJson');
-  const raw = fn(JSON.stringify({ request }));
-  if (typeof raw !== 'string' || !raw) {
-    return failNativeRequired<number>('estimateVirtualRouterRequestTokensJson', 'empty result');
-  }
-  let parsed: TokenEstimateOutput;
-  try {
-    parsed = JSON.parse(raw) as TokenEstimateOutput;
-  } catch {
-    return failNativeRequired<number>('estimateVirtualRouterRequestTokensJson', 'invalid result');
-  }
+  const parsed = callNativeJson(
+    'estimateVirtualRouterRequestTokensJson',
+    'estimateVirtualRouterRequestTokensJson',
+    [JSON.stringify({ request })],
+    (raw) => {
+      try {
+        return JSON.parse(raw) as TokenEstimateOutput;
+      } catch {
+        return null;
+      }
+    },
+    {
+      emptyReason: 'empty result',
+      invalidReason: 'invalid result'
+    }
+  );
   if (typeof parsed.tokens !== 'number' || !Number.isFinite(parsed.tokens)) {
-    return failNativeRequired<number>('estimateVirtualRouterRequestTokensJson', 'invalid token count');
+    throw failNativeRequired<number>('estimateVirtualRouterRequestTokensJson', 'invalid token count');
   }
   return Math.max(0, Math.round(parsed.tokens));
 }
 
-export function countRequestTokens(request: StandardizedRequest): number {
+export function countRequestTokens(request: StandardizedRequest | ProcessedRequest | Record<string, unknown>): number {
   return invokeTokenEstimator(request);
 }
 
