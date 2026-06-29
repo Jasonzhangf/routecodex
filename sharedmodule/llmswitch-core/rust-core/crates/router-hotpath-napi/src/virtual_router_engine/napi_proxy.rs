@@ -85,10 +85,13 @@ impl VirtualRouterEngineProxy {
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let overrides = resolve_runtime_path_overrides(&metadata_value);
+        let metadata_center_snapshot = metadata_value
+            .get("metadataCenterSnapshot")
+            .unwrap_or(&metadata_value);
         let mut core = self.core.write().expect("core write lock");
         let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
             with_session_dir_override(overrides.session_dir.as_deref(), || {
-                core.get_stop_message_state(&metadata_value)
+                core.get_stop_message_state(metadata_center_snapshot)
             })
         });
         serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -99,10 +102,13 @@ impl VirtualRouterEngineProxy {
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let overrides = resolve_runtime_path_overrides(&metadata_value);
+        let metadata_center_snapshot = metadata_value
+            .get("metadataCenterSnapshot")
+            .unwrap_or(&metadata_value);
         let mut core = self.core.write().expect("core write lock");
         let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
             with_session_dir_override(overrides.session_dir.as_deref(), || {
-                core.get_pre_command_state(&metadata_value)
+                core.get_pre_command_state(metadata_center_snapshot)
             })
         });
         serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))

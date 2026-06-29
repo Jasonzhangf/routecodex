@@ -4,7 +4,7 @@ import { describe, expect, test } from '@jest/globals';
 describe('server-side-tools auto-hook caller guard', () => {
   test('runServerSideToolEngine no longer hand-orchestrates optional/mandatory auto-hook queue execution inline', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts',
+      'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
       'utf8'
     );
 

@@ -382,9 +382,9 @@ jest.unstable_mockModule(
       return { action: 'return_null' };
     }),
     extractTextFromChatLikeWithNative: jest.fn(() => ''),
-    buildServertoolCliProjectionExecutionContextWithNative: jest.fn((input: any) => ({
     buildClientExecCliProjectionOutputWithNative: jest.fn(() => ({})),
     buildClientVisibleProjectionShellWithNative: jest.fn((input: any) => input?.base ?? {}),
+    buildServertoolCliProjectionExecutionContextWithNative: jest.fn((input: any) => ({
       flowId: 'servertool_cli_projection'
     })),
     planServertoolExecutionBranchWithNative: planServertoolExecutionBranchWithNativeMock,
@@ -854,7 +854,6 @@ jest.unstable_mockModule(
   })
 );
 
-
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/state-scope.js',
   () => ({
@@ -912,7 +911,7 @@ function bindTestMetadataCenter<T extends Record<string, unknown>>(
 beforeAll(async () => {
   const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
   registerServerToolHandler = registry.registerServerToolHandler;
-  const serverSideTools = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
+  const serverSideTools = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js');
   runServerSideToolEngine = serverSideTools.runServerSideToolEngine;
 
   registerServerToolHandler(TOOL_NAME, async () => {

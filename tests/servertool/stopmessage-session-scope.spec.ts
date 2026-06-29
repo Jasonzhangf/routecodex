@@ -1,11 +1,10 @@
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 
-const SESSION_DIR = path.join(os.homedir(), '.routecodex', 'sessions');
+const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-session-scope');
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 const TEST_SESSION_IDS = [
   'sess-123',
   'sess-legacy-cleanup',
@@ -29,12 +28,24 @@ const TEST_SESSION_IDS = [
 type BootstrapModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js');
 type EngineModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js');
 type StickyModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
-type ServerToolModule = typeof import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
+type ServerToolModule = typeof import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js');
 
 let bootstrapVirtualRouterConfig: BootstrapModule['bootstrapVirtualRouterConfig'];
 let VirtualRouterEngine: EngineModule['VirtualRouterEngine'];
 let saveRoutingInstructionStateSync: StickyModule['saveRoutingInstructionStateSync'];
 let runServerSideToolEngine: ServerToolModule['runServerSideToolEngine'];
+
+function bindTestMetadataCenter(
+  target: Record<string, unknown>,
+  args: { providerProtocol: string; sessionId?: string; runtimeControl?: Record<string, unknown> }
+): void {
+  const runtimeControl = { providerProtocol: args.providerProtocol, ...(args.runtimeControl ?? {}) };
+  const requestTruth = args.sessionId ? { sessionId: args.sessionId } : {};
+  Reflect.set(target, METADATA_CENTER_SYMBOL, {
+    readRuntimeControl: () => runtimeControl,
+    readRequestTruth: () => requestTruth
+  });
+}
 
 function buildEngine(): InstanceType<EngineModule['VirtualRouterEngine']> {
   const input: any = {
@@ -54,20 +65,58 @@ function buildEngine(): InstanceType<EngineModule['VirtualRouterEngine']> {
   const { config } = bootstrapVirtualRouterConfig(input);
   const engine = new VirtualRouterEngine();
   engine.initialize(config);
+  const route = engine.route.bind(engine);
+  engine.route = ((request: StandardizedRequest, metadata: Record<string, unknown> = {}) =>
+    route(request, withMetadataCenterSnapshot(metadata) as any)) as any;
   return engine;
 }
 
+function withMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
+  const requestId = typeof metadata.requestId === 'string' ? metadata.requestId : undefined;
+  const entryEndpoint = typeof metadata.entryEndpoint === 'string' ? metadata.entryEndpoint : undefined;
+  const providerProtocol = typeof metadata.providerProtocol === 'string' ? metadata.providerProtocol : undefined;
+  const sessionId =
+    typeof metadata.tmuxSessionId === 'string'
+      ? metadata.tmuxSessionId
+      : typeof metadata.sessionId === 'string'
+        ? metadata.sessionId
+        : undefined;
+  const conversationId = typeof metadata.conversationId === 'string' ? metadata.conversationId : undefined;
+  const routeHint = typeof metadata.routeHint === 'string' ? metadata.routeHint : undefined;
+  return {
+    ...metadata,
+    metadataCenterSnapshot: {
+      ...(requestId ? { requestId } : {}),
+      ...(entryEndpoint ? { entryEndpoint } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(conversationId ? { conversationId } : {}),
+      requestTruth: {
+        ...(requestId ? { requestId } : {}),
+        ...(entryEndpoint ? { entryEndpoint } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        ...(conversationId ? { conversationId } : {})
+      },
+      runtimeControl: {
+        ...(providerProtocol ? { providerProtocol } : {}),
+        ...(routeHint ? { routeHint } : {}),
+        sessionDir: SESSION_DIR
+      },
+      continuationContext: {}
+    }
+  };
+}
+
 function readSessionState(sessionId: string): any {
-  const tmuxFile = path.join(SESSION_DIR, `tmux-${sessionId}.json`);
-  const raw = fs.readFileSync(tmuxFile, 'utf8');
+  const sessionFile = path.join(SESSION_DIR, `session-${sessionId}.json`);
+  const raw = fs.readFileSync(sessionFile, 'utf8');
   return JSON.parse(raw);
 }
 
 function sessionStatePath(sessionId: string): string {
-  return path.join(SESSION_DIR, `tmux-${sessionId}.json`);
+  return path.join(SESSION_DIR, `session-${sessionId}.json`);
 }
 
-describe('stopMessage is tmux-scoped', () => {
+describe('stopMessage is session-scoped', () => {
   beforeAll(async () => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -79,7 +128,7 @@ describe('stopMessage is tmux-scoped', () => {
     const bootstrapMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js');
     const engineMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js');
     const stickyMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
-    const servertoolMod = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
+    const servertoolMod = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js');
     bootstrapVirtualRouterConfig = bootstrapMod.bootstrapVirtualRouterConfig;
     VirtualRouterEngine = engineMod.VirtualRouterEngine;
     saveRoutingInstructionStateSync = stickyMod.saveRoutingInstructionStateSync;
@@ -93,7 +142,7 @@ describe('stopMessage is tmux-scoped', () => {
     }
   });
 
-  test('ignores stopMessage instruction when tmux scope is missing', () => {
+  test('ignores stopMessage instruction when session scope is missing', () => {
     const engine = buildEngine();
     const request: StandardizedRequest = {
       model: 'gpt-test',
@@ -110,7 +159,7 @@ describe('stopMessage is tmux-scoped', () => {
     expect(fs.existsSync(path.join(SESSION_DIR, 'tmux-undefined.json'))).toBe(false);
   });
 
-  test('persists stopMessage under tmux:<sessionId> only', () => {
+  test('persists stopMessage under session:<sessionId> only', () => {
     const engine = buildEngine();
     const sessionId = 'sess-123';
     const request: StandardizedRequest = {
@@ -132,14 +181,14 @@ describe('stopMessage is tmux-scoped', () => {
     const persisted = readSessionState(sessionId);
     expect(persisted?.state?.stopMessageText).toBe('继续');
     expect(persisted?.state?.stopMessageMaxRepeats).toBe(2);
-    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`))).toBe(false);
     expect(fs.existsSync(path.join(SESSION_DIR, 'conversation-conv-should-not-be-used.json'))).toBe(false);
   });
 
-  test('session-scoped stopMessage is ignored without tmux', () => {
+  test('tmux-scoped stopMessage is ignored by session scope', () => {
     const engine = buildEngine();
     const sessionId = 'sess-legacy-cleanup';
-    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
         allowedProviders: new Set(),
       disabledProviders: new Set(),
@@ -149,10 +198,9 @@ describe('stopMessage is tmux-scoped', () => {
       stopMessageMaxRepeats: 5,
       stopMessageUsed: 0,
       stopMessageStageMode: 'on',
-      stopMessageAiMode: 'on',
       preCommandScriptPath: '/tmp/legacy-pre-command.sh',
       preCommandUpdatedAt: Date.now()
-    } as any);
+    } as any, SESSION_DIR);
 
     const metadata = {
       requestId: 'req-stopmessage-legacy-cleanup',
@@ -168,8 +216,8 @@ describe('stopMessage is tmux-scoped', () => {
     const preCommandState = engine.getPreCommandState(metadata);
     expect(preCommandState).toBeNull();
 
-    expect(fs.existsSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`))).toBe(false);
     expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`))).toBe(true);
   });
 
   test('mode-only stopMessage:on no longer persists state', () => {
@@ -191,7 +239,7 @@ describe('stopMessage is tmux-scoped', () => {
       routeHint: 'default'
     } as any);
 
-    expect(fs.existsSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
 
   test('mode-only stopMessage:on does not expose runtime snapshot without text', () => {
@@ -232,7 +280,7 @@ describe('stopMessage is tmux-scoped', () => {
     } as any;
     const beforeUpdatedAt = Date.now() - 100;
     const consumedAt = Date.now();
-    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
+    saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
         allowedProviders: new Set(),
       disabledProviders: new Set(),
@@ -245,7 +293,7 @@ describe('stopMessage is tmux-scoped', () => {
       stopMessageLastUsedAt: consumedAt,
       stopMessageStageMode: 'on',
       stopMessageSource: 'explicit'
-    } as any);
+    } as any, SESSION_DIR);
 
     engine.route(
       {
@@ -295,7 +343,7 @@ describe('stopMessage is tmux-scoped', () => {
     const engine2 = buildEngine();
     const snapshot = engine2.getStopMessageState(metadata);
     expect(snapshot).toBeNull();
-    expect(fs.existsSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
 
   test('mode-only stopMessage does not create scoped state across restart when session dir changes', () => {
@@ -331,7 +379,7 @@ describe('stopMessage is tmux-scoped', () => {
       const engine1 = buildEngine();
       engine1.route(request, metadata);
 
-      const legacyScopedFile = path.join(firstScopedDir, 'tmux-' + sessionId + '.json');
+      const legacyScopedFile = path.join(firstScopedDir, 'session-' + sessionId + '.json');
       expect(fs.existsSync(legacyScopedFile)).toBe(false);
 
       process.env.ROUTECODEX_SESSION_DIR = secondScopedDir;
@@ -342,7 +390,7 @@ describe('stopMessage is tmux-scoped', () => {
       } as any);
 
       expect(snapshot).toBeNull();
-      const migratedFile = path.join(secondScopedDir, 'tmux-' + sessionId + '.json');
+      const migratedFile = path.join(secondScopedDir, 'session-' + sessionId + '.json');
       expect(fs.existsSync(migratedFile)).toBe(false);
     } finally {
       if (previousSessionDir === undefined) {
@@ -565,17 +613,24 @@ describe('stopMessage is tmux-scoped', () => {
     expect(cleared?.state?.stopMessageText).toBeUndefined();
     expect(cleared?.state?.stopMessageMaxRepeats).toBeUndefined();
 
-    const adapterContext: AdapterContext = {
+    const adapterContext: Record<string, unknown> = {
       requestId: 'req_stopmessage_clear_no_followup',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
+      sessionId
+    };
+    bindTestMetadataCenter(adapterContext, {
+      providerProtocol: 'openai-chat',
       sessionId,
-      tmuxSessionId: sessionId,
-      capturedChatRequest: {
-        model: 'gpt-test',
-        messages: [{ role: 'user', content: '继续执行当前任务' }]
+      runtimeControl: {
+        stopGatewayContext: {
+          observed: true,
+          eligible: false,
+          source: 'chat',
+          reason: 'finish_reason_stop'
+        }
       }
-    } as any;
+    });
 
     const stopResponse: JsonObject = {
       id: 'chatcmpl-stop-after-clear-1',
@@ -622,7 +677,7 @@ describe('stopMessage is tmux-scoped', () => {
     } as any);
 
     const clearedAt = Date.now();
-    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
+    saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
         allowedProviders: new Set(),
       disabledProviders: new Set(),
@@ -633,7 +688,7 @@ describe('stopMessage is tmux-scoped', () => {
       stopMessageUsed: undefined,
       stopMessageUpdatedAt: clearedAt,
       stopMessageLastUsedAt: clearedAt
-    } as any);
+    } as any, SESSION_DIR);
 
     const nextRequest: StandardizedRequest = {
       model: 'gpt-test',
@@ -681,7 +736,7 @@ describe('stopMessage is tmux-scoped', () => {
     );
 
     const clearedAt = Date.now();
-    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
+    saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
         allowedProviders: new Set(),
       disabledProviders: new Set(),
@@ -692,7 +747,7 @@ describe('stopMessage is tmux-scoped', () => {
       stopMessageUsed: undefined,
       stopMessageUpdatedAt: clearedAt,
       stopMessageLastUsedAt: clearedAt
-    } as any);
+    } as any, SESSION_DIR);
 
     engine.route(
       {
@@ -773,7 +828,7 @@ describe('stopMessage is tmux-scoped', () => {
     expect(typeof beforeUpdatedAt === 'number').toBe(true);
 
     const exhaustedAt = Date.now();
-    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
+    saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
         allowedProviders: new Set(),
       disabledProviders: new Set(),
@@ -785,7 +840,7 @@ describe('stopMessage is tmux-scoped', () => {
       stopMessageUpdatedAt: beforeUpdatedAt,
       stopMessageLastUsedAt: exhaustedAt,
       stopMessageSource: 'explicit'
-    } as any);
+    } as any, SESSION_DIR);
 
     const setAgainRequest: StandardizedRequest = {
       model: 'gpt-test',
@@ -816,7 +871,7 @@ describe('stopMessage is tmux-scoped', () => {
     const sessionId = 'sess-stopmessage-explicit-override-runtime';
     const now = Date.now();
 
-    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
+    saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
         allowedProviders: new Set(),
       disabledProviders: new Set(),
@@ -828,11 +883,10 @@ describe('stopMessage is tmux-scoped', () => {
       stopMessageUpdatedAt: now - 10_000,
       stopMessageLastUsedAt: undefined,
       stopMessageStageMode: 'on',
-      stopMessageAiMode: 'on',
       stopMessageSource: 'explicit_text',
       stopMessageAiSeedPrompt: '旧 followup 种子',
       stopMessageAiHistory: [{ round: 1, followupText: '旧 followup' }]
-    } as any);
+    } as any, SESSION_DIR);
 
     const request: StandardizedRequest = {
       model: 'gpt-test',
@@ -855,7 +909,6 @@ describe('stopMessage is tmux-scoped', () => {
     expect(persisted?.state?.stopMessageMaxRepeats).toBe(3);
     expect(persisted?.state?.stopMessageUsed).toBe(0);
     expect(persisted?.state?.stopMessageStageMode).toBe('on');
-    expect(persisted?.state?.stopMessageAiMode).toBe('on');
     expect(persisted?.state?.stopMessageLastUsedAt).toBeUndefined();
     expect(persisted?.state?.stopMessageAiSeedPrompt).toBeUndefined();
     expect(persisted?.state?.stopMessageAiHistory).toBeUndefined();

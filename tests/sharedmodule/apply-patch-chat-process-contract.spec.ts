@@ -188,7 +188,7 @@ describe('apply_patch freeform chat-process contract', () => {
   it('never executes apply_patch locally through server-side tool engine', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
-    const { runServerSideToolEngine } = await import('../../sharedmodule/llmswitch-core/dist/servertool/server-side-tools.js');
+    const { runServerSideToolEngine } = await import('../../sharedmodule/llmswitch-core/dist/servertool/server-side-tools-impl.js');
     const workspace = path.join(process.cwd(), 'tmp', 'jest-apply-patch-freeform-only');
     fs.mkdirSync(workspace, { recursive: true });
     const target = path.join(workspace, 'sample.txt');

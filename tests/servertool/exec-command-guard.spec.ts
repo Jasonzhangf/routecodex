@@ -1,11 +1,41 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const TMP_DIR = path.join(process.cwd(), 'tmp', 'jest-exec-command-guard');
+
+function bindMetadataCenter<T extends Record<string, unknown>>(
+  adapterContext: T,
+  providerProtocol = 'openai-chat'
+): T {
+  const center = MetadataCenter.attach(adapterContext);
+  center.writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    {
+      module: 'tests/servertool/exec-command-guard.spec.ts',
+      symbol: 'bindMetadataCenter',
+      stage: 'test'
+    }
+  );
+  const requestId = typeof adapterContext.requestId === 'string' ? adapterContext.requestId : undefined;
+  if (requestId) {
+    center.writeRequestTruth(
+      'requestId',
+      requestId,
+      {
+        module: 'tests/servertool/exec-command-guard.spec.ts',
+        symbol: 'bindMetadataCenter',
+        stage: 'test'
+      }
+    );
+  }
+  return adapterContext;
+}
 
 function makeCapturedChatRequest(): JsonObject {
   return {
@@ -58,14 +88,14 @@ describe('exec_command guard servertool (reenter)', () => {
   });
 
   test('does not fabricate tool_outputs or followups for exec_command (client executes tool)', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-exec-guard-1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       routeId: 'coding',
       capturedChatRequest: makeCapturedChatRequest(),
       execCommandGuard: { enabled: true, policyFile: path.join(TMP_DIR, 'missing.json') }
-    } as any;
+    } as any);
 
     const chatResponse = makeToolCallResponse({ cmd: 'rm -rf /', workdir: '/Users/fanzhang/Documents/github/routecodex' });
 
@@ -87,14 +117,14 @@ describe('exec_command guard servertool (reenter)', () => {
   });
 
   test('passthrough even when entry is /v1/responses', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-exec-guard-resp-1',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-chat',
       routeId: 'coding',
       capturedChatRequest: makeCapturedChatRequest(),
       execCommandGuard: { enabled: true, policyFile: path.join(TMP_DIR, 'missing.json') }
-    } as any;
+    } as any);
 
     const chatResponse = makeToolCallResponse({ cmd: 'rm -rf /', workdir: '/Users/fanzhang/Documents/github/routecodex' });
     const result = await runServerSideToolEngine({
@@ -111,13 +141,13 @@ describe('exec_command guard servertool (reenter)', () => {
   });
 
   test('allowed command passthrough when no rules match', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-exec-guard-2',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       capturedChatRequest: makeCapturedChatRequest(),
       execCommandGuard: { enabled: true }
-    } as any;
+    } as any);
 
     const chatResponse = makeToolCallResponse({ cmd: 'echo hello', workdir: '/Users/fanzhang/Documents/github/routecodex' });
     const result = await runServerSideToolEngine({
@@ -145,13 +175,13 @@ describe('exec_command guard servertool (reenter)', () => {
       'utf8'
     );
 
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-exec-guard-3',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       capturedChatRequest: makeCapturedChatRequest(),
       execCommandGuard: { enabled: true, policyFile: policyPath }
-    } as any;
+    } as any);
 
     const chatResponse = makeToolCallResponse({ cmd: 'git reset --hard', workdir: '/Users/fanzhang/Documents/github/routecodex' });
     const result = await runServerSideToolEngine({
@@ -168,14 +198,14 @@ describe('exec_command guard servertool (reenter)', () => {
   });
 
   test('orchestration does not call reenterPipeline (no server-side followup)', async () => {
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-exec-guard-4',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       routeId: 'coding',
       capturedChatRequest: makeCapturedChatRequest(),
       execCommandGuard: { enabled: true }
-    } as any;
+    } as any);
 
     const chatResponse = makeToolCallResponse({ cmd: 'rm -rf /', workdir: '/Users/fanzhang/Documents/github/routecodex' });
 

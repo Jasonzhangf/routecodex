@@ -161,7 +161,7 @@ fn parse_routing_instruction_parse_options(
 pub fn resolve_virtual_router_routing_state_key_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_virtual_router_routing_state_key(&metadata);
+    let output = resolve_virtual_router_routing_state_key(metadata_center_snapshot_or_self(&metadata));
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -188,8 +188,12 @@ pub fn plan_chat_process_session_usage_json(input_json: String) -> NapiResult<St
 pub fn resolve_virtual_router_stop_message_scope_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_virtual_router_stop_message_scope(&metadata);
+    let output = resolve_virtual_router_stop_message_scope(metadata_center_snapshot_or_self(&metadata));
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+fn metadata_center_snapshot_or_self(metadata: &Value) -> &Value {
+    metadata.get("metadataCenterSnapshot").unwrap_or(metadata)
 }
 
 fn analyze_pending_tool_sync(
@@ -2708,4 +2712,41 @@ pub fn traffic_governor_observe_outcome_json(input_json: String) -> NapiResult<(
 
     governor.observe_outcome(&event);
     Ok(())
+}
+
+#[cfg(test)]
+mod metadata_center_snapshot_input_tests {
+    use super::metadata_center_snapshot_or_self;
+    use serde_json::json;
+
+    #[test]
+    fn metadata_center_snapshot_carrier_prefers_snapshot_payload() {
+        let metadata = json!({
+            "sessionId": "outer-session-must-not-win",
+            "metadataCenterSnapshot": {
+                "sessionId": "snapshot-session"
+            }
+        });
+
+        assert_eq!(
+            metadata_center_snapshot_or_self(&metadata)
+                .get("sessionId")
+                .and_then(|value| value.as_str()),
+            Some("snapshot-session")
+        );
+    }
+
+    #[test]
+    fn metadata_center_snapshot_carrier_accepts_already_unwrapped_snapshot() {
+        let metadata = json!({
+            "sessionId": "direct-snapshot"
+        });
+
+        assert_eq!(
+            metadata_center_snapshot_or_self(&metadata)
+                .get("sessionId")
+                .and_then(|value| value.as_str()),
+            Some("direct-snapshot")
+        );
+    }
 }

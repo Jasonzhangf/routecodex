@@ -1,8 +1,38 @@
 import { jest } from '@jest/globals';
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function bindMetadataCenter<T extends Record<string, unknown>>(
+  adapterContext: T,
+  providerProtocol = 'openai-chat'
+): T {
+  const center = MetadataCenter.attach(adapterContext);
+  center.writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    {
+      module: 'tests/servertool/reasoning-only-continue.spec.ts',
+      symbol: 'bindMetadataCenter',
+      stage: 'test'
+    }
+  );
+  const requestId = typeof adapterContext.requestId === 'string' ? adapterContext.requestId : undefined;
+  if (requestId) {
+    center.writeRequestTruth(
+      'requestId',
+      requestId,
+      {
+        module: 'tests/servertool/reasoning-only-continue.spec.ts',
+        symbol: 'bindMetadataCenter',
+        stage: 'test'
+      }
+    );
+  }
+  return adapterContext;
+}
 
 function buildReasoningOnlyResponse(): JsonObject {
   return {
@@ -26,7 +56,7 @@ function buildReasoningOnlyResponse(): JsonObject {
 describe('servertool reasoning-only empty assistant contract', () => {
   test('does not trigger auto continue when assistant payload is empty', async () => {
     const chatResponse = buildReasoningOnlyResponse();
-    const adapterContext = {} as AdapterContext;
+    const adapterContext = bindMetadataCenter({ requestId: 'req_reasoning_only_1' } as AdapterContext);
     const result = await runServerSideToolEngine({
       chatResponse,
       adapterContext,
@@ -41,10 +71,11 @@ describe('servertool reasoning-only empty assistant contract', () => {
 
   test('still does not trigger when tmux session is available', async () => {
     const chatResponse = buildReasoningOnlyResponse();
-    const adapterContext = {
+    const adapterContext = bindMetadataCenter({
+      requestId: 'req_reasoning_only_2',
       clientTmuxSessionId: 'session-123',
       clientInjectReady: true
-    } as unknown as AdapterContext;
+    } as unknown as AdapterContext);
     const result = await runServerSideToolEngine({
       chatResponse,
       adapterContext,
@@ -59,7 +90,7 @@ describe('servertool reasoning-only empty assistant contract', () => {
 
   test('orchestration also skips empty reasoning-only payloads', async () => {
     const chatResponse = buildReasoningOnlyResponse();
-    const adapterContext = {
+    const adapterContext = bindMetadataCenter({
       requestId: 'req_reasoning_only_3',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses',
@@ -69,7 +100,7 @@ describe('servertool reasoning-only empty assistant contract', () => {
         model: 'gpt-test',
         messages: [{ role: 'user', content: '继续完成当前任务' }]
       }
-    } as unknown as AdapterContext;
+    } as unknown as AdapterContext, 'openai-responses');
 
     const clientInjectDispatch = jest.fn(async () => ({ ok: true } as any));
     const reenterPipeline = jest.fn(async (opts: any) => {

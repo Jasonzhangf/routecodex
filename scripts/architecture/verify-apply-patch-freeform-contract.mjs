@@ -68,10 +68,9 @@ requireIncludes(
   'resend one raw patch string in canonical *** Begin Patch / *** End Patch grammar.',
   'response-side apply_patch guard must use raw patch grammar'
 );
-requireExcludes(
+requireMissing(
   'sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts',
-  './handlers/apply-patch.js',
-  'apply_patch servertool handler import'
+  'server-side-tools root facade must remain deleted'
 );
 requireMissing(
   'sharedmodule/llmswitch-core/src/servertool/handlers/apply-patch.ts',

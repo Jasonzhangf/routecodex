@@ -1,28 +1,46 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
 import { resetPreCommandHooksCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.js';
+import { isPreCommandScriptPathAllowedWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import type { ServerToolAutoHookTraceEvent } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 
 const HOOK_DIR = path.join(process.cwd(), 'tmp', 'jest-pre-command-hooks');
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+function ensureTestMetadataCenter(adapterContext: Record<string, unknown>): {
+  runtimeControl: Record<string, unknown>;
+  readRuntimeControl: () => Record<string, unknown>;
+} {
+  const existing = Reflect.get(adapterContext, METADATA_CENTER_SYMBOL) as
+    | { runtimeControl?: Record<string, unknown>; readRuntimeControl?: () => Record<string, unknown> }
+    | undefined;
+  if (existing?.runtimeControl && typeof existing.readRuntimeControl === 'function') {
+    return existing as {
+      runtimeControl: Record<string, unknown>;
+      readRuntimeControl: () => Record<string, unknown>;
+    };
+  }
+  const center = {
+    runtimeControl: {} as Record<string, unknown>,
+    readRuntimeControl() {
+      return this.runtimeControl;
+    }
+  };
+  Reflect.set(adapterContext, METADATA_CENTER_SYMBOL, center);
+  return center;
+}
 
 function bindProviderProtocol(adapterContext: Record<string, unknown>, providerProtocol = 'openai-responses'): void {
-  const center = MetadataCenter.attach(adapterContext);
-  if (!center.readRuntimeControl().providerProtocol) {
-    center.writeRuntimeControl(
-      'providerProtocol',
-      providerProtocol,
-      {
-        module: 'tests/servertool/pre-command-hooks.spec.ts',
-        symbol: 'bindProviderProtocol',
-        stage: 'test'
-      }
-    );
-  }
+  const center = ensureTestMetadataCenter(adapterContext);
+  center.runtimeControl.providerProtocol ??= providerProtocol;
+}
+
+function bindPreCommandState(adapterContext: Record<string, unknown>, state: Record<string, unknown>): void {
+  ensureTestMetadataCenter(adapterContext).runtimeControl.preCommandState = state;
 }
 
 function hasJqBinary(): boolean {
@@ -317,19 +335,21 @@ describe('servertool pre-command hooks', () => {
     process.env.ROUTECODEX_HOME = routecodexDir;
     process.env.ROUTECODEX_USER_DIR = routecodexDir;
     resetPreCommandHooksCacheForTests();
+    expect(isPreCommandScriptPathAllowedWithNative(runtimeScript)).toBe(true);
 
     const traces: ServerToolAutoHookTraceEvent[] = [];
     const adapterContext: AdapterContext = {
       requestId: 'req-pre-command-runtime-state',
       entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses',
-      __rt: {
-        preCommandState: {
-          preCommandScriptPath: runtimeScript
-        }
-      }
+      providerProtocol: 'openai-responses'
     } as any;
     bindProviderProtocol(adapterContext as unknown as Record<string, unknown>, 'openai-responses');
+    bindPreCommandState(adapterContext as unknown as Record<string, unknown>, {
+      preCommandScriptPath: runtimeScript
+    });
+    expect(
+      ensureTestMetadataCenter(adapterContext as unknown as Record<string, unknown>).readRuntimeControl().preCommandState
+    ).toEqual({ preCommandScriptPath: runtimeScript });
 
     const result = await runServerSideToolEngine({
       chatResponse: buildToolCallResponse('echo from-runtime'),

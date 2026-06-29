@@ -990,7 +990,7 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
-      - sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts
+      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
       - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
       - tests/servertool/followup-runtime-provider-pin.spec.ts
       - tests/servertool/server-side-tools.failfast.spec.ts
@@ -1093,7 +1093,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Error storm prevention waits are fixed blocking waits: 1s -> 2s -> 3s -> repeat."
+      - "Error storm prevention waits are fixed blocking waits: 1s -> 3s -> 5s -> repeat."
       - "Categories are global_error, session_storm, and servertool_followup."
       - "Provider traffic saturation no longer enters this queue; governor must raise saturation immediately so upper layers can switch provider without blocking wait."
       - "The queue owner does not decide which semantic family an error belongs to; provider availability vs session-local deterministic truth is decided upstream by error.provider_failure_policy + error.session_storm_boundary."
@@ -1586,6 +1586,7 @@ owners:
       - MetaReq05ProviderObservationProjected
       - MetaResp06ResponseObserved
       - MetaResp07BridgeMetadataBound
+      - MetaResp07ServertoolContextProjected
       - MetaResp08CloseoutReleased
     canonical_builders:
       - markReleased
@@ -3260,7 +3261,6 @@ owners:
       - prepareResponsesHandlerEntryForHttp
       - captureResponsesRequestContextForHttp
       - recordResponsesResponseForHttp
-      - seedResponsesToolCallResponseForHttp
       - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
       - captureResponsesInboundToolHistoryErrorsampleForHttp
@@ -3844,13 +3844,12 @@ owners:
       - "Started-stream Responses SSE incomplete is client-visible here only after the SSE handler decides the stream already emitted semantic frames."
 
   - feature_id: server.port_config_provider_failure_exemption
-    status: active
-    summary: "Provider-mode single-binding provider failure exemption contract"
+    status: removed
+    summary: "Removed provider-mode single-binding provider failure exemption contract"
     owner_kind: server_config
-    owner_scope: "Per-port config validation for provider-mode single-binding rethrow exemption"
+    owner_scope: "Per-port config validation rejects removed providerFailureExemption"
     owner_module: src/server/runtime/http-server/port-config-validator.ts
     canonical_types:
-      - ProviderFailureExemption
       - PortConfig
     canonical_builders:
       - validatePortConfigs
@@ -3858,19 +3857,19 @@ owners:
     allowed_paths:
       - src/server/runtime/http-server/port-config-validator.ts
       - src/server/runtime/http-server/port-config-types.ts
-      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption-removed.spec.ts
       - docs
     forbidden_paths:
       - src/providers
       - src/server/handlers
       - src/server/runtime/http-server/direct-decision.ts
     required_tests:
-      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption-removed.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Provider-mode single-binding failures intentionally rethrow and do not fall back to routingPolicyGroup; router-mode must reject this exemption."
+      - "Provider-mode single-binding rethrow exemption is removed; provider errors must enter ErrorErr05 and may project only after route/default exhaustion."
 
   - feature_id: hub.web_search_tool_governance
     status: active

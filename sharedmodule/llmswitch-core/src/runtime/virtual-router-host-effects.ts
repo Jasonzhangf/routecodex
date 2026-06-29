@@ -12,9 +12,7 @@ import {
   resolveStopMessageScope,
 } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import { formatVirtualRouterHit, createVirtualRouterHitRecord, resolveSessionLogColorKey, type VirtualRouterHitLogConfig } from './virtual-router-hit-log.js';
-import { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } from '../native/router-hotpath/native-virtual-router-routing-state.js';
-import type { RoutingInstruction, RoutingInstructionState } from '../native/router-hotpath/native-virtual-router-routing-state.js';
-import { mergeStopMessageFromPersisted } from '../native/router-hotpath/native-virtual-router-routing-state.js';
+import type { RoutingInstruction } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import { cleanMarkerSyntaxInPlace, hasMarkerSyntax } from '../conversion/shared/marker-lifecycle.js';
 
 export type VirtualRouterRouteHostEffects = {
@@ -93,7 +91,7 @@ export function emitStopMessageMarkerParseLog(log: StopMessageMarkerParseLog | n
   if (log.scopedTypes.length > 0) {
     console.log(log.stopScope
       ? `${scopeColor}[virtual-router][stop_scope]${reset} requestId=${log.requestId} stage=apply scope=${log.stopScope} instructions=${log.scopedTypes.join(',')}`
-      : `${scopeColor}[virtual-router][stop_scope]${reset} requestId=${log.requestId} stage=drop reason=missing_tmux_scope instructions=${log.scopedTypes.join(',')}`);
+      : `${scopeColor}[virtual-router][stop_scope]${reset} requestId=${log.requestId} stage=drop reason=missing_session_scope instructions=${log.scopedTypes.join(',')}`);
   }
 }
 
@@ -167,77 +165,6 @@ export function createVirtualRouterRouteHostEffects(args: {
   };
 }
 
-export function resolveTmuxScopedVirtualRouterStateScope(
-  metadata: RouterMetadataInput | Record<string, unknown>
-): string | null {
-  const metadataInput = coerceRouterMetadata(metadata);
-  const scope = resolveStopMessageScope(metadataInput);
-  if (!isTmuxScopedStopMessageState(scope)) {
-    pruneLegacySessionScopedStopAndPreCommandState(metadataInput);
-    return null;
-  }
-  return scope;
-}
-
-export function mergeVirtualRouterStopMessageSnapshotWithPersisted(
-  snapshot: StopMessageStateSnapshot | null,
-  scope?: string
-): StopMessageStateSnapshot | null {
-  if (!scope) {
-    return snapshot;
-  }
-  let persisted: RoutingInstructionState | null = null;
-  try {
-    persisted = loadRoutingInstructionStateSync(scope) as RoutingInstructionState | null;
-  } catch {
-    return snapshot;
-  }
-  if (!persisted) {
-    return snapshot;
-  }
-  const persistedText =
-    typeof persisted.stopMessageText === 'string' ? persisted.stopMessageText.trim() : '';
-  if (!snapshot && !persistedText) {
-    return snapshot;
-  }
-
-  const existing = {
-    stopMessageSource: snapshot?.stopMessageSource,
-    stopMessageText: snapshot?.stopMessageText,
-    stopMessageMaxRepeats: snapshot?.stopMessageMaxRepeats,
-    stopMessageUsed: snapshot?.stopMessageUsed,
-    stopMessageUpdatedAt: snapshot?.stopMessageUpdatedAt,
-    stopMessageLastUsedAt: snapshot?.stopMessageLastUsedAt,
-    stopMessageStageMode: snapshot?.stopMessageStageMode,
-    stopMessageAiSeedPrompt: snapshot?.stopMessageAiSeedPrompt,
-    stopMessageAiHistory: snapshot?.stopMessageAiHistory
-  };
-  const merged = mergeStopMessageFromPersisted(existing, persisted);
-  const base: StopMessageStateSnapshot = snapshot ?? {
-    stopMessageMaxRepeats:
-      typeof merged.stopMessageMaxRepeats === 'number' && Number.isFinite(merged.stopMessageMaxRepeats)
-        ? merged.stopMessageMaxRepeats
-        : 0
-  };
-  const mergedMaxRepeats =
-    typeof merged.stopMessageMaxRepeats === 'number' && Number.isFinite(merged.stopMessageMaxRepeats)
-      ? merged.stopMessageMaxRepeats
-      : base.stopMessageMaxRepeats;
-
-  return {
-    ...base,
-    stopMessageSource: merged.stopMessageSource,
-    stopMessageText: merged.stopMessageText,
-    stopMessageMaxRepeats: mergedMaxRepeats,
-    stopMessageUsed: merged.stopMessageUsed,
-    stopMessageUpdatedAt: merged.stopMessageUpdatedAt,
-    stopMessageLastUsedAt: merged.stopMessageLastUsedAt,
-    stopMessageStageMode: merged.stopMessageStageMode,
-    stopMessageAiSeedPrompt: merged.stopMessageAiSeedPrompt,
-    stopMessageAiHistory: merged.stopMessageAiHistory
-  };
-}
-
 export function injectVirtualRouterRuntimeMetadata(
   metadata: RouterMetadataInput | Record<string, unknown>
 ): Record<string, unknown> {
@@ -269,49 +196,6 @@ function coerceRouterMetadata(metadata: RouterMetadataInput | Record<string, unk
   return (metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? metadata
     : {}) as RouterMetadataInput;
-}
-
-function isTmuxScopedStopMessageState(scope: string | undefined): boolean {
-  return typeof scope === 'string' && scope.startsWith('tmux:');
-}
-
-function pruneLegacySessionScopedStopAndPreCommandState(metadata: RouterMetadataInput): void {
-  const sessionId = typeof metadata.sessionId === 'string' ? metadata.sessionId.trim() : '';
-  if (!sessionId) {
-    return;
-  }
-  const legacyKey = `session:${sessionId}`;
-  let state: RoutingInstructionState | null = null;
-  try {
-    state = loadRoutingInstructionStateSync(legacyKey) as RoutingInstructionState | null;
-  } catch {
-    return;
-  }
-  if (!state) {
-    return;
-  }
-  state.stopMessageSource = undefined;
-  state.stopMessageText = undefined;
-  state.stopMessageMaxRepeats = undefined;
-  state.stopMessageUsed = undefined;
-  state.stopMessageUpdatedAt = undefined;
-  state.stopMessageLastUsedAt = undefined;
-  state.stopMessageStageMode = undefined;
-  state.stopMessageAiSeedPrompt = undefined;
-  state.stopMessageAiHistory = undefined;
-  state.preCommandSource = undefined;
-  state.preCommandScriptPath = undefined;
-  state.preCommandUpdatedAt = undefined;
-
-  const hasOtherRoutingState =
-        Boolean(state.forcedTarget) ||
-        Boolean(state.preferTarget) ||
-    state.allowedProviders.size > 0 ||
-    state.disabledProviders.size > 0 ||
-    state.disabledKeys.size > 0 ||
-    state.disabledModels.size > 0;
-
-  saveRoutingInstructionStateSync(legacyKey, hasOtherRoutingState ? state : null);
 }
 
 function emitVirtualRouterHitLog(result: {

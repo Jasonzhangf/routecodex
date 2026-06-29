@@ -1,9 +1,7 @@
 import type { ProcessedRequest, StandardizedRequest } from '../../conversion/hub/types/standardized.js';
 import {
   createVirtualRouterRouteHostEffects,
-  injectVirtualRouterRuntimeMetadata,
-  mergeVirtualRouterStopMessageSnapshotWithPersisted,
-  resolveTmuxScopedVirtualRouterStateScope
+  injectVirtualRouterRuntimeMetadata
 } from '../../runtime/virtual-router-host-effects.js';
 import type {
   ProviderErrorEvent,
@@ -130,20 +128,11 @@ export class VirtualRouterEngine implements VirtualRouterRuntime {
   }
 
   getStopMessageState(metadata: RouterMetadataInput | Record<string, unknown>): StopMessageStateSnapshot | null {
-    const scope = resolveTmuxScopedVirtualRouterStateScope(metadata);
-    if (!scope) {
-      return null;
-    }
     const raw = this.nativeProxy.getStopMessageState(JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata)));
-    const snapshot = JSON.parse(raw) as StopMessageStateSnapshot | null;
-    return mergeVirtualRouterStopMessageSnapshotWithPersisted(snapshot, scope);
+    return JSON.parse(raw) as StopMessageStateSnapshot | null;
   }
 
   getPreCommandState(metadata: RouterMetadataInput | Record<string, unknown>): PreCommandStateSnapshot | null {
-    const scope = resolveTmuxScopedVirtualRouterStateScope(metadata);
-    if (!scope) {
-      return null;
-    }
     const raw = this.nativeProxy.getPreCommandState(JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata)));
     return JSON.parse(raw) as PreCommandStateSnapshot | null;
   }

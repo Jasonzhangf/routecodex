@@ -1,18 +1,48 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-compaction-false-positive');
 
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
   saveRoutingInstructionStateSync(`tmux:${sessionId}`, state as any);
+}
+
+function bindMetadataCenter<T extends Record<string, unknown>>(
+  adapterContext: T,
+  providerProtocol: string,
+  sessionId?: string
+): T {
+  const center = MetadataCenter.attach(adapterContext);
+  center.writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    {
+      module: 'tests/servertool/stopmessage-compaction-false-positive.spec.ts',
+      symbol: 'bindMetadataCenter',
+      stage: 'test'
+    }
+  );
+  if (sessionId) {
+    center.writeRequestTruth(
+      'sessionId',
+      sessionId,
+      {
+        module: 'tests/servertool/stopmessage-compaction-false-positive.spec.ts',
+        symbol: 'bindMetadataCenter',
+        stage: 'test'
+      }
+    );
+  }
+  return adapterContext;
 }
 
 describe('stopMessage should not be disabled by compaction marker substring', () => {
@@ -72,7 +102,7 @@ describe('stopMessage should not be disabled by compaction marker substring', ()
       stream: true
     } as any;
 
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-stopmessage-compaction-substring',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'gemini-chat',
@@ -80,7 +110,7 @@ describe('stopMessage should not be disabled by compaction marker substring', ()
       tmuxSessionId: sessionId,
       clientTmuxSessionId: sessionId,
       capturedChatRequest: capturedResponsesPayload
-    } as any;
+    } as any, 'gemini-chat', sessionId);
 
     const result = await runServerSideToolEngine({
       chatResponse,

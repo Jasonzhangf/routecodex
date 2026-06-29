@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { extractToolCalls } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { extractToolCalls } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
 import { mapNativeProviderResponseToChat } from '../sharedmodule/native-response-mapper-test-helper.js';
 
 describe('server-side-tools: extractToolCalls', () => {

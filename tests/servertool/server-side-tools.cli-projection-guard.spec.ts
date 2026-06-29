@@ -1,17 +1,6 @@
 import { describe, expect, jest, test } from '@jest/globals';
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js',
-  () => ({
-    cloneJson: jest.fn((value: unknown) => JSON.parse(JSON.stringify(value))),
-    extractTextFromChatLike: jest.fn(() => ''),
-    extractToolCalls: jest.fn(() => []),
-    runServerSideToolEngine: jest.fn(),
-    runServertoolAutoHookCaller: jest.fn(),
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.js',
   () => ({
     buildServertoolCliProjectionBranchResult: jest.fn(),
@@ -39,7 +28,7 @@ jest.unstable_mockModule(
 const {
   collectAdditionalClientToolCalls,
   isClientExecCliProjectionToolCall
-} = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
+} = await import('../../sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.js');
 
 describe('server-side-tools cli projection guard', () => {
   test('only client_exec_cli_projection execution mode can trigger CLI projection', () => {

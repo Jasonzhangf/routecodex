@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {
@@ -8,12 +8,42 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { buildOpenAIChatFromAnthropicMessage } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.js';
 import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-anthropic-stop-sequence');
 
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
   saveRoutingInstructionStateSync(`tmux:${sessionId}`, state as any);
+}
+
+function bindMetadataCenter<T extends Record<string, unknown>>(
+  adapterContext: T,
+  providerProtocol: string,
+  sessionId?: string
+): T {
+  const center = MetadataCenter.attach(adapterContext);
+  center.writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    {
+      module: 'tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts',
+      symbol: 'bindMetadataCenter',
+      stage: 'test'
+    }
+  );
+  if (sessionId) {
+    center.writeRequestTruth(
+      'sessionId',
+      sessionId,
+      {
+        module: 'tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts',
+        symbol: 'bindMetadataCenter',
+        stage: 'test'
+      }
+    );
+  }
+  return adapterContext;
 }
 
 describe('stopMessage trigger for /v1/messages (anthropic stop_sequence)', () => {
@@ -51,7 +81,7 @@ describe('stopMessage trigger for /v1/messages (anthropic stop_sequence)', () =>
     const chatResponse = buildOpenAIChatFromAnthropicMessage(anthropicPayload) as any;
     expect(chatResponse?.choices?.[0]?.finish_reason).toBe('stop');
 
-    const adapterContext: AdapterContext = {
+    const adapterContext: AdapterContext = bindMetadataCenter({
       requestId: 'req-stopmessage-anthropic-stop-seq',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
@@ -62,7 +92,7 @@ describe('stopMessage trigger for /v1/messages (anthropic stop_sequence)', () =>
         model: 'claude-test',
         messages: [{ role: 'user', content: 'hi' }]
       }
-    } as any;
+    } as any, 'anthropic-messages', sessionId);
 
     const result = await runServerSideToolEngine({
       chatResponse,

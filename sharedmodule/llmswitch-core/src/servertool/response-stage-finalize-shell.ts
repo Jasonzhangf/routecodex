@@ -6,6 +6,7 @@ import type {
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { planServertoolResponseStageGateWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
+import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 export async function finalizeServertoolResponseStage(args: {
   options: ServerSideToolEngineOptions;
@@ -20,7 +21,10 @@ export async function finalizeServertoolResponseStage(args: {
       ? args.initialResponseStageGatePlan
       : planServertoolResponseStageGateWithNative({
           payload: args.baseObject,
-          adapterContext: args.options.adapterContext as Record<string, unknown>
+          adapterContext: args.options.adapterContext as Record<string, unknown>,
+          runtimeControl: readRuntimeControlFromAnyBoundMetadataCenter(
+            args.options.adapterContext as Record<string, unknown>
+          )
         });
 
   const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({

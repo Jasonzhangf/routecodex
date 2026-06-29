@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions } from './types.js';
-import { runServerSideToolEngine } from './server-side-tools.js';
+import { runServerSideToolEngine } from './server-side-tools-impl.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import {
   createServerToolTimeoutError,

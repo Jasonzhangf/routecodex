@@ -521,7 +521,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
-      - sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts
+      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
       - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -609,7 +609,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Minimal change stack must prove fixed 1s/2s/3s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
+      - "Minimal change stack must prove fixed 1s/3s/5s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
       - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
 
   - feature_id: vr.route_selection

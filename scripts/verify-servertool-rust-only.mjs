@@ -166,6 +166,9 @@ const DELETED_SERVERTOOL_CLI_PROJECTION_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`,
   `${ROOT}/tests/servertool/servertool-cli-projection.spec.ts`,
 ];
+const DELETED_SERVERTOOL_ROOT_FACADE_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts`,
+];
 const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`,
@@ -683,7 +686,6 @@ function checkServertoolCliProjectionMap() {
   const verificationMap = readRequired(VERIFICATION_MAP);
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
   const cliProjectionRuntimeShell = readRequired(`${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`);
-  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
   const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const rustOutcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const nativeServertoolWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`);
@@ -729,9 +731,6 @@ function checkServertoolCliProjectionMap() {
   );
   if (existsSync(`${SERVERTOOL_TS_DIR}/handlers/fixture.ts`)) {
     fail('servertool-fixture-ts-handler-deleted', 'servertool fixture TS handler must stay physically deleted');
-  }
-  if (serverSideTools.includes("import './handlers/fixture.js'")) {
-    fail('servertool-fixture-ts-handler-deleted', 'server-side-tools.ts must not side-effect import deleted fixture handler');
   }
   pass('servertool-fixture-ts-handler-deleted', 'servertool fixture TS handler is deleted; Rust dispatch owns CLI projection');
   assertContains(
@@ -967,8 +966,18 @@ function checkServertoolCliProjectionMap() {
       );
     }
   }
-  assertContains('cli-projection-runtime-native-owner', `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`, cliProjectionRuntimeShell, 'buildClientExecCliProjectionOutputWithNative');
-  assertContains('cli-projection-runtime-native-owner', `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`, cliProjectionRuntimeShell, 'buildClientVisibleProjectionShellWithNative');
+  assertContains(
+    'cli-projection-runtime-native-owner',
+    `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`,
+    cliProjectionRuntimeShell,
+    'buildClientExecCliProjectionOutputWithNative'
+  );
+  assertContains(
+    'cli-projection-runtime-native-owner',
+    `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`,
+    cliProjectionRuntimeShell,
+    'buildClientVisibleProjectionShellWithNative'
+  );
   if (cliProjectionRuntimeShell.includes("name: 'exec_command'") || cliProjectionRuntimeShell.includes('"name": "exec_command"')) {
     fail('cli-projection-command-contract', 'cli-projection runtime shell must not build exec_command tool call shape in TS');
   }
@@ -3954,7 +3963,6 @@ function checkBackendRoutePolicyRustOwner() {
 // ── Check 15: servertool text extraction has Rust owner ───────
 function checkServertoolTextExtractionRustOwner() {
   const rustTextExtraction = readRequired(RUST_SERVERTOOL_TEXT_EXTRACTION);
-  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
   const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
   const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
@@ -3984,10 +3992,10 @@ function checkServertoolTextExtractionRustOwner() {
     nativeServertoolWrapper,
     'extractTextFromChatLikeWithNative'
   );
-  if (!serverSideTools.includes('extractTextFromChatLike,') || !serverSideToolsImpl.includes('extractTextFromChatLikeWithNative(payload)')) {
+  if (!serverSideToolsImpl.includes('extractTextFromChatLikeWithNative(payload)')) {
     fail(
       'servertool-text-extraction-thin-wrapper',
-      'server-side-tools thin shell must re-export extractTextFromChatLike and impl must delegate to extractTextFromChatLikeWithNative(payload)'
+      'server-side-tools-impl.ts must delegate extractTextFromChatLike to extractTextFromChatLikeWithNative(payload)'
     );
   }
 
@@ -4826,7 +4834,6 @@ function checkServertoolRustOutcomeCloseout() {
   const rustCli = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const resultRestoreSpec = readRequired(`${ROOT}/tests/servertool/servertool-cli-result-restore.spec.ts`);
   const cliProjectionRuntimeShell = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts`);
-  const tsServerSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
   const tsServerSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
 
   for (const needle of [
@@ -4870,16 +4877,24 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
+  for (const file of DELETED_SERVERTOOL_ROOT_FACADE_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'servertool-root-facade-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; callers must import the concrete Rust/native shell owner`
+      );
+    }
+  }
   for (const marker of ['reenterPipeline', 'providerInvoker', 'serverToolFollowup', 'serverToolFollowupSource', '--ticket', 'stcli_', 'rcc_cli_']) {
     if (cliProjectionRuntimeShell.includes(marker)) {
       fail('servertool-cli-runtime-shell', `cli-projection-runtime-shell.ts must not carry legacy servertool marker ${marker}`);
     }
   }
   for (const marker of ['memory_cache_auto', 'executeServertoolBackendPlan']) {
-    if (cliProjectionRuntimeShell.includes(marker) || tsServerSideTools.includes(marker) || tsServerSideToolsImpl.includes(marker)) {
+    if (cliProjectionRuntimeShell.includes(marker) || tsServerSideToolsImpl.includes(marker)) {
       fail(
         'servertool-cli-runtime-shell',
-        `servertool TS thin shells must not revive retired marker ${marker}`
+        `servertool runtime shell must not revive retired marker ${marker}`
       );
     }
   }
@@ -4893,7 +4908,7 @@ function checkServertoolRustOutcomeCloseout() {
     "return name !== 'servertool_fixture' && name !== 'stop_message_auto';",
     "return executionMode === 'client_exec_cli_projection' || executionMode === 'client_inject_only';",
   ]) {
-    if (tsServerSideTools.includes(marker) || tsServerSideToolsImpl.includes(marker)) {
+    if (tsServerSideToolsImpl.includes(marker)) {
       fail(
         'servertool-cli-ts-name-fallback',
         `server-side-tools*.ts must not retain TS tool-name fallback marker ${marker}`
@@ -4913,23 +4928,15 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'collectAdditionalClientToolCalls,',
-    'extractToolCalls,',
-    'extractToolCallsFromResponseStage',
-    'runServerSideToolEngine',
+    'collectAdditionalClientToolCalls',
+    'isClientExecCliProjectionToolCall'
   ]) {
-    if (!tsServerSideTools.includes(marker)) {
+    if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(
         'servertool-cli-projection-thin-shell-guard',
-        `server-side-tools.ts must keep CLI projection thin-shell guard marker ${marker}`
+        `cli-projection-runtime-shell.ts must keep CLI projection runtime marker ${marker}`
       );
     }
-  }
-  if (tsServerSideTools.includes('runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller')) {
-    fail(
-      'servertool-cli-projection-thin-shell-guard',
-      'server-side-tools.ts must not retain deleted auto-hook caller alias marker runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller'
-    );
   }
   for (const marker of ['export const runServerSideToolEngine =', 'export const extractToolCalls =']) {
     if (!tsServerSideToolsImpl.includes(marker)) {
@@ -5311,7 +5318,6 @@ function checkResponseStageMetadataCenterOnly() {
 }
 
 function checkServertoolAutoHookCallerThinShell() {
-  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
   const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
   for (const marker of [
     'const autoHookExecutionList = listAutoServerToolHooks();',
@@ -5319,27 +5325,27 @@ function checkServertoolAutoHookCallerThinShell() {
     "const optionalResult = await runAutoHookExecutionQueue({",
     "const mandatoryResult = await runAutoHookExecutionQueue({",
   ]) {
-    if (serverSideTools.includes(marker)) {
+    if (serverSideToolsImpl.includes(marker)) {
       fail(
         'servertool-auto-hook-caller-inline-orchestration',
-        `server-side-tools.ts must not retain inline auto-hook caller orchestration marker ${marker}`
+        `server-side-tools-impl.ts must not retain inline auto-hook caller orchestration marker ${marker}`
       );
     }
   }
   for (const marker of [
     'runServertoolAutoHookCallerViaThinShell as runServertoolAutoHookCaller',
   ]) {
-    if (serverSideTools.includes(marker)) {
+    if (serverSideToolsImpl.includes(marker)) {
       fail(
         'servertool-auto-hook-caller-thin-shell',
-        `server-side-tools.ts must not retain deleted auto-hook caller alias marker ${marker}`
+        `server-side-tools-impl.ts must not retain deleted auto-hook caller alias marker ${marker}`
       );
     }
   }
   for (const marker of [
     'export const runServertoolAutoHookCallerImpl =',
   ]) {
-    if (serverSideToolsImpl.includes(marker) || serverSideTools.includes(marker)) {
+    if (serverSideToolsImpl.includes(marker)) {
       fail(
         'servertool-auto-hook-caller-thin-shell',
         `*Impl alias export must not revive: ${marker}`
@@ -5378,28 +5384,28 @@ function checkServertoolAutoHookCallerThinShell() {
 }
 
 function checkServertoolResponseStageGateThinShell() {
-  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
+  const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
   for (const marker of [
     'detectEmptyAssistantPayloadContractSignalWithNative',
     'isStopEligibleForServerTool',
   ]) {
-    if (serverSideTools.includes(marker)) {
+    if (serverSideToolsImpl.includes(marker)) {
       fail(
         'servertool-response-stage-gate-inline-semantic',
-        `server-side-tools.ts must not retain response-stage inline semantic marker ${marker}`
+        `server-side-tools-impl.ts must not retain response-stage inline semantic marker ${marker}`
       );
     }
   }
-  if (serverSideTools.includes('bindResponseStageGateNativeShell(')) {
+  if (serverSideToolsImpl.includes('bindResponseStageGateNativeShell(')) {
     fail(
       'servertool-response-stage-gate-thin-shell',
-      'server-side-tools.ts must not retain deleted bindResponseStageGateNativeShell wrapper'
+      'server-side-tools-impl.ts must not retain deleted bindResponseStageGateNativeShell wrapper'
     );
     return;
   }
   pass(
     'servertool-response-stage-gate-thin-shell',
-    'server-side-tools.ts does not retain response-stage wrapper alias'
+    'server-side-tools-impl.ts does not retain response-stage wrapper alias'
   );
 
   const responseStageFinalizeShell = readRequired(TS_RESPONSE_STAGE_FINALIZE_SHELL);
@@ -5668,7 +5674,6 @@ function checkDeletedEmptyReplyContinueAbsent() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const skeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
-  const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
 
   for (const [file, content] of [
     [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib],
@@ -5677,7 +5682,6 @@ function checkDeletedEmptyReplyContinueAbsent() {
     [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper],
     [NATIVE_REQUIRED_EXPORTS, requiredExports],
     [`${RUST_SRC_DIR}/servertool_skeleton_config.rs`, skeletonConfig],
-    [TS_SERVER_SIDE_TOOLS, serverSideTools],
   ]) {
     for (const keyword of [
       'empty_reply_continue',
