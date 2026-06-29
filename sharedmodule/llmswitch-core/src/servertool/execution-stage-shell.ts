@@ -24,7 +24,7 @@ export async function runServertoolExecutionStage(args: {
   excludeAutoHookIds: Set<string> | null;
   responseStageGatePlan: Record<string, unknown>;
 }): Promise<ServerSideToolEngineResult> {
-  const baseForExecution = structuredClone(args.baseObject);
+  const baseForExecution = args.baseObject;
   const { dispatchPlan } = prepareServertoolDispatchStage({
     options: args.options,
     toolCalls: args.toolCalls,

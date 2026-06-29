@@ -5421,6 +5421,17 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
+  for (const marker of [
+    'structuredClone(args.baseObject)',
+    'const baseForExecution = structuredClone',
+  ]) {
+    if (executionStageShell.includes(marker)) {
+      fail(
+        'servertool-execution-stage-no-payload-clone',
+        `execution-stage-shell.ts must not deep-copy servertool payload marker ${marker}`
+      );
+    }
+  }
   if (!cliProjectionRuntimeShell.includes('export const collectAdditionalClientToolCalls =')) {
     fail(
       'servertool-cli-projection-thin-shell-guard',

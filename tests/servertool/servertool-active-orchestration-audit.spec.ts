@@ -173,7 +173,10 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts',
-    forbidden: [],
+    forbidden: [
+      'structuredClone(args.baseObject)',
+      'const baseForExecution = structuredClone',
+    ],
     required: [
       'prepareServertoolDispatchStage',
       'planServertoolExecutionBranchRuntimeAction',
