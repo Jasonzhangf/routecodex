@@ -315,6 +315,36 @@ jest.unstable_mockModule(
     planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({
       names: ['stop_message_auto']
     })),
+    resolveServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
+      const name = String(input.name ?? '').trim().toLowerCase();
+      if (name !== 'stop_message_auto') {
+        return null;
+      }
+      const spec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name];
+      return {
+        name,
+        trigger: spec.trigger.type,
+        execution: { kind: 'builtin', builtinName: name },
+        registration: {
+          name,
+          enabled: true,
+          trigger: spec.trigger.type,
+          executionMode: spec.execution.mode,
+          stripAfterExecute: spec.execution.stripAfterExecute,
+          autoHook: {
+            id: name,
+            phase: spec.trigger.phase ?? 'default',
+            priority: spec.trigger.priority ?? 100
+          }
+        },
+        autoHook: {
+          id: name,
+          phase: spec.trigger.phase ?? 'default',
+          priority: spec.trigger.priority ?? 100,
+          order: -1
+        }
+      };
+    }),
     planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
       entries: [{
         name: 'stop_message_auto',
@@ -530,6 +560,36 @@ jest.unstable_mockModule(
     planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({
       names: ['stop_message_auto']
     })),
+    resolveServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
+      const name = String(input.name ?? '').trim().toLowerCase();
+      if (name !== 'stop_message_auto') {
+        return null;
+      }
+      const spec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name];
+      return {
+        name,
+        trigger: spec.trigger.type,
+        execution: { kind: 'builtin', builtinName: name },
+        registration: {
+          name,
+          enabled: true,
+          trigger: spec.trigger.type,
+          executionMode: spec.execution.mode,
+          stripAfterExecute: spec.execution.stripAfterExecute,
+          autoHook: {
+            id: name,
+            phase: spec.trigger.phase ?? 'default',
+            priority: spec.trigger.priority ?? 100
+          }
+        },
+        autoHook: {
+          id: name,
+          phase: spec.trigger.phase ?? 'default',
+          priority: spec.trigger.priority ?? 100,
+          order: -1
+        }
+      };
+    }),
     planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
       entries: [{
         name: 'stop_message_auto',

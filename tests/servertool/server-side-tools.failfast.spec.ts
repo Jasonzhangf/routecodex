@@ -718,6 +718,31 @@ jest.unstable_mockModule(
         : { action: 'return_none' };
     }),
     planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({ names: ['stop_message_auto'] })),
+    resolveServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
+      const name = String(input?.name ?? '').trim().toLowerCase();
+      return name === 'stop_message_auto'
+        ? {
+            name,
+            trigger: 'auto',
+            execution: {
+              kind: 'builtin',
+              builtinName: name
+            },
+            autoHook: {
+              flowId: 'stop_message_flow',
+              trigger: { type: 'auto', phase: 'default', priority: 40 },
+              execution: { mode: 'auto_hook', stripAfterExecute: true }
+            },
+            registration: {
+              name,
+              enabled: true,
+              trigger: 'auto',
+              executionMode: 'auto_hook',
+              stripAfterExecute: true
+            }
+          }
+        : null;
+    }),
     planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
       entries: [{
         name: 'stop_message_auto',

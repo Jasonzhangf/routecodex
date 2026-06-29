@@ -21,6 +21,7 @@ import {
   planServertoolRegistryRegistrationFromSkeletonWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
   resolveServertoolRegisteredNameWithNative,
+  resolveServertoolBuiltinHandlerEntryWithNative,
   resolveServertoolToolSpecWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
@@ -97,6 +98,10 @@ export function getServertoolToolSpec(name: string): ServertoolToolSpec | null {
 
 export function planServertoolBuiltinHandlerEntry(name: string): Record<string, unknown> {
   return planServertoolBuiltinHandlerEntryWithNative({ name }) as unknown as Record<string, unknown>;
+}
+
+export function resolveServertoolBuiltinHandlerEntry(name: string): Record<string, unknown> | null {
+  return resolveServertoolBuiltinHandlerEntryWithNative({ name }) as Record<string, unknown> | null;
 }
 
 export function planServertoolBuiltinHandlerNames(): string[] {

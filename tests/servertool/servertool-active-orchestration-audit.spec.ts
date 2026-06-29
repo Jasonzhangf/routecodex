@@ -345,6 +345,7 @@ describe('stop-message-auto native-catalog audit', () => {
     expect(source).toContain('runStoplessBuiltinHandlerForRuntimeJson');
     expect(source).toContain('runBuiltinHandlerForRuntimeNapi');
     expect(source).toContain('function runBuiltinHandler(');
+    expect(source).toContain('resolveServertoolBuiltinHandlerEntry');
 
     const forbidden = [
       'runStoplessAutoHandlerRuntimeJson',
@@ -354,6 +355,8 @@ describe('stop-message-auto native-catalog audit', () => {
       "runtime.action !== 'return_handler_result'",
       "case 'stop_message_auto'",
       "name === 'stop_message_auto'",
+      "plan.action === 'return_none'",
+      "plan.action !== 'return_entry'",
       '.map((name) => getBuiltinHandlerEntry(name))',
       '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry?.autoHook))',
       '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry))',

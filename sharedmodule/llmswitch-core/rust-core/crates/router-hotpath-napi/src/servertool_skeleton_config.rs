@@ -860,6 +860,19 @@ pub fn plan_servertool_builtin_handler_entry_json(input_json: String) -> NapiRes
 }
 
 #[napi]
+pub fn resolve_servertool_builtin_handler_entry_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let name = read_trimmed_string(input.get("name")).unwrap_or_default();
+    let output = build_builtin_handler_entry_plan(&document, &name)
+        .get("entry")
+        .cloned()
+        .unwrap_or(Value::Null);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn plan_servertool_builtin_handler_names_json(input_json: String) -> NapiResult<String> {
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -1042,8 +1055,9 @@ mod tests {
         plan_servertool_builtin_auto_handler_entries_json,
         plan_servertool_backend_execution_json, plan_servertool_builtin_handler_entry_json,
         plan_servertool_builtin_handler_record_entries_json,
-        plan_servertool_builtin_handler_names_json, plan_servertool_followup_runtime_json,
-        plan_servertool_handler_contract_json, plan_servertool_registry_lookup_from_skeleton_json,
+        plan_servertool_builtin_handler_names_json, resolve_servertool_builtin_handler_entry_json,
+        plan_servertool_followup_runtime_json, plan_servertool_handler_contract_json,
+        plan_servertool_registry_lookup_from_skeleton_json,
         plan_servertool_registry_registration_from_skeleton_json,
         plan_servertool_skeleton_derived_config_json, resolve_servertool_registered_name_json,
         resolve_servertool_followup_flow_profile, resolve_servertool_progress_tool_name_json,
@@ -1383,12 +1397,26 @@ mod tests {
         assert_eq!(entry_value["entry"]["autoHook"]["priority"], 40);
         assert_eq!(entry_value["entry"]["autoHook"]["order"], -1);
 
+        let resolved = resolve_servertool_builtin_handler_entry_json(
+            json!({ "name": "stop_message_auto" }).to_string(),
+        )
+        .expect("resolved builtin entry");
+        let resolved_value: Value = serde_json::from_str(&resolved).expect("parse resolved entry");
+        assert_eq!(resolved_value["name"], "stop_message_auto");
+
         let unsupported =
             plan_servertool_builtin_handler_entry_json(json!({ "name": "web_search" }).to_string())
                 .expect("unsupported builtin entry");
         let unsupported_value: Value =
             serde_json::from_str(&unsupported).expect("parse unsupported builtin entry");
         assert_eq!(unsupported_value["action"], "return_none");
+
+        let resolved_unsupported =
+            resolve_servertool_builtin_handler_entry_json(json!({ "name": "web_search" }).to_string())
+                .expect("resolved unsupported entry");
+        let resolved_unsupported_value: Value =
+            serde_json::from_str(&resolved_unsupported).expect("parse resolved unsupported");
+        assert_eq!(resolved_unsupported_value, Value::Null);
     }
 
     #[test]

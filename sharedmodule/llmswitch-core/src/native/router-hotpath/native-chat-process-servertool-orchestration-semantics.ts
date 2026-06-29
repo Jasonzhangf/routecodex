@@ -561,6 +561,29 @@ export function planServertoolBuiltinHandlerEntryWithNative(input: {
   }
 }
 
+export function resolveServertoolBuiltinHandlerEntryWithNative(input: {
+  name: string;
+  document?: unknown;
+}): Record<string, unknown> | null {
+  const capability = 'resolveServertoolBuiltinHandlerEntryJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (parsed === null) {
+      return null;
+    }
+    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function planServertoolBuiltinHandlerNamesWithNative(input: {
   document?: unknown;
 } = {}): NativeServertoolBuiltinHandlerNamesPlan {

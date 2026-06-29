@@ -2,9 +2,9 @@ import type { ServerToolHandlerContext, ServerToolHandlerResult } from './types.
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import {
   planServertoolBuiltinAutoHandlerEntries,
-  planServertoolBuiltinHandlerEntry,
   planServertoolBuiltinHandlerRecordEntries,
-  planServertoolBuiltinHandlerNames
+  planServertoolBuiltinHandlerNames,
+  resolveServertoolBuiltinHandlerEntry
 } from './skeleton-config.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 
@@ -46,19 +46,11 @@ export async function __executeBuiltinHandlerForRuntime(
 }
 
 export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | undefined {
-  const plan = planServertoolBuiltinHandlerEntry(name);
-  if (plan.action === 'return_none') {
+  const entry = resolveServertoolBuiltinHandlerEntry(name);
+  if (!entry) {
     return undefined;
   }
-  if (
-    plan.action !== 'return_entry' ||
-    !plan.entry ||
-    typeof plan.entry !== 'object' ||
-    Array.isArray(plan.entry)
-  ) {
-    throw new Error(`[servertool] invalid Rust builtin handler entry plan for ${name}`);
-  }
-  return plan.entry as unknown as ServerToolHandlerEntry;
+  return entry as unknown as ServerToolHandlerEntry;
 }
 
 export function listBuiltinHandlerNames(): string[] {
