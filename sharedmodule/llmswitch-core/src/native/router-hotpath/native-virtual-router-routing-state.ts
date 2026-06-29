@@ -78,11 +78,26 @@ export interface RoutingInstructionState {
   chatProcessLastUpdatedAt?: number;
 }
 
-export type RoutingInstructionStateStoreLike = {
+export interface RoutingInstructionStateStoreLike {
   loadSync: (key: string) => RoutingInstructionState | null;
   saveAsync: (key: string, state: RoutingInstructionState | null) => void;
   saveSync?: (key: string, state: RoutingInstructionState | null) => void;
 };
+
+export interface ChatProcessSessionUsageOutput {
+  requestId: string;
+  totalRequests: number;
+  dailyRequests: number;
+  sessionStateUpdated: boolean;
+}
+
+export interface ChatProcessSessionUsageInput {
+  sessionScope?: string;
+  context?: Record<string, unknown>;
+  usage?: Record<string, unknown>;
+  capturedChatRequest?: Record<string, unknown>;
+  requestId?: string;
+}
 
 export class RoutingStateKeyMissingError extends Error {
   constructor(public readonly key: string | undefined, message: string) {
@@ -322,4 +337,39 @@ export function persistRoutingInstructionState(
     return;
   }
   routingStateStore.saveAsync(key, state);
+}
+
+/**
+ * Plan chat process session usage: increment global counter (total + local-day),
+ * generate requestId in `req_{total}_{daily}` format, optionally update the
+ * session-scoped RoutingInstructionState with usage tokens and message count.
+ *
+ * This is the Rust-backed single source of truth for session usage — callers
+ * must NOT compute requestIds or increment counters in TS.
+ */
+// feature_id: hub.chat_process_session_usage
+export function planChatProcessSessionUsage(
+  input: ChatProcessSessionUsageInput
+): ChatProcessSessionUsageOutput {
+  // feature_id: hub.chat_process_session_usage
+  // Native call: plan_chat_process_session_usage_json
+  const capability = 'planChatProcessSessionUsageJson';
+  const raw = invokeNativeString(capability, [stringifyForNative(capability, input ?? {})]);
+  const parsed = parseRecordPayload(capability, raw);
+  const requestId =
+    typeof parsed.requestId === 'string' && parsed.requestId.trim()
+      ? parsed.requestId.trim()
+      : failNativeRequired<string>(capability, 'invalid payload: requestId');
+  const total = typeof parsed.totalRequests === 'number' && Number.isFinite(parsed.totalRequests)
+    ? Math.max(0, Math.floor(parsed.totalRequests))
+    : 0;
+  const daily = typeof parsed.dailyRequests === 'number' && Number.isFinite(parsed.dailyRequests)
+    ? Math.max(0, Math.floor(parsed.dailyRequests))
+    : 0;
+  return {
+    requestId,
+    totalRequests: total,
+    dailyRequests: daily,
+    sessionStateUpdated: parsed.sessionStateUpdated === true
+  };
 }

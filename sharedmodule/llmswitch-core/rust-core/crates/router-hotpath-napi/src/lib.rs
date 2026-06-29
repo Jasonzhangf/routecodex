@@ -175,6 +175,16 @@ pub fn evaluate_singleton_route_pool_exhaustion_json(input_json: String) -> Napi
 }
 
 #[napi]
+pub fn plan_chat_process_session_usage_json(input_json: String) -> NapiResult<String> {
+    let output =
+        virtual_router_engine::chat_process_session_usage::plan_chat_process_session_usage_json(
+            input_json,
+        )
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn resolve_virtual_router_stop_message_scope_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;

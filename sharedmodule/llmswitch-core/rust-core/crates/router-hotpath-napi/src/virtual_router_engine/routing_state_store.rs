@@ -1,3 +1,4 @@
+use chrono::TimeZone;
 use serde_json::{Map, Value};
 use std::cell::RefCell;
 use std::env;
@@ -11,6 +12,83 @@ const RCC_HOME_ENV: &str = "RCC_HOME";
 const ROUTECODEX_USER_DIR_ENV: &str = "ROUTECODEX_USER_DIR";
 const ROUTECODEX_HOME_ENV: &str = "ROUTECODEX_HOME";
 const NO_SESSION_DIR_OVERRIDE_SENTINEL: &str = "__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__";
+const GLOBAL_REQUEST_COUNTER_FILENAME: &str = "global-request-counter.json";
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GlobalRequestCounter {
+    #[serde(default)]
+    pub total_requests: i64,
+    #[serde(default)]
+    pub daily_requests: i64,
+    #[serde(default)]
+    pub last_request_day: Option<String>,
+    #[serde(default)]
+    pub last_request_day_start_ms: Option<i64>,
+    #[serde(default)]
+    pub last_request_at_ms: i64,
+}
+
+impl GlobalRequestCounter {
+    pub(crate) fn new() -> Self {
+        Self {
+            total_requests: 0,
+            daily_requests: 0,
+            last_request_day: None,
+            last_request_day_start_ms: None,
+            last_request_at_ms: 0,
+        }
+    }
+
+    pub(crate) fn tick(&mut self, now_ms: i64) -> (i64, i64) {
+        let (current_day, day_start_ms) = local_day_for_timestamp_ms(now_ms);
+        if self.last_request_day.as_deref() != Some(current_day.as_str()) {
+            self.daily_requests = 0;
+        }
+        self.total_requests = self.total_requests.saturating_add(1).max(1);
+        self.daily_requests = self.daily_requests.saturating_add(1).max(1);
+        self.last_request_day = Some(current_day);
+        self.last_request_day_start_ms = Some(day_start_ms);
+        self.last_request_at_ms = now_ms;
+        (self.total_requests, self.daily_requests)
+    }
+
+    pub(crate) fn current_local_day() -> (String, i64) {
+        local_day_for_timestamp_ms(chrono::Utc::now().timestamp_millis())
+    }
+
+    pub(crate) fn parse_day_start_ms(day: &str) -> Option<i64> {
+        if day.len() != 10
+            || day.as_bytes().get(4) != Some(&b'-')
+            || day.as_bytes().get(7) != Some(&b'-')
+        {
+            return None;
+        }
+        let date = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()?;
+        let midnight = date.and_hms_opt(0, 0, 0)?;
+        match chrono::Local.from_local_datetime(&midnight) {
+            chrono::LocalResult::Single(dt) => Some(dt.timestamp_millis()),
+            chrono::LocalResult::Ambiguous(earliest, _) => Some(earliest.timestamp_millis()),
+            chrono::LocalResult::None => None,
+        }
+    }
+}
+
+fn local_day_for_timestamp_ms(now_ms: i64) -> (String, i64) {
+    use chrono::Datelike;
+
+    let local = chrono::DateTime::from_timestamp_millis(now_ms)
+        .map(|dt| dt.with_timezone(&chrono::Local))
+        .unwrap_or_else(chrono::Local::now);
+    let day = format!(
+        "{:04}-{:02}-{:02}",
+        local.year(),
+        local.month(),
+        local.day()
+    );
+    let start_ms = GlobalRequestCounter::parse_day_start_ms(&day).unwrap_or(now_ms);
+    (day, start_ms)
+}
 
 #[derive(Clone)]
 enum SessionDirOverride {
@@ -180,6 +258,125 @@ pub(crate) fn persist_routing_instruction_state(
     }
 }
 
+pub(crate) fn load_routing_instruction_state_strict(
+    key: &str,
+) -> Result<Option<RoutingInstructionState>, String> {
+    if !is_persistent_key(key) {
+        return Err(format!(
+            "routing instruction state key is not persistent: {}",
+            key
+        ));
+    }
+    let filepath = resolve_session_filepath(key).ok_or_else(|| {
+        format!(
+            "failed to resolve routing instruction state path for {}",
+            key
+        )
+    })?;
+    let raw = match fs::read_to_string(&filepath) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(format!(
+                "failed to read routing instruction state {:?}: {}",
+                filepath, e
+            ));
+        }
+    };
+    if raw.trim().is_empty() {
+        return Err(format!(
+            "routing instruction state file is empty: {:?}",
+            filepath
+        ));
+    }
+    let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
+        format!(
+            "failed to parse routing instruction state JSON {:?}: {}",
+            filepath, e
+        )
+    })?;
+    let payload = match parsed {
+        Value::Object(mut obj) => obj.remove("state").unwrap_or(Value::Object(obj)),
+        _ => {
+            return Err(format!(
+                "routing instruction state root must be object: {:?}",
+                filepath
+            ));
+        }
+    };
+    deserialize_routing_instruction_state(&payload)
+        .map(Some)
+        .ok_or_else(|| {
+            format!(
+                "failed to deserialize routing instruction state payload: {:?}",
+                filepath
+            )
+        })
+}
+
+pub(crate) fn persist_routing_instruction_state_strict(
+    key: &str,
+    state: Option<&RoutingInstructionState>,
+) -> Result<(), String> {
+    if !is_persistent_key(key) {
+        return Err(format!(
+            "routing instruction state key is not persistent: {}",
+            key
+        ));
+    }
+    let filepath = resolve_session_filepath(key).ok_or_else(|| {
+        format!(
+            "failed to resolve routing instruction state path for {}",
+            key
+        )
+    })?;
+    let should_clear = state.map(is_state_empty).unwrap_or(true);
+    if should_clear {
+        match fs::remove_file(&filepath) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                return Err(format!(
+                    "failed to remove routing instruction state {:?}: {}",
+                    filepath, e
+                ));
+            }
+        }
+    }
+    let payload = match state {
+        Some(state) => {
+            let mut root = Map::new();
+            root.insert("version".to_string(), Value::Number(1.into()));
+            root.insert(
+                "state".to_string(),
+                serialize_routing_instruction_state(state),
+            );
+            Value::Object(root)
+        }
+        None => Value::Null,
+    };
+    if let Some(dir) = filepath.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            format!(
+                "failed to create routing instruction state dir {:?}: {}",
+                dir, e
+            )
+        })?;
+    }
+    let text = serde_json::to_string(&payload).map_err(|e| {
+        format!(
+            "failed to serialize routing instruction state {:?}: {}",
+            filepath, e
+        )
+    })?;
+    atomic_write_file(&filepath, &text).map_err(|e| {
+        format!(
+            "failed to write routing instruction state {:?}: {}",
+            filepath, e
+        )
+    })
+}
+
 fn is_persistent_key(key: &str) -> bool {
     key.starts_with("session:") || key.starts_with("conversation:") || key.starts_with("tmux:")
 }
@@ -275,6 +472,72 @@ fn resolve_session_filepath(key: &str) -> Option<PathBuf> {
 fn resolve_provider_health_filepath() -> Option<PathBuf> {
     let dir = resolve_session_dir()?;
     Some(dir.join(Path::new("provider-health.json")))
+}
+
+fn resolve_global_request_counter_filepath() -> Option<PathBuf> {
+    if let SessionDirOverride::Path(explicit) = read_override_session_dir() {
+        return Some(explicit.join(Path::new(GLOBAL_REQUEST_COUNTER_FILENAME)));
+    }
+    resolve_rcc_user_dir().map(|base| {
+        base.join("state")
+            .join(Path::new(GLOBAL_REQUEST_COUNTER_FILENAME))
+    })
+}
+
+pub(crate) fn load_global_request_counter() -> Result<GlobalRequestCounter, String> {
+    let Some(filepath) = resolve_global_request_counter_filepath() else {
+        return Err("failed to resolve global request counter path".to_string());
+    };
+    let raw = match fs::read_to_string(&filepath) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(GlobalRequestCounter::new());
+        }
+        Err(e) => {
+            return Err(format!(
+                "failed to read global request counter {:?}: {}",
+                filepath, e
+            ));
+        }
+    };
+    if raw.trim().is_empty() {
+        return Err(format!(
+            "global request counter file is empty: {:?}",
+            filepath
+        ));
+    }
+    serde_json::from_str::<GlobalRequestCounter>(&raw).map_err(|e| {
+        format!(
+            "failed to parse global request counter {:?}: {}",
+            filepath, e
+        )
+    })
+}
+
+pub(crate) fn persist_global_request_counter(counter: &GlobalRequestCounter) -> Result<(), String> {
+    let Some(filepath) = resolve_global_request_counter_filepath() else {
+        return Err("failed to resolve global request counter path".to_string());
+    };
+    if let Some(dir) = filepath.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            format!(
+                "failed to create global request counter dir {:?}: {}",
+                dir, e
+            )
+        })?;
+    }
+    let text = serde_json::to_string(counter).map_err(|e| {
+        format!(
+            "failed to serialize global request counter {:?}: {}",
+            filepath, e
+        )
+    })?;
+    atomic_write_file(&filepath, &text).map_err(|e| {
+        format!(
+            "failed to write global request counter {:?}: {}",
+            filepath, e
+        )
+    })
 }
 
 pub(crate) fn load_provider_health_state() -> Option<Value> {

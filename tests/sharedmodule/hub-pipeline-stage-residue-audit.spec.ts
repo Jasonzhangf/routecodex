@@ -3743,12 +3743,20 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('chat process session usage bridge must not swallow routing state load failures', () => {
+  it('chat process session usage bridge must stay a native shell', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts');
     const source = fs.readFileSync(filePath, 'utf8');
-    const loadStateBlock = extractFunctionBlock(source, 'loadState');
-    expect(loadStateBlock).not.toMatch(/catch\s*\{/);
-    expect(loadStateBlock).not.toMatch(/return\s+null\s*;/);
+    const findings = collectMatches(source, [
+      { label: 'restores TS session usage scope resolver', pattern: /function\s+resolveSessionUsageScope\b/ },
+      { label: 'restores TS usage token normalization', pattern: /function\s+normalizeUsage\b|function\s+readRoundedToken\b/ },
+      { label: 'restores TS routing state read/write', pattern: /loadRoutingInstructionStateSync|saveRoutingInstructionStateSync|function\s+loadState\b/ },
+      { label: 'restores TS empty routing state construction', pattern: /function\s+createEmptyRoutingInstructionState\b/ },
+      { label: 'restores TS timestamp ownership', pattern: /Date\.now\s*\(/ },
+    ]);
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('planChatProcessSessionUsage');
+    expect(source).toContain("from '../../../native/router-hotpath/native-virtual-router-routing-state.js'");
   });
 
   it('marker lifecycle shared helper must not expose internal TS marker parsers as public API', () => {

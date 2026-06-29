@@ -5,6 +5,13 @@
 - 已验证：残留扫描只剩 gate forbidden markers；`cargo test -p router-hotpath-napi chat_servertool_orchestration --lib -- --nocapture` 44 passed；`cargo test -p servertool-core stop_message_auto --lib -- --nocapture` 22 passed；sharedmodule `tsc` PASS；`npm run verify:servertool-rust-only` PASS；`npm run verify:function-map-compile-gate` PASS；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS。
 - 已知无关红：`cargo test -p router-hotpath-napi stopless --lib -- --nocapture` 仍有 2 个 stopless request/provider-format 红点，来自现有 stopless request/provider payload tests，不是本 slice 编译失败；需后续按 stopless 在线闭环主线单独处理。
 
+# 2026-06-29 Hub Pipeline Rust closeout chat-process session usage slice
+
+- 目标：继续 Hub Pipeline Rust closeout，把 `saveChatProcessSessionActualUsage` 的 requestId/global counter/local-day reset/tmux usage writeback 从 TS 收口到 Rust。
+- 改动：新增 Rust `virtual_router_engine::chat_process_session_usage` owner 与 `planChatProcessSessionUsageJson` NAPI export；`routing_state_store` 增加 `GlobalRequestCounter`、strict routing-state read/write helper 与 `~/.rcc/state/global-request-counter.json` 读写；TS `chat-process-session-usage.ts` 只保留 `planChatProcessSessionUsage` native shell；residue audit 禁止 TS scope resolver、usage normalize、routing state read/write、`Date.now()` 复活。
+- 已验证：`cargo test -p router-hotpath-napi virtual_router_engine::chat_process_session_usage --lib -- --nocapture` 12 passed（含 tmux writeback 正向与 corrupt counter fail-fast 反向）；focused `hub-pipeline-stage-residue-audit.spec.ts -t "chat process session usage"` 2 passed；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；`npx tsc -p tsconfig.json --pretty false` PASS；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS；`npm run verify:architecture-thin-wrapper-only` PASS；`npm run verify:function-map-compile-gate` PASS；`npm run verify:architecture-mainline-call-map` PASS；`git diff --cached --check` PASS。
+- 缺口：本 slice 未做 live replay；它只证明 chat-process session usage Rust owner、native wrapper、map/gate/focused audit 层闭合，完整 Hub Pipeline Rust closeout 仍未完成。
+
 # 2026-06-29 stopless followup-flow skip removal slice
 
 - 目标：继续 Hub Pipeline Rust closeout，把 stopless 决策里的旧 `followup_flow_id` / `serverToolFollowup` skip 分支物理删除；`serverToolFollowup` 只保留为 routing/metadata control，不再作为 stop-message auto handler 的递归避让真源。

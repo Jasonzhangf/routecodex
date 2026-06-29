@@ -1,4 +1,5 @@
 pub(crate) mod bootstrap;
+pub(crate) mod chat_process_session_usage;
 mod classifier;
 pub(crate) mod config_bootstrap;
 mod context_weighted;
