@@ -6240,6 +6240,32 @@ function checkServertoolPostflightLoggingFailFast() {
   const postflightFile = `${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`;
   const postflightSource = readRequired(postflightFile);
   const observationSpec = readRequired(`${ROOT}/tests/servertool/engine-observation-shell.spec.ts`);
+  for (const marker of [
+    'const followupSummary: Record<string, unknown> = {',
+    "if ('payload' in followup)",
+    'payloadRecord.messages',
+    'payloadRecord.input',
+    "if ('injection' in followup)",
+    'followup.injection?.ops',
+  ]) {
+    if (postflightSource.includes(marker)) {
+      fail(
+        'servertool-postflight-observation-rust-owner',
+        `engine-postflight-shell.ts must not retain TS postflight observation semantic marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'buildServertoolPostflightObservationSummaryWithNative({',
+    "args.stageRecorder.record('servertool.execution', summary);",
+  ]) {
+    if (!postflightSource.includes(marker)) {
+      fail(
+        'servertool-postflight-observation-rust-owner',
+        `engine-postflight-shell.ts must keep native postflight observation marker ${marker}`
+      );
+    }
+  }
   if (postflightSource.includes('record_servertool_execution_snapshot')) {
     fail(
       'servertool-postflight-log-fail-fast',

@@ -313,6 +313,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planServertoolHandlerContractErrorJson",
   "planServertoolHandlerRuntimeActionJson",
   "planServertoolExecutionDispatchErrorJson",
+  "buildServertoolPostflightObservationSummaryJson",
   "createServertoolExecutionLoopStateJson",
   "appendServertoolExecutedRecordJson",
   "planServertoolMaterializationProgressJson",

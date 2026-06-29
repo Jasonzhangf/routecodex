@@ -181,6 +181,73 @@ describe('engine-observation-shell', () => {
     expect(logNonBlocking).not.toHaveBeenCalled();
   });
 
+  test('postflight observation summary is native-owned', async () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
+      'utf8'
+    );
+    expect(source).toContain('buildServertoolPostflightObservationSummaryWithNative({');
+    expect(source).not.toContain('const followupSummary: Record<string, unknown> = {');
+    expect(source).not.toContain("if ('payload' in followup)");
+    expect(source).not.toContain('followup.injection?.ops');
+
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
+    const stageRecorder = {
+      record: jest.fn()
+    };
+    await mod.runServertoolEnginePostflight({
+      options: {
+        requestId: 'req-postflight-native-summary',
+        adapterContext: {} as any
+      },
+      engineResult: {
+        mode: 'tool_flow',
+        finalChatResponse: {
+          tool_outputs: [
+            {
+              tool_name: 'reasoningStop',
+              tool_call_id: 'call_postflight_summary',
+              content: 'ok'
+            }
+          ]
+        },
+        execution: {
+          flowId: 'flow-postflight-summary',
+          followup: {
+            injection: {
+              ops: [{ op: 'append' }, { op: 1 }]
+            }
+          }
+        }
+      } as any,
+      runtimeAction: {
+        action: 'return_servertool_cli_projection_final'
+      },
+      flowId: 'flow-postflight-summary',
+      totalSteps: 5,
+      stageRecorder: stageRecorder as any,
+      logProgress: jest.fn(),
+      logNonBlocking: jest.fn()
+    });
+
+    expect(stageRecorder.record).toHaveBeenCalledWith(
+      'servertool.execution',
+      expect.objectContaining({
+        mode: 'tool_flow',
+        flowId: 'flow-postflight-summary',
+        hasFollowup: true,
+        toolOutputCount: 1,
+        toolName: 'reasoningStop',
+        toolCallId: 'call_postflight_summary',
+        toolOutputContent: 'ok',
+        followup: {
+          mode: 'injection',
+          injectionOps: ['append']
+        }
+      })
+    );
+  });
+
   test('engine-orchestration-shell owns the engine mainline body', () => {
     const source = fs.readFileSync(
       'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',

@@ -23,6 +23,7 @@ use servertool_core::orchestration_policy_contract;
 use servertool_core::outcome_contract;
 use servertool_core::pending_session_contract;
 use servertool_core::persisted_lookup;
+use servertool_core::postflight_observation_contract;
 use servertool_core::pre_command_hook_contract;
 use servertool_core::registry_contract;
 use servertool_core::response_stage_runtime_action_contract;
@@ -757,6 +758,18 @@ pub fn plan_servertool_execution_dispatch_error_json(input_json: &str) -> Result
             "deserialize servertool execution-dispatch error input: unknown kind {kind}"
         )),
     }
+}
+
+pub fn build_servertool_postflight_observation_summary_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: postflight_observation_contract::ServertoolPostflightObservationInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool postflight observation input: {e}"))?;
+    let output =
+        postflight_observation_contract::build_servertool_postflight_observation_summary(input)?;
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize servertool postflight observation summary: {e}"))
 }
 
 pub fn plan_servertool_handler_runtime_action_json(input_json: &str) -> Result<String, String> {
@@ -2688,6 +2701,43 @@ fn plans_servertool_execution_dispatch_error_via_servertool_core_bridge() {
     assert_eq!(
         parsed["message"],
         "[servertool] dispatch spec mismatch: web_search: native=guarded ts=legacy"
+    );
+}
+
+#[test]
+fn builds_servertool_postflight_observation_summary_via_servertool_core_bridge() {
+    let output = build_servertool_postflight_observation_summary_json(
+        &serde_json::json!({
+            "engineResult": {
+                "mode": "tool_flow",
+                "finalChatResponse": {
+                    "tool_outputs": [{
+                        "tool_name": "reasoningStop",
+                        "tool_call_id": "call_bridge",
+                        "content": "ok"
+                    }]
+                },
+                "execution": {
+                    "flowId": "flow_bridge",
+                    "followup": {
+                        "injection": {
+                            "ops": [{ "op": "append" }, { "op": 1 }]
+                        }
+                    }
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("postflight observation summary");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&output).expect("postflight summary json");
+    assert_eq!(parsed["mode"], "tool_flow");
+    assert_eq!(parsed["flowId"], "flow_bridge");
+    assert_eq!(parsed["toolName"], "reasoningStop");
+    assert_eq!(
+        parsed["followup"]["injectionOps"],
+        serde_json::json!(["append"])
     );
 }
 

@@ -28,6 +28,7 @@ pub mod orchestration_policy_contract;
 pub mod outcome_contract;
 pub mod pending_session_contract;
 pub mod persisted_lookup;
+pub mod postflight_observation_contract;
 pub mod pre_command_hook_contract;
 pub mod registry_contract;
 pub mod response_stage_runtime_action_contract;

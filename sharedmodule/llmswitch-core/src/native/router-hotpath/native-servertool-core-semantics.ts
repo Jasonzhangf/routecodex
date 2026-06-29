@@ -3655,6 +3655,25 @@ export function planServertoolExecutionDispatchErrorWithNative(input:
   );
 }
 
+export function buildServertoolPostflightObservationSummaryWithNative(input: {
+  engineResult: unknown;
+}): Record<string, unknown> {
+  const capability = 'buildServertoolPostflightObservationSummaryJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('buildServertoolPostflightObservationSummaryJson native unavailable');
+  }
+  const raw = fn(JSON.stringify(input));
+  if (typeof raw !== 'string') {
+    throw new Error(`buildServertoolPostflightObservationSummaryJson native returned non-string: ${typeof raw}`);
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('buildServertoolPostflightObservationSummaryJson native returned invalid summary');
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export function createServertoolExecutionLoopStateWithNative(): NativeServertoolExecutionLoopState {
   const capability = 'createServertoolExecutionLoopStateJson';
   const fn = readNativeFunction(capability);

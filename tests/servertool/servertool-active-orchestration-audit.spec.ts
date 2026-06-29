@@ -257,6 +257,21 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
+    forbidden: [
+      'const followupSummary: Record<string, unknown> = {',
+      "if ('payload' in followup)",
+      'payloadRecord.messages',
+      'payloadRecord.input',
+      "if ('injection' in followup)",
+      'followup.injection?.ops',
+    ],
+    required: [
+      'buildServertoolPostflightObservationSummaryWithNative({',
+      "args.stageRecorder.record('servertool.execution', summary);",
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/engine.ts',
     forbidden: [
       'function extractStoplessReasoningText(',
