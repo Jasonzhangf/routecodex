@@ -14,8 +14,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   materializeServertoolPlannedResult,
-  executeBuiltinServerToolHandler,
-  runServertoolHandler
+  executeBuiltinServerToolHandler
 } from './execution-handler-materialization-shell.js';
 import type { ServerToolExecutionDescriptor } from './registry-types.js';
 
@@ -46,12 +45,10 @@ export async function runAutoHookExecutionQueue(args: {
 
     let planned: unknown = null;
     try {
-      planned = hook.execution.kind === 'builtin'
-        ? await executeBuiltinServerToolHandler({
-            builtinName: hook.execution.builtinName,
-            ctx: args.contextBase
-          })
-        : await runServertoolHandler(hook.execution.handler, args.contextBase);
+      planned = await executeBuiltinServerToolHandler({
+        builtinName: hook.execution.builtinName,
+        ctx: args.contextBase
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown');
       const attemptPlan = planAutoHookRuntimeAttemptWithNative({

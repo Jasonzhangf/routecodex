@@ -1,4 +1,3 @@
-import type { ServerToolHandler } from './types.js';
 import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
 
 type TriggerMode = 'tool_call' | 'auto';
@@ -16,14 +15,7 @@ type ServerToolBuiltinExecutionDescriptor = {
   builtinName: string;
 };
 
-type ServerToolAdHocExecutionDescriptor = {
-  kind: 'adhoc';
-  handler: ServerToolHandler;
-};
-
-export type ServerToolExecutionDescriptor =
-  | ServerToolBuiltinExecutionDescriptor
-  | ServerToolAdHocExecutionDescriptor;
+export type ServerToolExecutionDescriptor = ServerToolBuiltinExecutionDescriptor;
 
 export interface ServerToolHandlerEntry {
   name: string;

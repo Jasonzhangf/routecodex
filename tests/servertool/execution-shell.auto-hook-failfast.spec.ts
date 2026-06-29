@@ -72,8 +72,9 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
-    runServertoolHandler: jest.fn(async (handler: any, context: any) => await handler(context)),
-    executeBuiltinServerToolHandler: jest.fn(),
+    executeBuiltinServerToolHandler: jest.fn(async () => {
+      throw new Error('optional-hook-boom');
+    }),
     materializeServertoolPlannedResult: jest.fn(async (planned: any) => {
       if (!planned) {
         return null;
@@ -140,10 +141,8 @@ describe('execution-shell auto hook failfast', () => {
             phase: 'default',
             priority: 1,
             execution: {
-              kind: 'adhoc',
-              handler: async () => {
-                throw new Error('optional-hook-boom');
-              }
+              kind: 'builtin',
+              builtinName: 'failing_primary_optional_hook'
             }
           }
         ],

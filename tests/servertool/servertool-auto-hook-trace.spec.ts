@@ -105,7 +105,6 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
-    runServertoolHandler: jest.fn(async (handler: any, context: any) => await handler(context)),
     executeBuiltinServerToolHandler: jest.fn(async ({ builtinName, ctx }: any) => {
       const hook = registryHooks.find(
         (entry) => entry.id === builtinName && entry.execution.kind === 'builtin'
@@ -282,8 +281,9 @@ describe('servertool auto hook trace', () => {
         priority: 20,
         order: 1,
         execution: {
-          kind: 'adhoc',
-          handler: async () => null
+          kind: 'builtin',
+          builtinName: 'vision_auto',
+          __testHandler: async () => null
         }
       },
       {
@@ -331,8 +331,9 @@ describe('servertool auto hook trace', () => {
         priority: 20,
         order: 1,
         execution: {
-          kind: 'adhoc',
-          handler: async () => null
+          kind: 'builtin',
+          builtinName: 'vision_auto',
+          __testHandler: async () => null
         }
       },
       {
@@ -414,8 +415,9 @@ describe('servertool auto hook trace', () => {
       priority: 20,
       order: 1,
       execution: {
-        kind: 'adhoc',
-        handler: async () => null
+        kind: 'builtin',
+        builtinName: 'vision_auto',
+        __testHandler: async () => null
       }
     });
     const options = createOptions([]);

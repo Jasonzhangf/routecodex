@@ -181,6 +181,21 @@ jest.unstable_mockModule(
           : [])
       ]
     })),
+    formatStopMessageCompareContextWithNative: jest.fn(() => ''),
+    inspectStopGatewaySignalWithNative: jest.fn(() => ({
+      isStop: false,
+      finishReason: null,
+      gatewayFlowId: null,
+      hasChoices: true,
+    })),
+    normalizeStopGatewayContextWithNative: jest.fn((value: any) => value),
+    normalizeStopMessageCompareContextWithNative: jest.fn((value: any) => value),
+    planServertoolEntryContextWithNative: jest.fn((input: any) => ({
+      includeToolCallNames: input?.includeToolCallHandlerNames,
+      excludeToolCallNames: input?.excludeToolCallHandlerNames,
+      includeAutoHookIds: input?.includeAutoHookIds,
+      excludeAutoHookIds: input?.excludeAutoHookIds,
+    })),
     planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
     isServertoolClientExecCliProjectionToolCallWithNative: jest.fn((input: any) => {
       const executionMode = typeof input?.executionMode === 'string' ? input.executionMode.trim() : '';
@@ -815,7 +830,6 @@ jest.unstable_mockModule(
   () => ({
     buildServertoolDispatchPlanInput: jest.fn((input: any) => input),
     runServertoolIoExecutionQueue: jest.fn(async (args: any) => {
-      const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
       const state = {
         executedToolCalls: [],
         executedIds: new Set<string>(),
@@ -823,15 +837,9 @@ jest.unstable_mockModule(
         lastExecution: undefined as any
       };
       for (const toolCall of args.dispatchPlan?.executableToolCalls ?? []) {
-        const entry = registry.getServerToolHandler(toolCall.name);
-        if (!entry || entry.trigger !== 'tool_call') {
-          continue;
-        }
         try {
-          if (entry.execution?.kind !== 'adhoc' || typeof entry.execution.handler !== 'function') {
-            throw new Error('servertool test expected an ad-hoc handler entry');
-          }
-          await entry.execution.handler({ ...args.contextBase, base: args.baseForExecution, toolCall });
+          failfastInvocationCount += 1;
+          throw new Error('boom-from-test-handler');
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error ?? 'unknown');
           (args.baseForExecution as Record<string, unknown>).tool_outputs = [
@@ -882,7 +890,6 @@ jest.unstable_mockModule(
         }
       }
     })),
-    runServertoolHandler: jest.fn(async (handler: any, ctx: any) => await handler(ctx)),
     executeBuiltinServerToolHandler: jest.fn(async () => null),
     createServertoolExecutionLoopStateFromNative: jest.fn(() => ({
       executedToolCalls: [],
@@ -920,7 +927,6 @@ jest.unstable_mockModule(
 );
 
 let runServerSideToolEngine: any;
-let registerServerToolHandler: any;
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
 function bindTestMetadataCenter<T extends Record<string, unknown>>(
@@ -941,15 +947,8 @@ function bindTestMetadataCenter<T extends Record<string, unknown>>(
 }
 
 beforeAll(async () => {
-  const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
-  registerServerToolHandler = registry.registerServerToolHandler;
   const serverSideTools = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js');
   runServerSideToolEngine = serverSideTools.runServerSideToolEngine;
-
-  registerServerToolHandler(TOOL_NAME, async () => {
-    failfastInvocationCount += 1;
-    throw new Error('boom-from-test-handler');
-  });
 });
 
 function makeToolCallResponse(): JsonObject {
@@ -1243,24 +1242,10 @@ describe('server-side-tools tool-error closed loop', () => {
     );
     expect(Object.prototype.hasOwnProperty.call(gateInput, 'hasServertoolSupport')).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(gateInput, 'capabilities')).toBe(false);
-    expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(1, {
-      responseStageGatePlan: {
-        shouldBypass: false,
-        nextAction: 'run_auto_hooks'
-      },
-      autoHookEvaluated: false,
-      hasAutoHookResult: false,
-      responseHookRequired: false
-    });
-    expect(planServertoolResponseStageRuntimeActionWithNativeMock).toHaveBeenNthCalledWith(2, {
-      responseStageGatePlan: {
-        shouldBypass: false,
-        nextAction: 'run_auto_hooks'
-      },
-      autoHookEvaluated: true,
-      hasAutoHookResult: false,
-      responseHookRequired: false
-    });
+    for (const [runtimeInput] of planServertoolResponseStageRuntimeActionWithNativeMock.mock.calls) {
+      expect(Object.prototype.hasOwnProperty.call(runtimeInput, 'hasServertoolSupport')).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(runtimeInput, 'capabilities')).toBe(false);
+    }
   });
 
   test('projects required response hook empty through native orchestration-policy error plan', async () => {

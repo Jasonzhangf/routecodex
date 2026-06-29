@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const getServerToolHandler = jest.fn();
-const runServertoolHandler = jest.fn();
+const executeBuiltinServerToolHandler = jest.fn();
 const materializeServertoolPlannedResult = jest.fn();
 const createServertoolExecutionLoopStateFromNative = jest.fn();
 const appendExecutedToolRecordFromNative = jest.fn();
@@ -21,8 +21,7 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     materializeServertoolPlannedResult,
-    executeBuiltinServerToolHandler: jest.fn(),
-    runServertoolHandler,
+    executeBuiltinServerToolHandler,
     createServertoolExecutionLoopStateFromNative,
     appendExecutedToolRecordFromNative
   })
@@ -139,7 +138,7 @@ describe('execution-queue-shell', () => {
       chatResponse: { ok: true },
       execution: { flowId: 'flow-1' }
     });
-    runServertoolHandler.mockResolvedValue({
+    executeBuiltinServerToolHandler.mockResolvedValue({
       finalize: jest.fn(),
       flowId: 'flow-1'
     });
@@ -147,8 +146,8 @@ describe('execution-queue-shell', () => {
       trigger: 'tool_call',
       registration: { executionMode: 'guarded' },
       execution: {
-        kind: 'adhoc',
-        handler: jest.fn()
+        kind: 'builtin',
+        builtinName: 'web_search'
       }
     });
   });

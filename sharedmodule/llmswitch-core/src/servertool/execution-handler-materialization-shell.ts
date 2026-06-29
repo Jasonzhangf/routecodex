@@ -17,11 +17,9 @@ import {
 import { __executeBuiltinHandlerForRuntime } from './builtin-handler-catalog.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
-  ServerToolHandler,
   ServerToolExecution,
   ServerToolFollowupPlan,
   ServerToolHandlerContext,
@@ -257,35 +255,6 @@ export async function executeBuiltinServerToolHandler(args: {
 }): Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null> {
   return __executeBuiltinHandlerForRuntime(args.builtinName, args.ctx);
 }
-
-export const runServertoolHandler = async (
-  handler: (ctx: ServerToolHandlerContext) => Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null>,
-  ctx: ServerToolHandlerContext
-): Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null> => {
-  try {
-    return await handler(ctx);
-  } catch (error) {
-    const toolName =
-      ctx && ctx.toolCall && typeof ctx.toolCall.name === 'string' && ctx.toolCall.name.trim()
-        ? ctx.toolCall.name.trim()
-        : 'auto';
-    const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-    const wrapped = buildProviderProtocolError(
-      planServertoolHandlerContractErrorWithNative({
-        kind: 'handler_failed',
-        toolName,
-        requestId: ctx.requestId,
-        entryEndpoint: ctx.entryEndpoint,
-        providerProtocol:
-          readProviderProtocolFromAnyBoundMetadataCenter(ctx.adapterContext as Record<string, unknown>) ??
-          'unknown',
-        error: message
-      })
-    ) as ProviderProtocolError & { status?: number; cause?: unknown };
-    wrapped.cause = error;
-    throw wrapped;
-  }
-};
 
 function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {
   const err = new ProviderProtocolError(plan.message, {

@@ -114,6 +114,7 @@ const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
 const TS_REGISTRY_REGISTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-registration-shell.ts`;
 const TS_REGISTRY_PROJECTION_SHELL = `${SERVERTOOL_TS_DIR}/registry-projection-shell.ts`;
 const TS_REGISTRY_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`;
+const TS_REGISTRY_TYPES = `${SERVERTOOL_TS_DIR}/registry-types.ts`;
 const TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL = `${SERVERTOOL_TS_DIR}/run-server-side-tool-engine-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
@@ -2715,6 +2716,11 @@ function checkServertoolExecutionDispatchRustOwner() {
     "outcomePlan.followupStrategy === 'reuse_last_execution'",
     '? args.executionState.lastExecution.followup',
     "if (!entry || entry.trigger !== 'tool_call')",
+    "entry.execution.kind === 'builtin'",
+    "entry.execution?.kind !== 'adhoc'",
+    "entry.execution?.kind !== 'handler'",
+    'entry.execution.handler',
+    'runServertoolHandler',
     'if (result) {',
     'if (lastErr) {',
     'executedToolCalls: [],',
@@ -3617,6 +3623,10 @@ function checkAutoHookExecutionRustOwner() {
     "reason: 'predicate_false'",
     "reason: 'matched_without_flow'",
     "reason: 'empty_materialized_result'",
+    "hook.execution.kind === 'builtin'",
+    "hook.execution?.kind !== 'adhoc'",
+    'hook.execution.handler',
+    'runServertoolHandler',
     'if (!planned) {',
     'if (result) {',
     'if (optionalResult) {',
@@ -3659,6 +3669,7 @@ function checkServertoolRegistryRustOwner() {
   const registryRegistrationShell = readRequired(TS_REGISTRY_REGISTRATION_SHELL);
   const registryProjectionShell = readRequired(TS_REGISTRY_PROJECTION_SHELL);
   const registryOrchestrationShell = readRequired(TS_REGISTRY_ORCHESTRATION_SHELL);
+  const registryTypes = readRequired(TS_REGISTRY_TYPES);
 
   for (const needle of [
     'feature_id: hub.servertool_registry_contract',
@@ -3746,6 +3757,19 @@ function checkServertoolRegistryRustOwner() {
       fail(
         'servertool-registry-registration-shell',
         `registry-registration-shell.ts must not retain TS registry action precondition marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'ServerToolAdHocExecutionDescriptor',
+    "kind: 'adhoc'",
+    'handler: ServerToolHandler',
+    '| ServerToolAdHocExecutionDescriptor',
+  ]) {
+    if (registryTypes.includes(marker)) {
+      fail(
+        'servertool-registry-types-no-adhoc-execution',
+        `registry-types.ts must not retain retired ad-hoc execution marker ${marker}`
       );
     }
   }

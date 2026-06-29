@@ -22,8 +22,7 @@ import {
   executeBuiltinServerToolHandler,
   materializeServertoolPlannedResult,
   type ServertoolExecutedRecord,
-  type ServertoolExecutionLoopState,
-  runServertoolHandler
+  type ServertoolExecutionLoopState
 } from './execution-handler-materialization-shell.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
@@ -86,12 +85,10 @@ export async function runServertoolIoExecutionQueue(args: {
     let planned = null;
     let lastErr: unknown;
     try {
-      planned = entry.execution.kind === 'builtin'
-        ? await executeBuiltinServerToolHandler({
-            builtinName: entry.execution.builtinName,
-            ctx
-          })
-        : await runServertoolHandler(entry.execution.handler, ctx);
+      planned = await executeBuiltinServerToolHandler({
+        builtinName: entry.execution.builtinName,
+        ctx
+      });
     } catch (err) {
       lastErr = err;
     }

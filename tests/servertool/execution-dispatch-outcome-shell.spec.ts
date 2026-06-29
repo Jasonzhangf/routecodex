@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const getServerToolHandler = jest.fn();
-const runServertoolHandler = jest.fn();
 const executeBuiltinServerToolHandler = jest.fn();
 const materializeServertoolPlannedResult = jest.fn();
 const createServertoolExecutionLoopStateFromNative = jest.fn();
@@ -57,7 +56,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     materializeServertoolPlannedResult,
-    runServertoolHandler,
     createServertoolExecutionLoopStateFromNative,
     appendExecutedToolRecordFromNative,
     buildServertoolOutcomePlanInput: jest.fn((input: any) => input),
@@ -304,10 +302,9 @@ describe('execution queue dispatch runtime', () => {
     getServerToolHandler.mockReturnValue({
       trigger: 'tool_call',
       registration: { executionMode: 'guarded' },
-      execution: { kind: 'handler', handler: jest.fn() },
-      handler: jest.fn()
+      execution: { kind: 'builtin', builtinName: 'failfast_test_tool' }
     });
-    runServertoolHandler.mockRejectedValue(new Error('boom-from-execution-shell'));
+    executeBuiltinServerToolHandler.mockRejectedValue(new Error('boom-from-execution-shell'));
     materializeServertoolPlannedResult.mockResolvedValue(null);
     buildServertoolHandlerErrorToolOutputPayloadWithNative.mockImplementation((input: any) => ({
       ...(input.base ?? {}),
@@ -406,8 +403,7 @@ describe('execution queue dispatch runtime', () => {
     getServerToolHandler.mockReturnValue({
       trigger: 'tool_call',
       registration: { executionMode: 'legacy' },
-      execution: { kind: 'handler', handler: jest.fn() },
-      handler: jest.fn()
+      execution: { kind: 'builtin', builtinName: 'web_search' }
     });
 
     await expect(
@@ -461,8 +457,7 @@ describe('execution queue dispatch runtime', () => {
     getServerToolHandler.mockReturnValue({
       trigger: 'auto',
       registration: { executionMode: 'guarded' },
-      execution: { kind: 'handler', handler: jest.fn() },
-      handler: jest.fn()
+      execution: { kind: 'builtin', builtinName: 'skip_tool' }
     });
 
     const result = await runServertoolIoExecutionQueue({
@@ -499,7 +494,7 @@ describe('execution queue dispatch runtime', () => {
       hasMaterializedResult: false,
       hasHandlerError: false
     });
-    expect(runServertoolHandler).not.toHaveBeenCalled();
+    expect(executeBuiltinServerToolHandler).not.toHaveBeenCalled();
     expect(result.executedToolCalls).toEqual([]);
   });
 
