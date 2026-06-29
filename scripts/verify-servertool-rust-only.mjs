@@ -77,8 +77,8 @@ const RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT = `${ROOT}/sharedmodule/llmswitch
 const RUST_SERVERTOOL_STOPLESS_CLI_PROJECTION_CONTEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`;
 const TS_SERVER_SIDE_TOOLS = `${SERVERTOOL_TS_DIR}/server-side-tools.ts`;
 const TS_PENDING_INJECTION = `${SERVERTOOL_TS_DIR}/pending-injection-block.ts`;
-const TS_PENDING_SESSION = `${SERVERTOOL_TS_DIR}/pending-session.ts`;
 const TS_PRE_COMMAND_HOOKS = `${SERVERTOOL_TS_DIR}/pre-command-hooks.ts`;
+const TS_PENDING_SESSION = `${SERVERTOOL_TS_DIR}/pending-session.ts`;
 const TS_ENGINE_SELECTION = `${SERVERTOOL_TS_DIR}/engine-selection-block.ts`;
 const TS_FLOW_PRESENTATION = `${SERVERTOOL_TS_DIR}/flow-presentation-block.ts`;
 const TS_SERVERTOOL_SKELETON_CONFIG = `${SERVERTOOL_TS_DIR}/skeleton-config.ts`;
@@ -3242,10 +3242,16 @@ function checkPreCommandHooksRustOwner() {
     'pub struct RuntimePreCommandStateSelectionPlan',
     'pub struct RuntimePreCommandStateRuntimeActionInput',
     'pub struct RuntimePreCommandStateRuntimeActionPlan',
+    'pub struct PreCommandHookAttemptInput',
+    'pub struct PreCommandHookAttemptPlan',
+    'pub struct PreCommandHookCompletionInput',
+    'pub struct PreCommandHookCompletionPlan',
     'pub fn plan_pre_command_hooks_config',
     'pub fn plan_runtime_pre_command_rule',
     'pub fn plan_runtime_pre_command_state_selection',
     'pub fn plan_runtime_pre_command_state_runtime_action',
+    'pub fn plan_pre_command_hook_attempt',
+    'pub fn plan_pre_command_hook_completion',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-rust-owner',
@@ -3265,6 +3271,8 @@ function checkPreCommandHooksRustOwner() {
     'plan_runtime_pre_command_rule_json',
     'plan_runtime_pre_command_state_selection_json',
     'plan_runtime_pre_command_state_runtime_action_json',
+    'plan_pre_command_hook_attempt_json',
+    'plan_pre_command_hook_completion_json',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-export',
@@ -3278,6 +3286,8 @@ function checkPreCommandHooksRustOwner() {
     'pub fn plan_runtime_pre_command_rule_json',
     'pub fn plan_runtime_pre_command_state_selection_json',
     'pub fn plan_runtime_pre_command_state_runtime_action_json',
+    'pub fn plan_pre_command_hook_attempt_json',
+    'pub fn plan_pre_command_hook_completion_json',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-export',
@@ -3291,6 +3301,8 @@ function checkPreCommandHooksRustOwner() {
     'planRuntimePreCommandRuleJson',
     'planRuntimePreCommandStateSelectionJson',
     'planRuntimePreCommandStateRuntimeActionJson',
+    'planPreCommandHookAttemptJson',
+    'planPreCommandHookCompletionJson',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-required-export',
@@ -3302,6 +3314,8 @@ function checkPreCommandHooksRustOwner() {
   for (const needle of [
     'planPreCommandHooksConfigWithNative',
     'planRuntimePreCommandRuleWithNative',
+    'planPreCommandHookAttemptWithNative',
+    'planPreCommandHookCompletionWithNative',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-bridge',
@@ -3373,6 +3387,14 @@ function checkPreCommandHooksRustOwner() {
     'DEFAULT_TIMEOUT_MS',
     'DEFAULT_TOOLS',
     '.replace(/[^a-zA-Z0-9_.-]+/g',
+    'hook.toolNames.has(',
+    'hook.cmdRegex && !hook.cmdRegex.test(',
+    "reason: 'tool_mismatch'",
+    "reason: 'cmd_regex_mismatch'",
+    "result: 'miss'",
+    "result: 'match'",
+    "result: 'error'",
+    'const traceBase = {',
   ]) {
     if (preCommandShell.includes(keyword)) {
       fail(

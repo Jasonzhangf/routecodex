@@ -98,9 +98,15 @@ owners:
       - PreCommandHookRulePlan
       - PreCommandRegexPlan
       - RuntimePreCommandRulePlanInput
+      - PreCommandHookAttemptInput
+      - PreCommandHookAttemptPlan
+      - PreCommandHookCompletionInput
+      - PreCommandHookCompletionPlan
     canonical_builders:
       - plan_pre_command_hooks_config
       - plan_runtime_pre_command_rule
+      - plan_pre_command_hook_attempt
+      - plan_pre_command_hook_completion
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
@@ -122,9 +128,9 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "servertool-core owns pre-command config enable/disable, hook rule normalization, hook id sanitization, tool-set default/dedupe/normalize, regex source/flags planning, timeout clamp/default, priority parsing, and runtime pre-command rule planning."
-      - "TS pre-command-hooks may only read config/env/cache, materialize Rust regex plans, parse current tool args, and run jq/shell/runtime script IO."
-      - "Do not restore local normalize/sanitize/timeout/priority/tool-set policy in TS."
+      - "servertool-core owns pre-command config enable/disable, hook rule normalization, hook id sanitization, tool-set default/dedupe/normalize, regex source/flags planning and matching, timeout clamp/default, priority parsing, runtime pre-command rule planning, hook attempt skip/execute planning, and completion trace planning."
+      - "TS pre-command-hooks may only read config/env/cache and execute explicit jq/shell/runtime script IO from native plans."
+      - "Do not restore local normalize/sanitize/timeout/priority/tool-set policy, regex materialization/matching, hook miss/match/error trace construction, or attempt/completion branching in TS."
 
   - feature_id: hub.servertool_engine_selection
     status: active

@@ -421,6 +421,22 @@ pub fn plan_runtime_pre_command_state_runtime_action_json(
         .map_err(|e| format!("serialize runtime pre-command state runtime action plan: {e}"))
 }
 
+pub fn plan_pre_command_hook_attempt_json(input_json: &str) -> Result<String, String> {
+    let input: pre_command_hook_contract::PreCommandHookAttemptInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pre-command hook attempt input: {e}"))?;
+    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_attempt(input))
+        .map_err(|e| format!("serialize pre-command hook attempt plan: {e}"))
+}
+
+pub fn plan_pre_command_hook_completion_json(input_json: &str) -> Result<String, String> {
+    let input: pre_command_hook_contract::PreCommandHookCompletionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pre-command hook completion input: {e}"))?;
+    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_completion(input))
+        .map_err(|e| format!("serialize pre-command hook completion plan: {e}"))
+}
+
 pub fn plan_auto_hook_runtime_attempt_json(input_json: &str) -> Result<String, String> {
     let input: auto_hook_runtime_contract::AutoHookRuntimeAttemptInput =
         serde_json::from_str(input_json)

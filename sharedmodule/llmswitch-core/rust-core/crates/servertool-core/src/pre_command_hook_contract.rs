@@ -1,6 +1,7 @@
 use crate::orchestration_policy_contract::ServertoolErrorPlan;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 // feature_id: hub.servertool_pre_command_hooks
 const DEFAULT_TIMEOUT_MS: i64 = 2000;
@@ -21,7 +22,7 @@ pub struct PreCommandHooksConfigPlan {
     pub hooks: Vec<PreCommandHookRulePlan>,
 }
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreCommandHookRulePlan {
     pub id: String,
@@ -39,7 +40,7 @@ pub struct PreCommandHookRulePlan {
     pub order: i64,
 }
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreCommandRegexPlan {
     pub source: String,
@@ -106,6 +107,89 @@ pub struct RuntimePreCommandStateRuntimeActionPlan {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimePreCommandStateRuntimeAction {
     UseSelected,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHookAttemptInput {
+    pub hook: PreCommandHookRulePlan,
+    pub request_id: String,
+    pub entry_endpoint: String,
+    pub provider_protocol: String,
+    pub tool_name: String,
+    pub tool_call_id: String,
+    pub tool_arguments: String,
+    pub queue_index: i64,
+    pub queue_total: i64,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHookAttemptPlan {
+    pub action: PreCommandHookAttemptAction,
+    pub trace_event: PreCommandHookTraceEventPlan,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution: Option<PreCommandHookExecutionPlan>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PreCommandHookAttemptAction {
+    Skip,
+    Execute,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHookExecutionPlan {
+    pub hook_id: String,
+    pub timeout_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_script_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jq_expression: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_command: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHookCompletionInput {
+    pub hook_id: String,
+    pub priority: i64,
+    pub queue_index: i64,
+    pub queue_total: i64,
+    pub matched: bool,
+    pub changed: bool,
+    #[serde(default)]
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHookCompletionPlan {
+    pub trace_event: PreCommandHookTraceEventPlan,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHookTraceEventPlan {
+    pub hook_id: String,
+    pub phase: String,
+    pub priority: i64,
+    pub queue: String,
+    pub queue_index: i64,
+    pub queue_total: i64,
+    pub result: PreCommandHookTraceResult,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PreCommandHookTraceResult {
+    Miss,
+    Match,
+    Error,
 }
 
 pub fn plan_pre_command_hooks_config(
@@ -215,6 +299,85 @@ pub fn plan_runtime_pre_command_state_runtime_action(
         state: selection.state,
         error_plan: None,
     })
+}
+
+pub fn plan_pre_command_hook_attempt(input: PreCommandHookAttemptInput) -> PreCommandHookAttemptPlan {
+    let normalized_tool = normalize_runtime_tool_name(&input.tool_name);
+    let current_args = parse_tool_arguments_object(&input.tool_arguments);
+    let current_command = extract_command_text(current_args.as_ref(), &input.tool_arguments);
+    let trace_base = pre_command_trace_base(
+        &input.hook.id,
+        input.hook.priority,
+        input.queue_index,
+        input.queue_total,
+    );
+
+    if !input
+        .hook
+        .tool_names
+        .iter()
+        .any(|tool| tool == &normalized_tool)
+    {
+        return PreCommandHookAttemptPlan {
+            action: PreCommandHookAttemptAction::Skip,
+            trace_event: pre_command_trace_event(trace_base, PreCommandHookTraceResult::Miss, "tool_mismatch"),
+            execution: None,
+        };
+    }
+    if !command_matches_regex(input.hook.cmd_regex.as_ref(), &current_command) {
+        return PreCommandHookAttemptPlan {
+            action: PreCommandHookAttemptAction::Skip,
+            trace_event: pre_command_trace_event(
+                trace_base,
+                PreCommandHookTraceResult::Miss,
+                "cmd_regex_mismatch",
+            ),
+            execution: None,
+        };
+    }
+
+    PreCommandHookAttemptPlan {
+        action: PreCommandHookAttemptAction::Execute,
+        trace_event: pre_command_trace_event(trace_base, PreCommandHookTraceResult::Match, "planned"),
+        execution: Some(PreCommandHookExecutionPlan {
+            hook_id: input.hook.id,
+            timeout_ms: input.hook.timeout_ms,
+            runtime_script_path: input.hook.runtime_script_path,
+            jq_expression: input.hook.jq_expression,
+            shell_command: input.hook.shell_command,
+        }),
+    }
+}
+
+pub fn plan_pre_command_hook_completion(
+    input: PreCommandHookCompletionInput,
+) -> PreCommandHookCompletionPlan {
+    let trace_base = pre_command_trace_base(
+        &input.hook_id,
+        input.priority,
+        input.queue_index,
+        input.queue_total,
+    );
+    if let Some(message) = input.error_message.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        return PreCommandHookCompletionPlan {
+            trace_event: pre_command_trace_event(trace_base, PreCommandHookTraceResult::Error, message),
+        };
+    }
+    PreCommandHookCompletionPlan {
+        trace_event: pre_command_trace_event(
+            trace_base,
+            PreCommandHookTraceResult::Match,
+            if input.matched {
+                if input.changed {
+                    "applied"
+                } else {
+                    "matched"
+                }
+            } else {
+                "no_action"
+            },
+        ),
+    }
 }
 
 fn disabled_config() -> PreCommandHooksConfigPlan {
@@ -414,12 +577,95 @@ fn clone_object_value(raw: Option<&Value>) -> Option<Value> {
     }
 }
 
+fn pre_command_trace_base(
+    hook_id: &str,
+    priority: i64,
+    queue_index: i64,
+    queue_total: i64,
+) -> PreCommandHookTraceEventPlan {
+    PreCommandHookTraceEventPlan {
+        hook_id: hook_id.to_string(),
+        phase: "pre_command".to_string(),
+        priority,
+        queue: "A_optional".to_string(),
+        queue_index,
+        queue_total,
+        result: PreCommandHookTraceResult::Miss,
+        reason: String::new(),
+    }
+}
+
+fn pre_command_trace_event(
+    mut base: PreCommandHookTraceEventPlan,
+    result: PreCommandHookTraceResult,
+    reason: &str,
+) -> PreCommandHookTraceEventPlan {
+    base.result = result;
+    base.reason = reason.to_string();
+    base
+}
+
+fn normalize_runtime_tool_name(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn parse_tool_arguments_object(raw: &str) -> Option<Value> {
+    if raw.trim().is_empty() {
+        return Some(json!({}));
+    }
+    match serde_json::from_str::<Value>(raw) {
+        Ok(Value::Object(map)) => Some(Value::Object(map)),
+        _ => None,
+    }
+}
+
+fn extract_command_text(args: Option<&Value>, raw_args: &str) -> String {
+    if let Some(record) = args.and_then(Value::as_object) {
+        if let Some(cmd) = record
+            .get("cmd")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return cmd.to_string();
+        }
+        if let Some(command) = record
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return command.to_string();
+        }
+    }
+    raw_args.trim().to_string()
+}
+
+fn command_matches_regex(plan: Option<&PreCommandRegexPlan>, command: &str) -> bool {
+    let Some(plan) = plan else {
+        return true;
+    };
+    if plan.source.trim().is_empty() {
+        return true;
+    }
+    let pattern = if plan.flags.contains('i') {
+        format!("(?i:{})", plan.source)
+    } else {
+        plan.source.clone()
+    };
+    Regex::new(&pattern)
+        .map(|regex| regex.is_match(command))
+        .unwrap_or(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
+        plan_pre_command_hook_attempt, plan_pre_command_hook_completion,
         plan_pre_command_hooks_config, plan_runtime_pre_command_rule,
         plan_runtime_pre_command_state_runtime_action, plan_runtime_pre_command_state_selection,
-        PreCommandHooksConfigPlanInput, RuntimePreCommandRulePlanInput,
+        PreCommandHookAttemptAction, PreCommandHookAttemptInput, PreCommandHookCompletionInput,
+        PreCommandHookTraceResult, PreCommandHooksConfigPlanInput, RuntimePreCommandRulePlanInput,
         RuntimePreCommandStateRuntimeAction, RuntimePreCommandStateRuntimeActionInput,
         RuntimePreCommandStateSelectionAction, RuntimePreCommandStateSelectionInput,
         RuntimePreCommandStateSource,
@@ -512,10 +758,7 @@ mod tests {
             runtime.action,
             RuntimePreCommandStateSelectionAction::UseSelected
         );
-        assert_eq!(
-            runtime.source,
-            RuntimePreCommandStateSource::RuntimeControl
-        );
+        assert_eq!(runtime.source, RuntimePreCommandStateSource::RuntimeControl);
         assert_eq!(
             runtime.state,
             Some(json!({ "preCommandScriptPath": "/tmp/runtime.sh" }))
@@ -569,5 +812,100 @@ mod tests {
             }))
         );
         assert_eq!(plan.error_plan, None);
+    }
+
+    #[test]
+    fn pre_command_hook_attempt_skips_mismatched_tool_or_command() {
+        let hook = plan_pre_command_hooks_config(&PreCommandHooksConfigPlanInput {
+            raw: json!({
+                "hooks": [
+                    { "id": "npm-only", "tool": "exec_command", "cmdRegex": "^npm\\s+", "jq": "." }
+                ]
+            }),
+        })
+        .hooks
+        .remove(0);
+
+        let wrong_tool = plan_pre_command_hook_attempt(PreCommandHookAttemptInput {
+            hook: hook.clone(),
+            request_id: "req-1".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            tool_name: "web_search".to_string(),
+            tool_call_id: "call-1".to_string(),
+            tool_arguments: json!({ "cmd": "npm test" }).to_string(),
+            queue_index: 0,
+            queue_total: 1,
+        });
+        assert_eq!(wrong_tool.action, PreCommandHookAttemptAction::Skip);
+        assert_eq!(wrong_tool.trace_event.result, PreCommandHookTraceResult::Miss);
+        assert_eq!(wrong_tool.trace_event.reason, "tool_mismatch");
+
+        let wrong_command = plan_pre_command_hook_attempt(PreCommandHookAttemptInput {
+            hook,
+            request_id: "req-1".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            tool_name: "exec_command".to_string(),
+            tool_call_id: "call-1".to_string(),
+            tool_arguments: json!({ "cmd": "echo nope" }).to_string(),
+            queue_index: 0,
+            queue_total: 1,
+        });
+        assert_eq!(wrong_command.action, PreCommandHookAttemptAction::Skip);
+        assert_eq!(wrong_command.trace_event.reason, "cmd_regex_mismatch");
+    }
+
+    #[test]
+    fn pre_command_hook_attempt_executes_with_event_payload_and_completion_trace() {
+        let hook = plan_pre_command_hooks_config(&PreCommandHooksConfigPlanInput {
+            raw: json!({
+                "hooks": [
+                    { "id": "npm-prefix", "tool": "exec_command", "cmdRegex": "^npm\\s+", "jq": ".cmd = .cmd" }
+                ]
+            }),
+        })
+        .hooks
+        .remove(0);
+
+        let attempt = plan_pre_command_hook_attempt(PreCommandHookAttemptInput {
+            hook,
+            request_id: "req-1".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            tool_name: "EXEC_COMMAND".to_string(),
+            tool_call_id: "call-1".to_string(),
+            tool_arguments: json!({ "cmd": "npm test" }).to_string(),
+            queue_index: 0,
+            queue_total: 1,
+        });
+        assert_eq!(attempt.action, PreCommandHookAttemptAction::Execute);
+        let execution = attempt.execution.expect("execution plan");
+        assert_eq!(execution.hook_id, "npm-prefix");
+        assert_eq!(execution.timeout_ms, 2000);
+
+        let completion = plan_pre_command_hook_completion(PreCommandHookCompletionInput {
+            hook_id: "npm-prefix".to_string(),
+            priority: 100,
+            queue_index: 0,
+            queue_total: 1,
+            matched: true,
+            changed: true,
+            error_message: None,
+        });
+        assert_eq!(completion.trace_event.result, PreCommandHookTraceResult::Match);
+        assert_eq!(completion.trace_event.reason, "applied");
+
+        let error = plan_pre_command_hook_completion(PreCommandHookCompletionInput {
+            hook_id: "npm-prefix".to_string(),
+            priority: 100,
+            queue_index: 0,
+            queue_total: 1,
+            matched: true,
+            changed: false,
+            error_message: Some("jq_failed:1".to_string()),
+        });
+        assert_eq!(error.trace_event.result, PreCommandHookTraceResult::Error);
+        assert_eq!(error.trace_event.reason, "jq_failed:1");
     }
 }

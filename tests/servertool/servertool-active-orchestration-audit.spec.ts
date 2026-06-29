@@ -121,6 +121,23 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts',
+    forbidden: [
+      'hook.toolNames.has(',
+      'hook.cmdRegex && !hook.cmdRegex.test(',
+      "reason: 'tool_mismatch'",
+      "reason: 'cmd_regex_mismatch'",
+      "result: 'miss'",
+      "result: 'match'",
+      "result: 'error'",
+      'const traceBase = {',
+    ],
+    required: [
+      'planPreCommandHookAttemptWithNative',
+      'planPreCommandHookCompletionWithNative',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts',
     forbidden: [],
     required: [

@@ -183,6 +183,24 @@ export interface RuntimePreCommandStateRuntimeActionPlan {
   state?: Record<string, unknown>;
 }
 
+export interface PreCommandHookExecutionPlan {
+  hookId: string;
+  timeoutMs: number;
+  runtimeScriptPath?: string;
+  jqExpression?: string;
+  shellCommand?: string;
+}
+
+export interface PreCommandHookAttemptPlan {
+  action: 'skip' | 'execute';
+  traceEvent: AutoHookTraceEventPlan;
+  execution?: PreCommandHookExecutionPlan;
+}
+
+export interface PreCommandHookCompletionPlan {
+  traceEvent: AutoHookTraceEventPlan;
+}
+
 export interface AutoHookTraceEventPlan {
   hookId: string;
   phase: string;
@@ -2031,6 +2049,50 @@ export function planRuntimePreCommandStateRuntimeActionWithNative(input: {
   };
 }
 
+export function planPreCommandHookAttemptWithNative(input: {
+  hook: PreCommandHookRulePlan;
+  requestId: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  toolName: string;
+  toolCallId: string;
+  toolArguments: string;
+  queueIndex: number;
+  queueTotal: number;
+}): PreCommandHookAttemptPlan {
+  const capability = 'planPreCommandHookAttemptJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPreCommandHookAttemptJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPreCommandHookAttemptJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parsePreCommandHookAttemptPlan(JSON.parse(resultJson) as unknown, capability);
+}
+
+export function planPreCommandHookCompletionWithNative(input: {
+  hookId: string;
+  priority: number;
+  queueIndex: number;
+  queueTotal: number;
+  matched: boolean;
+  changed: boolean;
+  errorMessage?: string;
+}): PreCommandHookCompletionPlan {
+  const capability = 'planPreCommandHookCompletionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPreCommandHookCompletionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPreCommandHookCompletionJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parsePreCommandHookCompletionPlan(JSON.parse(resultJson) as unknown, capability);
+}
+
 export function planAutoHookRuntimeAttemptWithNative(input: {
   hookId: string;
   phase: string;
@@ -3038,6 +3100,107 @@ function parsePreCommandHookRulePlan(value: unknown, capability: string): PreCom
     timeoutMs: record.timeoutMs as number,
     priority: record.priority as number,
     order: record.order as number
+  };
+}
+
+function parsePreCommandHookAttemptPlan(value: unknown, capability: string): PreCommandHookAttemptPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid attempt plan`);
+  }
+  const record = value as Record<string, unknown>;
+  if (record.action !== 'skip' && record.action !== 'execute') {
+    throw new Error(`${capability} native returned invalid action`);
+  }
+  const traceEvent = parseAutoHookTraceEventPlan(record.traceEvent, capability);
+  const execution =
+    record.execution === undefined || record.execution === null
+      ? undefined
+      : parsePreCommandHookExecutionPlan(record.execution, capability);
+  if (record.action === 'execute' && !execution) {
+    throw new Error(`${capability} native returned execute without execution plan`);
+  }
+  if (record.action === 'skip' && execution) {
+    throw new Error(`${capability} native returned skip with execution plan`);
+  }
+  return {
+    action: record.action,
+    traceEvent,
+    ...(execution ? { execution } : {})
+  };
+}
+
+function parsePreCommandHookCompletionPlan(value: unknown, capability: string): PreCommandHookCompletionPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid completion plan`);
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    traceEvent: parseAutoHookTraceEventPlan(record.traceEvent, capability)
+  };
+}
+
+function parsePreCommandHookExecutionPlan(value: unknown, capability: string): PreCommandHookExecutionPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid execution plan`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.hookId !== 'string' ||
+    !record.hookId.trim() ||
+    !Number.isInteger(record.timeoutMs)
+  ) {
+    throw new Error(`${capability} native returned malformed execution plan`);
+  }
+  const runtimeScriptPath =
+    typeof record.runtimeScriptPath === 'string' && record.runtimeScriptPath.trim()
+      ? record.runtimeScriptPath.trim()
+      : undefined;
+  const jqExpression =
+    typeof record.jqExpression === 'string' && record.jqExpression.trim()
+      ? record.jqExpression.trim()
+      : undefined;
+  const shellCommand =
+    typeof record.shellCommand === 'string' && record.shellCommand.trim()
+      ? record.shellCommand.trim()
+      : undefined;
+  return {
+    hookId: record.hookId.trim(),
+    timeoutMs: record.timeoutMs as number,
+    ...(runtimeScriptPath ? { runtimeScriptPath } : {}),
+    ...(jqExpression ? { jqExpression } : {}),
+    ...(shellCommand ? { shellCommand } : {})
+  };
+}
+
+function parseAutoHookTraceEventPlan(value: unknown, capability: string): AutoHookTraceEventPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid traceEvent`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.hookId !== 'string' ||
+    typeof record.phase !== 'string' ||
+    typeof record.priority !== 'number' ||
+    typeof record.queue !== 'string' ||
+    typeof record.queueIndex !== 'number' ||
+    typeof record.queueTotal !== 'number' ||
+    (record.result !== 'miss' && record.result !== 'match' && record.result !== 'error') ||
+    typeof record.reason !== 'string'
+  ) {
+    throw new Error(`${capability} native returned malformed traceEvent`);
+  }
+  return {
+    hookId: record.hookId,
+    phase: record.phase,
+    priority: record.priority,
+    queue: record.queue,
+    queueIndex: record.queueIndex,
+    queueTotal: record.queueTotal,
+    result: record.result,
+    reason: record.reason,
+    ...(typeof record.flowId === 'string' && record.flowId.trim()
+      ? { flowId: record.flowId.trim() }
+      : {})
   };
 }
 

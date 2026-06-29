@@ -102,6 +102,7 @@
 - `router-hotpath-napi` 收 request/response runtime orchestration。
 - TS 只剩 native wrapper、JSON bridge、CLI/HTTP/process IO shell。
 - builtin handler catalog 的注册、启用、排序、entry planning 也属于业务语义；必须由 Rust plan 产出，TS 只能消费 native plan 并执行必要 IO 壳。
+- pre-command / auto-hook 的匹配、regex 判断、miss/match/error trace、attempt/completion 分支也属于业务语义；TS 只能读配置/cache 和执行明确的 jq/shell/runtime script IO，不能 materialize regex 后自行匹配或拼 trace。
 
 5. 每个 slice 都要白盒 + 黑盒
 - 白盒锁 phase 行为、错误分支、空 schema、invalid schema、already-terminal、multi-hook merge。

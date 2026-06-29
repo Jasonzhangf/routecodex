@@ -62,7 +62,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "servertool-core owns pre-command hook config/rule normalization; TS may only read config/env/cache, materialize regex, parse current tool args, and execute jq/shell/runtime script IO."
+      - "servertool-core owns pre-command hook config/rule normalization, regex matching, attempt skip/execute planning, and completion trace planning; TS may only read config/env/cache and execute jq/shell/runtime script IO from native plans."
 
   - feature_id: hub.servertool_engine_selection
     change_risk: medium

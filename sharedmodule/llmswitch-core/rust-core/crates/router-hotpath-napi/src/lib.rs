@@ -1418,6 +1418,18 @@ pub fn plan_runtime_pre_command_state_runtime_action_json(
 }
 
 #[napi]
+pub fn plan_pre_command_hook_attempt_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_pre_command_hook_attempt_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_pre_command_hook_completion_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_pre_command_hook_completion_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_auto_hook_runtime_attempt_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_auto_hook_runtime_attempt_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

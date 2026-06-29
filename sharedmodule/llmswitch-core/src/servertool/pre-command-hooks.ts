@@ -8,6 +8,8 @@ import type {
   ToolCall
 } from './types.js';
 import {
+  planPreCommandHookAttemptWithNative,
+  planPreCommandHookCompletionWithNative,
   planPreCommandHooksConfigWithNative,
   planRuntimePreCommandRuleWithNative,
   type PreCommandHookRulePlan
@@ -18,21 +20,9 @@ import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-cente
 
 export const SERVERTOOL_PRE_COMMAND_HOOKS_FEATURE_ID = 'feature_id: hub.servertool_pre_command_hooks';
 
-interface PreCommandHookRule {
-  id: string;
-  toolNames: Set<string>;
-  cmdRegex?: RegExp;
-  jqExpression?: string;
-  shellCommand?: string;
-  runtimeScriptPath?: string;
-  timeoutMs: number;
-  priority: number;
-  order: number;
-}
-
 interface PreCommandHooksConfig {
   enabled: boolean;
-  hooks: PreCommandHookRule[];
+  hooks: PreCommandHookRulePlan[];
 }
 
 export interface PreCommandHookRunOptions {
@@ -140,47 +130,40 @@ export function runPreCommandHooks(options: PreCommandHookRunOptions): PreComman
   let currentArguments = options.toolArguments;
   let currentParsedArgs = parseToolArgumentsObject(currentArguments);
   let currentCommandText = extractCommandText(currentParsedArgs, currentArguments);
-  const normalizedTool = normalizeToolName(options.toolName);
-
-  for (const hook of config.hooks) {
-    const traceBase = {
-      hookId: hook.id,
-      phase: 'pre_command',
-      priority: hook.priority,
-      queue: 'A_optional' as const,
-      queueIndex: 0,
+  for (const [index, hook] of config.hooks.entries()) {
+    const attemptPlan = planPreCommandHookAttemptWithNative({
+      hook,
+      requestId: options.requestId,
+      entryEndpoint: options.entryEndpoint,
+      providerProtocol: options.providerProtocol,
+      toolName: options.toolName,
+      toolCallId: options.toolCallId,
+      toolArguments: currentArguments,
+      queueIndex: index,
       queueTotal: config.hooks.length
-    };
-
-    if (!hook.toolNames.has(normalizedTool)) {
-      traces.push({ ...traceBase, result: 'miss', reason: 'tool_mismatch' });
+    });
+    if (attemptPlan.action === 'skip') {
+      traces.push(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
       continue;
     }
-    if (hook.cmdRegex && !hook.cmdRegex.test(currentCommandText)) {
-      traces.push({ ...traceBase, result: 'miss', reason: 'cmd_regex_mismatch' });
-      continue;
+    const execution = attemptPlan.execution;
+    if (!execution) {
+      throw new Error('pre_command_hook_execute_missing_plan');
     }
 
     try {
       let matched = false;
-      if (hook.runtimeScriptPath && hook.runtimeScriptPath.trim()) {
+      let hookChanged = false;
+      if (execution.runtimeScriptPath) {
         const runtimeOutput = runRuntimeScriptHook(
-          hook.runtimeScriptPath,
-          {
-            requestId: options.requestId,
-            entryEndpoint: options.entryEndpoint,
-            providerProtocol: options.providerProtocol,
-            toolName: normalizedTool,
-            toolCallId: options.toolCallId,
-            arguments: currentParsedArgs ?? { args_raw: currentArguments },
-            command: currentCommandText,
-            hookId: hook.id
-          },
-          hook.timeoutMs
+          execution.runtimeScriptPath,
+          buildPreCommandHookEventPayload(options, execution.hookId, currentParsedArgs, currentArguments, currentCommandText),
+          execution.timeoutMs
         );
 
         if (typeof runtimeOutput === 'string' && runtimeOutput !== currentArguments) {
           changed = true;
+          hookChanged = true;
           currentArguments = runtimeOutput;
           currentParsedArgs = parseToolArgumentsObject(currentArguments);
           currentCommandText = extractCommandText(currentParsedArgs, currentArguments);
@@ -188,49 +171,52 @@ export function runPreCommandHooks(options: PreCommandHookRunOptions): PreComman
         matched = true;
       }
 
-      if (hook.jqExpression && hook.jqExpression.trim()) {
+      if (execution.jqExpression) {
         const jqInput = currentParsedArgs ?? { args_raw: currentArguments };
-        const transformed = runJqTransform(hook.jqExpression, jqInput, hook.timeoutMs);
+        const transformed = runJqTransform(execution.jqExpression, jqInput, execution.timeoutMs);
         currentParsedArgs = transformed;
         const nextArgs = JSON.stringify(transformed);
         if (nextArgs !== currentArguments) {
           changed = true;
+          hookChanged = true;
           currentArguments = nextArgs;
           currentCommandText = extractCommandText(currentParsedArgs, currentArguments);
         }
         matched = true;
       }
 
-      if (hook.shellCommand && hook.shellCommand.trim()) {
+      if (execution.shellCommand) {
         runShellCommandHook(
-          hook.shellCommand,
-          {
-            requestId: options.requestId,
-            entryEndpoint: options.entryEndpoint,
-            providerProtocol: options.providerProtocol,
-            toolName: normalizedTool,
-            toolCallId: options.toolCallId,
-            arguments: currentParsedArgs ?? { args_raw: currentArguments },
-            command: currentCommandText,
-            hookId: hook.id
-          },
-          hook.timeoutMs
+          execution.shellCommand,
+          buildPreCommandHookEventPayload(options, execution.hookId, currentParsedArgs, currentArguments, currentCommandText),
+          execution.timeoutMs
         );
         matched = true;
       }
 
-      traces.push({
-        ...traceBase,
-        result: 'match',
-        reason: matched ? (changed ? 'applied' : 'matched') : 'no_action'
-      });
+      traces.push(
+        planPreCommandHookCompletionWithNative({
+          hookId: execution.hookId,
+          priority: hook.priority,
+          queueIndex: index,
+          queueTotal: config.hooks.length,
+          matched,
+          changed: hookChanged
+        }).traceEvent as ServerToolAutoHookTraceEvent
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown_error');
-      traces.push({
-        ...traceBase,
-        result: 'error',
-        reason: message
-      });
+      traces.push(
+        planPreCommandHookCompletionWithNative({
+          hookId: execution.hookId,
+          priority: hook.priority,
+          queueIndex: index,
+          queueTotal: config.hooks.length,
+          matched: true,
+          changed: false,
+          errorMessage: message
+        }).traceEvent as ServerToolAutoHookTraceEvent
+      );
     }
   }
 
@@ -245,7 +231,7 @@ export function resetPreCommandHooksCacheForTests(): void {
   cachedConfig = null;
 }
 
-function resolveRuntimePreCommandRule(rawState: unknown): PreCommandHookRule | null {
+function resolveRuntimePreCommandRule(rawState: unknown): PreCommandHookRulePlan | null {
   if (!rawState || typeof rawState !== 'object' || Array.isArray(rawState)) {
     return null;
   }
@@ -259,7 +245,7 @@ function resolveRuntimePreCommandRule(rawState: unknown): PreCommandHookRule | n
     envTimeoutMs: process.env.ROUTECODEX_PRE_COMMAND_TIMEOUT_MS,
     scriptPathAllowed: isPreCommandScriptPathAllowedWithNative(scriptPath)
   });
-  return plan ? materializePreCommandHookRule(plan) : null;
+  return plan;
 }
 
 function resolvePreCommandHooksFilePath(): string {
@@ -323,41 +309,31 @@ function normalizePreCommandHooksConfig(raw: unknown): PreCommandHooksConfig {
   const plan = planPreCommandHooksConfigWithNative(raw);
   return {
     enabled: plan.enabled,
-    hooks: plan.hooks.map(materializePreCommandHookRule)
+    hooks: plan.hooks
   };
-}
-
-function materializePreCommandHookRule(plan: PreCommandHookRulePlan): PreCommandHookRule {
-  return {
-    id: plan.id,
-    toolNames: new Set(plan.toolNames),
-    cmdRegex: materializeRegex(plan.cmdRegex),
-    jqExpression: plan.jqExpression,
-    shellCommand: plan.shellCommand,
-    runtimeScriptPath: plan.runtimeScriptPath,
-    timeoutMs: plan.timeoutMs,
-    priority: plan.priority,
-    order: plan.order
-  };
-}
-
-function materializeRegex(plan: PreCommandHookRulePlan['cmdRegex']): RegExp | undefined {
-  if (!plan) {
-    return undefined;
-  }
-  try {
-    return new RegExp(plan.source, plan.flags);
-  } catch {
-    return undefined;
-  }
-}
-
-function normalizeToolName(value: string): string {
-  return (value || '').trim().toLowerCase();
 }
 
 function readString(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function buildPreCommandHookEventPayload(
+  options: PreCommandHookRunOptions,
+  hookId: string,
+  currentParsedArgs: Record<string, unknown> | null,
+  currentArguments: string,
+  currentCommandText: string
+): Record<string, unknown> {
+  return {
+    requestId: options.requestId,
+    entryEndpoint: options.entryEndpoint,
+    providerProtocol: options.providerProtocol,
+    toolName: options.toolName.trim().toLowerCase(),
+    toolCallId: options.toolCallId,
+    arguments: currentParsedArgs ?? { args_raw: currentArguments },
+    command: currentCommandText,
+    hookId
+  };
 }
 
 function parseToolArgumentsObject(raw: string): Record<string, unknown> | null {
