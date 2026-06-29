@@ -15,7 +15,7 @@ import type {
   ResponsesEventStats,
   ResponsesSseEventStream
 } from '../types/index.js';
-import { ValidationUtils, ErrorUtils } from '../shared/utils.js';
+import { ErrorUtils } from '../shared/utils.js';
 import { createResponsesSequencer } from './sequencers/responses-sequencer.js';
 import { createResponsesStreamWriter } from '../shared/writer.js';
 

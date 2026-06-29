@@ -4,7 +4,7 @@
  */
 
 import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall, ChatUsage } from '../../types/index.js';
-import { IdUtils, TimeUtils } from '../../shared/utils.js';
+import { TimeUtils } from '../../shared/utils.js';
 
 // 生成器配置
 export interface ChatEventGeneratorConfig {

@@ -107,6 +107,23 @@ for (const relPath of sharedOwnerFiles) {
   }
 }
 
+const sharedUtils = read('sharedmodule/llmswitch-core/src/sse/shared/utils.ts');
+for (const forbidden of [
+  'safeStringify',
+  'safeParse',
+  'isValidJson',
+  'static truncate',
+  'static random',
+  'export class ValidationUtils',
+  'export class IdUtils',
+  'isTimeoutError',
+  'isNetworkError',
+]) {
+  if (sharedUtils.includes(forbidden)) {
+    failures.push(`SSE shared utils resurrects dead fallback/helper wrapper: ${forbidden}`);
+  }
+}
+
 const providerNeutralProjectionFiles = [
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts',

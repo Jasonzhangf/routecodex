@@ -230,7 +230,6 @@ export class ChatJsonToSseConverterRefactored {
    * 验证请求格式
    */
   private validateRequest(request: ChatCompletionRequest): void {
-    // 最小校验，避免依赖不存在的 ValidationUtils 方法
     if (!request || typeof request !== 'object' || !Array.isArray(request.messages) || !request.model) {
       throw new Error('Invalid ChatCompletionRequest format');
     }

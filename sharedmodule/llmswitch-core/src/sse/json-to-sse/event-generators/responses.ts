@@ -15,7 +15,7 @@ import type {
   ResponsesToolCall,
   ResponsesFunctionCallOutputItem
 } from '../../types/index.js';
-import { IdUtils, TimeUtils, StringUtils } from '../../shared/utils.js';
+import { TimeUtils, StringUtils } from '../../shared/utils.js';
 
 const TEXT_CHUNK_BOUNDARY = /[\n\r\t，。、“”‘’！？,.\-:\u3000\s]/;
 
