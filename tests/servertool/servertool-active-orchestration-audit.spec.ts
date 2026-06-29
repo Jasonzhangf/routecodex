@@ -109,12 +109,29 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/dispatch-preparation-shell.ts',
-    forbidden: [],
+    forbidden: [
+      "from '../conversion/runtime-metadata.js'",
+      'readRuntimeMetadata(',
+    ],
     required: [
-      'readRuntimeMetadata',
+      'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
       'resolveServertoolRuntimePreCommandState',
       'applyPreCommandHooksToToolCalls',
       'planServertoolToolCallDispatchWithNative',
+    ],
+  },
+  {
+    file: 'sharedmodule/llmswitch-core/src/servertool/state-scope.ts',
+    forbidden: [
+      "from '../conversion/runtime-metadata.js'",
+      'readRuntimeMetadata(',
+      'stopMessageClientInjectSessionScope',
+      'stopMessageClientInjectScope',
+    ],
+    required: [
+      'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
+      'resolveStopMessageSessionScopeWithNative',
+      'resolveServertoolStickyKeyWithNative',
     ],
   },
   {

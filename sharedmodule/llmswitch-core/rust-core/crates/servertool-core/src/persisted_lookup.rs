@@ -1054,7 +1054,9 @@ pub fn collect_stop_message_persisted_candidate_keys(
 
 pub fn resolve_stop_message_session_scope(metadata: &Value) -> Option<String> {
     let row = metadata.as_object()?;
-    read_trimmed_string(row.get("sessionId")).map(|session_id| format!("session:{session_id}"))
+    read_trimmed_string(row.get("sessionId"))
+        .or_else(|| read_metadata_center_request_truth_string(metadata, "sessionId"))
+        .map(|session_id| format!("session:{session_id}"))
 }
 
 /// Synchronously build a `session:<sessionId>`-keyed stop-message persisted state
@@ -1095,7 +1097,9 @@ fn merge_runtime_metadata_with_record(record: &Value, runtime_metadata: Option<&
 }
 
 fn resolve_session_scope(metadata: &Value) -> Option<String> {
-    read_trimmed_string(metadata.get("sessionId")).map(|session_id| format!("session:{session_id}"))
+    read_trimmed_string(metadata.get("sessionId"))
+        .or_else(|| read_metadata_center_request_truth_string(metadata, "sessionId"))
+        .map(|session_id| format!("session:{session_id}"))
 }
 
 fn resolve_routing_state_key(metadata: &Value) -> String {
@@ -1103,16 +1107,40 @@ fn resolve_routing_state_key(metadata: &Value) -> String {
         return request_chain_key;
     }
 
-    if metadata.get("providerProtocol").and_then(Value::as_str) == Some("openai-responses") {
+    let provider_protocol = read_trimmed_string(metadata.get("providerProtocol"))
+        .or_else(|| read_metadata_center_runtime_control_string(metadata, "providerProtocol"));
+    if provider_protocol.as_deref() == Some("openai-responses") {
         if let Some(previous_request_id) = resolve_legacy_responses_request_chain_key(metadata) {
             return previous_request_id;
         }
-        if let Some(request_id) = read_trimmed_string(metadata.get("requestId")) {
+        if let Some(request_id) = read_trimmed_string(metadata.get("requestId"))
+            .or_else(|| read_metadata_center_request_truth_string(metadata, "requestId"))
+        {
             return request_id;
         }
     }
 
-    read_trimmed_string(metadata.get("requestId")).unwrap_or_else(|| "default".to_string())
+    read_trimmed_string(metadata.get("requestId"))
+        .or_else(|| read_metadata_center_request_truth_string(metadata, "requestId"))
+        .unwrap_or_else(|| "default".to_string())
+}
+
+fn read_metadata_center_request_truth_string(metadata: &Value, key: &str) -> Option<String> {
+    metadata
+        .get("metadataCenterSnapshot")
+        .and_then(Value::as_object)
+        .and_then(|snapshot| snapshot.get("requestTruth"))
+        .and_then(Value::as_object)
+        .and_then(|request_truth| read_trimmed_string(request_truth.get(key)))
+}
+
+fn read_metadata_center_runtime_control_string(metadata: &Value, key: &str) -> Option<String> {
+    metadata
+        .get("metadataCenterSnapshot")
+        .and_then(Value::as_object)
+        .and_then(|snapshot| snapshot.get("runtimeControl"))
+        .and_then(Value::as_object)
+        .and_then(|runtime_control| read_trimmed_string(runtime_control.get(key)))
 }
 
 fn resolve_continuation_request_chain_key(metadata: &Value) -> Option<String> {
@@ -1566,6 +1594,34 @@ mod tests {
             "req-parent"
         );
         assert_eq!(resolve_servertool_sticky_key(&json!({})), "default");
+    }
+
+    #[test]
+    fn scope_resolvers_read_metadata_center_request_truth() {
+        let metadata = json!({
+            "metadataCenterSnapshot": {
+                "requestTruth": {
+                    "sessionId": " snapshot-session ",
+                    "requestId": " snapshot-request "
+                },
+                "runtimeControl": {
+                    "providerProtocol": "openai-responses"
+                }
+            }
+        });
+
+        assert_eq!(
+            resolve_stop_message_session_scope(&metadata).as_deref(),
+            Some("session:snapshot-session")
+        );
+        assert_eq!(
+            resolve_servertool_sticky_key(&metadata),
+            "session:snapshot-session"
+        );
+        assert_eq!(
+            resolve_routing_state_key(&metadata),
+            "snapshot-request"
+        );
     }
 
     #[test]

@@ -3183,6 +3183,27 @@ function checkPendingSessionRustOwner() {
     pendingInjectionShell,
     'readRuntimeControlFromAnyBoundMetadataCenter'
   );
+  const stateScopeShell = readRequired(SERVERTOOL_STATE_SCOPE);
+  for (const marker of [
+    "from '../conversion/runtime-metadata.js'",
+    'readRuntimeMetadata(',
+    '__rt',
+    'stopMessageClientInjectSessionScope',
+    'stopMessageClientInjectScope',
+  ]) {
+    if (stateScopeShell.includes(marker)) {
+      fail(
+        'servertool-state-scope-metadata-center-only',
+        `state-scope.ts must resolve scope from MetadataCenter snapshot and native Rust, not legacy marker ${marker}`
+      );
+    }
+  }
+  assertContains(
+    'servertool-state-scope-metadata-center-only',
+    SERVERTOOL_STATE_SCOPE,
+    stateScopeShell,
+    'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter'
+  );
   for (const needle of [
     'planPendingInjectionPersistWithNative',
     'planPendingInjectionPersistErrorWithNative',

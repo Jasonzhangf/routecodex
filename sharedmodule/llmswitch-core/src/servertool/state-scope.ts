@@ -1,9 +1,8 @@
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import {
   resolveStopMessageSessionScopeWithNative,
   resolveServertoolStickyKeyWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { readRuntimeControlFromBoundMetadataCenter } from './metadata-center-carrier.js';
+import { readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -12,25 +11,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function buildServertoolScopeMetadata(record: Record<string, unknown>): Record<string, unknown> {
-  const runtime = readRuntimeMetadata(record) as Record<string, unknown> | undefined;
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(record);
-  const stopMessageClientInject = asRecord(runtimeControl?.stopMessageClientInject);
-  const runtimeControlScope = typeof stopMessageClientInject?.sessionScope === 'string'
-    ? stopMessageClientInject.sessionScope.trim()
-    : '';
-  const metadata = asRecord(record.metadata);
-  const merged = {
-    ...(metadata ?? {}),
-    ...(runtime ?? {}),
-    ...record
-  };
-  delete merged.stopMessageClientInjectSessionScope;
-  delete merged.stopMessageClientInjectScope;
-  if (runtimeControlScope) {
-    merged.stopMessageClientInjectSessionScope = runtimeControlScope;
-  }
-  return merged;
+function buildServertoolScopeMetadata(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  return readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(record);
 }
 
 export function resolveServertoolPersistentScopeKey(adapterContext: unknown): string | undefined {
@@ -38,7 +20,8 @@ export function resolveServertoolPersistentScopeKey(adapterContext: unknown): st
   if (!record) {
     return undefined;
   }
-  return resolveStopMessageSessionScopeWithNative(buildServertoolScopeMetadata(record)) || undefined;
+  const metadata = buildServertoolScopeMetadata(record);
+  return metadata ? resolveStopMessageSessionScopeWithNative(metadata) || undefined : undefined;
 }
 
 export function resolveServertoolLoopScopeKey(adapterContext: unknown): string | undefined {
@@ -46,5 +29,6 @@ export function resolveServertoolLoopScopeKey(adapterContext: unknown): string |
   if (!record) {
     return undefined;
   }
-  return resolveServertoolStickyKeyWithNative(buildServertoolScopeMetadata(record)) || undefined;
+  const metadata = buildServertoolScopeMetadata(record);
+  return metadata ? resolveServertoolStickyKeyWithNative(metadata) || undefined : undefined;
 }
