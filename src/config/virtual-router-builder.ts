@@ -299,7 +299,6 @@ function normalizeForwardersForNative(
   providerConfigs: ProviderConfigMap,
 ): Record<string, UnknownRecord> {
   const out: Record<string, UnknownRecord> = {};
-  const seenProtocolModels = new Map<string, string>();
   for (const [id, raw] of Object.entries(source)) {
     const entry: UnknownRecord = { ...raw };
     entry.forwarderId = pickString(entry.forwarderId) ?? id;
@@ -316,14 +315,6 @@ function normalizeForwardersForNative(
     if (!modelId) {
       throw new Error(`[forwarder-config] ${id} missing top-level model`);
     }
-    const seenKey = `${protocol}::${modelId}`;
-    const existingForwarderId = seenProtocolModels.get(seenKey);
-    if (existingForwarderId && existingForwarderId !== id) {
-      throw new Error(
-        `[forwarder-config] duplicate forwarder for (protocol='${protocol}', model='${modelId}'): existing='${existingForwarderId}', new='${id}'`,
-      );
-    }
-    seenProtocolModels.set(seenKey, id);
     entry.modelId = modelId;
     delete entry.model;
     const resolutionMode = pickString(entry.resolutionMode);

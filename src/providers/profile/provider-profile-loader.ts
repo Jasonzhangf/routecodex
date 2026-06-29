@@ -433,16 +433,6 @@ export function buildForwarderProfiles(
       ...(weights ? { weights } : {}),
     });
   }
-  // 同一 (protocol, model) 不允许多 forwarder
-  const seenModel = new Map<string, string>();
-  for (const p of profiles) {
-    const key = `${p.protocol}::${p.model}`;
-    const existing = seenModel.get(key);
-    if (existing) {
-      throw new Error(`[forwarder-profiles] duplicate forwarder for (protocol='${p.protocol}', model='${p.model}'): existing='${existing}', new='${p.id}'`);
-    }
-    seenModel.set(key, p.id);
-  }
   return {
     profiles,
     byId: profiles.reduce<Record<string, ProviderForwarderProfile>>((acc, profile) => {

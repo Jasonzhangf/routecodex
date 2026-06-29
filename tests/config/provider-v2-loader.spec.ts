@@ -303,6 +303,74 @@ describe('buildVirtualRouterInputV2', () => {
     );
   });
 
+  it('materializes multiple forwarders for the same protocol and model', async () => {
+    const root = await createTempDir('provider-v2-');
+    for (const providerId of ['paid', 'free']) {
+      const providerDir = path.join(root, providerId);
+      await fs.mkdir(providerDir, { recursive: true });
+      await fs.writeFile(
+        path.join(providerDir, 'config.v2.json'),
+        `${JSON.stringify({
+          version: '2.0.0',
+          providerId,
+          provider: {
+            id: providerId,
+            type: 'openai',
+            baseURL: `https://${providerId}.example.test/v1`,
+            auth: {
+              entries: [{ alias: 'key1', apiKey: 'test-key' }]
+            },
+            models: {
+              'gpt-5.3-codex-spark': { capabilities: ['tools', 'thinking'] }
+            }
+          }
+        }, null, 2)}\n`,
+        'utf8'
+      );
+    }
+
+    const input = await buildVirtualRouterInputV2({
+      virtualrouter: {
+        forwarders: {
+          'fwd.paid.gpt-5.3-codex-spark': {
+            protocol: 'openai',
+            model: 'gpt-5.3-codex-spark',
+            strategy: 'priority',
+            targets: [{ providerId: 'paid', priority: 1 }]
+          },
+          'fwd.gpt.gpt-5.3-codex-spark': {
+            protocol: 'openai',
+            model: 'gpt-5.3-codex-spark',
+            strategy: 'priority',
+            targets: [{ providerId: 'free', priority: 1 }]
+          }
+        },
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              default: [
+                { id: 'paid-pool', targets: ['fwd.paid.gpt-5.3-codex-spark'] },
+                { id: 'free-pool', targets: ['fwd.gpt.gpt-5.3-codex-spark'] }
+              ]
+            }
+          }
+        }
+      }
+    }, root);
+
+    const forwarders = input.forwarders as Record<string, any>;
+    expect(Object.keys(forwarders).sort()).toEqual([
+      'fwd.gpt.gpt-5.3-codex-spark',
+      'fwd.paid.gpt-5.3-codex-spark'
+    ]);
+    expect(forwarders['fwd.paid.gpt-5.3-codex-spark'].targets).toEqual([
+      expect.objectContaining({ providerKey: 'paid.key1.gpt-5.3-codex-spark' })
+    ]);
+    expect(forwarders['fwd.gpt.gpt-5.3-codex-spark'].targets).toEqual([
+      expect.objectContaining({ providerKey: 'free.key1.gpt-5.3-codex-spark' })
+    ]);
+  });
+
   it('materializes providerId-only multimodal forwarder targets into real provider keys', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'media');

@@ -5,7 +5,7 @@
  * - 解析 forwarders 节点
  * - 命名空间校验（fwd. 前缀）
  * - 引用不存在的 providerId 失败
- * - 同一 (protocol, model) 双 forwarder 失败
+ * - 同一 (protocol, model) 可配置多个 forwarder，用 forwarder id 区分不同池
  * - fwd id 含点号但 model 显式（不 split 推算）
  * - transportOverride 拒绝（hard guardrail）
  * - 抽出 knownProviderIds 用于 sanity check
@@ -105,7 +105,7 @@ describe('ProviderForwarder loader', () => {
       expect(() => buildForwarderProfiles(config, knownIds)).toThrow(/unknown providerId/);
     });
 
-    it('rejects duplicate forwarder for same (protocol, model)', () => {
+    it('allows multiple forwarders for same (protocol, model)', () => {
       const config = {
         forwarders: {
           'fwd.openai.gpt-4o-a': {
@@ -120,7 +120,11 @@ describe('ProviderForwarder loader', () => {
           },
         },
       };
-      expect(() => buildForwarderProfiles(config, knownIds)).toThrow(/duplicate forwarder/);
+      const result = buildForwarderProfiles(config, knownIds);
+      expect(result.profiles.map((profile) => profile.id).sort()).toEqual([
+        'fwd.openai.gpt-4o-a',
+        'fwd.openai.gpt-4o-b',
+      ]);
     });
 
     it('rejects transportOverride (hard guardrail)', () => {

@@ -1,3 +1,18 @@
+# 2026-06-29 forwarder same-model multi-pool startup fix
+
+- Symptom: global `routecodex start --port 5520` failed before app init with `[forwarder-config] duplicate forwarder for (protocol='openai', model='gpt-5.3-codex-spark')`, because config has both `fwd.paid.gpt-5.3-codex-spark` and `fwd.gpt.gpt-5.3-codex-spark`.
+- Root cause: TS config materializer, provider profile loader, and Rust `ForwarderRegistry::load` all incorrectly enforced `(protocol, model)` uniqueness. This conflicts with explicit forwarder-id routing where paid/free pools can share a model and remain distinct by `fwd.*` id.
+- Fix: removed `(protocol, model)` duplicate fail-fast in TS materialize/profile and Rust forwarder loader. Rust `by_model` keeps first entry for legacy model lookup, while explicit route targets continue to resolve by forwarder id.
+- Tests: added TS config materialization coverage for two `gpt-5.3-codex-spark` forwarders with distinct provider pools; converted provider profile and Rust forwarder duplicate tests to allow same model under different ids.
+- Verification:
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/config/provider-v2-loader.spec.ts tests/providers/forwarder-selection.spec.ts --runInBand` PASS, 27 passed.
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `cargo test -p router-hotpath-napi virtual_router_engine::forwarder --lib -- --nocapture` PASS, 17 passed.
+  - `npm run verify:vr-forwarder-runtime` PASS, 28 passed.
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS.
+  - `rg -n "duplicate forwarder for" /opt/homebrew/lib/node_modules/routecodex/dist/config/virtual-router-builder.js /opt/homebrew/lib/node_modules/routecodex/dist/providers/profile/provider-profile-loader.js` found 0 matches after global install.
+- Live startup result: `routecodex start --port 5520` no longer fails on duplicate forwarder; it now fails on the next config truth error: `fwd.gpt.gpt-5.3-codex-spark target providerId 'cc' is not configured`. Evidence: `~/.rcc/config.toml:104` has `providerId = "cc"` with `disabled = false`, and `~/.rcc/provider/cc/config.v2.*` is absent. Per no-fallback rules, this requires config correction authorization; code must not silently skip it.
+
 # 2026-06-29 servertool builtin handler native result parse shell cleanup
 
 - Objective: continue servertool TS residue cleanup by removing direct NAPI access and `JSON.parse(raw)` from `builtin-handler-catalog.ts`.

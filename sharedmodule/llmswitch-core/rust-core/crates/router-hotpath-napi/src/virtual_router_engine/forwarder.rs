@@ -118,7 +118,6 @@ impl ForwarderRegistry {
         self.by_provider.clear();
         // sticky_sessions 保留（runtime 状态不重置）
 
-        let mut seen_model: HashMap<(String, String), String> = HashMap::new();
         let mut seen_ids: HashSet<String> = HashSet::new();
 
         for (id, value) in forwarders.iter() {
@@ -158,18 +157,8 @@ impl ForwarderRegistry {
                 }
             }
 
-            // model 唯一性校验（同 (protocol, model) 不允许多 forwarder）
             let model_key = (entry.protocol.clone(), entry.model_id.clone());
-            if let Some(existing_id) = seen_model.get(&model_key) {
-                return Err(format!(
-                    "duplicate forwarder for (protocol='{}', model='{}'): existing='{}', new='{}'",
-                    entry.protocol, entry.model_id, existing_id, id
-                ));
-            }
-            seen_model.insert(model_key, id.clone());
-
-            self.by_model
-                .insert((entry.protocol.clone(), entry.model_id.clone()), id.clone());
+            self.by_model.entry(model_key).or_insert_with(|| id.clone());
             self.entries.insert(id.clone(), entry);
         }
         Ok(())
@@ -451,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn load_rejects_duplicate_id() {
+    fn load_allows_multiple_forwarders_for_same_protocol_model() {
         let mut reg = ForwarderRegistry::new();
         let mut fwd = serde_json::Map::new();
         let (id, value) = make_entry(
@@ -461,9 +450,6 @@ mod tests {
             ForwarderStrategy::RoundRobin,
             vec![("openai-prod-1.key1", None, None, false)],
         );
-        fwd.insert(id.clone(), value.clone());
-        // Same id cannot appear twice in a JSON map, so simulate via different ids but same model
-        let mut fwd2 = serde_json::Map::new();
         let (id2, value2) = make_entry(
             "fwd.openai.gpt-4o-dup",
             "openai",
@@ -471,12 +457,12 @@ mod tests {
             ForwarderStrategy::RoundRobin,
             vec![("openai-prod-2.key1", None, None, false)],
         );
-        fwd2.insert(id, value);
-        fwd2.insert(id2, value2);
+        fwd.insert(id.clone(), value);
+        fwd.insert(id2.clone(), value2);
         let providers = make_providers();
-        let result = reg.load(&fwd2, &providers);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("duplicate forwarder"));
+        reg.load(&fwd, &providers).expect("load forwarders");
+        assert!(reg.get(&id).is_some());
+        assert!(reg.get(&id2).is_some());
     }
 
     #[test]
