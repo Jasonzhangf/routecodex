@@ -14,6 +14,7 @@ const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
 const MODEL_CAPABILITY_ALLOWLIST: &[&str] = &[
     "text",
     "reasoning",
+    "no_reasoning_summary",
     "multimodal",
     "vision",
     "video",

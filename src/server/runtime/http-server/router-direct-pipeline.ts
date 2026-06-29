@@ -24,6 +24,7 @@
 
 import type { PortConfig } from './port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
+import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { resolveInboundProtocolFromEntryPath } from './provider-direct-pipeline.js';
 import { extractResponseStatus } from './executor/provider-response-utils.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
@@ -184,15 +185,16 @@ export async function executeRouterDirectPipeline(
     input.requestPayload,
     target.modelId,
     target.routeParams,
+    providerHandle.runtime,
   );
 
   // Write model override info to metadata center (on the metadata carrier)
-  const metadataCenterAttached = MetadataCenter.attach(input.requestPayload);
-  const pipelineMetadataCenter =
-    input.pipelineMetadata && typeof input.pipelineMetadata === 'object' && !Array.isArray(input.pipelineMetadata)
-      ? MetadataCenter.attach(input.pipelineMetadata)
-      : undefined;
   if (hookResult.originalClientModel) {
+    const metadataCenterAttached = MetadataCenter.attach(input.requestPayload);
+    const pipelineMetadataCenter =
+      input.pipelineMetadata && typeof input.pipelineMetadata === 'object' && !Array.isArray(input.pipelineMetadata)
+        ? MetadataCenter.attach(input.pipelineMetadata)
+        : undefined;
     auditContext.originalClientModel = hookResult.originalClientModel;
     // Write both on the request payload's metadata center for request-side consumption
     metadataCenterAttached.writeProviderObservation(
@@ -283,18 +285,22 @@ function applyDirectRouteHooks(
   payload: Record<string, unknown>,
   targetModelId?: string,
   routeParams?: Record<string, unknown>,
+  providerRuntime?: ProviderRuntimeProfile,
 ): DirectRouteHookResult {
-  let result = { ...payload } as Record<string, unknown>;
+  let result = payload;
   let originalClientModel: string | undefined;
+  let effectiveModelId = typeof targetModelId === 'string' ? targetModelId.trim() : '';
 
   // Model override hook
   const inboundModel = typeof result.model === 'string' ? result.model.trim() : '';
-  const effectiveModelId = typeof targetModelId === 'string' ? targetModelId.trim() : '';
   if (effectiveModelId && effectiveModelId !== inboundModel) {
+    result = { ...result };
     if (inboundModel) {
       originalClientModel = inboundModel;
     }
     result.model = effectiveModelId;
+  } else if (!effectiveModelId) {
+    effectiveModelId = inboundModel;
   }
 
   // Thinking effort override hook
@@ -311,7 +317,36 @@ function applyDirectRouteHooks(
     };
   }
 
+  result = applyTargetModelRequestCapabilityHook(result, effectiveModelId, providerRuntime);
+
   return { payload: result, originalClientModel };
+}
+
+function applyTargetModelRequestCapabilityHook(
+  payload: Record<string, unknown>,
+  targetModelId: string,
+  providerRuntime?: ProviderRuntimeProfile,
+): Record<string, unknown> {
+  if (!targetModelId) {
+    return payload;
+  }
+  const capabilities = providerRuntime?.modelCapabilities?.[targetModelId];
+  if (!Array.isArray(capabilities) || !capabilities.includes('no_reasoning_summary')) {
+    return payload;
+  }
+  const reasoning = payload.reasoning;
+  if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning)) {
+    return payload;
+  }
+  if (!Object.prototype.hasOwnProperty.call(reasoning, 'summary')) {
+    return payload;
+  }
+  const nextReasoning = { ...(reasoning as Record<string, unknown>) };
+  delete nextReasoning.summary;
+  return {
+    ...payload,
+    reasoning: nextReasoning,
+  };
 }
 
 // ---------------------------------------------------------------------------

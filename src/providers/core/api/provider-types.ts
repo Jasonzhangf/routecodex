@@ -165,6 +165,7 @@ export interface ProviderRuntimeProfile {
   streaming?: 'auto' | 'always' | 'never';
   modelStreaming?: Record<string, 'auto' | 'always' | 'never'>;
   modelContextTokens?: Record<string, number>;
+  modelCapabilities?: Record<string, string[]>;
   defaultContextTokens?: number;
   modelAnthropicThinkingConfig?: Record<string, AnthropicThinkingConfig>;
   defaultAnthropicThinkingConfig?: AnthropicThinkingConfig;

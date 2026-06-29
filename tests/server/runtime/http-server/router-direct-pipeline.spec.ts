@@ -436,6 +436,85 @@ describe('router-direct-pipeline', () => {
       expect(handle.instance.processIncoming).not.toHaveBeenCalled();
     });
 
+    it('strips reasoning.summary only when target model marks no_reasoning_summary', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'openai',
+        providerFamily: 'openai',
+        runtime: {
+          modelCapabilities: {
+            'gpt-5.3-codex-spark': ['text', 'reasoning', 'no_reasoning_summary'],
+          },
+        } as any,
+      } as ProviderHandle;
+      const requestPayload = {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+        reasoning: { effort: 'high', summary: 'detailed' },
+      };
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-5.3-codex-spark' },
+        requestPayload,
+        target: {
+          providerKey: 'openai.key.gpt-5.3-codex-spark',
+          providerType: 'openai',
+          runtimeKey: handle.runtimeKey,
+          modelId: 'gpt-5.3-codex-spark',
+        },
+        routingDecision: { routeName: 'tools' },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      const sentPayload = (handle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload).not.toBe(requestPayload);
+      expect(sentPayload.model).toBe('gpt-5.3-codex-spark');
+      expect(sentPayload.reasoning).toEqual({ effort: 'high' });
+      expect(requestPayload.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
+    });
+
+    it('keeps reasoning.summary by default for direct responses target models', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'openai',
+        providerFamily: 'openai',
+        runtime: {
+          modelCapabilities: {
+            'gpt-5.4-mini': ['text', 'reasoning'],
+          },
+        } as any,
+      } as ProviderHandle;
+      const requestPayload = {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+        reasoning: { effort: 'high', summary: 'detailed' },
+      };
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-5.4-mini' },
+        requestPayload,
+        target: {
+          providerKey: 'openai.key.gpt-5.4-mini',
+          providerType: 'openai',
+          runtimeKey: handle.runtimeKey,
+          modelId: 'gpt-5.4-mini',
+        },
+        routingDecision: { routeName: 'thinking' },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      const sentPayload = (handle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
+    });
+
 
   });
 });
