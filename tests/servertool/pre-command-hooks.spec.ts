@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
-import { resetPreCommandHooksCacheForTests } from '../../sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.js';
+import {
+  applyPreCommandHooksToToolCall,
+  resetPreCommandHooksCacheForTests
+} from '../../sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.js';
 import { isPreCommandScriptPathAllowedWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
@@ -371,5 +374,58 @@ describe('servertool pre-command hooks', () => {
       )
     ).toBe(true);
     expect(traces.some((event) => event.hookId === 'config-fallback-hook')).toBe(false);
+  });
+
+  test('fails fast when pre-command trace callback fails', () => {
+    const hookFile = path.join(HOOK_DIR, `pre-command-${Date.now()}-trace-fail.json`);
+    fs.writeFileSync(
+      hookFile,
+      JSON.stringify(
+        {
+          enabled: true,
+          hooks: [
+            {
+              id: 'trace-fail-hook',
+              tool: 'exec_command',
+              priority: 10,
+              jq: '.cmd = .cmd'
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+    process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE = hookFile;
+    resetPreCommandHooksCacheForTests();
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-pre-command-trace-fail',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    } as any;
+    bindProviderProtocol(adapterContext as unknown as Record<string, unknown>, 'openai-responses');
+
+    expect(() =>
+      applyPreCommandHooksToToolCall({
+        options: {
+          chatResponse: buildToolCallResponse('echo trace-fail'),
+          adapterContext,
+          entryEndpoint: '/v1/responses',
+          requestId: 'req-pre-command-trace-fail',
+          providerProtocol: 'openai-responses',
+          onAutoHookTrace: () => {
+            throw new Error('pre-command trace sink failed');
+          }
+        },
+        toolCall: {
+          id: 'call_exec_1',
+          name: 'exec_command',
+          arguments: JSON.stringify({ cmd: 'echo trace-fail', workdir: '/tmp' })
+        },
+        bases: [],
+        patchToolCallArgumentsById: undefined
+      })
+    ).toThrow('pre-command trace sink failed');
   });
 });

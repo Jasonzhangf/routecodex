@@ -3420,6 +3420,7 @@ function checkPreCommandHooksRustOwner() {
     "result: 'match'",
     "result: 'error'",
     'const traceBase = {',
+    '// best-effort',
   ]) {
     if (preCommandShell.includes(keyword)) {
       fail(
@@ -3427,6 +3428,12 @@ function checkPreCommandHooksRustOwner() {
         `Forbidden TS pre-command hook semantic "${keyword}" found in pre-command-hooks.ts`
       );
     }
+  }
+  if (/onAutoHookTrace[\s\S]{0,140}catch\s*\{/.test(preCommandShell)) {
+    fail(
+      'servertool-pre-command-hooks-no-ts-owner',
+      'pre-command-hooks.ts must not swallow pre-command trace callback failures'
+    );
   }
   pass(
     'servertool-pre-command-hooks-no-ts-owner',

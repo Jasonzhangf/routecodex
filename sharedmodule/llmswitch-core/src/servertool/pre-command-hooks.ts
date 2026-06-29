@@ -76,11 +76,7 @@ export function applyPreCommandHooksToToolCall(args: {
     preCommandState: args.runtimePreCommandState
   });
   for (const trace of preHookResult.traces) {
-    try {
-      args.options.onAutoHookTrace?.(trace);
-    } catch {
-      // best-effort
-    }
+    args.options.onAutoHookTrace?.(trace);
   }
   if (!preHookResult.changed || preHookResult.toolArguments === args.toolCall.arguments) {
     return;
