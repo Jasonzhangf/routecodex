@@ -62,11 +62,20 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
       response: AnthropicMessageResponse,
       requestId: string
     ): AsyncGenerator<AnthropicSseEvent> {
+      if (!response.id || !response.id.trim()) {
+        throw new Error('Invalid Anthropic response: missing id');
+      }
+      if (response.role !== 'assistant' && response.role !== 'user') {
+        throw new Error('Invalid Anthropic response: missing role');
+      }
+      if (!response.model || !response.model.trim()) {
+        throw new Error('Invalid Anthropic response: missing model');
+      }
       yield createEvent('message_start', {
         message: {
-          id: response.id || `msg_${requestId}`,
+          id: response.id,
           type: 'message',
-          role: response.role || 'assistant',
+          role: response.role,
           model: response.model
         }
       });
@@ -129,10 +138,12 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
           yield createEvent('content_block_stop', { index });
           index += 1;
         } else if (block.type === 'tool_use') {
-          const id = block.id || `call_${requestId}_${index}`;
+          if (!block.id || !block.id.trim()) {
+            throw new Error('Invalid Anthropic tool_use block: missing id');
+          }
           yield createEvent('content_block_start', {
             index,
-            content_block: { type: 'tool_use', id, name: block.name, input: block.input }
+            content_block: { type: 'tool_use', id: block.id, name: block.name, input: block.input }
           });
           const payload = normalizeToolInput(block.input ?? {});
           if (payload) {
