@@ -1,3 +1,10 @@
+# 2026-06-29 servertool stop context wrapper deletion slice
+
+- 目标：继续清理 servertool TS 残留，把独立 `stop-gateway-context.ts` / `stop-message-compare-context.ts` 控制 wrapper 物理删除，避免 servertool 目录里继续保留第二套 MetadataCenter 控制壳。
+- 改动：将 `inspect/attach/read/format` stop gateway 与 stop compare 控制函数合并到唯一 `metadata-center-carrier.ts`；`engine-preflight-shell.ts`、`progress-log-block.ts` 和 branch coverage 脚本改读 carrier；删除两个专用 wrapper 文件；`verify-servertool-rust-only` 改为旧 wrapper 防复活 + carrier marker 检查。
+- 已验证：focused Jest `stop-gateway-context + stop-message-compare-context + engine-preflight-shell + progress-log-block.failfast` 20 passed；sharedmodule `tsc` PASS；`npm run verify:servertool-rust-only` PASS；`npm run verify:function-map-compile-gate` PASS；scoped `git diff --check` PASS。
+- 边界：本 slice 只删除两个控制 wrapper；`pending-session`、`pre-command-hooks`、auto-hook/execution IO shell 等 servertool TS 残留仍需继续逐片下沉或删除。
+
 # 2026-06-29 responses continuation request-label rebind blocker
 
 - 目标：继续排查 `missing_request_context` 在线回放失败，确认是 capture 没写入还是 response 侧拿错了 request key。

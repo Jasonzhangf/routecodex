@@ -5,7 +5,7 @@ import {
   formatStopMessageCompareContext,
   readStopMessageCompareContext,
   type StopMessageCompareContext
-} from '../../sharedmodule/llmswitch-core/src/servertool/stop-message-compare-context.js';
+} from '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.ts';
 
 const BASE_CONTEXT: StopMessageCompareContext = {

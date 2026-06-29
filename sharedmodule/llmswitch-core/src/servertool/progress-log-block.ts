@@ -5,7 +5,7 @@ import {
   resolveServertoolProgressToolNameWithNative,
   shouldUseServertoolGoldProgressHighlightWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { formatStopMessageCompareContext, readStopMessageCompareContext } from './stop-message-compare-context.js';
+import { formatStopMessageCompareContext, readStopMessageCompareContext } from './metadata-center-carrier.js';
 
 function resolveStage(step: number, message: string): string {
   const normalized = message.trim().toLowerCase();

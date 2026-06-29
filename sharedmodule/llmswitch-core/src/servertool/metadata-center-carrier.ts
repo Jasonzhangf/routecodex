@@ -1,4 +1,13 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
+import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
+import {
+  formatStopMessageCompareContextWithNative,
+  inspectStopGatewaySignalWithNative,
+  normalizeStopGatewayContextWithNative,
+  normalizeStopMessageCompareContextWithNative,
+  type StopGatewayContext,
+  type StopMessageCompareContext
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
@@ -19,6 +28,21 @@ type MetadataCenterLike = {
   readRequestTruth?: () => Record<string, unknown> | undefined;
   readProviderObservation?: () => Record<string, unknown> | undefined;
 };
+
+const STOP_GATEWAY_CONTEXT_WRITER = {
+  module: 'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts',
+  symbol: 'attachStopGatewayContext',
+  stage: 'HubRespChatProcess03Governed'
+} as const;
+
+const STOP_MESSAGE_COMPARE_KEY = 'stopMessageCompareContext';
+const STOP_MESSAGE_COMPARE_WRITER = {
+  module: 'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts',
+  symbol: 'attachStopMessageCompareContext',
+  stage: 'HubRespChatProcess03Governed'
+} as const;
+
+export type { StopGatewayContext, StopMessageCompareContext };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -180,4 +204,81 @@ export function readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
       providerObservation: (providerObservation ?? {}) as JsonObject
     }
   };
+}
+
+export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
+  return inspectStopGatewaySignalWithNative(base);
+}
+
+export function attachStopGatewayContext(adapterContext: AdapterContext, context: StopGatewayContext): void {
+  writeRuntimeControlToBoundMetadataCenter({
+    metadata: adapterContext as unknown as Record<string, unknown>,
+    key: 'stopGatewayContext',
+    value: {
+      observed: context.observed,
+      eligible: context.eligible,
+      source: context.source,
+      reason: context.reason,
+      ...(typeof context.choiceIndex === 'number' ? { choiceIndex: context.choiceIndex } : {}),
+      ...(typeof context.hasToolCalls === 'boolean' ? { hasToolCalls: context.hasToolCalls } : {})
+    },
+    writer: STOP_GATEWAY_CONTEXT_WRITER,
+    reason: 'response stop gateway control signal',
+    required: true
+  });
+}
+
+export function readStopGatewayContext(adapterContext: unknown): StopGatewayContext | undefined {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return undefined;
+  }
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as Record<string, unknown>);
+  const raw = runtimeControl?.stopGatewayContext;
+  return normalizeStopGatewayContextWithNative(raw);
+}
+
+export function resolveStopGatewayContext(base: unknown, adapterContext?: unknown): StopGatewayContext {
+  const fromMetadata = readStopGatewayContext(adapterContext);
+  if (fromMetadata) {
+    return fromMetadata;
+  }
+  return inspectStopGatewaySignal(base);
+}
+
+export function isStopEligibleForServerTool(base: unknown, adapterContext?: unknown): boolean {
+  return resolveStopGatewayContext(base, adapterContext).eligible;
+}
+
+export function attachStopMessageCompareContext(
+  adapterContext: unknown,
+  context: StopMessageCompareContext
+): void {
+  const normalized = normalizeStopMessageCompareContextWithNative(context);
+  if (!normalized) {
+    throw new Error('invalid stop-message compare context');
+  }
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    throw new Error('MetadataCenter runtime_control.stopMessageCompareContext writer requires object carrier');
+  }
+  writeRuntimeControlToBoundMetadataCenter({
+    metadata: adapterContext as Record<string, unknown>,
+    key: STOP_MESSAGE_COMPARE_KEY,
+    value: { ...normalized } as JsonObject,
+    writer: STOP_MESSAGE_COMPARE_WRITER,
+    reason: 'stop-message compare control signal',
+    required: true
+  });
+}
+
+export function readStopMessageCompareContext(adapterContext: unknown): StopMessageCompareContext | undefined {
+  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
+    return undefined;
+  }
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as Record<string, unknown>);
+  const raw = runtimeControl?.[STOP_MESSAGE_COMPARE_KEY];
+  return normalizeStopMessageCompareContextWithNative(raw);
+}
+
+export function formatStopMessageCompareContext(context: StopMessageCompareContext | undefined): string {
+  return formatStopMessageCompareContextWithNative(context);
 }

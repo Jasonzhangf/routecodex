@@ -16,7 +16,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/stop-message-compare-context.js',
+  '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
   () => ({
     readStopMessageCompareContext: jest.fn(() => ({
       decision: 'trigger',

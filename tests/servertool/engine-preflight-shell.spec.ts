@@ -6,7 +6,7 @@ const containsSyntheticRouteCodexControlTextMock = jest.fn(() => false);
 const planServertoolEnginePreflightWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/stop-gateway-context.js',
+  '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
   () => ({
     inspectStopGatewaySignal: inspectStopGatewaySignalMock,
     attachStopGatewayContext: attachStopGatewayContextMock,
@@ -59,6 +59,7 @@ describe('engine-preflight-shell', () => {
     expect(source).toContain('inspectStopGatewaySignal(');
     expect(source).toContain('attachStopGatewayContext(');
     expect(source).toContain('containsSyntheticRouteCodexControlText(');
+    expect(source).not.toContain('./stop-gateway-context.js');
   });
 
   test('returns original chat when native preflight says so', () => {

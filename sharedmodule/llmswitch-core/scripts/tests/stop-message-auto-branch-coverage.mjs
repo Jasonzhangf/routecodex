@@ -135,7 +135,7 @@ function runDefaultDisabledCaseInSubprocess(repoRoot) {
 import path from 'node:path';
 const repoRoot = process.env.TEST_REPO_ROOT;
 const runServerToolOrchestration = (await import(path.resolve(repoRoot, 'dist', 'servertool/engine.js'))).runServerToolOrchestration;
-const readStopMessageCompareContext = (await import(path.resolve(repoRoot, 'dist', 'servertool/stop-message-compare-context.js'))).readStopMessageCompareContext;
+const readStopMessageCompareContext = (await import(path.resolve(repoRoot, 'dist', 'servertool/metadata-center-carrier.js'))).readStopMessageCompareContext;
 const adapterContext = {
   requestId: 'default-disabled-subprocess',
   entryEndpoint: '/v1/messages',
@@ -183,7 +183,7 @@ console.log(JSON.stringify({ executed: result.executed, reason: compare?.reason 
 
 async function main() {
   const { runServerToolOrchestration } = await importModule('servertool/engine.js');
-  const { readStopMessageCompareContext } = await importModule('servertool/stop-message-compare-context.js');
+  const { readStopMessageCompareContext } = await importModule('servertool/metadata-center-carrier.js');
   const { loadRoutingInstructionStateSync, saveRoutingInstructionStateSync } = await importModule(
     'native/router-hotpath/native-virtual-router-routing-state.js'
   );

@@ -5,7 +5,7 @@ import {
   inspectStopGatewaySignal,
   readStopGatewayContext,
   resolveStopGatewayContext
-} from '../../sharedmodule/llmswitch-core/src/servertool/stop-gateway-context.js';
+} from '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js';
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 

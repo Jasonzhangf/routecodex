@@ -94,6 +94,7 @@ const TS_BACKEND_ROUTE_SHADOW = `${SERVERTOOL_TS_DIR}/backend-route-shadow.ts`;
 const TS_VISION_ELIGIBILITY = `${SERVERTOOL_TS_DIR}/handlers/vision-eligibility.ts`;
 const TS_STOP_GATEWAY_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-gateway-context.ts`;
 const TS_STOP_MESSAGE_COMPARE_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-message-compare-context.ts`;
+const TS_METADATA_CENTER_CARRIER = `${SERVERTOOL_TS_DIR}/metadata-center-carrier.ts`;
 const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
 const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block.ts`;
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
@@ -200,6 +201,10 @@ const DELETED_SERVERTOOL_LOOP_SCOPE_TS_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts`,
   `${ROOT}/tests/servertool/loop-state-block.spec.ts`,
   `${ROOT}/tests/servertool/state-scope.metadata-center.spec.ts`,
+];
+const DELETED_STOP_CONTEXT_WRAPPER_TS_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/stop-gateway-context.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/stop-message-compare-context.ts`,
 ];
 const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
   'hub.servertool_cli_projection': [
@@ -2134,7 +2139,7 @@ function checkStopGatewayContextRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const tsShell = readRequired(TS_STOP_GATEWAY_CONTEXT);
+  const metadataCenterCarrier = readRequired(TS_METADATA_CENTER_CARRIER);
 
   for (const needle of [
     'pub fn inspect',
@@ -2148,6 +2153,14 @@ function checkStopGatewayContextRustOwner() {
       rustStopGateway,
       needle
     );
+  }
+  for (const file of [TS_STOP_GATEWAY_CONTEXT]) {
+    if (existsSync(file)) {
+      fail(
+        'stop-gateway-context-ts-wrapper-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; stop-gateway control belongs to metadata-center-carrier + Rust native`
+      );
+    }
   }
   assertContains(
     'stop-gateway-context-native-export',
@@ -2190,24 +2203,30 @@ function checkStopGatewayContextRustOwner() {
     'catch { return undefined; }',
     'ignore metadata write failures',
   ]) {
-    if (tsShell.includes(keyword)) {
+    if (metadataCenterCarrier.includes(keyword)) {
       fail(
-        'stop-gateway-context-ts-thin-shell',
-        `Forbidden TS stop-gateway semantic/fallback "${keyword}" found in stop-gateway-context.ts`
+        'stop-gateway-context-carrier-no-ts-owner',
+        `Forbidden TS stop-gateway semantic/fallback "${keyword}" found in metadata-center-carrier.ts`
       );
     }
   }
   assertContains(
-    'stop-gateway-context-ts-thin-shell',
-    TS_STOP_GATEWAY_CONTEXT,
-    tsShell,
+    'stop-gateway-context-metadata-carrier',
+    TS_METADATA_CENTER_CARRIER,
+    metadataCenterCarrier,
     'inspectStopGatewaySignalWithNative'
   );
   assertContains(
-    'stop-gateway-context-ts-thin-shell',
-    TS_STOP_GATEWAY_CONTEXT,
-    tsShell,
+    'stop-gateway-context-metadata-carrier',
+    TS_METADATA_CENTER_CARRIER,
+    metadataCenterCarrier,
     'normalizeStopGatewayContextWithNative'
+  );
+  assertContains(
+    'stop-gateway-context-metadata-carrier',
+    TS_METADATA_CENTER_CARRIER,
+    metadataCenterCarrier,
+    "key: 'stopGatewayContext'"
   );
   pass('stop-gateway-context-rust-owner', 'servertool-core owns stop-gateway inspect and metadata normalization');
 }
@@ -2219,7 +2238,7 @@ function checkStopMessageCompareContextRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const tsShell = readRequired(TS_STOP_MESSAGE_COMPARE_CONTEXT);
+  const metadataCenterCarrier = readRequired(TS_METADATA_CENTER_CARRIER);
 
   for (const needle of [
     'pub fn normalize_stop_message_compare_context',
@@ -2234,6 +2253,14 @@ function checkStopMessageCompareContextRustOwner() {
       rustCompare,
       needle
     );
+  }
+  for (const file of [TS_STOP_MESSAGE_COMPARE_CONTEXT]) {
+    if (existsSync(file)) {
+      fail(
+        'stop-message-compare-context-ts-wrapper-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; compare control belongs to metadata-center-carrier + Rust native`
+      );
+    }
   }
   for (const needle of [
     'normalize_stop_message_compare_context_json',
@@ -2290,10 +2317,10 @@ function checkStopMessageCompareContextRustOwner() {
     'readRuntimeMetadata',
     '.__rt',
   ]) {
-    if (tsShell.includes(keyword)) {
+    if (metadataCenterCarrier.includes(keyword)) {
       fail(
-        'stop-message-compare-context-ts-thin-shell',
-        `Forbidden TS stop-message compare semantic/fallback "${keyword}" found in stop-message-compare-context.ts`
+        'stop-message-compare-context-carrier-no-ts-owner',
+        `Forbidden TS stop-message compare semantic/fallback "${keyword}" found in metadata-center-carrier.ts`
       );
     }
   }
@@ -2303,23 +2330,23 @@ function checkStopMessageCompareContextRustOwner() {
     "key: STOP_MESSAGE_COMPARE_KEY",
     "required: true",
   ]) {
-    if (!tsShell.includes(keyword)) {
+    if (!metadataCenterCarrier.includes(keyword)) {
       fail(
         'stop-message-compare-context-metadata-center-only',
-        `stop-message-compare-context.ts must keep MetadataCenter runtime_control marker ${keyword}`
+        `metadata-center-carrier.ts must keep MetadataCenter runtime_control marker ${keyword}`
       );
     }
   }
   assertContains(
-    'stop-message-compare-context-ts-thin-shell',
-    TS_STOP_MESSAGE_COMPARE_CONTEXT,
-    tsShell,
+    'stop-message-compare-context-metadata-carrier',
+    TS_METADATA_CENTER_CARRIER,
+    metadataCenterCarrier,
     'normalizeStopMessageCompareContextWithNative'
   );
   assertContains(
-    'stop-message-compare-context-ts-thin-shell',
-    TS_STOP_MESSAGE_COMPARE_CONTEXT,
-    tsShell,
+    'stop-message-compare-context-metadata-carrier',
+    TS_METADATA_CENTER_CARRIER,
+    metadataCenterCarrier,
     'formatStopMessageCompareContextWithNative'
   );
   pass(
@@ -4844,17 +4871,25 @@ function checkDeletedStopMessageTsOwnersAbsent() {
 }
 
 function checkStopGatewayMetadataCenterOnly() {
-  const stopGatewayContext = readRequired(`${SERVERTOOL_TS_DIR}/stop-gateway-context.ts`);
+  for (const file of DELETED_STOP_CONTEXT_WRAPPER_TS_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'stop-context-wrapper-ts-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; control wrappers are consolidated into metadata-center-carrier.ts`
+      );
+    }
+  }
+  const stopGatewayContext = readRequired(TS_METADATA_CENTER_CARRIER);
   for (const marker of [
     "from '../conversion/runtime-metadata.js'",
     'ensureRuntimeMetadata',
-    'readRuntimeMetadata',
+    'readRuntimeMetadata(',
     '__rt',
   ]) {
     if (stopGatewayContext.includes(marker)) {
       fail(
         'stop-gateway-metadata-center-only',
-        `stop-gateway-context.ts must not use legacy runtime metadata marker ${marker}; stopGatewayContext belongs to MetadataCenter runtime_control`
+        `metadata-center-carrier.ts must not use legacy runtime metadata marker ${marker}; stopGatewayContext belongs to MetadataCenter runtime_control`
       );
     }
   }
@@ -4866,7 +4901,7 @@ function checkStopGatewayMetadataCenterOnly() {
     if (!stopGatewayContext.includes(marker)) {
       fail(
         'stop-gateway-metadata-center-only',
-        `stop-gateway-context.ts must use MetadataCenter runtime_control marker ${marker}`
+        `metadata-center-carrier.ts must use MetadataCenter runtime_control marker ${marker}`
       );
     }
   }

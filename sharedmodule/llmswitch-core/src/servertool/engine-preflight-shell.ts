@@ -6,7 +6,7 @@ import {
 import {
   attachStopGatewayContext,
   inspectStopGatewaySignal
-} from './stop-gateway-context.js';
+} from './metadata-center-carrier.js';
 import { planServertoolEnginePreflightWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 type StopGatewayContext = ReturnType<typeof inspectStopGatewaySignal>;
