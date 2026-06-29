@@ -121,8 +121,8 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
         },
     );
     let effective_runtime_loop_state =
-        persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context(
-            &persisted_lookup::RuntimeStopMessageStateFromAdapterContextInput {
+        persisted_lookup::resolve_runtime_stop_message_state_from_metadata_center(
+            &persisted_lookup::RuntimeStopMessageStateFromMetadataCenterInput {
                 runtime_metadata: input.runtime_metadata.clone(),
             },
         )
@@ -131,7 +131,6 @@ fn build_stopless_auto_handler_input_value(input: &StoplessAutoHandlerRuntimeInp
     serde_json::json!({
         "base": input.base,
         "requestId": input.request_id,
-        "followupFlowId": Value::Null,
         "shouldRunVisionFlow": false,
         "shouldBypassStopMessageForMedia": false,
         "metadataRuntimeControl": metadata_runtime_control,

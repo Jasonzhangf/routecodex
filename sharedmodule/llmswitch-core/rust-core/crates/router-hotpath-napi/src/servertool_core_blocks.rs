@@ -162,16 +162,16 @@ pub fn resolve_runtime_stop_message_state_json(input_json: &str) -> Result<Strin
         .map_err(|e| format!("serialize runtime stop-message state: {e}"))
 }
 
-pub fn resolve_runtime_stop_message_state_from_adapter_context_json(
+pub fn resolve_runtime_stop_message_state_from_metadata_center_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: persisted_lookup::RuntimeStopMessageStateFromAdapterContextInput =
+    let input: persisted_lookup::RuntimeStopMessageStateFromMetadataCenterInput =
         serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize runtime stop-message adapter context input: {e}"))?;
+            .map_err(|e| format!("deserialize runtime stop-message metadata center input: {e}"))?;
     let snapshot =
-        persisted_lookup::resolve_runtime_stop_message_state_from_adapter_context(&input);
+        persisted_lookup::resolve_runtime_stop_message_state_from_metadata_center(&input);
     serde_json::to_string(&snapshot)
-        .map_err(|e| format!("serialize runtime stop-message adapter context state: {e}"))
+        .map_err(|e| format!("serialize runtime stop-message metadata center state: {e}"))
 }
 
 pub fn read_runtime_stop_message_stage_mode_json(input_json: &str) -> Result<String, String> {
@@ -266,13 +266,6 @@ pub fn plan_stop_message_persist_snapshot_json(input_json: &str) -> Result<Strin
             .map_err(|e| format!("deserialize stop-message persist plan input: {e}"))?;
     serde_json::to_string(&stop_message_persist_plan::plan_stop_message_persist_snapshot(&input))
         .map_err(|e| format!("serialize stop-message persist plan: {e}"))
-}
-
-pub fn read_servertool_followup_flow_id_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool followup flow id input: {e}"))?;
-    serde_json::to_string(&persisted_lookup::read_servertool_followup_flow_id(&input))
-        .map_err(|e| format!("serialize servertool followup flow id: {e}"))
 }
 
 pub fn resolve_bd_working_directory_for_record_json(input_json: &str) -> Result<String, String> {
@@ -1696,30 +1689,35 @@ mod tests {
     }
 
     #[test]
-    fn resolves_runtime_stop_message_state_via_servertool_core_bridge() {
+    fn resolves_runtime_stop_message_state_via_metadata_center_bridge() {
         let raw = resolve_runtime_stop_message_state_json(
             &json!({
-                "serverToolLoopState": {
-                    "flowId": "stop_message_flow",
-                    "repeatCount": 99,
-                    "maxRepeats": 3
+                "metadataCenterSnapshot": {
+                    "runtimeControl": {
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "continuationPrompt": "continue from center",
+                            "repeatCount": 2,
+                            "maxRepeats": 3
+                        }
+                    }
                 }
             })
             .to_string(),
         )
         .expect("runtime stop state");
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["text"], "继续执行");
+        assert_eq!(parsed["text"], "continue from center");
         assert_eq!(parsed["maxRepeats"], 3);
-        assert_eq!(parsed["used"], 0);
+        assert_eq!(parsed["used"], 2);
         assert_eq!(parsed["source"], "servertool.stop_message");
         assert_eq!(parsed["stageMode"], "on");
         assert!(parsed.get("repeatCount").is_none());
     }
 
     #[test]
-    fn resolves_runtime_stop_message_state_from_adapter_context_via_servertool_core_bridge() {
-        let raw = resolve_runtime_stop_message_state_from_adapter_context_json(
+    fn resolves_runtime_stop_message_state_from_metadata_center_via_servertool_core_bridge() {
+        let raw = resolve_runtime_stop_message_state_from_metadata_center_json(
             &json!({
                 "runtimeMetadata": {
                     "metadataCenterSnapshot": {
@@ -1736,7 +1734,7 @@ mod tests {
             })
             .to_string(),
         )
-        .expect("runtime stop state from adapter context");
+        .expect("runtime stop state from metadata center");
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
         assert_eq!(parsed["text"], "continue from output");
         assert_eq!(parsed["maxRepeats"], 4);
@@ -1758,21 +1756,6 @@ mod tests {
         .expect("stage mode");
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
         assert_eq!(parsed, json!("auto"));
-    }
-
-    #[test]
-    fn reads_servertool_followup_flow_id_via_servertool_core_bridge() {
-        let raw = read_servertool_followup_flow_id_json(
-            &json!({
-                "serverToolLoopState": {
-                    "flowId": " stop_message_flow "
-                }
-            })
-            .to_string(),
-        )
-        .expect("followup flow id");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed, json!("stop_message_flow"));
     }
 
     #[test]

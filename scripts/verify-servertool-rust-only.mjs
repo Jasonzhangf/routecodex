@@ -1309,7 +1309,7 @@ function checkStopMessagePersistedLookupRustOwner() {
   for (const needle of [
     'pub fn resolve_servertool_state_key',
     'pub fn resolve_runtime_stop_message_state',
-    'pub fn resolve_runtime_stop_message_state_from_adapter_context',
+    'pub fn resolve_runtime_stop_message_state_from_metadata_center',
     'pub fn read_runtime_stop_message_stage_mode',
     'pub fn normalize_stop_message_stage_mode_value',
     'pub fn has_armed_stop_message_state',
@@ -1408,7 +1408,7 @@ function checkStopMessagePersistedLookupRustOwner() {
   for (const needle of [
     'resolveServertoolStateKeyWithNative',
     'resolveRuntimeStopMessageStateWithNative',
-    'resolveRuntimeStopMessageStateFromAdapterContextWithNative',
+    'resolveRuntimeStopMessageStateFromMetadataCenterWithNative',
     'readRuntimeStopMessageStageModeWithNative',
     'normalizeStopMessageStageModeValueWithNative',
     'hasArmedStopMessageStateWithNative',
@@ -1437,7 +1437,7 @@ function checkStopMessagePersistedLookupRustOwner() {
   for (const needle of [
     '"resolveServertoolStateKeyJson"',
     '"resolveRuntimeStopMessageStateJson"',
-    '"resolveRuntimeStopMessageStateFromAdapterContextJson"',
+    '"resolveRuntimeStopMessageStateFromMetadataCenterJson"',
     '"readRuntimeStopMessageStageModeJson"',
     '"normalizeStopMessageStageModeValueJson"',
     '"hasArmedStopMessageStateJson"',
@@ -1691,11 +1691,11 @@ function checkStopMessagePersistedLookupRustOwner() {
     }
   }
 
-  const adapterRuntimeStateBlock = extractFunctionBlock(runtimeUtils, 'resolveRuntimeStopMessageStateFromAdapterContext');
-  if (!adapterRuntimeStateBlock.includes('resolveRuntimeStopMessageStateFromAdapterContextWithNative')) {
+  const metadataCenterRuntimeStateBlock = extractFunctionBlock(runtimeUtils, 'resolveRuntimeStopMessageStateFromMetadataCenter');
+  if (!metadataCenterRuntimeStateBlock.includes('resolveRuntimeStopMessageStateFromMetadataCenterWithNative')) {
     fail(
       'stop-message-cli-result-state-ts-thin-shell',
-      'runtime-utils.ts resolveRuntimeStopMessageStateFromAdapterContext must call resolveRuntimeStopMessageStateFromAdapterContextWithNative'
+      'runtime-utils.ts resolveRuntimeStopMessageStateFromMetadataCenter must call resolveRuntimeStopMessageStateFromMetadataCenterWithNative'
     );
   }
   for (const keyword of [
@@ -1713,10 +1713,10 @@ function checkStopMessagePersistedLookupRustOwner() {
     'tool_message',
     'validateClientExecCommandResultWithNative',
   ]) {
-    if (adapterRuntimeStateBlock.includes(keyword)) {
+    if (metadataCenterRuntimeStateBlock.includes(keyword)) {
       fail(
         'stop-message-cli-result-state-ts-thin-shell',
-        `runtime-utils.ts resolveRuntimeStopMessageStateFromAdapterContext must not contain TS CLI-result semantic "${keyword}"`
+        `runtime-utils.ts resolveRuntimeStopMessageStateFromMetadataCenter must not contain TS CLI-result semantic "${keyword}"`
       );
     }
   }
@@ -4613,9 +4613,82 @@ function checkDeletedStopMessageTsOwnersAbsent() {
       );
     }
   }
+  const rustLookup = readRequired(RUST_SERVERTOOL_CORE_LOOKUP);
+  const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
+  const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+
+  for (const [check, file, content, needle] of [
+    [
+      'stop-message-metadata-center-runtime-state-rust-owner',
+      RUST_SERVERTOOL_CORE_LOOKUP,
+      rustLookup,
+      'pub struct RuntimeStopMessageStateFromMetadataCenterInput',
+    ],
+    [
+      'stop-message-metadata-center-runtime-state-rust-owner',
+      RUST_SERVERTOOL_CORE_LOOKUP,
+      rustLookup,
+      'pub fn resolve_runtime_stop_message_state_from_metadata_center',
+    ],
+    [
+      'stop-message-metadata-center-runtime-state-native-export',
+      `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+      napiBlocks,
+      'resolve_runtime_stop_message_state_from_metadata_center_json',
+    ],
+    [
+      'stop-message-metadata-center-runtime-state-native-export',
+      RUST_ROUTER_HOTPATH_NAPI_LIB,
+      napiLib,
+      'resolve_runtime_stop_message_state_from_metadata_center_json',
+    ],
+    [
+      'stop-message-metadata-center-runtime-state-required-export',
+      NATIVE_REQUIRED_EXPORTS,
+      requiredExports,
+      'resolveRuntimeStopMessageStateFromMetadataCenterJson',
+    ],
+    [
+      'stop-message-metadata-center-runtime-state-wrapper',
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
+      nativeWrapper,
+      'RuntimeStopMessageStateFromMetadataCenterInput',
+    ],
+    [
+      'stop-message-metadata-center-runtime-state-wrapper',
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
+      nativeWrapper,
+      'resolveRuntimeStopMessageStateFromMetadataCenterWithNative',
+    ],
+  ]) {
+    assertContains(check, file, content, needle);
+  }
+
+  for (const [file, content] of [
+    [RUST_SERVERTOOL_CORE_LOOKUP, rustLookup],
+    [`${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks],
+    [RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib],
+    [NATIVE_REQUIRED_EXPORTS, requiredExports],
+    [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper],
+  ]) {
+    for (const marker of [
+      'RuntimeStopMessageStateFromAdapterContext',
+      'resolve_runtime_stop_message_state_from_adapter_context',
+      'resolveRuntimeStopMessageStateFromAdapterContext',
+    ]) {
+      if (content.includes(marker)) {
+        fail(
+          'stop-message-adapter-context-runtime-state-deleted',
+          `${file.replace(`${ROOT}/`, '')} must not revive adapter-context stopless runtime state marker "${marker}"`
+        );
+      }
+    }
+  }
   pass(
     'deleted-stop-message-ts-owners-absent',
-    'deleted stop-message TS owners stay absent'
+    'deleted stop-message TS owners stay absent and runtime state is MetadataCenter-native'
   );
 }
 

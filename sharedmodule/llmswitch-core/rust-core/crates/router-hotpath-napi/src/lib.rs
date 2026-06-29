@@ -1226,10 +1226,10 @@ pub fn resolve_runtime_stop_message_state_json(input_json: String) -> NapiResult
 }
 
 #[napi]
-pub fn resolve_runtime_stop_message_state_from_adapter_context_json(
+pub fn resolve_runtime_stop_message_state_from_metadata_center_json(
     input_json: String,
 ) -> NapiResult<String> {
-    servertool_core_blocks::resolve_runtime_stop_message_state_from_adapter_context_json(
+    servertool_core_blocks::resolve_runtime_stop_message_state_from_metadata_center_json(
         &input_json,
     )
     .map_err(|e| napi::Error::from_reason(e))
@@ -1292,12 +1292,6 @@ pub fn plan_stop_message_default_config_json(input_json: String) -> NapiResult<S
 #[napi]
 pub fn plan_stop_message_persist_snapshot_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stop_message_persist_snapshot_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
-pub fn read_servertool_followup_flow_id_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::read_servertool_followup_flow_id_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

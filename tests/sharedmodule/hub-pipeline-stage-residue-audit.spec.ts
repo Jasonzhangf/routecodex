@@ -4196,7 +4196,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('stop_message schema budget must not be restored from servertool loop repeat count', () => {
+  it('stop_message schema budget must be restored from MetadataCenter stopless runtime control only', () => {
     const nativeWrapperPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
@@ -4212,24 +4212,34 @@ describe('hub pipeline stage residue audit', () => {
     const nativeWrapperSource = fs.readFileSync(nativeWrapperPath, 'utf8');
     const stopMessageNativeSource = fs.readFileSync(stopMessageNativePath, 'utf8');
     const rustLookupSource = fs.readFileSync(rustLookupPath, 'utf8');
+    const rustRuntimeStateStart = rustLookupSource.indexOf('pub fn resolve_runtime_stop_message_state(');
+    const rustRuntimeStateEnd = rustLookupSource.indexOf(
+      'pub fn read_runtime_stop_message_stage_mode',
+      rustRuntimeStateStart,
+    );
+    expect(rustRuntimeStateStart).toBeGreaterThanOrEqual(0);
+    expect(rustRuntimeStateEnd).toBeGreaterThan(rustRuntimeStateStart);
+    const rustRuntimeStateBlock = rustLookupSource.slice(rustRuntimeStateStart, rustRuntimeStateEnd);
     const runtimeStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateWithNative');
     const runtimeStageBlock = extractFunctionBlock(nativeWrapperSource, 'readRuntimeStopMessageStageModeWithNative');
-    const adapterStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateFromAdapterContextWithNative');
+    const metadataCenterStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateFromMetadataCenterWithNative');
 
     expect(rustLookupSource).toContain('pub fn resolve_runtime_stop_message_state');
     expect(rustLookupSource).toContain('pub fn read_servertool_followup_flow_id');
     expect(rustLookupSource).toContain('STOP_MESSAGE_FOLLOWUP_FLOW_ID');
-    expect(rustLookupSource).toContain('loop_state.get("maxRepeats")');
-    expect(rustLookupSource).not.toContain('loop_state.get("repeatCount")');
+    expect(rustRuntimeStateBlock).toContain('runtime_control.get("stopless")');
+    expect(rustRuntimeStateBlock).not.toContain('runtime.get("serverToolLoopState")');
+    expect(rustRuntimeStateBlock).not.toContain('runtime.get("stopMessageState")');
+    expect(rustRuntimeStateBlock).not.toContain('loop_state.get("repeatCount")');
     expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
     expect(nativeWrapperSource).not.toContain('readServertoolFollowupFlowIdWithNative');
-    expect(adapterStateBlock).toContain('resolveRuntimeStopMessageStateFromAdapterContextJson');
+    expect(metadataCenterStateBlock).toContain('resolveRuntimeStopMessageStateFromMetadataCenterJson');
     expect(stopMessageNativeSource).toContain('followupFlowId?: string;');
 
-    const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${adapterStateBlock}`, [
+    const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${metadataCenterStateBlock}`, [
       { label: 'runtime stop state TS reads loop state', pattern: /serverToolLoopState|loopState\.maxRepeats|stopMessageState|stopMessageUsed|stopMessageText/ },
       { label: 'runtime stop stage TS normalizes state locally', pattern: /toLowerCase\(\)|normalizeStopMessageStageMode/i },
-      { label: 'adapter-context stop state TS rebuilds snapshot locally', pattern: /serverToolLoopState|stopMessageState|stopMessageText|repeatCount|maxRepeats/ },
+      { label: 'metadata-center stop state TS rebuilds snapshot locally', pattern: /serverToolLoopState|stopMessageState|stopMessageText|repeatCount|maxRepeats/ },
     ]);
     const stopMessageNativeFindings = collectMatches(stopMessageNativeSource, [
       { label: 'stop-message native bridge keeps TS skip-hop branch', pattern: /skip_servertool_followup_hop/ },

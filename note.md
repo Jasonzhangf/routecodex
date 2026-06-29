@@ -1,3 +1,11 @@
+# 2026-06-29 Hub Pipeline Rust closeout Wave 3 stopless MetadataCenter runtime-state slice
+
+- 目标：继续 Wave 3 MetadataCenter request-scoped migration，把 stopless runtime-state restore 从旧 adapter-context/runtime-utils 面收口到 Rust `MetadataCenter.runtime_control.stopless`。
+- 改动：`servertool-core/src/persisted_lookup.rs` 的 `resolve_runtime_stop_message_state*` 只接受 `metadataCenterSnapshot.runtimeControl.stopless` / `runtime_control.stopless`；旧 `stopMessageState`、`serverToolLoopState`、`responsesRequestContext` data-plane 只保留反向测试证明会被忽略。NAPI/TS wrapper 改名为 `resolveRuntimeStopMessageStateFromMetadataCenter*`，旧 `FromAdapterContext` surface 由 `verify:servertool-rust-only` 防复活。
+- 同步：删除旧 `tests/servertool/stop-message-runtime-utils.continuation.spec.ts`；`hub.metadata_center_mainline` required tests 改指向 `stopless-cli-continuation.spec.ts` 与 residue audit；residue audit 改成审 `resolve_runtime_stop_message_state -> read_runtime_stop_message_stage_mode` 区间，避免把 `#[cfg(test)]` 反向 fixture 或其它 persisted owner 误判为 runtime restore。
+- 已验证：`cargo test -p servertool-core persisted_lookup --lib -- --nocapture` 42 passed；`cargo test -p router-hotpath-napi servertool_core_blocks --lib -- --nocapture` 57 passed；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS（warnings only）；root/sharedmodule `tsc` PASS；`npm run verify:servertool-rust-only` PASS；metadata dualwrite/manifest/write-boundary/leak gates PASS；`npm run verify:function-map-compile-gate` PASS；`stopless-cli-continuation.spec.ts` 18 passed；focused residue audit 1 passed；`git diff --check` PASS。
+- 缺口：本 slice 未做 live replay，只证明 Rust/NAPI/native wrapper/gate/focused blackbox 层闭合；完整 Hub Pipeline Rust closeout 仍未完成，Wave 4-7 仍在计划内。
+
 # 2026-06-29 servertool backend-route public surface retirement slice
 
 - 目标：继续 Hub Pipeline Rust closeout 的 servertool 局部收口；不恢复已删除 backend-route/reenter public surface，把 `backend_route_contract.rs`、`BackendRouteReenter`、`ServertoolBackendRouteHint01Planned`、`planServertoolBackendRoutePolicy*` 改成退役防复活合同。

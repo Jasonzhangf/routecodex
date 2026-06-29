@@ -216,11 +216,11 @@ owners:
       - StoplessExecutionPlan
       - StoplessOrchestrationPlanInput
       - StoplessOrchestrationPlan
-      - RuntimeStopMessageStateFromAdapterContextInput
+      - RuntimeStopMessageStateFromMetadataCenterInput
       - RuntimeStopMessageStateSnapshot
     canonical_builders:
       - plan_stopless_orchestration_action
-      - resolve_runtime_stop_message_state_from_adapter_context
+      - resolve_runtime_stop_message_state_from_metadata_center
       - plan_client_exec_cli_projection_output
       - resolve_stop_message_session_scope
     allowed_paths:
@@ -1605,7 +1605,8 @@ owners:
       - tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts
       - tests/server/handlers/handler-metadata-boundary.spec.ts
       - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
-      - tests/servertool/stop-message-runtime-utils.continuation.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-metadata-center-manifest-code-sync

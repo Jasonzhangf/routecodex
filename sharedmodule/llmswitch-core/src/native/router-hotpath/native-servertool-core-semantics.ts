@@ -469,8 +469,7 @@ export interface StopMessagePersistPlan {
   snapshot: StopMessagePersistSnapshotPlan;
 }
 
-export interface RuntimeStopMessageStateFromAdapterContextInput {
-  adapterContext: unknown;
+export interface RuntimeStopMessageStateFromMetadataCenterInput {
   runtimeMetadata?: unknown;
 }
 
@@ -1621,17 +1620,17 @@ export function validateClientExecCommandResultWithNative(rawOutput: string): Re
   return JSON.parse(resultJson) as Record<string, unknown>;
 }
 
-export function resolveRuntimeStopMessageStateFromAdapterContextWithNative(
-  input: RuntimeStopMessageStateFromAdapterContextInput,
+export function resolveRuntimeStopMessageStateFromMetadataCenterWithNative(
+  input: RuntimeStopMessageStateFromMetadataCenterInput,
 ): RuntimeStopMessageStateSnapshot | null {
-  const capability = 'resolveRuntimeStopMessageStateFromAdapterContextJson';
+  const capability = 'resolveRuntimeStopMessageStateFromMetadataCenterJson';
   const fn = readNativeFunction(capability);
   if (!fn) {
-    throw new Error('resolveRuntimeStopMessageStateFromAdapterContextJson native unavailable');
+    throw new Error('resolveRuntimeStopMessageStateFromMetadataCenterJson native unavailable');
   }
   const resultJson = fn(JSON.stringify(input));
   if (typeof resultJson !== 'string') {
-    throw new Error(`resolveRuntimeStopMessageStateFromAdapterContextJson native returned non-string: ${typeof resultJson}`);
+    throw new Error(`resolveRuntimeStopMessageStateFromMetadataCenterJson native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson) as RuntimeStopMessageStateSnapshot | null;
 }

@@ -900,7 +900,8 @@ verification:
     contract:
       - tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts
       - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
-      - tests/servertool/stop-message-runtime-utils.continuation.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
     smoke: []

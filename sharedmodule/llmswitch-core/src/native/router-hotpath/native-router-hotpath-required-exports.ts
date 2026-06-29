@@ -247,7 +247,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveServertoolStickyKeyJson",
   "resolveServertoolStateKeyJson",
   "resolveRuntimeStopMessageStateJson",
-  "resolveRuntimeStopMessageStateFromAdapterContextJson",
+  "resolveRuntimeStopMessageStateFromMetadataCenterJson",
   "readRuntimeStopMessageStageModeJson",
   "normalizeStopMessageStageModeValueJson",
   "hasArmedStopMessageStateJson",

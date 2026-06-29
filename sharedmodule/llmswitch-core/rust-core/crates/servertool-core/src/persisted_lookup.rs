@@ -5,9 +5,9 @@ use serde_json::Value;
 
 pub const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
 pub const STOP_MESSAGE_PERSISTED_LOOKUP_POLICY: &str = "strict_session_only";
-pub const STOP_MESSAGE_FOLLOWUP_FLOW_ID: &str = "stop_message_flow";
-pub const STOP_MESSAGE_FOLLOWUP_SOURCE: &str = "servertool.stop_message";
-pub const STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT: &str = "继续执行";
+pub const STOPLESS_FLOW_ID: &str = "stop_message_flow";
+pub const STOPLESS_STATE_SOURCE: &str = "servertool.stop_message";
+pub const STOPLESS_DEFAULT_TEXT: &str = "继续执行";
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -135,7 +135,7 @@ pub struct StopMessageRoutingStateClearPlanOutput {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeStopMessageStateFromAdapterContextInput {
+pub struct RuntimeStopMessageStateFromMetadataCenterInput {
     pub runtime_metadata: Option<Value>,
 }
 
@@ -289,48 +289,7 @@ pub fn plan_stop_message_persisted_state_selection(
 pub fn resolve_runtime_stop_message_state(
     runtime_metadata: &Value,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
-    if let Some(snapshot) = resolve_runtime_stopless_control_snapshot(runtime_metadata) {
-        return Some(snapshot);
-    }
-    let runtime = runtime_metadata.as_object()?;
-    let state = runtime.get("stopMessageState");
-    if let Some(direct) = resolve_stop_message_snapshot(state) {
-        return Some(direct);
-    }
-
-    let loop_state = runtime
-        .get("serverToolLoopState")
-        .and_then(Value::as_object)?;
-    if read_trimmed_string(loop_state.get("flowId")).as_deref()
-        != Some(STOP_MESSAGE_FOLLOWUP_FLOW_ID)
-    {
-        return None;
-    }
-    let max_repeats = read_js_nonnegative_integer(loop_state.get("maxRepeats"))?;
-    let used = state
-        .and_then(Value::as_object)
-        .and_then(|state| read_js_nonnegative_integer(state.get("stopMessageUsed")))
-        .unwrap_or(0);
-    let text = state
-        .and_then(Value::as_object)
-        .and_then(|state| read_trimmed_string(state.get("stopMessageText")))
-        .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
-
-    Some(RuntimeStopMessageStateSnapshot {
-        text,
-        provider_key: state
-            .and_then(Value::as_object)
-            .and_then(|state| read_trimmed_string(state.get("stopMessageProviderKey"))),
-        max_repeats,
-        used,
-        trigger_hint: None,
-        schema_feedback: None,
-        source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
-        updated_at: None,
-        last_used_at: None,
-        stage_mode: Some("on".to_string()),
-        ai_mode: None,
-    })
+    resolve_runtime_stopless_control_snapshot(runtime_metadata)
 }
 
 fn resolve_runtime_stopless_control_snapshot(
@@ -350,9 +309,8 @@ fn resolve_runtime_stopless_control_snapshot(
                 .and_then(Value::as_object)
                 .and_then(|runtime_control| runtime_control.get("stopless"))
                 .and_then(Value::as_object)
-        })
-        .or_else(|| runtime.get("stopless").and_then(Value::as_object))?;
-    if read_trimmed_string(stopless.get("flowId")).as_deref() != Some(STOP_MESSAGE_FOLLOWUP_FLOW_ID)
+        })?;
+    if read_trimmed_string(stopless.get("flowId")).as_deref() != Some(STOPLESS_FLOW_ID)
     {
         return None;
     }
@@ -362,7 +320,7 @@ fn resolve_runtime_stopless_control_snapshot(
     }
     let repeat_count = read_js_nonnegative_integer(stopless.get("repeatCount")).unwrap_or(0);
     let text = read_trimmed_string(stopless.get("continuationPrompt"))
-        .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
+        .unwrap_or_else(|| STOPLESS_DEFAULT_TEXT.to_string());
 
     Some(RuntimeStopMessageStateSnapshot {
         text,
@@ -374,7 +332,7 @@ fn resolve_runtime_stopless_control_snapshot(
             .get("schemaFeedback")
             .filter(|value| value.is_object())
             .cloned(),
-        source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
+        source: Some(STOPLESS_STATE_SOURCE.to_string()),
         updated_at: read_finite_number(stopless.get("updatedAt")),
         last_used_at: None,
         stage_mode: Some("on".to_string()),
@@ -382,8 +340,8 @@ fn resolve_runtime_stopless_control_snapshot(
     })
 }
 
-pub fn resolve_runtime_stop_message_state_from_adapter_context(
-    input: &RuntimeStopMessageStateFromAdapterContextInput,
+pub fn resolve_runtime_stop_message_state_from_metadata_center(
+    input: &RuntimeStopMessageStateFromMetadataCenterInput,
 ) -> Option<RuntimeStopMessageStateSnapshot> {
     if let Some(runtime) = input.runtime_metadata.as_ref() {
         if let Some(snapshot) = resolve_runtime_stop_message_state(runtime) {
@@ -475,45 +433,6 @@ pub fn plan_stop_message_routing_state_clear(
         .map(|value| value.floor() as i64)
         .unwrap_or_else(current_time_millis);
     StopMessageRoutingStateClearPlanOutput { timestamp }
-}
-
-pub fn read_servertool_followup_flow_id(runtime_metadata: &Value) -> String {
-    runtime_metadata
-        .as_object()
-        .and_then(|runtime| {
-            runtime
-                .get("metadataCenterSnapshot")
-                .and_then(Value::as_object)
-                .and_then(|snapshot| snapshot.get("runtimeControl"))
-                .and_then(Value::as_object)
-                .and_then(|runtime_control| runtime_control.get("stopless"))
-                .and_then(Value::as_object)
-                .and_then(|stopless| read_trimmed_string(stopless.get("flowId")))
-        })
-        .or_else(|| {
-            runtime_metadata
-                .as_object()
-                .and_then(|runtime| runtime.get("runtime_control"))
-                .and_then(Value::as_object)
-                .and_then(|runtime_control| runtime_control.get("stopless"))
-                .and_then(Value::as_object)
-                .and_then(|stopless| read_trimmed_string(stopless.get("flowId")))
-        })
-        .or_else(|| {
-            runtime_metadata
-                .as_object()
-                .and_then(|runtime| runtime.get("stopless"))
-                .and_then(Value::as_object)
-                .and_then(|stopless| read_trimmed_string(stopless.get("flowId")))
-        })
-        .or_else(|| {
-            runtime_metadata
-                .as_object()
-                .and_then(|runtime| runtime.get("serverToolLoopState"))
-                .and_then(Value::as_object)
-                .and_then(|loop_state| read_trimmed_string(loop_state.get("flowId")))
-        })
-        .unwrap_or_default()
 }
 
 pub fn resolve_bd_working_directory_for_record(
@@ -644,7 +563,7 @@ pub fn resolve_default_stop_message_snapshot(
     let options = input.options.as_ref();
     let text = options
         .and_then(|options| read_trimmed_string(options.text.as_ref()))
-        .unwrap_or_else(|| STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string());
+        .unwrap_or_else(|| STOPLESS_DEFAULT_TEXT.to_string());
     let max_repeats = options
         .and_then(|options| read_positive_finite_floor_value(options.max_repeats.as_ref()))
         .unwrap_or(1);
@@ -696,7 +615,7 @@ pub fn resolve_implicit_gemini_stop_message_snapshot(
     }
 
     Some(RuntimeStopMessageStateSnapshot {
-        text: STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string(),
+        text: STOPLESS_DEFAULT_TEXT.to_string(),
         provider_key: read_trimmed_string(input.record.get("providerKey"))
             .or_else(|| read_trimmed_string(input.record.get("providerId"))),
         max_repeats: 1,
@@ -1694,8 +1613,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_stop_state_resolves_direct_snapshot_with_defaults() {
-        let snapshot = resolve_runtime_stop_message_state(&json!({
+    fn runtime_stop_state_ignores_legacy_direct_snapshot() {
+        assert!(resolve_runtime_stop_message_state(&json!({
             "stopMessageState": {
                 "stopMessageText": "  keep going  ",
                 "stopMessageStageMode": "AUTO",
@@ -1705,29 +1624,12 @@ mod tests {
                 "stopMessageSource": " explicit "
             }
         }))
-        .expect("snapshot");
-
-        assert_eq!(
-            snapshot,
-            RuntimeStopMessageStateSnapshot {
-                text: "keep going".to_string(),
-                provider_key: None,
-                max_repeats: DEFAULT_STOP_MESSAGE_MAX_REPEATS,
-                used: 2,
-                trigger_hint: None,
-                schema_feedback: None,
-                source: Some("explicit".to_string()),
-                updated_at: Some(1234.0),
-                last_used_at: None,
-                stage_mode: Some("auto".to_string()),
-                ai_mode: None,
-            }
-        );
+        .is_none());
     }
 
     #[test]
-    fn runtime_stop_state_uses_loop_state_max_repeats_without_repeat_count() {
-        let snapshot = resolve_runtime_stop_message_state(&json!({
+    fn runtime_stop_state_ignores_legacy_loop_state() {
+        assert!(resolve_runtime_stop_message_state(&json!({
             "stopMessageState": {
                 "stopMessageUsed": "2",
                 "stopMessageText": "  "
@@ -1738,24 +1640,7 @@ mod tests {
                 "maxRepeats": "3"
             }
         }))
-        .expect("snapshot");
-
-        assert_eq!(
-            snapshot,
-            RuntimeStopMessageStateSnapshot {
-                text: STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT.to_string(),
-                provider_key: None,
-                max_repeats: 3,
-                used: 2,
-                trigger_hint: None,
-                schema_feedback: None,
-                source: Some(STOP_MESSAGE_FOLLOWUP_SOURCE.to_string()),
-                updated_at: None,
-                last_used_at: None,
-                stage_mode: Some("on".to_string()),
-                ai_mode: None,
-            }
-        );
+        .is_none());
 
         assert!(resolve_runtime_stop_message_state(&json!({
             "serverToolLoopState": {
@@ -1809,7 +1694,7 @@ mod tests {
         );
         assert_eq!(
             snapshot.source.as_deref(),
-            Some(STOP_MESSAGE_FOLLOWUP_SOURCE)
+            Some(STOPLESS_STATE_SOURCE)
         );
     }
 
@@ -1831,46 +1716,6 @@ mod tests {
                 }
             })),
             None
-        );
-    }
-
-    #[test]
-    fn servertool_followup_flow_id_reads_loop_state_only() {
-        assert_eq!(
-            read_servertool_followup_flow_id(&json!({
-                "serverToolLoopState": {
-                    "flowId": " stop_message_flow "
-                },
-                "flowId": "wrong-root"
-            })),
-            "stop_message_flow"
-        );
-        assert_eq!(
-            read_servertool_followup_flow_id(&json!({
-                "serverToolLoopState": {
-                    "flowId": " "
-                }
-            })),
-            ""
-        );
-    }
-
-    #[test]
-    fn servertool_followup_flow_id_prefers_canonical_stopless_flow_id() {
-        assert_eq!(
-            read_servertool_followup_flow_id(&json!({
-                "metadataCenterSnapshot": {
-                    "runtimeControl": {
-                        "stopless": {
-                            "flowId": " stop_message_flow "
-                        }
-                    }
-                },
-                "serverToolLoopState": {
-                    "flowId": "legacy_flow"
-                }
-            })),
-            "stop_message_flow"
         );
     }
 
@@ -2040,8 +1885,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_metadata_stop_state_wins_without_request_records() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
+    fn runtime_metadata_ignores_legacy_stop_message_state() {
+        let input = RuntimeStopMessageStateFromMetadataCenterInput {
             runtime_metadata: Some(json!({
                 "stopMessageState": {
                     "stopMessageText": " runtime text ",
@@ -2052,18 +1897,12 @@ mod tests {
             })),
         };
 
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
-            .expect("runtime snapshot");
-
-        assert_eq!(snapshot.text, "runtime text");
-        assert_eq!(snapshot.max_repeats, 4);
-        assert_eq!(snapshot.used, 1);
-        assert_ne!(snapshot.source.as_deref(), Some("client_exec_result"));
+        assert!(resolve_runtime_stop_message_state_from_metadata_center(&input).is_none());
     }
 
     #[test]
     fn runtime_metadata_does_not_restore_stopless_state_from_context_payload() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
+        let input = RuntimeStopMessageStateFromMetadataCenterInput {
             runtime_metadata: Some(json!({
                 "responsesRequestContext": {
                     "context": {
@@ -2076,12 +1915,12 @@ mod tests {
             })),
         };
 
-        assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
+        assert!(resolve_runtime_stop_message_state_from_metadata_center(&input).is_none());
     }
 
     #[test]
     fn runtime_control_stopless_is_the_only_context_state_source() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
+        let input = RuntimeStopMessageStateFromMetadataCenterInput {
             runtime_metadata: Some(json!({
                 "metadataCenterSnapshot": {
                     "continuationContext": {
@@ -2109,7 +1948,7 @@ mod tests {
             })),
         };
 
-        let snapshot = resolve_runtime_stop_message_state_from_adapter_context(&input)
+        let snapshot = resolve_runtime_stop_message_state_from_metadata_center(&input)
             .expect("runtime control stopless snapshot");
         assert_eq!(snapshot.text, "from metadata center runtime control");
         assert_eq!(snapshot.max_repeats, 3);
@@ -2122,25 +1961,25 @@ mod tests {
                 "missingFields": ["next_step"]
             }))
         );
-        assert_eq!(snapshot.source.as_deref(), Some(STOP_MESSAGE_FOLLOWUP_SOURCE));
+        assert_eq!(snapshot.source.as_deref(), Some(STOPLESS_STATE_SOURCE));
     }
 
     #[test]
     fn missing_runtime_metadata_ignores_stopless_command_seed() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
+        let input = RuntimeStopMessageStateFromMetadataCenterInput {
             runtime_metadata: None,
         };
 
-        assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
+        assert!(resolve_runtime_stop_message_state_from_metadata_center(&input).is_none());
     }
 
     #[test]
     fn missing_runtime_metadata_ignores_non_stopless_exec_output() {
-        let input = RuntimeStopMessageStateFromAdapterContextInput {
+        let input = RuntimeStopMessageStateFromMetadataCenterInput {
             runtime_metadata: None,
         };
 
-        assert!(resolve_runtime_stop_message_state_from_adapter_context(&input).is_none());
+        assert!(resolve_runtime_stop_message_state_from_metadata_center(&input).is_none());
     }
 
     #[test]
@@ -2209,7 +2048,7 @@ mod tests {
         })
         .expect("default snapshot");
 
-        assert_eq!(snapshot.text, STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT);
+        assert_eq!(snapshot.text, STOPLESS_DEFAULT_TEXT);
         assert_eq!(snapshot.max_repeats, 1);
         assert_eq!(snapshot.used, 0);
         assert_eq!(snapshot.source.as_deref(), Some("default"));
@@ -2337,7 +2176,7 @@ mod tests {
         )
         .expect("implicit gemini snapshot");
 
-        assert_eq!(snapshot.text, STOP_MESSAGE_FOLLOWUP_DEFAULT_TEXT);
+        assert_eq!(snapshot.text, STOPLESS_DEFAULT_TEXT);
         assert_eq!(snapshot.max_repeats, 1);
         assert_eq!(snapshot.used, 0);
         assert_eq!(snapshot.source.as_deref(), Some("auto"));
