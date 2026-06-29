@@ -12,7 +12,7 @@ interface BuilderOptions {
 interface BuilderState {
   id?: string;
   model?: string;
-  role: 'assistant' | 'user';
+  role?: 'assistant' | 'user';
   content: AnthropicContentBlock[];
   stopReason?: AnthropicMessageResponse['stop_reason'];
   stopSequence?: AnthropicMessageResponse['stop_sequence'];
@@ -55,7 +55,6 @@ function mergeAnthropicUsage(
 export function createAnthropicResponseBuilder(options?: BuilderOptions) {
   const state: BuilderState = {
     content: [],
-    role: 'assistant',
     completed: false
   };
   const inferStopReason = (): AnthropicMessageResponse['stop_reason'] => {
@@ -126,9 +125,11 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
         case 'message_start': {
           const payload = (event.data as any)?.message;
           if (payload) {
-            state.id = payload.id || state.id;
-            state.model = payload.model || state.model;
-            state.role = payload.role || state.role;
+            state.id = typeof payload.id === 'string' && payload.id.trim() ? payload.id.trim() : state.id;
+            state.model = typeof payload.model === 'string' && payload.model.trim() ? payload.model.trim() : state.model;
+            if (payload.role === 'assistant' || payload.role === 'user') {
+              state.role = payload.role;
+            }
             state.usage = mergeAnthropicUsage(state.usage, payload.usage);
           }
           break;
@@ -239,13 +240,31 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
           error: new Error('Anthropic SSE stream incomplete before message_stop')
         };
       }
+      if (!state.id) {
+        return {
+          success: false,
+          error: new Error('Anthropic SSE stream missing message id')
+        };
+      }
+      if (!state.role) {
+        return {
+          success: false,
+          error: new Error('Anthropic SSE stream missing message role')
+        };
+      }
+      if (!state.model) {
+        return {
+          success: false,
+          error: new Error('Anthropic SSE stream missing message model')
+        };
+      }
       return {
         success: true,
         response: {
-          id: state.id || `msg_${Date.now()}`,
+          id: state.id,
           type: 'message',
-          role: state.role || 'assistant',
-          model: state.model || 'unknown',
+          role: state.role,
+          model: state.model,
           content: state.content,
           usage: state.usage,
           stop_reason: inferStopReason(),

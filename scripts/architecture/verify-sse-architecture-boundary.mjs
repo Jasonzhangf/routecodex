@@ -127,6 +127,17 @@ for (const forbidden of [
   }
 }
 
+const anthropicResponseBuilder = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/anthropic-response-builder.ts');
+for (const forbidden of [
+  'state.id || `msg_${Date.now()}`',
+  "state.role || 'assistant'",
+  "state.model || 'unknown'",
+]) {
+  if (anthropicResponseBuilder.includes(forbidden)) {
+    failures.push(`Anthropic SSE builder resurrects message fallback: ${forbidden}`);
+  }
+}
+
 const providerNeutralProjectionFiles = [
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts',
