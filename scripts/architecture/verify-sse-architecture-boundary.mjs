@@ -191,6 +191,8 @@ for (const relPath of providerNeutralProjectionFiles) {
     'response.id || `msg_${requestId}`',
     "response.role || 'assistant'",
     'block.id || `call_${requestId}_${index}`',
+    'context.currentResponse.id || `chat_${context.requestId}`',
+    'context.currentResponse.created || Math.floor(Date.now() / 1000)',
     'call_${Math.random().toString(36).slice(2, 10)}',
     'JSON.stringify(fc?.arguments ?? {})',
     "typeof fc?.id === 'string' ? fc.id : `call_${Math.random().toString(36).slice(2, 10)}`",

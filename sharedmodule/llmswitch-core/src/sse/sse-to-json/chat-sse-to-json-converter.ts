@@ -384,6 +384,9 @@ export class ChatSseToJsonConverter {
       if (!dataValue) {
         return undefined;
       }
+      if (dataValue === '[DONE]') {
+        return undefined;
+      }
       const parsed = JSON.parse(dataValue);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
@@ -917,7 +920,9 @@ export class ChatSseToJsonConverter {
     const doneData = event.parsedData && typeof event.parsedData === 'object' && !Array.isArray(event.parsedData)
       ? event.parsedData as { totalTokens?: number }
       : typeof event.data === 'string'
-        ? JSON.parse(event.data) as { totalTokens?: number }
+        ? event.data === '[DONE]'
+          ? undefined
+          : JSON.parse(event.data) as { totalTokens?: number }
         : undefined;
     if (doneData) {
       if (typeof doneData.totalTokens === 'number') {
@@ -1076,9 +1081,9 @@ export class ChatSseToJsonConverter {
     }
 
     const response: ChatCompletionResponse = {
-      id: context.currentResponse.id || `chat_${context.requestId}`,
+      id: context.currentResponse.id,
       object: 'chat.completion',
-      created: context.currentResponse.created || Math.floor(Date.now() / 1000),
+      created: context.currentResponse.created,
       model: context.currentResponse.model,
       choices,
       usage: usage || undefined
@@ -1189,9 +1194,33 @@ export class ChatSseToJsonConverter {
    * 验证Chat chunk
    */
   private validateChatChunk(chunk: ChatCompletionChunk): void {
+    if (typeof chunk.id !== 'string' || !chunk.id.trim()) {
+      throw ErrorUtils.createError(
+        'Invalid chat completion chunk id',
+        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
+        { chunk }
+      );
+    }
+
     if (!chunk.object || chunk.object !== 'chat.completion.chunk') {
       throw ErrorUtils.createError(
         'Invalid chat completion chunk object',
+        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
+        { chunk }
+      );
+    }
+
+    if (typeof chunk.created !== 'number' || !Number.isFinite(chunk.created) || chunk.created <= 0) {
+      throw ErrorUtils.createError(
+        'Invalid chat completion chunk created timestamp',
+        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
+        { chunk }
+      );
+    }
+
+    if (typeof chunk.model !== 'string' || !chunk.model.trim()) {
+      throw ErrorUtils.createError(
+        'Invalid chat completion chunk model',
         CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
         { chunk }
       );

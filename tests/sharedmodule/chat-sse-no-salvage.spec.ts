@@ -55,4 +55,42 @@ describe('chat SSE no-salvage boundary', () => {
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
+
+  it('fails chat chunks missing upstream id instead of generating one from requestId', async () => {
+    const sseText = [
+      'event: chat_chunk',
+      'data: {"object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"hello"},"logprobs":null,"finish_reason":"stop"}]}',
+      '',
+      'event: chat.done',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_missing_id_no_synthetic',
+      model: 'gpt-4o-mini'
+    })).rejects.toMatchObject({
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
+
+  it('fails chat chunks missing created timestamp instead of using current time', async () => {
+    const sseText = [
+      'event: chat_chunk',
+      'data: {"id":"chatcmpl_missing_created","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"hello"},"logprobs":null,"finish_reason":"stop"}]}',
+      '',
+      'event: chat.done',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_missing_created_no_synthetic',
+      model: 'gpt-4o-mini'
+    })).rejects.toMatchObject({
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
 });
