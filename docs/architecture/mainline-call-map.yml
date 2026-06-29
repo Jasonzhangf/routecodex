@@ -648,11 +648,11 @@ chains:
         to_node: StoplessReq07ContinuationRestored
         caller_symbol: has_stop_message_auto_cli_result_in_request_json
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-        callee_symbol: resolve_runtime_stop_message_state_from_adapter_context
+        callee_symbol: resolve_runtime_stop_message_state_from_metadata_center
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "next request tool_outputs / runtime metadata"
-        semantic_output: "stopless runtime snapshot restored into request turn without file persistence"
+        semantic_input: "next request MetadataCenter runtime_control.stopless control signal"
+        semantic_output: "stopless runtime snapshot restored into request turn without file persistence, payload/context copying, or adapterContext carrier"
         status: anchored
         note: "Round-2 starts only after `/v1/responses` continuation restore has completed. Non-responses protocols skip continuation restore and enter the same request-side stopless hook boundary directly from standard request truth."
       - step_id: stl-06

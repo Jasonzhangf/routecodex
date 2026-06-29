@@ -126,6 +126,7 @@ const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
 const NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`;
 const NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`;
 const NATIVE_REQUIRED_EXPORTS = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`;
+const NATIVE_STOP_MESSAGE_AUTO = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`;
 const NATIVE_BUILD_SCRIPT = `${ROOT}/sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`;
 const ACTIVE_RUNTIME_SCAN_PATHS = [
   `${ROOT}/src`,
@@ -1317,7 +1318,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'pub fn plan_stop_message_persisted_state_selection',
     'pub fn plan_stop_message_routing_state_apply',
     'pub fn plan_stop_message_routing_state_clear',
-    'pub fn read_servertool_followup_flow_id',
     'pub fn resolve_bd_working_directory_for_record',
     'pub fn resolve_stop_message_followup_provider_key',
     'pub fn resolve_client_connection_state',
@@ -1327,7 +1327,7 @@ function checkStopMessagePersistedLookupRustOwner() {
     'pub fn plan_persist_stop_message_state',
     'pub fn resolve_default_stop_message_snapshot',
     'pub fn resolve_implicit_gemini_stop_message_snapshot',
-    'STOP_MESSAGE_FOLLOWUP_FLOW_ID',
+    'STOPLESS_FLOW_ID',
     'loop_state.get("maxRepeats")',
   ]) {
     assertContains(
@@ -1796,6 +1796,9 @@ function checkStopMessagePersistedLookupRustOwner() {
     [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'readServertoolFollowupFlowIdWithNative'],
     [NATIVE_REQUIRED_EXPORTS, requiredExports, '"readServertoolFollowupFlowIdJson"'],
     [STOP_MESSAGE_RUNTIME_UTILS, runtimeUtils, 'readServerToolFollowupFlowId'],
+    [RUST_SERVERTOOL_CORE_LOOKUP, rustLookup, 'pub fn read_servertool_followup_flow_id'],
+    [RUST_SERVERTOOL_CORE_LOOKUP, rustLookup, 'STOP_MESSAGE_FOLLOWUP_FLOW_ID'],
+    [NATIVE_STOP_MESSAGE_AUTO, readRequired(NATIVE_STOP_MESSAGE_AUTO), 'followupFlowId'],
   ]) {
     if (content.includes(marker)) {
       fail(
@@ -1804,19 +1807,6 @@ function checkStopMessagePersistedLookupRustOwner() {
       );
     }
   }
-  for (const keyword of [
-    'serverToolLoopState',
-    '.flowId',
-    'toNonEmptyText',
-  ]) {
-    if (followupFlowBlock.includes(keyword)) {
-      fail(
-        'servertool-followup-flow-id-ts-thin-shell',
-        `runtime-utils.ts readServerToolFollowupFlowId must not contain TS flow-id semantic "${keyword}"`
-      );
-    }
-  }
-
   const bdWorkingDirectoryBlock = extractFunctionBlock(runtimeUtils, 'resolveBdWorkingDirectoryForRecord');
   if (!bdWorkingDirectoryBlock.includes('resolveBdWorkingDirectoryForRecordWithNative')) {
     fail(

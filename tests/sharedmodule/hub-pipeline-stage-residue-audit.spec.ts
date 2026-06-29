@@ -4225,8 +4225,9 @@ describe('hub pipeline stage residue audit', () => {
     const metadataCenterStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateFromMetadataCenterWithNative');
 
     expect(rustLookupSource).toContain('pub fn resolve_runtime_stop_message_state');
-    expect(rustLookupSource).toContain('pub fn read_servertool_followup_flow_id');
-    expect(rustLookupSource).toContain('STOP_MESSAGE_FOLLOWUP_FLOW_ID');
+    expect(rustLookupSource).not.toContain('pub fn read_servertool_followup_flow_id');
+    expect(rustLookupSource).not.toContain('STOP_MESSAGE_FOLLOWUP_FLOW_ID');
+    expect(rustLookupSource).toContain('STOPLESS_FLOW_ID');
     expect(rustRuntimeStateBlock).toContain('runtime_control.get("stopless")');
     expect(rustRuntimeStateBlock).not.toContain('runtime.get("serverToolLoopState")');
     expect(rustRuntimeStateBlock).not.toContain('runtime.get("stopMessageState")');
@@ -4234,7 +4235,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
     expect(nativeWrapperSource).not.toContain('readServertoolFollowupFlowIdWithNative');
     expect(metadataCenterStateBlock).toContain('resolveRuntimeStopMessageStateFromMetadataCenterJson');
-    expect(stopMessageNativeSource).toContain('followupFlowId?: string;');
+    expect(stopMessageNativeSource).not.toContain('followupFlowId');
 
     const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${metadataCenterStateBlock}`, [
       { label: 'runtime stop state TS reads loop state', pattern: /serverToolLoopState|loopState\.maxRepeats|stopMessageState|stopMessageUsed|stopMessageText/ },

@@ -586,7 +586,7 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
                         "type": "function_call",
                         "call_id": "call_stopless_cli_1",
                         "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}'\"}"
                     },
                     {
                         "type": "function_call_output",
@@ -607,10 +607,28 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
                 "tool_choice": "auto",
                 "stream": false
             },
-            "metadata": {
-                "stopMessageEnabled": true,
-                "sessionId": "sess-stopless-cli-feedback-provider-guidance",
-                "runtime_control": {
+            "metadata": {},
+            "metadataCenterSnapshot": {
+                "requestTruth": {
+                    "requestId": "req-stopless-cli-feedback-provider-guidance",
+                    "sessionId": "sess-stopless-cli-feedback-provider-guidance"
+                },
+                "runtimeControl": {
+                    "stopMessage": {
+                        "enabled": true
+                    },
+                    "stopless": {
+                        "active": true,
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 1,
+                        "maxRepeats": 3,
+                        "triggerHint": "no_schema",
+                        "continuationPrompt": "继续推进当前任务。",
+                        "schemaFeedback": {
+                            "reasonCode": "stop_schema_missing",
+                            "missingFields": ["stopreason", "reason", "next_step"]
+                        }
+                    },
                     "preselectedRoute": {
                         "target": {
                             "providerKey": "mimo.key2.mimo-v2.5",

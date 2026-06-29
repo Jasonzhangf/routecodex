@@ -24,7 +24,6 @@ function buildMinimalDecisionContext(args: {
 }): StopMessageDecisionContext {
   return {
     port_stop_message_disabled: false,
-    followup_flow_id: undefined,
     stop_eligible: args.stopEligible,
     has_responses_submit_tool_outputs_resume: false,
     persisted_snapshot: undefined,
@@ -122,26 +121,6 @@ describe('stop-message native decision (blackbox)', () => {
       },
     };
     expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
-  });
-
-  test('stop_message followup flow remains eligible for bounded continuation', () => {
-    const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true }),
-      followup_flow_id: 'stop_message_flow',
-    };
-    const decision = decideStopMessageActionWithNative(ctx);
-    expect(decision.action).toBe('trigger');
-    expect(decision.skip_reason ?? undefined).toBeUndefined();
-  });
-
-  test('non-stop_message followup flow skips as generic followup hop', () => {
-    const ctx: StopMessageDecisionContext = {
-      ...buildMinimalDecisionContext({ stopEligible: true }),
-      followup_flow_id: 'apply_patch_flow',
-    };
-    const decision = decideStopMessageActionWithNative(ctx);
-    expect(decision.action).toBe('skip');
-    expect(decision.skip_reason).toContain('servertool_followup');
   });
 
   test('submit_tool_outputs resume remains eligible for stopless continuation', () => {

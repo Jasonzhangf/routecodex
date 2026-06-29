@@ -36,7 +36,6 @@ export interface ProviderPin {
 
 export interface StopMessageDecisionContext {
   port_stop_message_disabled: boolean;
-  followup_flow_id?: string;
   stop_eligible: boolean;
   has_responses_submit_tool_outputs_resume: boolean;
   persisted_snapshot?: StopMessageSnapshot;
@@ -86,7 +85,6 @@ export function runStopMessageAutoHandlerWithNative(input: {
   decision: StopMessageDecision;
   adapterContext: Record<string, unknown>;
   base: Record<string, unknown>;
-  followupFlowId?: string;
   candidateKeys?: string[];
 }): StopMessageHandlerResult {
   const capability = 'runStopMessageAutoHandlerJson';

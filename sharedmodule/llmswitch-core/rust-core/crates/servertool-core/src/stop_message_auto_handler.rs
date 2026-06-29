@@ -31,7 +31,6 @@ use crate::stopless_decision_context_signals::StoplessDecisionContextSignals;
 pub struct StopMessageAutoHandlerInput {
     pub base: Value,
     pub request_id: String,
-    pub followup_flow_id: Option<String>,
     pub should_run_vision_flow: bool,
     pub should_bypass_stop_message_for_media: bool,
     pub metadata_runtime_control: Option<Value>,
@@ -165,24 +164,6 @@ pub fn plan_stop_message_auto_handler(
     let metadata_center_stopless = runtime_control
         .and_then(|rc| rc.get("stopless"))
         .filter(|s| s.is_object() && !s.is_array());
-
-    // Check serverToolFollowup hop
-    let is_followup_hop = runtime_control
-        .map(|rc| rc.get("serverToolFollowup") == Some(&Value::Bool(true)))
-        .unwrap_or(false);
-
-    if is_followup_hop {
-        let stop_gateway = stop_gateway_context::inspect(&input.base);
-        let mut compare = StopMessageCompareContext::default_skip();
-        compare.stop_eligible = stop_gateway.eligible;
-        compare.decision = "skip".to_string();
-        compare.reason = "skip_servertool_followup_hop".to_string();
-        return StopMessageAutoHandlerPlan {
-            action: StopMessageAutoPlanAction::ReturnNull,
-            compare_context: compare,
-            ..Default::default()
-        };
-    }
 
     // ── Phase 2: Context ─────────────────────────────────────────────────────
     let stop_gateway = stop_gateway_context::inspect(&input.base);
@@ -459,13 +440,6 @@ fn decide_from_context(ctx: &Value) -> StopMessageDecision {
     // Port disabled
     if ctx.get("port_stop_message_disabled") == Some(&Value::Bool(true)) {
         return skip("skip_port_stopmessage_disabled");
-    }
-
-    // Followup flow
-    if let Some(ff) = ctx.get("followup_flow_id").and_then(Value::as_str) {
-        if !ff.is_empty() {
-            return skip("skip_servertool_followup_hop");
-        }
     }
 
     // Not stop eligible
@@ -952,7 +926,6 @@ mod tests {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             base: json!({}),
             request_id: "req-1".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: true,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: None,
@@ -978,7 +951,6 @@ mod tests {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             base: json!({}),
             request_id: "req-2".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: true,
             metadata_runtime_control: None,
@@ -1011,7 +983,6 @@ mod tests {
                 }]
             }),
             request_id: "req-3".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: None,
@@ -1035,38 +1006,10 @@ mod tests {
     }
 
     #[test]
-    fn servertool_followup_hop_skips() {
-        let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
-            base: json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "content": "ok" } }] }),
-            request_id: "req-4".to_string(),
-            followup_flow_id: Some("__servertool_followup__".to_string()),
-            should_run_vision_flow: false,
-            should_bypass_stop_message_for_media: false,
-            metadata_runtime_control: Some(json!({ "serverToolFollowup": true })),
-            metadata_previous_compare: None,
-            default_config: StopMessageDefaultConfigPlan {
-                enabled: true,
-                text: "continue".to_string(),
-                max_repeats: 3,
-            },
-            decision_signals: StoplessDecisionContextSignals {
-                port_stop_message_disabled: false,
-                has_responses_submit_tool_outputs_resume: false,
-                plan_mode_active: false,
-            },
-            effective_runtime_loop_state: None,
-            provider_key: None,
-        });
-        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnNull);
-        assert_eq!(plan.compare_context.reason, "skip_servertool_followup_hop");
-    }
-
-    #[test]
     fn budget_exhausted_returns_terminal() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             base: json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "content": "done" } }] }),
             request_id: "req-5".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: None,
@@ -1096,7 +1039,6 @@ mod tests {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             base: json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "content": "test" } }] }),
             request_id: "req-6".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1150,7 +1092,6 @@ mod tests {
                 }]
             }),
             request_id: "req-7".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1203,7 +1144,6 @@ mod tests {
                 }]
             }),
             request_id: "req-8".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1257,7 +1197,6 @@ mod tests {
                 }]
             }),
             request_id: "req-9".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: None,
@@ -1306,7 +1245,6 @@ mod tests {
                 ]
             }),
             request_id: "req-empty-responses".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1361,7 +1299,6 @@ mod tests {
                 }]
             }),
             request_id: "req-budget-terminal-visible".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1440,7 +1377,6 @@ mod tests {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             base,
             request_id: "req-complete-schema-budget-boundary".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1496,7 +1432,6 @@ mod tests {
                 }]
             }),
             request_id: "req-10".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1545,7 +1480,6 @@ mod tests {
                 }]
             }),
             request_id: "req-11".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1598,7 +1532,6 @@ mod tests {
                 }]
             }),
             request_id: "req-blocked-user-decision".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({
@@ -1678,7 +1611,6 @@ mod tests {
                 "output_text": "继续执行中"
             }),
             request_id: "req-submit-tool-outputs-stopless".to_string(),
-            followup_flow_id: None,
             should_run_vision_flow: false,
             should_bypass_stop_message_for_media: false,
             metadata_runtime_control: Some(json!({

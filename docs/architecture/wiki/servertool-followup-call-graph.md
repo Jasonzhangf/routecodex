@@ -90,7 +90,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `hub.servertool_followup` | followup orchestration + post-followup governed truth | `run_servertool_response_stage_json`, `plan_servertool_outcome_json`, `project_hub_resp_outbound_04_from_hub_resp_chatprocess_03` | `src/providers`, `src/server` |
 | `hub.servertool_cli_projection` | generic servertool -> client `exec_command` projection | `build_servertool_cli_projection_01_from_hub_resp_chatprocess_03` | provider runtime / executor local projection |
-| `hub.servertool_stopless_cli_continuation` | stopless runtime-metadata + current-turn tool-output continuation planning | `plan_stopless_orchestration_action`, `resolve_runtime_stop_message_state_from_adapter_context`, `plan_client_exec_cli_projection_output` | handler-local stopless logic / TS reenter |
+| `hub.servertool_stopless_cli_continuation` | stopless runtime-metadata control continuation planning | `plan_stopless_orchestration_action`, `resolve_runtime_stop_message_state_from_metadata_center`, `plan_client_exec_cli_projection_output` | handler-local stopless logic / TS reenter / adapterContext state |
 | `hub.servertool_orchestration_policy` | timeout, disconnect, provider pin, followup error policy | `resolve_adapter_context_provider_key`, `compact_followup_error_reason` | scattered handler/executor policy |
 
 ## Followup vs CLI

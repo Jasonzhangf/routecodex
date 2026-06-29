@@ -43,7 +43,6 @@ pub enum SnapshotSource {
 #[serde(rename_all = "camelCase")]
 pub enum SkipReason {
     PortDisabled,
-    ServertoolFollowupHop,
     ResponsesSubmitToolOutputsResume,
     ExplicitModeOff,
     ExplicitModeWithoutSnapshot,
@@ -61,7 +60,6 @@ impl SkipReason {
     pub fn as_str(&self) -> &'static str {
         match self {
             SkipReason::PortDisabled => "skip_port_stopmessage_disabled",
-            SkipReason::ServertoolFollowupHop => "skip_servertool_followup_hop",
             SkipReason::ResponsesSubmitToolOutputsResume => {
                 "skip_responses_submit_tool_outputs_resume"
             }
@@ -101,8 +99,6 @@ pub struct StopMessageDecisionContext {
     // Port gate
     pub port_stop_message_disabled: bool,
 
-    // Servertool followup context
-    pub followup_flow_id: Option<String>,
     pub stop_eligible: bool,
     /// Deprecated carrier kept for input compatibility. Finish reason truth is
     /// owned by chat process stop-gateway classification.
@@ -1402,11 +1398,6 @@ fn decide_stop_message_skip(ctx: &StopMessageDecisionContext) -> Option<SkipReas
     if ctx.port_stop_message_disabled {
         return Some(SkipReason::PortDisabled);
     }
-    if let Some(flow_id) = ctx.followup_flow_id.as_deref() {
-        if flow_id != "stop_message_flow" {
-            return Some(SkipReason::ServertoolFollowupHop);
-        }
-    }
     if matches!(ctx.explicit_mode, Some(StageMode::Off)) {
         return Some(SkipReason::ExplicitModeOff);
     }
@@ -1517,7 +1508,6 @@ mod tests {
     fn base_ctx() -> StopMessageDecisionContext {
         StopMessageDecisionContext {
             port_stop_message_disabled: false,
-            followup_flow_id: None,
             stop_eligible: true,
             finish_reasons: Some(vec!["stop".to_string()]),
             has_responses_submit_tool_outputs_resume: false,
@@ -1570,12 +1560,10 @@ mod tests {
     }
 
     #[test]
-    fn triggers_when_no_followup_context_and_default_enabled() {
+    fn triggers_when_default_enabled() {
         let mut ctx = base_ctx();
-        ctx.followup_flow_id = None; // NOT a followup context
-        ctx.default_enabled = true; // Default is ON
+        ctx.default_enabled = true;
         let result = decide(&ctx);
-        // Default now applies even without followup flow context.
         assert_eq!(result.action, Action::Trigger);
         let text = result.followup_text.expect("followup text");
         assert!(text.contains("stop schema"));
@@ -1729,9 +1717,8 @@ mod tests {
     }
 
     #[test]
-    fn triggers_when_persisted_snapshot_exists_even_without_followup_context() {
+    fn triggers_when_persisted_snapshot_exists() {
         let mut ctx = base_ctx();
-        ctx.followup_flow_id = None;
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "继续执行".to_string(),
             provider_key: None,
@@ -1818,32 +1805,12 @@ mod tests {
     }
 
     #[test]
-    fn skips_when_no_followup_context_and_not_eligible() {
+    fn skips_when_not_stop_eligible() {
         let mut ctx = base_ctx();
-        ctx.followup_flow_id = None;
         ctx.stop_eligible = false;
         let result = decide(&ctx);
         assert_eq!(result.action, Action::Skip);
         assert_eq!(result.skip_reason.unwrap(), "skip_not_stop_finish_reason");
-    }
-
-    #[test]
-    fn stop_message_followup_flow_remains_eligible_for_bounded_continuation() {
-        let mut ctx = base_ctx();
-        ctx.followup_flow_id = Some("stop_message_flow".to_string());
-        let result = decide(&ctx);
-        assert_eq!(result.action, Action::Trigger);
-        assert_eq!(result.used, 0);
-        assert_eq!(result.max_repeats, 3);
-    }
-
-    #[test]
-    fn non_stop_message_followup_flow_short_circuits_stop_message() {
-        let mut ctx = base_ctx();
-        ctx.followup_flow_id = Some("apply_patch_flow".to_string());
-        let result = decide(&ctx);
-        assert_eq!(result.action, Action::Skip);
-        assert_eq!(result.skip_reason.unwrap(), "skip_servertool_followup_hop");
     }
 
     #[test]
@@ -1862,7 +1829,6 @@ mod tests {
     #[test]
     fn explicit_mode_on_without_snapshot_skips() {
         let mut ctx = base_ctx();
-        ctx.followup_flow_id = None;
         ctx.persisted_snapshot = None;
         ctx.runtime_snapshot = None;
         ctx.explicit_mode = Some(StageMode::On);
@@ -1945,9 +1911,8 @@ mod tests {
     }
 
     #[test]
-    fn stop_message_followup_runtime_snapshot_uses_budgeted_snapshot() {
+    fn stop_message_runtime_snapshot_uses_budgeted_snapshot() {
         let mut ctx = base_ctx();
-        ctx.followup_flow_id = Some("stop_message_flow".to_string());
         ctx.persisted_snapshot = Some(StopMessageSnapshot {
             text: "persisted".to_string(),
             provider_key: None,
