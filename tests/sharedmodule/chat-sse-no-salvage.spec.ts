@@ -21,4 +21,23 @@ describe('chat SSE no-salvage boundary', () => {
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
+
+  it('fails fast on malformed chat.done payloads instead of swallowing parse errors', async () => {
+    const sseText = [
+      'event: chat_chunk',
+      'data: {"id":"chatcmpl_done_parse","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"hello"},"logprobs":null,"finish_reason":null}]}',
+      '',
+      'event: chat.done',
+      'data: {"totalTokens":',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_done_parse_error',
+      model: 'gpt-4o-mini'
+    })).rejects.toMatchObject({
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
 });

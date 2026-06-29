@@ -918,20 +918,15 @@ export class ChatSseToJsonConverter {
   ): Promise<void> {
     context.isCompleted = true;
 
-    // 解析done事件数据（如果有的话）
-    try {
-      const doneData = event.parsedData && typeof event.parsedData === 'object' && !Array.isArray(event.parsedData)
-        ? event.parsedData as { totalTokens?: number }
-        : typeof event.data === 'string'
-          ? JSON.parse(event.data) as { totalTokens?: number }
-          : undefined;
-      if (doneData) {
-        if (typeof doneData.totalTokens === 'number') {
-          context.eventStats.totalTokens = doneData.totalTokens;
-        }
+    const doneData = event.parsedData && typeof event.parsedData === 'object' && !Array.isArray(event.parsedData)
+      ? event.parsedData as { totalTokens?: number }
+      : typeof event.data === 'string'
+        ? JSON.parse(event.data) as { totalTokens?: number }
+        : undefined;
+    if (doneData) {
+      if (typeof doneData.totalTokens === 'number') {
+        context.eventStats.totalTokens = doneData.totalTokens;
       }
-    } catch (e) {
-      // 忽略解析错误
     }
   }
 
