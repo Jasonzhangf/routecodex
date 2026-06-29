@@ -278,6 +278,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planRuntimePreCommandStateRuntimeActionJson",
   "planPreCommandHookAttemptJson",
   "planPreCommandHookCompletionJson",
+  "planPreCommandHookEventPayloadJson",
   "planAutoHookRuntimeAttemptJson",
   "planAutoHookCallerFinalizationJson",
   "planServertoolExecutionBranchJson",

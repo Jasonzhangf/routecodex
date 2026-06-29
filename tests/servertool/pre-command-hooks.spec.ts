@@ -11,6 +11,10 @@ import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conve
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import type { ServerToolAutoHookTraceEvent } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 
+const PRE_COMMAND_HOOKS_SOURCE = path.join(
+  process.cwd(),
+  'sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts'
+);
 const HOOK_DIR = path.join(process.cwd(), 'tmp', 'jest-pre-command-hooks');
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
@@ -123,6 +127,14 @@ describe('servertool pre-command hooks', () => {
     } else {
       process.env.ROUTECODEX_USER_DIR = originalUserDir;
     }
+  });
+
+  test('pre-command shell does not own argument parsing or event payload semantics', () => {
+    const source = fs.readFileSync(PRE_COMMAND_HOOKS_SOURCE, 'utf8');
+    expect(source).not.toContain('function buildPreCommandHookEventPayload(');
+    expect(source).not.toContain('function parseToolArgumentsObject(');
+    expect(source).not.toContain('function extractCommandText(');
+    expect(source).toContain('planPreCommandHookEventPayloadWithNative');
   });
 
   test('applies jq transform in pre-command phase when jq is available', async () => {

@@ -10,6 +10,7 @@ import type {
 import {
   planPreCommandHookAttemptWithNative,
   planPreCommandHookCompletionWithNative,
+  planPreCommandHookEventPayloadWithNative,
   planPreCommandHooksConfigWithNative,
   planRuntimePreCommandRuleWithNative,
   type PreCommandHookRulePlan
@@ -124,8 +125,6 @@ export function runPreCommandHooks(options: PreCommandHookRunOptions): PreComman
   const traces: ServerToolAutoHookTraceEvent[] = [];
   let changed = false;
   let currentArguments = options.toolArguments;
-  let currentParsedArgs = parseToolArgumentsObject(currentArguments);
-  let currentCommandText = extractCommandText(currentParsedArgs, currentArguments);
   for (const [index, hook] of config.hooks.entries()) {
     const attemptPlan = planPreCommandHookAttemptWithNative({
       hook,
@@ -150,10 +149,20 @@ export function runPreCommandHooks(options: PreCommandHookRunOptions): PreComman
     try {
       let matched = false;
       let hookChanged = false;
+      const eventPlan = () => planPreCommandHookEventPayloadWithNative({
+        requestId: options.requestId,
+        entryEndpoint: options.entryEndpoint,
+        providerProtocol: options.providerProtocol,
+        toolName: options.toolName,
+        toolCallId: options.toolCallId,
+        toolArguments: currentArguments,
+        hookId: execution.hookId
+      });
       if (execution.runtimeScriptPath) {
+        const payloadPlan = eventPlan();
         const runtimeOutput = runRuntimeScriptHook(
           execution.runtimeScriptPath,
-          buildPreCommandHookEventPayload(options, execution.hookId, currentParsedArgs, currentArguments, currentCommandText),
+          payloadPlan.eventPayload,
           execution.timeoutMs
         );
 
@@ -161,30 +170,26 @@ export function runPreCommandHooks(options: PreCommandHookRunOptions): PreComman
           changed = true;
           hookChanged = true;
           currentArguments = runtimeOutput;
-          currentParsedArgs = parseToolArgumentsObject(currentArguments);
-          currentCommandText = extractCommandText(currentParsedArgs, currentArguments);
         }
         matched = true;
       }
 
       if (execution.jqExpression) {
-        const jqInput = currentParsedArgs ?? { args_raw: currentArguments };
-        const transformed = runJqTransform(execution.jqExpression, jqInput, execution.timeoutMs);
-        currentParsedArgs = transformed;
+        const transformed = runJqTransform(execution.jqExpression, eventPlan().jqInput, execution.timeoutMs);
         const nextArgs = JSON.stringify(transformed);
         if (nextArgs !== currentArguments) {
           changed = true;
           hookChanged = true;
           currentArguments = nextArgs;
-          currentCommandText = extractCommandText(currentParsedArgs, currentArguments);
         }
         matched = true;
       }
 
       if (execution.shellCommand) {
+        const payloadPlan = eventPlan();
         runShellCommandHook(
           execution.shellCommand,
-          buildPreCommandHookEventPayload(options, execution.hookId, currentParsedArgs, currentArguments, currentCommandText),
+          payloadPlan.eventPayload,
           execution.timeoutMs
         );
         matched = true;
@@ -319,53 +324,6 @@ function isMissingFileError(error: unknown): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? 'unknown_error');
-}
-
-function buildPreCommandHookEventPayload(
-  options: PreCommandHookRunOptions,
-  hookId: string,
-  currentParsedArgs: Record<string, unknown> | null,
-  currentArguments: string,
-  currentCommandText: string
-): Record<string, unknown> {
-  return {
-    requestId: options.requestId,
-    entryEndpoint: options.entryEndpoint,
-    providerProtocol: options.providerProtocol,
-    toolName: options.toolName.trim().toLowerCase(),
-    toolCallId: options.toolCallId,
-    arguments: currentParsedArgs ?? { args_raw: currentArguments },
-    command: currentCommandText,
-    hookId
-  };
-}
-
-function parseToolArgumentsObject(raw: string): Record<string, unknown> | null {
-  if (typeof raw !== 'string' || !raw.trim()) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function extractCommandText(args: Record<string, unknown> | null, rawArgs: string): string {
-  if (args && typeof args.cmd === 'string' && args.cmd.trim()) {
-    return args.cmd.trim();
-  }
-  if (args && typeof args.command === 'string' && args.command.trim()) {
-    return args.command.trim();
-  }
-  if (typeof rawArgs === 'string' && rawArgs.trim()) {
-    return rawArgs.trim();
-  }
-  return '';
 }
 
 function runJqTransform(

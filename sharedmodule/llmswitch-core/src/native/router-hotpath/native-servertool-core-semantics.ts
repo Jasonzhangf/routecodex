@@ -202,6 +202,12 @@ export interface PreCommandHookCompletionPlan {
   traceEvent: AutoHookTraceEventPlan;
 }
 
+export interface PreCommandHookEventPayloadPlan {
+  eventPayload: Record<string, unknown>;
+  jqInput: Record<string, unknown>;
+  command: string;
+}
+
 export interface AutoHookTraceEventPlan {
   hookId: string;
   phase: string;
@@ -2094,6 +2100,27 @@ export function planPreCommandHookCompletionWithNative(input: {
   return parsePreCommandHookCompletionPlan(JSON.parse(resultJson) as unknown, capability);
 }
 
+export function planPreCommandHookEventPayloadWithNative(input: {
+  requestId: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  toolName: string;
+  toolCallId: string;
+  toolArguments: string;
+  hookId: string;
+}): PreCommandHookEventPayloadPlan {
+  const capability = 'planPreCommandHookEventPayloadJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPreCommandHookEventPayloadJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPreCommandHookEventPayloadJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parsePreCommandHookEventPayloadPlan(JSON.parse(resultJson) as unknown, capability);
+}
+
 export function planAutoHookRuntimeAttemptWithNative(input: {
   hookId: string;
   phase: string;
@@ -3179,6 +3206,29 @@ function parsePreCommandHookCompletionPlan(value: unknown, capability: string): 
   return {
     action: record.action,
     traceEvent: parseAutoHookTraceEventPlan(record.traceEvent, capability)
+  };
+}
+
+function parsePreCommandHookEventPayloadPlan(value: unknown, capability: string): PreCommandHookEventPayloadPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${capability} native returned invalid event payload plan`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    !record.eventPayload ||
+    typeof record.eventPayload !== 'object' ||
+    Array.isArray(record.eventPayload) ||
+    !record.jqInput ||
+    typeof record.jqInput !== 'object' ||
+    Array.isArray(record.jqInput) ||
+    typeof record.command !== 'string'
+  ) {
+    throw new Error(`${capability} native returned malformed event payload plan`);
+  }
+  return {
+    eventPayload: record.eventPayload as Record<string, unknown>,
+    jqInput: record.jqInput as Record<string, unknown>,
+    command: record.command
   };
 }
 

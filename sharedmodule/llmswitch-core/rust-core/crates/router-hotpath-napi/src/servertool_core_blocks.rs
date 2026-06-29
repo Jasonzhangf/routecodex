@@ -437,6 +437,14 @@ pub fn plan_pre_command_hook_completion_json(input_json: &str) -> Result<String,
         .map_err(|e| format!("serialize pre-command hook completion plan: {e}"))
 }
 
+pub fn plan_pre_command_hook_event_payload_json(input_json: &str) -> Result<String, String> {
+    let input: pre_command_hook_contract::PreCommandHookEventPayloadInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pre-command hook event payload input: {e}"))?;
+    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_event_payload(input))
+        .map_err(|e| format!("serialize pre-command hook event payload plan: {e}"))
+}
+
 pub fn plan_auto_hook_runtime_attempt_json(input_json: &str) -> Result<String, String> {
     let input: auto_hook_runtime_contract::AutoHookRuntimeAttemptInput =
         serde_json::from_str(input_json)
@@ -2037,6 +2045,25 @@ mod tests {
         assert_eq!(runtime_plan["id"], "runtime_precommand:rewrite.sh");
         assert_eq!(runtime_plan["timeoutMs"], 1500);
         assert_eq!(runtime_plan["runtimeScriptPath"], "/tmp/rewrite.sh");
+
+        let payload = plan_pre_command_hook_event_payload_json(
+            &json!({
+                "requestId": "req-pre-command",
+                "entryEndpoint": "/v1/responses",
+                "providerProtocol": "openai-responses",
+                "toolName": " EXEC_COMMAND ",
+                "toolCallId": "call-1",
+                "toolArguments": json!({ "cmd": "npm test" }).to_string(),
+                "hookId": "hook-1"
+            })
+            .to_string(),
+        )
+        .expect("pre-command event payload plan");
+        let payload_plan: serde_json::Value =
+            serde_json::from_str(&payload).expect("pre-command event payload json");
+        assert_eq!(payload_plan["command"], "npm test");
+        assert_eq!(payload_plan["jqInput"]["cmd"], "npm test");
+        assert_eq!(payload_plan["eventPayload"]["toolName"], "exec_command");
     }
 
     #[test]

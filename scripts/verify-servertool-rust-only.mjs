@@ -3468,6 +3468,9 @@ function checkPreCommandHooksRustOwner() {
     '.replace(/[^a-zA-Z0-9_.-]+/g',
     'hook.toolNames.has(',
     'hook.cmdRegex && !hook.cmdRegex.test(',
+    'function buildPreCommandHookEventPayload(',
+    'function parseToolArgumentsObject(',
+    'function extractCommandText(',
     "reason: 'tool_mismatch'",
     "reason: 'cmd_regex_mismatch'",
     "result: 'miss'",
@@ -3482,6 +3485,39 @@ function checkPreCommandHooksRustOwner() {
         `Forbidden TS pre-command hook semantic "${keyword}" found in pre-command-hooks.ts`
       );
     }
+  }
+  for (const [file, marker] of [
+    [
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs`,
+      'pub fn plan_pre_command_hook_event_payload',
+    ],
+    [
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
+      'plan_pre_command_hook_event_payload_json',
+    ],
+    [
+      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
+      'pub fn plan_pre_command_hook_event_payload_json',
+    ],
+    [
+      NATIVE_REQUIRED_EXPORTS,
+      'planPreCommandHookEventPayloadJson',
+    ],
+    [
+      `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
+      'planPreCommandHookEventPayloadWithNative',
+    ],
+    [
+      TS_PRE_COMMAND_HOOKS,
+      'planPreCommandHookEventPayloadWithNative',
+    ],
+  ]) {
+    assertContains(
+      'servertool-pre-command-hook-event-payload-rust-owner',
+      file,
+      readRequired(file),
+      marker
+    );
   }
   if (/onAutoHookTrace[\s\S]{0,140}catch\s*\{/.test(preCommandShell)) {
     fail(

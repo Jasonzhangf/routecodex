@@ -172,6 +172,26 @@ pub struct PreCommandHookCompletionPlan {
     pub trace_event: PreCommandHookTraceEventPlan,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHookEventPayloadInput {
+    pub request_id: String,
+    pub entry_endpoint: String,
+    pub provider_protocol: String,
+    pub tool_name: String,
+    pub tool_call_id: String,
+    pub tool_arguments: String,
+    pub hook_id: String,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHookEventPayloadPlan {
+    pub event_payload: Value,
+    pub jq_input: Value,
+    pub command: String,
+}
+
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PreCommandHookCompletionAction {
@@ -387,6 +407,30 @@ pub fn plan_pre_command_hook_completion(
                 "no_action"
             },
         ),
+    }
+}
+
+pub fn plan_pre_command_hook_event_payload(
+    input: PreCommandHookEventPayloadInput,
+) -> PreCommandHookEventPayloadPlan {
+    let parsed_args = parse_tool_arguments_object(&input.tool_arguments);
+    let command = extract_command_text(parsed_args.as_ref(), &input.tool_arguments);
+    let arguments = parsed_args
+        .clone()
+        .unwrap_or_else(|| json!({ "args_raw": input.tool_arguments }));
+    PreCommandHookEventPayloadPlan {
+        event_payload: json!({
+            "requestId": input.request_id,
+            "entryEndpoint": input.entry_endpoint,
+            "providerProtocol": input.provider_protocol,
+            "toolName": normalize_runtime_tool_name(&input.tool_name),
+            "toolCallId": input.tool_call_id,
+            "arguments": arguments,
+            "command": command,
+            "hookId": input.hook_id,
+        }),
+        jq_input: parsed_args.unwrap_or_else(|| json!({ "args_raw": input.tool_arguments })),
+        command,
     }
 }
 
@@ -672,10 +716,12 @@ fn command_matches_regex(plan: Option<&PreCommandRegexPlan>, command: &str) -> b
 mod tests {
     use super::{
         plan_pre_command_hook_attempt, plan_pre_command_hook_completion,
-        plan_pre_command_hooks_config, plan_runtime_pre_command_rule,
+        plan_pre_command_hook_event_payload, plan_pre_command_hooks_config,
+        plan_runtime_pre_command_rule,
         plan_runtime_pre_command_state_runtime_action, plan_runtime_pre_command_state_selection,
         PreCommandHookAttemptAction, PreCommandHookAttemptInput, PreCommandHookCompletionInput,
-        PreCommandHookCompletionAction, PreCommandHookTraceResult, PreCommandHooksConfigPlanInput,
+        PreCommandHookCompletionAction, PreCommandHookEventPayloadInput,
+        PreCommandHookTraceResult, PreCommandHooksConfigPlanInput,
         RuntimePreCommandRulePlanInput, RuntimePreCommandStateRuntimeAction, RuntimePreCommandStateRuntimeActionInput,
         RuntimePreCommandStateSelectionAction, RuntimePreCommandStateSelectionInput,
         RuntimePreCommandStateSource,
@@ -919,5 +965,36 @@ mod tests {
         assert_eq!(error.action, PreCommandHookCompletionAction::FailFast);
         assert_eq!(error.trace_event.result, PreCommandHookTraceResult::Error);
         assert_eq!(error.trace_event.reason, "jq_failed:1");
+    }
+
+    #[test]
+    fn pre_command_hook_event_payload_extracts_arguments_command_and_jq_input() {
+        let plan = plan_pre_command_hook_event_payload(PreCommandHookEventPayloadInput {
+            request_id: "req-1".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            tool_name: " EXEC_COMMAND ".to_string(),
+            tool_call_id: "call-1".to_string(),
+            tool_arguments: json!({ "cmd": " npm test ", "workdir": "/tmp" }).to_string(),
+            hook_id: "hook-1".to_string(),
+        });
+        assert_eq!(plan.command, "npm test");
+        assert_eq!(plan.jq_input["cmd"], " npm test ");
+        assert_eq!(plan.event_payload["requestId"], "req-1");
+        assert_eq!(plan.event_payload["toolName"], "exec_command");
+        assert_eq!(plan.event_payload["arguments"]["workdir"], "/tmp");
+
+        let raw = plan_pre_command_hook_event_payload(PreCommandHookEventPayloadInput {
+            request_id: "req-raw".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            tool_name: "shell".to_string(),
+            tool_call_id: "call-raw".to_string(),
+            tool_arguments: "not-json".to_string(),
+            hook_id: "hook-raw".to_string(),
+        });
+        assert_eq!(raw.command, "not-json");
+        assert_eq!(raw.jq_input, json!({ "args_raw": "not-json" }));
+        assert_eq!(raw.event_payload["arguments"], json!({ "args_raw": "not-json" }));
     }
 }
