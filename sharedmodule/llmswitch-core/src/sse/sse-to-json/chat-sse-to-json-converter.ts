@@ -574,30 +574,7 @@ export class ChatSseToJsonConverter {
   }
 
   private parseChatChunkPayload(payload: string): unknown[] {
-    try {
-      return [JSON.parse(payload) as unknown];
-    } catch (primaryError) {
-      const segments = payload
-        .split('\n')
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0);
-      if (segments.length <= 1) {
-        throw primaryError;
-      }
-
-      const parsed: unknown[] = [];
-      for (const segment of segments) {
-        try {
-          parsed.push(JSON.parse(segment) as unknown);
-        } catch {
-          // Ignore non-JSON lines so valid partial frames can still be recovered.
-        }
-      }
-      if (!parsed.length) {
-        throw primaryError;
-      }
-      return parsed;
-    }
+    return [JSON.parse(payload) as unknown];
   }
 
   private ensureChoiceBuilder(
