@@ -137,7 +137,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   });
 
   if (outcomeRuntimeActionPlan.action === 'return_mixed_client_tools_pending_injection') {
-    const clientResponse = structuredClone(args.base);
+    const clientResponse = args.base;
     args.filterOutExecutedToolCalls(clientResponse, args.executionState.executedIds);
     args.stripToolOutputs(clientResponse);
     return {

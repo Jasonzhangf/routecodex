@@ -26,6 +26,7 @@ const TARGETS = [
       '[servertool] vision_analysis backend requires reenterPipeline',
       '[servertool] unsupported backend plan kind:',
       "if (planHandlerMaterializationAction(planned, options) === 'handler_plan')",
+      'structuredClone(args.base)',
     ],
   },
   {

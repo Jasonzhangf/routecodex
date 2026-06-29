@@ -5481,6 +5481,7 @@ function checkServertoolRustOutcomeCloseout() {
     "await import('./builtin-handler-catalog.js')",
     'getBuiltinHandlerEntry(args.builtinName)',
     'builtin handler missing execution descriptor',
+    'structuredClone(args.base)',
   ]) {
     if (executionMaterializationShell.includes(marker)) {
       fail(

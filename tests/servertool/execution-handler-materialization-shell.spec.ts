@@ -36,6 +36,17 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
     buildServertoolOutcomePlanInputWithNative,
+    getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => ({})),
+    normalizeServertoolRegistrationSpecWithNative: jest.fn(() => null),
+    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({ entries: [] })),
+    planServertoolBuiltinHandlerEntryWithNative: jest.fn(() => ({ action: 'return_none' })),
+    planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({ names: [] })),
+    planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({ entries: [] })),
+    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(() => ({ action: 'return_none' })),
+    planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({ toolSpecList: [] })),
+    resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
+    resolveServertoolBuiltinHandlerEntryWithNative: jest.fn(() => null),
+    resolveServertoolToolSpecWithNative: jest.fn(() => null),
     planServertoolOutcomeWithNative
   })
 );
@@ -179,7 +190,8 @@ describe('execution-handler-materialization-shell', () => {
 
     expect(source).toContain('adapterContext: args.options.adapterContext');
     expect(source).toContain('baseForExecution: args.baseForExecution');
-    expect(source).toContain('const clientResponse = structuredClone(args.base);');
+    expect(source).toContain('const clientResponse = args.base;');
+    expect(source).not.toContain('structuredClone(args.base)');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId ===');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===');
     expect(source).not.toContain('Array.isArray((args.baseForExecution as any).tool_outputs)');
