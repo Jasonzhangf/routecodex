@@ -6,7 +6,8 @@ import {
 } from './skeleton-config.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 
-async function runStoplessBuiltinHandlerForRuntimeNapi(
+async function runBuiltinHandlerForRuntimeNapi(
+  name: string,
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerResult | null> {
   const fn = readNativeFunction('runStoplessBuiltinHandlerForRuntimeJson');
@@ -14,6 +15,7 @@ async function runStoplessBuiltinHandlerForRuntimeNapi(
     throw new Error('runStoplessBuiltinHandlerForRuntimeJson native unavailable');
   }
   const raw = fn(JSON.stringify({
+    name,
     base: ctx.base,
     requestId: ctx.requestId,
     runtimeMetadata: ctx.runtimeMetadata ?? null,
@@ -31,10 +33,7 @@ async function runBuiltinHandler(
   name: string,
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerResult | null> {
-  if (name === 'stop_message_auto') {
-    return runStoplessBuiltinHandlerForRuntimeNapi(ctx);
-  }
-  throw new Error(`[servertool] unsupported builtin handler runtime: ${name}`);
+  return runBuiltinHandlerForRuntimeNapi(name, ctx);
 }
 
 export async function __executeBuiltinHandlerForRuntime(

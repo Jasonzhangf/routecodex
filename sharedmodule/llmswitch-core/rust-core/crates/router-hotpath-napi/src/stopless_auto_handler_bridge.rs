@@ -284,6 +284,17 @@ pub fn run_stopless_auto_handler_runtime_json(input_json: String) -> NapiResult<
 
 #[napi]
 pub fn run_stopless_builtin_handler_for_runtime_json(input_json: String) -> NapiResult<String> {
+    let input_value: Value = serde_json::from_str(&input_json).map_err(|e| {
+        napi::Error::from_reason(format!("deserialize StoplessBuiltinHandlerRuntimeInput: {e}"))
+    })?;
+    let name = read_trimmed_string(input_value.get("name")).ok_or_else(|| {
+        napi::Error::from_reason("[servertool] missing builtin handler name")
+    })?;
+    if name != "stop_message_auto" {
+        return Err(napi::Error::from_reason(format!(
+            "[servertool] unsupported builtin handler runtime: {name}"
+        )));
+    }
     let runtime_raw = run_stopless_auto_handler_runtime_json(input_json)?;
     let runtime_output: StoplessAutoHandlerRuntimeOutput =
         serde_json::from_str(&runtime_raw).map_err(|e| {

@@ -5544,6 +5544,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     "runtime.action === 'return_null'",
     "runtime.action === 'throw_error'",
     "runtime.action !== 'return_handler_result'",
+    "name === 'stop_message_auto'",
     "'return_terminal_final'",
     "'return_schema_fail_fast'",
     "'return_schema_allow_stop'",

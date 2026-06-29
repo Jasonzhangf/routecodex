@@ -343,7 +343,7 @@ describe('stop-message-auto native-catalog audit', () => {
     const source = fs.readFileSync(repoPath('sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts'), 'utf8');
 
     expect(source).toContain('runStoplessBuiltinHandlerForRuntimeJson');
-    expect(source).toContain('runStoplessBuiltinHandlerForRuntimeNapi');
+    expect(source).toContain('runBuiltinHandlerForRuntimeNapi');
     expect(source).toContain('function runBuiltinHandler(');
 
     const forbidden = [
@@ -353,6 +353,7 @@ describe('stop-message-auto native-catalog audit', () => {
       "runtime.action === 'throw_error'",
       "runtime.action !== 'return_handler_result'",
       "case 'stop_message_auto'",
+      "name === 'stop_message_auto'",
       'readPersistedStopMessageSnapshotFromCandidateKeys',
       'readPersistedStopMessageStageModeFromCandidateKeys',
       'readPersistedStopMessageTombstoneFromCandidateKeys',
