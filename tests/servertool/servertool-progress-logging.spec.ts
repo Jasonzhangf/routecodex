@@ -7,6 +7,17 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 import { serializeRoutingInstructionState, type RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 type ProgressFileLoggerModule = {
+  appendServerToolProgressFileEvent?: (event: {
+    requestId: string;
+    flowId: string;
+    tool: string;
+    stage: string;
+    result: string;
+    message: string;
+    step: number;
+    entryEndpoint?: string;
+    providerProtocol?: string;
+  }) => void;
   flushServerToolProgressFileLoggerForTests?: () => Promise<void>;
   resetServerToolProgressFileLoggerForTests?: () => void;
 };
@@ -753,6 +764,60 @@ describe('servertool progress logging', () => {
       } catch {}
       try {
         fs.unlinkSync(logPath);
+      } catch {}
+    }
+  });
+
+  test('enabled servertool JSONL file logging exposes write failures', async () => {
+    const logRoot = path.join(process.cwd(), 'tmp', 'jest-servertool-file-log-failfast');
+    fs.mkdirSync(logRoot, { recursive: true });
+    const fileAsParent = path.join(logRoot, `not-a-dir-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.writeFileSync(fileAsParent, 'not a directory', 'utf8');
+
+    const originalEnable = process.env.ROUTECODEX_SERVERTOOL_FILE_LOG;
+    const originalPath = process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH;
+
+    const mod = (await import(
+      '../../sharedmodule/llmswitch-core/src/servertool/log/progress-file.js'
+    )) as ProgressFileLoggerModule;
+    const append = mod.appendServerToolProgressFileEvent;
+    const flush = mod.flushServerToolProgressFileLoggerForTests;
+    const reset = mod.resetServerToolProgressFileLoggerForTests;
+    expect(typeof append).toBe('function');
+    expect(typeof flush).toBe('function');
+    expect(typeof reset).toBe('function');
+
+    process.env.ROUTECODEX_SERVERTOOL_FILE_LOG = '1';
+    process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH = path.join(fileAsParent, 'events.jsonl');
+    reset?.();
+
+    try {
+      append?.({
+        requestId: 'req-filelog-failfast',
+        flowId: 'stop_message_flow',
+        tool: 'stop_message_auto',
+        stage: 'match',
+        result: 'trigger',
+        message: 'trigger',
+        step: 1,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses'
+      });
+      await expect(flush?.()).rejects.toThrow();
+    } finally {
+      reset?.();
+      if (originalEnable === undefined) {
+        delete process.env.ROUTECODEX_SERVERTOOL_FILE_LOG;
+      } else {
+        process.env.ROUTECODEX_SERVERTOOL_FILE_LOG = originalEnable;
+      }
+      if (originalPath === undefined) {
+        delete process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH;
+      } else {
+        process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH = originalPath;
+      }
+      try {
+        fs.unlinkSync(fileAsParent);
       } catch {}
     }
   });

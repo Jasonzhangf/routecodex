@@ -93,14 +93,10 @@ export function appendServerToolProgressFileEvent(event: ServerToolProgressFileE
   }
   const logPath = resolveLogPath();
   const line = `${JSON.stringify({ ...event, ts: new Date().toISOString() })}\n`;
-  writeQueue = writeQueue
-    .then(async () => {
-      await ensureParentDir(logPath);
-      await fs.appendFile(logPath, line, 'utf8');
-    })
-    .catch(() => {
-      // best-effort file logging
-    });
+  writeQueue = writeQueue.then(async () => {
+    await ensureParentDir(logPath);
+    await fs.appendFile(logPath, line, 'utf8');
+  });
 }
 
 export function resetServerToolProgressFileLoggerForTests(): void {

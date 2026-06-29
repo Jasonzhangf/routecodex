@@ -5873,6 +5873,34 @@ function checkDeletedAiFollowupAbsent() {
   pass('deleted-ai-followup-absent', 'AI followup files, runtime branch, config schema, and focused tests are absent');
 }
 
+function checkServertoolProgressFileLoggingFailFast() {
+  const progressFile = `${SERVERTOOL_TS_DIR}/log/progress-file.ts`;
+  const progressFileSource = readRequired(progressFile);
+  const progressLoggingSpec = readRequired(`${ROOT}/tests/servertool/servertool-progress-logging.spec.ts`);
+  for (const keyword of [
+    '// best-effort file logging',
+    'best-effort file logging',
+    '.catch(() => {',
+  ]) {
+    if (progressFileSource.includes(keyword)) {
+      fail(
+        'servertool-progress-file-fail-fast',
+        `progress-file.ts must not swallow enabled JSONL file logging failures with "${keyword}"`
+      );
+    }
+  }
+  assertContains(
+    'servertool-progress-file-fail-fast',
+    `${ROOT}/tests/servertool/servertool-progress-logging.spec.ts`,
+    progressLoggingSpec,
+    'enabled servertool JSONL file logging exposes write failures'
+  );
+  pass(
+    'servertool-progress-file-fail-fast',
+    'enabled servertool JSONL file logging failures are exposed to the flush/test boundary'
+  );
+}
+
 // ── Run ────────────────────────────────────────────────────────
 console.log('\n=== verify-servertool-rust-only ===\n');
 
@@ -5917,6 +5945,7 @@ checkServertoolAutoHookCallerThinShell();
 checkServertoolResponseStageGateThinShell();
 checkServertoolEngineStoplessSessionThinShell();
 checkServertoolActiveOrchestrationAuditRedGate();
+checkServertoolProgressFileLoggingFailFast();
 checkDeletedEmptyReplyContinueAbsent();
 
 console.log();
