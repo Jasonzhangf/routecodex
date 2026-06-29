@@ -77,8 +77,6 @@ struct RawSseEvent {
 struct SseParserConfigInput {
     #[serde(default = "default_true")]
     enable_strict_validation: bool,
-    #[serde(default = "default_false")]
-    enable_event_recovery: bool,
     #[serde(default = "default_max_event_size")]
     max_event_size: usize,
     #[serde(default)]
@@ -105,10 +103,6 @@ struct SseStreamChunkParseOutput {
 
 fn default_true() -> bool {
     true
-}
-
-fn default_false() -> bool {
-    false
 }
 
 fn default_max_event_size() -> usize {
@@ -311,7 +305,7 @@ fn parse_sse_event_with_config(
             return Err(format!("Invalid event type: {}", raw_event.event));
         }
 
-        let mut event_type = raw_event.event.clone();
+        let event_type = raw_event.event.clone();
         let timestamp = raw_event
             .timestamp
             .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
@@ -334,17 +328,7 @@ fn parse_sse_event_with_config(
                     }
                     data = parsed_data;
                 }
-                Err(message) => {
-                    if config.enable_event_recovery {
-                        event_type = "error".to_string();
-                        data = serde_json::json!({
-                            "error": "Invalid JSON",
-                            "raw": raw_event.data
-                        });
-                    } else {
-                        return Err(message);
-                    }
-                }
+                Err(message) => return Err(message),
             }
         }
 
@@ -635,7 +619,6 @@ mod tests {
     fn parse_sse_event_with_config_maps_anthropic_protocol() {
         let config = SseParserConfigInput {
             enable_strict_validation: true,
-            enable_event_recovery: true,
             max_event_size: 1024 * 1024,
             allowed_event_types: vec!["message_stop".to_string()],
         };
@@ -656,35 +639,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_sse_event_with_config_recovers_invalid_json_when_enabled() {
+    fn parse_sse_stream_with_config_preserves_invalid_parse_result() {
         let config = SseParserConfigInput {
             enable_strict_validation: true,
-            enable_event_recovery: true,
-            max_event_size: 1024 * 1024,
-            allowed_event_types: vec!["response.output_text.delta".to_string()],
-        };
-        let result = parse_sse_event_with_config(
-            "event: response.output_text.delta\ndata: {invalid-json}",
-            &config,
-        );
-        assert!(result.success);
-        let event = result.event.expect("event");
-        assert_eq!(event.get("type").and_then(Value::as_str), Some("error"));
-        assert_eq!(
-            event
-                .get("data")
-                .and_then(Value::as_object)
-                .and_then(|row| row.get("error"))
-                .and_then(Value::as_str),
-            Some("Invalid JSON")
-        );
-    }
-
-    #[test]
-    fn parse_sse_stream_with_config_preserves_invalid_when_recovery_disabled() {
-        let config = SseParserConfigInput {
-            enable_strict_validation: true,
-            enable_event_recovery: false,
             max_event_size: 1024 * 1024,
             allowed_event_types: vec!["response.completed".to_string()],
         };
@@ -709,7 +666,6 @@ event: custom.type\ndata: {\"ok\":true}\n\n";
     fn parse_sse_stream_chunk_with_config_keeps_partial_tail() {
         let config = SseParserConfigInput {
             enable_strict_validation: true,
-            enable_event_recovery: false,
             max_event_size: 1024 * 1024,
             allowed_event_types: vec!["response.completed".to_string()],
         };
@@ -728,7 +684,6 @@ event: response.completed\ndata: {\"type\":\"response.completed\"";
     fn parse_sse_stream_chunk_with_config_flushes_tail() {
         let config = SseParserConfigInput {
             enable_strict_validation: true,
-            enable_event_recovery: false,
             max_event_size: 1024 * 1024,
             allowed_event_types: vec!["response.completed".to_string()],
         };
@@ -743,7 +698,6 @@ event: response.completed\ndata: {\"type\":\"response.completed\"";
     fn parse_sse_stream_with_config_supports_crlf_boundaries() {
         let config = SseParserConfigInput {
             enable_strict_validation: true,
-            enable_event_recovery: false,
             max_event_size: 1024 * 1024,
             allowed_event_types: vec!["response.completed".to_string()],
         };
