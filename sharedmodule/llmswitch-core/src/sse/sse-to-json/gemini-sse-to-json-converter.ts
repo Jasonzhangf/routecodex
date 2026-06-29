@@ -36,7 +36,7 @@ export class GeminiSseToJsonConverter {
 
     const parser = createSseParser({
       enableStrictValidation: true,
-      enableEventRecovery: true,
+      enableEventRecovery: false,
       allowedEventTypes: new Set([
         'gemini.data',
         'gemini.done'
@@ -49,13 +49,12 @@ export class GeminiSseToJsonConverter {
     try {
       for await (const result of parser.parseStreamAsync(this.normalizeStream(sseStream))) {
         if (!result.success || !result.event) {
-          if (result.error) {
-            throw new Error(result.error);
-          }
-          continue;
+          throw new Error(result.error || 'Failed to parse Gemini SSE event');
         }
         const event = result.event as GeminiSseEvent;
-        if (event.protocol !== 'gemini-chat') continue;
+        if (event.protocol !== 'gemini-chat') {
+          throw new Error(`Unexpected Gemini SSE protocol: ${event.protocol}`);
+        }
 
         if (event.type === 'gemini.data') {
           this.processChunkEvent(event, accumulator, context);

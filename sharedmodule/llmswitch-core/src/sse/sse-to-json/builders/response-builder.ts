@@ -50,7 +50,7 @@ export interface OutputItemState {
 // 默认配置
 export const DEFAULT_RESPONSE_BUILDER_CONFIG: ResponseBuilderConfig = {
   enableStrictValidation: true,
-  enableEventRecovery: true,
+  enableEventRecovery: false,
   maxOutputItems: 50,
   maxContentParts: 100,
   maxSequenceGaps: 10

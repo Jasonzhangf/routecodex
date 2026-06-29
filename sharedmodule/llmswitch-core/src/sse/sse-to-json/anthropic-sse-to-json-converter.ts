@@ -61,7 +61,7 @@ export class AnthropicSseToJsonConverter {
 
     const parser = createSseParser({
       enableStrictValidation: this.config.enableEventValidation,
-      enableEventRecovery: !this.config.strictMode,
+      enableEventRecovery: false,
       allowedEventTypes: new Set([
         'message_start',
         'content_block_start',
@@ -80,10 +80,7 @@ export class AnthropicSseToJsonConverter {
     try {
       for await (const result of parser.parseStreamAsync(this.chunkStrings(sseStream, context))) {
         if (!result.success || !result.event) {
-          if (this.config.strictMode) {
-            throw new Error(result.error || 'Failed to parse Anthropic SSE event');
-          }
-          continue;
+          throw new Error(result.error || 'Failed to parse Anthropic SSE event');
         }
 
         context.eventStats.firstEventAtMs ??= Date.now();
@@ -95,7 +92,7 @@ export class AnthropicSseToJsonConverter {
         }
 
         if ((result.event as AnthropicSseEvent).protocol !== 'anthropic-messages') {
-          continue;
+          throw new Error(`Unexpected Anthropic SSE protocol: ${(result.event as AnthropicSseEvent).protocol}`);
         }
         const builderStartedAt = Date.now();
         builder.processEvent(result.event as AnthropicSseEvent);

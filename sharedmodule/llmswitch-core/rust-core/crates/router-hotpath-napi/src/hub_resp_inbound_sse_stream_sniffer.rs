@@ -77,7 +77,7 @@ struct RawSseEvent {
 struct SseParserConfigInput {
     #[serde(default = "default_true")]
     enable_strict_validation: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     enable_event_recovery: bool,
     #[serde(default = "default_max_event_size")]
     max_event_size: usize,
@@ -105,6 +105,10 @@ struct SseStreamChunkParseOutput {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_max_event_size() -> usize {
@@ -418,7 +422,6 @@ fn parse_sse_stream_chunk_with_config(
         .into_iter()
         .filter(|chunk| !chunk.trim().is_empty())
         .map(|event_data| parse_sse_event_with_config(event_data, config))
-        .filter(|entry| entry.success || config.enable_event_recovery)
         .collect();
 
     SseStreamChunkParseOutput {
@@ -678,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_sse_stream_with_config_filters_invalid_when_recovery_disabled() {
+    fn parse_sse_stream_with_config_preserves_invalid_when_recovery_disabled() {
         let config = SseParserConfigInput {
             enable_strict_validation: true,
             enable_event_recovery: false,
@@ -688,12 +691,17 @@ mod tests {
         let stream = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n\
 event: custom.type\ndata: {\"ok\":true}\n\n";
         let result = parse_sse_stream_with_config(stream, &config);
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.len(), 2);
         assert!(result[0].success);
         let event = result[0].event.as_ref().expect("event");
         assert_eq!(
             event.get("type").and_then(Value::as_str),
             Some("response.completed")
+        );
+        assert!(!result[1].success);
+        assert_eq!(
+            result[1].error.as_deref(),
+            Some("Invalid event type: custom.type")
         );
     }
 

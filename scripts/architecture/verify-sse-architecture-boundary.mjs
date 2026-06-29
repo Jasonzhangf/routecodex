@@ -128,6 +128,11 @@ for (const forbidden of [
   }
 }
 
+const sseParser = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts');
+if (sseParser.includes('enableEventRecovery: true')) {
+  failures.push('SSE parser default must not enable event recovery');
+}
+
 const anthropicResponseBuilder = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/anthropic-response-builder.ts');
 for (const forbidden of [
   'state.id || `msg_${Date.now()}`',
@@ -164,6 +169,8 @@ for (const relPath of providerNeutralProjectionFiles) {
     }
   }
   for (const forbidden of [
+    'enableEventRecovery: true',
+    'enableEventRecovery: !this.config.strictMode',
     'tryMaterializeFinalResponse',
     'getSalvageResult',
     'const salvaged =',

@@ -1,0 +1,58 @@
+import { describe, expect, it } from '@jest/globals';
+import { Readable } from 'node:stream';
+
+import { ResponsesSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.js';
+import { AnthropicSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.js';
+import { GeminiSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.js';
+
+describe('SSE parser no-recovery boundary', () => {
+  it('fails malformed Responses SSE frames instead of recovering past them', async () => {
+    const converter = new ResponsesSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([
+      'event: response.created\n',
+      'data: not-json\n\n',
+      'event: response.done\n',
+      'data: {"type":"response.done","response":{"id":"resp_should_not_recover","object":"response","created_at":1,"status":"completed","model":"gpt-test","output":[]}}\n\n'
+    ]), {
+      requestId: 'req_responses_parser_no_recovery',
+      model: 'gpt-test'
+    })).rejects.toMatchObject({
+      code: 'SSE_TO_JSON_ERROR',
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
+
+  it('fails malformed Anthropic SSE frames instead of recovering past them', async () => {
+    const converter = new AnthropicSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([
+      'event: message_start\n',
+      'data: not-json\n\n',
+      'event: message_stop\n',
+      'data: {"type":"message_stop"}\n\n'
+    ]), {
+      requestId: 'req_anthropic_parser_no_recovery',
+      model: 'claude-sonnet-4-5'
+    })).rejects.toMatchObject({
+      code: 'ANTHROPIC_SSE_TO_JSON_FAILED',
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
+
+  it('fails malformed Gemini SSE frames instead of recovering past them', async () => {
+    const converter = new GeminiSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([
+      'event: gemini.data\n',
+      'data: not-json\n\n',
+      'event: gemini.done\n',
+      'data: {"candidates":[]}\n\n'
+    ]), {
+      requestId: 'req_gemini_parser_no_recovery',
+      model: 'gemini-test'
+    })).rejects.toMatchObject({
+      code: 'GEMINI_SSE_TO_JSON_FAILED'
+    });
+  });
+});

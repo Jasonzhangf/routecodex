@@ -28,6 +28,13 @@
 - 改动：`validateWireFormat()` 不再 catch 非字符串/坏输入异常；`responses-event-serializer-no-salvage.spec.ts` 增加非字符串输入会抛错的反向测试；SSE architecture gate 增加旧 catch-to-false 结构 marker。
 - 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/responses-event-serializer-no-salvage.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
 
+# 2026-06-29 SSE parser no-recovery slice
+
+- 目标：删除 sse-to-json decode path 的 parser recovery 静默失败；malformed SSE frame 必须暴露为失败，不能被 native parser/filter 跳过后继续成功。
+- 根因：Rust `parse_sse_stream_chunk_with_config()` 用 `.filter(|entry| entry.success || config.enable_event_recovery)`，在 recovery=false 时反而丢弃失败 entry，TS converter 看不到坏帧；Responses/Gemini malformed frame 红测会成功返回。
+- 改动：Rust parser 默认 `enable_event_recovery=false`，stream parser 保留所有 parse result；TS parser 默认 `enableEventRecovery=false`；Responses/Anthropic/Gemini converters 显式关闭 recovery，并对 `!success || !event` 必抛；协议不匹配也必抛；response-builder config 默认 recovery=false；architecture gate 禁止 decode projection 复活 `enableEventRecovery: true` / `!strictMode`。
+- 已验证：`cargo test -p router-hotpath-napi hub_resp_inbound_sse_stream_sniffer --lib -- --nocapture` PASS；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS；`npm run jest:run -- --runTestsByPath tests/sharedmodule/sse-parser-no-recovery.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
+
 # 2026-06-29 chat SSE no-salvage boundary slice
 
 - 目标：删掉 `chat-sse-to-json-converter.ts` 里对同一 SSE chunk 多行 payload 的 partial salvage，改为坏 payload 直接失败。

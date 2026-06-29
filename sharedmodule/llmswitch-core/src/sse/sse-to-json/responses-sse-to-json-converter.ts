@@ -72,7 +72,7 @@ export class ResponsesSseToJsonConverterRefactored {
     try {
       const parser = createSseParser({
         enableStrictValidation: this.config.enableEventValidation,
-        enableEventRecovery: !this.config.strictMode
+        enableEventRecovery: false
       });
 
       const readableStream = this.createReadableStream(sseStream);
@@ -112,8 +112,8 @@ export class ResponsesSseToJsonConverterRefactored {
           continue;
         }
 
-        if (!parseResult.success && this.config.strictMode) {
-          throw new Error(`Failed to parse SSE event: ${parseResult.error}`);
+        if (!parseResult.success || !parseResult.event) {
+          throw new Error(`Failed to parse SSE event: ${parseResult.error || 'missing event'}`);
         }
       }
 

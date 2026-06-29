@@ -24,7 +24,7 @@ export interface SseParseResult {
 
 export const DEFAULT_SSE_PARSER_CONFIG: SseParserConfig = {
   enableStrictValidation: true,
-  enableEventRecovery: true,
+  enableEventRecovery: false,
   maxEventSize: 1024 * 1024,
   allowedEventTypes: new Set([
     'chunk',
