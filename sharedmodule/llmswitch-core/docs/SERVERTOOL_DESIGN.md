@@ -323,7 +323,7 @@ Host 侧只需提供：
      - 在 Hub Pipeline 中把该配置挂入 AdapterContext（例如 metadata.myTool → adapterContext.myTool）；
      - 在 handler 中从 `ctx.adapterContext` 中读取配置。
    - 如需对特定 provider 协议做 shape 调整：
-     - 在 `conversion/compat/actions/` 中增加新的 compat action，并在对应 profile（如 `chat:gemini`）中挂载。
+     - 在 Rust `req_outbound_stage3_compat` / response compat owner 中增加相邻节点转换，并通过对应 profile（如 `chat:gemini`）启用。
 
 ## Host 层集成要点
 

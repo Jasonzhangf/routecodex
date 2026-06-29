@@ -14,7 +14,7 @@
 为避免这类错误，RouteCodex 在 `chat:glm` 兼容配置中增加了专门的裁剪动作：
 
 - Action：`glm_history_image_trim`
-- 实现位置：`sharedmodule/llmswitch-core/src/conversion/compat/actions/glm-history-image-trim.ts`
+- 实现位置：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/glm/request.rs`
 
 兼容策略规则：
 
@@ -41,4 +41,3 @@
   - 保持当前轮请求的图片能力正常可用。
 
 如果需要完整重现原始 payload（包括被裁剪掉的 inline 图片），可以使用 snapshot 调试工具直接回放 provider 前的快照，而不是依赖线上请求路径。
-

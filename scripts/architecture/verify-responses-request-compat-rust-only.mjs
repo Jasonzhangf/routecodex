@@ -14,6 +14,10 @@ const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotp
 const compatEngine = read('sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts');
 const functionMap = read('docs/architecture/function-map.yml');
 const verificationMap = read('docs/architecture/verification-map.yml');
+const legacyCompatActionsDir = path.join(
+  root,
+  'sharedmodule/llmswitch-core/src/conversion/compat/actions',
+);
 
 for (const required of [
   'normalize_responses_function_tools',
@@ -61,6 +65,70 @@ for (const relPath of forbiddenRuntimeFiles) {
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath} must not own responses request compat truth: ${forbidden}`);
+    }
+  }
+}
+
+if (fs.existsSync(legacyCompatActionsDir)) {
+  const entries = fs.readdirSync(legacyCompatActionsDir, { withFileTypes: true });
+  const remainingTsActions = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.ts'))
+    .map((entry) => `sharedmodule/llmswitch-core/src/conversion/compat/actions/${entry.name}`)
+    .sort();
+  if (remainingTsActions.length > 0) {
+    failures.push(
+      [
+        'legacy TS compat actions must stay physically removed; req_outbound provider-wire compat is Rust-owned',
+        ...remainingTsActions.map((relPath) => `  - ${relPath}`),
+      ].join('\n'),
+    );
+  }
+  if (fs.existsSync(path.join(legacyCompatActionsDir, '__tests__'))) {
+    failures.push('legacy TS compat actions self-tests must stay removed; Rust owner tests req_outbound_stage3_compat instead');
+  }
+}
+
+const sourceRoots = [
+  'sharedmodule/llmswitch-core/src',
+  'src',
+  'tests',
+  'scripts',
+];
+for (const sourceRoot of sourceRoots) {
+  const fullRoot = path.join(root, sourceRoot);
+  if (!fs.existsSync(fullRoot)) {
+    continue;
+  }
+  const stack = [fullRoot];
+  while (stack.length) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'dist') {
+          continue;
+        }
+        stack.push(fullPath);
+        continue;
+      }
+      if (!entry.isFile() || !/\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name)) {
+        continue;
+      }
+      const relPath = path.relative(root, fullPath).split(path.sep).join('/');
+      if (relPath === 'scripts/architecture/verify-responses-request-compat-rust-only.mjs') {
+        continue;
+      }
+      if (relPath.startsWith('sharedmodule/llmswitch-core/src/conversion/compat/actions/')) {
+        continue;
+      }
+      const source = fs.readFileSync(fullPath, 'utf8');
+      if (
+        /from\s+['"][^'"]*(?:conversion\/compat\/actions|compat\/actions)\//.test(source)
+        || /import\s*\(\s*['"][^'"]*(?:conversion\/compat\/actions|compat\/actions)\//.test(source)
+        || /require\s*\(\s*['"][^'"]*(?:conversion\/compat\/actions|compat\/actions)\//.test(source)
+      ) {
+        failures.push(`${relPath} must not import legacy TS compat action surfaces`);
+      }
     }
   }
 }

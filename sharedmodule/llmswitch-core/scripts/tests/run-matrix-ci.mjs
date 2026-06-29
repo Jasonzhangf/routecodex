@@ -125,16 +125,13 @@ async function main() {
   results.push(await run('matrix:coverage-responses-sse-missing-terminator', 'scripts/tests/responses-sse-missing-terminator.mjs'));
   results.push(await run('matrix:coverage-compat-lmstudio-tool-call-ids', 'scripts/tests/compat-lmstudio-tool-call-ids.mjs'));
   results.push(await run('matrix:coverage-hub-req-outbound-compat', 'scripts/tests/coverage-hub-req-outbound-compat.mjs'));
-  results.push(await run('matrix:deepseek-web-compat-tool-calling', 'scripts/tests/deepseek-web-compat-tool-calling.mjs'));
   results.push(await run('matrix:anthropic-usage-input-output-regression', 'scripts/tests/anthropic-usage-input-output-regression.mjs'));
   results.push(await run('matrix:anthropic-usage-full-preserve', 'scripts/tests/anthropic-usage-full-preserve.mjs'));
   results.push(await run('matrix:anthropic-sse-usage-merge', 'scripts/tests/anthropic-sse-usage-merge.mjs'));
   results.push(await run('matrix:anthropic-sse-stop-sequence', 'scripts/tests/anthropic-sse-stop-sequence.mjs'));
   results.push(await run('matrix:anthropic-sse-terminated-salvage', 'scripts/tests/anthropic-sse-to-json-terminated-salvage.mjs'));
-  results.push(await run('matrix:deepseek-bootstrap-multi-key-scan', 'scripts/tests/deepseek-bootstrap-multi-key-scan.mjs'));
   results.push(await run('matrix:openai-chat-json-text-body', 'scripts/tests/openai-chat-json-text-body.mjs'));
   results.push(await run('matrix:coverage-chat-sse-openai-no-event', 'scripts/tests/chat-sse-to-json-openai-no-event.mjs'));
-  results.push(await run('matrix:coverage-chat-sse-deepseek-web-patch', 'scripts/tests/chat-sse-to-json-deepseek-web-patch.mjs'));
   results.push(await run('matrix:coverage-instruction-target', 'scripts/tests/coverage-instruction-target.mjs'));
   results.push(await run('matrix:coverage-guidance-augment', 'scripts/tests/coverage-guidance-augment.mjs'));
   results.push(

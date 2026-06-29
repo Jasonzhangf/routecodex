@@ -2,10 +2,10 @@
   "generatedAt": "2026-06-09T18:44:11.459Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
-    "prodTsFileCount": 271,
-    "prodTsLocTotal": 56323,
-    "nonNativeFileCount": 104,
-    "nonNativeLocTotal": 23253
+    "prodTsFileCount": 246,
+    "prodTsLocTotal": 55306,
+    "nonNativeFileCount": 102,
+    "nonNativeLocTotal": 23165
   },
   "byTopDir": {
     "native": {
@@ -21,10 +21,10 @@
       "nonNativeLoc": 11804
     },
     "conversion": {
-      "prodTsFiles": 104,
-      "prodTsLoc": 10007,
-      "nonNativeFiles": 39,
-      "nonNativeLoc": 4727
+      "prodTsFiles": 79,
+      "prodTsLoc": 8990,
+      "nonNativeFiles": 37,
+      "nonNativeLoc": 4639
     },
     "servertool": {
       "prodTsFiles": 50,
@@ -121,168 +121,6 @@
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/compaction-detect.ts",
       "loc": 7,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/anthropic-claude-code-system-prompt.ts",
-      "loc": 72,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/anthropic-claude-code-user-id.ts",
-      "loc": 47,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/auto-thinking.ts",
-      "loc": 35,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/claude-thinking-tools.ts",
-      "loc": 9,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/deepseek-web-request.ts",
-      "loc": 98,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/deepseek-web-response.ts",
-      "loc": 193,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/field-mapping.ts",
-      "loc": 28,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/gemini-web-search.ts",
-      "loc": 41,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/glm-history-image-trim.ts",
-      "loc": 72,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/glm-image-content.ts",
-      "loc": 64,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/glm-native-compat.ts",
-      "loc": 58,
-      "nativeLinked": false,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/glm-tool-extraction.ts",
-      "loc": 63,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/glm-vision-prompt.ts",
-      "loc": 114,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/glm-web-search.ts",
-      "loc": 41,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/harvest-tool-calls-from-text.ts",
-      "loc": 27,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/lmstudio-responses-fc-ids.ts",
-      "loc": 9,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/lmstudio-responses-input-stringify.ts",
-      "loc": 68,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/normalize-tool-call-ids.ts",
-      "loc": 13,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/request-rules.ts",
-      "loc": 31,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/response-blacklist.ts",
-      "loc": 23,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/response-normalize.ts",
-      "loc": 14,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/response-validate.ts",
-      "loc": 11,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/snapshot.ts",
-      "loc": 30,
-      "nativeLinked": false,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/strip-orphan-function-calls-tag.ts",
-      "loc": 7,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/tool-schema.ts",
-      "loc": 33,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/tool-text-request-guidance.ts",
-      "loc": 25,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/compat/actions/universal-shape-filter.ts",
-      "loc": 82,
       "nativeLinked": true,
       "topDir": "conversion"
     },

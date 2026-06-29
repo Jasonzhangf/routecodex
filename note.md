@@ -1,3 +1,15 @@
+# 2026-06-29 Hub Pipeline Rust closeout Wave 2 req-outbound slice
+
+- Objective 来自 `/Users/fanzhang/.codex/attachments/122d8bb6-d5d6-4f35-bf66-ce1e784cb537/pasted-text-1.txt`：执行 `docs/goals/hub-pipeline-rust-closeout-plan.md`，优先 Wave 2 `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload`，除非 Wave 1 wrapper thinness 有 blocking violation。
+- 本轮流程锁定：先读 AGENTS/USER/note/routing、`.agents/skills/rcc-dev-skills/SKILL.md`、`rustify-the-code` skill 和 closeout plan；先锁 function-map / verification-map / mainline/wiki/manifest，再查 TS residual，不直接改实现。
+- 当前 worktree 已有大量无关脏改；本轮必须只修改并提交 verified req-outbound slice，保留其它 worker/user 改动。
+- 收口结果：`sharedmodule/llmswitch-core/src/conversion/compat/actions/` 旧 TS compat action 与自测物理删除；`verify:responses-request-compat-rust-only` 增加防复活扫描，禁止旧 action 文件、`__tests__` 和 active source/test/script import `compat/actions/*`。
+- 同步更新：`rustification-audit-baseline.json` 移除旧 compat action baseline；`docs/glm-history-inline-images.md` 和 `SERVERTOOL_DESIGN.md` 不再指向 TS actions；compat focused tests 改为绑定 MetadataCenter runtime_control.providerProtocol，并删除旧 response harvest action 断言。
+- 在线 replay：`node scripts/replay-codex-sample.mjs --sample ~/.rcc/codex-samples/openai-responses/ports/5555/req_1782692128504_59e1d218/client-request.json --base http://127.0.0.1:5555 --label req-outbound-compat-wave2` 返回 HTTP 200，run dir `.../runs/sample_1782696034117/req-outbound-compat-wave2`，trace `0690fb6250eee92a7a3cfd7db8833c71`；provider sample 为 MiniMax-M3 `tool_use` 正常，未见 `tool id() not found`。
+- 最新失败样本 `req_1782690770505_a5f982cc` 仅有 provider-request/error/runtime 文件，缺 `client-request.json`，无法用 replay script 做同入口在线复打；本轮记录为 replay 缺口，不把 provider-only 样本当完整闭环 replay。
+- 已验证通过：`cargo test -p router-hotpath-napi req_outbound_stage3_compat --lib -- --nocapture` 73 passed；`verify:responses-request-compat-rust-only`；`verify:responses-function-tool-normalization-rust-only`；`verify:responses-tool-parameters-normalization-rust-only`；`verify:responses-instructions-to-input-rust-only`；`verify:openai-chat-single-tool-call-history-compat-rust-only`；`verify:architecture-thin-wrapper-only`；focused Jest `tool-text-contract-and-harvest.compat` / `responses-function-tool-normalization.compat` 3 passed；`hub-pipeline-stage-residue-audit` 148 passed；root/sharedmodule `tsc`；`verify:function-map-compile-gate`；`git diff --check`。
+- 剩余风险：`npm run verify:llmswitch-rustification-audit` 仍 FAIL，红点为 servertool/metadata 新 TS 文件与 `conversion/runtime/servertool` topDir nonNative LOC baseline 增长；不属于本 req-outbound compat action 删除切片。
+
 # 2026-06-29 servertool builtin execution shell catalog lookup removal
 
 - 本轮继续缩小 TS 执行壳：`execution-handler-materialization-shell.ts::executeBuiltinServerToolHandler` 不再 dynamic import `builtin-handler-catalog.ts`、不再二次 `getBuiltinHandlerEntry(args.builtinName)` 校验 execution descriptor。
