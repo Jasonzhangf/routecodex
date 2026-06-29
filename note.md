@@ -1,3 +1,20 @@
+# 2026-06-29 servertool pre-command config JSON parse rustification slice
+
+- Objective: continue servertool TS residue cleanup by moving `pre-command-hooks.ts` config file JSON parsing from TS into Rust; TS remains file IO/native shell only for this slice.
+- Rust owner: `servertool-core::pre_command_hook_contract::plan_pre_command_hooks_config_text` parses config text and delegates to existing Rust config planner; NAPI export `planPreCommandHooksConfigTextJson`; TS wrapper `planPreCommandHooksConfigTextWithNative`.
+- TS shell result: `sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts` no longer contains `JSON.parse(content)` and loads config content through native/Rust.
+- Gate lock: `scripts/verify-servertool-rust-only.mjs` now requires the Rust text-plan owner/export/wrapper and forbids `JSON.parse(content)` in pre-command active shell.
+- Verification:
+  - `cargo test -p servertool-core pre_command --lib -- --nocapture` PASS, 12 passed.
+  - `cargo test -p router-hotpath-napi plans_pre_command_hooks_via_servertool_core_bridge --lib -- --nocapture` PASS, 1 passed.
+  - `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS.
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/pre-command-hooks.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` PASS, 36 passed.
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS.
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:servertool-rust-only` PASS.
+  - `npm run verify:architecture-thin-wrapper-only` PASS.
+  - `rg -n "JSON\\.parse\\(content\\)|const lines = stdout|JSON\\.parse\\(payload\\)|cleanedPayload" sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts` found 0 matches.
+
 # 2026-06-29 10000 MiniMax Anthropic SSE provider-response V2 shell cleanup
 
 - 现象：10000 `/v1/chat/completions` 连续报 `Upstream provider error`，样本 `~/.rcc/codex-samples/openai-chat/ports/10000/req_1782733503705_5aba9660` 的 provider 侧实际已返回完整 Anthropic SSE：`message_start -> tool_use input_json_delta -> message_delta stop_reason=tool_use -> message_stop`。

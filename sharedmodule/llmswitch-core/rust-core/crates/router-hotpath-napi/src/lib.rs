@@ -1398,6 +1398,12 @@ pub fn plan_pre_command_hooks_config_json(input_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn plan_pre_command_hooks_config_text_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_pre_command_hooks_config_text_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_runtime_pre_command_rule_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_runtime_pre_command_rule_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

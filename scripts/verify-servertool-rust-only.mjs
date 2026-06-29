@@ -3301,6 +3301,7 @@ function checkPreCommandHooksRustOwner() {
   for (const needle of [
     'feature_id: hub.servertool_pre_command_hooks',
     'pub struct PreCommandHooksConfigPlanInput',
+    'pub struct PreCommandHooksConfigTextPlanInput',
     'pub struct PreCommandHooksConfigPlan',
     'pub struct PreCommandHookRulePlan',
     'pub struct PreCommandRegexPlan',
@@ -3319,6 +3320,7 @@ function checkPreCommandHooksRustOwner() {
     'pub enum PreCommandHookCompletionAction',
     'pub enum PreCommandRuntimeScriptStdoutAction',
     'pub fn plan_pre_command_hooks_config',
+    'pub fn plan_pre_command_hooks_config_text',
     'pub fn plan_runtime_pre_command_rule',
     'pub fn plan_runtime_pre_command_state_selection',
     'pub fn plan_runtime_pre_command_state_runtime_action',
@@ -3342,6 +3344,7 @@ function checkPreCommandHooksRustOwner() {
   );
   for (const needle of [
     'plan_pre_command_hooks_config_json',
+    'plan_pre_command_hooks_config_text_json',
     'plan_runtime_pre_command_rule_json',
     'plan_runtime_pre_command_state_selection_json',
     'plan_runtime_pre_command_state_runtime_action_json',
@@ -3359,6 +3362,7 @@ function checkPreCommandHooksRustOwner() {
   }
   for (const needle of [
     'pub fn plan_pre_command_hooks_config_json',
+    'pub fn plan_pre_command_hooks_config_text_json',
     'pub fn plan_runtime_pre_command_rule_json',
     'pub fn plan_runtime_pre_command_state_selection_json',
     'pub fn plan_runtime_pre_command_state_runtime_action_json',
@@ -3376,6 +3380,7 @@ function checkPreCommandHooksRustOwner() {
   }
   for (const needle of [
     'planPreCommandHooksConfigJson',
+    'planPreCommandHooksConfigTextJson',
     'planRuntimePreCommandRuleJson',
     'planRuntimePreCommandStateSelectionJson',
     'planRuntimePreCommandStateRuntimeActionJson',
@@ -3393,6 +3398,7 @@ function checkPreCommandHooksRustOwner() {
   }
   for (const needle of [
     'planPreCommandHooksConfigWithNative',
+    'planPreCommandHooksConfigTextWithNative',
     'planRuntimePreCommandRuleWithNative',
     'planPreCommandHookAttemptWithNative',
     'planPreCommandHookCompletionWithNative',
@@ -3415,6 +3421,7 @@ function checkPreCommandHooksRustOwner() {
   for (const keyword of [
     'const lines = stdout',
     'JSON.parse(payload)',
+    'JSON.parse(content)',
     'cleanedPayload',
   ]) {
     if (preCommandShell.includes(keyword)) {

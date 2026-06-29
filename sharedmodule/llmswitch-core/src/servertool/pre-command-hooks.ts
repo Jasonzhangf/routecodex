@@ -12,6 +12,7 @@ import {
   planPreCommandHookCompletionWithNative,
   planPreCommandHookEventPayloadWithNative,
   planPreCommandHooksConfigWithNative,
+  planPreCommandHooksConfigTextWithNative,
   parsePreCommandJqStdoutWithNative,
   parsePreCommandRuntimeScriptStdoutWithNative,
   planRuntimePreCommandRuleWithNative,
@@ -293,8 +294,7 @@ function loadPreCommandHooksConfig(): PreCommandHooksConfig {
 
   try {
     const content = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(content) as unknown;
-    const config = normalizePreCommandHooksConfig(parsed);
+    const config = normalizePreCommandHooksConfigText(content);
     cachedConfig = {
       filePath,
       mtimeMs: stat.mtimeMs,
@@ -309,6 +309,14 @@ function loadPreCommandHooksConfig(): PreCommandHooksConfig {
 
 function normalizePreCommandHooksConfig(raw: unknown): PreCommandHooksConfig {
   const plan = planPreCommandHooksConfigWithNative(raw);
+  return {
+    enabled: plan.enabled,
+    hooks: plan.hooks
+  };
+}
+
+function normalizePreCommandHooksConfigText(content: string): PreCommandHooksConfig {
+  const plan = planPreCommandHooksConfigTextWithNative(content);
   return {
     enabled: plan.enabled,
     hooks: plan.hooks

@@ -15,6 +15,12 @@ pub struct PreCommandHooksConfigPlanInput {
     pub raw: Value,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandHooksConfigTextPlanInput {
+    pub content: String,
+}
+
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreCommandHooksConfigPlan {
@@ -278,6 +284,16 @@ pub fn plan_pre_command_hooks_config(
         enabled: true,
         hooks,
     }
+}
+
+pub fn plan_pre_command_hooks_config_text(
+    input: &PreCommandHooksConfigTextPlanInput,
+) -> Result<PreCommandHooksConfigPlan, String> {
+    let raw: Value = serde_json::from_str(&input.content)
+        .map_err(|e| format!("parse pre-command hooks config json: {e}"))?;
+    Ok(plan_pre_command_hooks_config(
+        &PreCommandHooksConfigPlanInput { raw },
+    ))
 }
 
 pub fn plan_runtime_pre_command_rule(
@@ -859,10 +875,11 @@ mod tests {
         parse_pre_command_jq_stdout, parse_pre_command_runtime_script_stdout,
         plan_pre_command_hook_attempt, plan_pre_command_hook_completion,
         plan_pre_command_hook_event_payload, plan_pre_command_hooks_config,
-        plan_runtime_pre_command_rule, plan_runtime_pre_command_state_runtime_action,
-        plan_runtime_pre_command_state_selection, PreCommandHookAttemptAction,
-        PreCommandHookAttemptInput, PreCommandHookCompletionAction, PreCommandHookCompletionInput,
-        PreCommandHookEventPayloadInput, PreCommandHookTraceResult, PreCommandHooksConfigPlanInput,
+        plan_pre_command_hooks_config_text, plan_runtime_pre_command_rule,
+        plan_runtime_pre_command_state_runtime_action, plan_runtime_pre_command_state_selection,
+        PreCommandHookAttemptAction, PreCommandHookAttemptInput, PreCommandHookCompletionAction,
+        PreCommandHookCompletionInput, PreCommandHookEventPayloadInput, PreCommandHookTraceResult,
+        PreCommandHooksConfigPlanInput, PreCommandHooksConfigTextPlanInput,
         PreCommandRuntimeScriptStdoutAction, PreCommandStdoutParseInput,
         RuntimePreCommandRulePlanInput, RuntimePreCommandStateRuntimeAction,
         RuntimePreCommandStateRuntimeActionInput, RuntimePreCommandStateSelectionAction,
@@ -911,6 +928,27 @@ mod tests {
             })
             .enabled
         );
+    }
+
+    #[test]
+    fn config_text_plan_parses_json_in_rust() {
+        let plan = plan_pre_command_hooks_config_text(&PreCommandHooksConfigTextPlanInput {
+            content: json!({
+                "hooks": [
+                    { "id": "from-text", "tool": "exec_command", "jq": "." }
+                ]
+            })
+            .to_string(),
+        })
+        .expect("config text plan");
+        assert!(plan.enabled);
+        assert_eq!(plan.hooks[0].id, "from-text");
+
+        let err = plan_pre_command_hooks_config_text(&PreCommandHooksConfigTextPlanInput {
+            content: "{not-json".to_string(),
+        })
+        .expect_err("invalid config json");
+        assert!(err.contains("parse pre-command hooks config json"));
     }
 
     #[test]

@@ -390,6 +390,15 @@ pub fn plan_pre_command_hooks_config_json(input_json: &str) -> Result<String, St
     .map_err(|e| format!("serialize pre-command hooks config plan: {e}"))
 }
 
+pub fn plan_pre_command_hooks_config_text_json(input_json: &str) -> Result<String, String> {
+    let input: pre_command_hook_contract::PreCommandHooksConfigTextPlanInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pre-command hooks config text input: {e}"))?;
+    let plan = pre_command_hook_contract::plan_pre_command_hooks_config_text(&input)?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize pre-command hooks config plan: {e}"))
+}
+
 pub fn plan_runtime_pre_command_rule_json(input_json: &str) -> Result<String, String> {
     let input: pre_command_hook_contract::RuntimePreCommandRulePlanInput =
         serde_json::from_str(input_json)

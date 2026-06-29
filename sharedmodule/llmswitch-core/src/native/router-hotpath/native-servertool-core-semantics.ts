@@ -2002,6 +2002,19 @@ export function planPreCommandHooksConfigWithNative(raw: unknown): PreCommandHoo
   return parsePreCommandHooksConfigPlan(JSON.parse(resultJson) as unknown, capability);
 }
 
+export function planPreCommandHooksConfigTextWithNative(content: string): PreCommandHooksConfigPlan {
+  const capability = 'planPreCommandHooksConfigTextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planPreCommandHooksConfigTextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({ content }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planPreCommandHooksConfigTextJson native returned non-string: ${typeof resultJson}`);
+  }
+  return parsePreCommandHooksConfigPlan(JSON.parse(resultJson) as unknown, capability);
+}
+
 export function planRuntimePreCommandRuleWithNative(input: {
   rawState: unknown;
   envTimeoutMs?: unknown;
