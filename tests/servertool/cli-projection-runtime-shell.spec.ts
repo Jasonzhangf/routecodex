@@ -1,20 +1,16 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
-const buildServertoolCliProjectionForToolCall = jest.fn();
+const buildClientExecCliProjectionOutputWithNative = jest.fn();
+const buildClientVisibleProjectionShellWithNative = jest.fn();
 const buildServertoolCliProjectionExecutionContextWithNative = jest.fn();
 const isServertoolClientExecCliProjectionToolCallWithNative = jest.fn();
 const collectServertoolAdditionalClientToolCallsWithNative = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js',
-  () => ({
-    buildServertoolCliProjectionForToolCall
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    buildClientExecCliProjectionOutputWithNative,
+    buildClientVisibleProjectionShellWithNative,
     buildServertoolCliProjectionExecutionContextWithNative
   })
 );
@@ -36,10 +32,13 @@ const {
 describe('cli-projection-runtime-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    buildServertoolCliProjectionForToolCall.mockReturnValue({
-      clientCallId: 'call_exec_1',
+    buildClientExecCliProjectionOutputWithNative.mockReturnValue({
       toolName: 'web_search',
-      chatResponse: { ok: true }
+      flowId: 'servertool_cli_projection',
+      execCommand: "routecodex hook run web_search --input-json '{}'"
+    });
+    buildClientVisibleProjectionShellWithNative.mockReturnValue({
+      ok: true
     });
     buildServertoolCliProjectionExecutionContextWithNative.mockReturnValue({
       flowId: 'servertool_cli_projection'
@@ -71,18 +70,30 @@ describe('cli-projection-runtime-shell', () => {
       base: { choices: [] },
       projectedToolCallId: 'call_projected'
     });
-    expect(buildServertoolCliProjectionForToolCall).toHaveBeenCalledWith({
-      options: { requestId: 'req-1' },
-      toolCall: {
-        id: 'call_projected',
-        name: 'web_search',
-        arguments: '{}',
-        executionMode: 'client_exec_cli_projection'
+    expect(buildClientExecCliProjectionOutputWithNative).toHaveBeenCalledWith({
+      toolName: 'web_search',
+      flowId: 'servertool_cli_projection',
+      input: {},
+      repeatCount: 0,
+      maxRepeats: 0
+    });
+    expect(buildClientVisibleProjectionShellWithNative).toHaveBeenCalledWith({
+      requestId: 'req-1',
+      clientCallId: expect.stringMatching(/^call_servertool_cli_[a-f0-9]+$/),
+      nativeProjection: {
+        toolName: 'web_search',
+        flowId: 'servertool_cli_projection',
+        execCommand: "routecodex hook run web_search --input-json '{}'"
       },
+      reasoningText: '继续执行本地 hook web_search。',
       additionalToolCalls: [
         { id: 'call_other', type: 'function', function: { name: 'exec_command', arguments: '{}' } }
-      ],
-      reasoningText: '继续执行本地 hook web_search。'
+      ]
+    });
+    expect(buildServertoolCliProjectionExecutionContextWithNative).toHaveBeenCalledWith({
+      requestId: 'req-1',
+      clientCallId: expect.stringMatching(/^call_servertool_cli_[a-f0-9]+$/),
+      toolName: 'web_search'
     });
     expect(result).toEqual({
       mode: 'tool_flow',

@@ -44,15 +44,7 @@ describe('servertool CLI result restoration removal', () => {
     });
     expect(typeof parsedOutput.continuationPrompt).toBe('string');
     expect(parsedOutput.continuationPrompt.length).toBeGreaterThan(0);
-    expect(parsedOutput.schemaGuidance).toBeDefined();
-    expect(parsedOutput.schemaGuidance.schemaOverview).toContain('结构化 JSON');
-    expect(parsedOutput.schemaGuidance.schemaPurpose).toContain('结束原因');
-    expect(Array.isArray(parsedOutput.schemaGuidance.requiredFields)).toBe(true);
-    expect(parsedOutput.schemaGuidance.requiredFields).toContain('stopreason');
-    expect(parsedOutput.schemaGuidance.requiredFields).toContain('next_step');
-    expect(Array.isArray(parsedOutput.schemaGuidance.fieldDescriptions)).toBe(true);
-    expect(parsedOutput.schemaGuidance.fieldDescriptions.some((field: any) => field.field === 'reason')).toBe(true);
-    expect(parsedOutput.schemaGuidance.sample).toContain('"stopreason":2');
+    expect(parsedOutput.schemaGuidance).toBeUndefined();
     for (const forbidden of [
       'schema',
       'hook',

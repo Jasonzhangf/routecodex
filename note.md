@@ -1,3 +1,11 @@
+# 2026-06-29 servertool CLI projection facade deletion closeout
+
+- 目标：继续 `hub.servertool_cli_projection` slice，物理删除旧 TS facade `sharedmodule/llmswitch-core/src/servertool/cli-projection.ts` 和旧测试 `tests/servertool/servertool-cli-projection.spec.ts`，让 `cli-projection-runtime-shell.ts` 直接调用 Rust/native projection owner。
+- 改动：runtime shell 改为调用 `buildClientExecCliProjectionOutputWithNative`、`buildClientVisibleProjectionShellWithNative`、`buildServertoolCliProjectionExecutionContextWithNative`；旧 failfast spec 不再 mock 已删除 `cli-projection.js`；`servertool-cli-result-restore.spec.ts` 同步为 `schemaGuidance` 不出现在 CLI stdout 的反向断言；function/verification map、wiki/html、design docs 改到 `cli-projection-runtime-shell.spec.ts` / runtime shell owner；`verify-servertool-rust-only` 防止旧 facade/test 复活。
+- 已验证：`cli-projection-runtime-shell.spec.ts` 4 passed；`servertool-cli-native-bridge.spec.ts` + `servertool-cli-result-restore.spec.ts` + runtime shell 28 passed；`servertool-command.spec.ts` 22 passed；`servertool-active-js-shadow-audit.spec.ts` 3 passed；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS；`npm run verify:servertool-rust-only` PASS；`npm run verify:function-map-compile-gate` PASS；`npm run verify:architecture-mainline-call-map` PASS；sharedmodule/root `tsc` PASS；wiki sync/html/review surface PASS；`git diff --check` PASS；`npm run build:base` PASS on rerun (version auto-bumped in worktree, not part of this slice).
+- 已知缺口：`tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts` 当前 5 red，集中在 stopless terminal/no_schema expectations（terminal content projection、triggerHint no_schema vs stop_schema_missing、third no_schema still projects CLI），不是旧 facade import/native projection unavailable；本 slice 不宣称 servertool/stopless blackbox 全闭环，也未做 live replay。
+- 提交隔离：只 stage 当前 facade deletion/runtime shell/test/doc/gate hunk；保留无关 dirty Rust/SSE/servertool registry/version bump/package changes。
+
 # 2026-06-29 servertool cli-projection TS facade deletion + stopless Rust red closeout
 
 - 目标：继续执行 “servertool/stopless 全部 Rust 化，不保留薄壳” 的收口；本轮先清最明确 blocker：`router-hotpath-napi stopless` 两个红测，以及物理删除 `sharedmodule/llmswitch-core/src/servertool/cli-projection.ts` 这层纯 TS projection facade。

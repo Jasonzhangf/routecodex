@@ -1,11 +1,15 @@
+import { randomUUID } from 'crypto';
 import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
   ToolCall
 } from './types.js';
-import { buildServertoolCliProjectionForToolCall } from './cli-projection.js';
-import { buildServertoolCliProjectionExecutionContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  buildClientExecCliProjectionOutputWithNative,
+  buildClientVisibleProjectionShellWithNative,
+  buildServertoolCliProjectionExecutionContextWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   collectServertoolAdditionalClientToolCallsWithNative,
   isServertoolClientExecCliProjectionToolCallWithNative
@@ -27,20 +31,30 @@ export function buildServertoolCliProjectionBranchResult(args: {
     );
   }
   const additionalToolCalls = collectAdditionalClientToolCalls(args.base, cliProjectedToolCall.id);
-  const projection = buildServertoolCliProjectionForToolCall({
-    options: args.options,
-    toolCall: cliProjectedToolCall,
-    ...(additionalToolCalls.length ? { additionalToolCalls } : {}),
-    reasoningText: `继续执行本地 hook ${cliProjectedToolCall.name}。`
+  const toolName = cliProjectedToolCall.name;
+  const nativeProjection = buildClientExecCliProjectionOutputWithNative({
+    toolName,
+    flowId: 'servertool_cli_projection',
+    input: parseToolArguments(cliProjectedToolCall.arguments),
+    repeatCount: 0,
+    maxRepeats: 0
   });
+  const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
+  const chatResponse = buildClientVisibleProjectionShellWithNative({
+    requestId: args.options.requestId,
+    clientCallId,
+    nativeProjection,
+    reasoningText: `继续执行本地 hook ${toolName}。`,
+    ...(additionalToolCalls.length ? { additionalToolCalls } : {})
+  }) as JsonObject;
   const execution = buildServertoolCliProjectionExecutionContextWithNative({
     requestId: args.options.requestId,
-    clientCallId: projection.clientCallId,
-    toolName: projection.toolName
+    clientCallId,
+    toolName
   });
   return {
     mode: 'tool_flow',
-    finalChatResponse: projection.chatResponse,
+    finalChatResponse: chatResponse,
     execution: execution as {
       flowId: string;
       context?: JsonObject;
@@ -60,3 +74,14 @@ export const collectAdditionalClientToolCalls = (base: JsonObject, projectedTool
     projectedToolCallId
   }) as JsonValue[];
 };
+
+function parseToolArguments(value: string): JsonObject {
+  if (!value.trim()) {
+    return {};
+  }
+  const parsed = JSON.parse(value) as unknown;
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as JsonObject;
+  }
+  throw new Error('[servertool.cli] tool arguments must be JSON object');
+}

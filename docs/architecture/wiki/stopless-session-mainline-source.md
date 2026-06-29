@@ -92,7 +92,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | stl-01 | stop response detected | `hub.servertool_stopless_cli_continuation` | anchored | `runServerToolOrchestration` routes stopless detection into the servertool handler. |
 | stl-02 | runtime snapshot resolved | `hub.servertool_stopless_cli_continuation` | anchored | stopless state is restored from runtime metadata or the current request `tool_outputs` after the request shape is materialized; never from another identity source. |
-| stl-03 | CLI projection planned | `hub.servertool_stopless_cli_continuation` | anchored | `buildServertoolCliProjectionForAutoFlow` builds the client-visible CLI command with concise structured input: `flowId/repeatCount/maxRepeats/triggerHint` plus optional `schemaFeedback{reasonCode,missingFields}`. |
+| stl-03 | CLI projection planned | `hub.servertool_stopless_cli_continuation` | anchored | Rust `plan_client_exec_cli_projection_output` plus native projection shell builds the client-visible CLI command with concise structured input: `flowId/repeatCount/maxRepeats/triggerHint` plus optional `schemaFeedback{reasonCode,missingFields}`. |
 | stl-04 | client executes the CLI | `hub.servertool_stopless_cli_continuation` | anchored | `routecodex hook run reasoningStop` executes with status-only CLI input plus active `sessionId/requestId` flags for the same request counter; client-visible continuation uses shell `exec_command` only, never raw internal `reasoningStop`. |
 | stl-05 | CLI result restored into next request scope | `hub.servertool_stopless_cli_continuation` | anchored | auto-projected CLI result is restored from the next request body/runtime control after Responses continuation restore runs; Rust req_chatprocess emits the updated `runtime_control.stopless`, and the request-stage shell writes only that control signal into MetadataCenter. Stopless must not write back into continuation store. |
 | stl-06 | next-turn guidance rewritten | `hub.servertool_stopless_cli_continuation` | anchored | responses/chat bridge collapses the stopless tool pair into model-transparent natural-language guidance plus missing/error feedback; only the latest stopless guidance may survive, raw historical tool pairs must not replay into later turns, and legacy shell-projected `reasoningStop` / `reasoning_stop` history must be physically removed. |
@@ -115,7 +115,7 @@ flowchart LR
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/cli/servertool-command.spec.ts --runInBand`
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts --runInBand`
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-vr-route-hint.spec.ts --runInBand`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/servertool-cli-projection.spec.ts --runInBand`
+- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/cli-projection-runtime-shell.spec.ts --runInBand`
 - `npm run verify:architecture-mainline-call-map`
 - `npm run verify:function-map-compile-gate`
 

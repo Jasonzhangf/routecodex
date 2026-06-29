@@ -89,7 +89,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
       - sharedmodule/llmswitch-core/src/servertool
     contract:
-      - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/cli-projection-runtime-shell.spec.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/servertool/servertool-cli-result-restore.spec.ts
       - tests/cli/servertool-command.spec.ts
@@ -116,11 +116,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/cli-projection.ts
+      - sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts
       - sharedmodule/llmswitch-core/src/servertool/engine.ts
     contract:
       - tests/servertool/stopless-cli-continuation.spec.ts
-      - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/cli-projection-runtime-shell.spec.ts
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
@@ -163,7 +163,7 @@ verification:
       - "If stop arrives with valid terminal schema, validation must prove stop is allowed even when the model did not proactively call the stop hook."
       - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
       - "Focused Rust gates: `cargo test -p servertool-core stopless --lib -- --nocapture`, `cargo test -p servertool-core cli_contract --lib -- --nocapture`, and `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`."
-      - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-projection.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`."
+      - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/cli-projection-runtime-shell.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`."
 
   - feature_id: hub.servertool_auto_hook_execution
     change_risk: medium
@@ -1325,7 +1325,7 @@ verification:
       - tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
     integration:
-      - tests/servertool/servertool-cli-projection.spec.ts
+      - tests/servertool/cli-projection-runtime-shell.spec.ts
       - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
     smoke:
       - npm run verify:function-map-compile-gate

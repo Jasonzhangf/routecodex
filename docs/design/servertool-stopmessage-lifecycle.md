@@ -115,7 +115,7 @@ Missing schema, invalid schema, malformed schema arguments, or `stopreason=2` wi
 - `cargo test -p servertool-core stopless --lib -- --nocapture`
 - `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`
 - `cargo test -p servertool-cli --test cli_blackbox -- --nocapture`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/servertool-cli-projection.spec.ts --runInBand`
+- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/cli-projection-runtime-shell.spec.ts --runInBand`
 - `npm run verify:servertool-rust-only`
 - `npm run verify:function-map-compile-gate`
 - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`

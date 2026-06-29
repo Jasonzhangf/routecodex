@@ -139,7 +139,7 @@ flowchart TD
 
 - `tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts`
 - `tests/sharedmodule/servertool-pending-session.spec.ts`
-- `tests/servertool/servertool-cli-projection.spec.ts`
+- `tests/servertool/cli-projection-runtime-shell.spec.ts`
 - `tests/servertool/stopless-cli-continuation.spec.ts`
 - `tests/servertool/followup-runtime-provider-pin.spec.ts`
 - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`

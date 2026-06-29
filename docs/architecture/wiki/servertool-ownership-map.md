@@ -257,7 +257,7 @@ Forbidden paths:
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/servertool-cli-projection.spec.ts`
+- `tests/servertool/cli-projection-runtime-shell.spec.ts`
 - `tests/servertool/servertool-cli-result-restore.spec.ts`
 - `tests/cli/servertool-command.spec.ts`
 - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
@@ -310,7 +310,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`
+- `sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine.ts`
 - `tests/servertool/stop-message-auto.goal-default.spec.ts`
 - `tests/servertool/stopless-cli-continuation.spec.ts`
@@ -323,7 +323,7 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/stopless-cli-continuation.spec.ts`
-- `tests/servertool/servertool-cli-projection.spec.ts`
+- `tests/servertool/cli-projection-runtime-shell.spec.ts`
 - `tests/servertool/stop-schema-lifecycle-contract.spec.ts`
 - `tests/responses/responses-openai-bridge.spec.ts`
 - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`

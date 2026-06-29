@@ -383,6 +383,8 @@ jest.unstable_mockModule(
     }),
     extractTextFromChatLikeWithNative: jest.fn(() => ''),
     buildServertoolCliProjectionExecutionContextWithNative: jest.fn((input: any) => ({
+    buildClientExecCliProjectionOutputWithNative: jest.fn(() => ({})),
+    buildClientVisibleProjectionShellWithNative: jest.fn((input: any) => input?.base ?? {}),
       flowId: 'servertool_cli_projection'
     })),
     planServertoolExecutionBranchWithNative: planServertoolExecutionBranchWithNativeMock,
@@ -852,14 +854,6 @@ jest.unstable_mockModule(
   })
 );
 
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/cli-projection.js',
-  () => ({
-    buildServertoolCliProjectionForToolCall: jest.fn(() => {
-      throw new Error('cli projection should not be used in server-side-tools.failfast.spec.ts');
-    })
-  })
-);
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/state-scope.js',

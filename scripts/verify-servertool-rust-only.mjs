@@ -162,6 +162,10 @@ const DELETED_CLI_RESULT_GUARD_TS_FILES = [
 const DELETED_SERVERTOOL_DISPATCH_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`,
 ];
+const DELETED_SERVERTOOL_CLI_PROJECTION_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`,
+  `${ROOT}/tests/servertool/servertool-cli-projection.spec.ts`,
+];
 const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`,
@@ -185,7 +189,7 @@ const DELETED_AI_FOLLOWUP_FILES = [
 const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
   'hub.servertool_cli_projection': [
     'tests/cli/servertool-command.spec.ts',
-    'tests/servertool/servertool-cli-projection.spec.ts',
+    'tests/servertool/cli-projection-runtime-shell.spec.ts',
     'tests/servertool/servertool-cli-native-bridge.spec.ts',
     'tests/servertool/servertool-cli-result-restore.spec.ts',
     'tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts',
@@ -199,7 +203,6 @@ const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
 });
 
 const STOPLESS_SESSION_LOCK_FILES = [
-  CLI_PROJECTION,
   `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`,
   `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
 ];
@@ -365,18 +368,13 @@ function extractFunctionBlock(content, functionName) {
 }
 
 function assertStoplessSessionIdLock() {
-  const cliProjection = readRequired(CLI_PROJECTION);
-  if (cliProjection.includes('stop_message_auto auto flow requires sessionId on adapterContext')) {
-    fail(
-      'stopless-session-lock',
-      `${CLI_PROJECTION} must not revive adapterContext.sessionId requirement for stopless auto flow`
-    );
-  }
-  if (cliProjection.includes('readSessionIdFromOptions(')) {
-    fail(
-      'stopless-session-lock',
-      `${CLI_PROJECTION} must not keep dead stopless session identity readers`
-    );
+  for (const file of DELETED_SERVERTOOL_CLI_PROJECTION_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'servertool-cli-projection-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; Rust/native projection owns this surface`
+      );
+    }
   }
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
   if (orchestration.includes('_raw_followup_text_ignored')) {
@@ -684,7 +682,7 @@ function checkServertoolCliProjectionMap() {
   const functionMap = readRequired(FUNCTION_MAP);
   const verificationMap = readRequired(VERIFICATION_MAP);
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
-  const cliProjection = readRequired(CLI_PROJECTION);
+  const cliProjectionRuntimeShell = readRequired(`${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`);
   const serverSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
   const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const rustOutcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
@@ -961,12 +959,21 @@ function checkServertoolCliProjectionMap() {
       privateCarrier
     );
   }
-  assertContains('cli-projection-thin-wrapper', CLI_PROJECTION, cliProjection, 'buildClientVisibleProjectionShellWithNative');
-  if (cliProjection.includes("name: 'exec_command'") || cliProjection.includes('"name": "exec_command"')) {
-    fail('cli-projection-command-contract', 'cli-projection.ts must not build exec_command tool call shape in TS');
+  for (const file of DELETED_SERVERTOOL_CLI_PROJECTION_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'servertool-cli-projection-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted; cli projection planning is Rust/native-owned`
+      );
+    }
   }
-  if (cliProjection.includes('routecodex servertool run')) {
-    fail('cli-projection-command-contract', 'cli-projection.ts must not build servertool CLI command strings in TS');
+  assertContains('cli-projection-runtime-native-owner', `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`, cliProjectionRuntimeShell, 'buildClientExecCliProjectionOutputWithNative');
+  assertContains('cli-projection-runtime-native-owner', `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`, cliProjectionRuntimeShell, 'buildClientVisibleProjectionShellWithNative');
+  if (cliProjectionRuntimeShell.includes("name: 'exec_command'") || cliProjectionRuntimeShell.includes('"name": "exec_command"')) {
+    fail('cli-projection-command-contract', 'cli-projection runtime shell must not build exec_command tool call shape in TS');
+  }
+  if (cliProjectionRuntimeShell.includes('routecodex servertool run')) {
+    fail('cli-projection-command-contract', 'cli-projection runtime shell must not build servertool CLI command strings in TS');
   }
   for (const keyword of [
     "args.flowId === 'stop_message_flow'",
@@ -976,13 +983,10 @@ function checkServertoolCliProjectionMap() {
     'const repeatCount =',
     'const maxRepeats =',
   ]) {
-    if (keyword === "args.flowId === 'stop_message_flow'" && cliProjection.includes('requires sessionId on adapterContext')) {
-      continue;
-    }
-    if (cliProjection.includes(keyword)) {
+    if (cliProjectionRuntimeShell.includes(keyword)) {
       fail(
         'cli-projection-output-no-ts-owner',
-        `Forbidden TS client exec projection semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`
+        `Forbidden TS client exec projection semantic "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts`
       );
     }
   }
@@ -1107,7 +1111,15 @@ function checkLegacyStopMessageRuntimeMirrorsRemoved() {
 
 // ── Check 7: Migrated CLI paths must not reenter provider flow ──
 function checkMigratedProjectionDoesNotReenter() {
-  for (const file of [CLI_PROJECTION]) {
+  for (const file of DELETED_SERVERTOOL_CLI_PROJECTION_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'servertool-cli-projection-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted`
+      );
+    }
+  }
+  for (const file of [`${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`]) {
     const content = readRequired(file);
     for (const keyword of ['reenterPipeline', 'providerInvoker']) {
       if (content.includes(keyword)) {
@@ -1131,11 +1143,14 @@ function checkMigratedProjectionDoesNotReenter() {
 
 // ── Check 8: apply_patch stays out of CLI projection ───────────
 function checkApplyPatchNotCliProjected() {
-  const cliProjection = readRequired(CLI_PROJECTION);
-  if (cliProjection.includes('apply_patch')) {
+  if (existsSync(CLI_PROJECTION)) {
+    fail('apply-patch-not-cli-projected', 'servertool/cli-projection.ts must stay physically deleted');
+  }
+  const cliProjectionRuntimeShell = readRequired(`${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`);
+  if (cliProjectionRuntimeShell.includes('apply_patch')) {
     fail('apply-patch-not-cli-projected', 'servertool CLI projection must not special-case or map apply_patch');
   } else {
-    pass('apply-patch-not-cli-projected', 'cli-projection.ts does not reference apply_patch');
+    pass('apply-patch-not-cli-projected', 'cli projection runtime shell does not reference apply_patch');
   }
 }
 
@@ -4810,7 +4825,7 @@ function checkServertoolRustOutcomeCloseout() {
   const rustOutcome = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const rustCli = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const resultRestoreSpec = readRequired(`${ROOT}/tests/servertool/servertool-cli-result-restore.spec.ts`);
-  const tsProjection = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`);
+  const cliProjectionRuntimeShell = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts`);
   const tsServerSideTools = readRequired(TS_SERVER_SIDE_TOOLS);
   const tsServerSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
 
@@ -4847,15 +4862,23 @@ function checkServertoolRustOutcomeCloseout() {
     );
   }
 
+  for (const file of DELETED_SERVERTOOL_CLI_PROJECTION_FILES) {
+    if (existsSync(file)) {
+      fail(
+        'servertool-cli-projection-deleted',
+        `${file.replace(`${ROOT}/`, '')} must stay physically deleted`
+      );
+    }
+  }
   for (const marker of ['reenterPipeline', 'providerInvoker', 'serverToolFollowup', 'serverToolFollowupSource', '--ticket', 'stcli_', 'rcc_cli_']) {
-    if (tsProjection.includes(marker)) {
-      fail('servertool-cli-thin-shell', `cli-projection.ts must not carry legacy servertool marker ${marker}`);
+    if (cliProjectionRuntimeShell.includes(marker)) {
+      fail('servertool-cli-runtime-shell', `cli-projection-runtime-shell.ts must not carry legacy servertool marker ${marker}`);
     }
   }
   for (const marker of ['memory_cache_auto', 'executeServertoolBackendPlan']) {
-    if (tsProjection.includes(marker) || tsServerSideTools.includes(marker) || tsServerSideToolsImpl.includes(marker)) {
+    if (cliProjectionRuntimeShell.includes(marker) || tsServerSideTools.includes(marker) || tsServerSideToolsImpl.includes(marker)) {
       fail(
-        'servertool-cli-thin-shell',
+        'servertool-cli-runtime-shell',
         `servertool TS thin shells must not revive retired marker ${marker}`
       );
     }
@@ -4877,7 +4900,6 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
-  const cliProjectionRuntimeShell = readRequired(`${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`);
   for (const marker of [
     'export function isClientExecCliProjectionToolCall(',
     'return isServertoolClientExecCliProjectionToolCallWithNative({',
@@ -5251,7 +5273,7 @@ function checkServertoolRustOutcomeCloseout() {
   );
 
   pass('servertool-outcome-rust-owner', 'servertool-core owns outcome planning and cli contract');
-  pass('servertool-cli-thin-shell', 'TS cli-projection remains a thin shell without legacy restore markers');
+  pass('servertool-cli-projection-deleted', 'TS cli-projection facade is deleted; runtime shell calls Rust/native projection directly');
 }
 
 function checkResponseStageMetadataCenterOnly() {
