@@ -103,6 +103,23 @@ describe('buildOpenAiSdkChatCallOptions', () => {
     ).toThrow(/metadata is not allowed in OpenAI SDK provider options/);
   });
 
+  it('fails fast when internal metadata center mirror reaches OpenAI SDK provider options builder', () => {
+    expect(() =>
+      buildOpenAiSdkChatCallOptions(
+        {
+          model: 'gpt-5.4',
+          messages: [{ role: 'user', content: 'hi' }],
+          __metadataCenter: {
+            runtimeControl: {
+              providerProtocol: 'openai-chat'
+            }
+          }
+        },
+        { authorization: 'Bearer test' }
+      )
+    ).toThrow(/metadata is not allowed in OpenAI SDK provider options/);
+  });
+
   it('maps openai chat payload into AI SDK call options and preserves reasoning/tool config', () => {
     const options = buildOpenAiSdkChatCallOptions(
       {

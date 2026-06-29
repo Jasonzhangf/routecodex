@@ -441,4 +441,31 @@ describe('executeAnthropicRequestWithBody', () => {
       global.fetch = originalFetch;
     }
   });
+
+  it('fails fast when internal metadata center mirror reaches Anthropic provider wire body', async () => {
+    await expect(
+      executeAnthropicRequestWithBody(
+        {
+          model: 'mimo-v2.5-pro',
+          max_tokens: 64,
+          messages: [{ role: 'user', content: 'hi' }],
+          __metadataCenter: {
+            runtimeControl: {
+              providerProtocol: 'anthropic-messages'
+            }
+          }
+        } as any,
+        {
+          endpoint: '/v1/messages',
+          headers: {
+            'content-type': 'application/json',
+            'anthropic-version': '2023-06-01'
+          },
+          targetUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages',
+          body: {},
+          wantsSse: true
+        } as any
+      )
+    ).rejects.toThrow('provider-runtime-error: anthropic provider wire body contains internal metadata');
+  });
 });

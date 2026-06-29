@@ -68,7 +68,12 @@ const HTTP_RESPONSE_METADATA_RELEASE_WRITER: MetadataCenterWriter = {
 
 function bindInternalStateCarrier(target: Record<string, unknown>, center: MetadataCenter): void {
   Reflect.set(target, METADATA_CENTER_SYMBOL, center);
-  target.__metadataCenter = center.snapshot() as unknown as Record<string, unknown>;
+  Object.defineProperty(target, '__metadataCenter', {
+    configurable: true,
+    enumerable: false,
+    value: center.snapshot() as unknown as Record<string, unknown>,
+    writable: true,
+  });
 }
 
 function transitionSlotStatus<T>(args: {

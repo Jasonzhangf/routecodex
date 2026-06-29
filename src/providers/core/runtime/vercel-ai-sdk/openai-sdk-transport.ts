@@ -454,7 +454,10 @@ export function buildOpenAiSdkChatCallOptions(
   body: UnknownRecord,
   requestHeaders: Record<string, string>
 ): LanguageModelV3CallOptions {
-  if (Object.prototype.hasOwnProperty.call(body, 'metadata')) {
+  if (
+    Object.prototype.hasOwnProperty.call(body, 'metadata')
+    || Object.prototype.hasOwnProperty.call(body, '__metadataCenter')
+  ) {
     throw new Error('provider-runtime-error: metadata is not allowed in OpenAI SDK provider options');
   }
   const prompt = convertPrompt(body);

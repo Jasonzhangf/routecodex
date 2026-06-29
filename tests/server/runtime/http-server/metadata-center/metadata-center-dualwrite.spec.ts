@@ -35,6 +35,26 @@ function seedRequestTruth(target: Record<string, unknown>, requestId: string, se
 }
 
 describe('metadata center dual-write API', () => {
+  it('keeps the compatibility metadata center mirror non-enumerable', () => {
+    const target: Record<string, unknown> = {};
+
+    writeMetadataCenterSlot({
+      target,
+      family: 'request_truth',
+      key: 'requestId',
+      value: 'req-non-enumerable',
+      writer: TEST_WRITER
+    });
+
+    expect(MetadataCenter.read(target)?.readRequestTruth().requestId).toBe('req-non-enumerable');
+    expect(Object.keys(target)).not.toContain('__metadataCenter');
+    expect({ ...target }).not.toHaveProperty('__metadataCenter');
+    expect(JSON.stringify(target)).not.toContain('__metadataCenter');
+    expect(Object.getOwnPropertyDescriptor(target, '__metadataCenter')).toEqual(
+      expect.objectContaining({ enumerable: false })
+    );
+  });
+
   it('writes runtime_control.stopless into JS mirror and Rust-readable snapshot in one call', () => {
     const target: Record<string, unknown> = {};
 

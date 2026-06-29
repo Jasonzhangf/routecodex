@@ -126,7 +126,10 @@ function buildInvalidJsonError(responseText: string): Error & {
 }
 
 function assertAnthropicProviderWireBody(providerWireBody: UnknownRecord): void {
-  if (Object.prototype.hasOwnProperty.call(providerWireBody, 'metadata')) {
+  if (
+    Object.prototype.hasOwnProperty.call(providerWireBody, 'metadata')
+    || Object.prototype.hasOwnProperty.call(providerWireBody, '__metadataCenter')
+  ) {
     throw new Error('provider-runtime-error: anthropic provider wire body contains internal metadata');
   }
 }
