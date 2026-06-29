@@ -217,6 +217,7 @@ for (const relPath of providerNeutralProjectionFiles) {
     'JSON.stringify(fc?.arguments ?? {})',
     "typeof fc?.id === 'string' ? fc.id : `call_${Math.random().toString(36).slice(2, 10)}`",
     "role: typeof d.role === 'string' ? d.role : 'assistant'",
+    "const et = (event && (event.event || event.type)) || 'unknown'",
     'syntheticResponse',
     'syntheticIndex',
     "id: `${context.requestId}-input-${inputIndex}`",

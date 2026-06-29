@@ -170,6 +170,13 @@
 - 10000 路由真值：`~/.rcc/config.toml` 中 `gateway_coding_10000.longcontext` 当前 targets 是 `["minimax.MiniMax-M3", "mimo.mimo-v2.5"]`，而不是 `fwd.glm-5.2`。
 - live sample 证据：`~/.rcc/codex-samples/openai-chat/ports/10000/req_1782701791204_2714110b/__runtime.json` 选中 `minimax.key1.MiniMax-M3`，`provider-request.json` 里的 `model` 也是 `MiniMax-M3`。
 
+# 2026-06-29 SSE chat stats event-type fail-fast slice
+
+- 目标：继续 SSE 收口，删除 `chat-json-to-sse-converter.ts` 里 `updateStats()` 对缺失 `event/event.type` 的隐式兜底，避免统计层把坏事件当作 unknown 继续跑。
+- 改动：`updateStats()` 现在要求 `event?.event || event?.type` 必须是非空字符串，否则直接抛 `Chat SSE event missing event/type for stats update`；`verify-sse-architecture-boundary.mjs` 与 `sse-no-silent-failure.spec.ts` 同步锁死旧表达式 `const et = (event && (event.event || event.type)) || 'unknown'`。
+- 验证：`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；`npm run verify:function-map-compile-gate` PASS。
+- 边界：本 slice 只改 SSE 统计路径，不碰 function-map 文档、servertool、Hub Pipeline 或 Virtual Router。
+
 # 2026-06-29 Hub Pipeline Rust closeout Wave 3 MetadataCenter dualwrite slice
 
 - Wave 3 baseline：`verify:architecture-metadata-center-manifest-code-sync`、`verify:architecture-metadata-center-write-boundaries`、`verify:architecture-metadata-leak-boundary` 均 PASS；`verify:metadata-center-dualwrite-api` FAIL，红点为 metadata center manifest 未列 dualwrite gate，以及 req governance 仍从 flat `metadata.stopMessageEnabled` 读取 truth。

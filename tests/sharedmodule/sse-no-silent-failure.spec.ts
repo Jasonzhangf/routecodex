@@ -35,6 +35,7 @@ describe('SSE no silent failure boundary', () => {
       '} catch {',
       'fallbackCode',
       'fallbackMessage',
+      "const et = (event && (event.event || event.type)) || 'unknown'",
     ];
     const hits: string[] = [];
 

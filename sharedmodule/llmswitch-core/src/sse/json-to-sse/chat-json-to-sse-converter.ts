@@ -157,8 +157,10 @@ export class ChatJsonToSseConverterRefactored {
    * 更新统计信息
    */
   private updateStats(context: ChatJsonToSseContext, event: any): void {
-    // 尽量兼容 event/event.type 两种字段
-    const et = (event && (event.event || event.type)) || 'unknown';
+    const et = event?.event || event?.type;
+    if (typeof et !== 'string' || !et.trim()) {
+      throw new Error('Chat SSE event missing event/type for stats update');
+    }
     if (typeof context.eventStats.totalEvents === 'number') context.eventStats.totalEvents++;
     if (context.eventStats.eventTypes) {
       context.eventStats.eventTypes[et] = (context.eventStats.eventTypes[et] || 0) + 1;
