@@ -8,6 +8,7 @@ import {
   readProviderProtocolFromAnyBoundMetadataCenter,
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
+import { planServertoolEntryContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export function resolveServertoolEntryContext(args: {
   options: ServerSideToolEngineOptions;
@@ -38,6 +39,12 @@ export function resolveServertoolEntryContext(args: {
   if (!runtimeMetadataSnapshot) {
     throw new Error('Servertool entry context requires MetadataCenter request truth or runtime_control snapshot');
   }
+  const entryContextPlan = planServertoolEntryContextWithNative({
+    includeToolCallHandlerNames: args.options.includeToolCallHandlerNames,
+    excludeToolCallHandlerNames: args.options.excludeToolCallHandlerNames,
+    includeAutoHookIds: args.options.includeAutoHookIds,
+    excludeAutoHookIds: args.options.excludeAutoHookIds
+  });
 
   return {
     action: 'continue',
@@ -51,10 +58,10 @@ export function resolveServertoolEntryContext(args: {
       providerProtocol,
       runtimeMetadata: runtimeMetadataSnapshot
     },
-    includeToolCallNames: normalizeFilterTokenSet(args.options.includeToolCallHandlerNames),
-    excludeToolCallNames: normalizeFilterTokenSet(args.options.excludeToolCallHandlerNames),
-    includeAutoHookIds: normalizeFilterTokenSet(args.options.includeAutoHookIds),
-    excludeAutoHookIds: normalizeFilterTokenSet(args.options.excludeAutoHookIds)
+    includeToolCallNames: tokenSetFromNativePlan(entryContextPlan.includeToolCallNames),
+    excludeToolCallNames: tokenSetFromNativePlan(entryContextPlan.excludeToolCallNames),
+    includeAutoHookIds: tokenSetFromNativePlan(entryContextPlan.includeAutoHookIds),
+    excludeAutoHookIds: tokenSetFromNativePlan(entryContextPlan.excludeAutoHookIds)
   };
 }
 
@@ -62,20 +69,6 @@ export function asServertoolJsonObject(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : null;
 }
 
-function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | null {
-  if (!Array.isArray(values) || values.length === 0) {
-    return null;
-  }
-  const normalized = new Set<string>();
-  for (const raw of values) {
-    if (typeof raw !== 'string') {
-      continue;
-    }
-    const value = raw.trim().toLowerCase();
-    if (!value) {
-      continue;
-    }
-    normalized.add(value);
-  }
-  return normalized.size > 0 ? normalized : null;
+function tokenSetFromNativePlan(values: string[] | undefined): Set<string> | null {
+  return values && values.length > 0 ? new Set(values) : null;
 }

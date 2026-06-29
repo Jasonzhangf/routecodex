@@ -1502,6 +1502,12 @@ pub fn plan_servertool_entry_preflight_json(input_json: String) -> NapiResult<St
 }
 
 #[napi]
+pub fn plan_servertool_entry_context_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_entry_context_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_registry_registration_action_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_registry_registration_action_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

@@ -2573,6 +2573,52 @@ export function planServertoolEntryPreflightWithNative(input: {
   };
 }
 
+export interface ServertoolEntryContextPlan {
+  includeToolCallNames?: string[];
+  excludeToolCallNames?: string[];
+  includeAutoHookIds?: string[];
+  excludeAutoHookIds?: string[];
+}
+
+export function planServertoolEntryContextWithNative(input: {
+  includeToolCallHandlerNames?: string[];
+  excludeToolCallHandlerNames?: string[];
+  includeAutoHookIds?: string[];
+  excludeAutoHookIds?: string[];
+}): ServertoolEntryContextPlan {
+  const capability = 'planServertoolEntryContextJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEntryContextJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEntryContextJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEntryContextJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  for (const key of [
+    'includeToolCallNames',
+    'excludeToolCallNames',
+    'includeAutoHookIds',
+    'excludeAutoHookIds'
+  ]) {
+    const value = record[key];
+    if (value != null && (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string'))) {
+      throw new Error(`planServertoolEntryContextJson native returned invalid ${key}`);
+    }
+  }
+  return {
+    includeToolCallNames: record.includeToolCallNames == null ? undefined : record.includeToolCallNames as string[],
+    excludeToolCallNames: record.excludeToolCallNames == null ? undefined : record.excludeToolCallNames as string[],
+    includeAutoHookIds: record.includeAutoHookIds == null ? undefined : record.includeAutoHookIds as string[],
+    excludeAutoHookIds: record.excludeAutoHookIds == null ? undefined : record.excludeAutoHookIds as string[]
+  };
+}
+
 export type ServertoolRegistryRegistrationActionPlan = {
   action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'register_adhoc';
   canonicalName?: string;

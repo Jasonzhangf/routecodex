@@ -551,6 +551,14 @@ pub fn plan_servertool_entry_preflight_json(input_json: &str) -> Result<String, 
         .map_err(|e| format!("serialize servertool entry preflight plan: {e}"))
 }
 
+pub fn plan_servertool_entry_context_json(input_json: &str) -> Result<String, String> {
+    let input: server_side_tool_entry_contract::ServertoolEntryContextInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool entry context input: {e}"))?;
+    serde_json::to_string(&server_side_tool_entry_contract::plan_servertool_entry_context(input))
+        .map_err(|e| format!("serialize servertool entry context plan: {e}"))
+}
+
 pub fn plan_servertool_registry_registration_action_json(
     input_json: &str,
 ) -> Result<String, String> {

@@ -21,7 +21,7 @@ function bindProviderProtocol(adapterContext: Record<string, unknown>, providerP
 }
 
 describe('entry-context-shell', () => {
-  test('owns entry json-object coercion and filter normalization', async () => {
+  test('keeps entry shell thin and delegates filter normalization to native Rust', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile(
         'sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts',
@@ -31,7 +31,9 @@ describe('entry-context-shell', () => {
 
     expect(source).toContain('export function resolveServertoolEntryContext(');
     expect(source).toContain('export function asServertoolJsonObject(');
-    expect(source).toContain('normalizeFilterTokenSet');
+    expect(source).toContain('planServertoolEntryContextWithNative');
+    expect(source).not.toContain('function normalizeFilterTokenSet(');
+    expect(source).not.toContain('.trim().toLowerCase()');
   });
 
   test('builds context base and normalized include/exclude sets', () => {

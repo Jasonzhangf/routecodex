@@ -3761,6 +3761,9 @@ function checkServertoolEntryPreflightRustOwner() {
     'pub struct ServertoolEntryPreflightInput',
     'pub struct ServertoolEntryPreflightPlan',
     'pub fn plan_servertool_entry_preflight',
+    'pub struct ServertoolEntryContextInput',
+    'pub struct ServertoolEntryContextPlan',
+    'pub fn plan_servertool_entry_context',
   ]) {
     assertContains('servertool-entry-preflight-rust-owner', RUST_SERVERTOOL_ENTRY_PREFLIGHT_CONTRACT, rustEntryPreflight, needle);
   }
@@ -3777,10 +3780,22 @@ function checkServertoolEntryPreflightRustOwner() {
     'plan_servertool_entry_preflight_json'
   );
   assertContains(
+    'servertool-entry-context-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'plan_servertool_entry_context_json'
+  );
+  assertContains(
     'servertool-entry-preflight-native-export',
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
     'pub fn plan_servertool_entry_preflight_json'
+  );
+  assertContains(
+    'servertool-entry-context-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn plan_servertool_entry_context_json'
   );
   assertContains(
     'servertool-entry-preflight-required-export',
@@ -3789,10 +3804,22 @@ function checkServertoolEntryPreflightRustOwner() {
     'planServertoolEntryPreflightJson'
   );
   assertContains(
+    'servertool-entry-context-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planServertoolEntryContextJson'
+  );
+  assertContains(
     'servertool-entry-preflight-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,
     'planServertoolEntryPreflightWithNative'
+  );
+  assertContains(
+    'servertool-entry-context-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planServertoolEntryContextWithNative'
   );
   assertContains(
     'servertool-entry-preflight-ts-thin-shell',
@@ -5158,16 +5185,27 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export function resolveServertoolEntryContext(',
     'export function asServertoolJsonObject(',
-    'normalizeFilterTokenSet',
-    'includeToolCallNames: normalizeFilterTokenSet',
-    'excludeToolCallNames: normalizeFilterTokenSet',
-    'includeAutoHookIds: normalizeFilterTokenSet',
-    'excludeAutoHookIds: normalizeFilterTokenSet'
+    'planServertoolEntryContextWithNative',
+    'includeToolCallNames: tokenSetFromNativePlan',
+    'excludeToolCallNames: tokenSetFromNativePlan',
+    'includeAutoHookIds: tokenSetFromNativePlan',
+    'excludeAutoHookIds: tokenSetFromNativePlan'
   ]) {
     if (!entryContextShell.includes(marker)) {
       fail(
         'servertool-entry-context-shell-owner',
         `entry-context-shell.ts must keep entry context owner marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'function normalizeFilterTokenSet(',
+    '.trim().toLowerCase()',
+  ]) {
+    if (entryContextShell.includes(marker)) {
+      fail(
+        'servertool-entry-context-no-ts-normalization-owner',
+        `entry-context-shell.ts must not own filter normalization marker ${marker}`
       );
     }
   }

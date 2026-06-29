@@ -164,8 +164,8 @@ const TARGETS = [
     required: [
       'resolveServertoolEntryContext',
       'asServertoolJsonObject',
-      'normalizeFilterTokenSet',
-      'includeToolCallNames: normalizeFilterTokenSet',
+      'planServertoolEntryContextWithNative',
+      'includeToolCallNames: tokenSetFromNativePlan',
     ],
   },
   {
