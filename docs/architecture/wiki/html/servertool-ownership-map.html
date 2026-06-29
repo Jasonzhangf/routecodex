@@ -418,13 +418,13 @@
           <li><code>StoplessExecutionPlan</code></li>
           <li><code>StoplessOrchestrationPlanInput</code></li>
           <li><code>StoplessOrchestrationPlan</code></li>
-          <li><code>RuntimeStopMessageStateFromAdapterContextInput</code></li>
+          <li><code>RuntimeStopMessageStateFromMetadataCenterInput</code></li>
           <li><code>RuntimeStopMessageStateSnapshot</code></li>
         </ul>
         <p>Canonical builders:</p>
         <ul>
           <li><code>plan_stopless_orchestration_action</code></li>
-          <li><code>resolve_runtime_stop_message_state_from_adapter_context</code></li>
+          <li><code>resolve_runtime_stop_message_state_from_metadata_center</code></li>
           <li><code>plan_client_exec_cli_projection_output</code></li>
           <li><code>resolve_stop_message_session_scope</code></li>
         </ul>
@@ -499,7 +499,7 @@
           <li>Once the standard <code>reasoningStop</code> tool is exposed on the request, legacy shell-projected stop history such as <code>exec_command(cmd=&quot;reasoningStop&quot;)</code>, <code>reasoning_stop</code>, and their paired <code>command not found</code> tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests.</li>
           <li>Model side must stay unaware of stopless identity. Stopless identity comes from write-once <code>request_truth.sessionId/requestId</code>; stopless control and progression come from Rust-produced <code>MetadataCenter.runtime_control.stopless</code> plus current request tool_output. <code>sessionDir</code>/persisted writeback and <code>requestTruth.runtimeControl</code> are forbidden.</li>
           <li>ReqChatProcess is the standard write origin for stopless runtime control: Rust request governance emits <code>metadata.runtime_control.stopless</code>, and the TS request-stage shell may only commit that Rust plan into the bound MetadataCenter with fail-fast binding checks.</li>
-          <li>TS engine orchestration may only call Rust <code>planStoplessExecutionJson</code> for stopless execution/context composition and orchestration planning; it must not build stopless context/requestTruth/session truth in TS, and it must not reenter for stopless CLI flows.</li>
+          <li>Stopless execution/control composition and orchestration planning are owned by the Rust Chat Process engine; TS may only expose unavoidable external IO/native-call shells and must not build stopless context/requestTruth/session truth or reenter for stopless CLI flows.</li>
           <li>Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter.</li>
           <li><code>responsesRequestContext.sessionId/conversationId</code> is continuation-only context for <code>/v1/responses</code>; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material.</li>
         </ul>

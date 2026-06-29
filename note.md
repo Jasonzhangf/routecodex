@@ -1,3 +1,10 @@
+# 2026-06-29 stopless followup-flow skip removal slice
+
+- 目标：继续 Hub Pipeline Rust closeout，把 stopless 决策里的旧 `followup_flow_id` / `serverToolFollowup` skip 分支物理删除；`serverToolFollowup` 只保留为 routing/metadata control，不再作为 stop-message auto handler 的递归避让真源。
+- 改动：`servertool-core/src/stop_message_auto_handler.rs` 删除 `followup_flow_id` 输入、`metadata_runtime_control.serverToolFollowup` early return 和 `skip_servertool_followup_hop` 分支；`stop-message-core/src/lib.rs` 删除 `StopMessageDecisionContext.followup_flow_id`、`SnapshotSource::ServertoolFollowupHop`、`SkipReason::ServertoolFollowupHop` 及相关测试；TS native type 删除 `followup_flow_id`；`stop-message-native-decision.spec.ts` 删除旧 followup-hop skip 断言；mainline/wiki 从 `FromAdapterContext` 指向 `FromMetadataCenter`。
+- 已验证：`cargo test -p servertool-core stop_message --lib -- --nocapture` 73 passed；`cargo test -p stop-message-core --lib -- --nocapture` 54 passed；`npm run verify:servertool-rust-only` PASS；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS（warnings only）；focused residue audit 1 passed；`stop-message-native-decision.spec.ts` 20 passed；`stopless-cli-continuation.spec.ts` 18 passed；root/sharedmodule `tsc` PASS；`npm run verify:function-map-compile-gate` PASS；`npm run verify:architecture-mainline-call-map` PASS；`git diff --check` PASS。
+- 缺口：本 slice 未做 live replay；它只证明 stopless followup-flow skip residue 已由 Rust/gate/focused blackbox 层闭合，完整 servertool hook skeleton 与 Hub Pipeline Rust closeout 仍未完成。
+
 # 2026-06-29 Hub Pipeline Rust closeout Wave 3 stopless MetadataCenter runtime-state slice
 
 - 目标：继续 Wave 3 MetadataCenter request-scoped migration，把 stopless runtime-state restore 从旧 adapter-context/runtime-utils 面收口到 Rust `MetadataCenter.runtime_control.stopless`。

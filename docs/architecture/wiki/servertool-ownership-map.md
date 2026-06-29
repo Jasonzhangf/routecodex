@@ -288,12 +288,12 @@ Canonical types:
 - `StoplessExecutionPlan`
 - `StoplessOrchestrationPlanInput`
 - `StoplessOrchestrationPlan`
-- `RuntimeStopMessageStateFromAdapterContextInput`
+- `RuntimeStopMessageStateFromMetadataCenterInput`
 - `RuntimeStopMessageStateSnapshot`
 
 Canonical builders:
 - `plan_stopless_orchestration_action`
-- `resolve_runtime_stop_message_state_from_adapter_context`
+- `resolve_runtime_stop_message_state_from_metadata_center`
 - `plan_client_exec_cli_projection_output`
 - `resolve_stop_message_session_scope`
 
