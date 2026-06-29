@@ -7,7 +7,6 @@ const repo = path.resolve(new URL('../..', import.meta.url).pathname);
 const roots = [
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_provider_key.rs',
-  'sharedmodule/llmswitch-core/src/servertool/backend-route-flow-policy.ts',
   'sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts',
   'sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts',
   'sharedmodule/llmswitch-core/docs',

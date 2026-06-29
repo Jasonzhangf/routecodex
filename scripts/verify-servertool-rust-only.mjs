@@ -3918,6 +3918,12 @@ function checkBackendRoutePolicyRustOwner() {
   );
   for (const file of [
     TS_BACKEND_ROUTE_SHAPE_GUARD,
+    TS_BACKEND_ROUTE_FINALIZE,
+    TS_BACKEND_ROUTE_FLOW_POLICY,
+    TS_BACKEND_ROUTE_ORIGIN_DELTA,
+    TS_BACKEND_ROUTE_RESPONSE,
+    TS_BACKEND_ROUTE_SHADOW,
+    `${SERVERTOOL_TS_DIR}/backend-route-seed.ts`,
     `${SERVERTOOL_TS_DIR}/backend-route-mainline-block.ts`,
     TS_BACKEND_ROUTE_REENTER,
     TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY,

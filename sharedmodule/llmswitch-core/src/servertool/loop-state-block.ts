@@ -6,11 +6,16 @@ import {
   planServertoolLoopStateWithNative,
   readServertoolLoopStateWithNative,
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './backend-route-flow-policy.js';
+import {
+  planServertoolFollowupRuntimeWithNative,
+  type NativeServertoolFollowupRuntimePlan
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   readRuntimeControlFromAnyBoundMetadataCenter,
   writeRuntimeControlToBoundMetadataCenter
 } from './metadata-center-carrier.js';
+
+type FollowupFlowDecision = NativeServertoolFollowupRuntimePlan;
 
 export type ServerToolLoopState = {
   flowId?: string;
@@ -114,7 +119,7 @@ export function buildServerToolLoopState(args: {
   if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
     return null;
   }
-  const decision = args.decision ?? resolveFollowupFlowDecision(args.flowId);
+  const decision = args.decision ?? planServertoolFollowupRuntimeWithNative(args.flowId ?? '');
   const payloadHash = hashPayload(args.payload, args.logNonBlocking);
   const stopPairHash = hashStopMessageRequestResponsePair(args.payload, args.response, args.logNonBlocking);
   const previous = readServerToolLoopState(args.adapterContext);

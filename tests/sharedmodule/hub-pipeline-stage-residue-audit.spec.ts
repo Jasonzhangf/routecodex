@@ -1387,51 +1387,27 @@ describe('hub pipeline stage residue audit', () => {
   it('servertool followup must not add standalone TS helper files during Rust closeout', () => {
     const legacyFiles = [
       'sharedmodule/llmswitch-core/src/servertool/followup-captured-tool-outputs.ts',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-origin-delta.ts',
     ];
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
-    const followupOriginDelta = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/backend-route-origin-delta.ts'),
-      'utf8'
-    );
-    const findings = collectMatches(followupOriginDelta, [
-      { label: 'extracts captured tool outputs in TS', pattern: /extractCapturedToolOutputs/ },
-      { label: 'extracts chat tool outputs in TS', pattern: /extractChatToolOutputs/ },
-      { label: 'applies single followup delta op in TS', pattern: /applySingleDeltaOp/ },
-      { label: 'rebuilds tool messages in TS', pattern: /appendToolMessagesFromToolOutputs/ },
-      { label: 'mutates tool list in TS', pattern: /dropToolByFunctionName|appendToolIfMissing/ },
-      { label: 'prunes pending tool calls in TS', pattern: /prunePendingToolCallsForOutputs/ },
-    ]);
 
-    expect({ existingFiles, findings }).toEqual({ existingFiles: [], findings: [] });
+    expect(existingFiles).toEqual([]);
   });
 
   it('servertool followup seed must not retain TS payload or tool semantics', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/backend-route-seed.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'imports non-native responses bridge conversion', pattern: /from ['"]\.\.\/conversion\/responses\/responses-openai-bridge\.js['"]/ },
-      { label: 'imports clone helper for TS semantic cloning', pattern: /from ['"]\.\/server-side-tools\.js['"]/ },
-      { label: 'implements responses top-level parameter extraction in TS', pattern: /function\s+extractResponsesTopLevelParameters/ },
-      { label: 'mutates followup parameter object in TS', pattern: /delete\s*\([^)]*\)\.stream|delete\s*\([^)]*\)\.tool_choice/ },
-      { label: 'iterates followup model precedence in TS', pattern: /record\.assignedModelId|record\.originalModelId/ },
-      { label: 'checks raw responses input in TS', pattern: /rawInput|textInput/ },
-      { label: 'converts responses input text to chat message in TS', pattern: /messages:\s*\[\{\s*role:\s*'user',\s*content:\s*textInput/s },
-      { label: 'drops tools by function name in TS', pattern: /dropToolByFunctionName|tools\.filter\(/ },
-      { label: 'calls responses bridge conversion from followup TS', pattern: /buildChatRequestFromResponses|captureResponsesContext/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('servertool followup dispatch and backend route shells must not coerce tool semantics in TS', () => {
     const deletedFiles = [
       'sharedmodule/llmswitch-core/src/servertool/backend-route-shape-guard.ts',
+      'sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.ts',
       'sharedmodule/llmswitch-core/src/servertool/backend-route-reenter-block.ts',
       'sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts',
       'tests/server/handlers/responses-handler.servertool-backend-route.dual-port.blackbox.spec.ts',
     ];
     const files = [
-      'sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.ts',
       'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
     ];
     const existingDeletedFiles = deletedFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
@@ -1623,33 +1599,7 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/servertool/backend-route-response-block.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
-    const bodyStart = source.indexOf('export function isEmptyClientResponsePayload');
-    expect(bodyStart).toBeGreaterThanOrEqual(0);
-    const nextExport = source.indexOf('\nexport function ', bodyStart + 1);
-    const body = source.slice(bodyStart, nextExport > bodyStart ? nextExport : undefined);
-    const findings = collectMatches(body, [
-      { label: 'checks required_action tool_calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
-      { label: 'checks output function/tool calls in TS', pattern: /function_call|tool_call|tool_use/ },
-      { label: 'loops response choices/output in TS', pattern: /for \(const (choice|item) of/ },
-    ]);
-    expect(body).toContain('isEmptyClientResponsePayloadWithNative(payload)');
-    expect(findings).toEqual([]);
-
-    const requiresActionStart = source.indexOf('export function hasRequiresActionShape');
-    expect(requiresActionStart).toBeGreaterThanOrEqual(0);
-    const requiresActionNextExport = source.indexOf('\nexport function ', requiresActionStart + 1);
-    const requiresActionBody = source.slice(
-      requiresActionStart,
-      requiresActionNextExport > requiresActionStart ? requiresActionNextExport : undefined,
-    );
-    const requiresActionFindings = collectMatches(requiresActionBody, [
-      { label: 'checks required_action tool_calls in TS', pattern: /required_action|submit_tool_outputs|tool_calls/ },
-      { label: 'checks output function/tool calls in TS', pattern: /function_call|tool_call|tool_use/ },
-      { label: 'loops response choices/output in TS', pattern: /for \(const (choice|item) of/ },
-    ]);
-    expect(requiresActionBody).toContain('isToolCallContinuationResponseWithNative(payload)');
-    expect(requiresActionFindings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('bridge snapshot recorder must not classify empty response tool semantics in TS', () => {
