@@ -99,23 +99,19 @@ export class ResponsesEventSerializer {
    * 验证SSE wire格式
    */
   validateWireFormat(wireData: string): boolean {
-    try {
-      const lines = wireData.trim().split('\n');
-      let hasEvent = false;
-      let hasData = false;
+    const lines = wireData.trim().split('\n');
+    let hasEvent = false;
+    let hasData = false;
 
-      for (const line of lines) {
-        if (line.startsWith('event:')) {
-          hasEvent = true;
-        } else if (line.startsWith('data:')) {
-          hasData = true;
-        }
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        hasEvent = true;
+      } else if (line.startsWith('data:')) {
+        hasData = true;
       }
-
-      return hasEvent && hasData;
-    } catch {
-      return false;
     }
+
+    return hasEvent && hasData;
   }
 
   private decorate(event: Omit<ResponsesSseEvent, 'protocol' | 'direction'>): ResponsesSseEvent {

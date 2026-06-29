@@ -31,4 +31,10 @@ describe('responses event serializer no-salvage boundary', () => {
       'data: {"type":"response.done","response":{}}\n'
     )).toThrow('Invalid Responses SSE timestamp: not-a-timestamp');
   });
+
+  it('throws on non-string wire validation input instead of returning false', () => {
+    const serializer = new ResponsesEventSerializer();
+
+    expect(() => serializer.validateWireFormat(null as unknown as string)).toThrow();
+  });
 });

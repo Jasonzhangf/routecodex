@@ -15,6 +15,12 @@
 - 改动：`coerceArgumentsChunk()` 不再把 stringify 失败降级为 `String(raw)`；`function_call.done` 和 `output_item.done` merge 失败直接让 `processEvent()` 进入 error state；完成态 output rebuild 不再 catch 后重建；architecture gate 禁止 `return String(raw)`、`outputItemState.arguments = '{}'`、`logResponseBuilderNonBlocking` 复活。
 - 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/responses-response-builder-no-salvage.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
 
+# 2026-06-29 responses serializer validate fail-fast slice
+
+- 目标：删除 `responses-event-serializer.ts::validateWireFormat()` 的 catch-to-false 静默失败。
+- 改动：`validateWireFormat()` 不再 catch 非字符串/坏输入异常；`responses-event-serializer-no-salvage.spec.ts` 增加非字符串输入会抛错的反向测试；SSE architecture gate 增加旧 catch-to-false 结构 marker。
+- 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/responses-event-serializer-no-salvage.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
+
 # 2026-06-29 chat SSE no-salvage boundary slice
 
 - 目标：删掉 `chat-sse-to-json-converter.ts` 里对同一 SSE chunk 多行 payload 的 partial salvage，改为坏 payload 直接失败。
