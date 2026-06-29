@@ -7,7 +7,6 @@
 import { PassThrough } from 'stream';
 import { DEFAULT_RESPONSES_CONVERSION_CONFIG } from '../types/index.js';
 import type {
-  ResponsesRequest,
   ResponsesResponse,
   ResponsesSseEvent,
   ResponsesJsonToSseContext,
@@ -60,47 +59,6 @@ export class ResponsesJsonToSseConverterRefactored {
   }
 
   /**
-   * 将Responses请求转换为SSE流
-   */
-  async convertRequestToJsonToSse(
-    request: ResponsesRequest,
-    options: ResponsesJsonToSseOptions
-  ): Promise<ResponsesSseEventStream> {
-    // TTL + max-size prune on every public entry
-    pruneResponsesContexts(this.contexts);
-    try {
-      this.validateRequest(request);
-    } catch (error) {
-      throw this.wrapError('REQUEST_CONVERSION_ERROR', error as Error, options.requestId);
-    }
-
-    // 1. 创建上下文
-    const context = this.createRequestContext(request, options);
-    this.contexts.set(options.requestId, context);
-
-    // 2. 创建底层流
-    const stream = new PassThrough({ objectMode: true });
-
-    // 3. 创建SSE事件流接口
-    const sseStream: ResponsesSseEventStream = Object.assign(stream, {
-      protocol: 'responses' as const,
-      direction: 'json_to_sse' as const,
-      requestId: options.requestId,
-      getStats: () => context.eventStats,
-      getConfig: () => this.config,
-      complete: () => this.completeStream(context, stream),
-      abort: (error?: Error) => this.abortStream(context, stream, error)
-    }) as ResponsesSseEventStream;
-
-    // 4. 启动异步转换过程（使用函数化架构）
-    this.processRequestToSseWithFunctions(request, context, stream).catch(error => {
-      this.handleStreamError(context, error, stream);
-    });
-
-    return sseStream;
-  }
-
-  /**
    * 将Responses响应转换为SSE流
    */
   async convertResponseToJsonToSse(
@@ -142,48 +100,6 @@ export class ResponsesJsonToSseConverterRefactored {
   }
 
   /**
-   * 使用函数化架构处理请求转换
-   */
-  private async processRequestToSseWithFunctions(
-    request: ResponsesRequest,
-    context: ResponsesJsonToSseContext,
-    stream: PassThrough
-  ): Promise<void> {
-    try {
-      // 1. 验证请求
-      this.validateRequest(request);
-
-      // 2. 创建流写入器
-      const writer = createResponsesStreamWriter(stream, {
-        onEvent: (event) => this.updateStats(context, event as ResponsesSseEvent),
-        onError: (error) => this.handleStreamError(context, error, stream)
-      });
-
-      // 3. 创建事件序列化器
-      const sequencer = createResponsesSequencer({
-        chunkSize: context.options.chunkSize || this.config.defaultChunkSize,
-        chunkDelayMs: context.options.delayMs || this.config.defaultDelayMs,
-        enableDelay: !!context.options.delayMs,
-        enableValidation: this.config.enableEventValidation,
-        enableRecovery: this.config.strictMode,
-        submittedToolOutputs: context.options.resumeToolOutputs
-      });
-
-      // 4. 生成事件序列并写入流
-      const eventStream = sequencer.sequenceRequest(request, context.requestId);
-      await writer.writeResponsesEvents(eventStream);
-
-      // 5. 完成流
-      writer.complete();
-
-    } catch (error) {
-      throw this.wrapError('REQUEST_CONVERSION_ERROR', error as Error, context.requestId);
-    } finally {
-      this.contexts.delete(context.requestId);
-    }
-  }
-
-  /**
    * 使用函数化架构处理响应转换
    */
   private async processResponseToSseWithFunctions(
@@ -221,19 +137,6 @@ export class ResponsesJsonToSseConverterRefactored {
       throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, context.requestId);
     } finally {
       this.contexts.delete(context.requestId);
-    }
-  }
-
-  /**
-   * 验证请求格式
-   */
-  private validateRequest(request: ResponsesRequest): void {
-    if (!request.model || !request.input) {
-      throw new Error('Invalid ResponsesRequest: missing required fields');
-    }
-
-    if (!Array.isArray(request.input)) {
-      throw new Error('Invalid ResponsesRequest: input must be an array');
     }
   }
 
@@ -355,39 +258,6 @@ export class ResponsesJsonToSseConverterRefactored {
   }
 
   /**
-   * 创建请求上下文
-   */
-  private createRequestContext(request: ResponsesRequest, options: ResponsesJsonToSseOptions): ResponsesJsonToSseContext {
-    const eventStats: ResponsesEventStats = {
-      totalEvents: 0,
-      eventTypes: {},
-      startTime: Date.now(),
-      outputItemsCount: 0,
-      contentPartsCount: 0,
-      deltaEventsCount: 0,
-      reasoningEventsCount: 0,
-      functionCallEventsCount: 0,
-      messageEventsCount: 0,
-      errorCount: 0
-    };
-
-    return {
-      requestId: options.requestId,
-      model: request.model,
-      responsesRequest: request,
-      options,
-      startTime: Date.now(),
-      sequenceCounter: 0,
-      outputIndexCounter: 0,
-      contentIndexCounter: new Map(),
-      isStreaming: true,
-      currentResponse: {},
-      eventStats,
-      outputItemStates: new Map()
-    };
-  }
-
-  /**
    * 创建响应上下文
    */
   private createResponseContext(response: ResponsesResponse, options: ResponsesJsonToSseOptions): ResponsesJsonToSseContext {
@@ -407,7 +277,7 @@ export class ResponsesJsonToSseConverterRefactored {
     return {
       requestId: options.requestId,
       model: response.model,
-      responsesRequest: {} as ResponsesRequest, // 空请求，因为是从响应转换
+      responsesRequest: {} as any,
       responsesResponse: response,
       options,
       startTime: Date.now(),

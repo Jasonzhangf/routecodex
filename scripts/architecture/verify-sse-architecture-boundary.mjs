@@ -194,10 +194,25 @@ for (const relPath of providerNeutralProjectionFiles) {
     'call_${Math.random().toString(36).slice(2, 10)}',
     'JSON.stringify(fc?.arguments ?? {})',
     "typeof fc?.id === 'string' ? fc.id : `call_${Math.random().toString(36).slice(2, 10)}`",
+    'syntheticResponse',
+    'syntheticIndex',
+    "id: `${context.requestId}-input-${inputIndex}`",
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath}: provider-neutral SSE projection must not salvage partial streams into successful responses: ${forbidden}`);
     }
+  }
+}
+
+const responsesJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts');
+for (const forbidden of [
+  'convertRequestToJsonToSse(',
+  'processRequestToSseWithFunctions',
+  'createRequestContext(request:',
+  'sequenceRequest(request, context.requestId)',
+]) {
+  if (responsesJsonToSseConverter.includes(forbidden)) {
+    failures.push(`Responses JSON->SSE must not synthesize request payloads into response SSE: ${forbidden}`);
   }
 }
 

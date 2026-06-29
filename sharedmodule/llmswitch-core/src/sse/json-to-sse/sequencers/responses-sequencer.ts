@@ -318,74 +318,6 @@ export async function* sequenceResponse(
 }
 
 /**
- * 序列化Responses请求（用于请求→SSE转换）
- */
-export async function* sequenceRequest(
-  request: any,
-  context: ResponsesEventGeneratorContext,
-  config: ResponsesSequencerConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
-): AsyncGenerator<ResponsesSseEvent> {
-  try {
-    // 验证请求格式
-    if (config.enableValidation && (!request.model || !request.input)) {
-      throw new Error('Invalid request: missing required fields');
-    }
-
-    // 对于请求，我们主要回显输入内容
-    yield* buildResponseStartEvents({
-      id: context.requestId,
-      object: 'response',
-      created_at: Math.floor(Date.now() / 1000),
-      status: 'in_progress',
-      model: request.model,
-      output: [],
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } as any
-    }, context, config);
-
-    // 回显输入消息作为输出项
-    if (request.input && Array.isArray(request.input)) {
-      let syntheticIndex = 0;
-      for (let inputIndex = 0; inputIndex < request.input.length; inputIndex++) {
-        const inputItem = request.input[inputIndex];
-
-        // 将输入转换为输出项格式
-        const outputItem: ResponsesMessageItem = {
-          id: `${context.requestId}-input-${inputIndex}`,
-          type: 'message',
-          status: 'completed',
-          role: inputItem.role,
-          content: inputItem.content
-        };
-
-        const expandedItems = expandResponsesMessageItem(outputItem, {
-          requestId: context.requestId,
-          outputIndex: syntheticIndex
-        });
-        for (const expanded of expandedItems) {
-          context.outputIndexCounter = syntheticIndex++;
-          yield* sequenceOutputItem(expanded, context, config);
-        }
-      }
-    }
-
-    const syntheticResponse: ResponsesResponse = {
-      id: context.requestId,
-      object: 'response',
-      created_at: Math.floor(Date.now() / 1000),
-      status: 'completed',
-      model: request.model,
-      output: [],
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } as any
-    };
-    yield buildResponseCompletedEvent(syntheticResponse, context, config);
-    yield buildResponseDoneEvent(syntheticResponse, context, config);
-
-  } catch (error) {
-    yield buildErrorEvent(error as Error, context, config);
-  }
-}
-
-/**
  * 创建Responses事件序列化器工厂
  */
 export function createResponsesSequencer(config?: Partial<ResponsesSequencerConfig>) {
@@ -398,14 +330,6 @@ export function createResponsesSequencer(config?: Partial<ResponsesSequencerConf
     async *sequenceResponse(response: ResponsesResponse, requestId: string) {
       const context = createDefaultResponsesContext(requestId, response.model);
       yield* sequenceResponse(response, context, finalConfig);
-    },
-
-    /**
-     * 序列化请求
-     */
-    async *sequenceRequest(request: any, requestId: string) {
-      const context = createDefaultResponsesContext(requestId, request.model);
-      yield* sequenceRequest(request, context, finalConfig);
     },
 
     /**
