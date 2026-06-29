@@ -177,6 +177,8 @@ for (const relPath of providerNeutralProjectionFiles) {
     'return String(raw)',
     "outputItemState.arguments = '{}'",
     'logResponseBuilderNonBlocking',
+    'fallbackCode',
+    'fallbackMessage',
     "fallback = 'model'",
     "return String(input ?? '')",
     'response.id || `msg_${requestId}`',

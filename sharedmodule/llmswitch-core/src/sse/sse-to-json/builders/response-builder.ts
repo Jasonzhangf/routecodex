@@ -925,15 +925,15 @@ export class ResponsesResponseBuilder {
   }
   private buildTerminalResponseError(params: {
     payload: any;
-    fallbackCode: string;
-    fallbackMessage: string;
+    defaultCode: string;
+    defaultMessage: string;
     defaultStatusCode?: number;
     defaultRetryable?: boolean;
   }): Error {
     const {
       payload,
-      fallbackCode,
-      fallbackMessage,
+      defaultCode,
+      defaultMessage,
       defaultStatusCode = 502,
       defaultRetryable = false
     } = params;
@@ -947,13 +947,13 @@ export class ResponsesResponseBuilder {
         ? responseError.code.trim()
         : typeof incompleteDetails?.reason === 'string' && incompleteDetails.reason.trim()
           ? incompleteDetails.reason.trim()
-          : fallbackCode;
+          : defaultCode;
     const message =
       typeof responseError?.message === 'string' && responseError.message.trim()
         ? responseError.message.trim()
         : typeof incompleteDetails?.reason === 'string' && incompleteDetails.reason.trim()
           ? `Responses response incomplete: ${incompleteDetails.reason.trim()}`
-          : fallbackMessage;
+          : defaultMessage;
     const errorType = typeof responseError?.type === 'string' ? responseError.type.trim().toLowerCase() : '';
     const normalizedCode = upstreamCode.toLowerCase();
     const isContextLengthExceeded =
@@ -999,8 +999,8 @@ export class ResponsesResponseBuilder {
     this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
     this.error = this.buildTerminalResponseError({
       payload,
-      fallbackCode: 'response_failed',
-      fallbackMessage: 'Responses request failed',
+      defaultCode: 'response_failed',
+      defaultMessage: 'Responses request failed',
       defaultStatusCode: 502,
       defaultRetryable: false
     });
@@ -1018,8 +1018,8 @@ export class ResponsesResponseBuilder {
     this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
     this.error = this.buildTerminalResponseError({
       payload,
-      fallbackCode: 'response_incomplete',
-      fallbackMessage: 'Responses response incomplete',
+      defaultCode: 'response_incomplete',
+      defaultMessage: 'Responses response incomplete',
       defaultStatusCode: 502,
       defaultRetryable: false
     });

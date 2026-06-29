@@ -12,8 +12,8 @@
 # 2026-06-29 responses response builder no-salvage slice
 
 - 目标：清掉 `response-builder.ts` 里 function_call/input 处理的 stringify fallback 与 merge 失败仅记录日志后继续成功的静默失败。
-- 改动：`coerceArgumentsChunk()` 不再把 stringify 失败降级为 `String(raw)`；`function_call.done` 和 `output_item.done` merge 失败直接让 `processEvent()` 进入 error state；完成态 output rebuild 不再 catch 后重建；architecture gate 禁止 `return String(raw)`、`outputItemState.arguments = '{}'`、`logResponseBuilderNonBlocking` 复活。
-- 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/responses-response-builder-no-salvage.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
+- 改动：`coerceArgumentsChunk()` 不再把 stringify 失败降级为 `String(raw)`；`function_call.done` 和 `output_item.done` merge 失败直接让 `processEvent()` 进入 error state；完成态 output rebuild 不再 catch 后重建；terminal error 参数从 `fallbackCode/fallbackMessage` 改为 `defaultCode/defaultMessage`；architecture gate 禁止 `return String(raw)`、`outputItemState.arguments = '{}'`、`logResponseBuilderNonBlocking`、`fallbackCode/fallbackMessage` 复活。
+- 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/responses-response-builder-no-salvage.spec.ts --runInBand` PASS；`npm run jest:run -- --runTestsByPath tests/sharedmodule/sse-no-silent-failure.spec.ts tests/sharedmodule/responses-response-builder-no-salvage.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
 
 # 2026-06-29 responses serializer validate fail-fast slice
 

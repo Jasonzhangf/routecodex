@@ -30,6 +30,8 @@ describe('SSE no silent failure boundary', () => {
       '/* ignore */',
       'Never throw from non-blocking logging',
       'catch {}',
+      'fallbackCode',
+      'fallbackMessage',
     ];
     const hits: string[] = [];
 
