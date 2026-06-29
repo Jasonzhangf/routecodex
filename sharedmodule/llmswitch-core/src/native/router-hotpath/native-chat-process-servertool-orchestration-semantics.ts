@@ -802,6 +802,25 @@ export function normalizeServertoolProgressTokenWithNative(input: {
   }
 }
 
+export function normalizeServertoolProgressFlowIdWithNative(input: {
+  value: unknown;
+}): string {
+  const capability = 'normalizeServertoolProgressFlowIdJson';
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (parsed === JSON_PARSE_FAILED || typeof parsed !== 'string' || !parsed.trim()) {
+      return fail('invalid payload');
+    }
+    return parsed.trim();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function planServertoolToolCallDispatchWithNative(input: {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   disableToolCallHandlers: boolean;

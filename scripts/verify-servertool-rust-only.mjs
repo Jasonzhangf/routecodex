@@ -4121,6 +4121,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'pub fn resolve_servertool_progress_stage_json',
     'pub fn normalize_servertool_progress_result_json',
     'pub fn normalize_servertool_progress_token_json',
+    'pub fn normalize_servertool_progress_flow_id_json',
   ]) {
     assertContains(
       'servertool-flow-presentation-rust-owner',
@@ -4135,6 +4136,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'resolveServertoolProgressStageJson',
     'normalizeServertoolProgressResultJson',
     'normalizeServertoolProgressTokenJson',
+    'normalizeServertoolProgressFlowIdJson',
   ]) {
     assertContains(
       'servertool-flow-presentation-required-export',
@@ -4149,6 +4151,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'resolveServertoolProgressStageWithNative',
     'normalizeServertoolProgressResultWithNative',
     'normalizeServertoolProgressTokenWithNative',
+    'normalizeServertoolProgressFlowIdWithNative',
   ]) {
     assertContains(
       'servertool-flow-presentation-native-bridge',
@@ -4162,6 +4165,17 @@ function checkServertoolFlowPresentationRustOwner() {
       progressLogShell,
       needle
     );
+  }
+  for (const keyword of [
+    'extra.flowId.trim()',
+    'flowId.trim()',
+  ]) {
+    if (progressLogShell.includes(keyword)) {
+      fail(
+        'servertool-flow-presentation-no-ts-owner',
+        `Forbidden TS progress flow id normalization "${keyword}" found in progress-log-block.ts`
+      );
+    }
   }
   if (existsSync(TS_FLOW_PRESENTATION)) {
     fail(

@@ -283,8 +283,12 @@ const TARGETS = [
       'function normalizeResult(',
       'event.reason.trim().toLowerCase().replace',
       'compareContext.reason.toLowerCase().replace',
+      'extra.flowId.trim()',
+      'flowId.trim()',
     ],
     required: [
+      'normalizeServertoolProgressFlowIdWithNative({ value: extra?.flowId })',
+      'normalizeServertoolProgressFlowIdWithNative({ value: flowId })',
       'resolveServertoolProgressStageWithNative({ step, message })',
       'normalizeServertoolProgressResultWithNative({ message })',
       'normalizeServertoolProgressTokenWithNative({ value: event.reason })',

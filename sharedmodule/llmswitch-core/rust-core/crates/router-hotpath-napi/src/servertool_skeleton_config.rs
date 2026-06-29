@@ -262,6 +262,10 @@ fn normalize_progress_token(value: &str) -> String {
     out.trim_matches('_').to_string()
 }
 
+fn normalize_progress_flow_id(value: &str) -> String {
+    value.trim().to_string()
+}
+
 fn resolve_progress_stage(step: i64, message: &str) -> String {
     let normalized = message.trim().to_ascii_lowercase();
     if normalized == "matched" || step <= 1 {
@@ -1055,6 +1059,23 @@ pub fn normalize_servertool_progress_token_json(input_json: String) -> NapiResul
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi]
+pub fn normalize_servertool_progress_flow_id_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let value = input
+        .get("value")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let output = normalize_progress_flow_id(value);
+    let output = if output.is_empty() {
+        "none".to_string()
+    } else {
+        output
+    };
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn resolve_servertool_followup_flow_profile(flow_id: &str) -> Value {
     let normalized_flow_id = flow_id.trim();
     if normalized_flow_id.is_empty() {
@@ -1103,9 +1124,10 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
 mod tests {
     use super::{
         build_servertool_dispatch_plan_input_json, build_servertool_outcome_plan_input_json,
-        get_default_servertool_skeleton_document_json, normalize_servertool_progress_result_json,
-        normalize_servertool_progress_token_json, normalize_servertool_registration_spec_json,
-        plan_servertool_backend_execution_json, plan_servertool_builtin_auto_handler_entries_json,
+        get_default_servertool_skeleton_document_json, normalize_servertool_progress_flow_id_json,
+        normalize_servertool_progress_result_json, normalize_servertool_progress_token_json,
+        normalize_servertool_registration_spec_json, plan_servertool_backend_execution_json,
+        plan_servertool_builtin_auto_handler_entries_json,
         plan_servertool_builtin_handler_entry_json, plan_servertool_builtin_handler_names_json,
         plan_servertool_builtin_handler_record_entries_json, plan_servertool_followup_runtime_json,
         plan_servertool_handler_contract_json, plan_servertool_registry_lookup_from_skeleton_json,
@@ -1582,6 +1604,17 @@ mod tests {
         )
         .expect("progress token");
         assert_eq!(token, "\"finish_reason_stop\"");
+
+        let flow_id = normalize_servertool_progress_flow_id_json(
+            json!({ "value": " stop-message_flow " }).to_string(),
+        )
+        .expect("progress flow id");
+        assert_eq!(flow_id, "\"stop-message_flow\"");
+
+        let empty_flow_id =
+            normalize_servertool_progress_flow_id_json(json!({ "value": "   " }).to_string())
+                .expect("empty progress flow id");
+        assert_eq!(empty_flow_id, "\"none\"");
     }
 
     #[test]

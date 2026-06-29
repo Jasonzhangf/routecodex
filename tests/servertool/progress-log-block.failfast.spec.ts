@@ -3,6 +3,9 @@ import { describe, expect, jest, test } from '@jest/globals';
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
+    normalizeServertoolProgressFlowIdWithNative: jest.fn(({ value }) =>
+      typeof value === 'string' && value.trim() ? value.trim() : 'none'
+    ),
     normalizeServertoolProgressResultWithNative: jest.fn(() => 'running'),
     normalizeServertoolProgressTokenWithNative: jest.fn(() => 'native_token'),
     resolveServertoolProgressStageWithNative: jest.fn(() => 'followup'),
@@ -43,6 +46,10 @@ describe('progress-log-block fail-fast behavior', () => {
     expect(source).not.toContain('function normalizeResult(');
     expect(source).not.toContain("event.reason.trim().toLowerCase().replace");
     expect(source).not.toContain("compareContext.reason.toLowerCase().replace");
+    expect(source).not.toContain('extra.flowId.trim()');
+    expect(source).not.toContain('flowId.trim()');
+    expect(source).toContain('normalizeServertoolProgressFlowIdWithNative({ value: extra?.flowId })');
+    expect(source).toContain('normalizeServertoolProgressFlowIdWithNative({ value: flowId })');
     expect(source).toContain('resolveServertoolProgressStageWithNative({ step, message })');
     expect(source).toContain('normalizeServertoolProgressResultWithNative({ message })');
     expect(source).toContain('normalizeServertoolProgressTokenWithNative({ value: event.reason })');

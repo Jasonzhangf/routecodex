@@ -2,6 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import {
+  normalizeServertoolProgressFlowIdWithNative,
   normalizeServertoolProgressResultWithNative,
   normalizeServertoolProgressTokenWithNative,
   resolveServertoolProgressStageWithNative,
@@ -95,7 +96,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
   };
 
   const logProgress = (step: number, _total: number, message: string, extra?: Record<string, unknown>): void => {
-    const flowId = typeof extra?.flowId === 'string' ? extra.flowId.trim() : '';
+    const flowId = normalizeServertoolProgressFlowIdWithNative({ value: extra?.flowId });
     const tool = resolveServertoolProgressToolNameWithNative({ flowId });
     const stage = resolveServertoolProgressStageWithNative({ step, message });
     const result = normalizeServertoolProgressResultWithNative({ message });
@@ -162,7 +163,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     const compareContext = readStopMessageCompareContext(args.adapterContext);
     const summary = formatStopMessageCompareContext(compareContext);
     const viewStage = stage === 'trigger' ? 'match' : 'entry';
-    const flowToken = flowId && flowId.trim() ? flowId.trim() : 'none';
+    const flowToken = normalizeServertoolProgressFlowIdWithNative({ value: flowId });
     const compareResult = compareContext
       ? `${compareContext.decision}_${normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })}`
       : 'unknown_no_context';
