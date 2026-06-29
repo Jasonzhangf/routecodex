@@ -137,6 +137,50 @@ describe('engine-observation-shell', () => {
     ).toThrow('stage recorder down');
   });
 
+  test('postflight stage recorder failures are fail-fast', async () => {
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
+    const logNonBlocking = jest.fn();
+    const stageRecorder = {
+      record: jest.fn(() => {
+        throw new Error('postflight recorder down');
+      })
+    };
+
+    await expect(
+      mod.runServertoolEnginePostflight({
+        options: {
+          requestId: 'req-postflight-failfast',
+          adapterContext: {} as any
+        },
+        engineResult: {
+          mode: 'tool_flow',
+          finalChatResponse: {
+            tool_outputs: [
+              {
+                tool_name: 'reasoningStop',
+                tool_call_id: 'call_postflight_failfast',
+                content: 'ok'
+              }
+            ]
+          },
+          execution: {
+            flowId: 'flow-postflight-failfast',
+            followup: null
+          }
+        } as any,
+        runtimeAction: {
+          action: 'return_servertool_cli_projection_final'
+        },
+        flowId: 'flow-postflight-failfast',
+        totalSteps: 5,
+        stageRecorder: stageRecorder as any,
+        logProgress: jest.fn(),
+        logNonBlocking
+      })
+    ).rejects.toThrow('postflight recorder down');
+    expect(logNonBlocking).not.toHaveBeenCalled();
+  });
+
   test('engine-orchestration-shell owns the engine mainline body', () => {
     const source = fs.readFileSync(
       'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',

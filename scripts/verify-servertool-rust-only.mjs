@@ -5975,6 +5975,34 @@ function checkServertoolProgressLoggingFailFast() {
   );
 }
 
+function checkServertoolPostflightLoggingFailFast() {
+  const postflightFile = `${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`;
+  const postflightSource = readRequired(postflightFile);
+  const observationSpec = readRequired(`${ROOT}/tests/servertool/engine-observation-shell.spec.ts`);
+  if (postflightSource.includes('record_servertool_execution_snapshot')) {
+    fail(
+      'servertool-postflight-log-fail-fast',
+      'engine-postflight-shell.ts must not convert execution snapshot recorder failures into non-blocking logs'
+    );
+  }
+  if (/stageRecorder\)[\s\S]{0,300}try\s*\{/.test(postflightSource)) {
+    fail(
+      'servertool-postflight-log-fail-fast',
+      'engine-postflight-shell.ts must not catch stageRecorder failures'
+    );
+  }
+  assertContains(
+    'servertool-postflight-log-fail-fast',
+    `${ROOT}/tests/servertool/engine-observation-shell.spec.ts`,
+    observationSpec,
+    'postflight stage recorder failures are fail-fast'
+  );
+  pass(
+    'servertool-postflight-log-fail-fast',
+    'servertool postflight stageRecorder failures fail fast'
+  );
+}
+
 // ── Run ────────────────────────────────────────────────────────
 console.log('\n=== verify-servertool-rust-only ===\n');
 
@@ -6022,6 +6050,7 @@ checkServertoolActiveOrchestrationAuditRedGate();
 checkServertoolProgressFileLoggingFailFast();
 checkServertoolMatchLoggingFailFast();
 checkServertoolProgressLoggingFailFast();
+checkServertoolPostflightLoggingFailFast();
 checkDeletedEmptyReplyContinueAbsent();
 
 console.log();
