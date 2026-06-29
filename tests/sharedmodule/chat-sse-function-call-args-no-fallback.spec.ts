@@ -12,10 +12,7 @@ async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
 }
 
 describe('chat SSE function_call arguments no-fallback boundary', () => {
-  it('fails cyclic legacy function_call arguments instead of serializing them as empty JSON', async () => {
-    const cyclic: Record<string, unknown> = { cmd: 'pwd' };
-    cyclic.self = cyclic;
-
+  it('fails legacy function_call with non-string arguments instead of stringifying them', async () => {
     const response: ChatCompletionResponse = {
       id: 'chatcmpl_bad_function_call_args',
       object: 'chat.completion',
@@ -27,9 +24,10 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
           role: 'assistant',
           content: '',
           function_call: {
+            id: 'call_bad_args',
             name: 'exec_command',
-            arguments: cyclic as unknown as string
-          }
+            arguments: { cmd: 'pwd' } as unknown as string
+          } as any
         },
         finish_reason: 'function_call'
       }]
@@ -43,7 +41,38 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
     const text = await collectText(stream);
 
     expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Converting circular structure to JSON');
+    expect(text).toContain('Invalid legacy function_call: missing arguments');
     expect(text).not.toContain('"arguments":"{}"');
+  });
+
+  it('fails legacy function_call without an id instead of generating one', async () => {
+    const response: ChatCompletionResponse = {
+      id: 'chatcmpl_missing_function_call_id',
+      object: 'chat.completion',
+      created: 1,
+      model: 'gpt-5.5',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: '',
+          function_call: {
+            name: 'exec_command',
+            arguments: '{"cmd":"pwd"}'
+          } as any
+        },
+        finish_reason: 'function_call'
+      }]
+    };
+
+    const converter = new ChatJsonToSseConverterRefactored();
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_chat_function_call_missing_id',
+      model: response.model
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('"code":"generation_error"');
+    expect(text).toContain('Invalid legacy function_call: missing id');
   });
 });

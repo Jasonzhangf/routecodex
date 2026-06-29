@@ -191,6 +191,9 @@ for (const relPath of providerNeutralProjectionFiles) {
     'response.id || `msg_${requestId}`',
     "response.role || 'assistant'",
     'block.id || `call_${requestId}_${index}`',
+    'call_${Math.random().toString(36).slice(2, 10)}',
+    'JSON.stringify(fc?.arguments ?? {})',
+    "typeof fc?.id === 'string' ? fc.id : `call_${Math.random().toString(36).slice(2, 10)}`",
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath}: provider-neutral SSE projection must not salvage partial streams into successful responses: ${forbidden}`);

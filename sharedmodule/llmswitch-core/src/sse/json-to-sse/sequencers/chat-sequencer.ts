@@ -261,18 +261,20 @@ function normalizeFunctionCall(message: any): any {
     return message;
   }
   const fc = message.function_call;
-  const name = typeof fc?.name === 'string' ? fc.name : 'function';
-  let args: string = '';
-  if (typeof fc?.arguments === 'string') {
-    args = fc.arguments;
-  } else {
-    args = JSON.stringify(fc?.arguments ?? {});
+  if (typeof fc?.id !== 'string' || !fc.id.trim()) {
+    throw new Error('Invalid legacy function_call: missing id');
+  }
+  if (typeof fc?.name !== 'string' || !fc.name.trim()) {
+    throw new Error('Invalid legacy function_call: missing name');
+  }
+  if (typeof fc?.arguments !== 'string') {
+    throw new Error('Invalid legacy function_call: missing arguments');
   }
   message.tool_calls = [
     {
-      id: typeof fc?.id === 'string' ? fc.id : `call_${Math.random().toString(36).slice(2, 10)}`,
+      id: fc.id,
       type: 'function',
-      function: { name, arguments: args }
+      function: { name: fc.name, arguments: fc.arguments }
     }
   ];
   return message;
