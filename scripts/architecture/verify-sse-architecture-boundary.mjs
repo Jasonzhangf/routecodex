@@ -132,6 +132,8 @@ for (const forbidden of [
   'state.id || `msg_${Date.now()}`',
   "state.role || 'assistant'",
   "state.model || 'unknown'",
+  'input = { _raw: block.buffer }',
+  '_raw: block.buffer',
 ]) {
   if (anthropicResponseBuilder.includes(forbidden)) {
     failures.push(`Anthropic SSE builder resurrects message fallback: ${forbidden}`);

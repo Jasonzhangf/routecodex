@@ -97,12 +97,7 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
     } else if (block.kind === 'redacted_thinking' && block.data.trim().length) {
       state.content.push({ type: 'redacted_thinking', data: block.data.trim() });
     } else if (block.kind === 'tool_use') {
-      let input: Record<string, unknown> = {};
-      try {
-        input = block.buffer ? JSON.parse(block.buffer) : {};
-      } catch {
-        input = { _raw: block.buffer };
-      }
+      const input = block.buffer ? JSON.parse(block.buffer) as Record<string, unknown> : {};
       state.content.push({
         type: 'tool_use',
         id: block.id,
