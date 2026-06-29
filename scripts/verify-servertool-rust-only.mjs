@@ -3639,6 +3639,7 @@ function checkAutoHookExecutionRustOwner() {
     'if (result) {',
     'if (optionalResult) {',
     'if (mandatoryResult) {',
+    'result.execution.flowId.trim()',
     '// best-effort',
   ]) {
     if (autoHookCaller.includes(keyword)) {

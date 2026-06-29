@@ -60,6 +60,7 @@ const TARGETS = [
       'if (!planned) {',
       'if (result) {',
       'if (optionalResult) {',
+      'result.execution.flowId.trim()',
       'if (mandatoryResult) {',
     ],
   },

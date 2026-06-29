@@ -69,8 +69,8 @@ export async function runAutoHookExecutionQueue(args: {
       ...traceBase,
       hasPlannedResult: Boolean(planned),
       hasMaterializedResult: Boolean(result),
-      ...(result?.execution && typeof result.execution.flowId === 'string' && result.execution.flowId.trim()
-        ? { materializedFlowId: result.execution.flowId.trim() }
+      ...(result?.execution && typeof result.execution.flowId === 'string'
+        ? { materializedFlowId: result.execution.flowId }
         : {})
     });
     args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
