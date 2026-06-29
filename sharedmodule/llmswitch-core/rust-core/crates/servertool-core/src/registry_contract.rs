@@ -3,33 +3,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ServertoolRegistryRegistrationActionInput {
-    pub name: String,
-    pub has_handler: bool,
-    pub builtin_name_matched: bool,
-    pub builtin_entry_present: bool,
-    pub registration_allowed_by_config: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ServertoolRegistryRegistrationAction {
-    IgnoreInvalid,
-    IgnoreBuiltinOverride,
-    IgnoreDisabled,
-    IgnoreRetired,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ServertoolRegistryRegistrationActionPlan {
-    pub action: ServertoolRegistryRegistrationAction,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub canonical_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct ServertoolRegistryLookupActionInput {
     pub name: String,
     pub builtin_entry_present: bool,
@@ -158,34 +131,6 @@ fn normalize_name(name: &str) -> Option<String> {
         None
     } else {
         Some(trimmed)
-    }
-}
-
-pub fn plan_servertool_registry_registration_action(
-    input: ServertoolRegistryRegistrationActionInput,
-) -> ServertoolRegistryRegistrationActionPlan {
-    let canonical_name = normalize_name(&input.name);
-    if canonical_name.is_none() || !input.has_handler {
-        return ServertoolRegistryRegistrationActionPlan {
-            action: ServertoolRegistryRegistrationAction::IgnoreInvalid,
-            canonical_name: None,
-        };
-    }
-    if input.builtin_entry_present {
-        return ServertoolRegistryRegistrationActionPlan {
-            action: ServertoolRegistryRegistrationAction::IgnoreBuiltinOverride,
-            canonical_name,
-        };
-    }
-    if input.builtin_name_matched && !input.registration_allowed_by_config {
-        return ServertoolRegistryRegistrationActionPlan {
-            action: ServertoolRegistryRegistrationAction::IgnoreDisabled,
-            canonical_name,
-        };
-    }
-    ServertoolRegistryRegistrationActionPlan {
-        action: ServertoolRegistryRegistrationAction::IgnoreRetired,
-        canonical_name,
     }
 }
 
@@ -383,66 +328,6 @@ pub fn plan_servertool_registry_source_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn registration_action_handles_invalid_builtin_override_disabled_and_retired_adhoc() {
-        let invalid = plan_servertool_registry_registration_action(
-            ServertoolRegistryRegistrationActionInput {
-                name: " ".to_string(),
-                has_handler: false,
-                builtin_name_matched: false,
-                builtin_entry_present: false,
-                registration_allowed_by_config: true,
-            },
-        );
-        assert_eq!(
-            invalid.action,
-            ServertoolRegistryRegistrationAction::IgnoreInvalid
-        );
-
-        let builtin = plan_servertool_registry_registration_action(
-            ServertoolRegistryRegistrationActionInput {
-                name: "stop_message_auto".to_string(),
-                has_handler: true,
-                builtin_name_matched: true,
-                builtin_entry_present: true,
-                registration_allowed_by_config: true,
-            },
-        );
-        assert_eq!(
-            builtin.action,
-            ServertoolRegistryRegistrationAction::IgnoreBuiltinOverride
-        );
-
-        let disabled = plan_servertool_registry_registration_action(
-            ServertoolRegistryRegistrationActionInput {
-                name: "stop_message_auto".to_string(),
-                has_handler: true,
-                builtin_name_matched: true,
-                builtin_entry_present: false,
-                registration_allowed_by_config: false,
-            },
-        );
-        assert_eq!(
-            disabled.action,
-            ServertoolRegistryRegistrationAction::IgnoreDisabled
-        );
-
-        let retired_adhoc = plan_servertool_registry_registration_action(
-            ServertoolRegistryRegistrationActionInput {
-                name: " custom_tool ".to_string(),
-                has_handler: true,
-                builtin_name_matched: false,
-                builtin_entry_present: false,
-                registration_allowed_by_config: true,
-            },
-        );
-        assert_eq!(
-            retired_adhoc.action,
-            ServertoolRegistryRegistrationAction::IgnoreRetired
-        );
-        assert_eq!(retired_adhoc.canonical_name.as_deref(), Some("custom_tool"));
-    }
 
     #[test]
     fn lookup_action_prefers_builtin_and_never_returns_adhoc() {

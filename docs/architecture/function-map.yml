@@ -665,12 +665,11 @@ owners:
 
   - feature_id: hub.servertool_registry_contract
     status: active
-    summary: "servertool registry registration, lookup, auto-hook descriptor, and projection planning"
+    summary: "servertool registry lookup, auto-hook descriptor, and projection planning"
     owner_kind: rust_ssot
-    owner_scope: "servertool registry registration, lookup, auto-hook descriptor, and projection planning"
+    owner_scope: "servertool registry lookup, auto-hook descriptor, and projection planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
     canonical_types:
-      - ServertoolRegistryRegistrationActionInput
       - ServertoolRegistryLookupActionInput
       - ServertoolRegistryAutoHookDescriptorInput
       - ServertoolRegistryProjectionInput
@@ -678,7 +677,6 @@ owners:
       - ServertoolRegistrySourceProjectionInput
       - ServertoolRegistrySourceProjectionPlan
     canonical_builders:
-      - plan_servertool_registry_registration_action
       - plan_servertool_registry_lookup_action
       - plan_servertool_registry_auto_hook_descriptors
       - plan_servertool_registry_projection
@@ -708,7 +706,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Rust owns registry registration, lookup, ordering, and projection planning."
+      - "Rust owns registry lookup, ordering, and projection planning."
 
   - feature_id: hub.servertool_response_stage_runtime_action_contract
     status: active

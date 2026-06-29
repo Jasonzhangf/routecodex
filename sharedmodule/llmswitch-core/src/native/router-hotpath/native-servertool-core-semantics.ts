@@ -2646,51 +2646,6 @@ export function planServertoolEntryContextWithNative(input: {
   };
 }
 
-export type ServertoolRegistryRegistrationActionPlan = {
-  action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'ignore_retired';
-  canonicalName?: string;
-};
-
-export function planServertoolRegistryRegistrationActionWithNative(input: {
-  name: string;
-  hasHandler: boolean;
-  builtinNameMatched: boolean;
-  builtinEntryPresent: boolean;
-  registrationAllowedByConfig: boolean;
-}): ServertoolRegistryRegistrationActionPlan {
-  const capability = 'planServertoolRegistryRegistrationActionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolRegistryRegistrationActionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolRegistryRegistrationActionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolRegistryRegistrationActionJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    record.action !== 'ignore_invalid' &&
-    record.action !== 'ignore_builtin_override' &&
-    record.action !== 'ignore_disabled' &&
-    record.action !== 'ignore_retired'
-  ) {
-    throw new Error('planServertoolRegistryRegistrationActionJson native returned invalid action');
-  }
-  if (record.canonicalName !== undefined && typeof record.canonicalName !== 'string') {
-    throw new Error('planServertoolRegistryRegistrationActionJson native returned invalid canonicalName');
-  }
-  return {
-    action: record.action,
-    ...(typeof record.canonicalName === 'string' && record.canonicalName.trim()
-      ? { canonicalName: record.canonicalName }
-      : {})
-  };
-}
-
 export type ServertoolRegistryLookupActionPlan = {
   action: 'return_builtin' | 'return_none';
   canonicalName?: string;

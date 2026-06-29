@@ -14,7 +14,6 @@ jest.unstable_mockModule(
       action: 'return_builtin',
       canonicalName: 'reasoningStop'
     })),
-    planServertoolRegistryRegistrationFromSkeleton: jest.fn(() => ({ action: 'skip_builtin' })),
     planServertoolBuiltinHandlerEntry: jest.fn(() => ({
       action: 'return_entry',
       entry: {
@@ -27,7 +26,18 @@ jest.unstable_mockModule(
         }
       }
     })),
-    planServertoolBuiltinHandlerNames: jest.fn(() => ['reasoningStop'])
+    resolveServertoolBuiltinHandlerEntry: jest.fn(() => ({
+      name: 'reasoningStop',
+      trigger: 'tool_call',
+      registration: {
+        name: 'reasoningStop',
+        trigger: 'tool_call',
+        executionMode: 'guarded'
+      }
+    })),
+    planServertoolBuiltinHandlerNames: jest.fn(() => ['reasoningStop']),
+    planServertoolBuiltinAutoHandlerEntries: jest.fn(() => []),
+    planServertoolBuiltinHandlerRecordEntries: jest.fn(() => [])
   })
 );
 

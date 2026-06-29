@@ -400,7 +400,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Rust owns registry registration, lookup, descriptor, and projection planning."
+      - "Rust owns registry lookup, descriptor, and projection planning."
 
   - feature_id: hub.servertool_response_stage_runtime_action_contract
     change_risk: medium

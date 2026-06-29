@@ -94,18 +94,6 @@ function readDisconnectedFlag(adapterContext: any): boolean {
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolRegistryRegistrationActionWithNative: jest.fn((input: any) => ({
-      action:
-        typeof input?.name === 'string' && input.name.trim()
-          ? input?.builtinEntryPresent
-            ? 'ignore_builtin_override'
-            : input?.builtinNameMatched && input?.registrationAllowedByConfig === false
-              ? 'ignore_disabled'
-              : input?.hasHandler
-                ? 'ignore_disabled'
-                : 'ignore_invalid'
-          : 'ignore_invalid'
-    })),
     planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
       action: input?.builtinEntryPresent
         ? 'return_builtin'
@@ -781,12 +769,6 @@ jest.unstable_mockModule(
         }
       }]
     })),
-    planServertoolRegistryRegistrationFromSkeletonWithNative: jest.fn((input: any) => {
-      const name = String(input?.name ?? '').trim().toLowerCase();
-      return name && input?.hasHandler === true
-        ? { action: 'ignore_disabled', canonicalName: name }
-        : { action: 'ignore_invalid' };
-    }),
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
       return { action: 'return_none', canonicalName: name };

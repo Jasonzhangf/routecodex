@@ -3659,6 +3659,8 @@ function checkServertoolRegistryRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
+  const skeletonConfigRust = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
   for (const file of DELETED_SERVERTOOL_REGISTRY_FACADE_FILES) {
     assertMissingFile(
       'servertool-registry-facades-deleted',
@@ -3673,13 +3675,9 @@ function checkServertoolRegistryRustOwner() {
 
   for (const needle of [
     'feature_id: hub.servertool_registry_contract',
-    'pub struct ServertoolRegistryRegistrationActionInput',
-    'pub enum ServertoolRegistryRegistrationAction',
-    'pub fn plan_servertool_registry_registration_action',
     'pub struct ServertoolRegistryLookupActionInput',
     'pub enum ServertoolRegistryLookupAction',
     'pub fn plan_servertool_registry_lookup_action',
-    'IgnoreRetired',
     'pub struct ServertoolRegistryAutoHookDescriptorInput',
     'pub struct ServertoolRegistryAutoHookDescriptorPlan',
     'pub fn plan_servertool_registry_auto_hook_descriptors',
@@ -3693,6 +3691,9 @@ function checkServertoolRegistryRustOwner() {
     assertContains('servertool-registry-rust-owner', RUST_SERVERTOOL_REGISTRY_CONTRACT, rustRegistry, needle);
   }
   for (const marker of [
+    'pub struct ServertoolRegistryRegistrationActionInput',
+    'pub enum ServertoolRegistryRegistrationAction',
+    'pub fn plan_servertool_registry_registration_action',
     'RegisterAdhoc',
     'ReturnAdhoc',
     'ServertoolRegistrySourceKind::Adhoc',
@@ -3714,7 +3715,6 @@ function checkServertoolRegistryRustOwner() {
     'pub mod registry_contract'
   );
   for (const needle of [
-    'plan_servertool_registry_registration_action_json',
     'plan_servertool_registry_lookup_action_json',
     'plan_servertool_registry_auto_hook_descriptors_json',
     'plan_servertool_registry_projection_json',
@@ -3724,22 +3724,40 @@ function checkServertoolRegistryRustOwner() {
     assertContains('servertool-registry-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, `pub fn ${needle}`);
   }
   for (const needle of [
-    'planServertoolRegistryRegistrationActionJson',
     'planServertoolRegistryLookupActionJson',
     'planServertoolRegistryAutoHookDescriptorsJson',
     'planServertoolRegistryProjectionJson',
     'planServertoolRegistrySourceProjectionJson',
-    'planServertoolRegistryRegistrationFromSkeletonJson',
     'planServertoolRegistryLookupFromSkeletonJson',
     'resolveServertoolRegisteredNameJson',
   ]) {
     assertContains('servertool-registry-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, needle);
   }
   for (const needle of [
-    'planServertoolRegistryRegistrationActionWithNative',
     'planServertoolRegistryLookupActionWithNative',
   ]) {
     assertContains('servertool-registry-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, needle);
+  }
+  for (const marker of [
+    'plan_servertool_registry_registration_action_json',
+    'planServertoolRegistryRegistrationActionWithNative',
+    'planServertoolRegistryRegistrationActionJson',
+    'ServertoolRegistryRegistrationActionPlan',
+    'planServertoolRegistryRegistrationFromSkeletonJson',
+  ]) {
+    if (
+      nativeWrapper.includes(marker) ||
+      requiredExports.includes(marker) ||
+      napiBlocks.includes(marker) ||
+      napiLib.includes(marker) ||
+      skeletonConfigShell.includes(marker) ||
+      skeletonConfigRust.includes(marker)
+    ) {
+      fail(
+        'servertool-registry-native-bridge-no-registration-action',
+        `servertool registry bridge/skeleton must not retain retired registration action marker ${marker}`
+      );
+    }
   }
   for (const marker of [
     'planServertoolRegistryRegistrationActionWithNative',
@@ -3752,6 +3770,10 @@ function checkServertoolRegistryRustOwner() {
     'adHocEntryPresent',
     'register_adhoc',
     'return_adhoc',
+    'registerServerToolHandlerViaNativePlan',
+    'planServertoolRegistryRegistrationFromSkeleton',
+    'hasHandler:',
+    'handler: ServerToolHandler',
   ]) {
     if (registryRegistrationShell.includes(marker)) {
       fail(
@@ -3774,14 +3796,12 @@ function checkServertoolRegistryRustOwner() {
     }
   }
   for (const needle of [
-    'planServertoolRegistryRegistrationFromSkeleton(',
     'planServertoolRegistryLookupFromSkeleton(',
     'isServertoolRegisteredNameByConfig(',
   ]) {
     assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
   }
   for (const needle of [
-    'registerServerToolHandlerViaNativePlan',
     'getServerToolHandlerViaNativePlan',
   ]) {
     assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
@@ -3814,6 +3834,8 @@ function checkServertoolRegistryRustOwner() {
     'projectRegistryHandlerNames({',
     'projectAutoServerToolHandlers({',
     'projectRegisteredServerToolHandlerRecords({',
+    'registerServerToolHandler',
+    'ServerToolHandler,',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
@@ -3851,6 +3873,8 @@ function checkServertoolRegistryRustOwner() {
     'native registry record projection mismatch',
     'if (builtinEntry) {',
     'return getAdHocHandlerEntry(canonicalName);',
+    'registerServerToolHandler',
+    'ServerToolHandler,',
     "phase: entry.autoHook?.phase ?? 'default'",
     "priority: entry.autoHook?.priority ?? 100",
     "order: entry.autoHook?.order ?? 0",

@@ -15,8 +15,7 @@ import {
   planServertoolResponseStageRuntimeActionWithNative,
   planServertoolRegistryAutoHookDescriptorsWithNative,
   planServertoolRegistryLookupActionWithNative,
-  planServertoolRegistryProjectionWithNative,
-  planServertoolRegistryRegistrationActionWithNative
+  planServertoolRegistryProjectionWithNative
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js';
 
@@ -591,33 +590,7 @@ describe('servertool CLI native bridge', () => {
     });
   });
 
-  it('uses Rust-owned registry registration and lookup action planning', () => {
-    expect(
-      planServertoolRegistryRegistrationActionWithNative({
-        name: ' stop_message_auto ',
-        hasHandler: true,
-        builtinNameMatched: true,
-        builtinEntryPresent: true,
-        registrationAllowedByConfig: true
-      })
-    ).toEqual({
-      action: 'ignore_builtin_override',
-      canonicalName: 'stop_message_auto'
-    });
-
-    expect(
-      planServertoolRegistryRegistrationActionWithNative({
-        name: ' custom_tool ',
-        hasHandler: true,
-        builtinNameMatched: false,
-        builtinEntryPresent: false,
-        registrationAllowedByConfig: true
-      })
-    ).toEqual({
-      action: 'ignore_retired',
-      canonicalName: 'custom_tool'
-    });
-
+  it('uses Rust-owned registry lookup action planning', () => {
     expect(
       planServertoolRegistryLookupActionWithNative({
         name: 'custom_tool',

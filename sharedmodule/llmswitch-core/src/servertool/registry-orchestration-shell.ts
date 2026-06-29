@@ -1,4 +1,3 @@
-import type { ServerToolHandler } from './types.js';
 import {
   type ServerToolHandlerRegistrationSpec,
   type ServerToolRegisteredHandlerRecord
@@ -10,8 +9,7 @@ import {
 } from './builtin-handler-catalog.js';
 import {
   getServerToolHandlerViaNativePlan,
-  isRegisteredServerToolNameViaNativeConfig,
-  registerServerToolHandlerViaNativePlan
+  isRegisteredServerToolNameViaNativeConfig
 } from './registry-registration-shell.js';
 import {
   projectAutoServerToolHookDescriptors,
@@ -26,22 +24,6 @@ export {
   type ServerToolAutoHookDescriptor,
   type ServerToolHandlerEntry
 } from './registry-types.js';
-
-export const registerServerToolHandler = (
-  name: string,
-  handler: ServerToolHandler,
-  options?: {
-    trigger?: 'tool_call' | 'auto';
-    priority?: number;
-    phase?: 'pre' | 'default' | 'post' | string;
-    hook?: {
-      priority?: number;
-      phase?: 'pre' | 'default' | 'post' | string;
-    };
-  }
-): void => {
-  registerServerToolHandlerViaNativePlan(name, handler, options);
-};
 
 export const getServerToolHandler = (
   name: string

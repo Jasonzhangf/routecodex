@@ -175,13 +175,5 @@ export interface ServerToolHandlerResult {
   metadataWritePlan?: JsonObject;
 }
 
-/**
- * ServerToolHandler：统一的 ServerTool handler 接口。
- * 后续 web_search / vision / 其它工具都会以 handler 形式挂载到注册表。
- */
-export type ServerToolHandler = (
-  ctx: ServerToolHandlerContext
-) => Promise<ServerToolHandlerPlan | null>;
-
 // 方便其它模块使用的公共别名
 export type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';

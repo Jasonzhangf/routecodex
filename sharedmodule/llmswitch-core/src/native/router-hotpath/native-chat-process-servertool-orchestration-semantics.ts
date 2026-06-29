@@ -76,10 +76,6 @@ export type NativeServertoolBuiltinHandlerNamesPlan = {
 export type NativeServertoolBuiltinHandlerEntriesPlan = {
   entries: Record<string, unknown>[];
 };
-export type NativeServertoolRegistryRegistrationActionPlan = {
-  action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'ignore_retired';
-  canonicalName?: string;
-};
 export type NativeServertoolRegistryLookupActionPlan = {
   action: 'return_builtin' | 'return_none';
   canonicalName?: string;
@@ -649,41 +645,6 @@ export function planServertoolBuiltinHandlerRecordEntriesWithNative(input: {
     const inputJson = encodeJsonArg(capability, input);
     const raw = invokeNativeStringCapability(capability, [inputJson]);
     return parseBuiltinHandlerEntriesPlan(capability, raw, fail);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function planServertoolRegistryRegistrationFromSkeletonWithNative(input: {
-  name: string;
-  hasHandler: boolean;
-  document?: unknown;
-}): NativeServertoolRegistryRegistrationActionPlan {
-  const capability = 'planServertoolRegistryRegistrationFromSkeletonJson';
-  const fail = (reason?: string) => failNativeRequired<NativeServertoolRegistryRegistrationActionPlan>(capability, reason);
-  try {
-    const inputJson = encodeJsonArg(capability, input);
-    const raw = invokeNativeStringCapability(capability, [inputJson]);
-    const parsed = parseJson(capability, raw);
-    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return fail('invalid payload');
-    }
-    const record = parsed as Record<string, unknown>;
-    if (
-      record.action !== 'ignore_invalid' &&
-      record.action !== 'ignore_builtin_override' &&
-      record.action !== 'ignore_disabled' &&
-      record.action !== 'ignore_retired'
-    ) {
-      return fail('invalid action');
-    }
-    return {
-      action: record.action,
-      ...(typeof record.canonicalName === 'string' && record.canonicalName.trim()
-        ? { canonicalName: record.canonicalName.trim() }
-        : {})
-    };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

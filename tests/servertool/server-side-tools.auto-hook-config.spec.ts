@@ -117,20 +117,6 @@ function mockRegistrySourceProjection(input: any): any {
   };
 }
 
-function mockRegistryRegistrationFromSkeleton(input: any): any {
-  const name = String(input?.name ?? '').trim().toLowerCase();
-  if (!name || input?.hasHandler !== true) {
-    return { action: 'ignore_invalid' };
-  }
-  if (name === 'stop_message_auto') {
-    const spec = mockToolSpec(name);
-    return spec?.enabled === false
-      ? { action: 'ignore_disabled', canonicalName: name }
-      : { action: 'ignore_builtin_override', canonicalName: name };
-  }
-  return { action: 'ignore_retired', canonicalName: name };
-}
-
 function mockRegistryLookupFromSkeleton(input: any): any {
   const name = String(input?.name ?? '').trim().toLowerCase();
   if (!name) {
@@ -255,9 +241,6 @@ jest.unstable_mockModule(
     resolveServertoolToolSpecWithNative: jest.fn((input: any) => {
       return mockToolSpec(input.name);
     }),
-    planServertoolRegistryRegistrationFromSkeletonWithNative: jest.fn(
-      mockRegistryRegistrationFromSkeleton
-    ),
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(
       mockRegistryLookupFromSkeleton
     ),
@@ -500,9 +483,6 @@ jest.unstable_mockModule(
     resolveServertoolToolSpecWithNative: jest.fn((input: any) => {
       return mockToolSpec(input.name);
     }),
-    planServertoolRegistryRegistrationFromSkeletonWithNative: jest.fn(
-      mockRegistryRegistrationFromSkeleton
-    ),
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(
       mockRegistryLookupFromSkeleton
     ),
@@ -653,18 +633,6 @@ const planServertoolHookScheduleWithNative = jest.fn((input: any) => ({
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolRegistryRegistrationActionWithNative: jest.fn((input: any) => ({
-      action:
-        typeof input?.name === 'string' && input.name.trim()
-          ? input?.builtinEntryPresent
-            ? 'ignore_builtin_override'
-            : input?.builtinNameMatched && input?.registrationAllowedByConfig === false
-              ? 'ignore_disabled'
-              : input?.hasHandler
-                ? 'ignore_disabled'
-                : 'ignore_invalid'
-          : 'ignore_invalid'
-    })),
     planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
       action: input?.builtinEntryPresent
         ? 'return_builtin'
@@ -724,18 +692,6 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
   () => ({
-    planServertoolRegistryRegistrationActionWithNative: jest.fn((input: any) => ({
-      action:
-        typeof input?.name === 'string' && input.name.trim()
-          ? input?.builtinEntryPresent
-            ? 'ignore_builtin_override'
-            : input?.builtinNameMatched && input?.registrationAllowedByConfig === false
-              ? 'ignore_disabled'
-              : input?.hasHandler
-                ? 'ignore_disabled'
-                : 'ignore_invalid'
-          : 'ignore_invalid'
-    })),
     planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
       action: input?.builtinEntryPresent
         ? 'return_builtin'
@@ -798,7 +754,6 @@ let buildServertoolPendingInjectionConfig: any;
 let getDefaultServertoolSkeletonDocument: any;
 let getServertoolToolSpec: any;
 let normalizeServerToolRegistrationSpec: any;
-let registerServerToolHandler: any;
 let listAutoServerToolHooks: any;
 let listRegisteredServerToolHandlerNames: any;
 let listRegisteredServerToolHandlerRecords: any;
@@ -815,7 +770,6 @@ beforeAll(async () => {
   const orchestrationBlocks = await import('../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js');
   buildAutoHookQueuesFromConfig = orchestrationBlocks.buildAutoHookQueuesFromConfig;
   const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
-  registerServerToolHandler = registry.registerServerToolHandler;
   listAutoServerToolHooks = registry.listAutoServerToolHooks;
   listRegisteredServerToolHandlerNames = registry.listRegisteredServerToolHandlerNames;
   listRegisteredServerToolHandlerRecords = registry.listRegisteredServerToolHandlerRecords;
@@ -878,15 +832,7 @@ describe('servertool skeleton config', () => {
     expect(getServertoolToolSpec('reasoningStop')).toBeNull();
   });
 
-  test('registry ignores TS auto-hook overrides for skeleton-owned tools', () => {
-    registerServerToolHandler('stop_message_auto', async () => null, {
-      trigger: 'tool_call',
-      hook: {
-        phase: 'post',
-        priority: 999
-      }
-    });
-
+  test('registry exposes skeleton-owned auto hooks without TS overrides', () => {
     const hook = listAutoServerToolHooks().find((entry: any) => entry.id === 'stop_message_auto');
     expect(hook).toBeDefined();
     expect(hook).toMatchObject({
@@ -901,14 +847,7 @@ describe('servertool skeleton config', () => {
     });
   });
 
-  test('registry projection ignores retired dynamic ad-hoc registration', () => {
-    registerServerToolHandler('custom_registry_tool', async () => null, {
-      trigger: 'tool_call'
-    });
-    registerServerToolHandler('custom_registry_auto', async () => null, {
-      trigger: 'auto'
-    });
-
+  test('registry projection is builtin-only after dynamic ad-hoc retirement', () => {
     expect(listRegisteredServerToolHandlerNames()).toEqual([
       'stop_message_auto'
     ]);
@@ -922,12 +861,7 @@ describe('servertool skeleton config', () => {
     ]);
   });
 
-  test('retired ad-hoc registrations do not materialize records', async () => {
-    registerServerToolHandler('custom_native_defaults_tool', async () => null);
-    registerServerToolHandler('custom_native_defaults_auto', async () => null, {
-      trigger: 'auto'
-    });
-
+  test('builtin-only registry records do not materialize ad-hoc records', async () => {
     const records = listRegisteredServerToolHandlerRecords().map((entry: any) => ({
       name: entry.registration.name,
       trigger: entry.registration.trigger,

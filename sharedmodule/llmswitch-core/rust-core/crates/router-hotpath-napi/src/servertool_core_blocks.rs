@@ -567,17 +567,6 @@ pub fn plan_servertool_entry_context_json(input_json: &str) -> Result<String, St
         .map_err(|e| format!("serialize servertool entry context plan: {e}"))
 }
 
-pub fn plan_servertool_registry_registration_action_json(
-    input_json: &str,
-) -> Result<String, String> {
-    let input: registry_contract::ServertoolRegistryRegistrationActionInput =
-        serde_json::from_str(input_json).map_err(|e| {
-            format!("deserialize servertool registry registration action input: {e}")
-        })?;
-    serde_json::to_string(&registry_contract::plan_servertool_registry_registration_action(input))
-        .map_err(|e| format!("serialize servertool registry registration action plan: {e}"))
-}
-
 pub fn plan_servertool_registry_lookup_action_json(input_json: &str) -> Result<String, String> {
     let input: registry_contract::ServertoolRegistryLookupActionInput =
         serde_json::from_str(input_json)
@@ -3100,47 +3089,6 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
 
 #[test]
 fn plans_servertool_registry_actions_via_servertool_core_bridge() {
-    let builtin = plan_servertool_registry_registration_action_json(
-        &serde_json::json!({
-            "name": " stop_message_auto ",
-            "hasHandler": true,
-            "builtinNameMatched": true,
-            "builtinEntryPresent": true,
-            "registrationAllowedByConfig": true
-        })
-        .to_string(),
-    )
-    .expect("registry builtin registration plan");
-    let builtin_value: serde_json::Value =
-        serde_json::from_str(&builtin).expect("parse builtin registration plan");
-    assert_eq!(
-        builtin_value["action"],
-        serde_json::json!("ignore_builtin_override")
-    );
-    assert_eq!(
-        builtin_value["canonicalName"],
-        serde_json::json!("stop_message_auto")
-    );
-
-    let retired_adhoc = plan_servertool_registry_registration_action_json(
-        &serde_json::json!({
-            "name": " custom_tool ",
-            "hasHandler": true,
-            "builtinNameMatched": false,
-            "builtinEntryPresent": false,
-            "registrationAllowedByConfig": true
-        })
-        .to_string(),
-    )
-    .expect("registry retired adhoc registration plan");
-    let retired_adhoc_value: serde_json::Value =
-        serde_json::from_str(&retired_adhoc).expect("parse retired adhoc registration plan");
-    assert_eq!(retired_adhoc_value["action"], serde_json::json!("ignore_retired"));
-    assert_eq!(
-        retired_adhoc_value["canonicalName"],
-        serde_json::json!("custom_tool")
-    );
-
     let lookup = plan_servertool_registry_lookup_action_json(
         &serde_json::json!({
             "name": "custom_tool",
