@@ -22,12 +22,8 @@ function logResponseBuilderNonBlocking(
   error: unknown,
   details: Record<string, unknown> = {}
 ): void {
-  try {
-    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(`[responses-response-builder] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
-  } catch {
-    // Never throw from non-blocking logging.
-  }
+  const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[responses-response-builder] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
 }
 // 构建器状态
 export type ResponseBuilderState = 'initial' | 'building' | 'completed' | 'error';

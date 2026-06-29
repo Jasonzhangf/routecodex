@@ -196,6 +196,17 @@ const forbiddenFrameKeys = [
 ];
 
 for (const [relPath, source] of sourceByRel.entries()) {
+  for (const forbidden of [
+    '/* noop */',
+    '/* ignore */',
+    'Never throw from non-blocking logging',
+    'catch {}',
+  ]) {
+    if (source.includes(forbidden)) {
+      failures.push(`${relPath}: SSE runtime must not contain silent failure marker: ${forbidden}`);
+    }
+  }
+
   if (!relPath.includes('/json-to-sse/') && !relPath.includes('/shared/')) continue;
   const lines = source.split('\n');
   lines.forEach((line, index) => {

@@ -26,12 +26,8 @@ function logChatJsonToSseNonBlocking(
   error: unknown,
   details: Record<string, unknown> = {}
 ): void {
-  try {
-    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(`[chat-json-to-sse] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
-  } catch {
-    // Never throw from non-blocking logging.
-  }
+  const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[chat-json-to-sse] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
 }
 
 

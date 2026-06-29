@@ -116,11 +116,7 @@ export class GeminiJsonToSseConverter {
     stream: PassThrough
   ): void {
     context.eventStats.errors += 1;
-    try {
-      stream.destroy(error);
-    } catch {
-      /* ignore */
-    }
+    stream.destroy(error);
   }
 
   private wrapError(code: string, error: Error, requestId: string): Error {

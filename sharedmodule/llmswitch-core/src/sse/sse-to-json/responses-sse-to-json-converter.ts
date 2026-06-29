@@ -81,9 +81,7 @@ export class ResponsesSseToJsonConverterRefactored {
       if (abortSignal && !abortSignal.aborted) {
         const onAbort = () => {
           context.isCompleted = true;
-          try {
-            abortableStream?.destroy();
-          } catch {}
+          abortableStream?.destroy();
         };
         abortSignal.addEventListener('abort', onAbort);
         abortHandler = () => abortSignal.removeEventListener('abort', onAbort);

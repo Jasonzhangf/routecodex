@@ -3,6 +3,12 @@
 - 已确认 `docs/goals/sse-rustification-closeout-plan.md` 可直接作为 SSE 收口实现文档引用。
 - 生成 `/goal` 时只保留主目标、文档路径、硬约束、验证门禁、完成标准，不把 slice 细节塞回聊天正文。
 
+# 2026-06-29 SSE no silent failure marker slice
+
+- 目标：继续清 SSE runtime 静默失败残留，禁止 `noop/ignore/Never throw/catch {}` 这类显式吞错 marker。
+- 改动：`anthropic-json-to-sse-converter.ts` / `gemini-json-to-sse-converter.ts` 的 stream error handler 不再吞 `destroy()` 错误；`chat-json-to-sse-converter.ts` / `response-builder.ts` 的 non-blocking logging helper 不再吞格式化/写日志错误；`responses-sse-to-json-converter.ts` abort destroy 不再包空 catch；`verify-sse-architecture-boundary.mjs` 与 `tests/sharedmodule/sse-no-silent-failure.spec.ts` 双锁禁止静默失败 marker 复活。
+- 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/sse-no-silent-failure.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
+
 # 2026-06-29 chat SSE no-salvage boundary slice
 
 - 目标：删掉 `chat-sse-to-json-converter.ts` 里对同一 SSE chunk 多行 payload 的 partial salvage，改为坏 payload 直接失败。
