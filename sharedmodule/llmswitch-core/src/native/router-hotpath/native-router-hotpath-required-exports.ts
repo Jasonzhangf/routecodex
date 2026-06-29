@@ -322,6 +322,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "compactFollowupErrorReasonJson",
   "resolveAdapterContextProviderKeyJson",
   "buildClientExecCliProjectionOutputJson",
+  "parseServertoolCliProjectionToolArgumentsJson",
   "buildServertoolCliProjectionExecutionContextJson",
   "planStoplessOrchestrationActionJson",
   "planStoplessExecutionJson",

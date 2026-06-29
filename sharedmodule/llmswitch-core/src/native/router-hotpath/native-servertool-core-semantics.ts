@@ -273,6 +273,10 @@ export interface ClientExecCliProjectionOutput {
   schemaGuidance?: unknown;
 }
 
+export interface ServertoolCliProjectionToolArgumentsInput {
+  arguments: string;
+}
+
 export interface ClientVisibleProjectionShellInput {
   requestId: string;
   clientCallId: string;
@@ -1362,6 +1366,32 @@ export function buildClientExecCliProjectionOutputWithNative(
     throw new Error(`buildClientExecCliProjectionOutputJson native returned non-string: ${typeof resultJson}`);
   }
   return JSON.parse(resultJson);
+}
+
+export function parseServertoolCliProjectionToolArgumentsWithNative(
+  input: ServertoolCliProjectionToolArgumentsInput,
+): Record<string, unknown> {
+  const capability = 'parseServertoolCliProjectionToolArgumentsJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('parseServertoolCliProjectionToolArgumentsJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
+    const nativeError = resultJson as Record<string, unknown>;
+    const message = typeof nativeError.message === 'string' && nativeError.message.trim()
+      ? nativeError.message.trim()
+      : JSON.stringify(nativeError);
+    throw new Error(`parseServertoolCliProjectionToolArgumentsJson native error: ${message}`);
+  }
+  if (typeof resultJson !== 'string') {
+    throw new Error(`parseServertoolCliProjectionToolArgumentsJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('parseServertoolCliProjectionToolArgumentsJson native returned invalid payload');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string, unknown>>(

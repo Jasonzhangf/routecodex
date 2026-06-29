@@ -995,6 +995,12 @@ function checkServertoolCliProjectionMap() {
     'cli-projection-runtime-native-owner',
     `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`,
     cliProjectionRuntimeShell,
+    'parseServertoolCliProjectionToolArgumentsWithNative'
+  );
+  assertContains(
+    'cli-projection-runtime-native-owner',
+    `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`,
+    cliProjectionRuntimeShell,
     'buildClientVisibleProjectionShellWithNative'
   );
   if (cliProjectionRuntimeShell.includes("name: 'exec_command'") || cliProjectionRuntimeShell.includes('"name": "exec_command"')) {
@@ -1010,6 +1016,8 @@ function checkServertoolCliProjectionMap() {
     'typeof args.input?.maxRepeats',
     'const repeatCount =',
     'const maxRepeats =',
+    'function parseToolArguments(',
+    'JSON.parse(value)',
   ]) {
     if (cliProjectionRuntimeShell.includes(keyword)) {
       fail(
@@ -5216,6 +5224,7 @@ function checkServertoolRustOutcomeCloseout() {
     'export function isClientExecCliProjectionToolCall(',
     'return isServertoolClientExecCliProjectionToolCallWithNative({',
     'executionMode: toolCall.executionMode',
+    'parseServertoolCliProjectionToolArgumentsWithNative({',
   ]) {
     if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(

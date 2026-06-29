@@ -1706,6 +1706,14 @@ pub fn build_client_exec_cli_projection_output_json(input_json: String) -> NapiR
 }
 
 #[napi]
+pub fn parse_servertool_cli_projection_tool_arguments_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::parse_servertool_cli_projection_tool_arguments_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_stopless_orchestration_action_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stopless_orchestration_action_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

@@ -135,6 +135,12 @@ pub struct ClientExecCliProjectionInput {
     pub request_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolCliProjectionToolArgumentsInput {
+    pub arguments: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServertoolCliError {
     UnsupportedTool(String),
@@ -1275,6 +1281,21 @@ pub fn plan_client_exec_cli_projection_output(
     )
 }
 
+/// feature_id: hub.servertool_cli_projection
+pub fn parse_servertool_cli_projection_tool_arguments(
+    input: ServertoolCliProjectionToolArgumentsInput,
+) -> Result<Value, ServertoolCliError> {
+    if input.arguments.trim().is_empty() {
+        return Ok(Value::Object(Map::new()));
+    }
+    let parsed: Value = serde_json::from_str(&input.arguments)
+        .map_err(|_| ServertoolCliError::InvalidField("arguments"))?;
+    if parsed.as_object().is_some() {
+        return Ok(parsed);
+    }
+    Err(ServertoolCliError::InvalidField("arguments"))
+}
+
 pub fn build_client_visible_projection_shell(
     input: ServertoolClientVisibleProjectionShellInput,
 ) -> Result<Value, ServertoolCliError> {
@@ -1512,6 +1533,42 @@ mod tests {
             .collect::<Vec<_>>();
         expected_sorted.sort();
         assert_eq!(actual_sorted, expected_sorted);
+    }
+
+    #[test]
+    fn parses_cli_projection_tool_arguments_in_rust() {
+        let empty = parse_servertool_cli_projection_tool_arguments(
+            ServertoolCliProjectionToolArgumentsInput {
+                arguments: "  ".to_string(),
+            },
+        )
+        .expect("empty args");
+        assert_eq!(empty, json!({}));
+
+        let object = parse_servertool_cli_projection_tool_arguments(
+            ServertoolCliProjectionToolArgumentsInput {
+                arguments: "{\"cmd\":\"pwd\"}".to_string(),
+            },
+        )
+        .expect("object args");
+        assert_eq!(object, json!({"cmd": "pwd"}));
+
+        assert!(matches!(
+            parse_servertool_cli_projection_tool_arguments(
+                ServertoolCliProjectionToolArgumentsInput {
+                    arguments: "[]".to_string()
+                }
+            ),
+            Err(ServertoolCliError::InvalidField("arguments"))
+        ));
+        assert!(matches!(
+            parse_servertool_cli_projection_tool_arguments(
+                ServertoolCliProjectionToolArgumentsInput {
+                    arguments: "{".to_string()
+                }
+            ),
+            Err(ServertoolCliError::InvalidField("arguments"))
+        ));
     }
 
     #[test]

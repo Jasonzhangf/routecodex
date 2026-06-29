@@ -964,6 +964,18 @@ pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<
     serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
 }
 
+pub fn parse_servertool_cli_projection_tool_arguments_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: cli_contract::ServertoolCliProjectionToolArgumentsInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize cli projection tool arguments input: {e}"))?;
+    let output = cli_contract::parse_servertool_cli_projection_tool_arguments(input)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize cli projection tool arguments: {e}"))
+}
+
 pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<String, String> {
     let input: stopless_orchestration_contract::StoplessOrchestrationPlanInput =
         serde_json::from_str(input_json)
@@ -2334,6 +2346,29 @@ mod tests {
         assert!(!command.contains("continuationPrompt"));
         assert!(!command.contains("schemaGuidance"));
         assert!(!command.contains("stdoutPreview"));
+    }
+
+    #[test]
+    fn parses_cli_projection_tool_arguments_via_servertool_core_bridge() {
+        let output = parse_servertool_cli_projection_tool_arguments_json(
+            &json!({
+                "arguments": "{\"cmd\":\"pwd\"}"
+            })
+            .to_string(),
+        )
+        .expect("cli projection tool args");
+        let plan: serde_json::Value =
+            serde_json::from_str(&output).expect("cli projection args json");
+        assert_eq!(plan["cmd"], "pwd");
+
+        let err = parse_servertool_cli_projection_tool_arguments_json(
+            &json!({
+                "arguments": "[]"
+            })
+            .to_string(),
+        )
+        .expect_err("array args must fail");
+        assert_eq!(err, "SERVERTOOL_CLI_INVALID_FIELD: arguments");
     }
 
     #[test]

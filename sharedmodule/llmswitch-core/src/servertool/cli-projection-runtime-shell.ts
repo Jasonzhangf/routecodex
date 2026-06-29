@@ -8,7 +8,8 @@ import type {
 import {
   buildClientExecCliProjectionOutputWithNative,
   buildClientVisibleProjectionShellWithNative,
-  buildServertoolCliProjectionExecutionContextWithNative
+  buildServertoolCliProjectionExecutionContextWithNative,
+  parseServertoolCliProjectionToolArgumentsWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   collectServertoolAdditionalClientToolCallsWithNative,
@@ -35,7 +36,9 @@ export function buildServertoolCliProjectionBranchResult(args: {
   const nativeProjection = buildClientExecCliProjectionOutputWithNative({
     toolName,
     flowId: 'servertool_cli_projection',
-    input: parseToolArguments(cliProjectedToolCall.arguments),
+    input: parseServertoolCliProjectionToolArgumentsWithNative({
+      arguments: cliProjectedToolCall.arguments
+    }),
     repeatCount: 0,
     maxRepeats: 0
   });
@@ -74,14 +77,3 @@ export const collectAdditionalClientToolCalls = (base: JsonObject, projectedTool
     projectedToolCallId
   }) as JsonValue[];
 };
-
-function parseToolArguments(value: string): JsonObject {
-  if (!value.trim()) {
-    return {};
-  }
-  const parsed = JSON.parse(value) as unknown;
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    return parsed as JsonObject;
-  }
-  throw new Error('[servertool.cli] tool arguments must be JSON object');
-}

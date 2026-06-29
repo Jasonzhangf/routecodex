@@ -2,6 +2,7 @@ import {
   buildClientExecCliProjectionOutputWithNative,
   buildServertoolCliProjectionExecutionContextWithNative,
   buildClientVisibleProjectionShellWithNative,
+  parseServertoolCliProjectionToolArgumentsWithNative,
   planServertoolEnginePreflightWithNative,
   planServertoolEngineSkipWithNative,
   planServertoolEngineRuntimeActionWithNative,
@@ -623,13 +624,15 @@ describe('servertool CLI native bridge', () => {
         id: 'stop_message_auto',
         phase: 'post',
         priority: 999,
-        order: 7
+        order: 7,
+        sourceIndex: 0
       },
       {
         id: 'vision_auto',
         phase: 'default',
         priority: 100,
-        order: 0
+        order: 0,
+        sourceIndex: 1
       }
     ]);
   });
@@ -677,6 +680,16 @@ describe('servertool CLI native bridge', () => {
       toolName: 'fake_exec',
       input: { query: 'x' }
     })).toThrow('SERVERTOOL_DENIED_TOOL: fake_exec');
+  });
+
+  it('parses CLI projection tool arguments at the Rust bridge', () => {
+    expect(parseServertoolCliProjectionToolArgumentsWithNative({
+      arguments: '{"cmd":"pwd"}'
+    })).toEqual({ cmd: 'pwd' });
+
+    expect(() => parseServertoolCliProjectionToolArgumentsWithNative({
+      arguments: '[]'
+    })).toThrow('SERVERTOOL_CLI_INVALID_FIELD: arguments');
   });
 
   it('rejects additional servertool calls in the client-visible shell', () => {

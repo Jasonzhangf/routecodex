@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const buildClientExecCliProjectionOutputWithNative = jest.fn();
 const buildClientVisibleProjectionShellWithNative = jest.fn();
 const buildServertoolCliProjectionExecutionContextWithNative = jest.fn();
+const parseServertoolCliProjectionToolArgumentsWithNative = jest.fn();
 const isServertoolClientExecCliProjectionToolCallWithNative = jest.fn();
 const collectServertoolAdditionalClientToolCallsWithNative = jest.fn();
 
@@ -11,7 +12,8 @@ jest.unstable_mockModule(
   () => ({
     buildClientExecCliProjectionOutputWithNative,
     buildClientVisibleProjectionShellWithNative,
-    buildServertoolCliProjectionExecutionContextWithNative
+    buildServertoolCliProjectionExecutionContextWithNative,
+    parseServertoolCliProjectionToolArgumentsWithNative
   })
 );
 
@@ -43,6 +45,7 @@ describe('cli-projection-runtime-shell', () => {
     buildServertoolCliProjectionExecutionContextWithNative.mockReturnValue({
       flowId: 'servertool_cli_projection'
     });
+    parseServertoolCliProjectionToolArgumentsWithNative.mockReturnValue({});
     isServertoolClientExecCliProjectionToolCallWithNative.mockImplementation((input: any) => ({
       executionMode: input?.executionMode
     }?.executionMode === 'client_exec_cli_projection'));
@@ -76,6 +79,9 @@ describe('cli-projection-runtime-shell', () => {
       input: {},
       repeatCount: 0,
       maxRepeats: 0
+    });
+    expect(parseServertoolCliProjectionToolArgumentsWithNative).toHaveBeenCalledWith({
+      arguments: '{}'
     });
     expect(buildClientVisibleProjectionShellWithNative).toHaveBeenCalledWith({
       requestId: 'req-1',
@@ -131,5 +137,15 @@ describe('cli-projection-runtime-shell', () => {
     expect(collectAdditionalClientToolCalls({ choices: [] } as any, 'call_projected')).toEqual([
       { id: 'call_other', type: 'function', function: { name: 'exec_command', arguments: '{}' } }
     ]);
+  });
+
+  test('cli projection shell does not own tool argument parsing', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts', 'utf8')
+    );
+
+    expect(source).not.toContain('function parseToolArguments(');
+    expect(source).not.toContain('JSON.parse(value)');
+    expect(source).toContain('parseServertoolCliProjectionToolArgumentsWithNative(');
   });
 });

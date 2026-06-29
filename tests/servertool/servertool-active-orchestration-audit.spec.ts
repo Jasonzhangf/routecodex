@@ -252,6 +252,8 @@ const TARGETS = [
     forbidden: [
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
       '.find(isClientExecCliProjectionToolCall)',
+      'function parseToolArguments(',
+      'JSON.parse(value)',
     ],
   },
   {
