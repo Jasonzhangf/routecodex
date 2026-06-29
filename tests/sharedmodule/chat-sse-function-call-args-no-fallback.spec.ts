@@ -12,6 +12,52 @@ async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
 }
 
 describe('chat SSE function_call arguments no-fallback boundary', () => {
+  it('fails missing response id instead of using requestId as chunk id', async () => {
+    const response: ChatCompletionResponse = {
+      object: 'chat.completion',
+      created: 1,
+      model: 'gpt-5.5',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'hello'
+        },
+        finish_reason: 'stop'
+      }]
+    } as ChatCompletionResponse;
+
+    const converter = new ChatJsonToSseConverterRefactored();
+
+    await expect(converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_chat_missing_response_id',
+      model: response.model
+    })).rejects.toThrow('Invalid ChatCompletionResponse: missing id');
+  });
+
+  it('fails missing response created timestamp instead of using current time', async () => {
+    const response: ChatCompletionResponse = {
+      id: 'chatcmpl_missing_created',
+      object: 'chat.completion',
+      model: 'gpt-5.5',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'hello'
+        },
+        finish_reason: 'stop'
+      }]
+    } as ChatCompletionResponse;
+
+    const converter = new ChatJsonToSseConverterRefactored();
+
+    await expect(converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_chat_missing_response_created',
+      model: response.model
+    })).rejects.toThrow('Invalid ChatCompletionResponse: missing created timestamp');
+  });
+
   it('fails legacy function_call with non-string arguments instead of stringifying them', async () => {
     const response: ChatCompletionResponse = {
       id: 'chatcmpl_bad_function_call_args',

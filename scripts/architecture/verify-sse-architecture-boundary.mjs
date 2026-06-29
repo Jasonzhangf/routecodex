@@ -105,6 +105,16 @@ for (const forbidden of [
   }
 }
 
+const chatEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts');
+for (const forbidden of [
+  'id: context.responseId ?? context.requestId',
+  'created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0)',
+]) {
+  if (chatEventGenerator.includes(forbidden)) {
+    failures.push(`Chat SSE generator must not synthesize response id/created truth: ${forbidden}`);
+  }
+}
+
 const sharedOwnerFiles = [
   'sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts',
   'sharedmodule/llmswitch-core/src/sse/shared/writer.ts',

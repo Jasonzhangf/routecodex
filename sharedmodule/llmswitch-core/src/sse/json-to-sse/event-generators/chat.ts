@@ -106,10 +106,16 @@ function createBaseChunk(
   created: number;
   model: string;
 } {
+  if (typeof context.responseId !== 'string' || !context.responseId.trim()) {
+    throw new Error('Invalid Chat response context: missing response id');
+  }
+  if (typeof context.created !== 'number' || !Number.isFinite(context.created) || context.created <= 0) {
+    throw new Error('Invalid Chat response context: missing created timestamp');
+  }
   return {
-    id: context.responseId ?? context.requestId,
+    id: context.responseId,
     object: 'chat.completion.chunk',
-    created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0),
+    created: context.created,
     model: context.model
   };
 }

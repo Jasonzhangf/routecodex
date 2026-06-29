@@ -114,6 +114,11 @@ export class ChatJsonToSseConverterRefactored {
   ): Promise<ChatSseEventStream> {
     // TTL + max-size prune on every public entry
     pruneChatContexts(this.contexts);
+    try {
+      this.validateResponse(response);
+    } catch (error) {
+      throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, options.requestId);
+    }
     // 1. 创建上下文
     const context = this.createResponseContext(response, options);
     this.contexts.set(options.requestId, context);
@@ -237,6 +242,12 @@ export class ChatJsonToSseConverterRefactored {
   private validateResponse(response: ChatCompletionResponse): void {
     if (!response || typeof response !== 'object' || !Array.isArray(response.choices) || !response.model) {
       throw new Error('Invalid ChatCompletionResponse format');
+    }
+    if (typeof response.id !== 'string' || !response.id.trim()) {
+      throw new Error('Invalid ChatCompletionResponse: missing id');
+    }
+    if (typeof response.created !== 'number' || !Number.isFinite(response.created) || response.created <= 0) {
+      throw new Error('Invalid ChatCompletionResponse: missing created timestamp');
     }
   }
 
