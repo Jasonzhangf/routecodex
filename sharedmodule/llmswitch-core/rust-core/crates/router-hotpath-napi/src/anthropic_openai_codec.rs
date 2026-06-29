@@ -706,7 +706,7 @@ fn normalize_anthropic_tool_history(messages: Vec<Value>) -> Vec<Value> {
     split_parallel_tool_use_result_turns(merge_adjacent_anthropic_messages(messages))
 }
 
-fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value {
+pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value {
     let Some(request_row) = chat_request.as_object() else {
         return Value::Object(Map::new());
     };

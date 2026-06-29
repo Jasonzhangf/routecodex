@@ -632,6 +632,16 @@ fn apply_provider_outbound_policy(
         strip_responses_reasoning_content(&mut payload);
     }
 
+    if protocol == "anthropic-messages" {
+        if let Value::Object(mapped_payload) =
+            crate::anthropic_openai_codec::build_anthropic_request_from_openai_chat_value(
+                &Value::Object(payload.clone()),
+            )
+        {
+            payload = mapped_payload;
+        }
+    }
+
     normalize_provider_outbound_tools(protocol, &mut payload);
     if protocol == "openai-responses" {
         normalize_openai_responses_input_items(&mut payload);
@@ -1218,5 +1228,74 @@ mod tests {
         assert!(tools[0].get("type").is_none());
         assert!(tools[0].get("function").is_none());
         assert!(tools[0].get("parameters").is_none());
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_converts_openai_tool_history_for_anthropic_messages() {
+        let input = serde_json::json!({
+            "protocol": "anthropic-messages",
+            "payload": {
+                "model": "MiniMax-M2.7",
+                "messages": [
+                    { "role": "user", "content": "run pwd" },
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_pwd",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"cmd\":\"pwd\"}"
+                            }
+                        }]
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_pwd",
+                        "name": "exec_command",
+                        "content": "/tmp/project"
+                    }
+                ],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "Run command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "cmd": { "type": "string" } },
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "stream": true
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let messages = output["messages"].as_array().unwrap();
+        assert_eq!(messages[1]["role"], serde_json::json!("assistant"));
+        assert_eq!(messages[1]["content"][0]["type"], serde_json::json!("tool_use"));
+        assert_eq!(messages[1]["content"][0]["id"], serde_json::json!("call_pwd"));
+        assert_eq!(
+            messages[1]["content"][0]["name"],
+            serde_json::json!("exec_command")
+        );
+        assert_eq!(messages[2]["role"], serde_json::json!("user"));
+        assert_eq!(
+            messages[2]["content"][0]["type"],
+            serde_json::json!("tool_result")
+        );
+        assert_eq!(
+            messages[2]["content"][0]["tool_use_id"],
+            serde_json::json!("call_pwd")
+        );
+        assert!(messages[1].get("tool_calls").is_none());
+        assert_ne!(messages[2]["role"], serde_json::json!("tool"));
+        assert!(messages[2].get("tool_call_id").is_none());
     }
 }
