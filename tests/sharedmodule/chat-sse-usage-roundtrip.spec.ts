@@ -287,6 +287,26 @@ describe('chat SSE usage compatibility', () => {
     });
   });
 
+  it('fails invalid decoded usage instead of silently dropping it', async () => {
+    const sseText = [
+      'data: {"id":"chatcmpl_usage_decode_invalid","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}',
+      '',
+      'data: {"id":"chatcmpl_usage_decode_invalid","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"hello"},"logprobs":null,"finish_reason":null}]}',
+      '',
+      'data: {"id":"chatcmpl_usage_decode_invalid","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}],"usage":{"input_tokens":"bad-value","output_tokens":4,"total_tokens":13}}',
+      '',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_usage_decode_invalid',
+      model: 'gpt-4o-mini'
+    })).rejects.toThrow('Invalid Chat usage.prompt_tokens');
+  });
+
   it('round-trips reasoning_content from chat SSE outbound/inbound mapping', async () => {
     const response: ChatCompletionResponse = {
       id: 'chatcmpl_reasoning_roundtrip',

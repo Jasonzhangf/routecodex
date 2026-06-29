@@ -191,6 +191,13 @@
 - 已验证：focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip` PASS；`npm run verify:sse-architecture-boundary` PASS；scoped `git diff --check` PASS。
 - 当前缺口：sharedmodule `tsc` 被并行 servertool 脏改挡住，红点在 `registry-projection-shell.ts` / `skeleton-config.ts`，不是本 SSE slice 引入；本轮不碰 servertool。
 
+# 2026-06-29 SSE chat decoded usage invalid fail-fast slice
+
+- 目标：继续 SSE TS cleanup，删除 Chat SSE->JSON decode 对坏 usage 的静默丢弃；坏 usage 不能在 `normalizeChatUsage()` 返回 null 后被 `buildUsageInfo()` 省略。
+- 改动：`chat-sse-to-json-converter.ts::normalizeChatUsage()` 现在对非对象 usage、坏 token、缺 token fields 抛 `Invalid Chat usage.*`；缓存 token 字段同样显式校验；`chat-sse-usage-roundtrip.spec.ts` 增加 invalid decoded usage 反向测试；SSE gate 禁止旧 `ChatUsage | null` 和 `return null` 丢坏 usage 结构复活。
+- 已验证：focused Jest `chat-sse-usage-roundtrip + chat-sse-usage-no-fallback` PASS；`npm run verify:sse-architecture-boundary` PASS；sharedmodule `tsc` PASS；scoped `git diff --check` PASS。
+- 边界：本 slice 只处理 Chat decode usage，不处理 `buildPartialResponse()` 的 partial response 补空值，后续单独审计。
+
 # 2026-06-29 Hub Pipeline Rust closeout Wave 3 MetadataCenter dualwrite slice
 
 - Wave 3 baseline：`verify:architecture-metadata-center-manifest-code-sync`、`verify:architecture-metadata-center-write-boundaries`、`verify:architecture-metadata-leak-boundary` 均 PASS；`verify:metadata-center-dualwrite-api` FAIL，红点为 metadata center manifest 未列 dualwrite gate，以及 req governance 仍从 flat `metadata.stopMessageEnabled` 读取 truth。

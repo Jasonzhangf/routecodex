@@ -44,7 +44,10 @@ const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
 const DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS = 45_000;
 const DEFAULT_CONTENT_IDLE_TIMEOUT_MS = 300_000;
 
-function readNonNegativeInteger(value: unknown): number | undefined {
+function readNonNegativeInteger(value: unknown, fieldName: string): number | undefined {
+  if (typeof value === 'undefined') {
+    return undefined;
+  }
   if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
     return Math.round(value);
   }
@@ -54,29 +57,35 @@ function readNonNegativeInteger(value: unknown): number | undefined {
       return Math.round(parsed);
     }
   }
-  return undefined;
+  throw new Error(`Invalid Chat usage.${fieldName}`);
 }
 
-function normalizeChatUsage(usage: unknown): ChatUsage | null {
-  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) {
-    return null;
+function normalizeChatUsage(usage: unknown): ChatUsage | undefined {
+  if (typeof usage === 'undefined' || usage === null) {
+    return undefined;
+  }
+  if (typeof usage !== 'object' || Array.isArray(usage)) {
+    throw new Error('Invalid Chat usage: expected object');
   }
   const record = usage as Record<string, unknown>;
   const promptTokens = readNonNegativeInteger(
-    record.prompt_tokens ?? record.input_tokens ?? record.promptTokens ?? record.inputTokens
+    record.prompt_tokens ?? record.input_tokens ?? record.promptTokens ?? record.inputTokens,
+    'prompt_tokens'
   );
   const completionTokens = readNonNegativeInteger(
-    record.completion_tokens ?? record.output_tokens ?? record.completionTokens ?? record.outputTokens
+    record.completion_tokens ?? record.output_tokens ?? record.completionTokens ?? record.outputTokens,
+    'completion_tokens'
   );
   const totalTokens = readNonNegativeInteger(
     record.total_tokens ??
       record.totalTokens ??
       ((promptTokens ?? 0) + (completionTokens ?? 0) > 0
         ? (promptTokens ?? 0) + (completionTokens ?? 0)
-        : undefined)
+        : undefined),
+    'total_tokens'
   );
   if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {
-    return null;
+    throw new Error('Invalid Chat usage: missing token fields');
   }
 
   // 提取缓存命中 token（支持常见上游格式）：
@@ -86,12 +95,12 @@ function normalizeChatUsage(usage: unknown): ChatUsage | null {
   let cachedTokens: number | undefined;
   const detailsInput = (record as any).input_tokens_details as Record<string, unknown> | undefined;
   const detailsPrompt = (record as any).prompt_tokens_details as Record<string, unknown> | undefined;
-  cachedTokens = readNonNegativeInteger(record.prompt_cache_hit_tokens);
+  cachedTokens = readNonNegativeInteger(record.prompt_cache_hit_tokens, 'prompt_cache_hit_tokens');
   if (cachedTokens === undefined && detailsInput) {
-    cachedTokens = readNonNegativeInteger((detailsInput as any).cached_tokens);
+    cachedTokens = readNonNegativeInteger((detailsInput as any).cached_tokens, 'input_tokens_details.cached_tokens');
   }
   if (cachedTokens === undefined && detailsPrompt) {
-    cachedTokens = readNonNegativeInteger((detailsPrompt as any).cached_tokens);
+    cachedTokens = readNonNegativeInteger((detailsPrompt as any).cached_tokens, 'prompt_tokens_details.cached_tokens');
   }
 
   const out: ChatUsage = {

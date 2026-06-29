@@ -232,6 +232,17 @@ for (const relPath of providerNeutralProjectionFiles) {
   }
 }
 
+const chatSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts');
+for (const forbidden of [
+  'function normalizeChatUsage(usage: unknown): ChatUsage | null',
+  'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return null;\n  }',
+  'if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {\n    return null;\n  }',
+]) {
+  if (chatSseToJsonConverter.includes(forbidden)) {
+    failures.push(`Chat SSE decode must not silently drop invalid usage: ${forbidden}`);
+  }
+}
+
 const responsesJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts');
 for (const forbidden of [
   'convertRequestToJsonToSse(',
