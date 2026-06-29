@@ -5539,7 +5539,11 @@ function checkServertoolEngineStoplessSessionThinShell() {
     }
   }
   for (const marker of [
+    'runtime.action',
     'switch (runtime.action)',
+    "runtime.action === 'return_null'",
+    "runtime.action === 'throw_error'",
+    "runtime.action !== 'return_handler_result'",
     "'return_terminal_final'",
     "'return_schema_fail_fast'",
     "'return_schema_allow_stop'",
@@ -5570,8 +5574,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     }
   }
   for (const marker of [
-    "readNativeFunction('runStoplessAutoHandlerRuntimeJson')",
-    "runtime.action !== 'return_handler_result'",
+    "readNativeFunction('runStoplessBuiltinHandlerForRuntimeJson')",
     'planServertoolBuiltinHandlerEntry(',
     'planServertoolBuiltinHandlerNames(',
   ]) {

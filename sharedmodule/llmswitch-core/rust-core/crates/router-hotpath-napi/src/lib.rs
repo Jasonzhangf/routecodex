@@ -1806,6 +1806,16 @@ pub fn run_stopless_auto_handler_runtime_json_bridge(input_json: String) -> Napi
     stopless_auto_handler_bridge::run_stopless_auto_handler_runtime_json(input_json)
 }
 
+/// Run complete stopless builtin handler runtime and return final handler result.
+/// TS builtin catalog may only consume this materialized output, not interpret
+/// stopless runtime actions locally.
+#[napi(js_name = "runStoplessBuiltinHandlerForRuntimeJson")]
+pub fn run_stopless_builtin_handler_for_runtime_json_bridge(
+    input_json: String,
+) -> NapiResult<String> {
+    stopless_auto_handler_bridge::run_stopless_builtin_handler_for_runtime_json(input_json)
+}
+
 /// Build complete stopless auto CLI projection — Rust-native.
 /// Replaces TS `buildServertoolCliProjectionForAutoFlow` + three Native calls.
 #[napi(js_name = "buildStoplessAutoCliProjectionJson")]

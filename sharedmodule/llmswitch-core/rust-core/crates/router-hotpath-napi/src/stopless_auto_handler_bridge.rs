@@ -282,6 +282,19 @@ pub fn run_stopless_auto_handler_runtime_json(input_json: String) -> NapiResult<
         .map_err(|e| napi::Error::from_reason(format!("serialize stopless runtime output: {e}")))
 }
 
+#[napi]
+pub fn run_stopless_builtin_handler_for_runtime_json(input_json: String) -> NapiResult<String> {
+    let runtime_raw = run_stopless_auto_handler_runtime_json(input_json)?;
+    let runtime_output: StoplessAutoHandlerRuntimeOutput =
+        serde_json::from_str(&runtime_raw).map_err(|e| {
+            napi::Error::from_reason(format!("deserialize stopless runtime output: {e}"))
+        })?;
+    let materialized = materialize_stopless_builtin_handler_result(runtime_output)?;
+    serde_json::to_string(&materialized).map_err(|e| {
+        napi::Error::from_reason(format!("serialize stopless builtin handler result: {e}"))
+    })
+}
+
 // ── NAPI: build complete stopless auto CLI projection ──────────────────────────
 
 /// Build a complete stopless CLI projection for an auto flow request.
@@ -698,6 +711,43 @@ fn build_runtime_output(
     Ok(output)
 }
 
+fn materialize_stopless_builtin_handler_result(
+    runtime_output: StoplessAutoHandlerRuntimeOutput,
+) -> NapiResult<Value> {
+    match runtime_output.action.as_str() {
+        "return_null" => Ok(Value::Null),
+        "return_handler_result" => {
+            let mut handler_result = runtime_output.handler_result.ok_or_else(|| {
+                napi::Error::from_reason("[servertool] Rust stopless runtime missing handlerResult")
+            })?;
+            if let Some(metadata_write_plan) = runtime_output.metadata_write_plan {
+                if let Some(obj) = handler_result.as_object_mut() {
+                    obj.insert(
+                        "metadataWritePlan".to_string(),
+                        serde_json::to_value(metadata_write_plan).map_err(|e| {
+                            napi::Error::from_reason(format!(
+                                "serialize stopless metadata write plan: {e}"
+                            ))
+                        })?,
+                    );
+                }
+            }
+            Ok(handler_result)
+        }
+        "throw_error" => {
+            let message = runtime_output
+                .error
+                .as_ref()
+                .map(|error| error.message.as_str())
+                .unwrap_or("[servertool] Rust stopless runtime requested an error");
+            Err(napi::Error::from_reason(message.to_string()))
+        }
+        action => Err(napi::Error::from_reason(format!(
+            "[servertool] unsupported Rust stopless runtime action: {action}"
+        ))),
+    }
+}
+
 // ── Input / Output Types ─────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -765,7 +815,7 @@ pub struct StoplessLearnedNoteWriteOutput {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessAutoHandlerRuntimeOutput {
     pub action: String,
@@ -785,7 +835,7 @@ pub struct StoplessAutoHandlerRuntimeOutput {
     pub error: Option<StoplessRuntimeError>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoplessRuntimeError {
     pub message: String,
