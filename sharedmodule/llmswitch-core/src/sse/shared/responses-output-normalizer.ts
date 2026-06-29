@@ -20,19 +20,15 @@ export interface ResponsesMessageNormalizationResult {
 
 export function normalizeResponsesMessageItem(
   item: ResponsesMessageItem,
-  options: ResponsesMessageNormalizationOptions
+  _options: ResponsesMessageNormalizationOptions
 ): ResponsesMessageNormalizationResult {
-  const fallbackRequestId = typeof options.requestId === 'string' && options.requestId.trim().length
-    ? options.requestId.trim()
-    : 'message';
-  const fallbackIndex = typeof options.outputIndex === 'number' ? options.outputIndex : 0;
-  const baseId =
-    typeof item.id === 'string' && item.id.trim().length
-      ? item.id.trim()
-      : `${fallbackRequestId}-message-${fallbackIndex}`;
+  const baseId = typeof item.id === 'string' ? item.id.trim() : '';
+  if (!baseId) {
+    throw new Error('Invalid Responses message: missing id');
+  }
   const { normalizedParts, reasoningChunks: extractedReasoning } = normalizeMessageContentParts(item.content);
-  const reasoningChunks = options.suppressReasoningFromContent ? [] : extractedReasoning;
-  const additionalReasoning = options.extraReasoning;
+  const reasoningChunks = _options.suppressReasoningFromContent ? [] : extractedReasoning;
+  const additionalReasoning = _options.extraReasoning;
   if (additionalReasoning) {
     const extras = Array.isArray(additionalReasoning) ? additionalReasoning : [additionalReasoning];
     for (const entry of extras) {
