@@ -3,6 +3,7 @@ import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import {
   normalizeServertoolProgressResultWithNative,
+  normalizeServertoolProgressTokenWithNative,
   resolveServertoolProgressStageWithNative,
   resolveServertoolProgressToolNameWithNative,
   shouldUseServertoolGoldProgressHighlightWithNative
@@ -132,10 +133,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     reason: string;
     flowId?: string;
   }): void => {
-    const reasonToken =
-      typeof event.reason === 'string' && event.reason.trim()
-        ? event.reason.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
-        : 'unknown';
+    const reasonToken = normalizeServertoolProgressTokenWithNative({ value: event.reason });
     appendServerToolProgressFileEvent({
       requestId: args.requestId,
       flowId: event.flowId || `hook:${event.hookId}`,
@@ -166,7 +164,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     const viewStage = stage === 'trigger' ? 'match' : 'entry';
     const flowToken = flowId && flowId.trim() ? flowId.trim() : 'none';
     const compareResult = compareContext
-      ? `${compareContext.decision}_${compareContext.reason.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'unknown'}`
+      ? `${compareContext.decision}_${normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })}`
       : 'unknown_no_context';
     appendServerToolProgressFileEvent({
       requestId: args.requestId,

@@ -280,10 +280,14 @@ const TARGETS = [
     forbidden: [
       'function resolveStage(',
       'function normalizeResult(',
+      'event.reason.trim().toLowerCase().replace',
+      'compareContext.reason.toLowerCase().replace',
     ],
     required: [
       'resolveServertoolProgressStageWithNative({ step, message })',
       'normalizeServertoolProgressResultWithNative({ message })',
+      'normalizeServertoolProgressTokenWithNative({ value: event.reason })',
+      'normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })',
     ],
   },
   {

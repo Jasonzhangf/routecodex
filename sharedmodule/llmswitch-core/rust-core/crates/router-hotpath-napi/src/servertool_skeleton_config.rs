@@ -1038,6 +1038,23 @@ pub fn normalize_servertool_progress_result_json(input_json: String) -> NapiResu
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi]
+pub fn normalize_servertool_progress_token_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let value = input
+        .get("value")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let output = normalize_progress_token(value);
+    let output = if output.is_empty() {
+        "unknown".to_string()
+    } else {
+        output
+    };
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn resolve_servertool_followup_flow_profile(flow_id: &str) -> Value {
     let normalized_flow_id = flow_id.trim();
     if normalized_flow_id.is_empty() {
@@ -1087,8 +1104,8 @@ mod tests {
     use super::{
         build_servertool_dispatch_plan_input_json, build_servertool_outcome_plan_input_json,
         get_default_servertool_skeleton_document_json, normalize_servertool_progress_result_json,
-        normalize_servertool_registration_spec_json, plan_servertool_backend_execution_json,
-        plan_servertool_builtin_auto_handler_entries_json,
+        normalize_servertool_progress_token_json, normalize_servertool_registration_spec_json,
+        plan_servertool_backend_execution_json, plan_servertool_builtin_auto_handler_entries_json,
         plan_servertool_builtin_handler_entry_json, plan_servertool_builtin_handler_names_json,
         plan_servertool_builtin_handler_record_entries_json, plan_servertool_followup_runtime_json,
         plan_servertool_handler_contract_json, plan_servertool_registry_lookup_from_skeleton_json,
@@ -1559,6 +1576,12 @@ mod tests {
             normalize_servertool_progress_result_json(json!({ "message": "   " }).to_string())
                 .expect("empty result");
         assert_eq!(empty, "\"unknown\"");
+
+        let token = normalize_servertool_progress_token_json(
+            json!({ "value": " Finish Reason: STOP " }).to_string(),
+        )
+        .expect("progress token");
+        assert_eq!(token, "\"finish_reason_stop\"");
     }
 
     #[test]

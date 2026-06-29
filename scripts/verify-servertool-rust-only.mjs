@@ -4119,6 +4119,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'pub fn should_use_servertool_gold_progress_highlight_json',
     'pub fn resolve_servertool_progress_stage_json',
     'pub fn normalize_servertool_progress_result_json',
+    'pub fn normalize_servertool_progress_token_json',
   ]) {
     assertContains(
       'servertool-flow-presentation-rust-owner',
@@ -4132,6 +4133,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'shouldUseServertoolGoldProgressHighlightJson',
     'resolveServertoolProgressStageJson',
     'normalizeServertoolProgressResultJson',
+    'normalizeServertoolProgressTokenJson',
   ]) {
     assertContains(
       'servertool-flow-presentation-required-export',
@@ -4145,6 +4147,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'shouldUseServertoolGoldProgressHighlightWithNative',
     'resolveServertoolProgressStageWithNative',
     'normalizeServertoolProgressResultWithNative',
+    'normalizeServertoolProgressTokenWithNative',
   ]) {
     assertContains(
       'servertool-flow-presentation-native-bridge',
@@ -4172,6 +4175,8 @@ function checkServertoolFlowPresentationRustOwner() {
     'goldHighlightFlowIds:',
     'function resolveStage(',
     'function normalizeResult(',
+    'event.reason.trim().toLowerCase().replace',
+    'compareContext.reason.toLowerCase().replace',
   ]) {
     if (skeletonConfigShell.includes(keyword) || progressLogShell.includes(keyword)) {
       fail(
