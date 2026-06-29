@@ -1,3 +1,15 @@
+# 2026-06-29 5520 startup correction after forwarder fix
+
+- Correction: earlier `fix(vr): allow same-model forwarder pools` was committed after proving the duplicate-forwarder blocker disappeared, but before proving `routecodex start --port 5520` and `/health` were green. That was incomplete live validation.
+- Follow-up config truth: user provided legacy `model_providers.cc` (`base_url=http://152.32.205.164:19090/v1`, `wire_api=responses`, `env_key=CC_OAI_KEY`). Added runtime config file outside repo: `~/.rcc/provider/cc/config.v2.toml`. Did not edit `~/.rcc/config.toml`.
+- Live verification:
+  - `routecodex config validate` PASS.
+  - `routecodex start --port 5520` PASS; server started on `0.0.0.0:5520`, `0.0.0.0:10000`, `0.0.0.0:5555`.
+  - `curl -sS http://127.0.0.1:5520/health` -> `{"status":"ok","ready":true,"pipelineReady":true,"server":"routecodex","version":"0.90.3308"}`.
+  - `curl -sS http://127.0.0.1:5555/health` -> ready true.
+  - `curl -sS http://127.0.0.1:10000/health` -> ready true.
+- Reusable lesson: for startup fixes, do not submit or report completion after only removing the first startup blocker. Required evidence is global install/runtime path + actual `routecodex start/restart` + target port `/health` green; if a new config error appears, report as the active blocker before claiming closure.
+
 # 2026-06-29 forwarder same-model multi-pool startup fix
 
 - Symptom: global `routecodex start --port 5520` failed before app init with `[forwarder-config] duplicate forwarder for (protocol='openai', model='gpt-5.3-codex-spark')`, because config has both `fwd.paid.gpt-5.3-codex-spark` and `fwd.gpt.gpt-5.3-codex-spark`.
