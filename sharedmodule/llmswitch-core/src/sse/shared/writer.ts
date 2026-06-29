@@ -154,6 +154,7 @@ export class StreamWriter {
     } catch (error) {
       this.stats.errors++;
       this.config.onError(error as Error);
+      throw error;
     }
   }
 
@@ -211,8 +212,7 @@ export class StreamWriter {
         await this.writeEvent(event);
       }
     } catch (error) {
-      this.stats.errors++;
-      this.config.onError(error as Error);
+      throw error;
     }
   }
 
