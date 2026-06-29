@@ -260,7 +260,10 @@ function loadPreCommandHooksConfig(): PreCommandHooksConfig {
   let stat: fs.Stats;
   try {
     stat = fs.statSync(filePath);
-  } catch {
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw new Error(`[servertool-pre-command] config stat failed file=${filePath} reason=${errorMessage(error)}`);
+    }
     cachedConfig = {
       filePath,
       mtimeMs: 0,
@@ -290,14 +293,8 @@ function loadPreCommandHooksConfig(): PreCommandHooksConfig {
       config
     };
     return config;
-  } catch {
-    cachedConfig = {
-      filePath,
-      mtimeMs: stat.mtimeMs,
-      size: stat.size,
-      config: { enabled: false, hooks: [] }
-    };
-    return cachedConfig.config;
+  } catch (error) {
+    throw new Error(`[servertool-pre-command] config load failed file=${filePath} reason=${errorMessage(error)}`);
   }
 }
 
@@ -311,6 +308,15 @@ function normalizePreCommandHooksConfig(raw: unknown): PreCommandHooksConfig {
 
 function readString(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof (error as { code?: unknown } | null)?.code === 'string'
+    && (error as { code: string }).code === 'ENOENT';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? 'unknown_error');
 }
 
 function buildPreCommandHookEventPayload(

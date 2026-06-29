@@ -428,4 +428,37 @@ describe('servertool pre-command hooks', () => {
       })
     ).toThrow('pre-command trace sink failed');
   });
+
+  test('fails fast when configured pre-command hooks file is malformed', () => {
+    const hookFile = path.join(HOOK_DIR, `pre-command-${Date.now()}-malformed.json`);
+    fs.writeFileSync(hookFile, '{not-json', 'utf8');
+    process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE = hookFile;
+    resetPreCommandHooksCacheForTests();
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-pre-command-malformed',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses'
+    } as any;
+    bindProviderProtocol(adapterContext as unknown as Record<string, unknown>, 'openai-responses');
+
+    expect(() =>
+      applyPreCommandHooksToToolCall({
+        options: {
+          chatResponse: buildToolCallResponse('echo malformed-config'),
+          adapterContext,
+          entryEndpoint: '/v1/responses',
+          requestId: 'req-pre-command-malformed',
+          providerProtocol: 'openai-responses'
+        },
+        toolCall: {
+          id: 'call_exec_1',
+          name: 'exec_command',
+          arguments: JSON.stringify({ cmd: 'echo malformed-config', workdir: '/tmp' })
+        },
+        bases: [],
+        patchToolCallArgumentsById: undefined
+      })
+    ).toThrow('[servertool-pre-command] config load failed');
+  });
 });

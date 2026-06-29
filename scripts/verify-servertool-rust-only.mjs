@@ -3435,6 +3435,12 @@ function checkPreCommandHooksRustOwner() {
       'pre-command-hooks.ts must not swallow pre-command trace callback failures'
     );
   }
+  if (/config load failed[\s\S]{0,700}config:\s*\{\s*enabled:\s*false,\s*hooks:\s*\[\]\s*\}/.test(preCommandShell)) {
+    fail(
+      'servertool-pre-command-hooks-no-ts-owner',
+      'pre-command-hooks.ts must not convert config load failures into disabled hooks'
+    );
+  }
   pass(
     'servertool-pre-command-hooks-no-ts-owner',
     'pre-command-hooks.ts is native-plan shell for config/rule normalization, hook id, tools, regex plan, timeout, and priority policy'
