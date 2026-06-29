@@ -39,12 +39,12 @@ async function maybeDelay(config: GeminiSequencerConfig): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, config.chunkDelayMs));
 }
 
-function getCandidateRole(candidate: GeminiCandidate, fallback = 'model'): string {
+function getCandidateRole(candidate: GeminiCandidate): string {
   const role = candidate?.content?.role;
   if (typeof role === 'string' && role.trim().length) {
     return role;
   }
-  return fallback;
+  throw new Error('Invalid Gemini candidate: missing role');
 }
 
 function getCandidateParts(candidate: GeminiCandidate): GeminiContentPart[] {

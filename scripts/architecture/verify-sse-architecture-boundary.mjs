@@ -122,6 +122,7 @@ for (const relPath of providerNeutralProjectionFiles) {
     'return salvaged',
     'const fallback = { input_tokens: 0, output_tokens: 0, total_tokens: 0 }',
     "args = '{}'",
+    "fallback = 'model'",
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath}: provider-neutral SSE projection must not salvage partial streams into successful responses: ${forbidden}`);
