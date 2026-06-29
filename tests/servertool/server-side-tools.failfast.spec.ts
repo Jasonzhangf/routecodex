@@ -5,7 +5,6 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 const TOOL_NAME = 'failfast_test_tool';
 let failfastInvocationCount = 0;
 const loadRoutingInstructionStateSyncMock = jest.fn();
-const readRuntimeMetadataMock = jest.fn(() => undefined);
 const applyPreCommandHooksToToolCallsMock = jest.fn(() => {});
 const resolveServertoolPersistentScopeKeyMock = jest.fn(() => null);
 const planServertoolResponseStageGateWithNativeMock = jest.fn(() => ({
@@ -938,13 +937,6 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
-  () => ({
-    readRuntimeMetadata: readRuntimeMetadataMock
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.js',
   () => ({
     buildProviderProtocolErrorWithNative: jest.fn((input: any) => ({
@@ -1049,8 +1041,6 @@ describe('server-side-tools tool-error closed loop', () => {
   beforeEach(() => {
     failfastInvocationCount = 0;
     loadRoutingInstructionStateSyncMock.mockReset();
-    readRuntimeMetadataMock.mockReset();
-    readRuntimeMetadataMock.mockReturnValue(undefined);
     applyPreCommandHooksToToolCallsMock.mockReset();
     resolveServertoolPersistentScopeKeyMock.mockReset();
     resolveServertoolPersistentScopeKeyMock.mockReturnValue(null);
@@ -1230,37 +1220,6 @@ describe('server-side-tools tool-error closed loop', () => {
         runtimePreCommandState: {
           preCommandScriptPath: '/tmp/control-pre-command.sh'
         }
-      })
-    );
-  });
-
-  test('ignores runtime metadata preCommandState', async () => {
-    readRuntimeMetadataMock.mockReturnValue({
-      preCommandState: {
-        preCommandScriptPath: '/tmp/runtime-pre-command.sh'
-      }
-    });
-    const adapterContext: AdapterContext = bindTestMetadataCenter({
-      requestId: 'req-servertool-precommand-runtime-1',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    } as any);
-
-    await runServerSideToolEngine({
-      chatResponse: makeToolCallResponse(),
-      adapterContext,
-      entryEndpoint: '/v1/responses',
-      requestId: 'req-servertool-precommand-runtime-1',
-      providerProtocol: 'openai-responses'
-    });
-
-    expect(loadRoutingInstructionStateSyncMock).not.toHaveBeenCalled();
-    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenCalledWith({
-      runtimeControlPreCommandState: undefined
-    });
-    expect(applyPreCommandHooksToToolCallsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimePreCommandState: undefined
       })
     );
   });

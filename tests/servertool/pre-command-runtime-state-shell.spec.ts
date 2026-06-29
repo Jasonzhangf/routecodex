@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
@@ -55,16 +57,15 @@ describe('pre-command-runtime-state-shell', () => {
     });
   });
 
-  test('ignores legacy __rt and runtime metadata preCommandState', () => {
-    const state = resolveServertoolRuntimePreCommandState({
-      adapterContext: { __rt: { preCommandState: { routeHint: 'web_search' } } },
-      requestId: 'req-metadata'
-    } as any);
+  test('source does not read legacy runtime metadata preCommandState', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/pre-command-runtime-state-shell.ts',
+      'utf8'
+    );
 
-    expect(state).toBeUndefined();
-    expect(planRuntimePreCommandStateRuntimeActionWithNative).toHaveBeenCalledWith({
-      runtimeControlPreCommandState: undefined
-    });
+    expect(source).not.toContain('__rt');
+    expect(source).not.toContain('readRuntimeMetadata(');
+    expect(source).toContain('readRuntimeControlFromAnyBoundMetadataCenter');
   });
 
   test('does not load persisted routing state for preCommandState', () => {

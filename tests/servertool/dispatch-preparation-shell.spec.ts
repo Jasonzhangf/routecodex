@@ -71,7 +71,7 @@ describe('dispatch-preparation-shell', () => {
     resolveServertoolRuntimePreCommandStateMock.mockReturnValue({ tag: 'resolved' });
   });
 
-  test('keeps runtime metadata, pre-command hooks and dispatch plan in the owner shell', async () => {
+  test('keeps MetadataCenter snapshot, pre-command hooks and dispatch plan in the owner shell', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile(
         'sharedmodule/llmswitch-core/src/servertool/dispatch-preparation-shell.ts',
