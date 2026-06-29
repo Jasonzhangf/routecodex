@@ -5078,7 +5078,7 @@ function checkServertoolRustOutcomeCloseout() {
     'export function createServertoolObservation(',
     'createServertoolProgressLogger({',
     'recordServertoolMatchSkipped({',
-    'recordServertoolMatchHit({',
+    'return recordServertoolMatchHit(args);',
   ]) {
     if (!engineObservationShell.includes(marker)) {
       fail(
@@ -5901,6 +5901,39 @@ function checkServertoolProgressFileLoggingFailFast() {
   );
 }
 
+function checkServertoolMatchLoggingFailFast() {
+  const matchLogFile = `${SERVERTOOL_TS_DIR}/match-log-block.ts`;
+  const matchLogSource = readRequired(matchLogFile);
+  const observationSpec = readRequired(`${ROOT}/tests/servertool/engine-observation-shell.spec.ts`);
+  for (const keyword of [
+    'record_servertool_match_skipped',
+    'record_servertool_match_hit',
+  ]) {
+    if (matchLogSource.includes(keyword)) {
+      fail(
+        'servertool-match-log-fail-fast',
+        `match-log-block.ts must not convert stageRecorder failure into non-blocking marker "${keyword}"`
+      );
+    }
+  }
+  if (/stageRecorder\?\.record[\s\S]{0,180}catch\s*\(/.test(matchLogSource)) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'match-log-block.ts must not catch stageRecorder failures'
+    );
+  }
+  assertContains(
+    'servertool-match-log-fail-fast',
+    `${ROOT}/tests/servertool/engine-observation-shell.spec.ts`,
+    observationSpec,
+    'match stage recorder failures are fail-fast'
+  );
+  pass(
+    'servertool-match-log-fail-fast',
+    'servertool match stageRecorder failures fail fast'
+  );
+}
+
 // ── Run ────────────────────────────────────────────────────────
 console.log('\n=== verify-servertool-rust-only ===\n');
 
@@ -5946,6 +5979,7 @@ checkServertoolResponseStageGateThinShell();
 checkServertoolEngineStoplessSessionThinShell();
 checkServertoolActiveOrchestrationAuditRedGate();
 checkServertoolProgressFileLoggingFailFast();
+checkServertoolMatchLoggingFailFast();
 checkDeletedEmptyReplyContinueAbsent();
 
 console.log();

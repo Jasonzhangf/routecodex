@@ -78,8 +78,7 @@ export function recordServertoolEngineMatchSkipped(args: {
   }
   recordServertoolMatchSkipped({
     ...args,
-    providerProtocol,
-    logNonBlocking: logServertoolNonBlocking
+    providerProtocol
   });
 }
 
@@ -88,8 +87,5 @@ export function recordServertoolEngineMatchHit(args: {
   execution: ServerToolExecution;
   stageRecorder?: StageRecorder;
 }): string {
-  return recordServertoolMatchHit({
-    ...args,
-    logNonBlocking: logServertoolNonBlocking
-  });
+  return recordServertoolMatchHit(args);
 }

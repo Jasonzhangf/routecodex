@@ -95,6 +95,48 @@ describe('engine-observation-shell', () => {
     })).toThrow('Servertool observation requires metadata center runtime_control.providerProtocol');
   });
 
+  test('match stage recorder failures are fail-fast', async () => {
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
+    const adapterContext: Record<string, unknown> = {};
+    bindProviderProtocol(adapterContext, 'openai-chat');
+    const stageRecorder = {
+      record: jest.fn(() => {
+        throw new Error('stage recorder down');
+      })
+    };
+
+    expect(() =>
+      mod.recordServertoolEngineMatchSkipped({
+        requestId: 'req-match-skip-failfast',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        engineMode: 'passthrough',
+        adapterContext: adapterContext as any,
+        stageRecorder: stageRecorder as any
+      })
+    ).toThrow('stage recorder down');
+
+    expect(() =>
+      mod.recordServertoolEngineMatchHit({
+        requestId: 'req-match-hit-failfast',
+        execution: {
+          flowId: 'flow-match-hit',
+          toolName: 'reasoningStop',
+          toolCall: {
+            id: 'call_match_hit',
+            type: 'function',
+            function: {
+              name: 'reasoningStop',
+              arguments: '{}'
+            }
+          },
+          followup: null
+        } as any,
+        stageRecorder: stageRecorder as any
+      })
+    ).toThrow('stage recorder down');
+  });
+
   test('engine-orchestration-shell owns the engine mainline body', () => {
     const source = fs.readFileSync(
       'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',

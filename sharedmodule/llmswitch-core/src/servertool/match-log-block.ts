@@ -8,20 +8,13 @@ export function recordServertoolMatchSkipped(args: {
   providerProtocol: string;
   engineMode: 'passthrough' | 'tool_flow';
   stageRecorder?: StageRecorder;
-  logNonBlocking: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 }): void {
   const skipReason = args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution';
-  try {
-    args.stageRecorder?.record('servertool.match', {
-      matched: false,
-      mode: args.engineMode,
-      reason: skipReason
-    });
-  } catch (error) {
-    args.logNonBlocking('record_servertool_match_skipped', error, {
-      requestId: args.requestId
-    });
-  }
+  args.stageRecorder?.record('servertool.match', {
+    matched: false,
+    mode: args.engineMode,
+    reason: skipReason
+  });
   appendServerToolProgressFileEvent({
     requestId: args.requestId,
     flowId: 'none',
@@ -39,19 +32,12 @@ export function recordServertoolMatchHit(args: {
   requestId: string;
   execution: ServerToolExecution;
   stageRecorder?: StageRecorder;
-  logNonBlocking: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 }): string {
   const flowId = args.execution.flowId ?? 'unknown';
-  try {
-    args.stageRecorder?.record('servertool.match', {
-      matched: true,
-      flowId,
-      hasFollowup: Boolean(args.execution.followup)
-    });
-  } catch (error) {
-    args.logNonBlocking('record_servertool_match_hit', error, {
-      requestId: args.requestId
-    });
-  }
+  args.stageRecorder?.record('servertool.match', {
+    matched: true,
+    flowId,
+    hasFollowup: Boolean(args.execution.followup)
+  });
   return flowId;
 }
