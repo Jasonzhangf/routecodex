@@ -158,6 +158,9 @@ const DELETED_STOP_VISIBLE_TEXT_TS_FILES = [
 const DELETED_CLI_RESULT_GUARD_TS_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-result-guard.ts`,
 ];
+const DELETED_SERVERTOOL_DISPATCH_FACADE_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`,
+];
 const DELETED_STOPLESS_TRANSPARENT_FILES = [
   `${ROOT}/tests/servertool/stopless-sessionid-transparent.spec.ts`,
   `${ROOT}/docs/goals/stopless-sessionid-transparent-plan.md`,
@@ -2628,7 +2631,13 @@ function checkStopMessageCounterRustOwner() {
 }
 
 function checkServertoolExecutionDispatchRustOwner() {
-  const executionShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`);
+  for (const file of DELETED_SERVERTOOL_DISPATCH_FACADE_FILES) {
+    assertMissingFile(
+      'servertool-dispatch-facade-deleted',
+      file,
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; execution queue runtime must import execution-queue-shell.ts directly`
+    );
+  }
   const executionQueueShell = readRequired(TS_EXECUTION_QUEUE_SHELL);
   const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
   const rustExecutionBranch = readRequired(RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT);
@@ -2671,37 +2680,6 @@ function checkServertoolExecutionDispatchRustOwner() {
     readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
     'buildServertoolOutcomePlanInputWithNative'
   );
-  if (executionShell.includes('export const buildServertoolDispatchPlanInput =')) {
-    fail(
-      'servertool-execution-dispatch-rust-owner',
-      'execution-dispatch-outcome-shell.ts must re-export buildServertoolDispatchPlanInput instead of declaring it'
-    );
-  }
-  if (!/export\s*\{\s*buildServertoolDispatchPlanInput\s*\}/.test(executionShell)) {
-    fail(
-      'servertool-execution-dispatch-rust-owner',
-      'execution-dispatch-outcome-shell.ts must re-export buildServertoolDispatchPlanInput from execution-queue-shell.js'
-    );
-  }
-  if (!/export\s*\{\s*runServertoolIoExecutionQueue\s*\}/.test(executionShell)) {
-    fail(
-      'servertool-execution-queue-shell-owner',
-      'execution-dispatch-outcome-shell.ts must re-export runServertoolIoExecutionQueue from execution-queue-shell.js'
-    );
-  }
-  for (const marker of [
-    'export function createServertoolExecutionLoopState(',
-    'export function appendExecutedToolRecord(',
-    'export function assertDispatchExecutionMode(',
-    'function assertDispatchExecutionMode(',
-  ]) {
-    if (executionShell.includes(marker)) {
-      fail(
-        'servertool-execution-dispatch-no-ts-test-only-exports',
-        `execution-dispatch-outcome-shell.ts must not re-export test-only thin-shell marker ${marker}`
-      );
-    }
-  }
   for (const keyword of [
     'listRegisteredServerToolHandlerRecords()',
     'registeredToolCallHandlers: listRegisteredServerToolHandlerRecords()',
@@ -2725,16 +2703,16 @@ function checkServertoolExecutionDispatchRustOwner() {
     'state.lastExecution = execution',
     'const newKeys = new Set(Object.keys(nextChatResponse));',
   ]) {
-    if (executionShell.includes(keyword)) {
+    if (executionQueueShell.includes(keyword)) {
       fail(
         'servertool-execution-dispatch-no-ts-registry-truth',
-        `Forbidden TS registry dispatch truth "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`
+        `Forbidden TS registry dispatch truth "${keyword}" found in sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
       );
     }
   }
   pass(
     'servertool-execution-dispatch-rust-owner',
-    'execution-dispatch-outcome-shell.ts builds dispatch-plan handler truth from Rust skeleton config'
+    'execution-queue-shell.ts builds dispatch-plan handler truth from Rust skeleton config without dispatch facade shell'
   );
 
   assertMissingFile(
@@ -2857,8 +2835,8 @@ function checkServertoolExecutionDispatchRustOwner() {
   }
   assertMissing(
     'servertool-execution-state-ts-thin-shell-deleted-wrapper-guard',
-    `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
-    executionShell,
+    TS_EXECUTION_QUEUE_SHELL,
+    executionQueueShell,
     'export function applyServertoolExecutionResult('
   );
   assertMissing(
@@ -6362,21 +6340,6 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'function materializeServertoolPlannedResult(',
         'function executeServertoolBackendPlan(',
         'export async function runServertoolHandler(',
-      ],
-    ],
-    [
-      `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
-      [
-        'const buildDispatchPlanInputViaThinShell',
-        'const buildOutcomePlanInputViaThinShell',
-        'const resolveToolCallExecutionOutcomeViaThinShell',
-        'const runToolCallExecutionLoopViaThinShell',
-        'const resolveHandlerExecutionSpecViaThinShell',
-        'function buildServertoolDispatchPlanInputThinShell(',
-        'function buildServertoolOutcomePlanInputThinShell(',
-        'export function resolveServertoolHandlerExecutionSpec(',
-        'JSON.parse(JSON.stringify(',
-        ...SERVERTOOL_DISPATCH_OUTCOME_FORBIDDEN_MARKERS,
       ],
     ],
     [

@@ -49,7 +49,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js',
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js',
   () => ({
     buildServertoolDispatchPlanInput: buildServertoolDispatchPlanInputMock
   })

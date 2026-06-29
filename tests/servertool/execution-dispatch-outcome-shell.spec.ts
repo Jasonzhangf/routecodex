@@ -142,16 +142,19 @@ jest.unstable_mockModule(
 const {
   runServertoolIoExecutionQueue
 } = await import(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js'
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js'
 );
 
-describe('execution-dispatch-outcome-shell', () => {
-  test('execution-dispatch shell stays an IO queue + dispatch facade; outcome materialization owns elsewhere', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile(
-        'sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts',
-        'utf8'
-      )
+describe('execution queue dispatch runtime', () => {
+  test('deleted dispatch outcome facade stays physically absent', async () => {
+    const fs = await import('node:fs/promises');
+    await expect(
+      fs.access('sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts')
+    ).rejects.toThrow();
+
+    const source = await fs.readFile(
+      'sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts',
+      'utf8'
     );
 
     expect(source).not.toContain('function materializeNativeToolCallExecutionOutcome(');

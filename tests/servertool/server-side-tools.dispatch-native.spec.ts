@@ -5,7 +5,7 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   buildServertoolDispatchPlanInput
-} from '../../sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.js';
+} from '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js';
 import { buildServertoolOutcomePlanInput } from '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js';
 import { buildServertoolDispatchPlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { listServertoolToolSpecs } from '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js';
