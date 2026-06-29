@@ -4204,6 +4204,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('provider response orchestration must not grow duplicate V2 owner', () => {
+    const duplicateFiles = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_response_orchestration_v2.rs',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-response-orchestration-v2.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-response-sse-materialize-fallback.ts',
+    ];
+    const existingFiles = duplicateFiles.filter((relPath) => fs.existsSync(path.join(process.cwd(), relPath)));
+    const functionMap = fs.readFileSync(path.join(process.cwd(), 'docs/architecture/function-map.yml'), 'utf8');
+    const verificationMap = fs.readFileSync(path.join(process.cwd(), 'docs/architecture/verification-map.yml'), 'utf8');
+
+    expect(existingFiles).toEqual([]);
+    expect(functionMap).not.toContain('hub.resp_chatprocess_orchestration_v2');
+    expect(verificationMap).not.toContain('hub.resp_chatprocess_orchestration_v2');
+    expect(functionMap).not.toContain('plan_provider_response_orchestration_v2');
+    expect(verificationMap).not.toContain('plan_provider_response_orchestration_v2');
+  });
+
   it('stop_message schema budget must be restored from MetadataCenter stopless runtime control only', () => {
     const nativeWrapperPath = path.join(
       process.cwd(),

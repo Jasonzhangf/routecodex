@@ -12,6 +12,13 @@
 - 已验证：`cargo test -p router-hotpath-napi virtual_router_engine::chat_process_session_usage --lib -- --nocapture` 12 passed（含 tmux writeback 正向与 corrupt counter fail-fast 反向）；focused `hub-pipeline-stage-residue-audit.spec.ts -t "chat process session usage"` 2 passed；`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；`npx tsc -p tsconfig.json --pretty false` PASS；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS；`npm run verify:architecture-thin-wrapper-only` PASS；`npm run verify:function-map-compile-gate` PASS；`npm run verify:architecture-mainline-call-map` PASS；`git diff --cached --check` PASS。
 - 缺口：本 slice 未做 live replay；它只证明 chat-process session usage Rust owner、native wrapper、map/gate/focused audit 层闭合，完整 Hub Pipeline Rust closeout 仍未完成。
 
+# 2026-06-29 Hub Pipeline Rust closeout provider-response duplicate V2 owner rejection
+
+- 目标：继续 Wave 6 provider response closeout 前，清理半成品 `provider_response_orchestration_v2` 第二 owner，避免和现有 `hub_pipeline_lib/effect_plan.rs` Rust effect plan owner 形成重复设计。
+- 改动：物理删除未跟踪 `provider_response_orchestration_v2.rs`、`native-provider-response-orchestration-v2.ts`、`native-provider-response-sse-materialize-fallback.ts`；清掉 function/verification map 中未提交的 `hub.resp_chatprocess_orchestration_v2` 注册；新增 residue audit，禁止这些 duplicate owner 文件和 feature_id 复活。
+- 已验证：新增 focused audit 先红，命中 3 个 duplicate owner 文件；删除后 `hub-pipeline-stage-residue-audit.spec.ts -t "provider response orchestration must not grow duplicate V2 owner"` PASS。
+- 缺口：本 slice 是错误 owner 防复活，不代表 Wave 6 provider-response 主线已闭合；下一步仍需基于现有 Rust `executeHubPipelineWithNative` / `normalizeProviderResponseEffectPlanWithNative` 真源继续收口 response conversion host。
+
 # 2026-06-29 stopless followup-flow skip removal slice
 
 - 目标：继续 Hub Pipeline Rust closeout，把 stopless 决策里的旧 `followup_flow_id` / `serverToolFollowup` skip 分支物理删除；`serverToolFollowup` 只保留为 routing/metadata control，不再作为 stop-message auto handler 的递归避让真源。
