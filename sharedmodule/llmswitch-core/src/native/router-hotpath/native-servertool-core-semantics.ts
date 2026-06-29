@@ -2448,6 +2448,29 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   };
 }
 
+export function runStoplessBuiltinHandlerForRuntimeWithNative(input: {
+  name: string;
+  base: JsonObject;
+  requestId: string;
+  runtimeMetadata?: JsonObject | null;
+}): unknown {
+  const capability = 'runStoplessBuiltinHandlerForRuntimeJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('runStoplessBuiltinHandlerForRuntimeJson native unavailable');
+  }
+  const raw = fn(JSON.stringify({
+    name: input.name,
+    base: input.base,
+    requestId: input.requestId,
+    runtimeMetadata: input.runtimeMetadata ?? null
+  }));
+  if (typeof raw !== 'string') {
+    throw new Error(`runStoplessBuiltinHandlerForRuntimeJson native returned non-string: ${typeof raw}`);
+  }
+  return JSON.parse(raw) as unknown;
+}
+
 export function planServertoolEngineSkipWithNative(input: {
   engineMode: string;
   hasExecution: boolean;

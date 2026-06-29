@@ -1,3 +1,16 @@
+# 2026-06-29 servertool builtin handler native result parse shell cleanup
+
+- Objective: continue servertool TS residue cleanup by removing direct NAPI access and `JSON.parse(raw)` from `builtin-handler-catalog.ts`.
+- Change: `native-servertool-core-semantics.ts` now owns the thin native wrapper `runStoplessBuiltinHandlerForRuntimeWithNative`; `builtin-handler-catalog.ts` calls that wrapper and no longer imports `readNativeFunction` or parses raw native JSON.
+- Gate lock: `servertool-active-orchestration-audit.spec.ts` and `verify-servertool-rust-only.mjs` now forbid `readNativeFunction` / `JSON.parse(raw)` in `builtin-handler-catalog.ts` and require `runStoplessBuiltinHandlerForRuntimeWithNative`.
+- Verification:
+  - `rg -n "JSON\\.parse\\(raw\\)|readNativeFunction" sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts` found 0 matches.
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS.
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `PATH=/opt/homebrew/opt/node@22/bin:$PATH node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/servertool/servertool-active-orchestration-audit.spec.ts --runInBand` PASS, 29 passed.
+  - `npm run verify:servertool-rust-only` PASS.
+  - `npm run verify:architecture-thin-wrapper-only` PASS.
+
 # 2026-06-29 servertool pre-command config JSON parse rustification slice
 
 - Objective: continue servertool TS residue cleanup by moving `pre-command-hooks.ts` config file JSON parsing from TS into Rust; TS remains file IO/native shell only for this slice.

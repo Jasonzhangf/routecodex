@@ -6,29 +6,18 @@ import {
   planServertoolBuiltinHandlerNames,
   resolveServertoolBuiltinHandlerEntry
 } from './skeleton-config.js';
-import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
+import { runStoplessBuiltinHandlerForRuntimeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 async function runBuiltinHandlerForRuntimeNapi(
   name: string,
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerResult | null> {
-  const fn = readNativeFunction('runStoplessBuiltinHandlerForRuntimeJson');
-  if (!fn) {
-    throw new Error('runStoplessBuiltinHandlerForRuntimeJson native unavailable');
-  }
-  const raw = fn(JSON.stringify({
+  return runStoplessBuiltinHandlerForRuntimeWithNative({
     name,
     base: ctx.base,
     requestId: ctx.requestId,
-    runtimeMetadata: ctx.runtimeMetadata ?? null,
-  }));
-  if (typeof raw === 'string') {
-    return JSON.parse(raw) as ServerToolHandlerResult | null;
-  }
-  if (raw === null || (raw && typeof raw === 'object' && !Array.isArray(raw))) {
-    return raw as ServerToolHandlerResult | null;
-  }
-  throw new Error(`runStoplessBuiltinHandlerForRuntimeJson native returned unsupported payload: ${typeof raw}`);
+    runtimeMetadata: ctx.runtimeMetadata ?? null
+  }) as ServerToolHandlerResult | null;
 }
 
 async function runBuiltinHandler(

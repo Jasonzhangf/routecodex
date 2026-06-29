@@ -401,13 +401,15 @@ describe('stop-message-auto native-catalog audit', () => {
   test('builtin-handler-catalog delegates stop-message-auto execution to Rust-owned native runtime', () => {
     const source = fs.readFileSync(repoPath('sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts'), 'utf8');
 
-    expect(source).toContain('runStoplessBuiltinHandlerForRuntimeJson');
+    expect(source).toContain('runStoplessBuiltinHandlerForRuntimeWithNative');
     expect(source).toContain('runBuiltinHandlerForRuntimeNapi');
     expect(source).toContain('function runBuiltinHandler(');
     expect(source).toContain('resolveServertoolBuiltinHandlerEntry');
 
     const forbidden = [
       'runStoplessAutoHandlerRuntimeJson',
+      'readNativeFunction',
+      'JSON.parse(raw)',
       'runtime.action',
       "runtime.action === 'return_null'",
       "runtime.action === 'throw_error'",

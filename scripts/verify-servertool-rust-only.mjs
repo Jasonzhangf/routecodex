@@ -4908,11 +4908,14 @@ function checkStoplessNoContextDataPlane() {
     'readBoundMetadataCenter',
     'ctx.adapterContext',
     'adapterContext: {}',
+    'readNativeFunction',
+    "readNativeFunction('runStoplessBuiltinHandlerForRuntimeJson')",
+    'JSON.parse(raw)',
   ]) {
     if (builtinCatalog.includes(marker)) {
       fail(
         'stopless-no-context-data-plane',
-        `builtin-handler-catalog.ts must not read adapterContext/MetadataCenter for stopless runtime marker ${marker}`
+        `builtin-handler-catalog.ts must not read adapterContext/MetadataCenter or parse native runtime payloads for stopless runtime marker ${marker}`
       );
     }
   }
@@ -6007,7 +6010,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     }
   }
   for (const marker of [
-    "readNativeFunction('runStoplessBuiltinHandlerForRuntimeJson')",
+    'runStoplessBuiltinHandlerForRuntimeWithNative(',
     'resolveServertoolBuiltinHandlerEntry(',
     'planServertoolBuiltinHandlerNames(',
     'planServertoolBuiltinAutoHandlerEntries(',
