@@ -109,6 +109,8 @@ const chatEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse
 for (const forbidden of [
   'id: context.responseId ?? context.requestId',
   'created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0)',
+  'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return undefined;\n  }',
+  'if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {\n    return undefined;\n  }',
 ]) {
   if (chatEventGenerator.includes(forbidden)) {
     failures.push(`Chat SSE generator must not synthesize response id/created truth: ${forbidden}`);

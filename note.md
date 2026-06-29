@@ -1,3 +1,10 @@
+# 2026-06-29 servertool registry ad-hoc TS dynamic registration retirement slice
+
+- 目标：继续清理 servertool TS 残留，物理删除 `adhoc-handler-test-support.ts`，退役 TS 动态 ad-hoc handler 注册/lookup/source projection，registry 只保留 Rust skeleton/builtin plan + TS native shell。
+- 改动：`registry_contract.rs` 删除 `RegisterAdhoc` / `ReturnAdhoc` / `ServertoolRegistrySourceKind::Adhoc` / `ad_hoc_*` source projection 字段，新增 `IgnoreRetired`；`servertool_skeleton_config.rs` 不再读取 `adHocRegisteredToolCallHandlers` 或 `adHocEntryPresent`；`registry-registration-shell.ts` 动态注册变 no-op，lookup 只返回 builtin；`registry-orchestration-shell.ts` / `registry-projection-shell.ts` 改 builtin-only；`execution-queue-shell.ts` 不再传 ad-hoc handler 列表。
+- gate 同步：`servertool-active-orchestration-audit` 与 `verify-servertool-rust-only` 把 `adhoc-handler-test-support.ts` 加入物理删除防复活，并禁止 active registry 文件/Rust contract 复活 ad-hoc markers；function/verification map 移除已删 `registry-impl.ts` allowed path 并补 registry-registration focused spec。
+- 待验证：Rust registry/servertool skeleton focused tests、registry/execution focused Jest、sharedmodule tsc、`verify:servertool-rust-only`、`verify:function-map-compile-gate`。
+
 # 2026-06-29 servertool stop context wrapper deletion slice
 
 - 目标：继续清理 servertool TS 残留，把独立 `stop-gateway-context.ts` / `stop-message-compare-context.ts` 控制 wrapper 物理删除，避免 servertool 目录里继续保留第二套 MetadataCenter 控制壳。
@@ -176,6 +183,13 @@
 - 改动：`updateStats()` 现在要求 `event?.event || event?.type` 必须是非空字符串，否则直接抛 `Chat SSE event missing event/type for stats update`；`verify-sse-architecture-boundary.mjs` 与 `sse-no-silent-failure.spec.ts` 同步锁死旧表达式 `const et = (event && (event.event || event.type)) || 'unknown'`。
 - 验证：`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；`npm run verify:function-map-compile-gate` PASS。
 - 边界：本 slice 只改 SSE 统计路径，不碰 function-map 文档、servertool、Hub Pipeline 或 Virtual Router。
+
+# 2026-06-29 SSE chat usage invalid fail-fast slice
+
+- 目标：继续 SSE TS cleanup，删除 Chat JSON->SSE usage normalization 对坏 token 字段的静默丢弃；缺 usage 可省略，但出现坏 usage 必须显式失败。
+- 改动：`event-generators/chat.ts::normalizeChatUsage()` 现在对非对象 usage、坏 token、缺 token fields 抛 `Invalid Chat usage.*`；新增 `tests/sharedmodule/chat-sse-usage-no-fallback.spec.ts` 锁住 missing usage 省略、invalid usage 输出 generation_error 且不发送 `[DONE]`；SSE gate 禁止旧 `return undefined` 丢坏 usage 结构复活。
+- 已验证：focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip` PASS；`npm run verify:sse-architecture-boundary` PASS；scoped `git diff --check` PASS。
+- 当前缺口：sharedmodule `tsc` 被并行 servertool 脏改挡住，红点在 `registry-projection-shell.ts` / `skeleton-config.ts`，不是本 SSE slice 引入；本轮不碰 servertool。
 
 # 2026-06-29 Hub Pipeline Rust closeout Wave 3 MetadataCenter dualwrite slice
 
