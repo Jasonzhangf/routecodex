@@ -4,7 +4,7 @@ import type {
   ServerToolExecution,
   ToolCall
 } from './types.js';
-import { getServerToolHandler, listAdHocRegisteredToolCallHandlerSpecs } from './registry-orchestration-shell.js';
+import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {
   planServertoolNoopOutcomeWithNative,
   buildServertoolDispatchPlanInputWithNative,
@@ -37,12 +37,6 @@ export const buildServertoolDispatchPlanInput = (args: {
   excludeToolCallHandlerNames?: string[];
   runtimeMetadata?: JsonObject;
 }) => {
-  const adHocHandlers = listAdHocRegisteredToolCallHandlerSpecs()
-    .map((entry) => ({
-      name: entry.name,
-      executionMode: entry.executionMode,
-      stripAfterExecute: entry.stripAfterExecute
-    }));
   return buildServertoolDispatchPlanInputWithNative({
     toolCalls: args.toolCalls,
     disableToolCallHandlers: args.disableToolCallHandlers,
@@ -52,7 +46,6 @@ export const buildServertoolDispatchPlanInput = (args: {
     ...(args.excludeToolCallHandlerNames?.length
       ? { excludeToolCallHandlerNames: args.excludeToolCallHandlerNames }
       : {}),
-    adHocRegisteredToolCallHandlers: adHocHandlers,
     runtimeMetadata: args.runtimeMetadata
   });
 };

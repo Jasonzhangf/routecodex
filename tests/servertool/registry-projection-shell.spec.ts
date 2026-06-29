@@ -58,59 +58,38 @@ describe('registry-projection-shell', () => {
       execution: { kind: 'builtin', builtinName: 'stop_message_auto' },
       autoHook: { id: 'stop_message_auto', phase: 'default', priority: 100, order: 0 },
     } as any;
-    const adHocAuto = {
-      name: 'custom_auto',
-      trigger: 'auto',
-      registration: { name: 'custom_auto', trigger: 'auto' },
-      execution: { kind: 'adhoc', handler: jest.fn() },
-      autoHook: { id: 'custom_auto', phase: 'default', priority: 100, order: 1 },
-    } as any;
     const builtinRecord = {
       name: 'stop_message_auto',
       trigger: 'auto',
       registration: { name: 'stop_message_auto', trigger: 'auto' },
       execution: { kind: 'builtin', builtinName: 'stop_message_auto' },
     } as any;
-    const adHocHandler = jest.fn();
-    const adHocRecord = {
-      registration: { name: 'custom_tool', trigger: 'tool_call' },
-      handler: adHocHandler,
-    } as any;
 
     planServertoolRegistrySourceProjectionWithNativeMock.mockReturnValue({
-      registeredNames: ['custom_tool', 'stop_message_auto'],
+      registeredNames: ['stop_message_auto'],
       autoHandlerRefs: [
-        { name: 'custom_auto', source: 'adhoc', sourceIndex: 0 },
         { name: 'stop_message_auto', source: 'builtin', sourceIndex: 0 },
       ],
       registeredRecordRefs: [
-        { name: 'custom_tool', trigger: 'tool_call', source: 'adhoc', sourceIndex: 0 },
         { name: 'stop_message_auto', trigger: 'auto', source: 'builtin', sourceIndex: 0 },
       ],
     });
 
     expect(projectRegistrySources({
       builtinNames: ['stop_message_auto'],
-      adHocNames: ['custom_tool'],
       builtinAutoHandlerEntries: [builtinAuto],
-      adHocAutoHandlerEntries: [adHocAuto],
       builtinRecordEntries: [builtinRecord],
-      adHocHandlerRecords: [adHocRecord],
     })).toEqual({
-      registeredNames: ['custom_tool', 'stop_message_auto'],
-      autoHandlers: [adHocAuto, builtinAuto],
+      registeredNames: ['stop_message_auto'],
+      autoHandlers: [builtinAuto],
       registeredRecords: [
-        { registration: adHocRecord.registration, handler: adHocHandler },
         { registration: builtinRecord.registration, handler: undefined },
       ],
     });
     expect(planServertoolRegistrySourceProjectionWithNativeMock).toHaveBeenCalledWith({
       builtinNames: ['stop_message_auto'],
-      adHocNames: ['custom_tool'],
       builtinAutoHandlerNames: ['stop_message_auto'],
-      adHocAutoHandlerNames: ['custom_auto'],
       builtinRecords: [{ name: 'stop_message_auto', trigger: 'auto' }],
-      adHocRecords: [{ name: 'custom_tool', trigger: 'tool_call' }],
     });
   });
 
@@ -130,11 +109,8 @@ describe('registry-projection-shell', () => {
 
     expect(() => projectRegistrySources({
       builtinNames: ['stop_message_auto'],
-      adHocNames: [],
       builtinAutoHandlerEntries: [builtinAuto],
-      adHocAutoHandlerEntries: [],
       builtinRecordEntries: [],
-      adHocHandlerRecords: [],
     })).toThrow('native registry source projection mismatch for auto handler');
   });
 });

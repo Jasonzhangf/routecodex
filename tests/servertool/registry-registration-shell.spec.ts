@@ -2,8 +2,6 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const getBuiltinHandlerEntryMock = jest.fn();
 const listBuiltinHandlerNamesMock = jest.fn();
-const getAdHocHandlerEntryMock = jest.fn();
-const registerAdHocHandlerForTestsMock = jest.fn();
 const planServertoolRegistryRegistrationFromSkeletonMock = jest.fn();
 const planServertoolRegistryLookupFromSkeletonMock = jest.fn();
 const isServertoolRegisteredNameByConfigMock = jest.fn();
@@ -13,14 +11,6 @@ jest.unstable_mockModule(
   () => ({
     getBuiltinHandlerEntry: getBuiltinHandlerEntryMock,
     listBuiltinHandlerNames: listBuiltinHandlerNamesMock,
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.js',
-  () => ({
-    getAdHocHandlerEntry: getAdHocHandlerEntryMock,
-    registerAdHocHandlerForTests: registerAdHocHandlerForTestsMock,
   })
 );
 
@@ -49,10 +39,10 @@ describe('registry-registration-shell', () => {
     isServertoolRegisteredNameByConfigMock.mockReturnValue(true);
   });
 
-  test('registers ad-hoc handler only when native registration plan allows it', () => {
+  test('dynamic ad-hoc registration is retired and ignored after native planning', () => {
     const handler = jest.fn();
     planServertoolRegistryRegistrationFromSkeletonMock.mockReturnValue({
-      action: 'register_adhoc',
+      action: 'ignore_disabled',
     });
 
     registerServerToolHandlerViaNativePlan(' Custom ', handler, { trigger: 'tool_call' });
@@ -61,29 +51,12 @@ describe('registry-registration-shell', () => {
       name: ' Custom ',
       hasHandler: true,
     });
-    expect(registerAdHocHandlerForTestsMock).toHaveBeenCalledWith(
-      ' Custom ',
-      handler,
-      { trigger: 'tool_call' }
-    );
   });
 
-  test('does not register when native registration plan rejects the request', () => {
-    planServertoolRegistryRegistrationFromSkeletonMock.mockReturnValue({
-      action: 'ignore',
-    });
-
-    registerServerToolHandlerViaNativePlan('custom', jest.fn());
-
-    expect(registerAdHocHandlerForTestsMock).not.toHaveBeenCalled();
-  });
-
-  test('returns builtin or ad-hoc entry based on native lookup plan', () => {
+  test('returns builtin entry and ignores retired ad-hoc lookup plans', () => {
     const builtin = { name: 'builtin' };
-    const adhoc = { name: 'adhoc' };
     listBuiltinHandlerNamesMock.mockReturnValue(['builtin']);
     getBuiltinHandlerEntryMock.mockReturnValue(builtin);
-    getAdHocHandlerEntryMock.mockReturnValue(adhoc);
 
     planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
       action: 'return_builtin',
@@ -92,14 +65,9 @@ describe('registry-registration-shell', () => {
     expect(getServerToolHandlerViaNativePlan('Builtin')).toBe(builtin);
 
     planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
-      action: 'return_adhoc',
-    });
-    expect(getServerToolHandlerViaNativePlan('adhoc')).toBe(adhoc);
-
-    planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
       action: 'return_none',
     });
-    expect(getServerToolHandlerViaNativePlan('missing')).toBeUndefined();
+    expect(getServerToolHandlerViaNativePlan('adhoc')).toBeUndefined();
   });
 
   test('checks registered tool names through native skeleton config', () => {

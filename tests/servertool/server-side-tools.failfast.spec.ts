@@ -102,16 +102,14 @@ jest.unstable_mockModule(
             : input?.builtinNameMatched && input?.registrationAllowedByConfig === false
               ? 'ignore_disabled'
               : input?.hasHandler
-                ? 'register_adhoc'
+                ? 'ignore_disabled'
                 : 'ignore_invalid'
           : 'ignore_invalid'
     })),
     planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
       action: input?.builtinEntryPresent
         ? 'return_builtin'
-        : input?.adHocEntryPresent
-          ? 'return_adhoc'
-          : 'return_none'
+        : 'return_none'
     })),
     planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn((input: any) =>
       Array.isArray(input?.hooks)
@@ -161,21 +159,13 @@ jest.unstable_mockModule(
     }),
     planServertoolRegistrySourceProjectionWithNative: jest.fn((input: any) => ({
       registeredNames: [
-        ...(Array.isArray(input?.builtinNames) ? input.builtinNames : []),
-        ...(Array.isArray(input?.adHocNames) ? input.adHocNames : [])
+        ...(Array.isArray(input?.builtinNames) ? input.builtinNames : [])
       ].map((name: any) => String(name ?? '').trim().toLowerCase()).filter(Boolean).sort(),
       autoHandlerRefs: [
         ...(Array.isArray(input?.builtinAutoHandlerNames)
           ? input.builtinAutoHandlerNames.map((name: any, sourceIndex: number) => ({
               name: String(name ?? '').trim().toLowerCase(),
               source: 'builtin',
-              sourceIndex
-            }))
-          : []),
-        ...(Array.isArray(input?.adHocAutoHandlerNames)
-          ? input.adHocAutoHandlerNames.map((name: any, sourceIndex: number) => ({
-              name: String(name ?? '').trim().toLowerCase(),
-              source: 'adhoc',
               sourceIndex
             }))
           : [])
@@ -186,14 +176,6 @@ jest.unstable_mockModule(
               name: String(record?.name ?? '').trim().toLowerCase(),
               trigger: String(record?.trigger ?? '').trim().toLowerCase(),
               source: 'builtin',
-              sourceIndex
-            }))
-          : []),
-        ...(Array.isArray(input?.adHocRecords)
-          ? input.adHocRecords.map((record: any, sourceIndex: number) => ({
-              name: String(record?.name ?? '').trim().toLowerCase(),
-              trigger: String(record?.trigger ?? '').trim().toLowerCase(),
-              source: 'adhoc',
               sourceIndex
             }))
           : [])
@@ -787,14 +769,12 @@ jest.unstable_mockModule(
     planServertoolRegistryRegistrationFromSkeletonWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
       return name && input?.hasHandler === true
-        ? { action: 'register_adhoc', canonicalName: name }
+        ? { action: 'ignore_disabled', canonicalName: name }
         : { action: 'ignore_invalid' };
     }),
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
-      return input?.adHocEntryPresent === true
-        ? { action: 'return_adhoc', canonicalName: name }
-        : { action: 'return_none', canonicalName: name };
+      return { action: 'return_none', canonicalName: name };
     }),
     resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
     normalizeServertoolRegistrationSpecWithNative: jest.fn((input: any) => {

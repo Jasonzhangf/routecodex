@@ -170,6 +170,7 @@ const DELETED_SERVERTOOL_ROOT_FACADE_FILES = [
 const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts`,
 ];
 const DELETED_BACKEND_ROUTE_POLICY_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`,
@@ -3631,6 +3632,7 @@ function checkServertoolRegistryRustOwner() {
     'pub struct ServertoolRegistryLookupActionInput',
     'pub enum ServertoolRegistryLookupAction',
     'pub fn plan_servertool_registry_lookup_action',
+    'IgnoreRetired',
     'pub struct ServertoolRegistryAutoHookDescriptorInput',
     'pub struct ServertoolRegistryAutoHookDescriptorPlan',
     'pub fn plan_servertool_registry_auto_hook_descriptors',
@@ -3642,6 +3644,21 @@ function checkServertoolRegistryRustOwner() {
     'pub fn plan_servertool_registry_source_projection',
   ]) {
     assertContains('servertool-registry-rust-owner', RUST_SERVERTOOL_REGISTRY_CONTRACT, rustRegistry, needle);
+  }
+  for (const marker of [
+    'RegisterAdhoc',
+    'ReturnAdhoc',
+    'ServertoolRegistrySourceKind::Adhoc',
+    'pub ad_hoc_names',
+    'pub ad_hoc_auto_handler_names',
+    'pub ad_hoc_records',
+  ]) {
+    if (rustRegistry.includes(marker)) {
+      fail(
+        'servertool-registry-rust-no-adhoc-owner',
+        `registry_contract.rs must not retain retired ad-hoc registry marker ${marker}`
+      );
+    }
   }
   assertContains(
     'servertool-registry-rust-owner',
@@ -3685,6 +3702,9 @@ function checkServertoolRegistryRustOwner() {
     'registrationAllowedByConfig',
     'isServertoolEnabledByConfig',
     'getServertoolToolSpec(name)?.enabled',
+    'adHocEntryPresent',
+    'register_adhoc',
+    'return_adhoc',
   ]) {
     if (registryRegistrationShell.includes(marker)) {
       fail(
@@ -3723,6 +3743,10 @@ function checkServertoolRegistryRustOwner() {
   for (const marker of [
     '[...listBuiltinHandlerNames(), ...listAdHocHandlerNames()]',
     '[...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()]',
+    'listAdHocHandler',
+    'adHocNames',
+    'adHocAutoHandlerEntries',
+    'adHocHandlerRecords',
     'builtinEntries',
     'rawRecords = [',
     '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry))',
@@ -3735,6 +3759,21 @@ function checkServertoolRegistryRustOwner() {
       fail(
         'servertool-registry-orchestration-no-ts-source-merge',
         `registry-orchestration-shell.ts must not retain TS registry source composition marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'adHocNames',
+    'adHocAutoHandlerEntries',
+    'adHocHandlerRecords',
+    'adHocRecords',
+    'adHocAutoHandlerNames',
+    "source: 'adhoc'",
+  ]) {
+    if (registryProjectionShell.includes(marker)) {
+      fail(
+        'servertool-registry-projection-no-adhoc-source',
+        `registry-projection-shell.ts must not retain retired ad-hoc registry source marker ${marker}`
       );
     }
   }

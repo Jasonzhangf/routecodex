@@ -80,17 +80,16 @@ function mockToolSpec(name: unknown): any | null {
 
 function mockRegistrySourceProjection(input: any): any {
   const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
-  const normalizeRecord = (record: any, source: 'builtin' | 'adhoc', sourceIndex: number) => ({
+  const normalizeRecord = (record: any, sourceIndex: number) => ({
     name: normalize(record?.name),
     trigger: String(record?.trigger ?? '').trim(),
-    source,
+    source: 'builtin',
     sourceIndex
   });
   const validRecord = (record: any) =>
     record.name && (record.trigger === 'tool_call' || record.trigger === 'auto');
   const registeredNames = [...new Set([
-    ...(Array.isArray(input?.builtinNames) ? input.builtinNames.map(normalize).filter(Boolean) : []),
-    ...(Array.isArray(input?.adHocNames) ? input.adHocNames.map(normalize).filter(Boolean) : [])
+    ...(Array.isArray(input?.builtinNames) ? input.builtinNames.map(normalize).filter(Boolean) : [])
   ])].sort();
   const autoHandlerRefs = [
     ...(Array.isArray(input?.builtinAutoHandlerNames)
@@ -99,24 +98,12 @@ function mockRegistrySourceProjection(input: any): any {
           source: 'builtin' as const,
           sourceIndex
         }))
-      : []),
-    ...(Array.isArray(input?.adHocAutoHandlerNames)
-      ? input.adHocAutoHandlerNames.map((name: any, sourceIndex: number) => ({
-          name: normalize(name),
-          source: 'adhoc' as const,
-          sourceIndex
-        }))
       : [])
   ].filter((entry) => entry.name);
   const records = [
     ...(Array.isArray(input?.builtinRecords)
       ? input.builtinRecords.map((record: any, sourceIndex: number) =>
-          normalizeRecord(record, 'builtin', sourceIndex)
-        )
-      : []),
-    ...(Array.isArray(input?.adHocRecords)
-      ? input.adHocRecords.map((record: any, sourceIndex: number) =>
-          normalizeRecord(record, 'adhoc', sourceIndex)
+          normalizeRecord(record, sourceIndex)
         )
       : [])
   ].filter(validRecord);
@@ -141,7 +128,7 @@ function mockRegistryRegistrationFromSkeleton(input: any): any {
       ? { action: 'ignore_disabled', canonicalName: name }
       : { action: 'ignore_builtin_override', canonicalName: name };
   }
-  return { action: 'register_adhoc', canonicalName: name };
+  return { action: 'ignore_retired', canonicalName: name };
 }
 
 function mockRegistryLookupFromSkeleton(input: any): any {
@@ -153,9 +140,7 @@ function mockRegistryLookupFromSkeleton(input: any): any {
   if (spec && spec.enabled !== false) {
     return { action: 'return_builtin', canonicalName: name };
   }
-  return input?.adHocEntryPresent === true
-    ? { action: 'return_adhoc', canonicalName: name }
-    : { action: 'return_none', canonicalName: name };
+  return { action: 'return_none', canonicalName: name };
 }
 
 jest.unstable_mockModule(
@@ -676,16 +661,14 @@ jest.unstable_mockModule(
             : input?.builtinNameMatched && input?.registrationAllowedByConfig === false
               ? 'ignore_disabled'
               : input?.hasHandler
-                ? 'register_adhoc'
+                ? 'ignore_disabled'
                 : 'ignore_invalid'
           : 'ignore_invalid'
     })),
     planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
       action: input?.builtinEntryPresent
         ? 'return_builtin'
-        : input?.adHocEntryPresent
-          ? 'return_adhoc'
-          : 'return_none'
+        : 'return_none'
     })),
     planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn((input: any) =>
       Array.isArray(input?.hooks)
@@ -749,16 +732,14 @@ jest.unstable_mockModule(
             : input?.builtinNameMatched && input?.registrationAllowedByConfig === false
               ? 'ignore_disabled'
               : input?.hasHandler
-                ? 'register_adhoc'
+                ? 'ignore_disabled'
                 : 'ignore_invalid'
           : 'ignore_invalid'
     })),
     planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
       action: input?.builtinEntryPresent
         ? 'return_builtin'
-        : input?.adHocEntryPresent
-          ? 'return_adhoc'
-          : 'return_none'
+        : 'return_none'
     })),
     planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn((input: any) =>
       Array.isArray(input?.hooks)
@@ -920,7 +901,7 @@ describe('servertool skeleton config', () => {
     });
   });
 
-  test('registry projection keeps native-owned name order and trigger grouping', () => {
+  test('registry projection ignores retired dynamic ad-hoc registration', () => {
     registerServerToolHandler('custom_registry_tool', async () => null, {
       trigger: 'tool_call'
     });
@@ -929,7 +910,6 @@ describe('servertool skeleton config', () => {
     });
 
     expect(listRegisteredServerToolHandlerNames()).toEqual([
-      'custom_registry_tool',
       'stop_message_auto'
     ]);
     expect(
@@ -938,13 +918,11 @@ describe('servertool skeleton config', () => {
         trigger: entry.registration.trigger
       }))
     ).toEqual([
-      { name: 'custom_registry_tool', trigger: 'tool_call' },
-      { name: 'stop_message_auto', trigger: 'auto' },
-      { name: 'custom_registry_auto', trigger: 'auto' }
+      { name: 'stop_message_auto', trigger: 'auto' }
     ]);
   });
 
-  test('adhoc registration defaults also come from native normalization', async () => {
+  test('retired ad-hoc registrations do not materialize records', async () => {
     registerServerToolHandler('custom_native_defaults_tool', async () => null);
     registerServerToolHandler('custom_native_defaults_auto', async () => null, {
       trigger: 'auto'
@@ -958,27 +936,14 @@ describe('servertool skeleton config', () => {
       autoHook: entry.registration.autoHook
     }));
 
-    expect(records).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: 'custom_native_defaults_tool',
-          trigger: 'tool_call',
-          executionMode: 'guarded',
-          stripAfterExecute: true
-        }),
-        expect.objectContaining({
-          name: 'custom_native_defaults_auto',
-          trigger: 'auto',
-          executionMode: 'auto_hook',
-          stripAfterExecute: true,
-          autoHook: expect.objectContaining({
-            id: 'custom_native_defaults_auto',
-            phase: 'default',
-            priority: 100
-          })
-        })
-      ])
-    );
+    expect(records).toEqual([
+      expect.objectContaining({
+        name: 'stop_message_auto',
+        trigger: 'auto',
+        executionMode: 'auto_hook',
+        stripAfterExecute: true
+      })
+    ]);
   });
 
   test('auto hook queue order is consumed from the Rust auto-hook queue planner', () => {

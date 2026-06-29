@@ -33,8 +33,7 @@ describe('server-side-tools native dispatch planner', () => {
     const spec = executableToolSpec();
     const input = buildServertoolDispatchPlanInputWithNative({
       toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
-      disableToolCallHandlers: false,
-      adHocRegisteredToolCallHandlers: []
+      disableToolCallHandlers: false
     });
 
     expect(input.registeredToolCallHandlers).toContainEqual({

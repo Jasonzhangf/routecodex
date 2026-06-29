@@ -4,10 +4,6 @@ import {
   getBuiltinHandlerEntry
 } from './builtin-handler-catalog.js';
 import {
-  getAdHocHandlerEntry,
-  registerAdHocHandlerForTests
-} from './adhoc-handler-test-support.js';
-import {
   isServertoolRegisteredNameByConfig,
   planServertoolRegistryLookupFromSkeleton,
   planServertoolRegistryRegistrationFromSkeleton
@@ -42,26 +38,18 @@ export const registerServerToolHandlerViaNativePlan = (
     name: typeof name === 'string' ? name : '',
     hasHandler: typeof handler === 'function',
   });
-  if (actionPlan.action !== 'register_adhoc') {
-    return;
-  }
-  registerAdHocHandlerForTests(name, handler, options);
+  void actionPlan;
+  void options;
 };
 
 export const getServerToolHandlerViaNativePlan = (
   name: string
 ): ServerToolHandlerEntry | undefined => {
-  const canonicalName = typeof name === 'string' ? name.trim().toLowerCase() : '';
-  const adHocEntry = canonicalName ? getAdHocHandlerEntry(canonicalName) : undefined;
   const actionPlan = planServertoolRegistryLookupFromSkeleton({
-    name: typeof name === 'string' ? name : '',
-    adHocEntryPresent: Boolean(adHocEntry)
+    name: typeof name === 'string' ? name : ''
   });
   if (actionPlan.action === 'return_builtin') {
     return resolveBuiltinEntry(actionPlan.canonicalName ?? name);
-  }
-  if (actionPlan.action === 'return_adhoc') {
-    return adHocEntry;
   }
   return undefined;
 };

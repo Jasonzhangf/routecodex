@@ -9,12 +9,6 @@ import {
   listBuiltinHandlerNames
 } from './builtin-handler-catalog.js';
 import {
-  listAdHocAutoHandlerEntries,
-  listAdHocHandlerNames,
-  listAdHocHandlerRecords,
-  listAdHocToolCallHandlerSpecs
-} from './adhoc-handler-test-support.js';
-import {
   getServerToolHandlerViaNativePlan,
   isRegisteredServerToolNameViaNativeConfig,
   registerServerToolHandlerViaNativePlan
@@ -60,25 +54,13 @@ function projectCurrentRegistrySources(): {
 } {
   return projectRegistrySources({
     builtinNames: listBuiltinHandlerNames(),
-    adHocNames: listAdHocHandlerNames(),
     builtinAutoHandlerEntries: listBuiltinAutoHandlerEntries(),
-    adHocAutoHandlerEntries: listAdHocAutoHandlerEntries(),
-    builtinRecordEntries: listBuiltinHandlerRecordEntries(),
-    adHocHandlerRecords: listAdHocHandlerRecords()
+    builtinRecordEntries: listBuiltinHandlerRecordEntries()
   });
 }
 
 export function listRegisteredServerToolHandlerNames(): string[] {
   return projectCurrentRegistrySources().registeredNames;
-}
-
-export function listAdHocRegisteredToolCallHandlerSpecs(): Array<{
-  name: string;
-  trigger: 'tool_call';
-  executionMode: string;
-  stripAfterExecute: boolean;
-}> {
-  return listAdHocToolCallHandlerSpecs();
 }
 
 export const listAutoServerToolHandlers = (): ServerToolHandlerEntry[] => {

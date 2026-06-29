@@ -2620,7 +2620,7 @@ export function planServertoolEntryContextWithNative(input: {
 }
 
 export type ServertoolRegistryRegistrationActionPlan = {
-  action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'register_adhoc';
+  action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'ignore_retired';
   canonicalName?: string;
 };
 
@@ -2649,7 +2649,7 @@ export function planServertoolRegistryRegistrationActionWithNative(input: {
     record.action !== 'ignore_invalid' &&
     record.action !== 'ignore_builtin_override' &&
     record.action !== 'ignore_disabled' &&
-    record.action !== 'register_adhoc'
+    record.action !== 'ignore_retired'
   ) {
     throw new Error('planServertoolRegistryRegistrationActionJson native returned invalid action');
   }
@@ -2665,14 +2665,13 @@ export function planServertoolRegistryRegistrationActionWithNative(input: {
 }
 
 export type ServertoolRegistryLookupActionPlan = {
-  action: 'return_builtin' | 'return_adhoc' | 'return_none';
+  action: 'return_builtin' | 'return_none';
   canonicalName?: string;
 };
 
 export function planServertoolRegistryLookupActionWithNative(input: {
   name: string;
   builtinEntryPresent: boolean;
-  adHocEntryPresent: boolean;
 }): ServertoolRegistryLookupActionPlan {
   const capability = 'planServertoolRegistryLookupActionJson';
   const fn = readNativeFunction(capability);
@@ -2690,7 +2689,6 @@ export function planServertoolRegistryLookupActionWithNative(input: {
   const record = parsed as Record<string, unknown>;
   if (
     record.action !== 'return_builtin' &&
-    record.action !== 'return_adhoc' &&
     record.action !== 'return_none'
   ) {
     throw new Error('planServertoolRegistryLookupActionJson native returned invalid action');
@@ -2772,7 +2770,7 @@ export type ServertoolRegistryProjectionPlan = {
   autoHandlerNames: string[];
 };
 
-export type ServertoolRegistrySourceKind = 'builtin' | 'adhoc';
+export type ServertoolRegistrySourceKind = 'builtin';
 
 export type ServertoolRegistrySourceRefPlan = {
   name: string;
@@ -2861,7 +2859,7 @@ export function planServertoolRegistryProjectionWithNative(input: {
 }
 
 function parseServertoolRegistrySource(value: unknown, capability: string): ServertoolRegistrySourceKind {
-  if (value !== 'builtin' && value !== 'adhoc') {
+  if (value !== 'builtin') {
     throw new Error(`${capability} native returned invalid source`);
   }
   return value;
@@ -2880,14 +2878,8 @@ function parseServertoolRegistrySourceIndex(value: unknown, capability: string):
 
 export function planServertoolRegistrySourceProjectionWithNative(input: {
   builtinNames: string[];
-  adHocNames: string[];
   builtinAutoHandlerNames: string[];
-  adHocAutoHandlerNames: string[];
   builtinRecords: Array<{
-    name: string;
-    trigger: string;
-  }>;
-  adHocRecords: Array<{
     name: string;
     trigger: string;
   }>;

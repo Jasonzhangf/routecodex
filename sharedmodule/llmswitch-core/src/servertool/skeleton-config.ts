@@ -125,7 +125,6 @@ export function planServertoolRegistryRegistrationFromSkeleton(input: {
 
 export function planServertoolRegistryLookupFromSkeleton(input: {
   name: string;
-  adHocEntryPresent: boolean;
 }): ReturnType<typeof planServertoolRegistryLookupFromSkeletonWithNative> {
   return planServertoolRegistryLookupFromSkeletonWithNative(input);
 }

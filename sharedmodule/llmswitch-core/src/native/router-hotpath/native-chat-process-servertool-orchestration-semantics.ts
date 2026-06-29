@@ -77,11 +77,11 @@ export type NativeServertoolBuiltinHandlerEntriesPlan = {
   entries: Record<string, unknown>[];
 };
 export type NativeServertoolRegistryRegistrationActionPlan = {
-  action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'register_adhoc';
+  action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'ignore_retired';
   canonicalName?: string;
 };
 export type NativeServertoolRegistryLookupActionPlan = {
-  action: 'return_builtin' | 'return_adhoc' | 'return_none';
+  action: 'return_builtin' | 'return_none';
   canonicalName?: string;
 };
 
@@ -428,11 +428,6 @@ export function buildServertoolDispatchPlanInputWithNative(input: {
   disableToolCallHandlers: boolean;
   includeToolCallHandlerNames?: string[];
   excludeToolCallHandlerNames?: string[];
-  adHocRegisteredToolCallHandlers?: Array<{
-    name: string;
-    executionMode: string;
-    stripAfterExecute: boolean;
-  }>;
   runtimeMetadata?: Record<string, unknown>;
   document?: unknown;
 }): NativeServertoolDispatchPlanInput {
@@ -679,7 +674,7 @@ export function planServertoolRegistryRegistrationFromSkeletonWithNative(input: 
       record.action !== 'ignore_invalid' &&
       record.action !== 'ignore_builtin_override' &&
       record.action !== 'ignore_disabled' &&
-      record.action !== 'register_adhoc'
+      record.action !== 'ignore_retired'
     ) {
       return fail('invalid action');
     }
@@ -697,7 +692,6 @@ export function planServertoolRegistryRegistrationFromSkeletonWithNative(input: 
 
 export function planServertoolRegistryLookupFromSkeletonWithNative(input: {
   name: string;
-  adHocEntryPresent: boolean;
   document?: unknown;
 }): NativeServertoolRegistryLookupActionPlan {
   const capability = 'planServertoolRegistryLookupFromSkeletonJson';
@@ -712,7 +706,6 @@ export function planServertoolRegistryLookupFromSkeletonWithNative(input: {
     const record = parsed as Record<string, unknown>;
     if (
       record.action !== 'return_builtin' &&
-      record.action !== 'return_adhoc' &&
       record.action !== 'return_none'
     ) {
       return fail('invalid action');

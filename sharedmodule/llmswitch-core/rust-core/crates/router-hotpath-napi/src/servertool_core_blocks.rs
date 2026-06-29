@@ -3095,7 +3095,7 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
         serde_json::json!("stop_message_auto")
     );
 
-    let adhoc = plan_servertool_registry_registration_action_json(
+    let retired_adhoc = plan_servertool_registry_registration_action_json(
         &serde_json::json!({
             "name": " custom_tool ",
             "hasHandler": true,
@@ -3105,27 +3105,26 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
         })
         .to_string(),
     )
-    .expect("registry adhoc registration plan");
-    let adhoc_value: serde_json::Value =
-        serde_json::from_str(&adhoc).expect("parse adhoc registration plan");
-    assert_eq!(adhoc_value["action"], serde_json::json!("register_adhoc"));
+    .expect("registry retired adhoc registration plan");
+    let retired_adhoc_value: serde_json::Value =
+        serde_json::from_str(&retired_adhoc).expect("parse retired adhoc registration plan");
+    assert_eq!(retired_adhoc_value["action"], serde_json::json!("ignore_retired"));
     assert_eq!(
-        adhoc_value["canonicalName"],
+        retired_adhoc_value["canonicalName"],
         serde_json::json!("custom_tool")
     );
 
     let lookup = plan_servertool_registry_lookup_action_json(
         &serde_json::json!({
             "name": "custom_tool",
-            "builtinEntryPresent": false,
-            "adHocEntryPresent": true
+            "builtinEntryPresent": false
         })
         .to_string(),
     )
     .expect("registry lookup plan");
     let lookup_value: serde_json::Value =
         serde_json::from_str(&lookup).expect("parse registry lookup plan");
-    assert_eq!(lookup_value["action"], serde_json::json!("return_adhoc"));
+    assert_eq!(lookup_value["action"], serde_json::json!("return_none"));
     assert_eq!(
         lookup_value["canonicalName"],
         serde_json::json!("custom_tool")
@@ -3188,15 +3187,9 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
     let source_projection = plan_servertool_registry_source_projection_json(
         &serde_json::json!({
             "builtinNames": [" stop_message_auto "],
-            "adHocNames": ["custom_tool", "stop_message_auto"],
             "builtinAutoHandlerNames": ["stop_message_auto"],
-            "adHocAutoHandlerNames": ["custom_auto"],
             "builtinRecords": [
                 { "name": "stop_message_auto", "trigger": "auto" }
-            ],
-            "adHocRecords": [
-                { "name": "custom_tool", "trigger": "tool_call" },
-                { "name": "custom_auto", "trigger": "auto" }
             ]
         })
         .to_string(),
@@ -3206,7 +3199,7 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
         serde_json::from_str(&source_projection).expect("parse registry source projection plan");
     assert_eq!(
         source_projection_value["registeredNames"],
-        serde_json::json!(["custom_tool", "stop_message_auto"])
+        serde_json::json!(["stop_message_auto"])
     );
     assert_eq!(
         source_projection_value["autoHandlerRefs"][0],
@@ -3214,7 +3207,7 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
     );
     assert_eq!(
         source_projection_value["registeredRecordRefs"][0],
-        serde_json::json!({ "name": "custom_tool", "trigger": "tool_call", "source": "adhoc", "sourceIndex": 0 })
+        serde_json::json!({ "name": "stop_message_auto", "trigger": "auto", "source": "builtin", "sourceIndex": 0 })
     );
 }
 

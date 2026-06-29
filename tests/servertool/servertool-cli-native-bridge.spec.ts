@@ -614,18 +614,17 @@ describe('servertool CLI native bridge', () => {
         registrationAllowedByConfig: true
       })
     ).toEqual({
-      action: 'register_adhoc',
+      action: 'ignore_retired',
       canonicalName: 'custom_tool'
     });
 
     expect(
       planServertoolRegistryLookupActionWithNative({
         name: 'custom_tool',
-        builtinEntryPresent: false,
-        adHocEntryPresent: true
+        builtinEntryPresent: false
       })
     ).toEqual({
-      action: 'return_adhoc',
+      action: 'return_none',
       canonicalName: 'custom_tool'
     });
   });

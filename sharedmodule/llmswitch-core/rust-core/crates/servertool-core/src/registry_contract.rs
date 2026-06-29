@@ -17,7 +17,7 @@ pub enum ServertoolRegistryRegistrationAction {
     IgnoreInvalid,
     IgnoreBuiltinOverride,
     IgnoreDisabled,
-    RegisterAdhoc,
+    IgnoreRetired,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -33,14 +33,12 @@ pub struct ServertoolRegistryRegistrationActionPlan {
 pub struct ServertoolRegistryLookupActionInput {
     pub name: String,
     pub builtin_entry_present: bool,
-    pub ad_hoc_entry_present: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ServertoolRegistryLookupAction {
     ReturnBuiltin,
-    ReturnAdhoc,
     ReturnNone,
 }
 
@@ -109,7 +107,6 @@ pub struct ServertoolRegistryProjectionPlan {
 #[serde(rename_all = "snake_case")]
 pub enum ServertoolRegistrySourceKind {
     Builtin,
-    Adhoc,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -125,15 +122,9 @@ pub struct ServertoolRegistrySourceProjectionInput {
     #[serde(default)]
     pub builtin_names: Vec<String>,
     #[serde(default)]
-    pub ad_hoc_names: Vec<String>,
-    #[serde(default)]
     pub builtin_auto_handler_names: Vec<String>,
     #[serde(default)]
-    pub ad_hoc_auto_handler_names: Vec<String>,
-    #[serde(default)]
     pub builtin_records: Vec<ServertoolRegistrySourceRecordInput>,
-    #[serde(default)]
-    pub ad_hoc_records: Vec<ServertoolRegistrySourceRecordInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -193,7 +184,7 @@ pub fn plan_servertool_registry_registration_action(
         };
     }
     ServertoolRegistryRegistrationActionPlan {
-        action: ServertoolRegistryRegistrationAction::RegisterAdhoc,
+        action: ServertoolRegistryRegistrationAction::IgnoreRetired,
         canonical_name,
     }
 }
@@ -211,12 +202,6 @@ pub fn plan_servertool_registry_lookup_action(
     if input.builtin_entry_present {
         return ServertoolRegistryLookupActionPlan {
             action: ServertoolRegistryLookupAction::ReturnBuiltin,
-            canonical_name,
-        };
-    }
-    if input.ad_hoc_entry_present {
-        return ServertoolRegistryLookupActionPlan {
-            action: ServertoolRegistryLookupAction::ReturnAdhoc,
             canonical_name,
         };
     }
@@ -359,7 +344,7 @@ pub fn plan_servertool_registry_source_projection(
     input: ServertoolRegistrySourceProjectionInput,
 ) -> Result<ServertoolRegistrySourceProjectionPlan, String> {
     let mut registered_name_set = std::collections::BTreeSet::new();
-    for name in input.builtin_names.into_iter().chain(input.ad_hoc_names) {
+    for name in input.builtin_names {
         let canonical =
             normalize_name(&name).ok_or_else(|| "invalid registered handler name".to_string())?;
         registered_name_set.insert(canonical);
@@ -374,13 +359,6 @@ pub fn plan_servertool_registry_source_projection(
         ServertoolRegistrySourceKind::Builtin,
         "builtin auto",
     )?;
-    push_source_refs(
-        &mut auto_handler_refs,
-        &mut seen_auto_names,
-        input.ad_hoc_auto_handler_names,
-        ServertoolRegistrySourceKind::Adhoc,
-        "ad-hoc auto",
-    )?;
 
     let mut tool_call_records = Vec::new();
     let mut auto_records = Vec::new();
@@ -392,15 +370,6 @@ pub fn plan_servertool_registry_source_projection(
             auto_records.push(plan);
         }
     }
-    for (source_index, record) in input.ad_hoc_records.into_iter().enumerate() {
-        let plan = source_record_plan(record, ServertoolRegistrySourceKind::Adhoc, source_index)?;
-        if plan.trigger == "tool_call" {
-            tool_call_records.push(plan);
-        } else {
-            auto_records.push(plan);
-        }
-    }
-
     let mut registered_record_refs = tool_call_records;
     registered_record_refs.extend(auto_records);
 
@@ -416,7 +385,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registration_action_handles_invalid_builtin_override_disabled_and_adhoc() {
+    fn registration_action_handles_invalid_builtin_override_disabled_and_retired_adhoc() {
         let invalid = plan_servertool_registry_registration_action(
             ServertoolRegistryRegistrationActionInput {
                 name: " ".to_string(),
@@ -459,7 +428,7 @@ mod tests {
             ServertoolRegistryRegistrationAction::IgnoreDisabled
         );
 
-        let adhoc = plan_servertool_registry_registration_action(
+        let retired_adhoc = plan_servertool_registry_registration_action(
             ServertoolRegistryRegistrationActionInput {
                 name: " custom_tool ".to_string(),
                 has_handler: true,
@@ -469,35 +438,32 @@ mod tests {
             },
         );
         assert_eq!(
-            adhoc.action,
-            ServertoolRegistryRegistrationAction::RegisterAdhoc
+            retired_adhoc.action,
+            ServertoolRegistryRegistrationAction::IgnoreRetired
         );
-        assert_eq!(adhoc.canonical_name.as_deref(), Some("custom_tool"));
+        assert_eq!(retired_adhoc.canonical_name.as_deref(), Some("custom_tool"));
     }
 
     #[test]
-    fn lookup_action_prefers_builtin_then_adhoc_then_none() {
+    fn lookup_action_prefers_builtin_and_never_returns_adhoc() {
         let builtin = plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
             name: "stop_message_auto".to_string(),
             builtin_entry_present: true,
-            ad_hoc_entry_present: true,
         });
         assert_eq!(
             builtin.action,
             ServertoolRegistryLookupAction::ReturnBuiltin
         );
 
-        let adhoc = plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
+        let retired_adhoc = plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
             name: "custom_tool".to_string(),
             builtin_entry_present: false,
-            ad_hoc_entry_present: true,
         });
-        assert_eq!(adhoc.action, ServertoolRegistryLookupAction::ReturnAdhoc);
+        assert_eq!(retired_adhoc.action, ServertoolRegistryLookupAction::ReturnNone);
 
         let none = plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
             name: "".to_string(),
             builtin_entry_present: false,
-            ad_hoc_entry_present: false,
         });
         assert_eq!(none.action, ServertoolRegistryLookupAction::ReturnNone);
     }
@@ -627,81 +593,45 @@ mod tests {
     }
 
     #[test]
-    fn registry_source_projection_keeps_source_refs_and_groups_records() {
+    fn registry_source_projection_keeps_builtin_source_refs_and_groups_records() {
         let plan =
             plan_servertool_registry_source_projection(ServertoolRegistrySourceProjectionInput {
                 builtin_names: vec![" stop_message_auto ".to_string()],
-                ad_hoc_names: vec!["custom_tool".to_string(), "stop_message_auto".to_string()],
                 builtin_auto_handler_names: vec!["stop_message_auto".to_string()],
-                ad_hoc_auto_handler_names: vec![" custom_auto ".to_string()],
                 builtin_records: vec![ServertoolRegistrySourceRecordInput {
                     name: "stop_message_auto".to_string(),
                     trigger: "auto".to_string(),
                 }],
-                ad_hoc_records: vec![
-                    ServertoolRegistrySourceRecordInput {
-                        name: "custom_tool".to_string(),
-                        trigger: "tool_call".to_string(),
-                    },
-                    ServertoolRegistrySourceRecordInput {
-                        name: "custom_auto".to_string(),
-                        trigger: "auto".to_string(),
-                    },
-                ],
             })
             .expect("source projection plan");
 
         assert_eq!(
             plan.registered_names,
-            vec!["custom_tool".to_string(), "stop_message_auto".to_string()]
+            vec!["stop_message_auto".to_string()]
         );
         assert_eq!(
             plan.auto_handler_refs,
-            vec![
-                ServertoolRegistrySourceRefPlan {
-                    name: "stop_message_auto".to_string(),
-                    source: ServertoolRegistrySourceKind::Builtin,
-                    source_index: 0,
-                },
-                ServertoolRegistrySourceRefPlan {
-                    name: "custom_auto".to_string(),
-                    source: ServertoolRegistrySourceKind::Adhoc,
-                    source_index: 0,
-                },
-            ]
+            vec![ServertoolRegistrySourceRefPlan {
+                name: "stop_message_auto".to_string(),
+                source: ServertoolRegistrySourceKind::Builtin,
+                source_index: 0,
+            }]
         );
         assert_eq!(
             plan.registered_record_refs,
-            vec![
-                ServertoolRegistrySourceRecordRefPlan {
-                    name: "custom_tool".to_string(),
-                    trigger: "tool_call".to_string(),
-                    source: ServertoolRegistrySourceKind::Adhoc,
-                    source_index: 0,
-                },
-                ServertoolRegistrySourceRecordRefPlan {
-                    name: "stop_message_auto".to_string(),
-                    trigger: "auto".to_string(),
-                    source: ServertoolRegistrySourceKind::Builtin,
-                    source_index: 0,
-                },
-                ServertoolRegistrySourceRecordRefPlan {
-                    name: "custom_auto".to_string(),
-                    trigger: "auto".to_string(),
-                    source: ServertoolRegistrySourceKind::Adhoc,
-                    source_index: 1,
-                },
-            ]
+            vec![ServertoolRegistrySourceRecordRefPlan {
+                name: "stop_message_auto".to_string(),
+                trigger: "auto".to_string(),
+                source: ServertoolRegistrySourceKind::Builtin,
+                source_index: 0,
+            }]
         );
 
         let duplicate_auto =
             plan_servertool_registry_source_projection(ServertoolRegistrySourceProjectionInput {
                 builtin_names: vec![],
-                ad_hoc_names: vec![],
-                builtin_auto_handler_names: vec!["alpha".to_string()],
-                ad_hoc_auto_handler_names: vec![" alpha ".to_string()],
+                builtin_auto_handler_names: vec!["alpha".to_string(), " alpha ".to_string()],
                 builtin_records: vec![],
-                ad_hoc_records: vec![],
             });
         assert_eq!(
             duplicate_auto.expect_err("duplicate source auto handler must fail"),

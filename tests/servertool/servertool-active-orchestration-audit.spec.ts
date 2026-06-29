@@ -6,6 +6,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/registry.ts',
   'sharedmodule/llmswitch-core/src/servertool/registry-impl.ts',
+  'sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts',
 ] as const;
 
 const TARGETS = [
@@ -59,16 +60,6 @@ const TARGETS = [
       'if (result) {',
       'if (optionalResult) {',
       'if (mandatoryResult) {',
-    ],
-  },
-  {
-    file: 'sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts',
-    forbidden: [
-      'function buildAdHocRegistration(',
-      "executionMode: 'guarded'",
-      'stripAfterExecute: true',
-      "phase: hookPhase",
-      'priority: hookPriority',
     ],
   },
   {
