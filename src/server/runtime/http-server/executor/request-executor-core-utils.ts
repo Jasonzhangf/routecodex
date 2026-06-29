@@ -1,5 +1,8 @@
 import { writeClientSnapshot } from '../../../../providers/core/utils/snapshot-writer.js';
-import { planPrimaryExhaustedToDefaultPoolNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
+import {
+  evaluateSingletonRoutePoolExhaustionNative,
+  planPrimaryExhaustedToDefaultPoolNative
+} from '../../../../modules/llmswitch/bridge/native-exports.js';
 import { asRecord } from '../provider-utils.js';
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
@@ -89,6 +92,19 @@ export interface ResolvePrimaryExhaustedPlanOutput {
 export interface PrimaryExhaustedRoutingContext {
   route: string;
   exhaustedTargets: string[];
+}
+
+export interface ResolveSingletonRoutePoolExhaustionDecisionInput {
+  pipelineError: unknown;
+  initialRoutePoolLen?: number | null;
+  explicitSingletonPool?: boolean;
+  excludedProviderCount: number;
+}
+
+export interface ResolveSingletonRoutePoolExhaustionDecisionOutput {
+  shouldBlock: boolean;
+  waitMs?: number;
+  candidateProviderCount?: number;
 }
 
 function normalizePrimaryExhaustedRouteName(value: unknown): string | undefined {
@@ -218,6 +234,23 @@ export function resolveDefaultTierAvailableForErrorErr05(args: {
     return true;
   }
   return false;
+}
+
+/**
+ * Host-side adapter around `evaluateSingletonRoutePoolExhaustionNative` (Rust).
+ *
+ * The singleton/default availability-floor decision belongs to Rust VR. The
+ * executor may only consume the native decision and perform wait/log IO.
+ */
+export function resolveSingletonRoutePoolExhaustionDecision(
+  input: ResolveSingletonRoutePoolExhaustionDecisionInput
+): ResolveSingletonRoutePoolExhaustionDecisionOutput {
+  return evaluateSingletonRoutePoolExhaustionNative({
+    pipelineError: input.pipelineError,
+    initialRoutePoolLen: input.initialRoutePoolLen,
+    explicitSingletonPool: input.explicitSingletonPool === true,
+    excludedProviderCount: input.excludedProviderCount
+  });
 }
 
 /**

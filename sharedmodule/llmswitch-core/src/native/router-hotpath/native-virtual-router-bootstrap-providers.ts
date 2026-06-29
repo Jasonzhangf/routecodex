@@ -3,9 +3,7 @@ import {
   VirtualRouterErrorCode,
   type ProviderRuntimeProfile
 } from './virtual-router-contracts.js';
-import { parseVirtualRouterNativeError } from './native-router-hotpath-loader.js';
-import { isNativeDisabledByEnv, makeNativeRequiredError } from './native-router-hotpath-policy.js';
-import { loadNativeRouterHotpathBinding } from './native-router-hotpath-loader.js';
+import { callNativeJson } from './native-router-hotpath.js';
 
 type ModelIndexEntry = {
   declared: boolean;
@@ -18,31 +16,9 @@ type NativeProvidersBootstrapPayload = {
   modelIndex: Record<string, ModelIndexEntry>;
 };
 
-function requireNativeFunction(exportName: string): (...args: string[]) => unknown {
-  if (isNativeDisabledByEnv()) {
-    throw makeNativeRequiredError(exportName, 'native disabled');
-  }
-  const binding = loadNativeRouterHotpathBinding() as Record<string, unknown> | null;
-  const fn = binding?.[exportName];
-  if (typeof fn !== 'function') {
-    throw makeNativeRequiredError(exportName);
-  }
-  return fn as (...args: string[]) => unknown;
-}
-
-function parseJsonPayload<T>(raw: unknown): T {
-  const returnedVirtualRouterError = parseVirtualRouterNativeError(raw);
-  if (returnedVirtualRouterError) {
-    throw returnedVirtualRouterError;
-  }
-  if (typeof raw !== 'string' || !raw) {
-    throw new VirtualRouterError(
-      'Virtual router native bootstrap returned empty payload',
-      VirtualRouterErrorCode.CONFIG_ERROR
-    );
-  }
+function parseNativeProvidersBootstrapPayload(raw: string): NativeProvidersBootstrapPayload | null {
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(raw) as NativeProvidersBootstrapPayload;
   } catch {
     throw new VirtualRouterError(
       'Virtual router native bootstrap returned invalid payload',
@@ -59,16 +35,21 @@ export function bootstrapProvidersWithNative(input: {
   modelIndex: Map<string, ModelIndexEntry>;
   source: 'native';
 } {
-  const fn = requireNativeFunction('bootstrapVirtualRouterProvidersJson');
-  let raw: unknown;
-  try {
-    raw = fn(JSON.stringify(input.providersSource ?? {}));
-  } catch (error) {
-    const virtualRouterError = parseVirtualRouterNativeError(error);
-    if (virtualRouterError) throw virtualRouterError;
-    throw error;
-  }
-  const parsed = parseJsonPayload<NativeProvidersBootstrapPayload>(raw);
+  const parsed = callNativeJson(
+    'bootstrapVirtualRouterProvidersJson',
+    'bootstrapVirtualRouterProvidersJson',
+    [JSON.stringify(input.providersSource ?? {})],
+    parseNativeProvidersBootstrapPayload,
+    {
+      createEmptyError: () => new VirtualRouterError(
+        'Virtual router native bootstrap returned empty payload',
+        VirtualRouterErrorCode.CONFIG_ERROR
+      ),
+      invalidReason: 'Virtual router native bootstrap returned invalid payload',
+      mapVirtualRouterErrors: true,
+      rethrowUnknownErrors: true
+    }
+  );
   if (!parsed || typeof parsed !== 'object' || !parsed.runtimeEntries || !parsed.aliasIndex || !parsed.modelIndex) {
     throw new VirtualRouterError(
       'Virtual router native providers bootstrap returned invalid payload',

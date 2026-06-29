@@ -10,7 +10,8 @@ import {
   makeNativeRequiredError
 } from './native-router-hotpath-policy.js';
 import {
-  loadNativeRouterHotpathBinding
+  loadNativeRouterHotpathBinding,
+  parseVirtualRouterNativeError
 } from './native-router-hotpath-loader.js';
 
 function toErrorReason(error: unknown): string {
@@ -29,25 +30,42 @@ function requireNativeFunction(capability: string, exportName: string): (...args
   return fn as (...args: string[]) => unknown;
 }
 
-function callNativeJson<T>(
+export function callNativeJson<T>(
   capability: string,
   exportName: string,
   args: string[],
-  parse: (raw: string) => T | null
+  parse: (raw: string) => T | null,
+  options?: {
+    createEmptyError?: () => Error;
+    emptyReason?: string;
+    invalidReason?: string;
+    mapVirtualRouterErrors?: boolean;
+    rethrowUnknownErrors?: boolean;
+  }
 ): T {
   const fn = requireNativeFunction(capability, exportName);
   let raw: unknown;
   try {
     raw = fn(...args);
   } catch (error) {
+    if (options?.mapVirtualRouterErrors) {
+      const virtualRouterError = parseVirtualRouterNativeError(error);
+      if (virtualRouterError) throw virtualRouterError;
+    }
+    if (options?.rethrowUnknownErrors) throw error;
     throw makeNativeRequiredError(capability, toErrorReason(error));
   }
+  if (options?.mapVirtualRouterErrors) {
+    const virtualRouterError = parseVirtualRouterNativeError(raw);
+    if (virtualRouterError) throw virtualRouterError;
+  }
   if (typeof raw !== 'string' || !raw) {
-    throw makeNativeRequiredError(capability, 'empty result');
+    if (options?.createEmptyError) throw options.createEmptyError();
+    throw makeNativeRequiredError(capability, options?.emptyReason ?? 'empty result');
   }
   const parsed = parse(raw);
   if (!parsed) {
-    throw makeNativeRequiredError(capability, 'invalid payload');
+    throw makeNativeRequiredError(capability, options?.invalidReason ?? 'invalid payload');
   }
   return parsed;
 }

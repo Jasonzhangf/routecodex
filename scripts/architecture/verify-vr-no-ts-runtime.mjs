@@ -45,6 +45,10 @@ const scanRoots = [
 
 const scanExtensions = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.md']);
 const singletonExecutorShellPath = 'src/server/runtime/http-server/executor/request-executor-core-utils.ts';
+const bootstrapWrapperPaths = [
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts',
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts',
+];
 
 function exists(relPath) {
   return fs.existsSync(path.join(root, relPath));
@@ -175,6 +179,27 @@ if (exists(singletonExecutorShellPath)) {
   for (const pattern of forbiddenLocalSingletonPatterns) {
     if (pattern.test(src)) {
       failures.push(`${singletonExecutorShellPath}: local singleton availability-floor semantics revived (${pattern})`);
+    }
+  }
+}
+
+for (const bootstrapWrapperPath of bootstrapWrapperPaths) {
+  if (!exists(bootstrapWrapperPath)) {
+    continue;
+  }
+  const src = fs.readFileSync(path.join(root, bootstrapWrapperPath), 'utf8');
+  const forbiddenBootstrapWrapperPatterns = [
+    /loadNativeRouterHotpathBinding/,
+    /parseVirtualRouterNativeError/,
+    /makeNativeRequiredError/,
+    /function\s+requireNativeBootstrapConfigFunction/,
+  ];
+  if (!src.includes('callNativeJson(')) {
+    failures.push(`${bootstrapWrapperPath}: bootstrap wrapper must delegate native JSON call to the shared thin wrapper helper`);
+  }
+  for (const pattern of forbiddenBootstrapWrapperPatterns) {
+    if (pattern.test(src)) {
+      failures.push(`${bootstrapWrapperPath}: local native bootstrap call/error plumbing revived (${pattern})`);
     }
   }
 }
