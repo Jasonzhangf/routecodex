@@ -136,18 +136,6 @@ export class ResponsesSseToJsonConverterRefactored {
       this.attachDecodeStats(response, context);
       return response;
     } catch (error) {
-      if (rawChunks.length > 0 && this.isTerminatedError(error)) {
-        const salvaged = this.tryMaterializeFinalResponse(rawChunks.join(''));
-        if (salvaged) {
-          context.isCompleted = true;
-          context.endTime = Date.now();
-          context.duration = context.endTime - context.startTime;
-          options.onCompletion?.(salvaged);
-          this.attachDecodeStats(salvaged, context);
-          return salvaged;
-        }
-      }
-
       context.isCompleted = true;
       context.endTime = Date.now();
       context.duration = context.endTime - context.startTime;
@@ -180,34 +168,6 @@ export class ResponsesSseToJsonConverterRefactored {
       throw new Error('Native responses SSE materializer returned invalid payload');
     }
     return payload as unknown as ResponsesResponse;
-  }
-
-  private tryMaterializeFinalResponse(bodyText: string): ResponsesResponse | null {
-    try {
-      return this.materializeFinalResponse(bodyText);
-    } catch {
-      return null;
-    }
-  }
-
-  private isTerminatedError(error: unknown): boolean {
-    if (!error || typeof error !== 'object') return false;
-    const msg = (error as { message?: unknown }).message;
-    const code = (error as { code?: unknown }).code;
-    const normalized = typeof msg === 'string' ? msg.toLowerCase() : '';
-    const normalizedCode = typeof code === 'string' ? code.toLowerCase() : '';
-    return (
-      normalized.includes('terminated')
-      || normalizedCode.includes('terminated')
-      || normalized.includes('upstream_stream_idle_timeout')
-      || normalizedCode.includes('upstream_stream_idle_timeout')
-      || normalized.includes('upstream_stream_no_content_timeout')
-      || normalizedCode.includes('upstream_stream_no_content_timeout')
-      || normalized.includes('upstream_stream_content_idle_timeout')
-      || normalizedCode.includes('upstream_stream_content_idle_timeout')
-      || normalized.includes('upstream_stream_timeout')
-      || normalizedCode.includes('upstream_stream_timeout')
-    );
   }
 
   private resolveSseFailureMetadata(error: Error): {

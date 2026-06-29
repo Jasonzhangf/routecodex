@@ -6,6 +6,13 @@
 - 已验证：两个原红 focused tests 均 1 passed；`cargo test -p router-hotpath-napi stopless --lib -- --nocapture` 56 passed；`cargo test -p servertool-core stop_message_auto --lib -- --nocapture` 22 passed；`tests/servertool/cli-projection-runtime-shell.spec.ts` 4 passed；`npm run verify:servertool-rust-only` PASS；`npm run verify:function-map-compile-gate` PASS。
 - 未闭合：`npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` 仍 FAIL，红点在 `sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts` 的 DeepSeek Web 已删除类型/函数残留（`extractDeepSeekWebErrorInfo`、`DeepSeekWebErrorInfo`、`createUpstreamSseSemanticError` 等 20 个 TS2304），不是本轮 servertool/stopless 文件引入。
 
+# 2026-06-29 SSE no-salvage fallback removal slice
+
+- 目标：继续 SSE Rustification/边界收口，删除 `chat-sse-to-json-converter.ts` 与 `responses-sse-to-json-converter.ts` 里“终止/超时后用 partial chunks salvage 成成功响应”的 fallback 语义。
+- 改动：物理删除 chat `isTerminatedError` / `trySalvageResponse` 及 convert/aggregate catch 中的成功返回；物理删除 responses `tryMaterializeFinalResponse` 和 catch 中的 salvage 成功返回。
+- 门禁：`verify-sse-architecture-boundary.mjs` 增加 `tryMaterializeFinalResponse` / `const salvaged =` / `return salvaged` forbidden markers，防止 provider-neutral SSE projection 复活 partial stream success fallback。
+- 已验证：focused Jest `chat-sse-usage-roundtrip.spec.ts` + `responses-sse-native-materialize.spec.ts` 12 passed；`npm run verify:sse-architecture-boundary` PASS；sharedmodule `tsc` PASS；scoped `git diff --check` PASS。
+
 # 2026-06-29 chat SSE provider-specific residue closeout
 
 - 目标：把 `sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts` 里的 DeepSeek-web patch / control / error 兼容语义物理删除，避免通用 SSE 投影继续承载 provider-specific 分支。

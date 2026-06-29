@@ -49,6 +49,17 @@ function expectChatChunkOnlyFields(chunk: ChatCompletionChunk): void {
   }
 }
 
+async function *partialChatCompletionThenTerminated(): AsyncGenerator<string> {
+  yield [
+    'data: {"id":"chatcmpl_timeout_no_done","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}',
+    '',
+    'data: {"id":"chatcmpl_timeout_no_done","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"hello"},"logprobs":null,"finish_reason":null}]}',
+    ''
+  ].join('\n');
+  const error = Object.assign(new Error('terminated'), { code: 'TERMINATED' });
+  throw error;
+}
+
 describe('chat SSE usage compatibility', () => {
   it('emits OpenAI/DeepSeek compatible chat SSE wire frames without named response events', async () => {
     const sseText = [
@@ -369,6 +380,19 @@ describe('chat SSE usage compatibility', () => {
       status: 400,
       statusCode: 400,
       retryable: false,
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
+
+  it('does not salvage a partial chat stream into success after stream termination', async () => {
+    const converter = new ChatSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(partialChatCompletionThenTerminated(), {
+      requestId: 'req_chat_no_salvage_timeout',
+      model: 'gpt-4o-mini'
+    })).rejects.toMatchObject({
+      code: 'TERMINATED',
+      upstreamCode: 'TERMINATED',
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });

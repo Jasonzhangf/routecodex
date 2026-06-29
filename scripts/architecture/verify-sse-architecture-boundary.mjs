@@ -112,6 +112,15 @@ for (const relPath of providerNeutralProjectionFiles) {
       failures.push(`${relPath}: provider-neutral SSE projection must not contain provider-specific marker "${providerSpecific}"`);
     }
   }
+  for (const forbidden of [
+    'tryMaterializeFinalResponse',
+    'const salvaged =',
+    'return salvaged',
+  ]) {
+    if (source.includes(forbidden)) {
+      failures.push(`${relPath}: provider-neutral SSE projection must not salvage partial streams into successful responses: ${forbidden}`);
+    }
+  }
 }
 
 const forbiddenFrameKeys = [

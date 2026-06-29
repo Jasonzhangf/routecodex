@@ -153,16 +153,6 @@ export class ChatSseToJsonConverter {
 
     } catch (error) {
       context.eventStats.errorCount++;
-      if (this.isTerminatedError(error)) {
-        const salvaged = this.trySalvageResponse(context);
-        if (salvaged) {
-          context.isCompleted = true;
-          context.eventStats.endTime = TimeUtils.now();
-          context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
-          options.onCompletion?.(salvaged);
-          return salvaged;
-        }
-      }
       options.onError?.(error as Error);
       throw this.wrapSseError(error, 'SSE to JSON conversion failed');
     } finally {
@@ -203,17 +193,6 @@ export class ChatSseToJsonConverter {
 
     } catch (error) {
       context.eventStats.errorCount++;
-      if (this.isTerminatedError(error)) {
-        const salvaged = this.trySalvageResponse(context);
-        if (salvaged) {
-          context.isCompleted = true;
-          context.eventStats.endTime = TimeUtils.now();
-          context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
-          options.onCompletion?.(salvaged);
-          yield salvaged;
-          return;
-        }
-      }
       options.onError?.(error as Error);
       throw this.wrapSseError(error, 'SSE stream aggregation failed');
     } finally {
@@ -1159,28 +1138,6 @@ export class ChatSseToJsonConverter {
     return response;
   }
 
-  private isTerminatedError(error: unknown): boolean {
-    if (!error || typeof error !== 'object') {
-      return false;
-    }
-    const message = (error as { message?: unknown }).message;
-    const code = (error as { code?: unknown }).code;
-    const normalizedMessage = typeof message === 'string' ? message.toLowerCase() : '';
-    const normalizedCode = typeof code === 'string' ? code.toLowerCase() : '';
-    return (
-      normalizedCode.includes('terminated') ||
-      normalizedMessage.includes('terminated') ||
-      normalizedCode.includes('upstream_stream_idle_timeout') ||
-      normalizedMessage.includes('upstream_stream_idle_timeout') ||
-      normalizedCode.includes('upstream_stream_content_idle_timeout') ||
-      normalizedMessage.includes('upstream_stream_content_idle_timeout') ||
-      normalizedCode.includes('upstream_stream_no_content_timeout') ||
-      normalizedMessage.includes('upstream_stream_no_content_timeout') ||
-      normalizedCode.includes('upstream_stream_timeout') ||
-      normalizedMessage.includes('upstream_stream_timeout')
-    );
-  }
-
   private wrapSseError(error: unknown, contextMessage: string): Error {
     const wrapped = ErrorUtils.wrapError(error, contextMessage) as Error & {
       code?: string;
@@ -1218,26 +1175,6 @@ export class ChatSseToJsonConverter {
     }
     wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
     return wrapped;
-  }
-
-  private trySalvageResponse(context: SseToChatJsonContext): ChatCompletionResponse | null {
-    const choices = context.currentResponse.choices || [];
-    const hasMaterializedChoice = choices.some((choice) => {
-      const message = choice?.message as unknown as Record<string, unknown> | undefined;
-      const content = typeof message?.content === 'string' ? message.content.trim() : '';
-      const reasoning = typeof (message as any)?.reasoning_content === 'string'
-        ? String((message as any).reasoning_content).trim()
-        : '';
-      const functionCall = message?.function_call;
-      const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
-      return Boolean(content || reasoning || functionCall || toolCalls.length > 0);
-    });
-
-    if (!hasMaterializedChoice) {
-      return null;
-    }
-
-    return this.finalizeResponse(context);
   }
 
   /**
