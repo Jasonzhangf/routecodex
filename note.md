@@ -1,3 +1,12 @@
+# 2026-06-29 servertool backend-route public surface retirement slice
+
+- 目标：继续 Hub Pipeline Rust closeout 的 servertool 局部收口；不恢复已删除 backend-route/reenter public surface，把 `backend_route_contract.rs`、`BackendRouteReenter`、`ServertoolBackendRouteHint01Planned`、`planServertoolBackendRoutePolicy*` 改成退役防复活合同。
+- 改动：`scripts/verify-servertool-rust-only.mjs` 删除旧 backend-route “必须存在”断言和不可达 `return` 后旧块，改为检查 deleted files + forbidden markers；`tests/servertool/servertool-snapshot-recording.spec.ts` 和 `servertool-core/src/backend_route_contract.rs` 保持物理删除；`native-servertool-core-semantics.ts` 补回 `extractTextFromChatLikeWithNative` thin wrapper，恢复合法 Rust text extraction bridge。
+- 残留扫描：`rg backend_route_contract|BackendRouteReenter|ServertoolBackendRoute|planServertoolBackendRoutePolicy|plan_servertool_backend_route|ServertoolBackendRouteHint01Planned|build_servertool_backend_route_hint|backend-route-mainline-block|servertool-snapshot-recording ...` 的活代码命中只剩 verify 脚本 forbidden marker；旧 docs/audit/plan 与 cargo build `.d` 有历史文本残留，不是 runtime surface。
+- 已验证：`npm run verify:servertool-rust-only` PASS；`cargo test -p servertool-core outcome_contract --lib -- --nocapture` 25 passed；`cargo check -p router-hotpath-napi --lib` PASS（warnings only）；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS；root/sharedmodule `tsc` PASS；`npm run verify:function-map-compile-gate` PASS；`npm run verify:architecture-mainline-call-map` PASS；`git diff --check` PASS。
+- 追加审计：`tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 的 `readServertoolFollowupFlowIdWithNative` 旧存在断言已改成退役缺失断言；focused Jest `-t "stop_message schema budget must not be restored from servertool loop repeat count"` PASS。整份 spec 仍有无关红点：缺 `scripts/tests/virtual-router-quota-health-restore.mjs`。
+- 边界：本 slice 只证明 backend-route public surface 退役与 servertool gate 对齐，不代表完整 `servertool.hook_skeleton.mainline` 或全 Hub Pipeline Rust closeout 完成；本 slice 未做 live replay。
+
 # 2026-06-29 Hub Pipeline Rust closeout Wave 2 req-outbound slice
 
 - Objective 来自 `/Users/fanzhang/.codex/attachments/122d8bb6-d5d6-4f35-bf66-ce1e784cb537/pasted-text-1.txt`：执行 `docs/goals/hub-pipeline-rust-closeout-plan.md`，优先 Wave 2 `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload`，除非 Wave 1 wrapper thinness 有 blocking violation。

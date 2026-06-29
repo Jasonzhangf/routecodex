@@ -53,11 +53,11 @@ pub struct ServertoolMaterializationProgressInput {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ServertoolMaterializationAction {
-    ExecuteBackendThenFinalize,
     FinalizeWithoutBackend,
     ReturnHandlerResult,
     InvalidPlanMissingFinalize,
     InvalidPlanResult,
+    UnsupportedBackendPlanKind,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -83,20 +83,15 @@ pub struct ServertoolHandlerRuntimeActionInput {
     pub has_backend_plan: bool,
     #[serde(default)]
     pub backend_kind: Option<String>,
-    #[serde(default)]
-    pub has_reenter_pipeline: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ServertoolHandlerRuntimeAction {
-    ExecuteBackendVisionAnalysisThenFinalize,
-    ExecuteBackendWebSearchThenFinalize,
     FinalizeWithoutBackend,
     ReturnHandlerResult,
     InvalidPlanMissingFinalize,
     InvalidPlanResult,
-    BackendRequiresReenterPipeline,
     UnsupportedBackendPlanKind,
 }
 
@@ -116,13 +111,6 @@ pub struct ServertoolHandlerFailedErrorInput {
     pub entry_endpoint: String,
     pub provider_protocol: String,
     pub error: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServertoolBackendRequiresReenterPipelineErrorInput {
-    pub request_id: String,
-    pub backend_kind: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,7 +162,7 @@ pub fn plan_servertool_materialization_progress(
     let action = match contract.action {
         ServertoolHandlerContractAction::HandlerPlan => {
             if input.has_backend_plan {
-                ServertoolMaterializationAction::ExecuteBackendThenFinalize
+                ServertoolMaterializationAction::UnsupportedBackendPlanKind
             } else {
                 ServertoolMaterializationAction::FinalizeWithoutBackend
             }
@@ -209,7 +197,7 @@ pub fn plan_servertool_handler_runtime_action(
         .as_ref()
         .map(|value| value.trim().to_string());
     let action = match progression.action {
-        ServertoolMaterializationAction::ExecuteBackendThenFinalize => {
+        ServertoolMaterializationAction::UnsupportedBackendPlanKind => {
             ServertoolHandlerRuntimeAction::UnsupportedBackendPlanKind
         }
         ServertoolMaterializationAction::FinalizeWithoutBackend => {
@@ -243,21 +231,6 @@ pub fn plan_servertool_handler_failed_error(input: &ServertoolHandlerFailedError
             "entryEndpoint": input.entry_endpoint.trim(),
             "providerProtocol": input.provider_protocol.trim(),
             "error": input.error.trim(),
-        }
-    })
-}
-
-pub fn plan_servertool_backend_requires_reenter_pipeline_error(
-    input: &ServertoolBackendRequiresReenterPipelineErrorInput,
-) -> Value {
-    serde_json::json!({
-        "message": "[servertool] vision_analysis backend requires reenterPipeline",
-        "code": "SERVERTOOL_HANDLER_FAILED",
-        "category": "INTERNAL_ERROR",
-        "status": 500,
-        "details": {
-            "requestId": input.request_id.trim(),
-            "backendKind": input.backend_kind.trim(),
         }
     })
 }
@@ -308,15 +281,15 @@ pub fn plan_servertool_invalid_handler_plan_result_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_servertool_backend_requires_reenter_pipeline_error, plan_servertool_handler_contract,
-        plan_servertool_handler_failed_error, plan_servertool_handler_runtime_action,
+        plan_servertool_handler_contract, plan_servertool_handler_failed_error,
+        plan_servertool_handler_runtime_action,
         plan_servertool_invalid_handler_plan_missing_finalize_error,
         plan_servertool_invalid_handler_plan_result_error,
         plan_servertool_materialization_progress,
         plan_servertool_unsupported_backend_plan_kind_error,
-        ServertoolBackendRequiresReenterPipelineErrorInput, ServertoolHandlerContractAction,
-        ServertoolHandlerContractInput, ServertoolHandlerFailedErrorInput,
-        ServertoolHandlerRuntimeAction, ServertoolHandlerRuntimeActionInput,
+        ServertoolHandlerContractAction, ServertoolHandlerContractInput,
+        ServertoolHandlerFailedErrorInput, ServertoolHandlerRuntimeAction,
+        ServertoolHandlerRuntimeActionInput,
         ServertoolInvalidHandlerPlanErrorInput, ServertoolMaterializationAction,
         ServertoolMaterializationProgressInput, ServertoolUnsupportedBackendPlanKindErrorInput,
     };
@@ -367,7 +340,7 @@ mod tests {
                 has_backend_plan: true,
             })
             .action,
-            ServertoolMaterializationAction::ExecuteBackendThenFinalize
+            ServertoolMaterializationAction::UnsupportedBackendPlanKind
         );
         assert_eq!(
             plan_servertool_materialization_progress(&ServertoolMaterializationProgressInput {
@@ -403,7 +376,6 @@ mod tests {
                 has_plan_markers: true,
                 has_backend_plan: true,
                 backend_kind: Some("vision_analysis".to_string()),
-                has_reenter_pipeline: false,
             })
             .action,
             ServertoolHandlerRuntimeAction::UnsupportedBackendPlanKind
@@ -417,7 +389,6 @@ mod tests {
                 has_plan_markers: true,
                 has_backend_plan: true,
                 backend_kind: Some("web_search".to_string()),
-                has_reenter_pipeline: false,
             })
             .action,
             ServertoolHandlerRuntimeAction::UnsupportedBackendPlanKind
@@ -431,7 +402,6 @@ mod tests {
                 has_plan_markers: true,
                 has_backend_plan: true,
                 backend_kind: Some("unknown_backend_kind".to_string()),
-                has_reenter_pipeline: true,
             })
             .action,
             ServertoolHandlerRuntimeAction::UnsupportedBackendPlanKind
@@ -450,17 +420,6 @@ mod tests {
             });
         assert_eq!(handler_failed["code"], "SERVERTOOL_HANDLER_FAILED");
         assert_eq!(handler_failed["details"]["toolName"], "tool");
-
-        let backend_requires = plan_servertool_backend_requires_reenter_pipeline_error(
-            &ServertoolBackendRequiresReenterPipelineErrorInput {
-                request_id: "req-2".to_string(),
-                backend_kind: "vision_analysis".to_string(),
-            },
-        );
-        assert_eq!(
-            backend_requires["details"]["backendKind"],
-            "vision_analysis"
-        );
 
         let unsupported = plan_servertool_unsupported_backend_plan_kind_error(
             &ServertoolUnsupportedBackendPlanKindErrorInput {

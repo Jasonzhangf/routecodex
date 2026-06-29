@@ -5,11 +5,9 @@
 //! - `stop_message_loop_guard`: loop guard evaluation
 //! - `stop_message_counter`: budget counter logic
 //! - `cli_contract`: servertool binary input/output contract
-//! - `backend_route_contract`: backend-route outcome policy contract
 
 pub mod auto_hook_execution_contract;
 pub mod auto_hook_queue_contract;
-pub mod backend_route_contract;
 pub mod blocked_report_contract;
 pub mod cli_contract;
 pub mod cli_result_guard;

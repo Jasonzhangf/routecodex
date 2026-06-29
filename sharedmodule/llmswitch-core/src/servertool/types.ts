@@ -37,25 +37,6 @@ export interface ServerSideToolEngineOptions {
   excludeAutoHookIds?: string[];
   includeToolCallHandlerNames?: string[];
   excludeToolCallHandlerNames?: string[];
-  reenterPipeline?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<{
-    body?: JsonObject;
-    sseStream?: unknown;
-    format?: string;
-  }>;
-  clientInjectDispatch?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<{
-    ok: boolean;
-    reason?: string;
-  }>;
   onAutoHookTrace?: (event: ServerToolAutoHookTraceEvent) => void;
 }
 

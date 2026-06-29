@@ -276,7 +276,7 @@ jest.unstable_mockModule(
     planRuntimePreCommandStateRuntimeActionWithNative: planRuntimePreCommandStateRuntimeActionWithNativeMock,
     planServertoolMaterializationProgressWithNative: jest.fn((input: any) => {
       if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
-        return { action: 'execute_backend_then_finalize' };
+        return { action: 'unsupported_backend_plan_kind' };
       }
       if (input?.hasFinalizeFunction) {
         return { action: 'finalize_without_backend' };
@@ -292,15 +292,6 @@ jest.unstable_mockModule(
     planServertoolHandlerRuntimeActionWithNative: jest.fn((input: any) => {
       if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
         const backendKind = String(input?.backendKind ?? '');
-        if (backendKind === 'vision_analysis' && !input?.hasReenterPipeline) {
-          return { action: 'backend_requires_reenter_pipeline', backendKind };
-        }
-        if (backendKind === 'vision_analysis') {
-          return { action: 'execute_backend_vision_analysis_then_finalize', backendKind };
-        }
-        if (backendKind === 'web_search') {
-          return { action: 'execute_backend_web_search_then_finalize', backendKind };
-        }
         return { action: 'unsupported_backend_plan_kind', backendKind };
       }
       if (input?.hasFinalizeFunction) {
@@ -527,18 +518,6 @@ jest.unstable_mockModule(
           }
         };
       }
-      if (kind === 'backend_requires_reenter_pipeline') {
-        return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: '[servertool] vision_analysis backend requires reenterPipeline',
-          details: {
-            requestId: String(input?.requestId ?? ''),
-            backendKind: String(input?.backendKind ?? '')
-          }
-        };
-      }
       if (kind === 'unsupported_backend_plan_kind') {
         return {
           code: 'SERVERTOOL_HANDLER_FAILED',
@@ -589,10 +568,6 @@ jest.unstable_mockModule(
       }
       return { action: 'invalid_plan_missing_finalize' };
     }),
-    planServertoolBackendExecutionWithNative: jest.fn((input: any) => ({
-      action: String(input?.kind ?? 'unsupported'),
-      backendKind: String(input?.kind ?? 'unsupported')
-    })),
     planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => ({
       optionalQueue: Array.isArray(input?.hooks) ? [...input.hooks] : [],
       mandatoryQueue: []

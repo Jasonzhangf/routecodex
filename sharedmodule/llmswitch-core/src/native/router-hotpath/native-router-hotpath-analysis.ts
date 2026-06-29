@@ -119,11 +119,6 @@ export type ServertoolHandlerContractPlanPayload = {
   action: string;
 };
 
-export type ServertoolBackendExecutionPlanPayload = {
-  action: string;
-  backendKind?: string;
-};
-
 export type ServertoolOutcomePlanInputExecutedToolCallPayload = {
   id: string;
   name: string;
@@ -650,26 +645,6 @@ export function parseServertoolHandlerContractPlanPayload(raw: string): Serverto
     return null;
   }
   return { action };
-}
-
-export function parseServertoolBackendExecutionPlanPayload(raw: string): ServertoolBackendExecutionPlanPayload | null {
-  const parsed = parseJson('parseServertoolBackendExecutionPlanPayload', raw) as
-    | {
-      action?: unknown;
-      backendKind?: unknown;
-    }
-    | typeof JSON_PARSE_FAILED;
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed.action !== 'string') {
-    return null;
-  }
-  const action = parsed.action.trim();
-  if (!action) {
-    return null;
-  }
-  return {
-    action,
-    ...(typeof parsed.backendKind === 'string' ? { backendKind: parsed.backendKind } : {})
-  };
 }
 
 export function parseServertoolResponseStageGatePayload(raw: string): ServertoolResponseStageGatePayload | null {

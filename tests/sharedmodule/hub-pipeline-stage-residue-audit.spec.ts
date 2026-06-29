@@ -4214,7 +4214,6 @@ describe('hub pipeline stage residue audit', () => {
     const rustLookupSource = fs.readFileSync(rustLookupPath, 'utf8');
     const runtimeStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateWithNative');
     const runtimeStageBlock = extractFunctionBlock(nativeWrapperSource, 'readRuntimeStopMessageStageModeWithNative');
-    const followupFlowBlock = extractFunctionBlock(nativeWrapperSource, 'readServertoolFollowupFlowIdWithNative');
     const adapterStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateFromAdapterContextWithNative');
 
     expect(rustLookupSource).toContain('pub fn resolve_runtime_stop_message_state');
@@ -4223,14 +4222,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(rustLookupSource).toContain('loop_state.get("maxRepeats")');
     expect(rustLookupSource).not.toContain('loop_state.get("repeatCount")');
     expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
-    expect(nativeWrapperSource).toContain('readServertoolFollowupFlowIdWithNative');
+    expect(nativeWrapperSource).not.toContain('readServertoolFollowupFlowIdWithNative');
     expect(adapterStateBlock).toContain('resolveRuntimeStopMessageStateFromAdapterContextJson');
     expect(stopMessageNativeSource).toContain('followupFlowId?: string;');
 
-    const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${followupFlowBlock}\n${adapterStateBlock}`, [
+    const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${adapterStateBlock}`, [
       { label: 'runtime stop state TS reads loop state', pattern: /serverToolLoopState|loopState\.maxRepeats|stopMessageState|stopMessageUsed|stopMessageText/ },
       { label: 'runtime stop stage TS normalizes state locally', pattern: /toLowerCase\(\)|normalizeStopMessageStageMode/i },
-      { label: 'servertool followup flow id TS reads loop state locally', pattern: /serverToolLoopState|\.flowId|toNonEmptyText/ },
       { label: 'adapter-context stop state TS rebuilds snapshot locally', pattern: /serverToolLoopState|stopMessageState|stopMessageText|repeatCount|maxRepeats/ },
     ]);
     const stopMessageNativeFindings = collectMatches(stopMessageNativeSource, [

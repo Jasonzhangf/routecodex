@@ -397,9 +397,6 @@ export function normalizeProviderResponseEffectPlanWithNative(
 
 export function planProviderResponseServertoolRuntimeActionsWithNative(input: {
   servertoolRuntimeActions: Array<Record<string, unknown>>;
-  providerInvoker: boolean;
-  reenterPipeline: boolean;
-  clientInjectDispatch: boolean;
 }): ProviderResponseServertoolRuntimeActionPlan {
   const capability = 'planProviderResponseServertoolRuntimeActionsJson';
   const fail = (reason?: string) => failNativeRequired<ProviderResponseServertoolRuntimeActionPlan>(capability, reason);

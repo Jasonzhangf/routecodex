@@ -365,13 +365,10 @@ export interface ServertoolEntryPreflightPlan {
 
 export interface ServertoolHandlerRuntimeActionPlan {
   action:
-    | 'execute_backend_vision_analysis_then_finalize'
-    | 'execute_backend_web_search_then_finalize'
     | 'finalize_without_backend'
     | 'return_handler_result'
     | 'invalid_plan_missing_finalize'
     | 'invalid_plan_result'
-    | 'backend_requires_reenter_pipeline'
     | 'unsupported_backend_plan_kind';
   backendKind?: string;
 }
@@ -406,196 +403,6 @@ export interface StoplessCliProjectionContextPlan {
   schemaFeedback?: JsonObject;
   sessionId?: string;
   requestId?: string;
-}
-
-export interface ServertoolBackendRoutePolicyInput {
-  toolName: string;
-  flowId?: string;
-  input?: unknown;
-  entryEndpoint?: string;
-  adapterContext?: unknown;
-}
-
-export interface ServertoolBackendRoutePolicyOutput {
-  toolName: string;
-  flowId: string;
-  routeHint: string;
-  executionMode: 'reenter';
-  eligible: boolean;
-  skipReason?: string | null;
-  shapeGuard: {
-    allowRequiresAction: boolean;
-    preserveStreaming: boolean;
-    failOnMissingPayload: boolean;
-  };
-  originDelta: {
-    requiresOriginSeed: boolean;
-    applyAssistantDelta: boolean;
-  };
-  finalize: {
-    shortCircuitRequiresAction: boolean;
-  };
-  input: unknown;
-}
-
-export interface ServertoolVisionEligibilityPlan {
-  shouldRunVisionFlow: boolean;
-  shouldBypassStopMessage: boolean;
-  reason: string;
-}
-
-export interface ServertoolBackendRouteFinalizeDecision {
-  ignoreRequiresActionFollowup?: boolean;
-}
-
-export interface ServertoolFollowupExecutionModeDecision {
-  outcomeMode?: 'skip' | 'client_inject_only' | 'reenter';
-  noFollowup?: boolean;
-  clientInjectOnly?: boolean;
-}
-
-export interface ServertoolFollowupExecutionModeInput {
-  flowId?: string;
-  decision?: ServertoolFollowupExecutionModeDecision;
-  metadata?: Record<string, unknown>;
-  metadataClientInjectOnly: boolean;
-  clientInjectSource?: string;
-}
-
-export interface ServertoolFollowupExecutionModePlan {
-  flowId?: string;
-  executionMode: 'skip' | 'client_inject_only' | 'reenter';
-}
-
-export interface ServertoolFollowupRuntimeActionDecision {
-  outcomeMode?: 'skip' | 'client_inject_only' | 'reenter';
-  noFollowup?: boolean;
-  autoLimit?: boolean;
-  clientInjectOnly?: boolean;
-  seedLoopPayload?: boolean;
-  clientInjectSource?: string;
-}
-
-export interface ServertoolFollowupRuntimeActionInput {
-  flowId?: string;
-  decision?: ServertoolFollowupRuntimeActionDecision;
-  metadata?: Record<string, unknown>;
-  metadataClientInjectOnly: boolean;
-  hasFollowupPayloadRaw: boolean;
-  loopStateRepeatCount?: number;
-  clientInjectSource?: string;
-}
-
-export interface ServertoolFollowupRuntimeActionPlan {
-  flowId?: string;
-  isStopMessageFlow: boolean;
-  loopPayloadSource: 'payload' | 'seed_loop_payload' | 'none';
-  autoLimit: {
-    exceeded: boolean;
-    status?: number;
-    code?: 'SERVERTOOL_FOLLOWUP_FAILED';
-    category?: 'INTERNAL_ERROR';
-    reason?: string;
-    repeatCount?: number;
-  };
-  clientInjectMetadata: {
-    force: boolean;
-    source?: string;
-  };
-}
-
-export interface ServertoolFollowupRuntimeMetadataInput {
-  metadata: Record<string, unknown>;
-  metadataRuntime?: Record<string, unknown> | null;
-  adapterContext?: Record<string, unknown> | null;
-  adapterRuntime?: Record<string, unknown> | null;
-  loopState?: Record<string, unknown> | null;
-  originalEntryEndpoint?: string;
-  followupEntryEndpoint?: string;
-}
-
-export interface ServertoolFollowupRuntimeMetadataPlan {
-  rootSet: Record<string, unknown>;
-  rootDelete: string[];
-  runtimeSet: Record<string, unknown>;
-}
-
-export interface ServertoolFollowupMaterializationInput {
-  followupPlan: unknown;
-  entryEndpoint?: string;
-}
-
-export interface ServertoolFollowupMaterializationPlan {
-  entryEndpoint: string;
-  payloadSource: 'payload' | 'injection' | 'none';
-  payload?: Record<string, unknown> | null;
-  injection?: Record<string, unknown> | null;
-}
-
-export interface ServertoolFollowupAppendUserTextPlan {
-  text?: string | null;
-}
-
-export interface ServertoolFollowupPayloadStreamPlan {
-  stream: boolean;
-}
-
-export interface ServertoolHubFollowupPolicyShadowInput {
-  modeRaw?: string;
-  sampleRateRaw?: unknown;
-  requestId?: string;
-  payload: Record<string, unknown>;
-}
-
-export interface ServertoolHubFollowupPolicyShadowDiffItem {
-  path: string;
-  baseline: unknown;
-  candidate: unknown;
-}
-
-export interface ServertoolHubFollowupPolicyShadowPlan {
-  mode: 'off' | 'shadow' | 'enforce';
-  sampled: boolean;
-  shouldRecord: boolean;
-  shouldEnforce: boolean;
-  candidate: Record<string, unknown>;
-  diffCount: number;
-  diffPaths: string[];
-  diffHead: ServertoolHubFollowupPolicyShadowDiffItem[];
-}
-
-export interface ServertoolPreferredFinalResponseInput {
-  hasFollowupBody: boolean;
-  hasRequiresActionShape: boolean;
-  isEmptyClientResponsePayload: boolean;
-}
-
-export interface ServertoolPreferredFinalResponsePlan {
-  source: 'followup_body' | 'final_chat_response';
-}
-
-export interface ServertoolFollowupErrorEnvelopePlan {
-  upstreamStatus?: number;
-  upstreamCode?: string;
-  reason?: string;
-  terminal: boolean;
-}
-
-export interface ServertoolFollowupErrorPlan {
-  message: string;
-  code: string;
-  category: string;
-  status: number;
-  details: Record<string, unknown>;
-}
-
-export interface ServertoolBootstrapReplayPlan {
-  preflightFailure?: {
-    status?: number;
-    code: string;
-    reason?: string;
-  } | null;
-  replayPayload?: Record<string, unknown> | null;
 }
 
 export type StopMessagePersistedLookupPlanOutput = ReturnType<typeof parseStopMessagePersistedLookupPlanPayload> extends infer T
@@ -732,11 +539,11 @@ export interface ServertoolErrorPlan {
 
 export interface ServertoolMaterializationProgressPlan {
   action:
-    | 'execute_backend_then_finalize'
     | 'finalize_without_backend'
     | 'return_handler_result'
     | 'invalid_plan_missing_finalize'
-    | 'invalid_plan_result';
+    | 'invalid_plan_result'
+    | 'unsupported_backend_plan_kind';
 }
 
 export interface StopMessageBlockedReport {
@@ -808,6 +615,23 @@ export interface ServertoolHookProjection {
 export interface ServertoolHookEffectPlan {
   events: ServertoolHookEvent[];
   projection: ServertoolHookProjection;
+}
+
+export function extractTextFromChatLikeWithNative(payload: JsonObject): string {
+  const capability = 'extractServertoolTextFromChatLikeJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('extractServertoolTextFromChatLikeJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(payload));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`extractServertoolTextFromChatLikeJson native returned non-string: ${typeof resultJson}`);
+  }
+  const result = JSON.parse(resultJson) as unknown;
+  if (typeof result !== 'string') {
+    throw new Error('extractServertoolTextFromChatLikeJson native returned invalid text');
+  }
+  return result;
 }
 
 // ── Stop gateway context ────────────────────────────────────────────────────
@@ -1392,23 +1216,6 @@ export function planStopMessagePersistSnapshotWithNative(input: {
     throw new Error(`${capability} native returned invalid persist plan fields`);
   }
   return record as unknown as StopMessagePersistPlan;
-}
-
-export function readServertoolFollowupFlowIdWithNative(runtimeMetadata: unknown): string {
-  const capability = 'readServertoolFollowupFlowIdJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('readServertoolFollowupFlowIdJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(runtimeMetadata ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`readServertoolFollowupFlowIdJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (typeof parsed !== 'string') {
-    throw new Error('readServertoolFollowupFlowIdJson native returned invalid flow id');
-  }
-  return parsed.trim();
 }
 
 function readStopMessageStageModeField(value: unknown, source: string): 'on' | 'off' | 'auto' | undefined {
@@ -3038,7 +2845,6 @@ export function planServertoolHandlerRuntimeActionWithNative(input: {
   hasPlanMarkers: boolean;
   hasBackendPlan: boolean;
   backendKind?: string;
-  hasReenterPipeline: boolean;
 }): ServertoolHandlerRuntimeActionPlan {
   const capability = 'planServertoolHandlerRuntimeActionJson';
   const fn = readNativeFunction(capability);
@@ -3055,13 +2861,10 @@ export function planServertoolHandlerRuntimeActionWithNative(input: {
   }
   const record = parsed as Record<string, unknown>;
   if (
-    record.action !== 'execute_backend_vision_analysis_then_finalize' &&
-    record.action !== 'execute_backend_web_search_then_finalize' &&
     record.action !== 'finalize_without_backend' &&
     record.action !== 'return_handler_result' &&
     record.action !== 'invalid_plan_missing_finalize' &&
     record.action !== 'invalid_plan_result' &&
-    record.action !== 'backend_requires_reenter_pipeline' &&
     record.action !== 'unsupported_backend_plan_kind'
   ) {
     throw new Error('planServertoolHandlerRuntimeActionJson native returned invalid action');
@@ -3544,11 +3347,6 @@ export function planServertoolHandlerContractErrorWithNative(input:
       error: string;
     }
   | {
-      kind: 'backend_requires_reenter_pipeline';
-      requestId: string;
-      backendKind: string;
-    }
-  | {
       kind: 'unsupported_backend_plan_kind';
       requestId: string;
       backendKind: string;
@@ -3651,11 +3449,11 @@ export function planServertoolMaterializationProgressWithNative(input: {
   }
   const record = parsed as Record<string, unknown>;
   if (
-    record.action !== 'execute_backend_then_finalize' &&
     record.action !== 'finalize_without_backend' &&
     record.action !== 'return_handler_result' &&
     record.action !== 'invalid_plan_missing_finalize' &&
-    record.action !== 'invalid_plan_result'
+    record.action !== 'invalid_plan_result' &&
+    record.action !== 'unsupported_backend_plan_kind'
   ) {
     throw new Error('planServertoolMaterializationProgressJson native returned invalid action');
   }
@@ -3870,634 +3668,6 @@ export function extractStopMessageAutoCliResultSnapshotFromRequestWithNative(inp
     throw new Error('extractStopMessageAutoCliResultSnapshotFromRequestJson native returned invalid snapshot');
   }
   return parsed as Record<string, unknown>;
-}
-
-export function planServertoolBackendRoutePolicyWithNative(
-  input: ServertoolBackendRoutePolicyInput,
-): ServertoolBackendRoutePolicyOutput {
-  const capability = 'planServertoolBackendRoutePolicyJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolBackendRoutePolicyJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
-    const nativeError = resultJson as Record<string, unknown>;
-    if (typeof nativeError.message === 'string' && nativeError.message.trim()) {
-      throw new Error(nativeError.message.trim());
-    }
-  }
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolBackendRoutePolicyJson native returned non-string: ${typeof resultJson}`);
-  }
-  return JSON.parse(resultJson) as ServertoolBackendRoutePolicyOutput;
-}
-
-export function planVisionEligibilityWithNative(adapterContext: unknown): ServertoolVisionEligibilityPlan {
-  const capability = 'planVisionEligibilityJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planVisionEligibilityJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ adapterContext: adapterContext ?? null }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planVisionEligibilityJson native returned non-string: ${typeof resultJson}`);
-  }
-  const plan = JSON.parse(resultJson) as Partial<ServertoolVisionEligibilityPlan> | null;
-  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
-    throw new Error('planVisionEligibilityJson native returned invalid payload');
-  }
-  if (typeof plan.shouldRunVisionFlow !== 'boolean') {
-    throw new Error('planVisionEligibilityJson native returned invalid shouldRunVisionFlow');
-  }
-  if (typeof plan.shouldBypassStopMessage !== 'boolean') {
-    throw new Error('planVisionEligibilityJson native returned invalid shouldBypassStopMessage');
-  }
-  if (typeof plan.reason !== 'string') {
-    throw new Error('planVisionEligibilityJson native returned invalid reason');
-  }
-  return plan as ServertoolVisionEligibilityPlan;
-}
-
-export function shouldShortCircuitRequiresActionFollowupWithNative(input: {
-  flowId?: string;
-  decision?: ServertoolBackendRouteFinalizeDecision;
-  hasRequiresActionShape: boolean;
-}): boolean {
-  const capability = 'shouldShortCircuitRequiresActionFollowupJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('shouldShortCircuitRequiresActionFollowupJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`shouldShortCircuitRequiresActionFollowupJson native returned non-string: ${typeof resultJson}`);
-  }
-  if (resultJson === 'true') {
-    return true;
-  }
-  if (resultJson === 'false') {
-    return false;
-  }
-  throw new Error(`shouldShortCircuitRequiresActionFollowupJson native returned invalid bool: ${resultJson}`);
-}
-
-export function planFollowupExecutionModeWithNative(
-  input: ServertoolFollowupExecutionModeInput,
-): ServertoolFollowupExecutionModePlan {
-  const capability = 'planFollowupExecutionModeJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planFollowupExecutionModeJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planFollowupExecutionModeJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planFollowupExecutionModeJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    record.executionMode !== 'skip' &&
-    record.executionMode !== 'client_inject_only' &&
-    record.executionMode !== 'reenter'
-  ) {
-    throw new Error('planFollowupExecutionModeJson native returned invalid executionMode');
-  }
-  return {
-    ...(typeof record.flowId === 'string' && record.flowId.trim() ? { flowId: record.flowId.trim() } : {}),
-    executionMode: record.executionMode
-  };
-}
-
-export function planFollowupRuntimeActionWithNative(
-  input: ServertoolFollowupRuntimeActionInput,
-): ServertoolFollowupRuntimeActionPlan {
-  const capability = 'planFollowupRuntimeActionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planFollowupRuntimeActionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planFollowupRuntimeActionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.isStopMessageFlow !== 'boolean') {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid isStopMessageFlow');
-  }
-  if (
-    record.loopPayloadSource !== 'payload' &&
-    record.loopPayloadSource !== 'seed_loop_payload' &&
-    record.loopPayloadSource !== 'none'
-  ) {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid loopPayloadSource');
-  }
-  const autoLimit = record.autoLimit;
-  if (!autoLimit || typeof autoLimit !== 'object' || Array.isArray(autoLimit)) {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid autoLimit');
-  }
-  const autoLimitRecord = autoLimit as Record<string, unknown>;
-  if (typeof autoLimitRecord.exceeded !== 'boolean') {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid autoLimit.exceeded');
-  }
-  const clientInjectMetadata = record.clientInjectMetadata;
-  if (!clientInjectMetadata || typeof clientInjectMetadata !== 'object' || Array.isArray(clientInjectMetadata)) {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid clientInjectMetadata');
-  }
-  const clientInjectRecord = clientInjectMetadata as Record<string, unknown>;
-  if (typeof clientInjectRecord.force !== 'boolean') {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid clientInjectMetadata.force');
-  }
-  const rawAutoLimitCode =
-    typeof autoLimitRecord.code === 'string'
-      ? autoLimitRecord.code.trim()
-      : '';
-  if (rawAutoLimitCode && rawAutoLimitCode !== 'SERVERTOOL_FOLLOWUP_FAILED') {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid autoLimit.code');
-  }
-  const autoLimitCode: 'SERVERTOOL_FOLLOWUP_FAILED' | undefined =
-    rawAutoLimitCode ? 'SERVERTOOL_FOLLOWUP_FAILED' : undefined;
-  const rawAutoLimitCategory =
-    typeof autoLimitRecord.category === 'string'
-      ? autoLimitRecord.category.trim()
-      : '';
-  if (rawAutoLimitCategory && rawAutoLimitCategory !== 'INTERNAL_ERROR') {
-    throw new Error('planFollowupRuntimeActionJson native returned invalid autoLimit.category');
-  }
-  const autoLimitCategory: 'INTERNAL_ERROR' | undefined =
-    rawAutoLimitCategory ? 'INTERNAL_ERROR' : undefined;
-  return {
-    ...(typeof record.flowId === 'string' && record.flowId.trim() ? { flowId: record.flowId.trim() } : {}),
-    isStopMessageFlow: record.isStopMessageFlow as boolean,
-    loopPayloadSource: record.loopPayloadSource,
-    autoLimit: {
-      exceeded: autoLimitRecord.exceeded,
-      ...(Number.isInteger(autoLimitRecord.status) ? { status: autoLimitRecord.status as number } : {}),
-      ...(autoLimitCode
-        ? { code: autoLimitCode }
-        : {}),
-      ...(autoLimitCategory
-        ? { category: autoLimitCategory }
-        : {}),
-      ...(typeof autoLimitRecord.reason === 'string' && autoLimitRecord.reason.trim()
-        ? { reason: autoLimitRecord.reason.trim() }
-        : {}),
-      ...(Number.isInteger(autoLimitRecord.repeatCount) ? { repeatCount: autoLimitRecord.repeatCount as number } : {})
-    },
-    clientInjectMetadata: {
-      force: clientInjectRecord.force,
-      ...(typeof clientInjectRecord.source === 'string' && clientInjectRecord.source.trim()
-        ? { source: clientInjectRecord.source.trim() }
-        : {})
-    }
-  };
-}
-
-export function planFollowupAutoLimitErrorWithNative(input: {
-  flowId?: string;
-  requestId: string;
-  repeatCount?: number;
-  reason?: string;
-  status?: number;
-  code?: 'SERVERTOOL_FOLLOWUP_FAILED';
-  category?: 'INTERNAL_ERROR';
-}): ServertoolErrorPlan {
-  const capability = 'planFollowupAutoLimitErrorJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planFollowupAutoLimitErrorJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planFollowupAutoLimitErrorJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planFollowupAutoLimitErrorJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    typeof record.message !== 'string' ||
-    typeof record.code !== 'string' ||
-    typeof record.category !== 'string' ||
-    !Number.isInteger(record.status) ||
-    typeof record.details !== 'object' ||
-    record.details === null ||
-    Array.isArray(record.details)
-  ) {
-    throw new Error('planFollowupAutoLimitErrorJson native returned malformed error plan');
-  }
-  return {
-    message: record.message,
-    code: record.code,
-    category: record.category,
-    status: record.status as number,
-    details: record.details as Record<string, unknown>
-  };
-}
-
-export function planFollowupRuntimeMetadataWithNative(
-  input: ServertoolFollowupRuntimeMetadataInput,
-): ServertoolFollowupRuntimeMetadataPlan {
-  const capability = 'planFollowupRuntimeMetadataJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planFollowupRuntimeMetadataJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planFollowupRuntimeMetadataJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planFollowupRuntimeMetadataJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  const rootSet = record.rootSet;
-  const rootDelete = record.rootDelete;
-  const runtimeSet = record.runtimeSet;
-  if (!rootSet || typeof rootSet !== 'object' || Array.isArray(rootSet)) {
-    throw new Error('planFollowupRuntimeMetadataJson native returned invalid rootSet');
-  }
-  if (!Array.isArray(rootDelete) || rootDelete.some((item) => typeof item !== 'string' || !item.trim())) {
-    throw new Error('planFollowupRuntimeMetadataJson native returned invalid rootDelete');
-  }
-  if (!runtimeSet || typeof runtimeSet !== 'object' || Array.isArray(runtimeSet)) {
-    throw new Error('planFollowupRuntimeMetadataJson native returned invalid runtimeSet');
-  }
-  return {
-    rootSet: rootSet as Record<string, unknown>,
-    rootDelete: rootDelete.map((item) => item.trim()),
-    runtimeSet: runtimeSet as Record<string, unknown>
-  };
-}
-
-export function planFollowupMaterializationWithNative(
-  input: ServertoolFollowupMaterializationInput,
-): ServertoolFollowupMaterializationPlan {
-  const capability = 'planFollowupMaterializationJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planFollowupMaterializationJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planFollowupMaterializationJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planFollowupMaterializationJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.entryEndpoint !== 'string' || !record.entryEndpoint.trim()) {
-    throw new Error('planFollowupMaterializationJson native returned invalid entryEndpoint');
-  }
-  if (
-    record.payloadSource !== 'payload' &&
-    record.payloadSource !== 'injection' &&
-    record.payloadSource !== 'none'
-  ) {
-    throw new Error('planFollowupMaterializationJson native returned invalid payloadSource');
-  }
-  const payload = record.payload;
-  const injection = record.injection;
-  if (payload !== null && payload !== undefined && (typeof payload !== 'object' || Array.isArray(payload))) {
-    throw new Error('planFollowupMaterializationJson native returned invalid payload object');
-  }
-  if (injection !== null && injection !== undefined && (typeof injection !== 'object' || Array.isArray(injection))) {
-    throw new Error('planFollowupMaterializationJson native returned invalid injection object');
-  }
-  return {
-    entryEndpoint: record.entryEndpoint.trim(),
-    payloadSource: record.payloadSource,
-    payload: (payload ?? null) as Record<string, unknown> | null,
-    injection: (injection ?? null) as Record<string, unknown> | null
-  };
-}
-
-export function planFollowupAppendUserTextWithNative(followupPlan: unknown): ServertoolFollowupAppendUserTextPlan {
-  const capability = 'planFollowupAppendUserTextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planFollowupAppendUserTextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ followupPlan }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planFollowupAppendUserTextJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planFollowupAppendUserTextJson native returned invalid payload');
-  }
-  const text = (parsed as Record<string, unknown>).text;
-  if (text !== null && text !== undefined && typeof text !== 'string') {
-    throw new Error('planFollowupAppendUserTextJson native returned invalid text');
-  }
-  return { text: typeof text === 'string' && text.trim() ? text : undefined };
-}
-
-export function planFollowupPayloadStreamWithNative(stream: boolean): ServertoolFollowupPayloadStreamPlan {
-  const capability = 'planFollowupPayloadStreamJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planFollowupPayloadStreamJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ stream }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planFollowupPayloadStreamJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planFollowupPayloadStreamJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.stream !== 'boolean') {
-    throw new Error('planFollowupPayloadStreamJson native returned invalid stream');
-  }
-  return { stream: record.stream };
-}
-
-export function planHubFollowupPolicyShadowWithNative(
-  input: ServertoolHubFollowupPolicyShadowInput,
-): ServertoolHubFollowupPolicyShadowPlan {
-  const capability = 'planHubFollowupPolicyShadowJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planHubFollowupPolicyShadowJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planHubFollowupPolicyShadowJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planHubFollowupPolicyShadowJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (record.mode !== 'off' && record.mode !== 'shadow' && record.mode !== 'enforce') {
-    throw new Error('planHubFollowupPolicyShadowJson native returned invalid mode');
-  }
-  if (
-    typeof record.sampled !== 'boolean' ||
-    typeof record.shouldRecord !== 'boolean' ||
-    typeof record.shouldEnforce !== 'boolean' ||
-    !record.candidate ||
-    typeof record.candidate !== 'object' ||
-    Array.isArray(record.candidate) ||
-    !Number.isInteger(record.diffCount) ||
-    !Array.isArray(record.diffPaths) ||
-    !record.diffPaths.every((path) => typeof path === 'string') ||
-    !Array.isArray(record.diffHead)
-  ) {
-    throw new Error('planHubFollowupPolicyShadowJson native returned invalid fields');
-  }
-  const diffHead = record.diffHead.map((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new Error('planHubFollowupPolicyShadowJson native returned invalid diffHead entry');
-    }
-    const row = entry as Record<string, unknown>;
-    if (typeof row.path !== 'string') {
-      throw new Error('planHubFollowupPolicyShadowJson native returned invalid diffHead path');
-    }
-    return {
-      path: row.path,
-      baseline: row.baseline,
-      candidate: row.candidate
-    };
-  });
-  return {
-    mode: record.mode,
-    sampled: record.sampled,
-    shouldRecord: record.shouldRecord,
-    shouldEnforce: record.shouldEnforce,
-    candidate: record.candidate as Record<string, unknown>,
-    diffCount: record.diffCount as number,
-    diffPaths: record.diffPaths as string[],
-    diffHead
-  };
-}
-
-export function planPreferredFinalResponseWithNative(
-  input: ServertoolPreferredFinalResponseInput,
-): ServertoolPreferredFinalResponsePlan {
-  const capability = 'planPreferredFinalResponseJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planPreferredFinalResponseJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planPreferredFinalResponseJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planPreferredFinalResponseJson native returned invalid payload');
-  }
-  const source = (parsed as Record<string, unknown>).source;
-  if (source !== 'followup_body' && source !== 'final_chat_response') {
-    throw new Error('planPreferredFinalResponseJson native returned invalid source');
-  }
-  return { source };
-}
-
-function serializeUnknownErrorForNative(error: unknown): unknown {
-  if (!error || typeof error !== 'object' || Array.isArray(error)) {
-    return error;
-  }
-  const record: Record<string, unknown> = { ...(error as Record<string, unknown>) };
-  if (error instanceof Error && typeof record.message !== 'string') {
-    record.message = error.message;
-  }
-  return record;
-}
-
-export function planFollowupErrorEnvelopeWithNative(error: unknown): ServertoolFollowupErrorEnvelopePlan {
-  const capability = 'planFollowupErrorEnvelopeJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planFollowupErrorEnvelopeJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ error: serializeUnknownErrorForNative(error) }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planFollowupErrorEnvelopeJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planFollowupErrorEnvelopeJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.terminal !== 'boolean') {
-    throw new Error('planFollowupErrorEnvelopeJson native returned invalid terminal');
-  }
-  const upstreamStatus = record.upstreamStatus;
-  const upstreamCode = record.upstreamCode;
-  const reason = record.reason;
-  return {
-    ...(Number.isInteger(upstreamStatus) ? { upstreamStatus: upstreamStatus as number } : {}),
-    ...(typeof upstreamCode === 'string' && upstreamCode.trim() ? { upstreamCode: upstreamCode.trim() } : {}),
-    ...(typeof reason === 'string' && reason.trim() ? { reason: reason.trim() } : {}),
-    terminal: record.terminal
-  };
-}
-
-function parseServertoolFollowupErrorPlan(capability: string, resultJson: unknown): ServertoolFollowupErrorPlan {
-  if (typeof resultJson !== 'string') {
-    throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${capability} native returned invalid payload`);
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    typeof record.message !== 'string' ||
-    typeof record.code !== 'string' ||
-    typeof record.category !== 'string' ||
-    !Number.isInteger(record.status) ||
-    !record.details ||
-    typeof record.details !== 'object' ||
-    Array.isArray(record.details)
-  ) {
-    throw new Error(`${capability} native returned invalid fields`);
-  }
-  return {
-    message: record.message,
-    code: record.code,
-    category: record.category,
-    status: record.status as number,
-    details: record.details as Record<string, unknown>
-  };
-}
-
-export function planEmptyFollowupErrorWithNative(input: {
-  flowId?: string;
-  requestId: string;
-  lastErrorMessage?: string;
-  originalResponseWasEmpty?: boolean;
-}): ServertoolFollowupErrorPlan {
-  const capability = 'planEmptyFollowupErrorJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planEmptyFollowupErrorJson native unavailable');
-  }
-  return parseServertoolFollowupErrorPlan(capability, fn(JSON.stringify({
-    ...input,
-    originalResponseWasEmpty: input.originalResponseWasEmpty === true
-  })));
-}
-
-export function planMissingFollowupPayloadErrorWithNative(input: {
-  flowId?: string;
-  requestId: string;
-  followupPlan: unknown;
-  adapterContext: unknown;
-}): ServertoolFollowupErrorPlan {
-  const capability = 'planMissingFollowupPayloadErrorJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planMissingFollowupPayloadErrorJson native unavailable');
-  }
-  return parseServertoolFollowupErrorPlan(capability, fn(JSON.stringify(input)));
-}
-
-export function planBootstrapReplayWithNative(input: {
-  preflightBody?: unknown;
-  replaySeed?: unknown;
-  adapterContext?: unknown;
-}): ServertoolBootstrapReplayPlan {
-  const capability = 'planBootstrapReplayJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planBootstrapReplayJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({
-    preflightBody: input.preflightBody ?? null,
-    replaySeed: input.replaySeed ?? null,
-    adapterContext: input.adapterContext ?? null
-  }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planBootstrapReplayJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planBootstrapReplayJson native returned invalid payload');
-  }
-  const record = parsed as Record<string, unknown>;
-  const preflightFailure = record.preflightFailure;
-  const replayPayload = record.replayPayload;
-  if (
-    preflightFailure !== null &&
-    preflightFailure !== undefined &&
-    (typeof preflightFailure !== 'object' || Array.isArray(preflightFailure))
-  ) {
-    throw new Error('planBootstrapReplayJson native returned invalid preflightFailure');
-  }
-  if (
-    replayPayload !== null &&
-    replayPayload !== undefined &&
-    (typeof replayPayload !== 'object' || Array.isArray(replayPayload))
-  ) {
-    throw new Error('planBootstrapReplayJson native returned invalid replayPayload');
-  }
-  let normalizedFailure: ServertoolBootstrapReplayPlan['preflightFailure'] = null;
-  if (preflightFailure && typeof preflightFailure === 'object' && !Array.isArray(preflightFailure)) {
-    const failureRecord = preflightFailure as Record<string, unknown>;
-    if (typeof failureRecord.code !== 'string' || !failureRecord.code.trim()) {
-      throw new Error('planBootstrapReplayJson native returned invalid preflight code');
-    }
-    normalizedFailure = {
-      ...(Number.isInteger(failureRecord.status) ? { status: failureRecord.status as number } : {}),
-      code: failureRecord.code.trim(),
-      ...(typeof failureRecord.reason === 'string' && failureRecord.reason.trim()
-        ? { reason: failureRecord.reason.trim() }
-        : {})
-    };
-  }
-  return {
-    preflightFailure: normalizedFailure,
-    replayPayload: (replayPayload ?? null) as Record<string, unknown> | null
-  };
-}
-
-export function extractTextFromChatLikeWithNative(payload: unknown): string {
-  const capability = 'extractServertoolTextFromChatLikeJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('extractServertoolTextFromChatLikeJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(payload));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`extractServertoolTextFromChatLikeJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (typeof parsed !== 'string') {
-    throw new Error(`extractServertoolTextFromChatLikeJson native returned invalid payload: ${typeof parsed}`);
-  }
-  return parsed;
-}
-
-export function extractCurrentAssistantStopTextWithNative(payload: unknown): string {
-  const capability = 'extractCurrentAssistantStopTextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('extractCurrentAssistantStopTextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(payload));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`extractCurrentAssistantStopTextJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (typeof parsed !== 'string') {
-    throw new Error(`extractCurrentAssistantStopTextJson native returned invalid payload: ${typeof parsed}`);
-  }
-  return parsed;
 }
 
 export function extractCurrentAssistantReasoningStopArgumentsWithNative(

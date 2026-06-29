@@ -205,8 +205,7 @@ function buildHandlerRuntimeActionInput(
     hasExecutionFlowId: typeof execution?.flowId === 'string',
     hasPlanMarkers: typeof planned.flowId === 'string' || planned.backend !== undefined || planned.finalize !== undefined,
     hasBackendPlan: planned.backend !== undefined,
-    ...(typeof backend?.kind === 'string' ? { backendKind: backend.kind } : {}),
-    hasReenterPipeline: false
+    ...(typeof backend?.kind === 'string' ? { backendKind: backend.kind } : {})
   };
 }
 
@@ -218,17 +217,11 @@ export const materializeServertoolPlannedResult = async (
     buildHandlerRuntimeActionInput(planned as Partial<ServerToolHandlerPlan & ServerToolHandlerResult>, options)
   );
   if (
-    actionPlan.action === 'execute_backend_vision_analysis_then_finalize' ||
-    actionPlan.action === 'execute_backend_web_search_then_finalize' ||
     actionPlan.action === 'unsupported_backend_plan_kind' ||
     actionPlan.action === 'finalize_without_backend'
   ) {
     const plan = planned as ServerToolHandlerPlan;
-    if (
-      actionPlan.action === 'execute_backend_vision_analysis_then_finalize' ||
-      actionPlan.action === 'execute_backend_web_search_then_finalize' ||
-      actionPlan.action === 'unsupported_backend_plan_kind'
-    ) {
+    if (actionPlan.action === 'unsupported_backend_plan_kind') {
       throw buildProviderProtocolError(
         planServertoolHandlerContractErrorWithNative({
           kind: 'unsupported_backend_plan_kind',

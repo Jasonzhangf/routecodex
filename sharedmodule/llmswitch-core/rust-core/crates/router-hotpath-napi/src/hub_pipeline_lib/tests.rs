@@ -1693,20 +1693,9 @@ fn response_tool_call_with_runtime_callbacks_returns_servertool_executor_effect_
         })
         .unwrap();
 
-    let effect = output
-        .effect_plan
-        .effects
-        .iter()
-        .find(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-                && effect.payload["action"] == json!("requireRuntimeExecutor")
-        })
-        .unwrap();
-    assert_eq!(effect.payload["reason"], json!("tool_call_dispatch"));
-    assert_eq!(
-        effect.payload["requestId"],
-        json!("req-servertool-tool-call-effect-1")
-    );
+    assert!(!output.effect_plan.effects.iter().any(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+    }));
 }
 
 #[test]

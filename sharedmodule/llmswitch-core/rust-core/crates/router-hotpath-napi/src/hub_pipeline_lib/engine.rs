@@ -812,21 +812,6 @@ fn response_requires_submit_tool_outputs(payload: &Value) -> bool {
         .is_some_and(|kind| kind == "submit_tool_outputs")
 }
 
-fn response_has_tool_calls(payload: &Value) -> bool {
-    payload
-        .get("choices")
-        .and_then(Value::as_array)
-        .is_some_and(|choices| {
-            choices.iter().any(|choice| {
-                choice
-                    .get("message")
-                    .and_then(|message| message.get("tool_calls"))
-                    .and_then(Value::as_array)
-                    .is_some_and(|tool_calls| !tool_calls.is_empty())
-            })
-        })
-}
-
 struct ServertoolRespStoplessHookOutput {
     payload: Value,
     flow_id: Option<String>,
@@ -1029,41 +1014,6 @@ fn plan_resp_chatprocess_03_servertool_runtime_actions(
             }),
         });
     }
-    if !should_plan_servertool_runtime_action(metadata) {
-        return;
-    }
-    let has_tool_calls = response_has_tool_calls(chatprocess_payload);
-    if has_tool_calls && !stop_gateway_eligible {
-        effects.push(HubPipelineEffect {
-            kind: HubPipelineEffectKind::ServertoolRuntimeAction,
-            payload: serde_json::json!({
-                "action": "requireRuntimeExecutor",
-                "reason": "tool_call_dispatch",
-                "requestId": request_id,
-                "payload": chatprocess_payload.clone(),
-            }),
-        });
-    }
-}
-
-fn should_plan_servertool_runtime_action(metadata: &Value) -> bool {
-    metadata
-        .get("runtimeEffects")
-        .and_then(Value::as_object)
-        .is_some_and(|runtime| {
-            runtime
-                .get("providerInvoker")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-                || runtime
-                    .get("reenterPipeline")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                || runtime
-                    .get("clientInjectDispatch")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-        })
 }
 
 fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {

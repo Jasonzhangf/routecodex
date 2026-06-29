@@ -6,15 +6,13 @@ use crate::stopless_prompt::{
     StoplessContinuationTrigger,
 };
 
-/// The three outcome types for servertool interception in HubRespChatProcess03Governed.
+/// Outcome types for servertool interception in HubRespChatProcess03Governed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ServertoolOutcome {
     /// stop_message_auto / servertool_fixture / web_search / vision_auto ->
     /// client-visible exec_command CLI projection
     ClientExecCliProjection,
-    /// Retired backend-route reenter outcome kept only for explicit fail-fast guards.
-    BackendRouteReenter,
     /// Retired server-IO-only outcome kept only for explicit fail-fast guards.
     ServerIoInternal,
 }
@@ -39,16 +37,6 @@ pub struct ServertoolClientExecCliProjection01Planned {
     pub input: Value,
     pub repeat_count: u32,
     pub max_repeats: u32,
-    pub reasoning_text: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ServertoolBackendRouteHint01Planned {
-    pub tool_name: String,
-    pub flow_id: String,
-    pub input: Value,
-    pub route_hint: String,
     pub reasoning_text: Option<String>,
 }
 
@@ -217,25 +205,6 @@ pub fn build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_
         input: input.input,
         repeat_count,
         max_repeats,
-        reasoning_text: input.reasoning_text,
-    })
-}
-
-pub fn build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
-    input: ServertoolHubRespChatProcess03Input,
-) -> Result<ServertoolBackendRouteHint01Planned, ServertoolOutcomeError> {
-    validate_outcome(&input.tool_name, ServertoolOutcome::BackendRouteReenter)?;
-    validate_no_internal_carrier(&input.input)?;
-    let flow_id = resolve_flow_id(&input, "servertool_backend_route")?;
-    Ok(ServertoolBackendRouteHint01Planned {
-        route_hint: match input.tool_name.as_str() {
-            "web_search" => "servertool_backend_route:web_search".to_string(),
-            "vision_auto" => "servertool_backend_route:vision_auto".to_string(),
-            _ => return Err(ServertoolOutcomeError::InvalidField("toolName")),
-        },
-        tool_name: input.tool_name,
-        flow_id,
-        input: input.input,
         reasoning_text: input.reasoning_text,
     })
 }
@@ -646,25 +615,6 @@ mod tests {
     }
 
     #[test]
-    fn memory_cache_auto_is_rejected_by_backend_route_builder() {
-        let err = build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
-            ServertoolHubRespChatProcess03Input {
-                tool_name: "memory_cache_auto".to_string(),
-                flow_id: None,
-                input: json!({"key":"x"}),
-                repeat_count: None,
-                max_repeats: None,
-                reasoning_text: None,
-            },
-        )
-        .expect_err("memory_cache_auto must not be backend route");
-        assert_eq!(
-            err,
-            ServertoolOutcomeError::UnsupportedTool("memory_cache_auto".to_string())
-        );
-    }
-
-    #[test]
     fn memory_cache_auto_is_rejected_by_server_io_builder() {
         let err = build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03(
             ServertoolHubRespChatProcess03Input {
@@ -734,52 +684,6 @@ mod tests {
         assert_eq!(
             err,
             ServertoolOutcomeError::DeniedInternalCarrier("metadata")
-        );
-    }
-
-    #[test]
-    fn web_search_backend_route_hint_is_retired() {
-        let err = build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
-            ServertoolHubRespChatProcess03Input {
-                tool_name: "web_search".to_string(),
-                flow_id: None,
-                input: json!({"query":"x"}),
-                repeat_count: None,
-                max_repeats: None,
-                reasoning_text: None,
-            },
-        )
-        .expect_err("web_search backend route builder is retired");
-        assert_eq!(
-            err,
-            ServertoolOutcomeError::WrongOutcome {
-                tool_name: "web_search".to_string(),
-                expected: ServertoolOutcome::BackendRouteReenter,
-                actual: ServertoolOutcome::ClientExecCliProjection
-            }
-        );
-    }
-
-    #[test]
-    fn web_search_backend_route_hint_rejects_before_payload_processing() {
-        let err = build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03(
-            ServertoolHubRespChatProcess03Input {
-                tool_name: "web_search".to_string(),
-                flow_id: None,
-                input: json!({"__rt":{"requestId":"req_internal"}}),
-                repeat_count: None,
-                max_repeats: None,
-                reasoning_text: None,
-            },
-        )
-        .expect_err("retired backend route must reject before payload processing");
-        assert_eq!(
-            err,
-            ServertoolOutcomeError::WrongOutcome {
-                tool_name: "web_search".to_string(),
-                expected: ServertoolOutcome::BackendRouteReenter,
-                actual: ServertoolOutcome::ClientExecCliProjection
-            }
         );
     }
 

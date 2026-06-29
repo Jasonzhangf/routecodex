@@ -85,25 +85,6 @@ export interface ServerToolOrchestrationOptions {
   entryEndpoint: string;
   providerProtocol: string;
   stageRecorder?: StageRecorder;
-  reenterPipeline?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<{
-    body?: JsonObject;
-    sseStream?: unknown;
-    format?: string;
-  }>;
-  clientInjectDispatch?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<{
-    ok: boolean;
-    reason?: string;
-  }>;
 }
 
 export interface ServerToolOrchestrationResult {
@@ -183,9 +164,6 @@ export async function runServerToolOrchestrationShell(
     entryEndpoint: options.entryEndpoint,
     requestId: options.requestId,
     providerProtocol,
-    ...(typeof options.clientInjectDispatch === 'function'
-      ? { clientInjectDispatch: options.clientInjectDispatch }
-      : {}),
     onAutoHookTrace: logAutoHookTrace
   };
 

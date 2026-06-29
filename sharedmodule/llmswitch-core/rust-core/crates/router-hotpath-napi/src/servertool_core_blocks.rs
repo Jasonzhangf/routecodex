@@ -3,23 +3,6 @@
 
 use servertool_core::auto_hook_execution_contract;
 use servertool_core::auto_hook_queue_contract;
-use servertool_core::backend_route_contract::{
-    plan_bootstrap_replay, plan_empty_followup_error, plan_followup_append_user_text,
-    plan_followup_auto_limit_error, plan_followup_error_envelope, plan_followup_execution_mode,
-    plan_followup_materialization, plan_followup_payload_stream, plan_followup_runtime_action,
-    plan_followup_runtime_metadata, plan_hub_followup_policy_shadow,
-    plan_missing_followup_payload_error, plan_preferred_final_response,
-    plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03, plan_vision_eligibility,
-    should_short_circuit_requires_action_followup, ServertoolBackendRoutePolicyInput,
-    ServertoolBackendRouteRequiresActionShortCircuitInput, ServertoolBootstrapReplayPlanInput,
-    ServertoolEmptyFollowupErrorPlanInput, ServertoolFollowupAppendUserTextInput,
-    ServertoolFollowupAutoLimitErrorPlanInput, ServertoolFollowupErrorPlanInput,
-    ServertoolFollowupExecutionModeInput, ServertoolFollowupMaterializationInput,
-    ServertoolFollowupPayloadStreamPlanInput, ServertoolFollowupRuntimeActionInput,
-    ServertoolFollowupRuntimeMetadataInput, ServertoolHubFollowupPolicyShadowInput,
-    ServertoolMissingFollowupPayloadErrorPlanInput, ServertoolPreferredFinalResponseInput,
-    ServertoolVisionEligibilityInput,
-};
 use servertool_core::blocked_report_contract;
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
@@ -675,18 +658,6 @@ pub fn plan_servertool_handler_contract_error_json(input_json: &str) -> Result<S
             )
             .map_err(|e| format!("serialize handler failed error plan: {e}"))
         }
-        "backend_requires_reenter_pipeline" => {
-            let parsed: execution_handler_contract::ServertoolBackendRequiresReenterPipelineErrorInput =
-                serde_json::from_value(input).map_err(|e| {
-                    format!("deserialize backend requires reenter pipeline error input: {e}")
-                })?;
-            serde_json::to_string(
-                &execution_handler_contract::plan_servertool_backend_requires_reenter_pipeline_error(
-                    &parsed,
-                ),
-            )
-            .map_err(|e| format!("serialize backend requires reenter pipeline error plan: {e}"))
-        }
         "unsupported_backend_plan_kind" => {
             let parsed: execution_handler_contract::ServertoolUnsupportedBackendPlanKindErrorInput =
                 serde_json::from_value(input)
@@ -1200,131 +1171,6 @@ pub fn extract_stop_message_auto_cli_result_snapshot_from_request_json(
     .map_err(|e| format!("serialize stopless cli result snapshot: {e}"))
 }
 
-pub fn plan_servertool_backend_route_policy_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolBackendRoutePolicyInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize backend route input: {e}"))?;
-    let output = plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03(input)
-        .map_err(|e| e.to_string())?;
-    serde_json::to_string(&output).map_err(|e| format!("serialize backend route plan: {e}"))
-}
-
-pub fn plan_vision_eligibility_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolVisionEligibilityInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize vision eligibility input: {e}"))?;
-    let output = plan_vision_eligibility(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize vision eligibility plan: {e}"))
-}
-
-pub fn should_short_circuit_requires_action_followup_json(
-    input_json: &str,
-) -> Result<String, String> {
-    let input: ServertoolBackendRouteRequiresActionShortCircuitInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize backend route requires_action input: {e}"))?;
-    Ok(if should_short_circuit_requires_action_followup(input) {
-        "true"
-    } else {
-        "false"
-    }
-    .to_string())
-}
-
-pub fn plan_followup_execution_mode_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolFollowupExecutionModeInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup execution mode input: {e}"))?;
-    let output = plan_followup_execution_mode(input).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output).map_err(|e| format!("serialize execution mode plan: {e}"))
-}
-
-pub fn plan_followup_runtime_action_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolFollowupRuntimeActionInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup runtime action input: {e}"))?;
-    let output = plan_followup_runtime_action(input).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output).map_err(|e| format!("serialize runtime action plan: {e}"))
-}
-
-pub fn plan_followup_auto_limit_error_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolFollowupAutoLimitErrorPlanInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup auto-limit error input: {e}"))?;
-    let output = plan_followup_auto_limit_error(input).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output).map_err(|e| format!("serialize followup auto-limit error: {e}"))
-}
-
-pub fn plan_followup_runtime_metadata_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolFollowupRuntimeMetadataInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup runtime metadata input: {e}"))?;
-    let output = plan_followup_runtime_metadata(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize runtime metadata plan: {e}"))
-}
-
-pub fn plan_followup_materialization_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolFollowupMaterializationInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup materialization input: {e}"))?;
-    let output = plan_followup_materialization(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize materialization plan: {e}"))
-}
-
-pub fn plan_followup_payload_stream_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolFollowupPayloadStreamPlanInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup payload stream input: {e}"))?;
-    let output = plan_followup_payload_stream(input);
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize followup payload stream plan: {e}"))
-}
-
-pub fn plan_hub_followup_policy_shadow_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolHubFollowupPolicyShadowInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize hub followup policy shadow input: {e}"))?;
-    let output = plan_hub_followup_policy_shadow(input);
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize hub followup policy shadow plan: {e}"))
-}
-
-pub fn plan_followup_append_user_text_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolFollowupAppendUserTextInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup append user text input: {e}"))?;
-    let output = plan_followup_append_user_text(input);
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize followup append user text plan: {e}"))
-}
-
-pub fn plan_preferred_final_response_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolPreferredFinalResponseInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize preferred final response input: {e}"))?;
-    let output = plan_preferred_final_response(input);
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize preferred final response plan: {e}"))
-}
-
-pub fn plan_followup_error_envelope_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolFollowupErrorPlanInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup error envelope input: {e}"))?;
-    let output = plan_followup_error_envelope(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize followup error envelope: {e}"))
-}
-
-pub fn plan_empty_followup_error_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolEmptyFollowupErrorPlanInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize empty followup error input: {e}"))?;
-    let output = plan_empty_followup_error(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize empty followup error plan: {e}"))
-}
-
-pub fn plan_missing_followup_payload_error_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolMissingFollowupPayloadErrorPlanInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize missing followup payload error input: {e}"))?;
-    let output = plan_missing_followup_payload_error(input);
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize missing followup payload error plan: {e}"))
-}
-
-pub fn plan_bootstrap_replay_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolBootstrapReplayPlanInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize bootstrap replay input: {e}"))?;
-    let output = plan_bootstrap_replay(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize bootstrap replay plan: {e}"))
-}
-
 pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, String> {
     let payload: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize text extraction payload: {e}"))?;
@@ -1497,48 +1343,8 @@ mod tests {
         let summary = format_stop_message_compare_context_json(&raw).expect("summary");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&summary).expect("json"),
-            json!("decision=trigger reason=native_decision armed=true mode=auto allowModeOnly=false max=3 used=1 left=2 active=true stopEligible=true captured=true compaction=false seed=true obs=none stable=2 toolSig=none")
+            json!("decision=trigger reason=native_decision armed=true mode=auto allowModeOnly=false max=3 used=1 left=2 active=true stopEligible=true compaction=false seed=true obs=none stable=2 toolSig=none")
         );
-    }
-
-    #[test]
-    fn backend_route_policy_for_web_search_is_retired_at_servertool_core_bridge() {
-        let err = plan_servertool_backend_route_policy_json(
-            &json!({
-                "toolName": "web_search",
-                "input": { "query": "routecodex" }
-            })
-            .to_string(),
-        )
-        .expect_err("web_search backend route must be retired");
-        assert!(err.contains("SERVERTOOL_OUTCOME_MISMATCH"));
-    }
-
-    #[test]
-    fn plans_vision_eligibility_via_servertool_core_bridge() {
-        let raw = plan_vision_eligibility_json(
-            &json!({
-                "adapterContext": {
-                    "providerProtocol": "openai-chat",
-                    "routeHint": "default",
-                    "capturedChatRequest": {
-                        "messages": [{
-                            "role": "user",
-                            "content": [
-                                { "type": "text", "text": "describe" },
-                                { "type": "image_url", "image_url": { "url": "https://example.com/a.png" } }
-                            ]
-                        }]
-                    }
-                }
-            })
-            .to_string(),
-        )
-        .expect("vision eligibility");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["shouldRunVisionFlow"], true);
-        assert_eq!(parsed["shouldBypassStopMessage"], true);
-        assert_eq!(parsed["reason"], "image_attachment");
     }
 
     #[test]
@@ -1659,247 +1465,6 @@ mod tests {
     }
 
     #[test]
-    fn backend_route_policy_bridge_rejects_client_exec_tool() {
-        let err = plan_servertool_backend_route_policy_json(
-            &json!({
-                "toolName": "stop_message_auto",
-                "input": {}
-            })
-            .to_string(),
-        )
-        .expect_err("stop_message_auto is not backend route");
-        assert!(err.contains("SERVERTOOL_OUTCOME_MISMATCH"));
-    }
-
-    #[test]
-    fn requires_action_short_circuit_bridge_returns_bool_json() {
-        let raw = should_short_circuit_requires_action_followup_json(
-            &json!({
-                "flowId": "stop_message_flow",
-                "decision": { "ignoreRequiresActionFollowup": true },
-                "hasRequiresActionShape": true
-            })
-            .to_string(),
-        )
-        .expect("requires action bridge");
-        assert_eq!(raw, "true");
-    }
-
-    #[test]
-    fn plans_followup_execution_mode_via_servertool_core_bridge() {
-        let raw = plan_followup_execution_mode_json(
-            &json!({
-                "flowId": "continue_execution_flow",
-                "decision": {
-                    "outcomeMode": "reenter",
-                    "noFollowup": false,
-                    "clientInjectOnly": false
-                },
-                "metadata": {
-                    "clientInjectOnly": " true "
-                },
-                "metadataClientInjectOnly": false,
-                "clientInjectSource": null
-            })
-            .to_string(),
-        )
-        .expect("execution mode bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["flowId"], "continue_execution_flow");
-        assert_eq!(parsed["executionMode"], "client_inject_only");
-    }
-
-    #[test]
-    fn plans_followup_runtime_action_via_servertool_core_bridge() {
-        let raw = plan_followup_runtime_action_json(
-            &json!({
-                "flowId": "stop_message_flow",
-                "decision": {
-                    "outcomeMode": "reenter",
-                    "noFollowup": false,
-                    "autoLimit": true,
-                    "clientInjectOnly": true,
-                    "seedLoopPayload": true,
-                    "clientInjectSource": "servertool.continue_execution"
-                },
-                "metadata": {
-                    "clientInjectOnly": false,
-                    "clientInjectSource": " servertool.continue_execution "
-                },
-                "metadataClientInjectOnly": false,
-                "hasFollowupPayloadRaw": false,
-                "loopStateRepeatCount": 3,
-                "clientInjectSource": null
-            })
-            .to_string(),
-        )
-        .expect("runtime action bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["flowId"], "stop_message_flow");
-        assert_eq!(parsed["loopPayloadSource"], "seed_loop_payload");
-        assert_eq!(parsed["autoLimit"]["exceeded"], true);
-        assert_eq!(parsed["autoLimit"]["status"], 502);
-        assert_eq!(parsed["clientInjectMetadata"]["force"], true);
-        assert_eq!(
-            parsed["clientInjectMetadata"]["source"],
-            "servertool.continue_execution"
-        );
-    }
-
-    #[test]
-    fn plans_followup_auto_limit_error_via_servertool_core_bridge() {
-        let raw = plan_followup_auto_limit_error_json(
-            &json!({
-                "flowId": "continue_execution_flow",
-                "requestId": "req-auto-limit",
-                "repeatCount": 3,
-                "reason": "followup_auto_limit_hit",
-                "status": 502,
-                "code": "SERVERTOOL_FOLLOWUP_FAILED",
-                "category": "INTERNAL_ERROR"
-            })
-            .to_string(),
-        )
-        .expect("followup auto-limit error bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(
-            parsed["message"],
-            "[servertool] followup auto limit reached before stopless contract was satisfied"
-        );
-        assert_eq!(parsed["code"], "SERVERTOOL_FOLLOWUP_FAILED");
-        assert_eq!(parsed["category"], "INTERNAL_ERROR");
-        assert_eq!(parsed["status"], 502);
-        assert_eq!(parsed["details"]["flowId"], "continue_execution_flow");
-        assert_eq!(parsed["details"]["requestId"], "req-auto-limit");
-        assert_eq!(parsed["details"]["repeatCount"], 3);
-        assert_eq!(parsed["details"]["reason"], "followup_auto_limit_hit");
-    }
-
-    #[test]
-    fn plans_followup_runtime_metadata_via_servertool_core_bridge() {
-        let raw = plan_followup_runtime_metadata_json(
-            &json!({
-                "metadata": {},
-                "metadataRuntime": null,
-                "adapterContext": {
-                    "routecodexPortMode": "router",
-                    "routeId": "coding"
-                },
-                "adapterRuntime": null,
-                "loopState": {
-                    "repeatCount": 1
-                },
-                "originalEntryEndpoint": "/v1/responses",
-                "followupEntryEndpoint": "/v1/responses"
-            })
-            .to_string(),
-        )
-        .expect("runtime metadata bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["rootSet"]["routeHint"], "coding");
-        assert_eq!(parsed["rootSet"]["stream"], false);
-        assert_eq!(parsed["runtimeSet"]["serverToolFollowup"], true);
-        assert_eq!(
-            parsed["runtimeSet"]["serverToolLoopState"]["repeatCount"],
-            1
-        );
-        assert_eq!(parsed["rootDelete"].as_array().map(Vec::len), Some(0));
-    }
-
-    #[test]
-    fn plans_followup_materialization_via_servertool_core_bridge() {
-        let raw = plan_followup_materialization_json(
-            &json!({
-                "followupPlan": {
-                    "entryEndpoint": " /v1/responses ",
-                    "injection": {
-                        "ops": [{ "op": "append_user_text", "text": "next" }]
-                    }
-                },
-                "entryEndpoint": "/v1/chat/completions"
-            })
-            .to_string(),
-        )
-        .expect("materialization bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["entryEndpoint"], "/v1/responses");
-        assert_eq!(parsed["payloadSource"], "injection");
-        assert!(parsed["payload"].is_null());
-        assert!(parsed["injection"]["ops"].is_array());
-    }
-
-    #[test]
-    fn plans_followup_error_envelope_via_servertool_core_bridge() {
-        let raw = plan_followup_error_envelope_json(
-            &json!({
-                "error": {
-                    "details": {
-                        "statusCode": 429.9,
-                        "upstreamCode": "HTTP_429",
-                        "reason": "rate limit"
-                    }
-                }
-            })
-            .to_string(),
-        )
-        .expect("followup error envelope bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert_eq!(parsed["upstreamStatus"], 429);
-        assert_eq!(parsed["upstreamCode"], "HTTP_429");
-        assert_eq!(parsed["reason"], "rate limit");
-        assert_eq!(parsed["terminal"], true);
-    }
-
-    #[test]
-    fn plans_bootstrap_replay_via_servertool_core_bridge() {
-        let raw = plan_bootstrap_replay_json(
-            &json!({
-                "preflightBody": { "ok": true },
-                "replaySeed": {
-                    "model": "gpt-test",
-                    "messages": [{ "role": "user", "content": "hello" }],
-                    "parameters": { "temperature": 0.1 }
-                },
-                "adapterContext": null
-            })
-            .to_string(),
-        )
-        .expect("bootstrap replay bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert!(parsed["preflightFailure"].is_null());
-        assert_eq!(parsed["replayPayload"]["model"], "gpt-test");
-        assert_eq!(parsed["replayPayload"]["messages"][0]["role"], "user");
-        assert_eq!(parsed["replayPayload"]["parameters"]["temperature"], 0.1);
-    }
-
-    #[test]
-    fn plans_bootstrap_replay_from_adapter_context_seed_via_servertool_core_bridge() {
-        let raw = plan_bootstrap_replay_json(
-            &json!({
-                "preflightBody": { "ok": true },
-                "replaySeed": null,
-                "adapterContext": {
-                    "capturedChatRequest": {
-                        "model": "gpt-adapter",
-                        "messages": [{ "role": "user", "content": "hello from adapter" }],
-                        "parameters": { "temperature": 0.3 }
-                    }
-                }
-            })
-            .to_string(),
-        )
-        .expect("bootstrap replay bridge");
-        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("json");
-        assert!(parsed["preflightFailure"].is_null());
-        assert_eq!(parsed["replayPayload"]["model"], "gpt-adapter");
-        assert_eq!(
-            parsed["replayPayload"]["messages"][0]["content"],
-            "hello from adapter"
-        );
-        assert_eq!(parsed["replayPayload"]["parameters"]["temperature"], 0.3);
-    }
-
-    #[test]
     fn extracts_text_from_chat_like_via_servertool_core_bridge() {
         let raw = extract_text_from_chat_like_json(
             &json!({
@@ -1958,15 +1523,11 @@ mod tests {
     fn detects_stop_message_auto_cli_result_via_servertool_core_bridge() {
         let raw = has_stop_message_auto_cli_result_in_request_json(
             &json!({
-                "adapterContext": {
-                    "__raw_request_body": {
-                        "input": [{
-                            "type": "function_call_output",
-                            "call_id": "call_servertool",
-                            "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
-                        }]
-                    }
-                }
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_servertool",
+                    "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\"}"
+                }]
             })
             .to_string(),
         )
@@ -2158,25 +1719,20 @@ mod tests {
 
     #[test]
     fn resolves_runtime_stop_message_state_from_adapter_context_via_servertool_core_bridge() {
-        let command = "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3}'";
         let raw = resolve_runtime_stop_message_state_from_adapter_context_json(
             &json!({
-                "adapterContext": {
-                    "__raw_request_body": {
-                        "input": [{
-                            "type": "function_call",
-                            "call_id": "call_servertool_cli",
-                            "name": "exec_command",
-                            "arguments": json!({ "cmd": command }).to_string()
-                        }],
-                        "tool_outputs": [{
-                            "type": "function_call_output",
-                            "call_id": "call_servertool_cli",
-                            "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"continue from output\",\"repeatCount\":2,\"maxRepeats\":4}"
-                        }]
+                "runtimeMetadata": {
+                    "metadataCenterSnapshot": {
+                        "runtimeControl": {
+                            "stopless": {
+                                "flowId": "stop_message_flow",
+                                "continuationPrompt": "continue from output",
+                                "repeatCount": 1,
+                                "maxRepeats": 4
+                            }
+                        }
                     }
-                },
-                "runtimeMetadata": null
+                }
             })
             .to_string(),
         )
@@ -2185,7 +1741,7 @@ mod tests {
         assert_eq!(parsed["text"], "continue from output");
         assert_eq!(parsed["maxRepeats"], 4);
         assert_eq!(parsed["used"], 1);
-        assert_eq!(parsed["source"], "client_exec_result");
+        assert_eq!(parsed["source"], "servertool.stop_message");
         assert_eq!(parsed["stageMode"], "on");
     }
 
@@ -2669,7 +2225,7 @@ mod tests {
     fn plans_stopless_decision_context_signals_via_servertool_core_bridge() {
         let output = plan_stopless_decision_context_signals_json(
             &json!({
-                "adapterContext": {
+                "runtimeMetadata": {
                     "runtime_control": {
                         "stopMessageEnabled": false
                     },
@@ -3060,8 +2616,7 @@ fn plans_servertool_handler_runtime_action_via_servertool_core_bridge() {
             "hasExecutionFlowId": false,
             "hasPlanMarkers": true,
             "hasBackendPlan": true,
-            "backendKind": "vision_analysis",
-            "hasReenterPipeline": false
+            "backendKind": "vision_analysis"
         })
         .to_string(),
     )
@@ -3652,12 +3207,7 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
         &serde_json::json!({
             "hasPendingInjection": false,
             "isStopMessageFlow": false,
-            "executionContext": {
-                "servertoolCliProjection": {
-                    "flowId": "servertool_cli_projection"
-                }
-            },
-            "hasServertoolCliProjectionContext": false,
+            "hasServertoolCliProjectionContext": true,
             "stoplessAction": "continue"
         })
         .to_string(),
@@ -3690,28 +3240,23 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
 
 #[test]
 fn plans_stopless_cli_projection_context_via_servertool_core_bridge() {
-    let plan = plan_stopless_cli_projection_context_json(
-        &serde_json::json!({
-            "executionContext": {
-                "serverToolLoopState": {
+        let plan = plan_stopless_cli_projection_context_json(
+            &serde_json::json!({
+            "metadataWritePlan": {
+                "stopless": {
                     "repeatCount": 4,
                     "maxRepeats": 6,
                     "triggerHint": " loop-hint ",
                     "schemaFeedback": {
                         "reason_code": "loop_feedback"
                     }
-                },
-                "stopSchemaTriggerHint": "context-hint",
-                "stopSchemaFeedback": {
-                    "reason_code": "context_feedback"
                 }
             },
             "stoplessControl": {
-                "triggerHint": "control-hint"
-            },
-            "runtimeSnapshot": {
-                "used": 1,
-                "maxRepeats": 3
+                "triggerHint": "control-hint",
+                "schemaFeedback": {
+                    "reason_code": "control_feedback"
+                }
             },
             "chatStopText": "来自 chat 的 stop 文本",
             "adapterStopText": "来自 adapter 的 stop 文本"
@@ -3726,11 +3271,11 @@ fn plans_stopless_cli_projection_context_via_servertool_core_bridge() {
     );
     assert_eq!(parsed["repeatCount"], serde_json::json!(4));
     assert_eq!(parsed["maxRepeats"], serde_json::json!(6));
-    assert_eq!(parsed["triggerHint"], serde_json::json!("context-hint"));
+    assert_eq!(parsed["publicTriggerHint"], serde_json::json!("no_schema"));
     assert_eq!(
         parsed["schemaFeedback"],
         serde_json::json!({
-            "reason_code": "context_feedback"
+            "reason_code": "loop_feedback"
         })
     );
 }
@@ -3788,5 +3333,5 @@ fn plans_servertool_materialization_progress_via_servertool_core_bridge() {
     )
     .expect("materialization progress plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(parsed["action"], "execute_backend_then_finalize");
+    assert_eq!(parsed["action"], "unsupported_backend_plan_kind");
 }

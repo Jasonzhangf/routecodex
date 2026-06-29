@@ -58,12 +58,7 @@ function runProviderResponseRustHubPipeline(options: ProviderResponseConversionO
         ...options.context,
         clientProtocol: resolveProviderResponseContextSignals(options.context, options.entryEndpoint).clientProtocol,
         entryEndpoint: options.entryEndpoint,
-        stream: options.wantsStream,
-        runtimeEffects: {
-          providerInvoker: false,
-          reenterPipeline: false,
-          clientInjectDispatch: typeof options.clientInjectDispatch === 'function'
-        }
+        stream: options.wantsStream
       },
       ...(metadataCenterSnapshot ? { metadataCenterSnapshot } : {}),
       stream: options.wantsStream,
@@ -181,10 +176,7 @@ async function executeProviderResponseNativeServertoolEffects(args: {
   let payload = args.payload;
   let stage: HubRespPayloadStage = 'client_semantic';
   const actionPlan = planProviderResponseServertoolRuntimeActionsWithNative({
-    servertoolRuntimeActions: readNativeServertoolRuntimeActionEffects(args.runtimeEffects),
-    providerInvoker: false,
-    reenterPipeline: false,
-    clientInjectDispatch: false
+    servertoolRuntimeActions: readNativeServertoolRuntimeActionEffects(args.runtimeEffects)
   });
   if (actionPlan.error) {
     throwServertoolRuntimeErrorDescriptor(actionPlan.error);
@@ -523,15 +515,6 @@ interface ProviderResponseConversionOptions {
   entryEndpoint: string;
   wantsStream: boolean;
   stageRecorder?: StageRecorder;
-  clientInjectDispatch?: (options: {
-    entryEndpoint: string;
-    requestId: string;
-    body?: JsonObject;
-    metadata?: JsonObject;
-  }) => Promise<{
-    ok: boolean;
-    reason?: string;
-  }>;
 }
 
 interface ProviderResponseConversionResult {

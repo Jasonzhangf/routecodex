@@ -45,7 +45,6 @@ const RUST_SERVERTOOL_CORE_BLOCKS = `${ROOT}/sharedmodule/llmswitch-core/rust-co
 const RUST_SERVERTOOL_STOP_GATEWAY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_gateway_context.rs`;
 const RUST_SERVERTOOL_STOP_MESSAGE_COMPARE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_compare_context.rs`;
 const RUST_SERVERTOOL_COUNTER = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_counter.rs`;
-const RUST_SERVERTOOL_BACKEND_ROUTE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`;
 const RUST_SERVERTOOL_LOOP_STATE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/loop_state_contract.rs`;
 const RUST_SERVERTOOL_ORCHESTRATION_POLICY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs`;
 const RUST_SERVERTOOL_PENDING_SESSION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs`;
@@ -164,6 +163,11 @@ const DELETED_SERVERTOOL_DISPATCH_FACADE_FILES = [
 const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`,
+];
+const DELETED_BACKEND_ROUTE_POLICY_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/vision-eligibility.ts`,
+  `${ROOT}/tests/servertool/servertool-snapshot-recording.spec.ts`,
 ];
 const DELETED_STOPLESS_TRANSPARENT_FILES = [
   `${ROOT}/tests/servertool/stopless-sessionid-transparent.spec.ts`,
@@ -756,9 +760,7 @@ function checkServertoolCliProjectionMap() {
   for (const needle of [
     'pub struct ServertoolHubRespChatProcess03Input',
     'pub struct ServertoolClientExecCliProjection01Planned',
-    'pub struct ServertoolBackendRouteHint01Planned',
     'pub fn build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03',
-    'pub fn build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03',
   ]) {
     assertContains(
       'servertool-outcome-topology-rust-owner',
@@ -778,7 +780,9 @@ function checkServertoolCliProjectionMap() {
     'fn vision_auto_is_client_exec_cli_projection',
     'fn builds_web_search_client_exec_projection_plan',
     'fn builds_vision_auto_client_exec_projection_plan',
-    'fn web_search_backend_route_hint_is_retired',
+    'fn memory_cache_auto_is_not_a_servertool_outcome',
+    'fn memory_cache_auto_is_rejected_by_client_projection_builder',
+    'fn memory_cache_auto_is_rejected_by_server_io_builder',
     'fn unknown_tool_returns_none',
     'fn unknown_tool_is_rejected_by_projection_builder',
     'fn fake_exec_is_denied_by_projection_builder',
@@ -1414,7 +1418,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     'planStoplessDecisionContextSignalsWithNative',
     'planStopMessageDefaultConfigWithNative',
     'planStopMessagePersistSnapshotWithNative',
-    'readServertoolFollowupFlowIdWithNative',
     'resolveBdWorkingDirectoryForRecordWithNative',
     'resolveStopMessageFollowupProviderKeyWithNative',
     'resolveClientConnectionStateWithNative',
@@ -1444,7 +1447,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     '"planStoplessDecisionContextSignalsJson"',
     '"planStopMessageDefaultConfigJson"',
     '"planStopMessagePersistSnapshotJson"',
-    '"readServertoolFollowupFlowIdJson"',
     '"resolveBdWorkingDirectoryForRecordJson"',
     '"resolveStopMessageFollowupProviderKeyJson"',
     '"resolveClientConnectionStateJson"',
@@ -1790,12 +1792,17 @@ function checkStopMessagePersistedLookupRustOwner() {
     }
   }
 
-  const followupFlowBlock = extractFunctionBlock(runtimeUtils, 'readServerToolFollowupFlowId');
-  if (!followupFlowBlock.includes('readServertoolFollowupFlowIdWithNative')) {
-    fail(
-      'servertool-followup-flow-id-ts-thin-shell',
-      'runtime-utils.ts readServerToolFollowupFlowId must call readServertoolFollowupFlowIdWithNative'
-    );
+  for (const [file, content, marker] of [
+    [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'readServertoolFollowupFlowIdWithNative'],
+    [NATIVE_REQUIRED_EXPORTS, requiredExports, '"readServertoolFollowupFlowIdJson"'],
+    [STOP_MESSAGE_RUNTIME_UTILS, runtimeUtils, 'readServerToolFollowupFlowId'],
+  ]) {
+    if (content.includes(marker)) {
+      fail(
+        'servertool-followup-flow-id-deleted',
+        `${file.replace(`${ROOT}/`, '')} must not retain deleted followup flow id marker ${marker}`
+      );
+    }
   }
   for (const keyword of [
     'serverToolLoopState',
@@ -3860,36 +3867,44 @@ function checkServertoolFlowPresentationRustOwner() {
   );
 }
 
-// ── Check 14: backend-route policy has Rust owner ─────────────
+// ── Check 14: backend-route policy surface is retired ─────────
 function checkBackendRoutePolicyRustOwner() {
-  const rustBackendRoute = readRequired(RUST_SERVERTOOL_BACKEND_ROUTE);
   const outcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
-  const resultRestoreSpec = readRequired(`${ROOT}/tests/servertool/servertool-cli-result-restore.spec.ts`);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
 
-  assertContains(
-    'backend-route-policy-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_servertool_backend_route_policy_01_from_hub_resp_chatprocess_03'
-  );
-  assertContains(
-    'backend-route-policy-rust-owner',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
-    outcomeContract,
-    'ServertoolOutcome::BackendRouteReenter'
-  );
-  assertContains(
-    'backend-route-retired-rust-tests',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
-    outcomeContract,
-    'fn web_search_backend_route_hint_is_retired()'
-  );
-  assertContains(
-    'backend-route-retired-rust-tests',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
-    outcomeContract,
-    'fn web_search_backend_route_hint_rejects_before_payload_processing()'
-  );
+  for (const file of DELETED_BACKEND_ROUTE_POLICY_FILES) {
+    assertMissingFile(
+      'backend-route-policy-retired',
+      file,
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted after backend-route policy retirement`
+    );
+  }
+  for (const [file, source] of [
+    [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`, outcomeContract],
+    [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib],
+    [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper],
+    [NATIVE_REQUIRED_EXPORTS, requiredExports],
+  ]) {
+    for (const marker of [
+      'BackendRouteReenter',
+      'ServertoolBackendRoute',
+      'planServertoolBackendRoutePolicy',
+      'planServertoolBackendRoutePolicyJson',
+      'backend_route_contract',
+      'plan_servertool_backend_route_policy',
+      'ServertoolBackendRouteHint01Planned',
+      'build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03',
+    ]) {
+      if (source.includes(marker)) {
+        fail(
+          'backend-route-policy-retired',
+          `${file.replace(`${ROOT}/`, '')} must not retain retired backend-route policy marker ${marker}`
+        );
+      }
+    }
+  }
   assertMissing(
     'backend-route-outcome-rust-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`,
@@ -3922,874 +3937,9 @@ function checkBackendRoutePolicyRustOwner() {
     }
   }
   pass(
-    'backend-route-policy-rust-owner',
+    'backend-route-policy-retired',
     'web_search/vision_auto backend-route reenter is retired; old TS backend-route shells stay deleted'
   );
-  return;
-  assertContains(
-    'backend-route-followup-runtime-metadata-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_followup_runtime_metadata'
-  );
-  assertContains(
-    'backend-route-followup-runtime-metadata-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planFollowupRuntimeMetadataWithNative'
-  );
-  assertContains(
-    'backend-route-followup-runtime-metadata-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planFollowupRuntimeMetadataJson'
-  );
-  assertContains(
-    'backend-route-followup-materialization-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_followup_materialization'
-  );
-  assertContains(
-    'backend-route-followup-append-user-text-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_followup_append_user_text'
-  );
-  assertContains(
-    'backend-route-followup-append-user-text-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'fn followup_append_user_text_uses_first_non_empty_append_op'
-  );
-  assertContains(
-    'backend-route-followup-append-user-text-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'fn followup_append_user_text_ignores_blank_and_invalid_shapes'
-  );
-  assertContains(
-    'backend-route-preferred-final-response-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_preferred_final_response'
-  );
-  assertContains(
-    'backend-route-preferred-final-response-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'fn preferred_final_response_selects_followup_for_requires_action_or_non_empty_body'
-  );
-  assertContains(
-    'backend-route-preferred-final-response-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'fn preferred_final_response_keeps_final_chat_for_empty_or_missing_followup'
-  );
-  assertContains(
-    'backend-route-followup-materialization-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planFollowupMaterializationWithNative'
-  );
-  assertContains(
-    'backend-route-followup-materialization-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planFollowupMaterializationJson'
-  );
-  for (const keyword of [
-    'resolveFollowupEntryEndpoint',
-    'resolveFollowupPayloadFromPlan',
-    'resolveFollowupPayloadSource',
-    'materializeFollowupPayload',
-    'FollowupPayloadSource',
-    'materializationPlan.payloadSource',
-    "payloadSource === 'payload'",
-    "payloadSource === 'injection'",
-    "payloadSource === 'none'",
-    "hasOwnProperty.call(followupPlan, 'payload')",
-    "hasOwnProperty.call(followupPlan, 'injection')",
-    "typeof (followupPlan as { entryEndpoint?: unknown }).entryEndpoint",
-    "'/v1/chat/completions'"
-  ]) {
-    if (runtimeShell.includes(keyword)) {
-      fail(
-        'backend-route-followup-materialization-no-ts-owner',
-        `Forbidden TS followup materialization semantic "${keyword}" found in backend-route-runtime-block.ts`
-      );
-    }
-  }
-  pass(
-    'backend-route-followup-materialization-no-ts-owner',
-    'backend-route-runtime-block.ts consumes native materialization plan without local followupPlan field policy'
-  );
-  assertContains(
-    'backend-route-loop-state-rust-owner',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
-    servertoolCoreLib,
-    'pub mod loop_state_contract'
-  );
-  for (const needle of [
-    'pub fn read_servertool_loop_state',
-    'pub fn plan_servertool_loop_state',
-    'AUTO_PAYLOAD_HASH',
-    'STOP_MESSAGE_FLOW_ID',
-  ]) {
-    assertContains(
-      'backend-route-loop-state-rust-owner',
-      RUST_SERVERTOOL_LOOP_STATE,
-      rustLoopState,
-      needle
-    );
-  }
-  assertContains(
-    'backend-route-loop-state-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'readServertoolLoopStateWithNative'
-  );
-  assertContains(
-    'backend-route-loop-state-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planServertoolLoopStateWithNative'
-  );
-  assertContains(
-    'backend-route-loop-state-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'readServertoolLoopStateJson'
-  );
-  assertContains(
-    'backend-route-loop-state-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planServertoolLoopStateJson'
-  );
-  assertContains(
-    'backend-route-loop-state-ts-thin-shell',
-    TS_LOOP_STATE_BLOCK,
-    loopStateShell,
-    'planServertoolLoopStateWithNative'
-  );
-  assertContains(
-    'backend-route-loop-state-metadata-center-only',
-    TS_LOOP_STATE_BLOCK,
-    loopStateShell,
-    'readRuntimeControlFromAnyBoundMetadataCenter'
-  );
-  assertContains(
-    'backend-route-loop-state-metadata-center-only',
-    TS_LOOP_STATE_BLOCK,
-    loopStateShell,
-    'writeRuntimeControlToBoundMetadataCenter'
-  );
-  for (const keyword of [
-    "from '../conversion/runtime-metadata.js'",
-    'readRuntimeMetadata(',
-    '__rt',
-  ]) {
-    if (loopStateShell.includes(keyword)) {
-      fail(
-        'backend-route-loop-state-metadata-center-only',
-        `loop-state-block.ts must use MetadataCenter runtime_control only; forbidden marker ${keyword}`
-      );
-    }
-  }
-  for (const keyword of [
-    'sameFlow',
-    'samePayload',
-    'prevCount',
-    'previousStartedAtMs',
-    'previousPairHash',
-    'previousPairCount',
-    '__servertool_auto__',
-    'Number.isFinite',
-    'Math.floor',
-    'Math.max',
-    "args.flowId === 'stop_message_flow'",
-    "args.flowId !== 'stop_message_flow'",
-  ]) {
-    if (loopStateShell.includes(keyword)) {
-      fail(
-        'backend-route-loop-state-ts-thin-shell',
-        `Forbidden TS loop-state policy semantic "${keyword}" found in loop-state-block.ts`
-      );
-    }
-  }
-  for (const [toolName, forbiddenProjection] of [
-    ['web_search', 'ClientExecCliProjection'],
-    ['vision_auto', 'ClientExecCliProjection'],
-    ['memory_cache_auto', 'BackendRouteReenter'],
-  ]) {
-    const pattern = new RegExp(`"${toolName}"[^\\n]+${forbiddenProjection}`);
-    if (pattern.test(outcomeContract) || pattern.test(rustBackendRoute)) {
-      fail(
-        'backend-route-policy-rust-owner',
-        `${toolName} has forbidden ${forbiddenProjection} mapping in servertool Rust contracts`
-      );
-    }
-  }
-  const finalizeShell = readRequired(TS_BACKEND_ROUTE_FINALIZE);
-  const shadowShell = readRequired(TS_BACKEND_ROUTE_SHADOW);
-  const originDeltaShell = readRequired(TS_BACKEND_ROUTE_ORIGIN_DELTA);
-  const reenterShell = readRequired(TS_BACKEND_ROUTE_REENTER);
-  const bootstrapReplayShell = readRequired(TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY);
-  const responseShell = readRequired(TS_BACKEND_ROUTE_RESPONSE);
-  const visionEligibilityShell = readRequired(TS_VISION_ELIGIBILITY);
-  const rustServertoolCoreBlocks = readRequired(RUST_SERVERTOOL_CORE_BLOCKS);
-  const finalizeFunctionNames = Array.from(finalizeShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
-    .map((match) => match[1])
-    .sort();
-  if (finalizeFunctionNames.join(',') !== 'shouldShortCircuitRequiresActionFollowup') {
-    fail(
-      'backend-route-finalize-ts-thin-shell',
-      `backend-route-finalize-block.ts must only expose the native short-circuit delegate; found exports: ${finalizeFunctionNames.join(',') || '(none)'}`
-    );
-  }
-  const finalizeShortCircuitBlock = extractFunctionBlock(finalizeShell, 'shouldShortCircuitRequiresActionFollowup');
-  assertContains(
-    'backend-route-finalize-ts-thin-shell',
-    TS_BACKEND_ROUTE_FINALIZE,
-    finalizeShortCircuitBlock,
-    'shouldShortCircuitRequiresActionFollowupWithNative'
-  );
-  for (const [filePath, source] of [
-    [TS_BACKEND_ROUTE_FINALIZE, finalizeShell],
-    [NATIVE_SERVERTOOL_CORE_WRAPPER, readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER)],
-    [NATIVE_REQUIRED_EXPORTS, readRequired(NATIVE_REQUIRED_EXPORTS)],
-    [RUST_SERVERTOOL_BACKEND_ROUTE, rustBackendRoute],
-    [RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib],
-    [RUST_SERVERTOOL_CORE_BLOCKS, rustServertoolCoreBlocks],
-  ]) {
-    for (const marker of [
-      'decorateFinalChatWithServerToolContext',
-      'decorateServertoolFinalChatWithNative',
-      'decorateServertoolFinalChatJson',
-      'decorate_servertool_final_chat',
-      'contextDecorationMode',
-      'context_decoration_mode',
-    ]) {
-      if (source.includes(marker)) {
-        fail(
-          'backend-route-context-decoration-deleted',
-          `${filePath} must not retain backend final context decoration marker ${marker}`
-        );
-      }
-    }
-  }
-  const visionEligibilityFunctionNames = Array.from(visionEligibilityShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
-    .map((match) => match[1])
-    .sort();
-  if (
-    visionEligibilityFunctionNames.join(',') !==
-    'shouldBypassStopMessageForMediaContext,shouldRunVisionFlowForAdapterContext'
-  ) {
-    fail(
-      'backend-route-vision-eligibility-ts-thin-shell',
-      `vision-eligibility.ts must remain a two-function native delegate; found exports: ${visionEligibilityFunctionNames.join(',') || '(none)'}`
-    );
-  }
-  for (const functionName of [
-    'shouldRunVisionFlowForAdapterContext',
-    'shouldBypassStopMessageForMediaContext',
-  ]) {
-    assertContains(
-      'backend-route-vision-eligibility-ts-thin-shell',
-      TS_VISION_ELIGIBILITY,
-      extractFunctionBlock(visionEligibilityShell, functionName),
-      'planVisionEligibilityWithNative'
-    );
-  }
-  assertContains(
-    'backend-route-origin-delta-native-seed-owner',
-    RUST_SRC_DIR + '/servertool_followup_delta.rs',
-    readRequired(RUST_SRC_DIR + '/servertool_followup_delta.rs'),
-    'pub(crate) fn resolve_followup_origin_seed'
-  );
-  assertContains(
-    'backend-route-origin-delta-native-bridge',
-    NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
-    chatProcessServertoolWrapper,
-    'resolveFollowupOriginSeedWithNative'
-  );
-  assertContains(
-    'backend-route-origin-delta-required-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'resolveFollowupOriginSeedJson'
-  );
-  assertContains(
-    'backend-route-origin-delta-ts-thin-shell',
-    TS_BACKEND_ROUTE_ORIGIN_DELTA,
-    originDeltaShell,
-    'resolveFollowupOriginSeedWithNative'
-  );
-  const originDeltaFunctionNames = Array.from(originDeltaShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
-    .map((match) => match[1])
-    .sort();
-  if (
-    originDeltaFunctionNames.join(',') !==
-    'applyFollowupDeltaPlan,extractAssistantFollowupMessage,loadFollowupOriginSeed'
-  ) {
-    fail(
-      'backend-route-origin-delta-ts-thin-shell',
-      `backend-route-origin-delta.ts must remain a three-function IO/native delegate; found exports: ${originDeltaFunctionNames.join(',') || '(none)'}`
-    );
-  }
-  for (const [functionName, nativeCall] of [
-    ['extractAssistantFollowupMessage', 'extractAssistantFollowupMessageWithNative'],
-    ['loadFollowupOriginSeed', 'resolveFollowupOriginSeedWithNative'],
-    ['applyFollowupDeltaPlan', 'applyFollowupDeltaPlanWithNative'],
-  ]) {
-    assertContains(
-      'backend-route-origin-delta-ts-thin-shell',
-      TS_BACKEND_ROUTE_ORIGIN_DELTA,
-      extractFunctionBlock(originDeltaShell, functionName),
-      nativeCall
-    );
-  }
-  const responseFunctionNames = Array.from(responseShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
-    .map((match) => match[1])
-    .sort();
-  if (
-    responseFunctionNames.join(',') !==
-    [
-      'choosePreferredFinalChatResponse',
-      'coerceFollowupPayloadStream',
-      'createEmptyFollowupError',
-      'createMissingFollowupPayloadError',
-      'extractAppendUserTextFromFollowupPlan',
-      'hasRequiresActionShape',
-      'isEmptyClientResponsePayload',
-    ].sort().join(',')
-  ) {
-    fail(
-      'backend-route-response-ts-surface',
-      `backend-route-response-block.ts exported function surface changed; found exports: ${responseFunctionNames.join(',') || '(none)'}`
-    );
-  }
-  assertContains(
-    'backend-route-response-ts-thin-shell',
-    TS_BACKEND_ROUTE_RESPONSE,
-    extractFunctionBlock(responseShell, 'isEmptyClientResponsePayload'),
-    'isEmptyClientResponsePayloadWithNative'
-  );
-  assertContains(
-    'backend-route-response-ts-thin-shell',
-    TS_BACKEND_ROUTE_RESPONSE,
-    extractFunctionBlock(responseShell, 'hasRequiresActionShape'),
-    'isToolCallContinuationResponseWithNative'
-  );
-  assertContains(
-    'backend-route-response-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_followup_append_user_text'
-  );
-  assertContains(
-    'backend-route-response-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_followup_payload_stream'
-  );
-  assertContains(
-    'backend-route-response-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_preferred_final_response'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`),
-    'plan_followup_append_user_text_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`),
-    'plan_followup_payload_stream_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`),
-    'plan_preferred_final_response_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`),
-    'pub fn plan_followup_append_user_text_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`),
-    'pub fn plan_followup_payload_stream_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`),
-    'pub fn plan_preferred_final_response_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
-    'planFollowupAppendUserTextJson'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
-    'planFollowupPayloadStreamJson'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
-    'planPreferredFinalResponseJson'
-  );
-  assertContains(
-    'backend-route-shadow-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
-    'planHubFollowupPolicyShadowJson'
-  );
-  assertContains(
-    'backend-route-shadow-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_hub_followup_policy_shadow'
-  );
-  assertContains(
-    'backend-route-shadow-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planHubFollowupPolicyShadowWithNative'
-  );
-  assertContains(
-    'backend-route-shadow-ts-thin-shell',
-    TS_BACKEND_ROUTE_SHADOW,
-    shadowShell,
-    'planHubFollowupPolicyShadowWithNative'
-  );
-  for (const keyword of ['fnv1a32', 'shouldSample(', 'normalizeFollowupPayload', 'diffPayloads(', 'clampSampleRate', 'readMode(']) {
-    if (shadowShell.includes(keyword)) {
-      fail(
-        'backend-route-shadow-ts-thin-shell',
-        `Forbidden TS shadow semantic "${keyword}" found in backend-route-shadow.ts`
-      );
-    }
-  }
-  assertContains(
-    'backend-route-response-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_empty_followup_error'
-  );
-  assertContains(
-    'backend-route-response-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_missing_followup_payload_error'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`),
-    'plan_empty_followup_error_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`),
-    'plan_missing_followup_payload_error_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`),
-    'pub fn plan_empty_followup_error_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`),
-    'pub fn plan_missing_followup_payload_error_json'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
-    'planEmptyFollowupErrorJson'
-  );
-  assertContains(
-    'backend-route-response-native-export',
-    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`,
-    readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`),
-    'planMissingFollowupPayloadErrorJson'
-  );
-  for (const keyword of [
-    'function cloneJson',
-    'JSON.parse(JSON.stringify',
-    'function normalizeSeed',
-    'extractCapturedChatSeed',
-    'capturedEntryRequest',
-    'capturedChatRequest',
-    'seed.messages =',
-    'delete seed.model',
-  ]) {
-    if (originDeltaShell.includes(keyword)) {
-      fail(
-        'backend-route-origin-delta-no-ts-seed-owner',
-        `Forbidden TS origin seed semantic "${keyword}" found in backend-route-origin-delta.ts`
-      );
-    }
-  }
-  assertContains(
-    'backend-route-vision-eligibility-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_vision_eligibility'
-  );
-  assertContains(
-    'backend-route-vision-eligibility-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planVisionEligibilityWithNative'
-  );
-  assertContains(
-    'backend-route-vision-eligibility-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planVisionEligibilityJson'
-  );
-  assertContains(
-    'backend-route-vision-eligibility-ts-thin-shell',
-    TS_VISION_ELIGIBILITY,
-    visionEligibilityShell,
-    'planVisionEligibilityWithNative'
-  );
-  for (const keyword of [
-    'containsImageAttachment',
-    'readRuntimeMetadata',
-    'extractCapturedChatSeed',
-    'VIDEO_URL_HINT_RE',
-    'latestUserTurnContainsVideo',
-    'resolveInlineMultimodalSupport',
-    'hasInlineMultimodalSupport',
-    'isImageGenerationRequest',
-    'hasImageGenerationFlag',
-    'readMediaUrlCandidate',
-    'supportsMultimodal',
-    'routeHint',
-    'forceVision',
-    'hasVideoAttachment'
-  ]) {
-    if (visionEligibilityShell.includes(keyword)) {
-      fail(
-        'backend-route-vision-eligibility-no-ts-owner',
-        `Forbidden TS vision eligibility semantic "${keyword}" found in vision-eligibility.ts`
-      );
-    }
-  }
-  pass(
-    'backend-route-vision-eligibility-no-ts-owner',
-    'vision-eligibility.ts delegates vision/media eligibility to Rust native plan'
-  );
-  assertContains(
-    'backend-route-bootstrap-replay-native-request-id-owner',
-    TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY,
-    bootstrapReplayShell,
-    'buildFollowupRequestIdWithNative'
-  );
-  assertContains(
-    'backend-route-followup-error-envelope-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_followup_error_envelope'
-  );
-  assertContains(
-    'backend-route-followup-error-envelope-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planFollowupErrorEnvelopeWithNative'
-  );
-  assertContains(
-    'backend-route-followup-error-envelope-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planFollowupErrorEnvelopeJson'
-  );
-  assertContains(
-    'backend-route-bootstrap-replay-rust-owner',
-    RUST_SERVERTOOL_BACKEND_ROUTE,
-    rustBackendRoute,
-    'pub fn plan_bootstrap_replay'
-  );
-  assertContains(
-    'backend-route-bootstrap-replay-native-bridge',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    'planBootstrapReplayWithNative'
-  );
-  assertContains(
-    'backend-route-bootstrap-replay-native-export',
-    NATIVE_REQUIRED_EXPORTS,
-    requiredExports,
-    'planBootstrapReplayJson'
-  );
-  for (const keyword of [
-    'function readTrimmedString',
-    'function extractFollowupErrorEnvelope',
-    'function isTerminalFollowupError',
-    'upstreamStatus >= 400',
-    'upstreamStatus < 500',
-    'provider_not_available',
-    'client_timeout_hint_expired',
-    'no available providers after applying routing instructions',
-    "text.includes(\"tool_choice\")",
-    "text.includes('tool_choice')",
-  ]) {
-    if (reenterShell.includes(keyword)) {
-      fail(
-        'backend-route-followup-error-envelope-no-ts-owner',
-        `Forbidden TS followup error semantic "${keyword}" found in backend-route-reenter-block.ts`
-      );
-    }
-  }
-  pass(
-    'backend-route-followup-error-envelope-no-ts-owner',
-    'backend-route-reenter-block.ts consumes native error envelope plan without local terminal classification'
-  );
-  for (const keyword of [
-    "baseRequestId.trim() ? baseRequestId.trim() : 'servertool'",
-    "suffix.trim() ? suffix.trim() : ':followup'",
-    'return `${trimmedBase}${trimmedSuffix}`',
-  ]) {
-    if (bootstrapReplayShell.includes(keyword)) {
-      fail(
-        'backend-route-bootstrap-replay-no-ts-request-id-owner',
-        `Forbidden TS requestId builder semantic "${keyword}" found in backend-route-bootstrap-replay-block.ts`
-      );
-    }
-  }
-  for (const keyword of [
-    'function readPreflightStatus',
-    'function buildReplayPayload',
-    'extractCapturedChatSeed',
-    './backend-route-seed.js',
-    'Number.isFinite',
-    'Math.floor',
-    '/^HTTP_\\d{3}$/i',
-    'preflightStatus === 429',
-    'preflightStatus === 400',
-    'preflightError as any',
-    'seed.messages as JsonObject[]',
-  ]) {
-    if (bootstrapReplayShell.includes(keyword)) {
-      fail(
-        'backend-route-bootstrap-replay-no-ts-owner',
-        `Forbidden TS bootstrap replay semantic "${keyword}" found in backend-route-bootstrap-replay-block.ts`
-      );
-    }
-  }
-  pass(
-    'backend-route-bootstrap-replay-no-ts-owner',
-    'backend-route-bootstrap-replay-block.ts consumes native bootstrap replay plan without local preflight/replay policy'
-  );
-  for (const keyword of [
-    'isNoFollowupFlowId',
-    'isAutoLimitFlowId',
-    'isFlowOnlyLoopLimitFlowId',
-    'isClientInjectOnlyFollowupFlowId',
-    'isSeedLoopPayloadFollowupFlowId',
-    'resolveClientInjectSourceForFlowId',
-    'resolveTransparentReplayRequestSuffixForFlowId',
-    'shouldIgnoreRequiresActionFollowup',
-    'resolveContextDecorationModeForFlowId',
-    'shouldPreserveStopMessageEligibilityForFollowup',
-    "outcomeMode: plan?.outcomeMode ?? 'reenter'",
-    'plan?.noFollowup === true',
-    'plan?.autoLimit === true',
-    'plan?.flowOnlyLoopLimit === true',
-    'plan?.clientInjectOnly === true',
-    'plan?.seedLoopPayload === true',
-  ]) {
-    if (flowPolicyShell.includes(keyword)) {
-      fail(
-        'backend-route-flow-policy-no-ts-owner',
-        `Forbidden TS flow policy semantic "${keyword}" found in backend-route-flow-policy.ts`
-      );
-    }
-  }
-  for (const keyword of [
-    'visibleSummary',
-    'decorateContinueExecutionSummary',
-    'decorateWebSearchSummary',
-    'message.content',
-    'cloneJsonObject',
-    '【web_search',
-  ]) {
-    if (finalizeShell.includes(keyword)) {
-      fail(
-        'backend-route-finalize-no-ts-owner',
-        `Forbidden TS finalize semantic "${keyword}" found in backend-route-finalize-block.ts`
-      );
-    }
-  }
-  assertContains(
-    'backend-route-followup-execution-mode-thin-shell',
-    TS_BACKEND_ROUTE_RUNTIME,
-    runtimeShell,
-    'planFollowupExecutionModeWithNative'
-  );
-  const runtimeFunctionNames = Array.from(runtimeShell.matchAll(/export function\s+([A-Za-z0-9_]+)/g))
-    .map((match) => match[1])
-    .sort();
-  if (
-    runtimeFunctionNames.join(',') !==
-    [
-      'applyClientInjectOnlyMetadata',
-      'applyFollowupRuntimeMetadata',
-      'assertAutoLimitNotExceeded',
-      'materializeFollowupInjectionPayload',
-      'planFollowupMaterialization',
-      'resolveFollowupExecutionMode',
-      'resolveFollowupRuntimeActionPlan',
-      'resolveLoopPayload',
-    ].sort().join(',')
-  ) {
-    fail(
-      'backend-route-followup-runtime-ts-surface',
-      `backend-route-runtime-block.ts exported function surface changed; found exports: ${runtimeFunctionNames.join(',') || '(none)'}`
-    );
-  }
-  const executionModeBlock = extractFunctionBlock(runtimeShell, 'resolveFollowupExecutionMode');
-  for (const keyword of [
-    "decision.outcomeMode === 'skip'",
-    'if (decision.noFollowup',
-    '|| decision.noFollowup',
-    'decision.noFollowup ||',
-    "decision.outcomeMode === 'client_inject_only'",
-    'if (decision.clientInjectOnly',
-    '|| decision.clientInjectOnly',
-    'decision.clientInjectOnly ||',
-  ]) {
-    if (executionModeBlock.includes(keyword)) {
-      fail(
-        'backend-route-followup-execution-mode-no-ts-owner',
-        `Forbidden TS followup execution mode semantic "${keyword}" found in backend-route-runtime-block.ts`
-      );
-    }
-  }
-  for (const [functionName, keywords] of [
-    [
-      'resolveLoopPayload',
-      [
-        'args.followupPayloadRaw ||',
-        '? args.buildSeedLoopPayload()',
-      ],
-    ],
-    [
-      'assertAutoLimitNotExceeded',
-      [
-        'if (!decision.autoLimit',
-        'args.loopState.repeatCount < 3',
-        'repeatCount < 3',
-        "reason: 'followup_auto_limit_hit'",
-      ],
-    ],
-    [
-      'applyClientInjectOnlyMetadata',
-      [
-        'if (!decision.clientInjectOnly',
-        'decision.clientInjectSource ??',
-        "'servertool.followup'",
-      ],
-    ],
-  ]) {
-    const runtimeActionPlanBlock = extractFunctionBlock(runtimeShell, 'resolveFollowupRuntimeActionPlan');
-    assertContains(
-      'backend-route-followup-runtime-action-thin-shell',
-      TS_BACKEND_ROUTE_RUNTIME,
-      runtimeActionPlanBlock,
-      'planFollowupRuntimeActionWithNative'
-    );
-    const block = extractFunctionBlock(runtimeShell, functionName);
-    assertContains(
-      'backend-route-followup-runtime-action-thin-shell',
-      TS_BACKEND_ROUTE_RUNTIME,
-      block,
-      'resolveFollowupRuntimeActionPlan'
-    );
-    for (const keyword of keywords) {
-      if (block.includes(keyword)) {
-        fail(
-          'backend-route-followup-runtime-action-no-ts-owner',
-          `Forbidden TS followup runtime semantic "${keyword}" found in ${functionName}`
-        );
-      }
-    }
-  }
-  const runtimeMetadataBlock = extractFunctionBlock(runtimeShell, 'applyFollowupRuntimeMetadata');
-  assertContains(
-    'backend-route-followup-runtime-metadata-thin-shell',
-    TS_BACKEND_ROUTE_RUNTIME,
-    runtimeMetadataBlock,
-    'planFollowupRuntimeMetadataWithNative'
-  );
-  for (const keyword of [
-    'const adapterTarget',
-    'runtimeRouteHint',
-    'runtimeRouteName',
-    'followupMode',
-    'const routeHint',
-    "routecodexPortMode === 'string'",
-    "serverToolFollowupMode === 'string'",
-    'rootLoopState',
-    'currentLoopState',
-    'mergedLoopState',
-    'metadata.routeHint =',
-    'delete (args.metadata as Record<string, unknown>).routeHint',
-    "serverToolOriginalEntryEndpoint =",
-    "args.originalEntryEndpoint.trim().length",
-  ]) {
-    if (runtimeMetadataBlock.includes(keyword)) {
-      fail(
-        'backend-route-followup-runtime-metadata-no-ts-owner',
-        `Forbidden TS followup runtime metadata semantic "${keyword}" found in applyFollowupRuntimeMetadata`
-      );
-    }
-  }
-  const files = ACTIVE_RUNTIME_SCAN_PATHS.flatMap((dir) => listFiles(dir));
-  for (const file of files) {
-    const content = readFileSync(file, 'utf8');
-    if (content.includes('./backend-route-shape-guard.js')) {
-      fail(
-        'backend-route-shape-guard-no-ts-owner',
-        `Forbidden backend-route-shape-guard import found in ${file.replace(`${ROOT}/`, '')}`
-      );
-    }
-    if (content.includes('validateServertoolFollowupPayloadShape')) {
-      fail(
-        'backend-route-shape-guard-no-ts-owner',
-        `Forbidden deleted TS shape validation symbol found in ${file.replace(`${ROOT}/`, '')}`
-      );
-    }
-    if (content.includes('SERVERTOOL_FOLLOWUP_INVALID_SHAPE')) {
-      fail(
-        'backend-route-shape-guard-no-ts-owner',
-        `Forbidden deleted servertool shape error code found in ${file.replace(`${ROOT}/`, '')}`
-      );
-    }
-  }
-  pass('backend-route-policy-rust-owner', 'servertool-core owns backend-route policy contract');
 }
 
 // ── Check 15: servertool text extraction has Rust owner ───────
@@ -5600,10 +4750,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const needle of [
     'pub enum ServertoolOutcome',
     'ServertoolClientExecCliProjection01Planned',
-    'ServertoolBackendRouteHint01Planned',
     'ServertoolServerIoInternal01Observed',
     'pub fn build_servertool_client_exec_cli_projection_01_from_hub_resp_chatprocess_03',
-    'pub fn build_servertool_backend_route_hint_01_from_hub_resp_chatprocess_03',
     'pub fn build_servertool_server_io_internal_01_from_hub_resp_chatprocess_03',
     'fake_exec',
     'servertool_fixture',
@@ -5924,7 +5072,6 @@ function checkServertoolRustOutcomeCloseout() {
     'pub struct ServertoolHandlerRuntimeActionPlan',
     'pub fn plan_servertool_handler_runtime_action',
     'pub fn plan_servertool_handler_failed_error',
-    'pub fn plan_servertool_backend_requires_reenter_pipeline_error',
     'pub fn plan_servertool_unsupported_backend_plan_kind_error',
   ]) {
     assertContains(
@@ -5933,6 +5080,17 @@ function checkServertoolRustOutcomeCloseout() {
       rustExecutionHandlerContract,
       needle
     );
+  }
+  for (const marker of [
+    'plan_servertool_backend_requires_reenter_pipeline_error',
+    'backend_requires_reenter_pipeline',
+  ]) {
+    if (rustExecutionHandlerContract.includes(marker)) {
+      fail(
+        'servertool-execution-handler-contract-rust-owner',
+        `execution handler contract must not retain retired backend reenter marker ${marker}`
+      );
+    }
   }
   assertContains(
     'servertool-execution-handler-contract-rust-owner',

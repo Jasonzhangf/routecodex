@@ -5,15 +5,62 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    appendServertoolExecutedRecordWithNative: jest.fn((input: any) => input?.state ?? {}),
+    planServertoolExecutionDispatchErrorWithNative: jest.fn(() => ({
+      code: 'SERVERTOOL_HANDLER_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: '[servertool] dispatch failed',
+      details: {}
+    })),
+    planServertoolExecutionOutcomeRuntimeActionWithNative: jest.fn(() => ({
+      action: 'return_tool_flow',
+      executionFlowId: 'flow-test',
+      reuseLastExecutionEnvelope: false
+    })),
+    createServertoolExecutionLoopStateWithNative: jest.fn(() => ({ executedRecords: [] })),
+    planServertoolHookScheduleWithNative: jest.fn(() => ({ action: 'skip' })),
+    isAdapterClientDisconnectedWithNative: jest.fn(() => false),
+    planClientDisconnectWatcherWithNative: jest.fn(() => ({ intervalMs: 1000 })),
+    planServertoolClientDisconnectedErrorWithNative: jest.fn(() => ({
+      code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+      category: 'INTERNAL_ERROR',
+      status: 499,
+      message: '[servertool] client disconnected',
+      details: {}
+    })),
+    planServertoolRequiredResponseHookEmptyErrorWithNative: jest.fn(() => ({
+      code: 'SERVERTOOL_HANDLER_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: '[servertool] required response hook returned empty result',
+      details: {}
+    })),
+    planServertoolStateLoadFailedErrorWithNative: jest.fn(() => ({
+      code: 'SERVERTOOL_STATE_LOAD_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 500,
+      message: '[servertool] state load failed',
+      details: {}
+    })),
+    planServertoolTimeoutErrorWithNative: jest.fn(() => ({
+      code: 'SERVERTOOL_TIMEOUT',
+      category: 'TIMEOUT',
+      status: 504,
+      message: '[servertool] timeout',
+      details: {}
+    })),
+    planServertoolTimeoutWatcherWithNative: jest.fn(() => ({ armed: false, timeoutMs: 0 })),
+    planStopMessageFetchFailedErrorWithNative: jest.fn(() => ({
+      code: 'SERVERTOOL_HANDLER_FAILED',
+      category: 'INTERNAL_ERROR',
+      status: 502,
+      message: 'fetch failed',
+      details: {}
+    })),
     planServertoolHandlerRuntimeActionWithNative: jest.fn((input: any) => {
       if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
         const backendKind = String(input?.backendKind ?? '');
-        if (backendKind === 'vision_analysis') {
-          return { action: 'execute_backend_vision_analysis_then_finalize', backendKind };
-        }
-        if (backendKind === 'web_search') {
-          return { action: 'execute_backend_web_search_then_finalize', backendKind };
-        }
         return { action: 'unsupported_backend_plan_kind', backendKind };
       }
       if (input?.hasFinalizeFunction) {
@@ -29,7 +76,7 @@ jest.unstable_mockModule(
     }),
     planServertoolMaterializationProgressWithNative: jest.fn((input: any) => {
       if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
-        return { action: 'execute_backend_then_finalize' };
+        return { action: 'unsupported_backend_plan_kind' };
       }
       if (input?.hasFinalizeFunction) {
         return { action: 'finalize_without_backend' };
@@ -56,18 +103,6 @@ jest.unstable_mockModule(
             entryEndpoint: String(input?.entryEndpoint ?? ''),
             providerProtocol: String(input?.providerProtocol ?? ''),
             error: String(input?.error ?? '')
-          }
-        };
-      }
-      if (kind === 'backend_requires_reenter_pipeline') {
-        return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: '[servertool] vision_analysis backend requires reenterPipeline',
-          details: {
-            requestId: String(input?.requestId ?? ''),
-            backendKind: String(input?.backendKind ?? '')
           }
         };
       }

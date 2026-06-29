@@ -8,7 +8,6 @@ import {
   parseServertoolDispatchPlanPayload,
   parseServertoolDispatchPlanInputPayload,
   parseServertoolFollowupRuntimePlanPayload,
-  parseServertoolBackendExecutionPlanPayload,
   parseServertoolHandlerContractPlanPayload,
   parseServertoolAutoHookQueuesPayload,
   parseServertoolOutcomePlanPayload,
@@ -53,10 +52,6 @@ export type NativeServertoolOutcomePlanInput = ReturnType<typeof parseServertool
   : never;
 
 export type NativeServertoolHandlerContractPlan = ReturnType<typeof parseServertoolHandlerContractPlanPayload> extends infer T
-  ? Exclude<T, null>
-  : never;
-
-export type NativeServertoolBackendExecutionPlan = ReturnType<typeof parseServertoolBackendExecutionPlanPayload> extends infer T
   ? Exclude<T, null>
   : never;
 
@@ -374,11 +369,6 @@ export function planServertoolResponseStageGateWithNative(input: {
   runtimeControl?: Record<string, unknown>;
   allowFollowup?: boolean;
   hasServertoolSupport?: boolean;
-  capabilities?: {
-    providerInvoker: boolean;
-    reenterPipeline: boolean;
-    clientInjectDispatch?: boolean;
-  };
 }): NativeServertoolResponseStageGate {
   const capability = 'planServertoolResponseStageGateJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolResponseStageGate>(capability, reason);
@@ -388,7 +378,6 @@ export function planServertoolResponseStageGateWithNative(input: {
       adapterContext: input.adapterContext ?? null,
       runtimeControl: input.runtimeControl ?? null,
       allowFollowup: input.allowFollowup === true,
-      capabilities: input.capabilities ?? null,
       ...(typeof input.hasServertoolSupport === 'boolean'
         ? { hasServertoolSupport: input.hasServertoolSupport }
         : {})
@@ -493,22 +482,6 @@ export function planServertoolHandlerContractWithNative(input: {
     const inputJson = encodeJsonArg(capability, input);
     const raw = invokeNativeStringCapability(capability, [inputJson]);
     const parsed = parseServertoolHandlerContractPlanPayload(raw);
-    return parsed ?? fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function planServertoolBackendExecutionWithNative(input: {
-  kind?: string;
-}): NativeServertoolBackendExecutionPlan {
-  const capability = 'planServertoolBackendExecutionJson';
-  const fail = (reason?: string) => failNativeRequired<NativeServertoolBackendExecutionPlan>(capability, reason);
-  try {
-    const inputJson = encodeJsonArg(capability, input);
-    const raw = invokeNativeStringCapability(capability, [inputJson]);
-    const parsed = parseServertoolBackendExecutionPlanPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -903,25 +876,6 @@ export function buildServertoolReq04FollowupPayloadWithNative(adapterContext: un
   try {
     const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [adapterContext ?? null]);
     const parsed = parseJson('buildServertoolReq04FollowupPayload', raw);
-    if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
-    if (parsed === null) return null;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');
-    return parsed as Record<string, unknown>;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-export function resolveFollowupOriginSeedWithNative(input: {
-  adapterContext: unknown;
-  snapshot?: unknown;
-}): Record<string, unknown> | null {
-  const capability = 'resolveFollowupOriginSeedJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | null>(capability, reason);
-  try {
-    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [input]);
-    const parsed = parseJson('resolveFollowupOriginSeed', raw);
     if (parsed === JSON_PARSE_FAILED) return fail('invalid json');
     if (parsed === null) return null;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('invalid payload');
