@@ -883,7 +883,7 @@ export function planServertoolNoopOutcomeWithNative(input: {
 }
 
 export function planServertoolAutoHookQueuesWithNative(input: {
-  hooks: Array<{ id: string; phase: string; priority: number; order: number }>;
+  hooks: Array<{ id: string; phase: string; priority: number; order: number; sourceIndex: number }>;
   includeAutoHookIds?: string[];
   excludeAutoHookIds?: string[];
   optionalPrimaryHookOrder: string[];

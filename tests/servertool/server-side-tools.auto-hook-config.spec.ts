@@ -984,7 +984,7 @@ describe('servertool skeleton config', () => {
   test('auto hook queue order is consumed from the Rust auto-hook queue planner', () => {
     const queues = buildAutoHookQueuesFromConfig({
       hooks: [
-        { id: 'vision_auto', phase: 'default', priority: 20, order: 0 },
+        { id: 'Vision-Auto', phase: 'default', priority: 20, order: 0 },
         { id: 'stop_message_auto', phase: 'default', priority: 40, order: 0 }
       ],
       includeAutoHookIds: null,
@@ -992,10 +992,20 @@ describe('servertool skeleton config', () => {
     });
 
     expect(queues.optionalQueue.map((hook: any) => hook.id)).toEqual([
-      'vision_auto',
+      'Vision-Auto',
       'stop_message_auto'
     ]);
     expect(planServertoolHookScheduleWithNative).not.toHaveBeenCalled();
+  });
+
+  test('auto hook queue shell does not own hook id normalization', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts', 'utf8')
+    );
+
+    expect(source).toContain('sourceIndex');
+    expect(source).not.toContain('function normalizeServerToolCallName(');
+    expect(source).not.toContain('.trim().toLowerCase()');
   });
 
 });

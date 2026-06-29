@@ -155,6 +155,7 @@ export type ServertoolAutoHookPlanEntryPayload = {
   phase: string;
   priority: number;
   order: number;
+  sourceIndex: number;
 };
 
 export type ServertoolAutoHookQueuesPayload = {
@@ -720,9 +721,13 @@ export function parseServertoolAutoHookQueuesPayload(raw: string): ServertoolAut
         order:
           typeof entry.order === 'number' && Number.isFinite(entry.order)
             ? Math.floor(entry.order)
-            : 0
+            : 0,
+        sourceIndex:
+          typeof entry.sourceIndex === 'number' && Number.isInteger(entry.sourceIndex) && entry.sourceIndex >= 0
+            ? entry.sourceIndex
+            : -1
       }))
-      .filter((entry) => entry.id.length > 0);
+      .filter((entry) => entry.id.length > 0 && entry.sourceIndex >= 0);
 
   return {
     optionalQueue: normalizeQueue(parsed.optionalQueue),

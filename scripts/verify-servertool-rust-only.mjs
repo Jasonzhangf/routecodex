@@ -5526,11 +5526,24 @@ function checkServertoolAutoHookCallerThinShell() {
     'function scheduleAutoHookQueueWithNative',
     'planServertoolHookScheduleWithNative',
     "effectKind: `auto_hook:${normalizeServerToolCallName(hook.id)}:${requiredness}`",
+    'function normalizeServerToolCallName(',
+    '.trim().toLowerCase()',
   ]) {
     if (orchestrationBlocks.includes(marker)) {
       fail(
         'servertool-auto-hook-queue-single-rust-plan',
         `orchestration-blocks.ts must not reschedule Rust-planned auto-hook queues via TS marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'sourceIndex',
+    'args.hooks[entry.sourceIndex]',
+  ]) {
+    if (!orchestrationBlocks.includes(marker)) {
+      fail(
+        'servertool-auto-hook-queue-single-rust-plan',
+        `orchestration-blocks.ts must map Rust-planned auto-hook queues by sourceIndex marker ${marker}`
       );
     }
   }

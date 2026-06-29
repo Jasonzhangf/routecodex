@@ -6,14 +6,6 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import type { ToolCall } from './types.js';
 
-function normalizeServerToolCallName(name: string): string {
-  const normalized = name.trim().toLowerCase();
-  if (normalized === 'websearch' || normalized === 'web-search') {
-    return 'web_search';
-  }
-  return normalized;
-}
-
 function replaceJsonObjectInPlaceInternal(target: JsonObject, next: JsonObject): void {
   const newKeys = new Set(Object.keys(next));
   for (const [key, value] of Object.entries(next)) {
@@ -56,28 +48,22 @@ export function buildAutoHookQueuesFromConfig<THook extends {
   mandatoryQueue: THook[];
 } {
   const queueConfig = buildServertoolAutoHookQueueConfig();
-  const hookById = new Map<string, THook>();
-  for (const hook of args.hooks) {
-    if (!hook || typeof hook.id !== 'string') {
-      continue;
-    }
-    hookById.set(normalizeServerToolCallName(hook.id), hook);
-  }
   const nativePlan = planServertoolAutoHookQueuesWithNative({
-    hooks: args.hooks.map((hook) => ({
+    hooks: args.hooks.map((hook, sourceIndex) => ({
       id: hook.id,
       phase: hook.phase,
       priority: hook.priority,
-      order: hook.order
+      order: hook.order,
+      sourceIndex
     })),
     ...(args.includeAutoHookIds ? { includeAutoHookIds: [...args.includeAutoHookIds] } : {}),
     ...(args.excludeAutoHookIds ? { excludeAutoHookIds: [...args.excludeAutoHookIds] } : {}),
     optionalPrimaryHookOrder: queueConfig.optionalPrimaryOrder,
     mandatoryHookOrder: queueConfig.mandatoryOrder
   });
-  const mapQueue = (entries: Array<{ id: string }>): THook[] =>
+  const mapQueue = (entries: Array<{ sourceIndex: number }>): THook[] =>
     entries
-      .map((entry) => hookById.get(normalizeServerToolCallName(entry.id)))
+      .map((entry) => args.hooks[entry.sourceIndex])
       .filter((hook): hook is THook => Boolean(hook));
   return {
     optionalQueue: mapQueue(nativePlan.optionalQueue),

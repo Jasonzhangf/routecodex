@@ -337,6 +337,8 @@ struct ServertoolAutoHookSpecInput {
     phase: String,
     priority: i64,
     order: i64,
+    #[serde(default, rename = "sourceIndex")]
+    source_index: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -356,6 +358,8 @@ struct ServertoolAutoHookPlanEntry {
     phase: String,
     priority: i64,
     order: i64,
+    #[serde(rename = "sourceIndex")]
+    source_index: usize,
     queue: String,
     queue_index: i64,
     queue_total: i64,
@@ -684,7 +688,9 @@ fn read_stop_eligible_from_gate_input(payload: &Value, runtime_control: Option<&
         .unwrap_or_else(|| servertool_core::stop_gateway_context::is_stop_eligible(payload))
 }
 
-fn read_stop_gateway_context_from_runtime_control(runtime_control: Option<&Value>) -> Option<Value> {
+fn read_stop_gateway_context_from_runtime_control(
+    runtime_control: Option<&Value>,
+) -> Option<Value> {
     runtime_control
         .and_then(Value::as_object)
         .and_then(|row| row.get("stopGatewayContext"))
@@ -1580,11 +1586,12 @@ pub fn plan_servertool_response_stage_gate_json(input_json: String) -> NapiResul
     let stop_eligible = read_stop_eligible_from_gate_input(&input.payload, runtime_control);
     let has_empty_assistant_payload_contract_signal =
         detect_empty_assistant_payload_contract_signal(&input.payload).is_some();
-    let stop_gateway = read_stop_gateway_context_from_runtime_control(runtime_control).or_else(|| {
-        inspect_stop_gateway_signal(&input.payload.to_string())
-            .ok()
-            .and_then(|raw| serde_json::from_str::<Value>(raw.as_str()).ok())
-    });
+    let stop_gateway =
+        read_stop_gateway_context_from_runtime_control(runtime_control).or_else(|| {
+            inspect_stop_gateway_signal(&input.payload.to_string())
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Value>(raw.as_str()).ok())
+        });
     let stop_gateway_reason: Option<&str> = match stop_gateway.as_ref() {
         Some(value) => value
             .get("reason")
@@ -2445,7 +2452,8 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
     let mut hooks: Vec<ServertoolAutoHookSpecInput> = input
         .hooks
         .into_iter()
-        .filter_map(|hook| {
+        .enumerate()
+        .filter_map(|(source_index, hook)| {
             let id = normalize_routecodex_tool_name(Some(hook.id.as_str()))
                 .unwrap_or_else(|| hook.id.trim().to_ascii_lowercase());
             if id.is_empty() || !is_name_included(id.as_str(), include.as_ref(), exclude.as_ref()) {
@@ -2456,6 +2464,7 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
                 phase: normalize_auto_hook_phase(hook.phase.as_str()),
                 priority: hook.priority,
                 order: hook.order,
+                source_index: Some(hook.source_index.unwrap_or(source_index)),
             })
         })
         .collect();
@@ -2526,6 +2535,7 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
             phase: hook.phase,
             priority: hook.priority,
             order: hook.order,
+            source_index: hook.source_index.unwrap_or(index),
             queue: "A_optional".to_string(),
             queue_index: index as i64 + 1,
             queue_total: optional_total,
@@ -2539,6 +2549,7 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
             phase: hook.phase,
             priority: hook.priority,
             order: hook.order,
+            source_index: hook.source_index.unwrap_or(index),
             queue: "B_mandatory".to_string(),
             queue_index: index as i64 + 1,
             queue_total: mandatory_total,
@@ -3904,6 +3915,33 @@ mod tests {
         assert_eq!(
             optional[0].get("queueTotal").and_then(|v| v.as_i64()),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn test_plan_servertool_auto_hook_queues_returns_original_source_index() {
+        let raw = serde_json::json!({
+            "hooks": [
+                { "id": "Vision-Auto", "phase": "default", "priority": 20, "order": 0, "sourceIndex": 7 },
+                { "id": "stop_message_auto", "phase": "default", "priority": 40, "order": 0, "sourceIndex": 8 }
+            ],
+            "optionalPrimaryHookOrder": [],
+            "mandatoryHookOrder": []
+        });
+        let output = plan_servertool_auto_hook_queues_json(raw.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
+        let optional = parsed
+            .get("optionalQueue")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            optional[0].get("sourceIndex").and_then(|v| v.as_i64()),
+            Some(7)
+        );
+        assert_eq!(
+            optional[1].get("sourceIndex").and_then(|v| v.as_i64()),
+            Some(8)
         );
     }
 
