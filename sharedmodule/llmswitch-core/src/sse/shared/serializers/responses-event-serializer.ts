@@ -74,8 +74,9 @@ export class ResponsesEventSerializer {
         const dataStr = line.substring(5).trim();
         try {
           eventData = dataStr ? JSON.parse(dataStr) : null;
-        } catch {
-          throw new Error(`Invalid Responses SSE data payload: ${dataStr}`);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+          throw new Error(`Invalid Responses SSE data payload: ${dataStr}; ${reason}`);
         }
       } else if (line.startsWith('id:')) {
         eventId = line.substring(3).trim();

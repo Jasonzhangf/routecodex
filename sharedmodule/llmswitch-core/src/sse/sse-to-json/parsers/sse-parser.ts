@@ -95,6 +95,10 @@ interface SseStreamChunkNativeResult {
   remainingBuffer: string;
 }
 
+function formatParserErrorReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? 'unknown');
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -118,8 +122,8 @@ function assembleSseEventFromLinesWithNative(lines: string[]): RawSseEvent | nul
   let payload: string;
   try {
     payload = JSON.stringify(Array.isArray(lines) ? lines : []);
-  } catch {
-    return fail('json stringify failed');
+  } catch (error) {
+    return fail(`json stringify failed: ${formatParserErrorReason(error)}`);
   }
   try {
     const raw = fn(payload);
@@ -176,8 +180,8 @@ function parseSseEventWithNative(
       ...config,
       allowedEventTypes: Array.from(config.allowedEventTypes)
     });
-  } catch {
-    return fail('json stringify failed');
+  } catch (error) {
+    return fail(`json stringify failed: ${formatParserErrorReason(error)}`);
   }
 
   try {
@@ -222,8 +226,8 @@ function parseSseStreamWithNative(
       ...config,
       allowedEventTypes: Array.from(config.allowedEventTypes)
     });
-  } catch {
-    return fail('json stringify failed');
+  } catch (error) {
+    return fail(`json stringify failed: ${formatParserErrorReason(error)}`);
   }
 
   try {
@@ -273,8 +277,8 @@ function parseSseStreamChunkWithNative(
       ...config,
       allowedEventTypes: Array.from(config.allowedEventTypes)
     });
-  } catch {
-    return fail('json stringify failed');
+  } catch (error) {
+    return fail(`json stringify failed: ${formatParserErrorReason(error)}`);
   }
 
   try {

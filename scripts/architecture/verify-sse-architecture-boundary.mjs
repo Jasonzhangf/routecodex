@@ -280,6 +280,7 @@ for (const [relPath, source] of sourceByRel.entries()) {
     'non-blocking',
     'logChatJsonToSseNonBlocking',
     'catch {}',
+    '} catch {',
     'message_placeholder_',
     'createResponseBuilder(',
   ]) {

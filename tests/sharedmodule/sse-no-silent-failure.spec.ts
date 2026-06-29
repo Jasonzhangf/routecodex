@@ -32,6 +32,7 @@ describe('SSE no silent failure boundary', () => {
       'non-blocking',
       'logChatJsonToSseNonBlocking',
       'catch {}',
+      '} catch {',
       'fallbackCode',
       'fallbackMessage',
     ];
