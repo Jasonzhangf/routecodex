@@ -534,19 +534,7 @@ fn should_merge_adjacent_anthropic_messages(role: &str, previous: &Value, next: 
     if role.eq_ignore_ascii_case("user") {
         let previous_has_tool_result = content_blocks_contain_type(previous, "tool_result");
         let next_is_tool_result_only = content_blocks_are_all_type(next, "tool_result");
-        let next_has_non_empty_text = next.as_array().is_some_and(|blocks| {
-            blocks.iter().any(|block| {
-                let Some(row) = block.as_object() else {
-                    return false;
-                };
-                let is_text = read_trimmed_string(row.get("type"))
-                    .is_some_and(|block_type| block_type.eq_ignore_ascii_case("text"));
-                let has_text =
-                    read_trimmed_string(row.get("text")).is_some_and(|text| !text.is_empty());
-                is_text && has_text
-            })
-        });
-        return previous_has_tool_result && (next_is_tool_result_only || next_has_non_empty_text);
+        return previous_has_tool_result && next_is_tool_result_only;
     }
     false
 }
@@ -1638,7 +1626,7 @@ mod tests {
     }
 
     #[test]
-    fn build_anthropic_from_openai_chat_merges_tool_result_with_following_user_text_turn() {
+    fn build_anthropic_from_openai_chat_keeps_tool_result_separate_from_following_user_text_turn() {
         let payload = json!({
             "model": "MiniMax-M3",
             "messages": [
@@ -1683,19 +1671,20 @@ mod tests {
         .expect("json output");
 
         let messages = output["messages"].as_array().expect("messages array");
-        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.len(), 3);
         assert_eq!(messages[1]["role"].as_str(), Some("user"));
-        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 2);
+        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 1);
         assert_eq!(
             messages[1]["content"][0]["type"].as_str(),
             Some("tool_result")
         );
-        assert_eq!(messages[1]["content"][1]["type"].as_str(), Some("text"));
-        assert_eq!(messages[1]["content"][1]["text"].as_str(), Some("继续"));
+        assert_eq!(messages[2]["role"].as_str(), Some("user"));
+        assert_eq!(messages[2]["content"][0]["type"].as_str(), Some("text"));
+        assert_eq!(messages[2]["content"][0]["text"].as_str(), Some("继续"));
     }
 
     #[test]
-    fn build_anthropic_from_openai_chat_keeps_tool_result_then_user_image_placeholder_in_one_user_turn(
+    fn build_anthropic_from_openai_chat_keeps_tool_result_separate_from_user_image_placeholder(
     ) {
         let payload = json!({
             "model": "MiniMax-M3",
@@ -1763,15 +1752,25 @@ mod tests {
         assert_eq!(merged_user_turn["role"].as_str(), Some("user"));
         let content = merged_user_turn["content"]
             .as_array()
-            .expect("merged user content");
-        assert_eq!(content.len(), 2);
+            .expect("tool result user content");
+        assert_eq!(content.len(), 1);
         assert_eq!(content[0]["type"].as_str(), Some("tool_result"));
         assert_eq!(
             content[0]["tool_use_id"].as_str(),
             Some("call_inline_image_history")
         );
-        assert_eq!(content[1]["type"].as_str(), Some("text"));
-        assert_eq!(content[1]["text"].as_str(), Some("[Image omitted]"));
+        let placeholder_turn = messages
+            .get(tool_use_index + 2)
+            .expect("placeholder user turn follows tool_result");
+        assert_eq!(placeholder_turn["role"].as_str(), Some("user"));
+        let placeholder_content = placeholder_turn["content"]
+            .as_array()
+            .expect("placeholder user content");
+        assert_eq!(placeholder_content[0]["type"].as_str(), Some("text"));
+        assert_eq!(
+            placeholder_content[0]["text"].as_str(),
+            Some("[Image omitted]")
+        );
     }
 
     #[test]

@@ -233,7 +233,10 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
 
     let output: serde_json::Value =
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
-    assert_eq!(output.get("success").and_then(|value| value.as_bool()), Some(true));
+    assert_eq!(
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true)
+    );
     assert_eq!(
         output
             .pointer("/metadata/target/providerKey")
@@ -475,8 +478,29 @@ fn execute_hub_pipeline_json_preserves_stopless_instructions_for_anthropic_provi
                 "stream": false
             },
             "metadata": {
-                "stopMessageEnabled": true,
                 "runtime_control": {
+                    "preselectedRoute": {
+                        "target": {
+                            "providerKey": "mimo.key2.mimo-v2.5",
+                            "providerType": "anthropic",
+                            "runtimeKey": "mimo.key2",
+                            "modelId": "mimo-v2.5",
+                            "outboundProfile": "anthropic-messages"
+                        },
+                        "decision": { "routeName": "tools" },
+                        "diagnostics": {}
+                    }
+                }
+            },
+            "metadataCenterSnapshot": {
+                "requestTruth": {
+                    "requestId": "req-responses-stopless-to-anthropic-system",
+                    "sessionId": "sess-responses-stopless-to-anthropic-system"
+                },
+                "runtimeControl": {
+                    "stopMessage": {
+                        "enabled": true
+                    },
                     "preselectedRoute": {
                         "target": {
                             "providerKey": "mimo.key2.mimo-v2.5",
