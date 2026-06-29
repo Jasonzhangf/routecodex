@@ -1,3 +1,10 @@
+# 2026-06-29 stopless deleted legacy followup handler export slice
+
+- 目标：回答并落实“stopless 不应该再有 followup”边界；stopless 主线只允许 Chat Process Rust `runStoplessAutoHandlerRuntimeJson` + client-visible CLI projection，不再保留旧 `runStopMessageAutoHandlerJson` followup carrier 入口。
+- 改动：物理删除 `router-hotpath-napi::chat_servertool_orchestration::run_stop_message_auto_handler_json`、对应 NAPI export `runStopMessageAutoHandlerJson`、TS wrapper `runStopMessageAutoHandlerWithNative`、required native export 项，以及只覆盖该旧 wrapper 的 Jest；`verify-servertool-rust-only` 改为禁止旧 wrapper/旧 NAPI 能力名复活，并把 schema feedback gate 指向 `servertool-core/src/stop_message_auto_handler.rs` 与 `stop_message_persist_plan.rs` 真源。
+- 已验证：残留扫描只剩 gate forbidden markers；`cargo test -p router-hotpath-napi chat_servertool_orchestration --lib -- --nocapture` 44 passed；`cargo test -p servertool-core stop_message_auto --lib -- --nocapture` 22 passed；sharedmodule `tsc` PASS；`npm run verify:servertool-rust-only` PASS；`npm run verify:function-map-compile-gate` PASS；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS。
+- 已知无关红：`cargo test -p router-hotpath-napi stopless --lib -- --nocapture` 仍有 2 个 stopless request/provider-format 红点，来自现有 stopless request/provider payload tests，不是本 slice 编译失败；需后续按 stopless 在线闭环主线单独处理。
+
 # 2026-06-29 stopless followup-flow skip removal slice
 
 - 目标：继续 Hub Pipeline Rust closeout，把 stopless 决策里的旧 `followup_flow_id` / `serverToolFollowup` skip 分支物理删除；`serverToolFollowup` 只保留为 routing/metadata control，不再作为 stop-message auto handler 的递归避让真源。

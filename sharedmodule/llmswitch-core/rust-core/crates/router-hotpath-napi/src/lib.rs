@@ -1806,12 +1806,6 @@ pub fn write_stopless_learned_note_json_bridge(input_json: String) -> NapiResult
     stopless_auto_handler_bridge::write_stopless_learned_note_json(input_json)
 }
 
-/// Run stop_message_auto — Rust-native entry point for stopless runtime execution.
-#[napi(js_name = "runStopMessageAutoHandlerJson")]
-pub fn run_stop_message_auto_handler_json_bridge(input_json: String) -> NapiResult<String> {
-    chat_servertool_orchestration::run_stop_message_auto_handler_json(input_json)
-}
-
 #[napi]
 pub fn extract_servertool_text_from_chat_like_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::extract_text_from_chat_like_json(&input_json)

@@ -12,7 +12,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildStoplessAutoHandlerInputJson",
   "runStoplessAutoHandlerRuntimeJson",
   "buildStoplessAutoCliProjectionFromEngineJson",
-  "runStopMessageAutoHandlerJson",
   "buildOpenaiChatFromAnthropicJson",
   "buildOpenaiChatResponseFromAnthropicMessageJson",
   "buildAnthropicFromOpenaiChatJson",

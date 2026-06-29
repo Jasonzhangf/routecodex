@@ -53,6 +53,7 @@ const RUST_SERVERTOOL_ENGINE_SELECTION = `${ROOT}/sharedmodule/llmswitch-core/ru
 const RUST_SERVERTOOL_TEXT_EXTRACTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/text_extraction.rs`;
 const RUST_SERVERTOOL_STOP_VISIBLE_TEXT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_visible_text.rs`;
 const RUST_SERVERTOOL_STOPLESS_DECISION_CONTEXT_SIGNALS = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs`;
+const RUST_SERVERTOOL_STOP_MESSAGE_AUTO_HANDLER = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_auto_handler.rs`;
 const RUST_SERVERTOOL_STOP_MESSAGE_DEFAULT_CONFIG = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_default_config.rs`;
 const RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_persist_plan.rs`;
 const RUST_SERVERTOOL_STOPLESS_ORCHESTRATION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`;
@@ -447,30 +448,31 @@ function assertStoplessSessionIdLock() {
 }
 
 function assertStoplessSchemaFeedbackLock() {
-  const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
+  const stopMessageHandler = readRequired(RUST_SERVERTOOL_STOP_MESSAGE_AUTO_HANDLER);
+  const persistPlan = readRequired(RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN);
   assertContains(
     'stopless-schema-feedback-lock',
-    CHAT_SERVERTOOL_ORCHESTRATION,
-    orchestration,
-    'decision_followup_text = input'
+    RUST_SERVERTOOL_STOP_MESSAGE_AUTO_HANDLER,
+    stopMessageHandler,
+    'if let Some(ref ft) = schema_gate.followup_text'
   );
   assertContains(
     'stopless-schema-feedback-lock',
-    CHAT_SERVERTOOL_ORCHESTRATION,
-    orchestration,
-    'followup_text = if matches!'
+    RUST_SERVERTOOL_STOP_MESSAGE_AUTO_HANDLER,
+    stopMessageHandler,
+    'effective_decision.followup_text = Some(ft.clone());'
   );
   assertContains(
     'stopless-schema-feedback-lock',
-    CHAT_SERVERTOOL_ORCHESTRATION,
-    orchestration,
-    'decision_followup_text.unwrap_or_else(|| natural_followup_text.clone())'
+    RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN,
+    persistPlan,
+    'let prefer_schema_followup_text = matches!'
   );
   assertContains(
     'stopless-schema-feedback-lock',
-    CHAT_SERVERTOOL_ORCHESTRATION,
-    orchestration,
-    'test_stop_message_auto_schema_followup_text_keeps_exact_validation_feedback'
+    RUST_SERVERTOOL_STOP_MESSAGE_PERSIST_PLAN,
+    persistPlan,
+    'invalid_schema_prefers_detailed_followup_text_for_snapshot'
   );
   assertContains(
     'stopless-schema-feedback-lock',
@@ -1554,10 +1556,10 @@ function checkStopMessagePersistedLookupRustOwner() {
       'stop-message-auto.ts must pass empty candidateKeys into the Rust-owned native handler call'
     );
   }
-  if (!stopMessageAuto.includes('runStopMessageAutoHandlerWithNative({')) {
+  if (stopMessageAuto.includes('runStopMessageAutoHandlerWithNative')) {
     fail(
       'stop-message-persisted-state-selection-ts-thin-shell',
-      'stop-message-auto.ts must delegate stopless assembly to Rust-owned native handler'
+      'stop-message-auto.ts must not restore the deleted stopless followup handler wrapper'
     );
   }
   if (!stopMessageAuto.includes('planStoplessDecisionContextSignals({')) {
@@ -1795,10 +1797,12 @@ function checkStopMessagePersistedLookupRustOwner() {
   for (const [file, content, marker] of [
     [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'readServertoolFollowupFlowIdWithNative'],
     [NATIVE_REQUIRED_EXPORTS, requiredExports, '"readServertoolFollowupFlowIdJson"'],
+    [NATIVE_REQUIRED_EXPORTS, requiredExports, '"runStopMessageAutoHandlerJson"'],
     [STOP_MESSAGE_RUNTIME_UTILS, runtimeUtils, 'readServerToolFollowupFlowId'],
     [RUST_SERVERTOOL_CORE_LOOKUP, rustLookup, 'pub fn read_servertool_followup_flow_id'],
     [RUST_SERVERTOOL_CORE_LOOKUP, rustLookup, 'STOP_MESSAGE_FOLLOWUP_FLOW_ID'],
     [NATIVE_STOP_MESSAGE_AUTO, readRequired(NATIVE_STOP_MESSAGE_AUTO), 'followupFlowId'],
+    [NATIVE_STOP_MESSAGE_AUTO, readRequired(NATIVE_STOP_MESSAGE_AUTO), 'runStopMessageAutoHandlerWithNative'],
   ]) {
     if (content.includes(marker)) {
       fail(

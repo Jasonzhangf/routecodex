@@ -11,7 +11,6 @@
 
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
 import { failNativeRequired } from './native-router-hotpath-policy.js';
-import type { ServerToolFollowupPlan } from '../../servertool/types.js';
 
 // ── Types (re-exported for TS consumers) ─────────────────────────────────────
 
@@ -58,8 +57,6 @@ export interface StopMessageDecision {
   provider_pin?: ProviderPin;
 }
 
-// ── Native bridge (kept for TS callers that have not yet migrated) ──────────
-
 export type StopSchemaGateDecision = {
   action: 'allow_stop' | 'followup' | 'fail_fast';
   reason_code: string;
@@ -80,35 +77,6 @@ export type StopSchemaGateDecision = {
   missingFields?: string[];
   parsed?: Record<string, unknown>;
 };
-
-export function runStopMessageAutoHandlerWithNative(input: {
-  decision: StopMessageDecision;
-  adapterContext: Record<string, unknown>;
-  base: Record<string, unknown>;
-  candidateKeys?: string[];
-}): StopMessageHandlerResult {
-  const capability = 'runStopMessageAutoHandlerJson';
-  const fail = (reason?: string) => failNativeRequired<StopMessageHandlerResult>(capability, reason);
-  try {
-    const fn = readNativeFunction(capability);
-    if (!fn) {
-      return fail('native_unavailable');
-    }
-    const inputJson = JSON.stringify(input);
-    const raw = fn(inputJson);
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-      return raw as StopMessageHandlerResult;
-    }
-    if (typeof raw !== 'string') {
-      return fail(`native_returned_non_string: ${typeof raw}`);
-    }
-    const parsed = JSON.parse(raw) as StopMessageHandlerResult;
-    return parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
 
 export function decideStopMessageActionWithNative(ctx: StopMessageDecisionContext): StopMessageDecision {
   const capability = 'decideStopMessageAction';
@@ -213,12 +181,3 @@ export function evaluateStopSchemaGateWithNative(args: {
     return fail(reason);
   }
 }
-
-// ── Internal types ──────────────────────────────────────────────────────────
-
-type StopMessageHandlerResult = {
-  chatResponse: Record<string, unknown>;
-  flowId: string;
-  followup: ServerToolFollowupPlan | null;
-  stoplessRuntimeState: Record<string, unknown> | null;
-};
