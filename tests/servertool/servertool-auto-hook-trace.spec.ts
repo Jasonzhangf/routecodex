@@ -15,13 +15,11 @@ const registryHooks: Array<{
   execution: ServerToolExecutionDescriptor & { __testHandler?: (ctx: ServerToolHandlerContext) => Promise<any> };
 }> = [];
 
-const planAutoHookExecutionDecisionWithNativeMock = jest.fn((input: any) => {
+const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
   const flowId =
     typeof input?.materializedFlowId === 'string' && input.materializedFlowId.trim()
       ? input.materializedFlowId.trim()
-      : typeof input?.flowId === 'string' && input.flowId.trim()
-        ? input.flowId.trim()
-        : undefined;
+      : undefined;
   const outcome = input?.message
     ? 'error'
     : input?.hasPlannedResult !== true
@@ -31,7 +29,9 @@ const planAutoHookExecutionDecisionWithNativeMock = jest.fn((input: any) => {
         : 'materialized_empty';
   if (outcome === 'materialized_match') {
     return {
-      action: 'return_result',
+      returnResult: true,
+      continueQueue: false,
+      rethrowError: false,
       traceEvent: {
         hookId: String(input?.hookId ?? ''),
         phase: String(input?.phase ?? ''),
@@ -46,7 +46,9 @@ const planAutoHookExecutionDecisionWithNativeMock = jest.fn((input: any) => {
     };
   }
   return {
-    action: outcome === 'error' ? 'rethrow_error' : 'continue_queue',
+    returnResult: false,
+    continueQueue: outcome !== 'error',
+    rethrowError: outcome === 'error',
     traceEvent: {
       hookId: String(input?.hookId ?? ''),
       phase: String(input?.phase ?? ''),
@@ -65,27 +67,21 @@ const planAutoHookExecutionDecisionWithNativeMock = jest.fn((input: any) => {
   };
 });
 
-const planAutoHookQueueProgressWithNativeMock = jest.fn((input: any) => {
-  const queueOrder = Array.isArray(input?.queueOrder) ? input.queueOrder.map((v: any) => String(v)) : [];
-  const currentQueue = String(input?.currentQueue ?? '');
-  const currentIndex = queueOrder.indexOf(currentQueue);
+const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
   if (input?.resultPresent) {
-    return { action: 'return_result' };
+    return { returnResult: true, continueNextQueue: false, returnNull: false };
   }
-  if (currentIndex >= 0 && currentIndex + 1 < queueOrder.length) {
-    return {
-      action: 'continue_next_queue',
-      nextQueue: queueOrder[currentIndex + 1]
-    };
+  if (input?.finalQueue) {
+    return { returnResult: false, continueNextQueue: false, returnNull: true };
   }
-  return { action: 'return_null' };
+  return { returnResult: false, continueNextQueue: true, returnNull: false };
 });
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planAutoHookExecutionDecisionWithNative: planAutoHookExecutionDecisionWithNativeMock,
-    planAutoHookQueueProgressWithNative: planAutoHookQueueProgressWithNativeMock
+    planAutoHookRuntimeAttemptWithNative: planAutoHookRuntimeAttemptWithNativeMock,
+    planAutoHookCallerFinalizationWithNative: planAutoHookCallerFinalizationWithNativeMock
   })
 );
 
@@ -141,15 +137,13 @@ beforeAll(async () => {
 
 beforeEach(() => {
   registryHooks.length = 0;
-  planAutoHookExecutionDecisionWithNativeMock.mockClear();
-  planAutoHookQueueProgressWithNativeMock.mockClear();
-  planAutoHookExecutionDecisionWithNativeMock.mockImplementation((input: any) => {
+  planAutoHookRuntimeAttemptWithNativeMock.mockClear();
+  planAutoHookCallerFinalizationWithNativeMock.mockClear();
+  planAutoHookRuntimeAttemptWithNativeMock.mockImplementation((input: any) => {
     const flowId =
       typeof input?.materializedFlowId === 'string' && input.materializedFlowId.trim()
         ? input.materializedFlowId.trim()
-        : typeof input?.flowId === 'string' && input.flowId.trim()
-          ? input.flowId.trim()
-          : undefined;
+        : undefined;
     const outcome = input?.message
       ? 'error'
       : input?.hasPlannedResult !== true
@@ -159,7 +153,9 @@ beforeEach(() => {
           : 'materialized_empty';
     if (outcome === 'materialized_match') {
       return {
-        action: 'return_result',
+        returnResult: true,
+        continueQueue: false,
+        rethrowError: false,
         traceEvent: {
           hookId: String(input?.hookId ?? ''),
           phase: String(input?.phase ?? ''),
@@ -174,7 +170,9 @@ beforeEach(() => {
       };
     }
     return {
-      action: outcome === 'error' ? 'rethrow_error' : 'continue_queue',
+      returnResult: false,
+      continueQueue: outcome !== 'error',
+      rethrowError: outcome === 'error',
       traceEvent: {
         hookId: String(input?.hookId ?? ''),
         phase: String(input?.phase ?? ''),
@@ -192,20 +190,14 @@ beforeEach(() => {
       }
     };
   });
-  planAutoHookQueueProgressWithNativeMock.mockImplementation((input: any) => {
-    const queueOrder = Array.isArray(input?.queueOrder) ? input.queueOrder.map((v: any) => String(v)) : [];
-    const currentQueue = String(input?.currentQueue ?? '');
-    const currentIndex = queueOrder.indexOf(currentQueue);
+  planAutoHookCallerFinalizationWithNativeMock.mockImplementation((input: any) => {
     if (input?.resultPresent) {
-      return { action: 'return_result' };
+      return { returnResult: true, continueNextQueue: false, returnNull: false };
     }
-    if (currentIndex >= 0 && currentIndex + 1 < queueOrder.length) {
-      return {
-        action: 'continue_next_queue',
-        nextQueue: queueOrder[currentIndex + 1]
-      };
+    if (input?.finalQueue) {
+      return { returnResult: false, continueNextQueue: false, returnNull: true };
     }
-    return { action: 'return_null' };
+    return { returnResult: false, continueNextQueue: true, returnNull: false };
   });
 });
 
@@ -388,8 +380,10 @@ describe('servertool auto hook trace', () => {
         __testHandler: async () => null
       }
     });
-    planAutoHookExecutionDecisionWithNativeMock.mockImplementationOnce((input: any) => ({
-      action: 'return_result',
+    planAutoHookRuntimeAttemptWithNativeMock.mockImplementationOnce((input: any) => ({
+      returnResult: true,
+      continueQueue: false,
+      rethrowError: false,
       traceEvent: {
         hookId: String(input?.hookId ?? ''),
         phase: String(input?.phase ?? ''),

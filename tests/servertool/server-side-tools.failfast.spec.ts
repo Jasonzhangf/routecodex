@@ -354,8 +354,10 @@ jest.unstable_mockModule(
         }
       };
     }),
-    planAutoHookExecutionDecisionWithNative: jest.fn((input: any) => ({
-      action: input?.message ? 'rethrow_error' : input?.hasMaterializedResult === true ? 'return_result' : 'continue_queue',
+    planAutoHookRuntimeAttemptWithNative: jest.fn((input: any) => ({
+      returnResult: !input?.message && input?.hasMaterializedResult === true,
+      continueQueue: !input?.message && input?.hasMaterializedResult !== true,
+      rethrowError: Boolean(input?.message),
       traceEvent: {
         hookId: String(input?.hookId ?? ''),
         phase: String(input?.phase ?? ''),
@@ -368,17 +370,14 @@ jest.unstable_mockModule(
         ...(typeof input?.materializedFlowId === 'string' ? { flowId: input.materializedFlowId } : {})
       }
     })),
-    planAutoHookQueueProgressWithNative: jest.fn((input: any) => {
-      const queueOrder = Array.isArray(input?.queueOrder) ? input.queueOrder.map((value: any) => String(value)) : [];
-      const currentQueue = String(input?.currentQueue ?? '');
-      const currentIndex = queueOrder.indexOf(currentQueue);
+    planAutoHookCallerFinalizationWithNative: jest.fn((input: any) => {
       if (input?.resultPresent) {
-        return { action: 'return_result' };
+        return { returnResult: true, continueNextQueue: false, returnNull: false };
       }
-      if (currentIndex >= 0 && currentIndex + 1 < queueOrder.length) {
-        return { action: 'continue_next_queue', nextQueue: queueOrder[currentIndex + 1] };
+      if (input?.finalQueue) {
+        return { returnResult: false, continueNextQueue: false, returnNull: true };
       }
-      return { action: 'return_null' };
+      return { returnResult: false, continueNextQueue: true, returnNull: false };
     }),
     extractTextFromChatLikeWithNative: jest.fn(() => ''),
     buildClientExecCliProjectionOutputWithNative: jest.fn(() => ({})),

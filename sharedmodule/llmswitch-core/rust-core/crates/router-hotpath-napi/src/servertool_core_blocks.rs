@@ -1,8 +1,7 @@
 // feature_id: hub.servertool_stopless_cli_continuation
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
-use servertool_core::auto_hook_execution_contract;
-use servertool_core::auto_hook_queue_contract;
+use servertool_core::auto_hook_runtime_contract;
 use servertool_core::blocked_report_contract;
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
@@ -422,22 +421,22 @@ pub fn plan_runtime_pre_command_state_runtime_action_json(
         .map_err(|e| format!("serialize runtime pre-command state runtime action plan: {e}"))
 }
 
-pub fn plan_auto_hook_execution_decision_json(input_json: &str) -> Result<String, String> {
-    let input: auto_hook_execution_contract::AutoHookExecutionDecisionInput =
+pub fn plan_auto_hook_runtime_attempt_json(input_json: &str) -> Result<String, String> {
+    let input: auto_hook_runtime_contract::AutoHookRuntimeAttemptInput =
         serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize auto-hook execution decision input: {e}"))?;
-    serde_json::to_string(&auto_hook_execution_contract::plan_auto_hook_execution_decision(input))
-        .map_err(|e| format!("serialize auto-hook execution decision plan: {e}"))
-}
-
-pub fn plan_auto_hook_queue_progress_json(input_json: &str) -> Result<String, String> {
-    let input: auto_hook_queue_contract::AutoHookQueueProgressInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize auto-hook queue progress input: {e}"))?;
-    serde_json::to_string(&auto_hook_queue_contract::plan_auto_hook_queue_progress(
+            .map_err(|e| format!("deserialize auto-hook runtime attempt input: {e}"))?;
+    serde_json::to_string(&auto_hook_runtime_contract::plan_auto_hook_runtime_attempt(
         input,
     ))
-    .map_err(|e| format!("serialize auto-hook queue progress plan: {e}"))
+    .map_err(|e| format!("serialize auto-hook runtime attempt plan: {e}"))
+}
+
+pub fn plan_auto_hook_caller_finalization_json(input_json: &str) -> Result<String, String> {
+    let input: auto_hook_runtime_contract::AutoHookCallerFinalizationInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize auto-hook caller finalization input: {e}"))?;
+    serde_json::to_string(&auto_hook_runtime_contract::plan_auto_hook_caller_finalization(input))
+        .map_err(|e| format!("serialize auto-hook caller finalization plan: {e}"))
 }
 
 pub fn plan_servertool_execution_branch_json(input_json: &str) -> Result<String, String> {
@@ -2483,8 +2482,8 @@ fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
 }
 
 #[test]
-fn plans_auto_hook_execution_decision_via_servertool_core_bridge() {
-    let plan = plan_auto_hook_execution_decision_json(
+fn plans_auto_hook_runtime_attempt_via_servertool_core_bridge() {
+    let plan = plan_auto_hook_runtime_attempt_json(
         &serde_json::json!({
             "hookId": "stop_message_auto",
             "phase": "default",
@@ -2498,16 +2497,18 @@ fn plans_auto_hook_execution_decision_via_servertool_core_bridge() {
         })
         .to_string(),
     )
-    .expect("auto-hook execution plan");
+    .expect("auto-hook runtime attempt plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(parsed["action"], "return_result");
+    assert_eq!(parsed["returnResult"], true);
+    assert_eq!(parsed["continueQueue"], false);
+    assert_eq!(parsed["rethrowError"], false);
     assert_eq!(parsed["traceEvent"]["result"], "match");
     assert_eq!(
         parsed["traceEvent"]["flowId"],
         serde_json::Value::String("stop_message_flow".to_string())
     );
 
-    let planned_null = plan_auto_hook_execution_decision_json(
+    let planned_null = plan_auto_hook_runtime_attempt_json(
         &serde_json::json!({
             "hookId": "vision_auto",
             "phase": "default",
@@ -2520,10 +2521,12 @@ fn plans_auto_hook_execution_decision_via_servertool_core_bridge() {
         })
         .to_string(),
     )
-    .expect("auto-hook planned-null plan");
+    .expect("auto-hook planned-null runtime attempt plan");
     let planned_null_parsed: serde_json::Value =
         serde_json::from_str(&planned_null).expect("parse planned-null plan");
-    assert_eq!(planned_null_parsed["action"], "continue_queue");
+    assert_eq!(planned_null_parsed["returnResult"], false);
+    assert_eq!(planned_null_parsed["continueQueue"], true);
+    assert_eq!(planned_null_parsed["rethrowError"], false);
     assert_eq!(
         planned_null_parsed["traceEvent"]["reason"],
         serde_json::Value::String("predicate_false".to_string())
@@ -2531,22 +2534,46 @@ fn plans_auto_hook_execution_decision_via_servertool_core_bridge() {
 }
 
 #[test]
-fn plans_auto_hook_queue_progress_via_servertool_core_bridge() {
-    let plan = plan_auto_hook_queue_progress_json(
+fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
+    let result = plan_auto_hook_caller_finalization_json(
         &serde_json::json!({
-            "queueOrder": ["A_optional", "B_mandatory"],
-            "currentQueue": "A_optional",
-            "resultPresent": false
+            "resultPresent": true,
+            "finalQueue": false
         })
         .to_string(),
     )
-    .expect("auto-hook queue progress plan");
-    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(parsed["action"], "continue_next_queue");
-    assert_eq!(
-        parsed["nextQueue"],
-        serde_json::Value::String("B_mandatory".to_string())
+    .expect("auto-hook caller finalization result plan");
+    let parsed: serde_json::Value = serde_json::from_str(&result).expect("parse result plan");
+    assert_eq!(parsed["returnResult"], true);
+    assert_eq!(parsed["continueNextQueue"], false);
+    assert_eq!(parsed["returnNull"], false);
+
+    let next = plan_auto_hook_caller_finalization_json(
+        &serde_json::json!({
+            "resultPresent": false,
+            "finalQueue": false
+        })
+        .to_string(),
+    )
+    .expect("auto-hook caller finalization next plan");
+    let next_parsed: serde_json::Value = serde_json::from_str(&next).expect("parse next plan");
+    assert_eq!(next_parsed["returnResult"], false);
+    assert_eq!(next_parsed["continueNextQueue"], true);
+    assert_eq!(next_parsed["returnNull"], false);
+
+    let done = plan_auto_hook_caller_finalization_json(
+        &serde_json::json!({
+            "resultPresent": false,
+            "finalQueue": true
+        })
+        .to_string(),
     );
+    let done_parsed: serde_json::Value =
+        serde_json::from_str(&done.expect("auto-hook caller finalization null plan"))
+            .expect("parse null plan");
+    assert_eq!(done_parsed["returnResult"], false);
+    assert_eq!(done_parsed["continueNextQueue"], false);
+    assert_eq!(done_parsed["returnNull"], true);
 }
 
 #[test]
@@ -3223,8 +3250,8 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
 
 #[test]
 fn plans_stopless_cli_projection_context_via_servertool_core_bridge() {
-        let plan = plan_stopless_cli_projection_context_json(
-            &serde_json::json!({
+    let plan = plan_stopless_cli_projection_context_json(
+        &serde_json::json!({
             "metadataWritePlan": {
                 "stopless": {
                     "repeatCount": 4,

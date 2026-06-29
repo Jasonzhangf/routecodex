@@ -9,8 +9,8 @@ import { buildAutoHookQueuesFromConfig } from './orchestration-blocks.js';
 import { listAutoServerToolHooks } from './registry-orchestration-shell.js';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
 import {
-  planAutoHookExecutionDecisionWithNative,
-  planAutoHookQueueProgressWithNative
+  planAutoHookCallerFinalizationWithNative,
+  planAutoHookRuntimeAttemptWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   materializeServertoolPlannedResult,
@@ -54,19 +54,14 @@ export async function runAutoHookExecutionQueue(args: {
         : await runServertoolHandler(hook.execution.handler, args.contextBase);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-      const decision = planAutoHookExecutionDecisionWithNative({
+      const attemptPlan = planAutoHookRuntimeAttemptWithNative({
         ...traceBase,
         message
       });
       try {
-        args.options.onAutoHookTrace?.(decision.traceEvent as ServerToolAutoHookTraceEvent);
+        args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
       } catch {
         // best-effort
-      }
-      if (decision.action !== 'rethrow_error') {
-        throw new Error(
-          `[servertool] invalid native auto-hook execution error action: ${String(decision.action)}`,
-        );
       }
       throw error;
     }
@@ -77,7 +72,7 @@ export async function runAutoHookExecutionQueue(args: {
       result = await materializeServertoolPlannedResult(planned as any, args.options);
     }
 
-    const decision = planAutoHookExecutionDecisionWithNative({
+    const attemptPlan = planAutoHookRuntimeAttemptWithNative({
       ...traceBase,
       hasPlannedResult: Boolean(planned),
       hasMaterializedResult: Boolean(result),
@@ -86,22 +81,22 @@ export async function runAutoHookExecutionQueue(args: {
         : {})
     });
     try {
-      args.options.onAutoHookTrace?.(decision.traceEvent as ServerToolAutoHookTraceEvent);
+      args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
     } catch {
       // best-effort
     }
 
-    if (decision.action === 'return_result') {
+    if (attemptPlan.returnResult) {
       if (!result) {
         throw new Error('[servertool] native auto-hook execution requested result but materialization was empty');
       }
       return result;
     }
-    if (decision.action === 'continue_queue') {
+    if (attemptPlan.continueQueue) {
       continue;
     }
     throw new Error(
-      `[servertool] invalid native auto-hook execution action for non-error outcome: ${String(decision.action)}`,
+      '[servertool] native auto-hook execution returned no materialized disposition',
     );
   }
 
@@ -135,12 +130,11 @@ export async function runServertoolAutoHookCaller(args: {
       options: args.options,
       contextBase: args.contextBase
     });
-    const progressPlan = planAutoHookQueueProgressWithNative({
-      queueOrder: queueOrder.map((entry) => entry.queueName),
-      currentQueue: queue.queueName,
-      resultPresent: Boolean(queueResult)
+    const finalizationPlan = planAutoHookCallerFinalizationWithNative({
+      resultPresent: Boolean(queueResult),
+      finalQueue: queue.queueName === queueOrder[queueOrder.length - 1]?.queueName
     });
-    if (progressPlan.action === 'return_result') {
+    if (finalizationPlan.returnResult) {
       if (!queueResult) {
         throw new Error('[servertool] native auto-hook queue progress requested result but queue result was empty');
       }
@@ -151,10 +145,10 @@ export async function runServertoolAutoHookCaller(args: {
         ...(queueResult.metadataWritePlan ? { metadataWritePlan: queueResult.metadataWritePlan } : {})
       };
     }
-    if (progressPlan.action === 'continue_next_queue') {
+    if (finalizationPlan.continueNextQueue) {
       continue;
     }
-    if (progressPlan.action === 'return_null') {
+    if (finalizationPlan.returnNull) {
       return null;
     }
   }

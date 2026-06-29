@@ -293,19 +293,22 @@ owners:
 
   - feature_id: hub.servertool_auto_hook_execution
     status: active
-    summary: "servertool auto-hook execution decision and trace event planning"
+    summary: "servertool auto-hook runtime attempt, trace, and caller finalization planning"
     owner_kind: rust_ssot
-    owner_scope: "servertool auto-hook execution decision and trace event planning"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs
+    owner_scope: "servertool auto-hook runtime attempt, trace, and caller finalization planning"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs
     canonical_types:
-      - AutoHookExecutionDecisionInput
-      - AutoHookExecutionDecisionPlan
-      - AutoHookExecutionAction
+      - AutoHookRuntimeAttemptInput
+      - AutoHookRuntimeAttemptPlan
+      - AutoHookCallerFinalizationInput
+      - AutoHookCallerFinalizationPlan
       - AutoHookTraceEventPlan
     canonical_builders:
-      - plan_auto_hook_execution_decision
+      - plan_auto_hook_runtime_attempt
+      - plan_auto_hook_caller_finalization
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
@@ -323,39 +326,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Rust owns required/optional auto-hook execution decision and trace planning."
-
-  - feature_id: hub.servertool_auto_hook_queue_progress
-    status: active
-    summary: "servertool auto-hook queue progress planning"
-    owner_kind: rust_ssot
-    owner_scope: "servertool auto-hook queue progress planning"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs
-    canonical_types:
-      - AutoHookQueueProgressInput
-      - AutoHookQueueProgressPlan
-      - AutoHookQueueProgressAction
-    canonical_builders:
-      - plan_auto_hook_queue_progress
-    allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
-      - tests/servertool/servertool-auto-hook-trace.spec.ts
-    forbidden_paths:
-      - src/providers
-      - src/server/runtime/http-server/executor
-    required_tests:
-      - tests/servertool/servertool-auto-hook-trace.spec.ts
-      - tests/servertool/server-side-tools.failfast.spec.ts
-    required_gates:
-      - npm run verify:servertool-rust-only
-      - npm run verify:function-map-compile-gate
-    migration_target: rust
-    notes:
-      - "Rust owns auto-hook queue progress and action planning."
+      - "Rust owns auto-hook attempt disposition, trace planning, and optional-to-mandatory queue finalization."
 
   - feature_id: hub.servertool_engine_preflight_contract
     status: active

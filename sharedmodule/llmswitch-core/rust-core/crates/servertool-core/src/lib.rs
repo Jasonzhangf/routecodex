@@ -7,7 +7,7 @@
 //! - `cli_contract`: servertool binary input/output contract
 
 pub mod auto_hook_execution_contract;
-pub mod auto_hook_queue_contract;
+pub mod auto_hook_runtime_contract;
 pub mod blocked_report_contract;
 pub mod cli_contract;
 pub mod cli_result_guard;

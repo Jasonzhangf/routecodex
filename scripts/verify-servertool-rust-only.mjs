@@ -62,7 +62,7 @@ const RUST_SERVERTOOL_CLI_RESULT_GUARD = `${ROOT}/sharedmodule/llmswitch-core/ru
 const RUST_SERVERTOOL_BLOCKED_REPORT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/blocked_report_contract.rs`;
 const RUST_SERVERTOOL_HOOK_SKELETON = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs`;
 const RUST_SERVERTOOL_AUTO_HOOK_EXECUTION = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs`;
-const RUST_SERVERTOOL_AUTO_HOOK_QUEUE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs`;
+const RUST_SERVERTOOL_AUTO_HOOK_RUNTIME = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs`;
 const RUST_SERVERTOOL_REGISTRY_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs`;
 const RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs`;
 const RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs`;
@@ -3437,7 +3437,7 @@ function checkPreCommandHooksRustOwner() {
 
 function checkAutoHookExecutionRustOwner() {
   const rustAutoHookExecution = readRequired(RUST_SERVERTOOL_AUTO_HOOK_EXECUTION);
-  const rustAutoHookQueue = readRequired(RUST_SERVERTOOL_AUTO_HOOK_QUEUE);
+  const rustAutoHookRuntime = readRequired(RUST_SERVERTOOL_AUTO_HOOK_RUNTIME);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
@@ -3455,12 +3455,15 @@ function checkAutoHookExecutionRustOwner() {
     assertContains('servertool-auto-hook-execution-rust-owner', RUST_SERVERTOOL_AUTO_HOOK_EXECUTION, rustAutoHookExecution, needle);
   }
   for (const needle of [
-    'feature_id: hub.servertool_auto_hook_queue_progress',
-    'pub struct AutoHookQueueProgressInput',
-    'pub struct AutoHookQueueProgressPlan',
-    'pub fn plan_auto_hook_queue_progress',
+    'feature_id: hub.servertool_auto_hook_execution',
+    'pub struct AutoHookRuntimeAttemptInput',
+    'pub struct AutoHookRuntimeAttemptPlan',
+    'pub struct AutoHookCallerFinalizationInput',
+    'pub struct AutoHookCallerFinalizationPlan',
+    'pub fn plan_auto_hook_runtime_attempt',
+    'pub fn plan_auto_hook_caller_finalization',
   ]) {
-    assertContains('servertool-auto-hook-execution-rust-owner', RUST_SERVERTOOL_AUTO_HOOK_QUEUE, rustAutoHookQueue, needle);
+    assertContains('servertool-auto-hook-execution-rust-owner', RUST_SERVERTOOL_AUTO_HOOK_RUNTIME, rustAutoHookRuntime, needle);
   }
   assertContains(
     'servertool-auto-hook-execution-rust-owner',
@@ -3472,22 +3475,30 @@ function checkAutoHookExecutionRustOwner() {
     'servertool-auto-hook-execution-rust-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
     servertoolCoreLib,
-    'pub mod auto_hook_queue_contract'
+    'pub mod auto_hook_runtime_contract'
   );
   for (const needle of [
-    'plan_auto_hook_execution_decision_json',
-    'plan_auto_hook_queue_progress_json',
+    'plan_auto_hook_runtime_attempt_json',
+    'plan_auto_hook_caller_finalization_json',
   ]) {
     assertContains('servertool-auto-hook-execution-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, needle);
     assertContains('servertool-auto-hook-execution-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, `pub fn ${needle}`);
   }
-  assertContains('servertool-auto-hook-execution-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planAutoHookExecutionDecisionJson');
-  assertContains('servertool-auto-hook-execution-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planAutoHookQueueProgressJson');
-  assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookExecutionDecisionWithNative');
-  assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookQueueProgressWithNative');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'planAutoHookExecutionDecisionWithNative({');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'planAutoHookQueueProgressWithNative({');
+  assertContains('servertool-auto-hook-execution-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planAutoHookRuntimeAttemptJson');
+  assertContains('servertool-auto-hook-execution-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planAutoHookCallerFinalizationJson');
+  assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookRuntimeAttemptWithNative');
+  assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookCallerFinalizationWithNative');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'planAutoHookRuntimeAttemptWithNative({');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'planAutoHookCallerFinalizationWithNative({');
   for (const keyword of [
+    'auto_hook_queue_contract',
+    'plan_auto_hook_queue_progress',
+    'plan_auto_hook_execution_decision_json',
+    'plan_auto_hook_queue_progress_json',
+    'planAutoHookExecutionDecisionWithNative',
+    'planAutoHookQueueProgressWithNative',
+    'decision.action',
+    'progressPlan.action',
     "result: 'error'",
     "reason: 'predicate_false'",
     "reason: 'matched_without_flow'",

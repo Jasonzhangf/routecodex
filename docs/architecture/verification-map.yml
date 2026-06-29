@@ -169,6 +169,7 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
@@ -182,26 +183,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Rust owns auto-hook execution decision and trace planning."
-
-  - feature_id: hub.servertool_auto_hook_queue_progress
-    change_risk: medium
-    unit:
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
-    contract:
-      - tests/servertool/servertool-auto-hook-trace.spec.ts
-    integration:
-      - tests/servertool/server-side-tools.failfast.spec.ts
-    smoke:
-      - npm run verify:servertool-rust-only
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "Rust owns auto-hook queue progress planning."
+      - "Rust owns auto-hook attempt disposition, trace planning, and optional-to-mandatory queue finalization."
 
   - feature_id: hub.servertool_engine_preflight_contract
     change_risk: medium

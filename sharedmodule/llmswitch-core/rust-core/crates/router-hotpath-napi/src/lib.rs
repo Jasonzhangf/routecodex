@@ -161,7 +161,8 @@ fn parse_routing_instruction_parse_options(
 pub fn resolve_virtual_router_routing_state_key_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_virtual_router_routing_state_key(metadata_center_snapshot_or_self(&metadata));
+    let output =
+        resolve_virtual_router_routing_state_key(metadata_center_snapshot_or_self(&metadata));
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -188,7 +189,8 @@ pub fn plan_chat_process_session_usage_json(input_json: String) -> NapiResult<St
 pub fn resolve_virtual_router_stop_message_scope_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resolve_virtual_router_stop_message_scope(metadata_center_snapshot_or_self(&metadata));
+    let output =
+        resolve_virtual_router_stop_message_scope(metadata_center_snapshot_or_self(&metadata));
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -1416,14 +1418,14 @@ pub fn plan_runtime_pre_command_state_runtime_action_json(
 }
 
 #[napi]
-pub fn plan_auto_hook_execution_decision_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_auto_hook_execution_decision_json(&input_json)
+pub fn plan_auto_hook_runtime_attempt_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_auto_hook_runtime_attempt_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
 #[napi]
-pub fn plan_auto_hook_queue_progress_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_auto_hook_queue_progress_json(&input_json)
+pub fn plan_auto_hook_caller_finalization_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_auto_hook_caller_finalization_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 

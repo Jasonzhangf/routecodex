@@ -183,19 +183,30 @@ export interface RuntimePreCommandStateRuntimeActionPlan {
   state?: Record<string, unknown>;
 }
 
-export interface AutoHookExecutionDecisionPlan {
-  action: 'continue_queue' | 'return_result' | 'rethrow_error';
-  traceEvent: {
-    hookId: string;
-    phase: string;
-    priority: number;
-    queue: string;
-    queueIndex: number;
-    queueTotal: number;
-    result: 'miss' | 'match' | 'error';
-    reason: string;
-    flowId?: string;
-  };
+export interface AutoHookTraceEventPlan {
+  hookId: string;
+  phase: string;
+  priority: number;
+  queue: string;
+  queueIndex: number;
+  queueTotal: number;
+  result: 'miss' | 'match' | 'error';
+  reason: string;
+  flowId?: string;
+}
+
+export interface AutoHookRuntimeAttemptPlan {
+  traceEvent: AutoHookTraceEventPlan;
+  returnResult: boolean;
+  continueQueue: boolean;
+  rethrowError: boolean;
+  errorMessage?: string;
+}
+
+export interface AutoHookCallerFinalizationPlan {
+  returnResult: boolean;
+  continueNextQueue: boolean;
+  returnNull: boolean;
 }
 
 export interface EngineSelectionOverridesPlan {
@@ -2020,113 +2031,112 @@ export function planRuntimePreCommandStateRuntimeActionWithNative(input: {
   };
 }
 
-export function planAutoHookExecutionDecisionWithNative(input: {
+export function planAutoHookRuntimeAttemptWithNative(input: {
   hookId: string;
   phase: string;
   priority: number;
   queue: string;
   queueIndex: number;
   queueTotal: number;
-  outcome?: 'error' | 'planned_null' | 'materialized_match' | 'materialized_empty';
   hasPlannedResult?: boolean;
   hasMaterializedResult?: boolean;
   message?: string;
-  flowId?: string;
   materializedFlowId?: string;
-}): AutoHookExecutionDecisionPlan {
-  const capability = 'planAutoHookExecutionDecisionJson';
+}): AutoHookRuntimeAttemptPlan {
+  const capability = 'planAutoHookRuntimeAttemptJson';
   const fn = readNativeFunction(capability);
   if (!fn) {
-    throw new Error('planAutoHookExecutionDecisionJson native unavailable');
+    throw new Error('planAutoHookRuntimeAttemptJson native unavailable');
   }
   const resultJson = fn(JSON.stringify(input));
   if (typeof resultJson !== 'string') {
-    throw new Error(`planAutoHookExecutionDecisionJson native returned non-string: ${typeof resultJson}`);
+    throw new Error(`planAutoHookRuntimeAttemptJson native returned non-string: ${typeof resultJson}`);
   }
   const parsed = JSON.parse(resultJson) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planAutoHookExecutionDecisionJson native returned invalid plan');
+    throw new Error('planAutoHookRuntimeAttemptJson native returned invalid plan');
   }
   const record = parsed as Record<string, unknown>;
-  if (
-    record.action !== 'continue_queue' &&
-    record.action !== 'return_result' &&
-    record.action !== 'rethrow_error'
-  ) {
-    throw new Error('planAutoHookExecutionDecisionJson native returned invalid action');
+  const trace = record.traceEvent;
+  if (!trace || typeof trace !== 'object' || Array.isArray(trace)) {
+    throw new Error('planAutoHookRuntimeAttemptJson native returned invalid traceEvent');
   }
-  const traceEvent = record.traceEvent;
-  if (!traceEvent || typeof traceEvent !== 'object' || Array.isArray(traceEvent)) {
-    throw new Error('planAutoHookExecutionDecisionJson native returned invalid traceEvent');
-  }
-  const trace = traceEvent as Record<string, unknown>;
+  const traceRecord = trace as Record<string, unknown>;
   if (
-    typeof trace.hookId !== 'string' ||
-    typeof trace.phase !== 'string' ||
-    typeof trace.priority !== 'number' ||
-    typeof trace.queue !== 'string' ||
-    typeof trace.queueIndex !== 'number' ||
-    typeof trace.queueTotal !== 'number' ||
-    (trace.result !== 'miss' && trace.result !== 'match' && trace.result !== 'error') ||
-    typeof trace.reason !== 'string'
+    typeof traceRecord.hookId !== 'string' ||
+    typeof traceRecord.phase !== 'string' ||
+    typeof traceRecord.priority !== 'number' ||
+    typeof traceRecord.queue !== 'string' ||
+    typeof traceRecord.queueIndex !== 'number' ||
+    typeof traceRecord.queueTotal !== 'number' ||
+    (traceRecord.result !== 'miss' && traceRecord.result !== 'match' && traceRecord.result !== 'error') ||
+    typeof traceRecord.reason !== 'string' ||
+    typeof record.returnResult !== 'boolean' ||
+    typeof record.continueQueue !== 'boolean' ||
+    typeof record.rethrowError !== 'boolean'
   ) {
-    throw new Error('planAutoHookExecutionDecisionJson native returned malformed traceEvent');
+    throw new Error('planAutoHookRuntimeAttemptJson native returned malformed plan');
+  }
+  const dispositions = [record.returnResult, record.continueQueue, record.rethrowError].filter(Boolean).length;
+  if (dispositions !== 1) {
+    throw new Error('planAutoHookRuntimeAttemptJson native returned invalid disposition cardinality');
   }
   return {
-    action: record.action,
     traceEvent: {
-      hookId: trace.hookId,
-      phase: trace.phase,
-      priority: trace.priority,
-      queue: trace.queue,
-      queueIndex: trace.queueIndex,
-      queueTotal: trace.queueTotal,
-      result: trace.result,
-      reason: trace.reason,
-      ...(typeof trace.flowId === 'string' && trace.flowId.trim()
-        ? { flowId: trace.flowId.trim() }
+      hookId: traceRecord.hookId,
+      phase: traceRecord.phase,
+      priority: traceRecord.priority,
+      queue: traceRecord.queue,
+      queueIndex: traceRecord.queueIndex,
+      queueTotal: traceRecord.queueTotal,
+      result: traceRecord.result,
+      reason: traceRecord.reason,
+      ...(typeof traceRecord.flowId === 'string' && traceRecord.flowId.trim()
+        ? { flowId: traceRecord.flowId.trim() }
         : {})
-    }
+    },
+    returnResult: record.returnResult,
+    continueQueue: record.continueQueue,
+    rethrowError: record.rethrowError,
+    ...(typeof record.errorMessage === 'string' && record.errorMessage.trim()
+      ? { errorMessage: record.errorMessage.trim() }
+      : {})
   };
 }
 
-export function planAutoHookQueueProgressWithNative(input: {
-  queueOrder: string[];
-  currentQueue: string;
+export function planAutoHookCallerFinalizationWithNative(input: {
   resultPresent: boolean;
-}): {
-  action: 'return_result' | 'continue_next_queue' | 'return_null';
-  nextQueue?: string;
-} {
-  const capability = 'planAutoHookQueueProgressJson';
+  finalQueue: boolean;
+}): AutoHookCallerFinalizationPlan {
+  const capability = 'planAutoHookCallerFinalizationJson';
   const fn = readNativeFunction(capability);
   if (!fn) {
-    throw new Error('planAutoHookQueueProgressJson native unavailable');
+    throw new Error('planAutoHookCallerFinalizationJson native unavailable');
   }
   const resultJson = fn(JSON.stringify(input));
   if (typeof resultJson !== 'string') {
-    throw new Error(`planAutoHookQueueProgressJson native returned non-string: ${typeof resultJson}`);
+    throw new Error(`planAutoHookCallerFinalizationJson native returned non-string: ${typeof resultJson}`);
   }
   const parsed = JSON.parse(resultJson) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planAutoHookQueueProgressJson native returned invalid plan');
+    throw new Error('planAutoHookCallerFinalizationJson native returned invalid plan');
   }
   const record = parsed as Record<string, unknown>;
   if (
-    record.action !== 'return_result' &&
-    record.action !== 'continue_next_queue' &&
-    record.action !== 'return_null'
+    typeof record.returnResult !== 'boolean' ||
+    typeof record.continueNextQueue !== 'boolean' ||
+    typeof record.returnNull !== 'boolean'
   ) {
-    throw new Error('planAutoHookQueueProgressJson native returned invalid action');
+    throw new Error('planAutoHookCallerFinalizationJson native returned malformed plan');
   }
-  if (record.nextQueue !== undefined && typeof record.nextQueue !== 'string') {
-    throw new Error('planAutoHookQueueProgressJson native returned invalid nextQueue');
+  const dispositions = [record.returnResult, record.continueNextQueue, record.returnNull].filter(Boolean).length;
+  if (dispositions !== 1) {
+    throw new Error('planAutoHookCallerFinalizationJson native returned invalid disposition cardinality');
   }
   return {
-    action: record.action,
-    ...(typeof record.nextQueue === 'string' && record.nextQueue.trim()
-      ? { nextQueue: record.nextQueue }
-      : {})
+    returnResult: record.returnResult,
+    continueNextQueue: record.continueNextQueue,
+    returnNull: record.returnNull
   };
 }
 

@@ -19,8 +19,7 @@ Feature scope: `hub.servertool_*`
 | `hub.servertool_engine_selection` | servertool primary auto-hook first pass and rerun selection planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_cli_projection` | servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run build:base`<br/>`npm run verify:architecture-ci` |
 | `hub.servertool_stopless_cli_continuation` | stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src` | `npm run verify:stopless-invalid-schema-blackbox`<br/>`npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
-| `hub.servertool_auto_hook_execution` | servertool auto-hook execution decision and trace event planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
-| `hub.servertool_auto_hook_queue_progress` | servertool auto-hook queue progress planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
+| `hub.servertool_auto_hook_execution` | servertool auto-hook runtime attempt, trace, and caller finalization planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_preflight_contract` | servertool engine preflight early-return planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_runtime_action_contract` | servertool engine runtime action planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_skip_contract` | servertool engine skip planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
@@ -369,23 +368,26 @@ Notes:
 
 ## hub.servertool_auto_hook_execution
 
-Summary: servertool auto-hook execution decision and trace event planning
+Summary: servertool auto-hook runtime attempt, trace, and caller finalization planning
 
 Owner kind: `rust_ssot`
-Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs`
-Owner scope: servertool auto-hook execution decision and trace event planning
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs`
+Owner scope: servertool auto-hook runtime attempt, trace, and caller finalization planning
 
 Canonical types:
-- `AutoHookExecutionDecisionInput`
-- `AutoHookExecutionDecisionPlan`
-- `AutoHookExecutionAction`
+- `AutoHookRuntimeAttemptInput`
+- `AutoHookRuntimeAttemptPlan`
+- `AutoHookCallerFinalizationInput`
+- `AutoHookCallerFinalizationPlan`
 - `AutoHookTraceEventPlan`
 
 Canonical builders:
-- `plan_auto_hook_execution_decision`
+- `plan_auto_hook_runtime_attempt`
+- `plan_auto_hook_caller_finalization`
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
@@ -406,46 +408,7 @@ Required gates:
 - `npm run verify:function-map-compile-gate`
 
 Notes:
-- Rust owns required/optional auto-hook execution decision and trace planning.
-
-## hub.servertool_auto_hook_queue_progress
-
-Summary: servertool auto-hook queue progress planning
-
-Owner kind: `rust_ssot`
-Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs`
-Owner scope: servertool auto-hook queue progress planning
-
-Canonical types:
-- `AutoHookQueueProgressInput`
-- `AutoHookQueueProgressPlan`
-- `AutoHookQueueProgressAction`
-
-Canonical builders:
-- `plan_auto_hook_queue_progress`
-
-Allowed paths:
-- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_queue_contract.rs`
-- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
-- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts`
-- `tests/servertool/servertool-auto-hook-trace.spec.ts`
-
-Forbidden paths:
-- `src/providers`
-- `src/server/runtime/http-server/executor`
-
-Required tests:
-- `tests/servertool/servertool-auto-hook-trace.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
-
-Required gates:
-- `npm run verify:servertool-rust-only`
-- `npm run verify:function-map-compile-gate`
-
-Notes:
-- Rust owns auto-hook queue progress and action planning.
+- Rust owns auto-hook attempt disposition, trace planning, and optional-to-mandatory queue finalization.
 
 ## hub.servertool_engine_preflight_contract
 

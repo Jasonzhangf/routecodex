@@ -6,8 +6,10 @@ import type {
 } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
-const planAutoHookExecutionDecisionWithNativeMock = jest.fn((input: any) => ({
-  action: input?.message ? 'rethrow_error' : 'continue_queue',
+const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => ({
+  returnResult: false,
+  continueQueue: !input?.message,
+  rethrowError: Boolean(input?.message),
   traceEvent: {
     hookId: String(input?.hookId ?? ''),
     phase: String(input?.phase ?? ''),
@@ -23,8 +25,12 @@ const planAutoHookExecutionDecisionWithNativeMock = jest.fn((input: any) => ({
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planAutoHookExecutionDecisionWithNative: planAutoHookExecutionDecisionWithNativeMock,
-    planAutoHookQueueProgressWithNative: jest.fn(() => ({ action: 'return_null' })),
+    planAutoHookRuntimeAttemptWithNative: planAutoHookRuntimeAttemptWithNativeMock,
+    planAutoHookCallerFinalizationWithNative: jest.fn(() => ({
+      returnResult: false,
+      continueNextQueue: false,
+      returnNull: true
+    })),
     planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn(() => []),
     planServertoolHookScheduleWithNative: jest.fn((input: any) => ({
       events: (input?.hooks ?? []).map((hook: any) => ({
@@ -146,7 +152,7 @@ describe('execution-shell auto hook failfast', () => {
       })
     ).rejects.toThrow('optional-hook-boom');
 
-    expect(planAutoHookExecutionDecisionWithNativeMock).toHaveBeenCalledWith(
+    expect(planAutoHookRuntimeAttemptWithNativeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         hookId: 'failing_primary_optional_hook',
         queue: 'A_optional',
