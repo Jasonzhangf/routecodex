@@ -16,15 +16,6 @@ import type {
   SseToResponsesJsonContext
 } from '../../types/index.js';
 import { normalizeResponsesMessageItem } from '../../shared/responses-output-normalizer.js';
-import { formatUnknownError } from '../../../shared/common-utils.js';
-function logResponseBuilderNonBlocking(
-  stage: string,
-  error: unknown,
-  details: Record<string, unknown> = {}
-): void {
-  const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-  console.warn(`[responses-response-builder] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
-}
 // 构建器状态
 export type ResponseBuilderState = 'initial' | 'building' | 'completed' | 'error';
 // 构建器配置
@@ -528,11 +519,7 @@ export class ResponsesResponseBuilder {
       return raw;
     }
     if (raw && typeof raw === 'object') {
-      try {
-        return JSON.stringify(raw);
-      } catch {
-        return String(raw);
-      }
+      return JSON.stringify(raw);
     }
     return undefined;
   }
@@ -598,24 +585,16 @@ export class ResponsesResponseBuilder {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
     // 写入最终的 name/arguments（Responses: response.function_call_arguments.done）
-    try {
-      if (typeof data.name === 'string' && data.name) outputItemState.name = data.name;
-      if (typeof data.call_id === 'string' && data.call_id) outputItemState.callId = data.call_id;
-      const finalChunk =
-        this.coerceArgumentsChunk(data?.arguments) ??
-        this.coerceArgumentsChunk(data?.delta?.arguments) ??
-        this.coerceArgumentsChunk(data?.delta);
-      if (this.shouldOverrideArguments(outputItemState.arguments, finalChunk)) {
-        outputItemState.arguments = finalChunk;
-      } else if (!outputItemState.arguments && finalChunk) {
-        // 没有任何累计增量时，保底写入 done 事件里的值
-        outputItemState.arguments = finalChunk;
-      }
-    } catch (error) {
-      logResponseBuilderNonBlocking('function_call.done.merge_final', error, {
-        itemId: String(data?.item_id ?? ''),
-        callId: String(data?.call_id ?? '')
-      });
+    if (typeof data.name === 'string' && data.name) outputItemState.name = data.name;
+    if (typeof data.call_id === 'string' && data.call_id) outputItemState.callId = data.call_id;
+    const finalChunk =
+      this.coerceArgumentsChunk(data?.arguments) ??
+      this.coerceArgumentsChunk(data?.delta?.arguments) ??
+      this.coerceArgumentsChunk(data?.delta);
+    if (this.shouldOverrideArguments(outputItemState.arguments, finalChunk)) {
+      outputItemState.arguments = finalChunk;
+    } else if (!outputItemState.arguments && finalChunk) {
+      outputItemState.arguments = finalChunk;
     }
     outputItemState.status = 'completed';
     outputItemState.lastEventTime = event.timestamp;
@@ -836,50 +815,35 @@ export class ResponsesResponseBuilder {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
     // 若为 custom_tool_call 变体（已在 start 阶段重命名为 function_call），尝试提取 name/arguments
-    try {
-      const item = (data as any).item || {};
-      if (outputItemState.type === 'reasoning' && item && typeof item === 'object') {
-        if (!outputItemState.encryptedContent && typeof (item as any).encrypted_content === 'string') {
-          outputItemState.encryptedContent = (item as any).encrypted_content as string;
-        }
-        const summary = Array.isArray(item.summary) ? item.summary : [];
-        if (summary.length && outputItemState.summaryByIndex.size === 0) {
-          summary.forEach((entry: any, index: number) => {
-            if (typeof entry === 'string') {
-              outputItemState.summaryByIndex.set(index, entry);
-              return;
-            }
-            if (entry && typeof entry === 'object' && typeof entry.text === 'string') {
-              outputItemState.summaryByIndex.set(index, entry.text);
-            }
-          });
-        }
+    const item = (data as any).item || {};
+    if (outputItemState.type === 'reasoning' && item && typeof item === 'object') {
+      if (!outputItemState.encryptedContent && typeof (item as any).encrypted_content === 'string') {
+        outputItemState.encryptedContent = (item as any).encrypted_content as string;
       }
-      if (outputItemState.type === 'function_call') {
-        if (!outputItemState.name && typeof item.name === 'string') outputItemState.name = item.name;
-        if (!outputItemState.callId && typeof item.call_id === 'string') (outputItemState as any).callId = item.call_id;
-        if (!outputItemState.arguments) {
-          const input = (item as any).input;
-          if (typeof input === 'string') {
-            try { outputItemState.arguments = JSON.stringify({ input }); }
-            catch (err) {
-              logResponseBuilderNonBlocking('output_item.done.stringify_input', err, { inputType: typeof input });
-              outputItemState.arguments = JSON.stringify({ input: String(input) });
-            }
-          } else if (input && typeof input === 'object') {
-            try { outputItemState.arguments = JSON.stringify(input); }
-            catch (err) {
-              logResponseBuilderNonBlocking('output_item.done.stringify_object', err, {});
-              outputItemState.arguments = '{}';
-            }
+      const summary = Array.isArray(item.summary) ? item.summary : [];
+      if (summary.length && outputItemState.summaryByIndex.size === 0) {
+        summary.forEach((entry: any, index: number) => {
+          if (typeof entry === 'string') {
+            outputItemState.summaryByIndex.set(index, entry);
+            return;
           }
+          if (entry && typeof entry === 'object' && typeof entry.text === 'string') {
+            outputItemState.summaryByIndex.set(index, entry.text);
+          }
+        });
+      }
+    }
+    if (outputItemState.type === 'function_call') {
+      if (!outputItemState.name && typeof item.name === 'string') outputItemState.name = item.name;
+      if (!outputItemState.callId && typeof item.call_id === 'string') (outputItemState as any).callId = item.call_id;
+      if (!outputItemState.arguments) {
+        const input = (item as any).input;
+        if (typeof input === 'string') {
+          outputItemState.arguments = JSON.stringify({ input });
+        } else if (input && typeof input === 'object') {
+          outputItemState.arguments = JSON.stringify(input);
         }
       }
-    } catch (error) {
-      logResponseBuilderNonBlocking('output_item.done.merge_item_payload', error, {
-        itemId: String(data?.item_id ?? ''),
-        outputType: String(outputItemState.type ?? '')
-      });
     }
     outputItemState.status = 'completed';
     outputItemState.lastEventTime = event.timestamp;
@@ -952,12 +916,8 @@ export class ResponsesResponseBuilder {
       ? (payload as any).status
       : 'completed';
     // 将已聚合的输出写回并标记完成（若为空数组也重建）
-    try {
-      const cur = (this.response as any).output;
-      if (!Array.isArray(cur) || cur.length === 0) {
-        (this.response as any).output = this.buildOutputItems();
-      }
-    } catch {
+    const cur = (this.response as any).output;
+    if (!Array.isArray(cur) || cur.length === 0) {
       (this.response as any).output = this.buildOutputItems();
     }
     this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);
@@ -1211,12 +1171,8 @@ export class ResponsesResponseBuilder {
     const status: string | undefined = (this.response as any)?.status;
     if (status === 'completed') {
       // 确保输出结构完整
-      try {
-        const cur = (this.response as any).output;
-        if (!Array.isArray(cur) || cur.length === 0) {
-          (this.response as any).output = this.buildOutputItems();
-        }
-      } catch {
+      const cur = (this.response as any).output;
+      if (!Array.isArray(cur) || cur.length === 0) {
         (this.response as any).output = this.buildOutputItems();
       }
       this.applyDerivedTopLevelOutputText(this.response as ResponsesResponse);

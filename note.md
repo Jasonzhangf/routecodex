@@ -9,6 +9,12 @@
 - 改动：`anthropic-json-to-sse-converter.ts` / `gemini-json-to-sse-converter.ts` 的 stream error handler 不再吞 `destroy()` 错误；`chat-json-to-sse-converter.ts` / `response-builder.ts` 的 non-blocking logging helper 不再吞格式化/写日志错误；`responses-sse-to-json-converter.ts` abort destroy 不再包空 catch；`verify-sse-architecture-boundary.mjs` 与 `tests/sharedmodule/sse-no-silent-failure.spec.ts` 双锁禁止静默失败 marker 复活。
 - 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/sse-no-silent-failure.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
 
+# 2026-06-29 responses response builder no-salvage slice
+
+- 目标：清掉 `response-builder.ts` 里 function_call/input 处理的 stringify fallback 与 merge 失败仅记录日志后继续成功的静默失败。
+- 改动：`coerceArgumentsChunk()` 不再把 stringify 失败降级为 `String(raw)`；`function_call.done` 和 `output_item.done` merge 失败直接让 `processEvent()` 进入 error state；完成态 output rebuild 不再 catch 后重建；architecture gate 禁止 `return String(raw)`、`outputItemState.arguments = '{}'`、`logResponseBuilderNonBlocking` 复活。
+- 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/responses-response-builder-no-salvage.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；scoped `git diff --check` PASS。
+
 # 2026-06-29 chat SSE no-salvage boundary slice
 
 - 目标：删掉 `chat-sse-to-json-converter.ts` 里对同一 SSE chunk 多行 payload 的 partial salvage，改为坏 payload 直接失败。
