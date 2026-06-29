@@ -80,6 +80,24 @@ describe('servertool pending session store', () => {
     await expect(fs.access(pendingFile)).rejects.toBeTruthy();
   });
 
+  test('returns null only when pending file is missing', async () => {
+    const loaded = await loadPendingServerToolInjection('session-missing', tempRoot);
+    expect(loaded).toBeNull();
+  });
+
+  test('fails malformed pending file instead of treating it as no pending injection', async () => {
+    const sessionId = 'session-malformed-json';
+    const pendingDir = path.join(tempRoot, 'servertool-pending');
+    await fs.mkdir(pendingDir, { recursive: true });
+    const pendingFile = path.join(pendingDir, `${sessionId}.json`);
+    await fs.writeFile(pendingFile, '{not-json', 'utf8');
+
+    await expect(loadPendingServerToolInjection(sessionId, tempRoot)).rejects.toThrow(
+      '[servertool-pending] pending injection JSON parse failed'
+    );
+    await expect(fs.access(pendingFile)).resolves.toBeUndefined();
+  });
+
   test('clear removes pending file', async () => {
     const sessionId = 'session-clear';
     await savePendingServerToolInjection(sessionId, {

@@ -3215,9 +3215,34 @@ function checkPendingSessionRustOwner() {
       );
     }
   }
+  for (const pattern of [
+    {
+      label: 'pending-session cleanup failure swallowed',
+      regex: /catch\s*\{[\s\S]{0,180}(?:ignore|no-op|keep original reason visible even if cleanup fails)/,
+    },
+    {
+      label: 'pending-session silent force cleanup wrapper',
+      regex: /dropPendingFile\s*\(/,
+    },
+    {
+      label: 'pending-session read failure converted into no pending',
+      regex: /pending injection read failed[\s\S]{0,500}return\s+null\s*;/,
+    },
+  ]) {
+    if (pattern.regex.test(pendingSessionShell)) {
+      fail(
+        'servertool-pending-session-fail-fast-io',
+        `${pattern.label} in pending-session.ts`
+      );
+    }
+  }
   pass(
     'servertool-pending-session-no-ts-owner',
     'pending-session.ts is native-only shell for max-age, session file, payload coercion, and stale/malformed load decisions'
+  );
+  pass(
+    'servertool-pending-session-fail-fast-io',
+    'pending-session.ts returns null only for missing file and fails fast on parse/read/cleanup errors'
   );
 }
 

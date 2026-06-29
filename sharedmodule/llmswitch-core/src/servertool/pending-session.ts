@@ -27,8 +27,25 @@ export interface PendingServerToolInjection {
   sourceRequestId?: string;
 }
 
-async function readJsonFile(file: string): Promise<unknown> {
-  return JSON.parse(await fs.readFile(file, 'utf8'));
+function isMissingFileError(error: unknown): boolean {
+  return typeof (error as { code?: unknown } | null)?.code === 'string'
+    && (error as { code: string }).code === 'ENOENT';
+}
+
+async function readPendingJsonFile(file: string): Promise<unknown | null> {
+  let text: string;
+  try {
+    text = await fs.readFile(file, 'utf8');
+  } catch (error) {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(`[servertool-pending] pending injection JSON parse failed file=${file} reason=${message}`);
+  }
 }
 
 async function writeJsonFileAtomic(file: string, payload: unknown): Promise<void> {
@@ -64,17 +81,9 @@ function resolvePendingFile(sessionDir: string, sessionId: string): string | nul
   return fileName ? path.join(resolvePendingDir(sessionDir), fileName) : null;
 }
 
-async function dropPendingFile(file: string, message: string): Promise<void> {
-  try {
-    await fs.rm(file, { force: true });
-  } catch {
-    // keep original reason visible even if cleanup fails
-  }
-  try {
-    console.warn(message);
-  } catch {
-    // no-op
-  }
+async function removePlannedDropFile(file: string, message: string): Promise<void> {
+  await fs.rm(file, { force: true });
+  console.warn(message);
 }
 
 export async function savePendingServerToolInjection(
@@ -100,29 +109,19 @@ export async function loadPendingServerToolInjection(
   const base = requireSessionDir(sessionDir);
   const file = resolvePendingFile(base, sessionId);
   if (!file) return null;
-  try {
-    const raw = await readJsonFile(file);
-    const maxAgeMs = resolvePendingMaxAgeMs();
-    const plan = planPendingSessionLoadWithNative({
-      raw,
-      nowMs: Date.now(),
-      maxAgeMs
-    });
-    if (plan.action === 'drop') {
-      await dropPendingFile(file, plan.message);
-      return null;
-    }
-    return plan.pending as PendingServerToolInjection;
-  } catch (error) {
-    const code = typeof (error as { code?: unknown } | null)?.code === 'string'
-      ? String((error as { code: string }).code)
-      : '';
-    if (code !== 'ENOENT') {
-      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-      await dropPendingFile(file, `[servertool-pending] pending injection read failed session=${sessionId} reason=${message}`);
-    }
+  const raw = await readPendingJsonFile(file);
+  if (raw === null) return null;
+  const maxAgeMs = resolvePendingMaxAgeMs();
+  const plan = planPendingSessionLoadWithNative({
+    raw,
+    nowMs: Date.now(),
+    maxAgeMs
+  });
+  if (plan.action === 'drop') {
+    await removePlannedDropFile(file, plan.message);
     return null;
   }
+  return plan.pending as PendingServerToolInjection;
 }
 
 export async function clearPendingServerToolInjection(
@@ -132,9 +131,5 @@ export async function clearPendingServerToolInjection(
   const base = requireSessionDir(sessionDir);
   const file = resolvePendingFile(base, sessionId);
   if (!file) return;
-  try {
-    await fs.rm(file, { force: true });
-  } catch {
-    // ignore
-  }
+  await fs.rm(file, { force: true });
 }

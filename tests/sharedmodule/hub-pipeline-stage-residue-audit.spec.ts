@@ -4116,6 +4116,9 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'validates pending injection tool semantics in TS persistence', pattern: /validatePendingInjection/ },
       { label: 'reads tool_call ids for semantic filtering in TS persistence', pattern: /afterToolCallIds[\s\S]{0,240}synthetic|tool_call_id[\s\S]{0,240}message contract/ },
       { label: 'silently swallows pending-session load failures', pattern: /catch\s*\{\s*return null;\s*\}/ },
+      { label: 'converts pending-session read failures into no pending session', pattern: /pending injection read failed[\s\S]{0,500}return\s+null\s*;/ },
+      { label: 'silently swallows pending-session cleanup failures', pattern: /catch\s*\{[\s\S]{0,180}(?:ignore|no-op|keep original reason visible even if cleanup fails)/ },
+      { label: 'uses pending-session drop helper that can hide cleanup failures', pattern: /dropPendingFile\s*\(/ },
     ]);
 
     expect(findings).toEqual([]);
