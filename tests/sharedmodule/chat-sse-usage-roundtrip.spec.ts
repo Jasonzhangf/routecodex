@@ -310,7 +310,7 @@ describe('chat SSE usage compatibility', () => {
     expect(parsed.choices?.[0]?.message?.reasoning_content).toBe('先检查上下文，再继续执行');
   });
 
-  it('reuses parsed deepseek patch payload instead of reparsing the same chunk', async () => {
+  it('rejects DeepSeek patch payload as a non-chat SSE chunk', async () => {
     const sseText = [
       'data: {"v":{"response":{"message_id":2,"status":"WIP","content":""}}}',
       '',
@@ -324,17 +324,12 @@ describe('chat SSE usage compatibility', () => {
     ].join('\n');
 
     const converter = new ChatSseToJsonConverter();
-    const parseChatChunkPayloadSpy = jest.spyOn(converter as any, 'parseChatChunkPayload');
-    try {
-      const response = await converter.convertSseToJson(Readable.from([sseText]), {
-        requestId: 'req_deepseek_patch_reuse_parsed_data',
-        model: 'deepseek-chat'
-      });
-      expect(response.choices?.[0]?.message?.content).toContain('hello');
-      expect(parseChatChunkPayloadSpy).not.toHaveBeenCalled();
-    } finally {
-      parseChatChunkPayloadSpy.mockRestore();
-    }
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_deepseek_patch_reuse_parsed_data',
+      model: 'deepseek-chat'
+    })).rejects.toMatchObject({
+      code: 'CHAT_PARSE_ERROR'
+    });
   });
 
   it('does not synthesize finish_reason=stop when upstream never emits finish_reason', async () => {
@@ -359,7 +354,7 @@ describe('chat SSE usage compatibility', () => {
 
   it('preserves upstream context length errors instead of classifying them as SSE decode failures', async () => {
     const sseText = [
-      'event: toast',
+      'event: error',
       'data: {"type":"error","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","finish_reason":"context_length_exceeded"}',
       ''
     ].join('\n');

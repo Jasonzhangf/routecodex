@@ -94,6 +94,26 @@ for (const relPath of sharedOwnerFiles) {
   }
 }
 
+const providerNeutralProjectionFiles = [
+  'sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts',
+  'sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts',
+  'sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts',
+  'sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts',
+  'sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts',
+  'sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts',
+  'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts',
+  'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts',
+];
+
+for (const relPath of providerNeutralProjectionFiles) {
+  const source = read(relPath);
+  for (const providerSpecific of ['deepseek', 'glm', 'lmstudio', 'minimax', 'qwen', 'kimi', 'siliconflow']) {
+    if (source.toLowerCase().includes(providerSpecific)) {
+      failures.push(`${relPath}: provider-neutral SSE projection must not contain provider-specific marker "${providerSpecific}"`);
+    }
+  }
+}
+
 const forbiddenFrameKeys = [
   'metadata',
   '__rt',
