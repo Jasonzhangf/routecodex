@@ -54,8 +54,7 @@ export function createServertoolObservation(args: {
     blue: BLUE,
     yellow: YELLOW,
     gold: GOLD,
-    reset: RESET,
-    logNonBlocking: logServertoolNonBlocking
+    reset: RESET
   });
   return {
     ...logger,

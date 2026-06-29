@@ -73,7 +73,6 @@ type CommonArgs = {
   yellow: string;
   gold: string;
   reset: string;
-  logNonBlocking: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 };
 
 export function createServertoolProgressLogger(args: CommonArgs) {
@@ -117,19 +116,12 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     const color = shouldUseServertoolGoldProgressHighlightWithNative({ flowId }) ? args.gold : args.yellow;
     const shouldPrintConsole = tool !== 'stop_message_auto';
     if (shouldPrintConsole) {
-      try {
-        printServertoolLine(color, args.reset, [
-          field('requestId', args.requestId, color, args.reset),
-          `tool=${tool}`,
-          `stage=${stage}`,
-          field('result', result, color, args.reset)
-        ]);
-      } catch (error) {
-        args.logNonBlocking('log_progress_console', error, {
-          requestId: args.requestId,
-          flowId: flowId || 'none'
-        });
-      }
+      printServertoolLine(color, args.reset, [
+        field('requestId', args.requestId, color, args.reset),
+        `tool=${tool}`,
+        `stage=${stage}`,
+        field('result', result, color, args.reset)
+      ]);
     }
     appendServerToolProgressFileEvent({
       requestId: args.requestId,
@@ -170,24 +162,17 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       entryEndpoint: args.entryEndpoint,
       providerProtocol: args.providerProtocol
     });
-    try {
-      args.stageRecorder?.record('servertool.hook', {
-        hookId: event.hookId,
-        phase: event.phase,
-        priority: event.priority,
-        result: event.result,
-        reason: event.reason,
-        queue: event.queue,
-        queueIndex: event.queueIndex,
-        queueTotal: event.queueTotal,
-        ...(event.flowId ? { flowId: event.flowId } : {})
-      });
-    } catch (error) {
-      args.logNonBlocking('log_auto_hook_trace_stage_recorder', error, {
-        requestId: args.requestId,
-        hookId: event.hookId
-      });
-    }
+    args.stageRecorder?.record('servertool.hook', {
+      hookId: event.hookId,
+      phase: event.phase,
+      priority: event.priority,
+      result: event.result,
+      reason: event.reason,
+      queue: event.queue,
+      queueIndex: event.queueIndex,
+      queueTotal: event.queueTotal,
+      ...(event.flowId ? { flowId: event.flowId } : {})
+    });
   };
 
   const logStopCompare = (stage: 'entry' | 'trigger', flowId?: string): void => {
@@ -209,10 +194,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       entryEndpoint: args.entryEndpoint,
       providerProtocol: args.providerProtocol
     });
-    try {
-      if (compareContext?.decision !== 'trigger') {
-        return;
-      }
+    if (compareContext?.decision === 'trigger') {
       const compact = compactStopCompareSummary(summary);
       const entryBrief = stopEntryBrief ? [
         ['source', stopEntryBrief.source],
@@ -236,23 +218,13 @@ export function createServertoolProgressLogger(args: CommonArgs) {
           return field(part.slice(0, index), part.slice(index + 1), args.blue, args.reset);
         })
       ]);
-    } catch (error) {
-      args.logNonBlocking('log_stop_compare_console', error, {
-        requestId: args.requestId
-      });
     }
-    try {
-      args.stageRecorder?.record('servertool.stop_compare', {
-        stage: viewStage,
-        flowId: flowToken,
-        summary,
-        ...(compareContext ? { compare: compareContext } : {})
-      });
-    } catch (error) {
-      args.logNonBlocking('log_stop_compare_stage_recorder', error, {
-        requestId: args.requestId
-      });
-    }
+    args.stageRecorder?.record('servertool.stop_compare', {
+      stage: viewStage,
+      flowId: flowToken,
+      summary,
+      ...(compareContext ? { compare: compareContext } : {})
+    });
   };
 
   return {

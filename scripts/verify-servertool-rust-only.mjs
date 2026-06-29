@@ -5934,6 +5934,47 @@ function checkServertoolMatchLoggingFailFast() {
   );
 }
 
+function checkServertoolProgressLoggingFailFast() {
+  const progressLogFile = `${SERVERTOOL_TS_DIR}/progress-log-block.ts`;
+  const progressLogSource = readRequired(progressLogFile);
+  const progressLogSpec = readRequired(`${ROOT}/tests/servertool/progress-log-block.failfast.spec.ts`);
+  for (const keyword of [
+    'log_progress_console',
+    'log_auto_hook_trace_stage_recorder',
+    'log_stop_compare_console',
+    'log_stop_compare_stage_recorder',
+  ]) {
+    if (progressLogSource.includes(keyword)) {
+      fail(
+        'servertool-progress-log-fail-fast',
+        `progress-log-block.ts must not convert progress logger failure into non-blocking marker "${keyword}"`
+      );
+    }
+  }
+  if (/printServertoolLine[\s\S]{0,240}catch\s*\(/.test(progressLogSource)) {
+    fail(
+      'servertool-progress-log-fail-fast',
+      'progress-log-block.ts must not catch console logging failures'
+    );
+  }
+  if (/stageRecorder\?\.record[\s\S]{0,260}catch\s*\(/.test(progressLogSource)) {
+    fail(
+      'servertool-progress-log-fail-fast',
+      'progress-log-block.ts must not catch stageRecorder failures'
+    );
+  }
+  assertContains(
+    'servertool-progress-log-fail-fast',
+    `${ROOT}/tests/servertool/progress-log-block.failfast.spec.ts`,
+    progressLogSpec,
+    'progress-log-block fail-fast behavior'
+  );
+  pass(
+    'servertool-progress-log-fail-fast',
+    'progress logger console and stageRecorder failures fail fast'
+  );
+}
+
 // ── Run ────────────────────────────────────────────────────────
 console.log('\n=== verify-servertool-rust-only ===\n');
 
@@ -5980,6 +6021,7 @@ checkServertoolEngineStoplessSessionThinShell();
 checkServertoolActiveOrchestrationAuditRedGate();
 checkServertoolProgressFileLoggingFailFast();
 checkServertoolMatchLoggingFailFast();
+checkServertoolProgressLoggingFailFast();
 checkDeletedEmptyReplyContinueAbsent();
 
 console.log();

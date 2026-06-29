@@ -55,7 +55,7 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('export function createServertoolObservation(');
     expect(source).toContain('createServertoolProgressLogger({');
     expect(source).toContain('recordServertoolMatchSkipped({');
-    expect(source).toContain('recordServertoolMatchHit({');
+    expect(source).toContain('return recordServertoolMatchHit(args);');
 
     const progressSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
@@ -146,10 +146,10 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('export async function runServerToolOrchestrationShell(');
     expect(source).toContain('createServertoolObservation({');
     expect(source).toContain('runEnginePreflight({');
-    expect(source).toContain('planServertoolEngineSkipWithNativeLocal({');
+    expect(source).toContain('planServertoolEngineSkipWithNative({');
     expect(source).toContain('recordServertoolEngineMatchSkipped({');
     expect(source).toContain('recordServertoolEngineMatchHit({');
-    expect(source).toContain('planStoplessOrchestrationActionWithNativeLocal({');
+    expect(source).toContain('planStoplessExecutionWithNativeLocal({');
     expect(source).toContain('runServertoolEnginePostflight({');
   });
 });
