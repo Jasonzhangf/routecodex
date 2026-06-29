@@ -945,6 +945,39 @@ mod tests {
     }
 
     #[test]
+    fn run_stopless_builtin_handler_requires_builtin_name() {
+        let result = run_stopless_builtin_handler_for_runtime_json(
+            json!({
+                "base": { "choices": [] },
+                "requestId": "req-missing-builtin-name"
+            })
+            .to_string(),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .reason
+            .contains("[servertool] missing builtin handler name"));
+    }
+
+    #[test]
+    fn run_stopless_builtin_handler_rejects_unknown_builtin_name() {
+        let result = run_stopless_builtin_handler_for_runtime_json(
+            json!({
+                "name": "unknown_builtin",
+                "base": { "choices": [] },
+                "requestId": "req-unknown-builtin-name"
+            })
+            .to_string(),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .reason
+            .contains("[servertool] unsupported builtin handler runtime: unknown_builtin"));
+    }
+
+    #[test]
     fn write_stopless_learned_note_no_content_returns_ok_false() {
         let input = json!({
             "requestId": "req-note-1",
