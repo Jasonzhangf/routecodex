@@ -199,7 +199,7 @@ export interface ChatChoice {
 export interface ChatJsonToSseContext {
   requestId: string;
   model: string;
-  chatRequest: ChatCompletionRequest;
+  chatRequest?: ChatCompletionRequest;
   options: ChatJsonToSseOptions;
   startTime: number;
   sequenceCounter: number;

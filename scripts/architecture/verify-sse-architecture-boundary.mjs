@@ -240,6 +240,28 @@ for (const forbidden of [
   }
 }
 
+const chatJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts');
+for (const forbidden of [
+  'convertRequestToJsonToSse(',
+  'processRequestToSseWithFunctions',
+  'createRequestContext(request:',
+]) {
+  if (chatJsonToSseConverter.includes(forbidden)) {
+    failures.push(`Chat JSON->SSE must not synthesize request payloads into response SSE: ${forbidden}`);
+  }
+}
+
+const chatSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts');
+for (const forbidden of [
+  'sequenceChatRequest(',
+  'sequenceRequest(request',
+  'yield* sequenceChatRequest',
+]) {
+  if (chatSequencer.includes(forbidden)) {
+    failures.push(`Chat sequencer must not expose request-to-SSE response synthesis: ${forbidden}`);
+  }
+}
+
 const forbiddenFrameKeys = [
   'metadata',
   '__rt',

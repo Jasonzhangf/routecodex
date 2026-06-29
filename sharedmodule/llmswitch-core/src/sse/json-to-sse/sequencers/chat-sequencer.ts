@@ -284,49 +284,6 @@ function normalizeFunctionCall(message: any): any {
 }
 
 /**
- * 序列化Chat请求（用于请求→SSE转换）
- */
-export async function* sequenceChatRequest(
-  request: any,
-  context: ChatEventGeneratorContext,
-  config: ChatSequencerConfig = DEFAULT_CHAT_SEQUENCER_CONFIG
-): AsyncGenerator<ChatSseEvent> {
-  try {
-    // 验证请求格式
-    if (!request.messages || !Array.isArray(request.messages)) {
-      throw new Error('Invalid ChatCompletionRequest: missing messages');
-    }
-
-    // 为每个消息生成事件（主要用于流式回显）
-    for (let messageIndex = 0; messageIndex < request.messages.length; messageIndex++) {
-      const message = request.messages[messageIndex];
-
-      // 为每条消息创建新的上下文
-      const messageContext = {
-        ...context,
-        choiceIndex: messageIndex,
-        toolCallIndexCounter: 0,
-        contentIndexCounter: new Map()
-      };
-
-      // 序列化消息
-      yield* sequenceMessageContent(message, messageContext, config);
-
-      // 消息间添加小延迟（如果启用）
-      if (config.enableDelay && config.chunkDelayMs > 0 && messageIndex < request.messages.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs * 2));
-      }
-    }
-
-    // 请求结束时发送done事件
-    yield buildDoneEvent(context, config);
-
-  } catch (error) {
-    yield buildErrorEvent(error as Error, context, config);
-  }
-}
-
-/**
  * 创建Chat事件序列化器工厂
  */
 export function createChatSequencer(config?: Partial<ChatSequencerConfig>) {
@@ -344,14 +301,6 @@ export function createChatSequencer(config?: Partial<ChatSequencerConfig>) {
         typeof (response as { created?: unknown }).created === 'number' ? (response as { created: number }).created : undefined
       );
       yield* sequenceChatResponse(response, context, finalConfig);
-    },
-
-    /**
-     * 序列化请求
-     */
-    async *sequenceRequest(request: any, model: string, requestId: string) {
-      const context = createDefaultContext(model, requestId);
-      yield* sequenceChatRequest(request, context, finalConfig);
     },
 
     /**

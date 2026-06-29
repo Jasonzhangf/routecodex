@@ -7,7 +7,6 @@
 import { PassThrough } from 'stream';
 import { DEFAULT_CHAT_CONVERSION_CONFIG } from '../types/index.js';
 import type {
-  ChatCompletionRequest,
   ChatCompletionResponse,
   ChatSseEvent,
   ChatJsonToSseContext,
@@ -71,41 +70,6 @@ export class ChatJsonToSseConverterRefactored {
   }
 
   /**
-   * 将Chat Completion请求转换为SSE流
-   */
-  async convertRequestToJsonToSse(
-    request: ChatCompletionRequest,
-    options: ChatJsonToSseOptions
-  ): Promise<ChatSseEventStream> {
-    // TTL + max-size prune on every public entry
-    pruneChatContexts(this.contexts);
-    // 1. 创建上下文
-    const context = this.createRequestContext(request, options);
-    this.contexts.set(options.requestId, context);
-
-    // 2. 创建底层流
-    const stream = new PassThrough({ objectMode: true });
-
-    // 3. 创建SSE事件流接口
-    const sseStream: ChatSseEventStream = Object.assign(stream, {
-      protocol: 'chat' as const,
-      direction: 'json_to_sse' as const,
-      requestId: options.requestId,
-      getStats: () => context.eventStats,
-      getConfig: () => this.config,
-      complete: () => this.completeStream(context, stream),
-      abort: (error?: Error) => this.abortStream(context, stream, error)
-    }) as ChatSseEventStream;
-
-    // 4. 启动异步转换过程（使用函数化架构）
-    this.processRequestToSseWithFunctions(request, context, stream).catch(error => {
-      this.handleStreamError(context, error, stream);
-    });
-
-    return sseStream;
-  }
-
-  /**
    * 将Chat Completion响应转换为SSE流
    */
   async convertResponseToJsonToSse(
@@ -146,47 +110,6 @@ export class ChatJsonToSseConverterRefactored {
   }
 
   /**
-   * 使用函数化架构处理请求转换
-   */
-  private async processRequestToSseWithFunctions(
-    request: ChatCompletionRequest,
-    context: ChatJsonToSseContext,
-    stream: PassThrough
-  ): Promise<void> {
-    try {
-      // 1. 验证请求
-      this.validateRequest(request);
-
-      // 2. 创建流写入器
-      const writer = createChatStreamWriter(stream, {
-        onEvent: (event) => this.updateStats(context, event),
-        onError: (error) => this.handleStreamError(context, error, stream)
-      });
-
-      // 3. 创建事件序列化器
-      const sequencer = createChatSequencer({
-        chunkSize: context.options.maxTokensPerChunk || this.config.maxTokensPerChunk,
-        chunkDelayMs: context.options.chunkDelayMs || this.config.defaultChunkDelayMs,
-        enableDelay: !!context.options.chunkDelayMs,
-        reasoningMode: context.options.reasoningMode || this.config.reasoningMode,
-        reasoningTextPrefix: context.options.reasoningTextPrefix ?? this.config.reasoningTextPrefix
-      });
-
-      // 4. 生成事件序列并写入流
-      const eventStream = sequencer.sequenceRequest(request, context.model, context.requestId);
-      await writer.writeChatEvents(eventStream);
-
-      // 5. 完成流
-      writer.complete();
-
-    } catch (error) {
-      throw this.wrapError('REQUEST_CONVERSION_ERROR', error as Error, context.requestId);
-    } finally {
-      this.contexts.delete(context.requestId);
-    }
-  }
-
-  /**
    * 使用函数化架构处理响应转换
    */
   private async processResponseToSseWithFunctions(
@@ -224,15 +147,6 @@ export class ChatJsonToSseConverterRefactored {
       throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, context.requestId);
     } finally {
       this.contexts.delete(context.requestId);
-    }
-  }
-
-  /**
-   * 验证请求格式
-   */
-  private validateRequest(request: ChatCompletionRequest): void {
-    if (!request || typeof request !== 'object' || !Array.isArray(request.messages) || !request.model) {
-      throw new Error('Invalid ChatCompletionRequest format');
     }
   }
 
@@ -343,39 +257,6 @@ export class ChatJsonToSseConverterRefactored {
   }
 
   /**
-   * 创建请求上下文
-   */
-  private createRequestContext(request: ChatCompletionRequest, options: ChatJsonToSseOptions): ChatJsonToSseContext {
-    const eventStats: ChatEventStats = {
-      totalChunks: 0,
-      totalTokens: 0,
-      totalChoices: 0,
-      totalToolCalls: 0,
-      startTime: Date.now(),
-      tokenRate: 0,
-      chunkRate: 0,
-      errorCount: 0,
-      retryCount: 0,
-      totalEvents: 0,
-      eventTypes: {}
-    };
-
-    return {
-      requestId: options.requestId,
-      model: request.model,
-      chatRequest: request,
-      options,
-      startTime: Date.now(),
-      sequenceCounter: 0,
-      choiceIndexCounter: 0,
-      toolCallIndexCounter: 0,
-      currentChunk: {},
-      isStreaming: true,
-      eventStats
-    };
-  }
-
-  /**
    * 创建响应上下文
    */
   private createResponseContext(response: ChatCompletionResponse, options: ChatJsonToSseOptions): ChatJsonToSseContext {
@@ -396,7 +277,7 @@ export class ChatJsonToSseConverterRefactored {
     return {
       requestId: options.requestId,
       model: response.model,
-      chatRequest: {} as ChatCompletionRequest,
+      chatResponse: response,
       options,
       startTime: Date.now(),
       sequenceCounter: 0,
