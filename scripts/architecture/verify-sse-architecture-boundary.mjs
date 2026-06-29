@@ -277,6 +277,8 @@ for (const [relPath, source] of sourceByRel.entries()) {
     '/* noop */',
     '/* ignore */',
     'Never throw from non-blocking logging',
+    'non-blocking',
+    'logChatJsonToSseNonBlocking',
     'catch {}',
     'message_placeholder_',
     'createResponseBuilder(',

@@ -29,6 +29,8 @@ describe('SSE no silent failure boundary', () => {
       '/* noop */',
       '/* ignore */',
       'Never throw from non-blocking logging',
+      'non-blocking',
+      'logChatJsonToSseNonBlocking',
       'catch {}',
       'fallbackCode',
       'fallbackMessage',

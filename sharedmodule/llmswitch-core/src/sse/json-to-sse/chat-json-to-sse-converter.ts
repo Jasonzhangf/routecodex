@@ -17,18 +17,6 @@ import type {
 import { ErrorUtils } from '../shared/utils.js';
 import { createChatSequencer } from './sequencers/chat-sequencer.js';
 import { createChatStreamWriter } from '../shared/writer.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
-
-
-function logChatJsonToSseNonBlocking(
-  stage: string,
-  error: unknown,
-  details: Record<string, unknown> = {}
-): void {
-  const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
-  console.warn(`[chat-json-to-sse] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
-}
-
 
 // Memory management constants
 const CONTEXT_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -183,18 +171,11 @@ export class ChatJsonToSseConverterRefactored {
     // 更新时间戳
     if (et === 'chat_chunk') {
       context.eventStats.totalChunks++;
-      try {
-        const chunkObj = typeof event?.data === 'string' ? JSON.parse(event.data) : event?.data;
-        const choice = chunkObj?.choices?.[0];
-        const deltaContent = choice?.delta?.content;
-        if (typeof deltaContent === 'string') {
-          context.eventStats.totalTokens += deltaContent.length;
-        }
-      } catch (error) {
-        logChatJsonToSseNonBlocking('stats.parse_chat_chunk', error, {
-          requestId: context.requestId,
-          eventType: et
-        });
+      const chunkObj = typeof event?.data === 'string' ? JSON.parse(event.data) : event?.data;
+      const choice = chunkObj?.choices?.[0];
+      const deltaContent = choice?.delta?.content;
+      if (typeof deltaContent === 'string') {
+        context.eventStats.totalTokens += deltaContent.length;
       }
     }
 
