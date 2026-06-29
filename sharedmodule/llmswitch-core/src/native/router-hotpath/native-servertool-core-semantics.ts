@@ -208,6 +208,11 @@ export interface PreCommandHookEventPayloadPlan {
   command: string;
 }
 
+export interface PreCommandRuntimeScriptStdoutParsePlan {
+  action: 'no_change' | 'replace_arguments';
+  toolArguments?: string;
+}
+
 export interface AutoHookTraceEventPlan {
   hookId: string;
   phase: string;
@@ -2149,6 +2154,59 @@ export function planPreCommandHookEventPayloadWithNative(input: {
     throw new Error(`planPreCommandHookEventPayloadJson native returned non-string: ${typeof resultJson}`);
   }
   return parsePreCommandHookEventPayloadPlan(JSON.parse(resultJson) as unknown, capability);
+}
+
+export function parsePreCommandJqStdoutWithNative(input: {
+  stdout: string;
+}): Record<string, unknown> {
+  const capability = 'parsePreCommandJqStdoutJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('parsePreCommandJqStdoutJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`parsePreCommandJqStdoutJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('parsePreCommandJqStdoutJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (!record.parsed || typeof record.parsed !== 'object' || Array.isArray(record.parsed)) {
+    throw new Error('parsePreCommandJqStdoutJson native returned invalid parsed object');
+  }
+  return record.parsed as Record<string, unknown>;
+}
+
+export function parsePreCommandRuntimeScriptStdoutWithNative(input: {
+  stdout: string;
+}): PreCommandRuntimeScriptStdoutParsePlan {
+  const capability = 'parsePreCommandRuntimeScriptStdoutJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('parsePreCommandRuntimeScriptStdoutJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`parsePreCommandRuntimeScriptStdoutJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('parsePreCommandRuntimeScriptStdoutJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.action !== 'no_change' && record.action !== 'replace_arguments') {
+    throw new Error('parsePreCommandRuntimeScriptStdoutJson native returned invalid action');
+  }
+  const toolArguments = record.toolArguments;
+  if (toolArguments !== undefined && typeof toolArguments !== 'string') {
+    throw new Error('parsePreCommandRuntimeScriptStdoutJson native returned invalid toolArguments');
+  }
+  return {
+    action: record.action,
+    ...(typeof toolArguments === 'string' ? { toolArguments } : {})
+  };
 }
 
 export function planAutoHookRuntimeAttemptWithNative(input: {

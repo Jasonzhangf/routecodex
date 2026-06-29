@@ -134,7 +134,12 @@ describe('servertool pre-command hooks', () => {
     expect(source).not.toContain('function buildPreCommandHookEventPayload(');
     expect(source).not.toContain('function parseToolArgumentsObject(');
     expect(source).not.toContain('function extractCommandText(');
+    expect(source).not.toContain('const lines = stdout');
+    expect(source).not.toContain('JSON.parse(payload)');
+    expect(source).not.toContain('cleanedPayload');
     expect(source).toContain('planPreCommandHookEventPayloadWithNative');
+    expect(source).toContain('parsePreCommandJqStdoutWithNative');
+    expect(source).toContain('parsePreCommandRuntimeScriptStdoutWithNative');
   });
 
   test('applies jq transform in pre-command phase when jq is available', async () => {

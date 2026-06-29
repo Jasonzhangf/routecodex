@@ -426,8 +426,10 @@ pub fn plan_pre_command_hook_attempt_json(input_json: &str) -> Result<String, St
     let input: pre_command_hook_contract::PreCommandHookAttemptInput =
         serde_json::from_str(input_json)
             .map_err(|e| format!("deserialize pre-command hook attempt input: {e}"))?;
-    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_attempt(input))
-        .map_err(|e| format!("serialize pre-command hook attempt plan: {e}"))
+    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_attempt(
+        input,
+    ))
+    .map_err(|e| format!("serialize pre-command hook attempt plan: {e}"))
 }
 
 pub fn plan_pre_command_hook_completion_json(input_json: &str) -> Result<String, String> {
@@ -444,6 +446,24 @@ pub fn plan_pre_command_hook_event_payload_json(input_json: &str) -> Result<Stri
             .map_err(|e| format!("deserialize pre-command hook event payload input: {e}"))?;
     serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_event_payload(input))
         .map_err(|e| format!("serialize pre-command hook event payload plan: {e}"))
+}
+
+pub fn parse_pre_command_jq_stdout_json(input_json: &str) -> Result<String, String> {
+    let input: pre_command_hook_contract::PreCommandStdoutParseInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pre-command jq stdout parse input: {e}"))?;
+    let plan = pre_command_hook_contract::parse_pre_command_jq_stdout(input)?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize pre-command jq stdout parse plan: {e}"))
+}
+
+pub fn parse_pre_command_runtime_script_stdout_json(input_json: &str) -> Result<String, String> {
+    let input: pre_command_hook_contract::PreCommandStdoutParseInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize pre-command runtime stdout parse input: {e}"))?;
+    let plan = pre_command_hook_contract::parse_pre_command_runtime_script_stdout(input)?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize pre-command runtime stdout parse plan: {e}"))
 }
 
 pub fn plan_auto_hook_runtime_attempt_json(input_json: &str) -> Result<String, String> {
@@ -2730,8 +2750,7 @@ fn builds_servertool_postflight_observation_summary_via_servertool_core_bridge()
         .to_string(),
     )
     .expect("postflight observation summary");
-    let parsed: serde_json::Value =
-        serde_json::from_str(&output).expect("postflight summary json");
+    let parsed: serde_json::Value = serde_json::from_str(&output).expect("postflight summary json");
     assert_eq!(parsed["mode"], "tool_flow");
     assert_eq!(parsed["flowId"], "flow_bridge");
     assert_eq!(parsed["toolName"], "reasoningStop");

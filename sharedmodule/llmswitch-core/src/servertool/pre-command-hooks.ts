@@ -12,6 +12,8 @@ import {
   planPreCommandHookCompletionWithNative,
   planPreCommandHookEventPayloadWithNative,
   planPreCommandHooksConfigWithNative,
+  parsePreCommandJqStdoutWithNative,
+  parsePreCommandRuntimeScriptStdoutWithNative,
   planRuntimePreCommandRuleWithNative,
   type PreCommandHookRulePlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -350,26 +352,9 @@ function runJqTransform(
     throw new Error(`jq_failed:${stderr || result.status}`);
   }
 
-  const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : '';
-  if (!stdout) {
-    throw new Error('jq_empty_output');
-  }
-  const lines = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  const payload = lines.length > 0 ? lines[lines.length - 1] : stdout;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(payload);
-  } catch {
-    throw new Error('jq_invalid_json_output');
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('jq_non_object_output');
-  }
-  return parsed as Record<string, unknown>;
+  return parsePreCommandJqStdoutWithNative({
+    stdout: typeof result.stdout === 'string' ? result.stdout : ''
+  });
 }
 
 function runShellCommandHook(command: string, eventPayload: Record<string, unknown>, timeoutMs: number): void {
@@ -432,52 +417,8 @@ function runRuntimeScriptHook(
     throw new Error(`runtime_precommand_failed:${stderr || result.status}`);
   }
 
-  const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : '';
-  if (!stdout) {
-    return undefined;
-  }
-  const lines = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  const payload = lines.length > 0 ? lines[lines.length - 1] : stdout;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(payload);
-  } catch {
-    const cleanedPayload = payload.replace(/\\"/g, '"').trim();
-    const unwrapped =
-      cleanedPayload.startsWith('"') && cleanedPayload.endsWith('"') && cleanedPayload.length > 1
-        ? cleanedPayload.slice(1, -1)
-        : cleanedPayload;
-    try {
-      parsed = JSON.parse(unwrapped);
-    } catch {
-      throw new Error('runtime_precommand_invalid_json:' + payload.slice(0, 200));
-    }
-  }
-
-  if (typeof parsed === 'string' && parsed.trim()) {
-    return parsed;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return undefined;
-  }
-
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.toolArguments === 'string' && record.toolArguments.trim()) {
-    return record.toolArguments;
-  }
-  if (Object.prototype.hasOwnProperty.call(record, 'arguments')) {
-    const argValue = record.arguments;
-    if (typeof argValue === 'string') {
-      return argValue;
-    }
-    if (argValue && typeof argValue === 'object' && !Array.isArray(argValue)) {
-      return JSON.stringify(argValue);
-    }
-  }
-
-  return JSON.stringify(record);
+  const parsePlan = parsePreCommandRuntimeScriptStdoutWithNative({
+    stdout: typeof result.stdout === 'string' ? result.stdout : ''
+  });
+  return parsePlan.action === 'replace_arguments' ? parsePlan.toolArguments : undefined;
 }

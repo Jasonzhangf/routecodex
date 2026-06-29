@@ -192,6 +192,33 @@ pub struct PreCommandHookEventPayloadPlan {
     pub command: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandStdoutParseInput {
+    pub stdout: String,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandJqStdoutParsePlan {
+    pub parsed: Value,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreCommandRuntimeScriptStdoutParsePlan {
+    pub action: PreCommandRuntimeScriptStdoutAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_arguments: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PreCommandRuntimeScriptStdoutAction {
+    NoChange,
+    ReplaceArguments,
+}
+
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PreCommandHookCompletionAction {
@@ -329,7 +356,9 @@ pub fn plan_runtime_pre_command_state_runtime_action(
     })
 }
 
-pub fn plan_pre_command_hook_attempt(input: PreCommandHookAttemptInput) -> PreCommandHookAttemptPlan {
+pub fn plan_pre_command_hook_attempt(
+    input: PreCommandHookAttemptInput,
+) -> PreCommandHookAttemptPlan {
     let normalized_tool = normalize_runtime_tool_name(&input.tool_name);
     let current_args = parse_tool_arguments_object(&input.tool_arguments);
     let current_command = extract_command_text(current_args.as_ref(), &input.tool_arguments);
@@ -348,7 +377,11 @@ pub fn plan_pre_command_hook_attempt(input: PreCommandHookAttemptInput) -> PreCo
     {
         return PreCommandHookAttemptPlan {
             action: PreCommandHookAttemptAction::Skip,
-            trace_event: pre_command_trace_event(trace_base, PreCommandHookTraceResult::Miss, "tool_mismatch"),
+            trace_event: pre_command_trace_event(
+                trace_base,
+                PreCommandHookTraceResult::Miss,
+                "tool_mismatch",
+            ),
             execution: None,
         };
     }
@@ -366,7 +399,11 @@ pub fn plan_pre_command_hook_attempt(input: PreCommandHookAttemptInput) -> PreCo
 
     PreCommandHookAttemptPlan {
         action: PreCommandHookAttemptAction::Execute,
-        trace_event: pre_command_trace_event(trace_base, PreCommandHookTraceResult::Match, "planned"),
+        trace_event: pre_command_trace_event(
+            trace_base,
+            PreCommandHookTraceResult::Match,
+            "planned",
+        ),
         execution: Some(PreCommandHookExecutionPlan {
             hook_id: input.hook.id,
             timeout_ms: input.hook.timeout_ms,
@@ -386,10 +423,19 @@ pub fn plan_pre_command_hook_completion(
         input.queue_index,
         input.queue_total,
     );
-    if let Some(message) = input.error_message.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(message) = input
+        .error_message
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         return PreCommandHookCompletionPlan {
             action: PreCommandHookCompletionAction::FailFast,
-            trace_event: pre_command_trace_event(trace_base, PreCommandHookTraceResult::Error, message),
+            trace_event: pre_command_trace_event(
+                trace_base,
+                PreCommandHookTraceResult::Error,
+                message,
+            ),
         };
     }
     PreCommandHookCompletionPlan {
@@ -431,6 +477,101 @@ pub fn plan_pre_command_hook_event_payload(
         }),
         jq_input: parsed_args.unwrap_or_else(|| json!({ "args_raw": input.tool_arguments })),
         command,
+    }
+}
+
+pub fn parse_pre_command_jq_stdout(
+    input: PreCommandStdoutParseInput,
+) -> Result<PreCommandJqStdoutParsePlan, String> {
+    let payload = select_last_nonempty_stdout_line(&input.stdout).ok_or("jq_empty_output")?;
+    let parsed: Value =
+        serde_json::from_str(&payload).map_err(|_| "jq_invalid_json_output".to_string())?;
+    if !parsed.is_object() {
+        return Err("jq_non_object_output".to_string());
+    }
+    Ok(PreCommandJqStdoutParsePlan { parsed })
+}
+
+pub fn parse_pre_command_runtime_script_stdout(
+    input: PreCommandStdoutParseInput,
+) -> Result<PreCommandRuntimeScriptStdoutParsePlan, String> {
+    let Some(payload) = select_last_nonempty_stdout_line(&input.stdout) else {
+        return Ok(PreCommandRuntimeScriptStdoutParsePlan {
+            action: PreCommandRuntimeScriptStdoutAction::NoChange,
+            tool_arguments: None,
+        });
+    };
+    let parsed = parse_runtime_script_payload(&payload)?;
+    if let Some(text) = parsed.as_str() {
+        if !text.trim().is_empty() {
+            return Ok(replace_runtime_arguments(text.to_string()));
+        }
+    }
+    let Some(record) = parsed.as_object() else {
+        return Ok(PreCommandRuntimeScriptStdoutParsePlan {
+            action: PreCommandRuntimeScriptStdoutAction::NoChange,
+            tool_arguments: None,
+        });
+    };
+    if let Some(tool_arguments) = record
+        .get("toolArguments")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Ok(replace_runtime_arguments(tool_arguments.to_string()));
+    }
+    if let Some(arg_value) = record.get("arguments") {
+        if let Some(text) = arg_value.as_str() {
+            return Ok(replace_runtime_arguments(text.to_string()));
+        }
+        if arg_value.is_object() {
+            return Ok(replace_runtime_arguments(arg_value.to_string()));
+        }
+    }
+    Ok(replace_runtime_arguments(
+        Value::Object(record.clone()).to_string(),
+    ))
+}
+
+fn replace_runtime_arguments(tool_arguments: String) -> PreCommandRuntimeScriptStdoutParsePlan {
+    PreCommandRuntimeScriptStdoutParsePlan {
+        action: PreCommandRuntimeScriptStdoutAction::ReplaceArguments,
+        tool_arguments: Some(tool_arguments),
+    }
+}
+
+fn select_last_nonempty_stdout_line(stdout: &str) -> Option<String> {
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .last()
+        .map(str::to_string)
+        .or_else(|| Some(trimmed.to_string()))
+}
+
+fn parse_runtime_script_payload(payload: &str) -> Result<Value, String> {
+    match serde_json::from_str::<Value>(payload) {
+        Ok(value) => Ok(value),
+        Err(_) => {
+            let cleaned = payload.replace("\\\"", "\"").trim().to_string();
+            let unwrapped =
+                if cleaned.starts_with('"') && cleaned.ends_with('"') && cleaned.len() > 1 {
+                    cleaned[1..cleaned.len() - 1].to_string()
+                } else {
+                    cleaned
+                };
+            serde_json::from_str::<Value>(&unwrapped).map_err(|_| {
+                format!(
+                    "runtime_precommand_invalid_json:{}",
+                    payload.chars().take(200).collect::<String>()
+                )
+            })
+        }
     }
 }
 
@@ -715,16 +856,17 @@ fn command_matches_regex(plan: Option<&PreCommandRegexPlan>, command: &str) -> b
 #[cfg(test)]
 mod tests {
     use super::{
+        parse_pre_command_jq_stdout, parse_pre_command_runtime_script_stdout,
         plan_pre_command_hook_attempt, plan_pre_command_hook_completion,
         plan_pre_command_hook_event_payload, plan_pre_command_hooks_config,
-        plan_runtime_pre_command_rule,
-        plan_runtime_pre_command_state_runtime_action, plan_runtime_pre_command_state_selection,
-        PreCommandHookAttemptAction, PreCommandHookAttemptInput, PreCommandHookCompletionInput,
-        PreCommandHookCompletionAction, PreCommandHookEventPayloadInput,
-        PreCommandHookTraceResult, PreCommandHooksConfigPlanInput,
-        RuntimePreCommandRulePlanInput, RuntimePreCommandStateRuntimeAction, RuntimePreCommandStateRuntimeActionInput,
-        RuntimePreCommandStateSelectionAction, RuntimePreCommandStateSelectionInput,
-        RuntimePreCommandStateSource,
+        plan_runtime_pre_command_rule, plan_runtime_pre_command_state_runtime_action,
+        plan_runtime_pre_command_state_selection, PreCommandHookAttemptAction,
+        PreCommandHookAttemptInput, PreCommandHookCompletionAction, PreCommandHookCompletionInput,
+        PreCommandHookEventPayloadInput, PreCommandHookTraceResult, PreCommandHooksConfigPlanInput,
+        PreCommandRuntimeScriptStdoutAction, PreCommandStdoutParseInput,
+        RuntimePreCommandRulePlanInput, RuntimePreCommandStateRuntimeAction,
+        RuntimePreCommandStateRuntimeActionInput, RuntimePreCommandStateSelectionAction,
+        RuntimePreCommandStateSelectionInput, RuntimePreCommandStateSource,
     };
     use serde_json::json;
 
@@ -894,7 +1036,10 @@ mod tests {
             queue_total: 1,
         });
         assert_eq!(wrong_tool.action, PreCommandHookAttemptAction::Skip);
-        assert_eq!(wrong_tool.trace_event.result, PreCommandHookTraceResult::Miss);
+        assert_eq!(
+            wrong_tool.trace_event.result,
+            PreCommandHookTraceResult::Miss
+        );
         assert_eq!(wrong_tool.trace_event.reason, "tool_mismatch");
 
         let wrong_command = plan_pre_command_hook_attempt(PreCommandHookAttemptInput {
@@ -950,7 +1095,10 @@ mod tests {
             error_message: None,
         });
         assert_eq!(completion.action, PreCommandHookCompletionAction::Continue);
-        assert_eq!(completion.trace_event.result, PreCommandHookTraceResult::Match);
+        assert_eq!(
+            completion.trace_event.result,
+            PreCommandHookTraceResult::Match
+        );
         assert_eq!(completion.trace_event.reason, "applied");
 
         let error = plan_pre_command_hook_completion(PreCommandHookCompletionInput {
@@ -995,6 +1143,60 @@ mod tests {
         });
         assert_eq!(raw.command, "not-json");
         assert_eq!(raw.jq_input, json!({ "args_raw": "not-json" }));
-        assert_eq!(raw.event_payload["arguments"], json!({ "args_raw": "not-json" }));
+        assert_eq!(
+            raw.event_payload["arguments"],
+            json!({ "args_raw": "not-json" })
+        );
+    }
+
+    #[test]
+    fn parses_jq_stdout_in_rust() {
+        let plan = parse_pre_command_jq_stdout(PreCommandStdoutParseInput {
+            stdout: "debug\n{\"cmd\":\"npm test\"}\n".to_string(),
+        })
+        .expect("jq stdout");
+        assert_eq!(plan.parsed, json!({ "cmd": "npm test" }));
+
+        let err = parse_pre_command_jq_stdout(PreCommandStdoutParseInput {
+            stdout: "not-json".to_string(),
+        })
+        .expect_err("invalid jq stdout");
+        assert_eq!(err, "jq_invalid_json_output");
+    }
+
+    #[test]
+    fn parses_runtime_script_stdout_in_rust() {
+        let string_plan = parse_pre_command_runtime_script_stdout(PreCommandStdoutParseInput {
+            stdout: "\"npm test\"".to_string(),
+        })
+        .expect("string stdout");
+        assert_eq!(
+            string_plan.action,
+            PreCommandRuntimeScriptStdoutAction::ReplaceArguments
+        );
+        assert_eq!(string_plan.tool_arguments.as_deref(), Some("npm test"));
+
+        let record_plan = parse_pre_command_runtime_script_stdout(PreCommandStdoutParseInput {
+            stdout: "log\n{\"arguments\":{\"cmd\":\"echo ok\"}}\n".to_string(),
+        })
+        .expect("record stdout");
+        assert_eq!(
+            record_plan.action,
+            PreCommandRuntimeScriptStdoutAction::ReplaceArguments
+        );
+        assert_eq!(
+            record_plan.tool_arguments.as_deref(),
+            Some("{\"cmd\":\"echo ok\"}")
+        );
+
+        let empty_plan = parse_pre_command_runtime_script_stdout(PreCommandStdoutParseInput {
+            stdout: "   ".to_string(),
+        })
+        .expect("empty stdout");
+        assert_eq!(
+            empty_plan.action,
+            PreCommandRuntimeScriptStdoutAction::NoChange
+        );
+        assert_eq!(empty_plan.tool_arguments, None);
     }
 }

@@ -3313,13 +3313,19 @@ function checkPreCommandHooksRustOwner() {
     'pub struct PreCommandHookAttemptPlan',
     'pub struct PreCommandHookCompletionInput',
     'pub struct PreCommandHookCompletionPlan',
+    'pub struct PreCommandStdoutParseInput',
+    'pub struct PreCommandJqStdoutParsePlan',
+    'pub struct PreCommandRuntimeScriptStdoutParsePlan',
     'pub enum PreCommandHookCompletionAction',
+    'pub enum PreCommandRuntimeScriptStdoutAction',
     'pub fn plan_pre_command_hooks_config',
     'pub fn plan_runtime_pre_command_rule',
     'pub fn plan_runtime_pre_command_state_selection',
     'pub fn plan_runtime_pre_command_state_runtime_action',
     'pub fn plan_pre_command_hook_attempt',
     'pub fn plan_pre_command_hook_completion',
+    'pub fn parse_pre_command_jq_stdout',
+    'pub fn parse_pre_command_runtime_script_stdout',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-rust-owner',
@@ -3341,6 +3347,8 @@ function checkPreCommandHooksRustOwner() {
     'plan_runtime_pre_command_state_runtime_action_json',
     'plan_pre_command_hook_attempt_json',
     'plan_pre_command_hook_completion_json',
+    'parse_pre_command_jq_stdout_json',
+    'parse_pre_command_runtime_script_stdout_json',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-export',
@@ -3356,6 +3364,8 @@ function checkPreCommandHooksRustOwner() {
     'pub fn plan_runtime_pre_command_state_runtime_action_json',
     'pub fn plan_pre_command_hook_attempt_json',
     'pub fn plan_pre_command_hook_completion_json',
+    'pub fn parse_pre_command_jq_stdout_json',
+    'pub fn parse_pre_command_runtime_script_stdout_json',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-export',
@@ -3371,6 +3381,8 @@ function checkPreCommandHooksRustOwner() {
     'planRuntimePreCommandStateRuntimeActionJson',
     'planPreCommandHookAttemptJson',
     'planPreCommandHookCompletionJson',
+    'parsePreCommandJqStdoutJson',
+    'parsePreCommandRuntimeScriptStdoutJson',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-required-export',
@@ -3384,6 +3396,8 @@ function checkPreCommandHooksRustOwner() {
     'planRuntimePreCommandRuleWithNative',
     'planPreCommandHookAttemptWithNative',
     'planPreCommandHookCompletionWithNative',
+    'parsePreCommandJqStdoutWithNative',
+    'parsePreCommandRuntimeScriptStdoutWithNative',
   ]) {
     assertContains(
       'servertool-pre-command-hooks-native-bridge',
@@ -3397,6 +3411,18 @@ function checkPreCommandHooksRustOwner() {
       preCommandShell,
       needle
     );
+  }
+  for (const keyword of [
+    'const lines = stdout',
+    'JSON.parse(payload)',
+    'cleanedPayload',
+  ]) {
+    if (preCommandShell.includes(keyword)) {
+      fail(
+        'servertool-pre-command-hooks-no-ts-output-parser',
+        `Forbidden TS pre-command stdout parser "${keyword}" found in pre-command-hooks.ts`
+      );
+    }
   }
   assertContains(
     'servertool-pre-command-hooks-runtime-selection-thin-shell',
