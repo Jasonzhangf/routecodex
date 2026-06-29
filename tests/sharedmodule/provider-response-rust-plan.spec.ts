@@ -228,6 +228,52 @@ describe('provider response Rust native plan', () => {
     expect(recordResponsesResponseMock).not.toHaveBeenCalled();
   });
 
+  it('records Responses response capture under the active response request id when request truth was rebound', async () => {
+    const context: Record<string, unknown> = {
+      requestId: 'openai-responses-router-gpt-5.5-20260629T203754219-423335-3618',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      sessionId: 'responses-rebound-request-context-session',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false
+    };
+    const center = MetadataCenter.attach(context);
+    center.writeRequestTruth(
+      'requestId',
+      'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618',
+      TEST_METADATA_WRITER,
+      'simulate provider-level request id rebind'
+    );
+    center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('sessionId', context.sessionId, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRuntimeControl('providerProtocol', 'openai-chat', TEST_METADATA_WRITER, 'test-runtime-control');
+
+    await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_rebound_request_context',
+        object: 'chat.completion',
+        model: 'glm-5.2',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: false
+    });
+
+    expect(recordResponsesResponseMock).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'openai-responses-router-gpt-5.5-20260629T203754219-423335-3618'
+    }));
+    expect(recordResponsesResponseMock).not.toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618'
+    }));
+  });
+
   it('projects stopless CLI command instead of reentering followup for Anthropic relay stop', async () => {
     const suffix = `anthropic_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const context: Record<string, unknown> = withMetadataCenter({
