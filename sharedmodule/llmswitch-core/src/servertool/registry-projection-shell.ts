@@ -21,16 +21,9 @@ type RegistrySourceProjectionResult = {
   registeredRecords: ServerToolRegisteredHandlerRecord[];
 };
 
-function canonicalName(name: string): string {
-  return name.trim().toLowerCase();
-}
-
 export function projectAutoServerToolHookDescriptors(args: {
   entries: ServerToolHandlerEntry[];
 }): ServerToolAutoHookDescriptor[] {
-  const entryById = new Map(
-    args.entries.map((entry) => [entry.name.trim().toLowerCase(), entry] as const)
-  );
   return planServertoolRegistryAutoHookDescriptorsWithNative({
     hooks: args.entries.map((entry) => ({
       id: entry.name,
@@ -39,10 +32,10 @@ export function projectAutoServerToolHookDescriptors(args: {
       order: entry.autoHook?.order
     }))
   }).map((descriptor) => {
-    const entry = entryById.get(descriptor.id.trim().toLowerCase());
+    const entry = args.entries[descriptor.sourceIndex];
     if (!entry) {
       throw new Error(
-        `[servertool] native registry auto-hook descriptor missing entry for id: ${descriptor.id}`
+        `[servertool] native registry auto-hook descriptor missing entry for sourceIndex: ${descriptor.sourceIndex}`
       );
     }
     return {
@@ -77,22 +70,18 @@ export function projectRegistrySources(args: {
     registeredNames: projection.registeredNames,
     autoHandlers: projection.autoHandlerRefs.map((ref) => {
       const entry = args.builtinAutoHandlerEntries[ref.sourceIndex];
-      if (!entry || canonicalName(entry.name) !== canonicalName(ref.name)) {
+      if (!entry) {
         throw new Error(
-          `[servertool] native registry source projection mismatch for auto handler ${ref.source}:${ref.sourceIndex}:${ref.name}`
+          `[servertool] native registry source projection missing auto handler ${ref.source}:${ref.sourceIndex}:${ref.name}`
         );
       }
       return entry;
     }),
     registeredRecords: projection.registeredRecordRefs.map((ref) => {
       const entry = builtinRecords[ref.sourceIndex];
-      if (
-        !entry ||
-        canonicalName(entry.registration.name) !== canonicalName(ref.name) ||
-        entry.registration.trigger !== ref.trigger
-      ) {
+      if (!entry) {
         throw new Error(
-          `[servertool] native registry source projection mismatch for registered record ${ref.source}:${ref.sourceIndex}:${ref.trigger}:${ref.name}`
+          `[servertool] native registry source projection missing registered record ${ref.source}:${ref.sourceIndex}:${ref.trigger}:${ref.name}`
         );
       }
       return {

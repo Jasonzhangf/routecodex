@@ -35,7 +35,7 @@ describe('registry-projection-shell', () => {
       autoHook: { phase: 'post', priority: 9, order: 1 },
     } as any;
     planServertoolRegistryAutoHookDescriptorsWithNativeMock.mockReturnValue([
-      { id: 'alpha', phase: 'post', priority: 9, order: 1 },
+      { id: 'alpha', phase: 'post', priority: 9, order: 1, sourceIndex: 0 },
     ]);
 
     expect(projectAutoServerToolHookDescriptors({ entries: [entry] })).toEqual([
@@ -93,7 +93,7 @@ describe('registry-projection-shell', () => {
     });
   });
 
-  test('rejects source projection mismatches', () => {
+  test('rejects missing source projection indexes without rematching names in TS', () => {
     const builtinAuto = {
       name: 'stop_message_auto',
       trigger: 'auto',
@@ -103,7 +103,7 @@ describe('registry-projection-shell', () => {
 
     planServertoolRegistrySourceProjectionWithNativeMock.mockReturnValue({
       registeredNames: [],
-      autoHandlerRefs: [{ name: 'wrong', source: 'builtin', sourceIndex: 0 }],
+      autoHandlerRefs: [{ name: 'wrong', source: 'builtin', sourceIndex: 1 }],
       registeredRecordRefs: [],
     });
 
@@ -111,6 +111,17 @@ describe('registry-projection-shell', () => {
       builtinNames: ['stop_message_auto'],
       builtinAutoHandlerEntries: [builtinAuto],
       builtinRecordEntries: [],
-    })).toThrow('native registry source projection mismatch for auto handler');
+    })).toThrow('native registry source projection missing auto handler');
+  });
+
+  test('registry projection shell does not own name normalization', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts', 'utf8')
+    );
+
+    expect(source).toContain('sourceIndex');
+    expect(source).not.toContain('function canonicalName(');
+    expect(source).not.toContain('.trim().toLowerCase()');
+    expect(source).not.toContain('native registry source projection mismatch');
   });
 });

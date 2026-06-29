@@ -42,6 +42,7 @@ pub struct ServertoolRegistryAutoHookDescriptorPlan {
     pub phase: String,
     pub priority: i64,
     pub order: i64,
+    pub source_index: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -174,7 +175,7 @@ pub fn plan_servertool_registry_auto_hook_descriptors(
     let mut seen_ids = std::collections::HashSet::new();
     let mut output = Vec::with_capacity(input.len());
 
-    for hook in input {
+    for (source_index, hook) in input.into_iter().enumerate() {
         let canonical_id = normalize_name(&hook.id)
             .ok_or_else(|| "invalid auto hook descriptor id".to_string())?;
         if !seen_ids.insert(canonical_id.clone()) {
@@ -185,6 +186,7 @@ pub fn plan_servertool_registry_auto_hook_descriptors(
             phase: normalize_auto_hook_phase(hook.phase.as_deref()),
             priority: hook.priority.unwrap_or(100),
             order: hook.order.unwrap_or(0),
+            source_index,
         });
     }
 
@@ -378,12 +380,14 @@ mod tests {
                     phase: "post".to_string(),
                     priority: 999,
                     order: 7,
+                    source_index: 0,
                 },
                 ServertoolRegistryAutoHookDescriptorPlan {
                     id: "vision_auto".to_string(),
                     phase: "default".to_string(),
                     priority: 100,
                     order: 0,
+                    source_index: 1,
                 }
             ]
         );

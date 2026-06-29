@@ -101,14 +101,15 @@ jest.unstable_mockModule(
     })),
     planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn((input: any) =>
       Array.isArray(input?.hooks)
-        ? input.hooks.map((hook: any) => ({
+        ? input.hooks.map((hook: any, sourceIndex: number) => ({
             id: String(hook?.id ?? '').trim().toLowerCase(),
             phase:
               hook?.phase === 'pre' || hook?.phase === 'post'
                 ? hook.phase
                 : 'default',
             priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
-            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0
+            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
+            sourceIndex
           }))
         : []
     ),

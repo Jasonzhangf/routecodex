@@ -2691,6 +2691,7 @@ export type ServertoolRegistryAutoHookDescriptorPlan = {
   phase: 'pre' | 'default' | 'post';
   priority: number;
   order: number;
+  sourceIndex: number;
 };
 
 export function planServertoolRegistryAutoHookDescriptorsWithNative(input: {
@@ -2731,11 +2732,19 @@ export function planServertoolRegistryAutoHookDescriptorsWithNative(input: {
     if (typeof record.order !== 'number' || !Number.isFinite(record.order)) {
       throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid order');
     }
+    if (
+      typeof record.sourceIndex !== 'number' ||
+      !Number.isInteger(record.sourceIndex) ||
+      record.sourceIndex < 0
+    ) {
+      throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid sourceIndex');
+    }
     return {
       id: record.id,
       phase: record.phase,
       priority: record.priority,
-      order: record.order
+      order: record.order,
+      sourceIndex: record.sourceIndex
     };
   });
 }

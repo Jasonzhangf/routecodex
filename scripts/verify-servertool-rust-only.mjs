@@ -3845,6 +3845,9 @@ function checkServertoolRegistryRustOwner() {
     }
   }
   for (const marker of [
+    'function canonicalName(',
+    '.trim().toLowerCase()',
+    'native registry source projection mismatch',
     'adHocNames',
     'adHocAutoHandlerEntries',
     'adHocHandlerRecords',

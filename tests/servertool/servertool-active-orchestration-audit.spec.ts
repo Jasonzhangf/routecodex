@@ -312,7 +312,11 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts',
-    forbidden: [],
+    forbidden: [
+      'function canonicalName(',
+      '.trim().toLowerCase()',
+      'native registry source projection mismatch',
+    ],
     required: [
       'planServertoolRegistryAutoHookDescriptorsWithNative',
       'projectAutoServerToolHookDescriptors',
