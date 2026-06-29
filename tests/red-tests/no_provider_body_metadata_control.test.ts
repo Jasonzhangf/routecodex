@@ -22,7 +22,6 @@ describe('provider metadata isolation redlines', () => {
       'src/server/handlers/messages-handler.ts',
       'src/server/handlers/responses-handler.ts',
       'sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts',
-      'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs'
     ];
     const forbidden = [

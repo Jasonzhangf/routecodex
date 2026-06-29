@@ -290,9 +290,9 @@ npm run jest:run -- --runTestsByPath tests/red-tests/no_provider_body_metadata_c
     - 问题：Responses JSON -> SSE 的 `createResponsePayload` 会把 `response.metadata` 投射到 `response.created` / `response.in_progress` / `response.completed` client SSE payload。
     - 修复：client SSE response payload 不再输出 `metadata`；内部 metadata 只能留在 carrier / snapshot root。
 
-17. `sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts`
-    - 问题：Responses SSE -> JSON builder 会从 provider SSE `data.metadata` / `responsePayload.metadata` 重建 client JSON `response.metadata`。
-    - 修复：builder 不再聚合或恢复 response metadata；provider event metadata 不进入 client JSON body。
+17. `sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts`
+    - 问题：Responses SSE -> JSON native materializer 仍需确保 provider SSE `data.metadata` / `responsePayload.metadata` 不会进入 client JSON `response.metadata`。
+    - 修复：native materializer 不聚合或恢复 response metadata；provider event metadata 不进入 client JSON body。
 
 18. `src/server/runtime/http-server/direct-passthrough-payload.ts`
     - 问题：direct passthrough replay 优先使用 `metadata.__raw_request_body` 时，会把 raw body 的 top-level `metadata` 恢复进 provider wire payload。

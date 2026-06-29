@@ -144,7 +144,7 @@
 - apply_patch/custom_tool_call projection 与去重状态机
 - nested response payload normalize
 - 应用强相关 summary / hint / stopless 辅助语义
-- TS `response-builder.ts` 状态机
+- Responses SSE native materializer / decode projection 状态机
 - TS `responses-json-to-sse-converter.ts` 事件序列化主逻辑
 
 这些能力迁移时必须先判断阶段归属：
@@ -180,7 +180,6 @@
 
 当前已确认仍在 TS 的主实现：
 
-- `sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts`
 - `sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts`
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts`
 
@@ -350,7 +349,6 @@ Rust 模块形态要求：
 - `src/server/handlers/handler-response-sse.ts`
 - `src/modules/llmswitch/bridge/responses-sse-bridge.ts`
 - `src/modules/llmswitch/bridge/responses-response-bridge.ts`
-- `sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts`
 - `sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts`
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`

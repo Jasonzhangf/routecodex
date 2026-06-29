@@ -671,11 +671,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts",
       "textContains": ""
     },

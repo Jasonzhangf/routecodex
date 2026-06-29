@@ -168,7 +168,6 @@ for (const forbidden of [
 
 const providerNeutralProjectionFiles = [
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
-  'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts',
@@ -219,6 +218,8 @@ for (const relPath of providerNeutralProjectionFiles) {
     'syntheticResponse',
     'syntheticIndex',
     "id: `${context.requestId}-input-${inputIndex}`",
+    'message_placeholder_',
+    'createResponseBuilder(',
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath}: provider-neutral SSE projection must not salvage partial streams into successful responses: ${forbidden}`);
@@ -254,6 +255,8 @@ for (const [relPath, source] of sourceByRel.entries()) {
     '/* ignore */',
     'Never throw from non-blocking logging',
     'catch {}',
+    'message_placeholder_',
+    'createResponseBuilder(',
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath}: SSE runtime must not contain silent failure marker: ${forbidden}`);

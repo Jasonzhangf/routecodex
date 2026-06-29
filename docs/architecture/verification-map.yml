@@ -1957,7 +1957,6 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
     contract:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
       - tests/sharedmodule/responses-sse-native-materialize.spec.ts

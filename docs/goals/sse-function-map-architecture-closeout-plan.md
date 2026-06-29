@@ -150,7 +150,7 @@ Migration target:
 Owner:
 
 - `sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts`
-- `sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts`
+- `sharedmodule/llmswitch-core/src/sse/sse-to-json` native materializer surface
 
 Responsibility:
 
@@ -278,7 +278,7 @@ Canonical query anchors used by the first-stage map:
 
 - `sse.codec_registry_surface`: `createChatCodec`, `createResponsesCodec`
 - `sse.stream_parse_boundary`: `assembleSseEvent`, `parseSseEvent`, `createSseParser`
-- `sse.responses_decode_projection`: `createResponseBuilder`
+- `sse.responses_decode_projection`: `materializeFinalResponse`
 - `sse.responses_encode_projection`: `ResponsesJsonToSseConverter`
 - `sse.chat_stream_projection`: `ChatJsonToSseConverter`
 - `sse.anthropic_gemini_stream_projection`: `createAnthropicSequencer`, `createGeminiSequencer`

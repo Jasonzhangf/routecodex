@@ -1,7 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
-import { createResponseBuilder } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.js';
 
 async function collectEvents(response: any): Promise<any[]> {
   const events: any[] = [];
@@ -55,55 +54,11 @@ describe('responses SSE metadata boundary', () => {
     expect(responseEvents.map((event) => event.type)).toEqual(
       expect.arrayContaining(['response.created', 'response.in_progress', 'response.completed', 'response.done'])
     );
+    expect(JSON.stringify(events)).not.toContain('message_placeholder_');
     for (const event of responseEvents) {
       expect(event.data.response.metadata).toBeUndefined();
       expect(JSON.stringify(event.data.response)).not.toContain('must-not-leak');
       expect(JSON.stringify(event.data.response)).not.toContain('__shadowCompareForcedProviderKey');
     }
-  });
-
-  it('does not project provider SSE metadata into reconstructed client JSON response', () => {
-    const builder = createResponseBuilder();
-
-    builder.processEvent({
-      type: 'response.created',
-      timestamp: 0,
-      protocol: 'responses',
-      direction: 'sse_to_json',
-      sequenceNumber: 0,
-      data: {
-        response: {
-          id: 'resp_sse_metadata_boundary',
-          object: 'response',
-          created_at: 1710000000,
-          status: 'in_progress',
-          model: 'gpt-test',
-          metadata: { session_id: 'provider-event-metadata' }
-        }
-      }
-    } as any);
-    builder.processEvent({
-      type: 'response.completed',
-      timestamp: 0,
-      protocol: 'responses',
-      direction: 'sse_to_json',
-      sequenceNumber: 1,
-      data: {
-        response: {
-          id: 'resp_sse_metadata_boundary',
-          object: 'response',
-          status: 'completed',
-          model: 'gpt-test',
-          metadata: { routeHint: 'provider-completed-metadata' },
-          output: []
-        }
-      }
-    } as any);
-
-    const result = builder.getResult();
-    expect(result.success).toBe(true);
-    expect((result.response as any).metadata).toBeUndefined();
-    expect(JSON.stringify(result.response)).not.toContain('provider-event-metadata');
-    expect(JSON.stringify(result.response)).not.toContain('provider-completed-metadata');
   });
 });

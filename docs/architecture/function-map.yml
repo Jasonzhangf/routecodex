@@ -3560,16 +3560,15 @@ owners:
     summary: "OpenAI Responses SSE event stream to Responses JSON projection"
     owner_kind: server_projection
     owner_scope: "OpenAI Responses SSE event stream to Responses JSON projection"
-    owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
+    owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
     canonical_types:
       - ResponsesSseEvent
       - ResponsesResponse
       - SseToResponsesJsonOptions
     canonical_builders:
-      - createResponseBuilder
+      - materializeFinalResponse
     allowed_paths:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts
       - src/providers/core/runtime/responses-provider.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
@@ -3587,7 +3586,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Decode projection may aggregate provider SSE into Responses JSON and surface decode failures; it must not own provider retry/reroute policy, Hub tool governance, or client frame repair."
+      - "Decode projection is owned by the native materializer behind responses-sse-to-json-converter.ts; it may aggregate provider SSE into Responses JSON and surface decode failures, but it must not own provider retry/reroute policy, Hub tool governance, or client frame repair."
 
   - feature_id: sse.responses_encode_projection
     status: active
