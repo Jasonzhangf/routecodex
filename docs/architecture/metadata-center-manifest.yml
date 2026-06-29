@@ -238,3 +238,4 @@ verification:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-wiki-sync
     - npm run verify:architecture-metadata-center-write-boundaries
+    - npm run verify:metadata-center-dualwrite-api
