@@ -81,6 +81,8 @@ for (const forbidden of [
 const responsesSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts');
 for (const forbidden of [
   'eventData = dataStr;',
+  'if (!source) return Date.now();',
+  'return Number.isNaN(parsed) ? Date.now() : parsed;',
 ]) {
   if (responsesSerializer.includes(forbidden)) {
     failures.push(`Responses SSE serializer retains parse salvage marker: ${forbidden}`);

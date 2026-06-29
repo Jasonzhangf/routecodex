@@ -393,13 +393,18 @@ export class ResponsesEventSerializer {
    * 解析 wire 中的时间戳字符串
    */
   private parseTimestamp(source: string | null): number {
-    if (!source) return Date.now();
+    if (!source) {
+      throw new Error('Missing Responses SSE timestamp');
+    }
     const numeric = Number(source);
     if (!Number.isNaN(numeric)) {
       return numeric;
     }
     const parsed = Date.parse(source);
-    return Number.isNaN(parsed) ? Date.now() : parsed;
+    if (Number.isNaN(parsed)) {
+      throw new Error(`Invalid Responses SSE timestamp: ${source}`);
+    }
+    return parsed;
   }
 }
 

@@ -8,7 +8,27 @@ describe('responses event serializer no-salvage boundary', () => {
 
     expect(() => serializer.deserializeFromWire(
       'event: response.done\n' +
+      'id: 123\n' +
       'data: not-json\n'
     )).toThrow('Invalid Responses SSE data payload: not-json');
+  });
+
+  it('throws when the timestamp is missing instead of using the current time', () => {
+    const serializer = new ResponsesEventSerializer();
+
+    expect(() => serializer.deserializeFromWire(
+      'event: response.done\n' +
+      'data: {"type":"response.done","response":{}}\n'
+    )).toThrow('Missing Responses SSE timestamp');
+  });
+
+  it('throws when the timestamp is invalid instead of parsing a fallback time', () => {
+    const serializer = new ResponsesEventSerializer();
+
+    expect(() => serializer.deserializeFromWire(
+      'event: response.done\n' +
+      'id: not-a-timestamp\n' +
+      'data: {"type":"response.done","response":{}}\n'
+    )).toThrow('Invalid Responses SSE timestamp: not-a-timestamp');
   });
 });
