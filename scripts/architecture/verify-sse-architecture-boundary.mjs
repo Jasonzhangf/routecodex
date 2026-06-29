@@ -139,6 +139,7 @@ const providerNeutralProjectionFiles = [
   'sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts',
   'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts',
   'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts',
+  'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts',
 ];
 
 for (const relPath of providerNeutralProjectionFiles) {
@@ -156,6 +157,7 @@ for (const relPath of providerNeutralProjectionFiles) {
     'const fallback = { input_tokens: 0, output_tokens: 0, total_tokens: 0 }',
     "args = '{}'",
     "fallback = 'model'",
+    "return String(input ?? '')",
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath}: provider-neutral SSE projection must not salvage partial streams into successful responses: ${forbidden}`);

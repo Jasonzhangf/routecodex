@@ -48,11 +48,7 @@ function normalizeToolInput(input: unknown): string {
   if (typeof input === 'string') {
     return input;
   }
-  try {
-    return JSON.stringify(input ?? {});
-  } catch {
-    return String(input ?? '');
-  }
+  return JSON.stringify(input ?? {});
 }
 
 export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConfig>) {
