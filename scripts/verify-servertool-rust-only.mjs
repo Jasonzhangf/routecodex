@@ -5553,6 +5553,9 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'runtime.chatResponse ?? ctx.base',
     'runtime.execution ??',
     'stopMessageTerminalFinal: true',
+    '.map((name) => getBuiltinHandlerEntry(name))',
+    '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry?.autoHook))',
+    '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry))',
   ]) {
     if (builtinHandlerCatalogSource.includes(marker)) {
       fail(
@@ -5578,6 +5581,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
     "readNativeFunction('runStoplessBuiltinHandlerForRuntimeJson')",
     'planServertoolBuiltinHandlerEntry(',
     'planServertoolBuiltinHandlerNames(',
+    'planServertoolBuiltinAutoHandlerEntries(',
+    'planServertoolBuiltinHandlerRecordEntries(',
   ]) {
     if (!builtinHandlerCatalogSource.includes(marker)) {
       fail(

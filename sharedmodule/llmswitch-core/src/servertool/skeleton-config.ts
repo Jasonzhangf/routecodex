@@ -13,8 +13,10 @@ import type {
 import {
   getDefaultServertoolSkeletonDocumentWithNative,
   normalizeServertoolRegistrationSpecWithNative,
+  planServertoolBuiltinAutoHandlerEntriesWithNative,
   planServertoolBuiltinHandlerEntryWithNative,
   planServertoolBuiltinHandlerNamesWithNative,
+  planServertoolBuiltinHandlerRecordEntriesWithNative,
   planServertoolRegistryLookupFromSkeletonWithNative,
   planServertoolRegistryRegistrationFromSkeletonWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
@@ -99,6 +101,14 @@ export function planServertoolBuiltinHandlerEntry(name: string): Record<string, 
 
 export function planServertoolBuiltinHandlerNames(): string[] {
   return planServertoolBuiltinHandlerNamesWithNative().names;
+}
+
+export function planServertoolBuiltinAutoHandlerEntries(): Record<string, unknown>[] {
+  return planServertoolBuiltinAutoHandlerEntriesWithNative().entries;
+}
+
+export function planServertoolBuiltinHandlerRecordEntries(): Record<string, unknown>[] {
+  return planServertoolBuiltinHandlerRecordEntriesWithNative().entries;
 }
 
 export function planServertoolRegistryRegistrationFromSkeleton(input: {

@@ -354,6 +354,9 @@ describe('stop-message-auto native-catalog audit', () => {
       "runtime.action !== 'return_handler_result'",
       "case 'stop_message_auto'",
       "name === 'stop_message_auto'",
+      '.map((name) => getBuiltinHandlerEntry(name))',
+      '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry?.autoHook))',
+      '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry))',
       'readPersistedStopMessageSnapshotFromCandidateKeys',
       'readPersistedStopMessageStageModeFromCandidateKeys',
       'readPersistedStopMessageTombstoneFromCandidateKeys',
@@ -386,5 +389,7 @@ describe('stop-message-auto native-catalog audit', () => {
     ];
     const hits = forbidden.filter((marker) => source.includes(marker));
     expect(hits).toEqual([]);
+    expect(source).toContain('planServertoolBuiltinAutoHandlerEntries');
+    expect(source).toContain('planServertoolBuiltinHandlerRecordEntries');
   });
 });

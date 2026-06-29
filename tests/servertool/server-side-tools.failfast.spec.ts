@@ -718,6 +718,50 @@ jest.unstable_mockModule(
         : { action: 'return_none' };
     }),
     planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({ names: ['stop_message_auto'] })),
+    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
+      entries: [{
+        name: 'stop_message_auto',
+        trigger: 'auto',
+        execution: {
+          kind: 'builtin',
+          builtinName: 'stop_message_auto'
+        },
+        autoHook: {
+          flowId: 'stop_message_flow',
+          trigger: { type: 'auto', phase: 'default', priority: 40 },
+          execution: { mode: 'auto_hook', stripAfterExecute: true }
+        },
+        registration: {
+          name: 'stop_message_auto',
+          enabled: true,
+          trigger: 'auto',
+          executionMode: 'auto_hook',
+          stripAfterExecute: true
+        }
+      }]
+    })),
+    planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({
+      entries: [{
+        name: 'stop_message_auto',
+        trigger: 'auto',
+        execution: {
+          kind: 'builtin',
+          builtinName: 'stop_message_auto'
+        },
+        autoHook: {
+          flowId: 'stop_message_flow',
+          trigger: { type: 'auto', phase: 'default', priority: 40 },
+          execution: { mode: 'auto_hook', stripAfterExecute: true }
+        },
+        registration: {
+          name: 'stop_message_auto',
+          enabled: true,
+          trigger: 'auto',
+          executionMode: 'auto_hook',
+          stripAfterExecute: true
+        }
+      }]
+    })),
     planServertoolRegistryRegistrationFromSkeletonWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
       return name && input?.hasHandler === true

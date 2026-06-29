@@ -73,6 +73,9 @@ export type NativeServertoolBuiltinHandlerEntryPlan =
 export type NativeServertoolBuiltinHandlerNamesPlan = {
   names: string[];
 };
+export type NativeServertoolBuiltinHandlerEntriesPlan = {
+  entries: Record<string, unknown>[];
+};
 export type NativeServertoolRegistryRegistrationActionPlan = {
   action: 'ignore_invalid' | 'ignore_builtin_override' | 'ignore_disabled' | 'register_adhoc';
   canonicalName?: string;
@@ -577,6 +580,57 @@ export function planServertoolBuiltinHandlerNamesWithNative(input: {
     return {
       names: names.map((name) => name.trim().toLowerCase()).sort()
     };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+function parseBuiltinHandlerEntriesPlan(
+  capability: string,
+  raw: string,
+  fail: (reason?: string) => NativeServertoolBuiltinHandlerEntriesPlan
+): NativeServertoolBuiltinHandlerEntriesPlan {
+  const parsed = parseJson(capability, raw);
+  if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return fail('invalid payload');
+  }
+  const entries = (parsed as Record<string, unknown>).entries;
+  if (
+    !Array.isArray(entries) ||
+    entries.some((entry) => !entry || typeof entry !== 'object' || Array.isArray(entry))
+  ) {
+    return fail('invalid entries');
+  }
+  return {
+    entries: entries as Record<string, unknown>[]
+  };
+}
+
+export function planServertoolBuiltinAutoHandlerEntriesWithNative(input: {
+  document?: unknown;
+} = {}): NativeServertoolBuiltinHandlerEntriesPlan {
+  const capability = 'planServertoolBuiltinAutoHandlerEntriesJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolBuiltinHandlerEntriesPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    return parseBuiltinHandlerEntriesPlan(capability, raw, fail);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planServertoolBuiltinHandlerRecordEntriesWithNative(input: {
+  document?: unknown;
+} = {}): NativeServertoolBuiltinHandlerEntriesPlan {
+  const capability = 'planServertoolBuiltinHandlerRecordEntriesJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolBuiltinHandlerEntriesPlan>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    return parseBuiltinHandlerEntriesPlan(capability, raw, fail);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

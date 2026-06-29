@@ -1,7 +1,9 @@
 import type { ServerToolHandlerContext, ServerToolHandlerResult } from './types.js';
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import {
+  planServertoolBuiltinAutoHandlerEntries,
   planServertoolBuiltinHandlerEntry,
+  planServertoolBuiltinHandlerRecordEntries,
   planServertoolBuiltinHandlerNames
 } from './skeleton-config.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
@@ -64,13 +66,9 @@ export function listBuiltinHandlerNames(): string[] {
 }
 
 export function listBuiltinAutoHandlerEntries(): ServerToolHandlerEntry[] {
-  return listBuiltinHandlerNames()
-    .map((name) => getBuiltinHandlerEntry(name))
-    .filter((entry): entry is ServerToolHandlerEntry => Boolean(entry?.autoHook));
+  return planServertoolBuiltinAutoHandlerEntries() as unknown as ServerToolHandlerEntry[];
 }
 
 export function listBuiltinHandlerRecordEntries(): ServerToolHandlerEntry[] {
-  return listBuiltinHandlerNames()
-    .map((name) => getBuiltinHandlerEntry(name))
-    .filter((entry): entry is ServerToolHandlerEntry => Boolean(entry));
+  return planServertoolBuiltinHandlerRecordEntries() as unknown as ServerToolHandlerEntry[];
 }

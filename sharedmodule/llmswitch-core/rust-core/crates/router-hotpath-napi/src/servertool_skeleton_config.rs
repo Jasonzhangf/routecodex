@@ -293,6 +293,25 @@ fn build_builtin_handler_entry_plan(document: &Value, name: &str) -> Value {
     })
 }
 
+fn build_builtin_handler_entry_list(document: &Value, auto_only: bool) -> Vec<Value> {
+    let mut entries = Vec::new();
+    if let Some(tools) = internal_tools(document) {
+        let mut names = tools.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        for name in names {
+            let plan = build_builtin_handler_entry_plan(document, &name);
+            let Some(entry) = plan.get("entry").cloned().filter(Value::is_object) else {
+                continue;
+            };
+            if auto_only && !entry.get("autoHook").is_some_and(Value::is_object) {
+                continue;
+            }
+            entries.push(entry);
+        }
+    }
+    entries
+}
+
 fn normalize_registration_spec_from_tool_spec(spec: &Value, canonical: &str) -> Value {
     let trigger_node = spec.get("trigger");
     let trigger = trigger_node
@@ -867,6 +886,32 @@ pub fn plan_servertool_builtin_handler_names_json(input_json: String) -> NapiRes
 }
 
 #[napi]
+pub fn plan_servertool_builtin_auto_handler_entries_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let output = json!({
+        "entries": build_builtin_handler_entry_list(&document, true)
+    });
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn plan_servertool_builtin_handler_record_entries_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let document = read_document_from_input(&input);
+    let output = json!({
+        "entries": build_builtin_handler_entry_list(&document, false)
+    });
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn plan_servertool_registry_registration_from_skeleton_json(
     input_json: String,
 ) -> NapiResult<String> {
@@ -994,7 +1039,9 @@ mod tests {
     use super::{
         build_servertool_dispatch_plan_input_json, build_servertool_outcome_plan_input_json,
         get_default_servertool_skeleton_document_json, normalize_servertool_registration_spec_json,
+        plan_servertool_builtin_auto_handler_entries_json,
         plan_servertool_backend_execution_json, plan_servertool_builtin_handler_entry_json,
+        plan_servertool_builtin_handler_record_entries_json,
         plan_servertool_builtin_handler_names_json, plan_servertool_followup_runtime_json,
         plan_servertool_handler_contract_json, plan_servertool_registry_lookup_from_skeleton_json,
         plan_servertool_registry_registration_from_skeleton_json,
@@ -1298,6 +1345,26 @@ mod tests {
             .expect("builtin names");
         let names_value: Value = serde_json::from_str(&names).expect("parse builtin names");
         assert_eq!(names_value["names"], json!(["stop_message_auto"]));
+
+        let auto_entries = plan_servertool_builtin_auto_handler_entries_json(json!({}).to_string())
+            .expect("builtin auto entries");
+        let auto_entries_value: Value =
+            serde_json::from_str(&auto_entries).expect("parse builtin auto entries");
+        assert_eq!(auto_entries_value["entries"][0]["name"], "stop_message_auto");
+        assert_eq!(
+            auto_entries_value["entries"][0]["autoHook"]["phase"],
+            "default"
+        );
+
+        let record_entries =
+            plan_servertool_builtin_handler_record_entries_json(json!({}).to_string())
+                .expect("builtin record entries");
+        let record_entries_value: Value =
+            serde_json::from_str(&record_entries).expect("parse builtin record entries");
+        assert_eq!(
+            record_entries_value["entries"][0]["registration"]["executionMode"],
+            "auto_hook"
+        );
 
         let entry = plan_servertool_builtin_handler_entry_json(
             json!({ "name": "stop_message_auto" }).to_string(),

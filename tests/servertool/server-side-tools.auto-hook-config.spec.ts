@@ -315,6 +315,38 @@ jest.unstable_mockModule(
     planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({
       names: ['stop_message_auto']
     })),
+    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
+      entries: [{
+        name: 'stop_message_auto',
+        trigger: 'auto',
+        execution: { kind: 'builtin', builtinName: 'stop_message_auto' },
+        registration: {
+          name: 'stop_message_auto',
+          enabled: true,
+          trigger: 'auto',
+          executionMode: 'auto_hook',
+          stripAfterExecute: true,
+          autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40 }
+        },
+        autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40, order: -1 }
+      }]
+    })),
+    planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({
+      entries: [{
+        name: 'stop_message_auto',
+        trigger: 'auto',
+        execution: { kind: 'builtin', builtinName: 'stop_message_auto' },
+        registration: {
+          name: 'stop_message_auto',
+          enabled: true,
+          trigger: 'auto',
+          executionMode: 'auto_hook',
+          stripAfterExecute: true,
+          autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40 }
+        },
+        autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40, order: -1 }
+      }]
+    })),
     extractCapturedChatSeedWithNative: jest.fn(() => null),
     normalizeFollowupParametersWithNative: jest.fn((value: any) => value ?? undefined),
     resolveFollowupModelWithNative: jest.fn((seedModel: any) => String(seedModel ?? 'gpt-test')),
@@ -497,6 +529,38 @@ jest.unstable_mockModule(
     }),
     planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({
       names: ['stop_message_auto']
+    })),
+    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
+      entries: [{
+        name: 'stop_message_auto',
+        trigger: 'auto',
+        execution: { kind: 'builtin', builtinName: 'stop_message_auto' },
+        registration: {
+          name: 'stop_message_auto',
+          enabled: true,
+          trigger: 'auto',
+          executionMode: 'auto_hook',
+          stripAfterExecute: true,
+          autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40 }
+        },
+        autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40, order: -1 }
+      }]
+    })),
+    planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({
+      entries: [{
+        name: 'stop_message_auto',
+        trigger: 'auto',
+        execution: { kind: 'builtin', builtinName: 'stop_message_auto' },
+        registration: {
+          name: 'stop_message_auto',
+          enabled: true,
+          trigger: 'auto',
+          executionMode: 'auto_hook',
+          stripAfterExecute: true,
+          autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40 }
+        },
+        autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40, order: -1 }
+      }]
     })),
     extractCapturedChatSeedWithNative: jest.fn(() => null),
     normalizeFollowupParametersWithNative: jest.fn((value: any) => value ?? undefined),
