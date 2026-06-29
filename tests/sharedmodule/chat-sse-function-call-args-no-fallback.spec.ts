@@ -121,4 +121,31 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
     expect(text).toContain('"code":"generation_error"');
     expect(text).toContain('Invalid legacy function_call: missing id');
   });
+
+  it('fails chunk delta without role instead of defaulting to assistant', async () => {
+    const response: ChatCompletionResponse = {
+      id: 'chatcmpl_delta_missing_role',
+      object: 'chat.completion',
+      created: 1,
+      model: 'gpt-5.5',
+      choices: [{
+        index: 0,
+        delta: {
+          content: 'hello'
+        },
+        finish_reason: 'stop'
+      } as any]
+    };
+
+    const converter = new ChatJsonToSseConverterRefactored();
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_chat_delta_missing_role',
+      model: response.model
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('"code":"generation_error"');
+    expect(text).toContain('Invalid ChatCompletionChunk delta: missing role');
+    expect(text).not.toContain('"role":"assistant"');
+  });
 });

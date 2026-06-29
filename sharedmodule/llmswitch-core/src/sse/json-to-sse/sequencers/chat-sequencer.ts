@@ -213,8 +213,11 @@ export async function* sequenceChatResponse(
     // 兼容上游给到的 chunk 形态（choices[0].delta）
     if (!message && choice && typeof choice === 'object' && choice.delta) {
       const d = choice.delta;
+      if (typeof d.role !== 'string' || !d.role.trim()) {
+        throw new Error('Invalid ChatCompletionChunk delta: missing role');
+      }
       message = {
-        role: typeof d.role === 'string' ? d.role : 'assistant',
+        role: d.role,
         content: typeof d.content !== 'undefined' ? d.content : null,
         tool_calls: Array.isArray(d.tool_calls) ? d.tool_calls : undefined
       };
