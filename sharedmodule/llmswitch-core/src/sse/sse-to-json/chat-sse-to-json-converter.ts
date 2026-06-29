@@ -798,10 +798,17 @@ export class ChatSseToJsonConverter {
     }
 
     const messageBuilder = choiceBuilder.messageBuilder;
+    if (typeof messageBuilder.role !== 'string' || !messageBuilder.role.trim()) {
+      throw ErrorUtils.createError(
+        'Chat SSE stream missing message role',
+        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
+        { choiceIndex }
+      );
+    }
 
     // 构建message
     const message: ChatMessage = {
-      role: messageBuilder.role || 'assistant'
+      role: messageBuilder.role
     };
 
     const normalizedContent = normalizeChatMessageContent(messageBuilder.content);

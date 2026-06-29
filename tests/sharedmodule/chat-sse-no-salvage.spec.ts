@@ -93,4 +93,23 @@ describe('chat SSE no-salvage boundary', () => {
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
+
+  it('fails chat chunks missing role instead of defaulting to assistant', async () => {
+    const sseText = [
+      'event: chat_chunk',
+      'data: {"id":"chatcmpl_missing_role","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"hello"},"logprobs":null,"finish_reason":"stop"}]}',
+      '',
+      'event: chat.done',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_missing_role_no_synthetic',
+      model: 'gpt-4o-mini'
+    })).rejects.toMatchObject({
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
 });

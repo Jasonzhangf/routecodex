@@ -209,6 +209,7 @@ for (const relPath of providerNeutralProjectionFiles) {
     "return String(input ?? '')",
     'response.id || `msg_${requestId}`',
     "response.role || 'assistant'",
+    "role: messageBuilder.role || 'assistant'",
     'block.id || `call_${requestId}_${index}`',
     'context.currentResponse.id || `chat_${context.requestId}`',
     'context.currentResponse.created || Math.floor(Date.now() / 1000)',
