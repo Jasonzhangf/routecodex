@@ -4,7 +4,6 @@ import {
   planServertoolAutoHookQueuesWithNative,
   runServertoolOrchestrationMutationWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { planServertoolHookScheduleWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import type { ToolCall } from './types.js';
 
 function normalizeServerToolCallName(name: string): string {
@@ -41,40 +40,6 @@ function nativeArray(input: Record<string, unknown>): JsonObject[] {
     throw new Error('[servertool] orchestration mutation returned invalid array');
   }
   return output.filter((entry): entry is JsonObject => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)));
-}
-
-function scheduleAutoHookQueueWithNative<THook extends {
-  id: string;
-  phase: string;
-  priority: number;
-  order: number;
-}>(hooks: THook[], requiredness: 'required' | 'optional'): THook[] {
-  if (hooks.length <= 1) {
-    return hooks;
-  }
-  const plan = planServertoolHookScheduleWithNative({
-    direction: 'response',
-    respPhase: 'servertoolRespHook01Intercepted',
-    hooks: hooks.map((hook) => ({
-      id: hook.id,
-      direction: 'response',
-      respPhase: 'servertoolRespHook01Intercepted',
-      requiredness,
-      priority: hook.priority,
-      order: hook.order,
-      ownerFeatureId: 'binding pending',
-      inputNode: 'HubRespChatProcess03Governed',
-      outputNode: 'ServertoolRespHook01Intercepted',
-      effectKind: `auto_hook:${normalizeServerToolCallName(hook.id)}:${requiredness}`,
-      enabled: true
-    })),
-    requireAtLeastOneRequiredHook: false
-  });
-  const hookById = new Map(hooks.map((hook) => [normalizeServerToolCallName(hook.id), hook] as const));
-  const scheduled = plan.projection.hookIds
-    .map((id) => hookById.get(normalizeServerToolCallName(id)))
-    .filter((hook): hook is THook => Boolean(hook));
-  return scheduled.length === hooks.length ? scheduled : hooks;
 }
 
 export function buildAutoHookQueuesFromConfig<THook extends {
@@ -115,8 +80,8 @@ export function buildAutoHookQueuesFromConfig<THook extends {
       .map((entry) => hookById.get(normalizeServerToolCallName(entry.id)))
       .filter((hook): hook is THook => Boolean(hook));
   return {
-    optionalQueue: scheduleAutoHookQueueWithNative(mapQueue(nativePlan.optionalQueue), 'optional'),
-    mandatoryQueue: scheduleAutoHookQueueWithNative(mapQueue(nativePlan.mandatoryQueue), 'required')
+    optionalQueue: mapQueue(nativePlan.optionalQueue),
+    mandatoryQueue: mapQueue(nativePlan.mandatoryQueue)
   };
 }
 

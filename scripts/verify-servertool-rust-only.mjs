@@ -5365,6 +5365,19 @@ function checkServertoolAutoHookCallerThinShell() {
     );
   }
   const autoHookCallerShell = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
+  const orchestrationBlocks = readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`);
+  for (const marker of [
+    'function scheduleAutoHookQueueWithNative',
+    'planServertoolHookScheduleWithNative',
+    "effectKind: `auto_hook:${normalizeServerToolCallName(hook.id)}:${requiredness}`",
+  ]) {
+    if (orchestrationBlocks.includes(marker)) {
+      fail(
+        'servertool-auto-hook-queue-single-rust-plan',
+        `orchestration-blocks.ts must not reschedule Rust-planned auto-hook queues via TS marker ${marker}`
+      );
+    }
+  }
   if (autoHookCallerShell.includes('export async function runServertoolAutoHookCallerViaThinShell(')) {
     fail(
       'servertool-auto-hook-caller-thin-shell',

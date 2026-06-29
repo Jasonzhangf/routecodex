@@ -981,25 +981,7 @@ describe('servertool skeleton config', () => {
     );
   });
 
-  test('auto hook queue order is finalized by native hook skeleton scheduler', () => {
-    planServertoolHookScheduleWithNative.mockImplementationOnce((input: any) => ({
-      events: (input.hooks ?? []).map((hook: any) => ({
-        hookId: hook.id,
-        status: 'scheduled',
-        effectKind: hook.effectKind,
-        requiredness: hook.requiredness,
-        noOp: false
-      })),
-      projection: {
-        direction: 'response',
-        phase: 'ServertoolRespHook01Intercepted',
-        inputNode: 'HubRespChatProcess03Governed',
-        outputNode: 'ServertoolRespHook01Intercepted',
-        hookIds: ['stop_message_auto', 'vision_auto'],
-        effectKinds: ['auto_hook:stop_message_auto:optional', 'auto_hook:vision_auto:optional']
-      }
-    }));
-
+  test('auto hook queue order is consumed from the Rust auto-hook queue planner', () => {
     const queues = buildAutoHookQueuesFromConfig({
       hooks: [
         { id: 'vision_auto', phase: 'default', priority: 20, order: 0 },
@@ -1010,15 +992,10 @@ describe('servertool skeleton config', () => {
     });
 
     expect(queues.optionalQueue.map((hook: any) => hook.id)).toEqual([
-      'stop_message_auto',
-      'vision_auto'
+      'vision_auto',
+      'stop_message_auto'
     ]);
-    expect(planServertoolHookScheduleWithNative).toHaveBeenCalledWith(
-      expect.objectContaining({
-        direction: 'response',
-        respPhase: 'servertoolRespHook01Intercepted'
-      })
-    );
+    expect(planServertoolHookScheduleWithNative).not.toHaveBeenCalled();
   });
 
 });
