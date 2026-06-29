@@ -274,7 +274,6 @@ import {
   attachStopMessageCompareContext,
   readStopMessageCompareContext
 } from '../stop-message-compare-context.js';
-import { writeStoplessLearnedNoteEntry } from './memory/cache-writer.js';
 import { normalizeStoplessTriggerHintForMetadataWithNative } from '../../native/router-hotpath/native-servertool-core-semantics.js';
 
 export { extractBlockedReportFromMessagesForTests };

@@ -1,3 +1,10 @@
+# 2026-06-29 servertool stale TS data/context residue deletion slice
+
+- 目标：继续清理 servertool TS 残留，物理删除旧 data/context/followup sanitize 路径，不保留失败薄壳。
+- 改动：删除 `handlers/memory/cache-writer.ts`、`origin-request-store.ts`、`handlers/followup-sanitize.ts` 及对应旧 Jest；从 `src/modules/llmswitch/bridge*` / `native-exports*` 移除 `sanitizeFollowupText` public export 和动态 import；`verify-servertool-rust-only` 增加 deleted-list + active runtime source forbidden marker；`hub-pipeline-stage-residue-audit` 把 followup sanitize 改为 deleted file；相关 docs 旧引用改为已删除/不得复活。
+- 已验证：sharedmodule/root `tsc` PASS；`npm run verify:servertool-rust-only` PASS；focused `hub-pipeline-stage-residue-audit -t "servertool handlers must not inject or strip tool protocol payloads in TS"` PASS；`verify:function-map-compile-gate` PASS；`verify:architecture-thin-wrapper-only` PASS；`verify:architecture-mainline-call-map` PASS；scoped `git diff --check` PASS；`docs/architecture/no-fallback-diff-rules.json` JSON parse PASS。
+- 已知无关红：整份 `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 仍因既有缺失 `scripts/tests/virtual-router-quota-health-restore.mjs` 失败，本轮 focused case 通过。
+
 # 2026-06-29 SSE /goal prompt closeout
 
 - 已确认 `docs/goals/sse-rustification-closeout-plan.md` 可直接作为 SSE 收口实现文档引用。

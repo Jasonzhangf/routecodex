@@ -50,7 +50,6 @@ function readServertoolCliRouteHintFromRequestValue(value) {
 let cachedSharedSemantics;
 let cachedSharedSemanticsSync;
 let cachedRespSemantics;
-let cachedFollowupSanitize;
 let cachedFailurePolicyModule;
 let cachedHubBridgePolicySemantics;
 let cachedHubBridgePolicySemanticsSync;
@@ -213,24 +212,6 @@ async function getRespSemantics() {
         throw new Error('[llmswitch-bridge] native-hub-pipeline-resp-semantics not available');
     }
     return cachedRespSemantics;
-}
-async function getFollowupSanitizeModule() {
-    if (cachedFollowupSanitize !== undefined) {
-        if (!cachedFollowupSanitize) {
-            throw new Error('[llmswitch-bridge] followup-sanitize not available');
-        }
-        return cachedFollowupSanitize;
-    }
-    try {
-        cachedFollowupSanitize = await importCoreDist('servertool/handlers/followup-sanitize');
-    }
-    catch {
-        cachedFollowupSanitize = null;
-    }
-    if (!cachedFollowupSanitize) {
-        throw new Error('[llmswitch-bridge] followup-sanitize not available');
-    }
-    return cachedFollowupSanitize;
 }
 async function getHubBridgePolicySemantics() {
     if (cachedHubBridgePolicySemantics !== undefined) {
@@ -426,14 +407,6 @@ export async function buildAnthropicResponseFromChatJson(chatResponse, aliasMap)
         throw new Error('[llmswitch-bridge] buildAnthropicResponseFromChatJson not available');
     }
     return fn(chatResponse, aliasMap);
-}
-export async function sanitizeFollowupText(raw) {
-    const mod = await getFollowupSanitizeModule();
-    const fn = mod.sanitizeFollowupText;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] sanitizeFollowupText not available');
-    }
-    return fn(raw);
 }
 export async function sanitizeProviderOutboundPayload(input) {
     const mod = await getHubBridgePolicySemantics();

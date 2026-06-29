@@ -1083,12 +1083,12 @@ TS shell 只做：
 - `sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts`：6
 - `sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts`：2
 - `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`：1
-- `sharedmodule/llmswitch-core/src/servertool/origin-request-store.ts`：1
 
 原因：
 
 - 这些文件不是当前 strict-zero 主链入口；
 - 可在主链收口后再做命名/语义级去债，不应抢在主链前面。
+- `sharedmodule/llmswitch-core/src/servertool/origin-request-store.ts` 已删除；servertool 不允许保存 origin request/context snapshot。
 
 ### 推荐下一刀
 

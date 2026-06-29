@@ -28,7 +28,6 @@ export declare function planResponsesHandlerEntry(payload: unknown, entryEndpoin
     payload: AnyRecord;
 }>;
 export declare function buildAnthropicResponseFromChatJson(chatResponse: unknown, aliasMap?: Record<string, string>): Promise<AnyRecord>;
-export declare function sanitizeFollowupText(raw: unknown): Promise<string>;
 export declare function sanitizeProviderOutboundPayload(input: {
     protocol?: string;
     compatibilityProfile?: string;

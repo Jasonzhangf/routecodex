@@ -1631,11 +1631,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/servertool/handlers/memory/cache-writer.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.ts",
       "textContains": ""
     },

@@ -118,10 +118,6 @@ type NativeHubPipelineRespSemantics = {
   ) => Record<string, unknown>;
 };
 
-type FollowupSanitizeModule = {
-  sanitizeFollowupText?: (raw: unknown) => string;
-};
-
 type NativeHubBridgePolicySemantics = {
   sanitizeProviderOutboundPayloadWithNative?: (input: {
     protocol?: string;
@@ -246,7 +242,6 @@ type NativeHubVrNodeContracts = {
 let cachedSharedSemantics: NativeSharedConversionSemantics | null | undefined;
 let cachedSharedSemanticsSync: NativeSharedConversionSemantics | null | undefined;
 let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
-let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
 let cachedHubBridgePolicySemantics: NativeHubBridgePolicySemantics | null | undefined;
 let cachedHubBridgePolicySemanticsSync: NativeHubBridgePolicySemantics | null | undefined;
@@ -440,24 +435,6 @@ async function getRespSemantics(): Promise<NativeHubPipelineRespSemantics> {
     throw new Error('[llmswitch-bridge] native-hub-pipeline-resp-semantics not available');
   }
   return cachedRespSemantics;
-}
-
-async function getFollowupSanitizeModule(): Promise<FollowupSanitizeModule> {
-  if (cachedFollowupSanitize !== undefined) {
-    if (!cachedFollowupSanitize) {
-      throw new Error('[llmswitch-bridge] followup-sanitize not available');
-    }
-    return cachedFollowupSanitize;
-  }
-  try {
-    cachedFollowupSanitize = await importCoreDist<FollowupSanitizeModule>('servertool/handlers/followup-sanitize');
-  } catch {
-    cachedFollowupSanitize = null;
-  }
-  if (!cachedFollowupSanitize) {
-    throw new Error('[llmswitch-bridge] followup-sanitize not available');
-  }
-  return cachedFollowupSanitize;
 }
 
 async function getHubBridgePolicySemantics(): Promise<NativeHubBridgePolicySemantics> {
@@ -691,15 +668,6 @@ export async function buildAnthropicResponseFromChatJson(
     throw new Error('[llmswitch-bridge] buildAnthropicResponseFromChatJson not available');
   }
   return fn(chatResponse, aliasMap) as AnyRecord;
-}
-
-export async function sanitizeFollowupText(raw: unknown): Promise<string> {
-  const mod = await getFollowupSanitizeModule();
-  const fn = mod.sanitizeFollowupText;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] sanitizeFollowupText not available');
-  }
-  return fn(raw);
 }
 
 export async function sanitizeProviderOutboundPayload(input: {

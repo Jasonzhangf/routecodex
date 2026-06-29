@@ -758,7 +758,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 | `context-capture-orchestration.ts` | 59→62 | orchestrator 控制流 | 无法迁 Rust |
 | `context-factories.ts` | 29 | factory wrapper | 无法迁 Rust |
 | `responses-context-snapshot.ts` | 58 | 待独立审计 | 非 HubPipeline 主线 |
-| `cache-write.ts` | 70 | 依赖 servertool/cache-writer | **不迁移**：独立基础设施 |
+| `cache-write.ts` | 70 | 旧 servertool/cache-writer 依赖已删除 | **不得复活** |
 | `index.ts` | 53→58 | thin wrapper | 保留 |
 
 ### 变更
@@ -817,7 +817,7 @@ rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs
 | `tool-output-snapshot.ts` | 26 | ✅ 纯 Rust wrapper | **已物理删除** |
 | `responses-context-snapshot.ts` | 58 | `persistResponsesConversationRequestContext` 仍被外部调用 | **保留**：待独立清理 |
 | `context-factories.ts` | 29 | factory wrapper | 无法迁 Rust |
-| `cache-write.ts` | 70 | 依赖 servertool/cache-writer | **不迁移** |
+| `cache-write.ts` | 70 | 旧 servertool/cache-writer 依赖已删除 | **不得复活** |
 
 ### 变更
 | 文件 | 变更 |

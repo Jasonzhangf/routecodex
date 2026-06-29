@@ -136,10 +136,9 @@
    - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` ≈ 665 行
    - 当前并非“薄骨架”，而是 trigger / execution outcome / followup dispatch / finalize / loop guard 混在一起。
 
-5. **历史残留仍在 servertool 真路径**
-   - `server-side-tools.ts.bak~bak6`
-   - `handlers/memory/cache-writer.ts.bak`
-   - 说明该区域长期热修，但没有完成真正骨架化。
+5. **历史残留必须物理删除**
+   - 旧 `server-side-tools.ts.bak~bak6` 与 `handlers/memory/cache-writer.ts.bak` 不应作为当前骨架参考。
+   - 已删除的 cache/origin/followup sanitize 路径不得复活。
 
 ### 本轮已先落的第一刀
 1. 历史第一刀曾新增 host 壳层共享 helper：

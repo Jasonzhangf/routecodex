@@ -189,6 +189,13 @@ const DELETED_AI_FOLLOWUP_FILES = [
   `${ROOT}/tests/servertool/stopmessage-response-snapshot.spec.ts`,
   `${ROOT}/tests/servertool/stop-message-auto-followup-extraction.spec.ts`,
 ];
+const DELETED_SERVERTOOL_DATA_CONTEXT_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/memory/cache-writer.ts`,
+  `${ROOT}/tests/servertool/cache-writer.spec.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/origin-request-store.ts`,
+  `${ROOT}/tests/servertool/origin-request-store.spec.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/followup-sanitize.ts`,
+];
 const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
   'hub.servertool_cli_projection': [
     'tests/cli/servertool-command.spec.ts',
@@ -2482,27 +2489,30 @@ function checkOrchestrationPolicyRustOwner() {
       );
     }
   }
-  const followupSanitize = readRequired(`${SERVERTOOL_TS_DIR}/handlers/followup-sanitize.ts`);
-  for (const keyword of [
-    'const TIME_TAG_BLOCK_RE',
-    'const STOPMESSAGE_MARKER_RE',
-    'const IMAGE_OMITTED_RE',
-    'function collapseBlankLines',
-    'replace(STOPMESSAGE_MARKER_RE',
-  ]) {
-    if (followupSanitize.includes(keyword)) {
-      fail(
-        'servertool-followup-sanitize-ts-thin-shell',
-        `Forbidden TS followup sanitize semantic "${keyword}" found in followup-sanitize.ts`
-      );
+  for (const file of DELETED_SERVERTOOL_DATA_CONTEXT_FILES) {
+    assertMissingFile(
+      'servertool-data-context-ts-deleted',
+      file,
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; servertool must not carry context/request/response data or stale followup sanitize shells in TS`
+    );
+  }
+  for (const file of listFiles(`${ROOT}/src`).concat(listFiles(`${ROOT}/sharedmodule/llmswitch-core/src`))) {
+    const relativeFile = file.replace(`${ROOT}/`, '');
+    const source = readFileSync(file, 'utf8');
+    for (const marker of [
+      'servertool/handlers/followup-sanitize',
+      'sanitizeFollowupText',
+      'servertool/handlers/memory/cache-writer',
+      'origin-request-store',
+    ]) {
+      if (source.includes(marker)) {
+        fail(
+          'servertool-data-context-ts-deleted',
+          `${relativeFile} must not reference deleted servertool data/context residue marker "${marker}"`
+        );
+      }
     }
   }
-  assertContains(
-    'servertool-followup-sanitize-ts-thin-shell',
-    `${SERVERTOOL_TS_DIR}/handlers/followup-sanitize.ts`,
-    followupSanitize,
-    'normalizeClientInjectTextWithNative'
-  );
   for (const needle of [
     'parseServertoolTimeoutMsWithNative',
     'readClientInjectOnlyWithNative',

@@ -1431,9 +1431,9 @@ describe('hub pipeline stage residue audit', () => {
   it('servertool handlers must not inject or strip tool protocol payloads in TS', () => {
     const deletedFiles = [
       'sharedmodule/llmswitch-core/src/servertool/handlers/web-search.ts',
+      'sharedmodule/llmswitch-core/src/servertool/handlers/followup-sanitize.ts',
     ];
     const files = [
-      'sharedmodule/llmswitch-core/src/servertool/handlers/followup-sanitize.ts',
       'sharedmodule/llmswitch-core/src/servertool/handlers/vision-eligibility.ts',
     ];
     const existingDeletedFiles = deletedFiles.filter((relativePath) => fs.existsSync(path.join(process.cwd(), relativePath)));
