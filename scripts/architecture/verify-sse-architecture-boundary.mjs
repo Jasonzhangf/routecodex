@@ -78,6 +78,15 @@ for (const forbidden of [
   }
 }
 
+const responsesSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts');
+for (const forbidden of [
+  'eventData = dataStr;',
+]) {
+  if (responsesSerializer.includes(forbidden)) {
+    failures.push(`Responses SSE serializer retains parse salvage marker: ${forbidden}`);
+  }
+}
+
 const sharedOwnerFiles = [
   'sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts',
   'sharedmodule/llmswitch-core/src/sse/shared/writer.ts',

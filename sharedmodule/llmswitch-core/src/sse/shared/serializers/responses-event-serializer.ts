@@ -75,7 +75,7 @@ export class ResponsesEventSerializer {
         try {
           eventData = dataStr ? JSON.parse(dataStr) : null;
         } catch {
-          eventData = dataStr;
+          throw new Error(`Invalid Responses SSE data payload: ${dataStr}`);
         }
       } else if (line.startsWith('id:')) {
         eventId = line.substring(3).trim();
