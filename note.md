@@ -1,3 +1,8 @@
+# 2026-06-29 anthropic chat projection created fix
+
+- 现象：`/v1/chat/completions` 走 `minimax[key1].MiniMax-M3` 时，Anthropic SSE 能正常产出 tool_use，但 Rust 投影到 OpenAI chat 后缺 `created`，被 SSE codec fail-fast 拒绝。
+- 修法：`hub_resp_outbound_client_semantics_blocks/anthropic_chat_response.rs` 现在在 Anthropic SSE materialize + final OpenAI chat projection 两层都显式写入 `created`，并加回归测试锁住缺字段不再复发。
+
 # 2026-06-29 servertool registry ad-hoc TS dynamic registration retirement slice
 
 - 目标：继续清理 servertool TS 残留，物理删除 `adhoc-handler-test-support.ts`，退役 TS 动态 ad-hoc handler 注册/lookup/source projection，registry 只保留 Rust skeleton/builtin plan + TS native shell。
@@ -197,6 +202,14 @@
 - 改动：`chat-sse-to-json-converter.ts::normalizeChatUsage()` 现在对非对象 usage、坏 token、缺 token fields 抛 `Invalid Chat usage.*`；缓存 token 字段同样显式校验；`chat-sse-usage-roundtrip.spec.ts` 增加 invalid decoded usage 反向测试；SSE gate 禁止旧 `ChatUsage | null` 和 `return null` 丢坏 usage 结构复活。
 - 已验证：focused Jest `chat-sse-usage-roundtrip + chat-sse-usage-no-fallback` PASS；`npm run verify:sse-architecture-boundary` PASS；sharedmodule `tsc` PASS；scoped `git diff --check` PASS。
 - 边界：本 slice 只处理 Chat decode usage，不处理 `buildPartialResponse()` 的 partial response 补空值，后续单独审计。
+
+# 2026-06-29 SSE chat partial response no synthetic truth slice
+
+- 目标：继续 SSE TS cleanup，删除 Chat SSE->JSON `aggregateSseStream()` partial response 的 synthetic truth 兜底；partial response 不得用空 `id`、`created=0` 或 `{role:'assistant',content:''}` 补齐坏状态。
+- 改动：`buildPartialResponse()` 现在要求 current response 已有非空 id、正数 created、非空 model，并要求每个 choice 已有 message；缺失时抛 `Chat SSE partial response missing *`。SSE gate 禁止旧 `id || ''`、`created || 0`、`message || { role: 'assistant', content: '' }` 复活。
+- 测试：`chat-sse-usage-roundtrip.spec.ts` 增加 aggregate partial 正向回归，证明 partial response 使用真实 upstream id/created/message，不依赖 synthetic fallback。
+- 已验证：focused Jest `chat-sse-usage-roundtrip.spec.ts` PASS（12 tests）；`npm run verify:sse-architecture-boundary` PASS；scoped `git diff --check` PASS。
+- 当前缺口：sharedmodule `tsc` FAIL，红点在 `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` 引用已删除的 `native-provider-response-orchestration-v2.js` / `native-provider-response-sse-materialize-fallback.js`，不属于本 SSE slice；本轮不碰 Hub/response 并行改动。
 
 # 2026-06-29 Hub Pipeline Rust closeout Wave 3 MetadataCenter dualwrite slice
 

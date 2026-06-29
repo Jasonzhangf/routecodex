@@ -1060,18 +1060,51 @@ export class ChatSseToJsonConverter {
     if (choices.length === 0) {
       return null;
     }
+    if (typeof context.currentResponse.id !== 'string' || !context.currentResponse.id.trim()) {
+      throw ErrorUtils.createError(
+        'Chat SSE partial response missing id',
+        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
+        { requestId: context.requestId }
+      );
+    }
+    if (
+      typeof context.currentResponse.created !== 'number' ||
+      !Number.isFinite(context.currentResponse.created) ||
+      context.currentResponse.created <= 0
+    ) {
+      throw ErrorUtils.createError(
+        'Chat SSE partial response missing created timestamp',
+        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
+        { requestId: context.requestId }
+      );
+    }
+    if (typeof context.currentResponse.model !== 'string' || !context.currentResponse.model.trim()) {
+      throw ErrorUtils.createError(
+        'Chat SSE partial response missing model',
+        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
+        { requestId: context.requestId }
+      );
+    }
 
     return {
-      id: context.currentResponse.id || '',
+      id: context.currentResponse.id,
       object: 'chat.completion',
-      created: context.currentResponse.created || 0,
+      created: context.currentResponse.created,
       model: context.currentResponse.model,
       usage: this.buildUsageInfo(context) || undefined,
-      choices: choices.map(choice => ({
-        ...choice,
-        // 确保message对象存在
-        message: choice.message || { role: 'assistant', content: '' }
-      }))
+      choices: choices.map(choice => {
+        if (!choice.message) {
+          throw ErrorUtils.createError(
+            'Chat SSE partial response missing message',
+            CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
+            { requestId: context.requestId, choiceIndex: choice.index }
+          );
+        }
+        return {
+          ...choice,
+          message: choice.message
+        };
+      })
     };
   }
 

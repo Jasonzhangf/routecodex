@@ -307,6 +307,37 @@ describe('chat SSE usage compatibility', () => {
     })).rejects.toThrow('Invalid Chat usage.prompt_tokens');
   });
 
+  it('aggregates partial responses without synthetic id created or message fallback', async () => {
+    const sseText = [
+      'data: {"id":"chatcmpl_partial_truth","object":"chat.completion.chunk","created":1782384831,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}',
+      '',
+      'data: {"id":"chatcmpl_partial_truth","object":"chat.completion.chunk","created":1782384831,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"hello"},"logprobs":null,"finish_reason":null}]}',
+      '',
+      'data: {"id":"chatcmpl_partial_truth","object":"chat.completion.chunk","created":1782384831,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}',
+      '',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    const partials: ChatCompletionResponse[] = [];
+    for await (const response of converter.aggregateSseStream(Readable.from([sseText]), {
+      requestId: 'req_chat_partial_truth',
+      model: 'gpt-4o-mini',
+      onPartialResponse: partial => partials.push(partial)
+    })) {
+      partials.push(response);
+    }
+
+    expect(partials.length).toBeGreaterThan(0);
+    for (const partial of partials) {
+      expect(partial.id).toBe('chatcmpl_partial_truth');
+      expect(partial.created).toBe(1782384831);
+      expect(partial.choices?.[0]?.message?.role).toBe('assistant');
+      expect(partial.choices?.[0]?.message).not.toEqual({ role: 'assistant', content: '' });
+    }
+  });
+
   it('round-trips reasoning_content from chat SSE outbound/inbound mapping', async () => {
     const response: ChatCompletionResponse = {
       id: 'chatcmpl_reasoning_roundtrip',
