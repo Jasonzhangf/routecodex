@@ -266,7 +266,7 @@ function normalizeFunctionCall(message: any): any {
   if (typeof fc?.arguments === 'string') {
     args = fc.arguments;
   } else {
-    try { args = JSON.stringify(fc?.arguments ?? {}); } catch { args = '{}'; }
+    args = JSON.stringify(fc?.arguments ?? {});
   }
   message.tool_calls = [
     {
