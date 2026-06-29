@@ -6,8 +6,11 @@ import {
   planServertoolLoopStateWithNative,
   readServertoolLoopStateWithNative,
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import { resolveFollowupFlowDecision, type FollowupFlowDecision } from './backend-route-flow-policy.js';
+import {
+  readRuntimeControlFromAnyBoundMetadataCenter,
+  writeRuntimeControlToBoundMetadataCenter
+} from './metadata-center-carrier.js';
 
 export type ServerToolLoopState = {
   flowId?: string;
@@ -23,7 +26,9 @@ export function readServerToolLoopState(adapterContext: AdapterContext): ServerT
   if (!adapterContext || typeof adapterContext !== 'object') {
     return null;
   }
-  const rt = readRuntimeMetadata(adapterContext as unknown as Record<string, unknown>);
+  const rt = readRuntimeControlFromAnyBoundMetadataCenter(
+    adapterContext as unknown as Record<string, unknown>
+  );
   return readServertoolLoopStateWithNative(rt);
 }
 
@@ -113,7 +118,7 @@ export function buildServerToolLoopState(args: {
   const payloadHash = hashPayload(args.payload, args.logNonBlocking);
   const stopPairHash = hashStopMessageRequestResponsePair(args.payload, args.response, args.logNonBlocking);
   const previous = readServerToolLoopState(args.adapterContext);
-  return planServertoolLoopStateWithNative({
+  const next = planServertoolLoopStateWithNative({
     ...(typeof args.flowId === 'string' ? { flowId: args.flowId } : {}),
     decision: {
       flowOnlyLoopLimit: decision.flowOnlyLoopLimit
@@ -123,4 +128,19 @@ export function buildServerToolLoopState(args: {
     stopPairHash,
     nowMs: Date.now()
   });
+  if (next) {
+    writeRuntimeControlToBoundMetadataCenter({
+      metadata: args.adapterContext as unknown as Record<string, unknown>,
+      key: 'serverToolLoopState',
+      value: next,
+      writer: {
+        module: 'sharedmodule/llmswitch-core/src/servertool/loop-state-block.ts',
+        symbol: 'buildServerToolLoopState',
+        stage: 'servertool.loop_state'
+      },
+      reason: 'servertool loop-state control signal',
+      required: true
+    });
+  }
+  return next;
 }

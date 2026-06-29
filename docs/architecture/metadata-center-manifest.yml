@@ -12,7 +12,7 @@ node_ids:
   - MetaReq04RuntimeControlBound
   - MetaReq05ProviderObservationProjected
   - MetaResp06ResponseObserved
-  - MetaResp07ServertoolContextProjected
+  - MetaResp07BridgeMetadataBound
   - MetaResp08CloseoutReleased
 families:
   request_truth:
@@ -49,6 +49,7 @@ families:
       - stopGatewayContext
       - stopless
       - stopMessageCompareContext
+      - serverToolLoopState
       - stopMessageEnabled
       - stopMessageExcludeDirect
       - streamIntent
@@ -152,7 +153,7 @@ stages:
       - runtime_control
       - provider_observation
       - response_observation
-  - node_id: MetaResp07ServertoolContextProjected
+  - node_id: MetaResp07BridgeMetadataBound
     owner: HubRespChatProcess03Governed
     read_families:
       - request_truth

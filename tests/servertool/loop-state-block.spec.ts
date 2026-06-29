@@ -4,6 +4,7 @@ import {
   buildServerToolLoopState,
   readServerToolLoopState
 } from '../../sharedmodule/llmswitch-core/src/servertool/loop-state-block.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const decision = {
   flowId: 'web_search_flow',
@@ -19,18 +20,24 @@ const decision = {
 
 describe('servertool loop-state block', () => {
   test('reads loop state through native normalization', () => {
-    const state = readServerToolLoopState({
-      __rt: {
-        serverToolLoopState: {
-          flowId: ' stop_message_flow ',
-          payloadHash: ' __servertool_auto__ ',
-          repeatCount: 2.8,
-          startedAtMs: -10,
-          stopPairRepeatCount: 3.2,
-          stopPairWarned: true
-        }
+    const adapterContext: Record<string, unknown> = {};
+    MetadataCenter.attach(adapterContext).writeRuntimeControl(
+      'serverToolLoopState',
+      {
+        flowId: ' stop_message_flow ',
+        payloadHash: ' __servertool_auto__ ',
+        repeatCount: 2.8,
+        startedAtMs: -10,
+        stopPairRepeatCount: 3.2,
+        stopPairWarned: true
+      },
+      {
+        module: 'tests/servertool/loop-state-block.spec.ts',
+        symbol: 'reads loop state through native normalization',
+        stage: 'test'
       }
-    } as any);
+    );
+    const state = readServerToolLoopState(adapterContext as any);
 
     expect(state).toEqual({
       flowId: 'stop_message_flow',
@@ -43,8 +50,10 @@ describe('servertool loop-state block', () => {
   });
 
   test('plans repeat state through native policy', () => {
+    const adapterContext: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(adapterContext);
     const first = buildServerToolLoopState({
-      adapterContext: { __rt: {} } as any,
+      adapterContext: adapterContext as any,
       flowId: 'web_search_flow',
       decision,
       payload: { query: 'routecodex' },
@@ -55,9 +64,10 @@ describe('servertool loop-state block', () => {
     expect(first?.repeatCount).toBe(1);
     expect(first?.payloadHash).toEqual(expect.any(String));
     expect(first?.startedAtMs).toEqual(expect.any(Number));
+    expect(center.readRuntimeControl().serverToolLoopState).toEqual(first);
 
     const second = buildServerToolLoopState({
-      adapterContext: { __rt: { serverToolLoopState: first } } as any,
+      adapterContext: adapterContext as any,
       flowId: 'web_search_flow',
       decision,
       payload: { query: 'routecodex' },
@@ -70,10 +80,12 @@ describe('servertool loop-state block', () => {
   });
 
   test('plans stop-message pair repeat state through native policy', () => {
+    const adapterContext: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(adapterContext);
     const payload = { model: 'gpt-test', messages: [{ role: 'user', content: 'continue' }] };
     const response = { choices: [{ message: { role: 'assistant', content: 'stop' } }] };
     const first = buildServerToolLoopState({
-      adapterContext: { __rt: {} } as any,
+      adapterContext: adapterContext as any,
       flowId: 'stop_message_flow',
       decision: { ...decision, flowId: 'stop_message_flow', flowOnlyLoopLimit: true },
       payload,
@@ -88,9 +100,18 @@ describe('servertool loop-state block', () => {
       stopPairRepeatCount: 1,
       stopPairWarned: false
     });
+    center.writeRuntimeControl(
+      'serverToolLoopState',
+      { ...first, stopPairWarned: true },
+      {
+        module: 'tests/servertool/loop-state-block.spec.ts',
+        symbol: 'plans stop-message pair repeat state through native policy',
+        stage: 'test'
+      }
+    );
 
     const second = buildServerToolLoopState({
-      adapterContext: { __rt: { serverToolLoopState: { ...first, stopPairWarned: true } } } as any,
+      adapterContext: adapterContext as any,
       flowId: 'stop_message_flow',
       decision: { ...decision, flowId: 'stop_message_flow', flowOnlyLoopLimit: true },
       payload,

@@ -269,6 +269,7 @@ export class MetadataCenter {
       stopGatewayContext: this.state.runtimeControl.stopGatewayContext?.value as Record<string, unknown> | undefined,
       stopless: this.state.runtimeControl.stopless?.value as MetadataCenterRuntimeControl['stopless'] | undefined,
       stopMessageCompareContext: this.state.runtimeControl.stopMessageCompareContext?.value as MetadataCenterRuntimeControl['stopMessageCompareContext'] | undefined,
+      serverToolLoopState: this.state.runtimeControl.serverToolLoopState?.value as Record<string, unknown> | undefined,
       stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,
       stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value as boolean | undefined,
       streamIntent: this.state.runtimeControl.streamIntent?.value as string | undefined,

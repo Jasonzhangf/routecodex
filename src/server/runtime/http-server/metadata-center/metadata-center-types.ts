@@ -110,6 +110,7 @@ export type MetadataCenterRuntimeControl = {
   stopGatewayContext?: Record<string, unknown>;
   stopless?: MetadataCenterStoplessRuntimeControl;
   stopMessageCompareContext?: MetadataCenterStopMessageCompareContext;
+  serverToolLoopState?: Record<string, unknown>;
   stopMessageEnabled?: boolean;
   stopMessageExcludeDirect?: boolean;
   streamIntent?: string;

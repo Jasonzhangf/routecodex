@@ -1060,6 +1060,11 @@ function checkLegacyStopMessageRuntimeMirrorsRemoved() {
   const cleanupAllowlist = new Set([
     `${ROOT}/src/server/runtime/http-server/executor/servertool-followup-metadata.ts`,
   ]);
+  const metadataCenterServerToolLoopStateAllowlist = new Set([
+    `${ROOT}/src/server/runtime/http-server/metadata-center/metadata-center-types.ts`,
+    `${ROOT}/src/server/runtime/http-server/metadata-center/metadata-center.js`,
+    `${ROOT}/src/server/runtime/http-server/metadata-center/metadata-center.ts`,
+  ]);
   const files = listFiles(`${ROOT}/src/server/runtime/http-server`);
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
@@ -1075,6 +1080,9 @@ function checkLegacyStopMessageRuntimeMirrorsRemoved() {
         if (!badLine) {
           continue;
         }
+      }
+      if (metadataCenterServerToolLoopStateAllowlist.has(file) && keyword === 'serverToolLoopState') {
+        continue;
       }
       fail(
         'legacy-stopmessage-runtime-mirror-removed',
@@ -4073,6 +4081,30 @@ function checkBackendRoutePolicyRustOwner() {
     loopStateShell,
     'planServertoolLoopStateWithNative'
   );
+  assertContains(
+    'backend-route-loop-state-metadata-center-only',
+    TS_LOOP_STATE_BLOCK,
+    loopStateShell,
+    'readRuntimeControlFromAnyBoundMetadataCenter'
+  );
+  assertContains(
+    'backend-route-loop-state-metadata-center-only',
+    TS_LOOP_STATE_BLOCK,
+    loopStateShell,
+    'writeRuntimeControlToBoundMetadataCenter'
+  );
+  for (const keyword of [
+    "from '../conversion/runtime-metadata.js'",
+    'readRuntimeMetadata(',
+    '__rt',
+  ]) {
+    if (loopStateShell.includes(keyword)) {
+      fail(
+        'backend-route-loop-state-metadata-center-only',
+        `loop-state-block.ts must use MetadataCenter runtime_control only; forbidden marker ${keyword}`
+      );
+    }
+  }
   for (const keyword of [
     'sameFlow',
     'samePayload',

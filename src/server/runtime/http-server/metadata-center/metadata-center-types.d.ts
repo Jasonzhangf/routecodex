@@ -83,6 +83,7 @@ export type MetadataCenterRuntimeControl = {
     responsesContinuationSavedAtChatProcessExit?: boolean;
     stopless?: MetadataCenterStoplessRuntimeControl;
     stopMessageCompareContext?: MetadataCenterStopMessageCompareContext;
+    serverToolLoopState?: Record<string, unknown>;
     stopMessageEnabled?: boolean;
     stopMessageExcludeDirect?: boolean;
     streamIntent?: string;

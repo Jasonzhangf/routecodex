@@ -192,6 +192,7 @@ export class MetadataCenter {
             responsesContinuationSavedAtChatProcessExit: this.state.runtimeControl.responsesContinuationSavedAtChatProcessExit?.value,
             stopless: this.state.runtimeControl.stopless?.value,
             stopMessageCompareContext: this.state.runtimeControl.stopMessageCompareContext?.value,
+            serverToolLoopState: this.state.runtimeControl.serverToolLoopState?.value,
             stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value,
             stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value,
             streamIntent: this.state.runtimeControl.streamIntent?.value,
