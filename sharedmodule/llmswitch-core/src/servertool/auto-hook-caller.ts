@@ -58,11 +58,7 @@ export async function runAutoHookExecutionQueue(args: {
         ...traceBase,
         message
       });
-      try {
-        args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
-      } catch {
-        // best-effort
-      }
+      args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
       throw error;
     }
 
@@ -80,11 +76,7 @@ export async function runAutoHookExecutionQueue(args: {
         ? { materializedFlowId: result.execution.flowId.trim() }
         : {})
     });
-    try {
-      args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
-    } catch {
-      // best-effort
-    }
+    args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
 
     if (attemptPlan.returnResult) {
       if (!result) {

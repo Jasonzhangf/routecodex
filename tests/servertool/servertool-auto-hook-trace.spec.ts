@@ -406,4 +406,30 @@ describe('servertool auto hook trace', () => {
       })
     ).rejects.toThrow('native auto-hook execution requested result but materialization was empty');
   });
+
+  test('fails fast when auto-hook trace callback fails', async () => {
+    registryHooks.push({
+      id: 'vision_auto',
+      phase: 'default',
+      priority: 20,
+      order: 1,
+      execution: {
+        kind: 'adhoc',
+        handler: async () => null
+      }
+    });
+    const options = createOptions([]);
+    options.onAutoHookTrace = () => {
+      throw new Error('trace sink failed');
+    };
+
+    await expect(
+      runServertoolAutoHookCaller({
+        options,
+        contextBase: createContextBase(options),
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null
+      })
+    ).rejects.toThrow('trace sink failed');
+  });
 });

@@ -3506,6 +3506,7 @@ function checkAutoHookExecutionRustOwner() {
     'if (result) {',
     'if (optionalResult) {',
     'if (mandatoryResult) {',
+    '// best-effort',
   ]) {
     if (autoHookCaller.includes(keyword)) {
       fail(
@@ -3513,6 +3514,12 @@ function checkAutoHookExecutionRustOwner() {
         `Forbidden TS auto-hook execution semantic "${keyword}" found in auto-hook-caller.ts`
       );
     }
+  }
+  if (/onAutoHookTrace[\s\S]{0,140}catch\s*\{/.test(autoHookCaller)) {
+    fail(
+      'servertool-auto-hook-execution-no-ts-owner',
+      'auto-hook-caller.ts must not swallow auto-hook trace callback failures'
+    );
   }
   pass(
     'servertool-auto-hook-execution-no-ts-owner',
