@@ -6,7 +6,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import type { PendingServerToolInjection } from './pending-session.js';
 import { savePendingServerToolInjection } from './pending-session.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
+import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 export const SERVERTOOL_PENDING_SESSION_FEATURE_ID = 'feature_id: hub.servertool_pending_session';
 
@@ -16,14 +16,14 @@ export async function persistPendingServerToolInjection(args: {
   flowId: string;
   adapterContext?: unknown;
 }): Promise<boolean> {
-  const runtime = args.adapterContext && typeof args.adapterContext === 'object' && !Array.isArray(args.adapterContext)
-    ? readRuntimeMetadata(args.adapterContext as Record<string, unknown>)
+  const runtimeControl = args.adapterContext && typeof args.adapterContext === 'object' && !Array.isArray(args.adapterContext)
+    ? readRuntimeControlFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>)
     : undefined;
-  const sessionDir = typeof runtime?.sessionDir === 'string' && runtime.sessionDir.trim()
-    ? runtime.sessionDir.trim()
+  const sessionDir = typeof runtimeControl?.sessionDir === 'string' && runtimeControl.sessionDir.trim()
+    ? runtimeControl.sessionDir.trim()
     : '';
   if (!sessionDir) {
-    throw new Error('[servertool-pending] runtime metadata sessionDir missing');
+    throw new Error('[servertool-pending] MetadataCenter runtime_control.sessionDir missing');
   }
   const plan = planPendingInjectionPersistWithNative({
     pendingInjection: args.pendingInjection,

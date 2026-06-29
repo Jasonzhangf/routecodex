@@ -196,7 +196,8 @@ export class MetadataCenter {
             stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value,
             stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value,
             streamIntent: this.state.runtimeControl.streamIntent?.value,
-            clientAbort: this.state.runtimeControl.clientAbort?.value
+            clientAbort: this.state.runtimeControl.clientAbort?.value,
+            sessionDir: this.state.runtimeControl.sessionDir?.value
         };
     }
     writeProviderObservation(key, value, writtenBy, reason) {

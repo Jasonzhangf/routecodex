@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from '@jest/globals';
 
 import type { ServerSideToolEngineResult } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 let persistPendingServerToolInjection: typeof import(
   '../../sharedmodule/llmswitch-core/src/servertool/pending-injection-block.js'
@@ -36,6 +37,21 @@ function buildPendingInjection(): NonNullable<ServerSideToolEngineResult['pendin
       }
     ]
   };
+}
+
+function bindSessionDir(sessionDir: string): Record<string, unknown> {
+  const adapterContext: Record<string, unknown> = {};
+  const center = MetadataCenter.attach(adapterContext);
+  center.writeRuntimeControl(
+    'sessionDir',
+    sessionDir,
+    {
+      module: 'tests/servertool/pending-injection-block.spec.ts',
+      symbol: 'bindSessionDir',
+      stage: 'test'
+    }
+  );
+  return adapterContext;
 }
 
 async function readPendingFile(root: string, sessionId: string): Promise<Record<string, unknown>> {
@@ -83,11 +99,7 @@ describe('pending-injection-block native shell', () => {
         pendingInjection: buildPendingInjection(),
         requestId: ' req-1 ',
         flowId: ' flow-1 ',
-        adapterContext: {
-          __rt: {
-            sessionDir: tempRoot
-          }
-        }
+        adapterContext: bindSessionDir(tempRoot)
       })
     ).resolves.toBe(true);
 
@@ -115,11 +127,7 @@ describe('pending-injection-block native shell', () => {
         },
         requestId: 'req-2',
         flowId: 'flow-2',
-        adapterContext: {
-          __rt: {
-            sessionDir: tempRoot
-          }
-        }
+        adapterContext: bindSessionDir(tempRoot)
       })
     ).resolves.toBe(false);
 
@@ -134,11 +142,7 @@ describe('pending-injection-block native shell', () => {
         pendingInjection: buildPendingInjection(),
         requestId: 'req-3',
         flowId: 'flow-3',
-        adapterContext: {
-          __rt: {
-            sessionDir: tempRoot
-          }
-        }
+        adapterContext: bindSessionDir(tempRoot)
       })
     ).rejects.toMatchObject({
       code: 'SERVERTOOL_PENDING_INJECTION_FAILED',

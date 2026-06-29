@@ -273,7 +273,8 @@ export class MetadataCenter {
       stopMessageEnabled: this.state.runtimeControl.stopMessageEnabled?.value as boolean | undefined,
       stopMessageExcludeDirect: this.state.runtimeControl.stopMessageExcludeDirect?.value as boolean | undefined,
       streamIntent: this.state.runtimeControl.streamIntent?.value as string | undefined,
-      clientAbort: this.state.runtimeControl.clientAbort?.value as boolean | undefined
+      clientAbort: this.state.runtimeControl.clientAbort?.value as boolean | undefined,
+      sessionDir: this.state.runtimeControl.sessionDir?.value as string | undefined
     };
   }
 

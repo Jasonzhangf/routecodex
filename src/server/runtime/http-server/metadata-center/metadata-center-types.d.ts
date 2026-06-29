@@ -88,6 +88,7 @@ export type MetadataCenterRuntimeControl = {
     stopMessageExcludeDirect?: boolean;
     streamIntent?: string;
     clientAbort?: boolean;
+    sessionDir?: string;
 };
 export type MetadataCenterProviderObservation = {
     target?: Record<string, unknown>;

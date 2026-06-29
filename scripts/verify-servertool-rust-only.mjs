@@ -3165,6 +3165,24 @@ function checkPendingSessionRustOwner() {
     );
   }
   const pendingInjectionShell = readRequired(TS_PENDING_INJECTION);
+  for (const marker of [
+    "from '../conversion/runtime-metadata.js'",
+    'readRuntimeMetadata(',
+    '__rt',
+  ]) {
+    if (pendingInjectionShell.includes(marker)) {
+      fail(
+        'servertool-pending-injection-metadata-center-only',
+        `pending-injection-block.ts must read sessionDir from MetadataCenter runtime_control, not runtime metadata marker ${marker}`
+      );
+    }
+  }
+  assertContains(
+    'servertool-pending-injection-metadata-center-only',
+    TS_PENDING_INJECTION,
+    pendingInjectionShell,
+    'readRuntimeControlFromAnyBoundMetadataCenter'
+  );
   for (const needle of [
     'planPendingInjectionPersistWithNative',
     'planPendingInjectionPersistErrorWithNative',
