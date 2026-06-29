@@ -159,6 +159,7 @@
           MetaReq04RuntimeControlBound[&quot;MetaReq04RuntimeControlBound&lt;br/&gt;route/servertool/stream control slots attached&quot;]
           MetaReq05ProviderObservationProjected[&quot;MetaReq05ProviderObservationProjected&lt;br/&gt;target/provider observation projected&quot;]
           MetaResp06ResponseObserved[&quot;MetaResp06ResponseObserved&lt;br/&gt;finish reason / response semantics observed&quot;]
+          MetaResp07BridgeMetadataBound[&quot;MetaResp07BridgeMetadataBound&lt;br/&gt;bridge metadata carrier bound&quot;]
           MetaResp07ServertoolContextProjected[&quot;MetaResp07ServertoolContextProjected&lt;br/&gt;servertool read-only bridge projection&quot;]
           MetaResp08CloseoutReleased[&quot;MetaResp08CloseoutReleased&lt;br/&gt;request-scoped metadata finalized and released&quot;]
 
@@ -168,8 +169,9 @@
           MetaReq03ContinuationAttached --&gt;|mtc-03| MetaReq04RuntimeControlBound
           MetaReq04RuntimeControlBound --&gt;|mtc-04| MetaReq05ProviderObservationProjected
           MetaReq05ProviderObservationProjected --&gt;|mtc-05| MetaResp06ResponseObserved
-          MetaResp06ResponseObserved --&gt;|mtc-06| MetaResp07ServertoolContextProjected
-          MetaResp07ServertoolContextProjected --&gt;|mtc-07| MetaResp08CloseoutReleased</pre>
+          MetaResp06ResponseObserved --&gt;|mtc-06| MetaResp07BridgeMetadataBound
+          MetaResp07BridgeMetadataBound --&gt;|mtc-07| MetaResp07ServertoolContextProjected
+          MetaResp07ServertoolContextProjected --&gt;|mtc-08| MetaResp08CloseoutReleased</pre>
         <h2>Stage Owners and Target Families</h2>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>owner stage</th><th>metadata families allowed to write</th><th>current owner truth</th></tr></thead>

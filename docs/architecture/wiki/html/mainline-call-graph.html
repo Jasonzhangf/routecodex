@@ -498,6 +498,7 @@
         <pre class="mermaid">flowchart LR
           MetaResp08CloseoutReleased[&quot;MetaResp08CloseoutReleased&quot;]
           MetaResp07ServertoolContextProjected[&quot;MetaResp07ServertoolContextProjected&quot;]
+          MetaResp07BridgeMetadataBound[&quot;MetaResp07BridgeMetadataBound&quot;]
           MetaResp06ResponseObserved[&quot;MetaResp06ResponseObserved&quot;]
           MetaReq05ProviderObservationProjected[&quot;MetaReq05ProviderObservationProjected&quot;]
           MetaReq04RuntimeControlBound[&quot;MetaReq04RuntimeControlBound&quot;]
@@ -510,8 +511,9 @@
           MetaReq03ContinuationAttached --&gt;|mtc-03| MetaReq04RuntimeControlBound
           MetaReq04RuntimeControlBound --&gt;|mtc-04| MetaReq05ProviderObservationProjected
           MetaReq05ProviderObservationProjected --&gt;|mtc-05| MetaResp06ResponseObserved
-          MetaResp06ResponseObserved --&gt;|mtc-06| MetaResp07ServertoolContextProjected
-          MetaResp07ServertoolContextProjected --&gt;|mtc-07| MetaResp08CloseoutReleased
+          MetaResp06ResponseObserved --&gt;|mtc-06| MetaResp07BridgeMetadataBound
+          MetaResp07BridgeMetadataBound --&gt;|mtc-07| MetaResp07ServertoolContextProjected
+          MetaResp07ServertoolContextProjected --&gt;|mtc-08| MetaResp08CloseoutReleased
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -521,6 +523,7 @@
           class MetaReq04RuntimeControlBound anchored;
           class MetaReq05ProviderObservationProjected anchored;
           class MetaResp06ResponseObserved anchored;
+          class MetaResp07BridgeMetadataBound anchored;
           class MetaResp07ServertoolContextProjected anchored;
           class MetaResp08CloseoutReleased anchored;</pre>
         <table>
@@ -533,8 +536,9 @@
         <tr><td>mtc-03</td><td><code>MetaReq03ContinuationAttached -&gt; MetaReq04RuntimeControlBound</code></td><td>anchored</td><td><code>finalizeRequestExecutorAttemptMetadata -&gt; finalizeRequestExecutorAttemptMetadata</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         <tr><td>mtc-04</td><td><code>MetaReq04RuntimeControlBound -&gt; MetaReq05ProviderObservationProjected</code></td><td>anchored</td><td><code>resolveRequestExecutorPipelineAttempt -&gt; resolveRequestExecutorPipelineAttempt</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         <tr><td>mtc-05</td><td><code>MetaReq05ProviderObservationProjected -&gt; MetaResp06ResponseObserved</code></td><td>anchored</td><td><code>persistResponsesConversationLifecycleAtChatProcessExitWithinCore -&gt; readMetadataCenterRequestTruth</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
-        <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07ServertoolContextProjected</code></td><td>anchored</td><td><code>buildBridgeAdapterContext -&gt; readRuntimeServerToolProjection</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
-        <tr><td>mtc-07</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07BridgeMetadataBound</code></td><td>anchored</td><td><code>buildBridgeAdapterContext -&gt; readRuntimeServerToolProjection</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-07</td><td><code>MetaResp07BridgeMetadataBound -&gt; MetaResp07ServertoolContextProjected</code></td><td>anchored</td><td><code>runProviderResponseRustHubPipeline -&gt; readRuntimeControlFromBoundMetadataCenter</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-08</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         </tbody>
         </table>
         <h2>Shared Multi-Reference Functions</h2>

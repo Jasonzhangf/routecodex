@@ -363,7 +363,7 @@ Notes:
 - Once the standard `reasoningStop` tool is exposed on the request, legacy shell-projected stop history such as `exec_command(cmd="reasoningStop")`, `reasoning_stop`, and their paired `command not found` tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests.
 - Model side must stay unaware of stopless identity. Stopless identity comes from write-once `request_truth.sessionId/requestId`; stopless control and progression come from Rust-produced `MetadataCenter.runtime_control.stopless` plus current request tool_output. `sessionDir`/persisted writeback and `requestTruth.runtimeControl` are forbidden.
 - ReqChatProcess is the standard write origin for stopless runtime control: Rust request governance emits `metadata.runtime_control.stopless`, and the TS request-stage shell may only commit that Rust plan into the bound MetadataCenter with fail-fast binding checks.
-- TS engine orchestration may only call Rust `planStoplessExecutionJson` for stopless execution/context composition and orchestration planning; it must not build stopless context/requestTruth/session truth in TS, and it must not reenter for stopless CLI flows.
+- Stopless execution/control composition and orchestration planning are owned by the Rust Chat Process engine; TS may only expose unavoidable external IO/native-call shells and must not build stopless context/requestTruth/session truth or reenter for stopless CLI flows.
 - Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter.
 - `responsesRequestContext.sessionId/conversationId` is continuation-only context for `/v1/responses`; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material.
 
@@ -860,12 +860,15 @@ Canonical types:
 - `ServertoolRegistryAutoHookDescriptorInput`
 - `ServertoolRegistryProjectionInput`
 - `ServertoolRegistryProjectionPlan`
+- `ServertoolRegistrySourceProjectionInput`
+- `ServertoolRegistrySourceProjectionPlan`
 
 Canonical builders:
 - `plan_servertool_registry_registration_action`
 - `plan_servertool_registry_lookup_action`
 - `plan_servertool_registry_auto_hook_descriptors`
 - `plan_servertool_registry_projection`
+- `plan_servertool_registry_source_projection`
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs`
@@ -873,6 +876,10 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
 - `sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`
+- `sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts`
+- `tests/servertool/registry-projection-shell.spec.ts`
 - `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
 
 Forbidden paths:

@@ -16,6 +16,7 @@ node_ids:
   - MetaReq04RuntimeControlBound
   - MetaReq05ProviderObservationProjected
   - MetaResp06ResponseObserved
+  - MetaResp07BridgeMetadataBound
   - MetaResp07ServertoolContextProjected
   - MetaResp08CloseoutReleased
 edges:

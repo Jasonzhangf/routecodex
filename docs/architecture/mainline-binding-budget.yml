@@ -50,11 +50,11 @@ chains:
     max_binding_pending_edges: 0
     note: Error mainline still has one split host/runtime classification edge.
   - chain_id: metadata.center.mainline
-    expected_total_edges: 8
-    min_anchored_edges: 7
+    expected_total_edges: 9
+    min_anchored_edges: 8
     max_partial_edges: 1
     max_binding_pending_edges: 0
-    note: Metadata center runtime-control family is partially implemented.
+    note: Metadata center runtime-control family is partially implemented; bridge-bound metadata carrier split is now anchored.
   - chain_id: runtime.lifecycle.mainline
     expected_total_edges: 10
     min_anchored_edges: 10

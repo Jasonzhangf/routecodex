@@ -41,6 +41,7 @@ flowchart LR
   MetaReq04RuntimeControlBound["MetaReq04RuntimeControlBound<br/>route/servertool/stream control slots attached"]
   MetaReq05ProviderObservationProjected["MetaReq05ProviderObservationProjected<br/>target/provider observation projected"]
   MetaResp06ResponseObserved["MetaResp06ResponseObserved<br/>finish reason / response semantics observed"]
+  MetaResp07BridgeMetadataBound["MetaResp07BridgeMetadataBound<br/>bridge metadata carrier bound"]
   MetaResp07ServertoolContextProjected["MetaResp07ServertoolContextProjected<br/>servertool read-only bridge projection"]
   MetaResp08CloseoutReleased["MetaResp08CloseoutReleased<br/>request-scoped metadata finalized and released"]
 
@@ -50,8 +51,9 @@ flowchart LR
   MetaReq03ContinuationAttached -->|mtc-03| MetaReq04RuntimeControlBound
   MetaReq04RuntimeControlBound -->|mtc-04| MetaReq05ProviderObservationProjected
   MetaReq05ProviderObservationProjected -->|mtc-05| MetaResp06ResponseObserved
-  MetaResp06ResponseObserved -->|mtc-06| MetaResp07ServertoolContextProjected
-  MetaResp07ServertoolContextProjected -->|mtc-07| MetaResp08CloseoutReleased
+  MetaResp06ResponseObserved -->|mtc-06| MetaResp07BridgeMetadataBound
+  MetaResp07BridgeMetadataBound -->|mtc-07| MetaResp07ServertoolContextProjected
+  MetaResp07ServertoolContextProjected -->|mtc-08| MetaResp08CloseoutReleased
 ```
 
 ## Stage Owners and Target Families

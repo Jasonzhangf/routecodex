@@ -1585,7 +1585,7 @@ owners:
       - MetaReq04RuntimeControlBound
       - MetaReq05ProviderObservationProjected
       - MetaResp06ResponseObserved
-      - MetaResp07ServertoolContextProjected
+      - MetaResp07BridgeMetadataBound
       - MetaResp08CloseoutReleased
     canonical_builders:
       - markReleased
