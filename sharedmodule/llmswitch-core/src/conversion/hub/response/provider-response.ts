@@ -359,11 +359,18 @@ function resolveResponsesConversationRequestLabelWithinCore(args: {
   requestLabel: string;
 }): string {
   const requestTruth = readMetadataCenterRequestTruth(args.metadata);
+  const requestLabel =
+    typeof args.requestLabel === 'string' && args.requestLabel.trim()
+      ? args.requestLabel.trim()
+      : undefined;
+  if (requestLabel) {
+    return requestLabel;
+  }
   const canonicalRequestId =
     typeof requestTruth.requestId === 'string' && requestTruth.requestId.trim()
       ? requestTruth.requestId.trim()
       : undefined;
-  return canonicalRequestId ?? args.requestLabel;
+  return canonicalRequestId ?? '';
 }
 
 async function persistResponsesConversationLifecycleAtChatProcessExitWithinCore(args: {

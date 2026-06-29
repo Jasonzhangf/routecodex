@@ -52,6 +52,9 @@ jest.unstable_mockModule(
     captureResponsesRequestContext: jest.fn(),
     finalizeResponsesConversationRequestRetention: jest.fn(),
     recordResponsesResponse: jest.fn(),
+    responsesConversationStore: {
+      getDebugStats: jest.fn(() => ({})),
+    },
   })
 );
 
@@ -181,7 +184,7 @@ describe('provider response metadata center providerProtocol contract', () => {
       })
     }));
     expect(recordResponsesResponse).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'openai-responses-router-20260628T184855563-416867-1902'
+      requestId: 'openai-responses-provider-20260628T184855563-416867-1902'
     }));
     expect(result.body?.choices?.[0]?.message?.content).toBe('center protocol wins');
   });

@@ -17,6 +17,7 @@ type MetadataCenterLike = {
   ) => void;
   readRuntimeControl?: () => Record<string, unknown>;
   readRequestTruth?: () => Record<string, unknown> | undefined;
+  readProviderObservation?: () => Record<string, unknown> | undefined;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -146,18 +147,37 @@ export function readRequestTruthFromAnyBoundMetadataCenter(
   return metadata ? readRequestTruthFromAnyBoundMetadataCenter(metadata) : undefined;
 }
 
+export function readProviderObservationFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!target) {
+    return undefined;
+  }
+  const directCenter = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  if (directCenter && typeof directCenter.readProviderObservation === 'function') {
+    const providerObservation = directCenter.readProviderObservation();
+    return providerObservation && typeof providerObservation === 'object' && !Array.isArray(providerObservation)
+      ? providerObservation
+      : undefined;
+  }
+  const metadata = asRecord(target.metadata);
+  return metadata ? readProviderObservationFromAnyBoundMetadataCenter(metadata) : undefined;
+}
+
 export function readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
   target: Record<string, unknown> | undefined
 ): JsonObject | undefined {
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(target);
   const requestTruth = readRequestTruthFromAnyBoundMetadataCenter(target);
-  if (!runtimeControl && !requestTruth) {
+  const providerObservation = readProviderObservationFromAnyBoundMetadataCenter(target);
+  if (!runtimeControl && !requestTruth && !providerObservation) {
     return undefined;
   }
   return {
     metadataCenterSnapshot: {
       requestTruth: (requestTruth ?? {}) as JsonObject,
-      runtimeControl: (runtimeControl ?? {}) as JsonObject
+      runtimeControl: (runtimeControl ?? {}) as JsonObject,
+      providerObservation: (providerObservation ?? {}) as JsonObject
     }
   };
 }

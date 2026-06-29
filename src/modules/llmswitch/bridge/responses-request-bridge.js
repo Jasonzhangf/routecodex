@@ -650,16 +650,6 @@ export async function captureResponsesRequestContextForHttp(args) {
         entryKind: args.entryKind ?? 'responses',
     });
 }
-export async function captureResponsesPipelineRequestContextForHttp(args) {
-    if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
-        return;
-    }
-    await captureResponsesRequestContextForHttp({
-        requestId: args.requestId,
-        ...args.requestContext,
-        providerKey: args.providerKey,
-    });
-}
 export function attachResponsesRequestContextToResultForHttp(args) {
     void args.requestContext;
     if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {

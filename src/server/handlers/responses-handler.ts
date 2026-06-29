@@ -1,7 +1,7 @@
 // feature_id: server.responses_handler_family
 // feature_id: server.responses_request_handler_bridge_surface
 // feature_id: hub.chat_process_responses_continuation
-// canonical_builders: buildResponsesConversationPortScopeForHttp, buildResponsesPipelineMetadataForHttp, captureResponsesPipelineRequestContextForHttp, prepareResponsesRequestBodyForHttp
+// canonical_builders: buildResponsesConversationPortScopeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesRequestBodyForHttp
 import type { Request, Response } from 'express';
 import type { HandlerContext } from './types.js';
 import {
@@ -19,7 +19,6 @@ import {
   buildResponsesConversationPortScopeForHttp,
   buildResponsesPipelineMetadataForHttp,
   captureResponsesInboundToolHistoryErrorsampleForHttp,
-  captureResponsesPipelineRequestContextForHttp,
   clearResponsesConversationOnHandlerFailureForHttp,
   finalizeResponsesPipelineResultForHttp,
   planResponsesHandlerStreamForHttp,
@@ -218,15 +217,6 @@ export async function handleResponses(
 	      body: pipelineBody,
       metadata: buildHandlerPipelineMetadata(preparedPipelineBody.requestBodyMetadata, responsesPipelineMetadata)
 	    };
-    await captureResponsesPipelineRequestContextForHttp({
-      entryEndpoint: pipelineEntryEndpoint,
-      requestId,
-      requestContext,
-      providerKey: typeof resumeMeta?.providerKey === 'string' ? resumeMeta.providerKey : undefined
-    }).catch((error) => {
-      logResponsesHandlerNonBlockingError('responses_context.capture_inbound', error, { requestId });
-    });
-
     const activeRequestTimeoutMs =
       typeof requestTimeoutMs === 'number' && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
         ? requestTimeoutMs

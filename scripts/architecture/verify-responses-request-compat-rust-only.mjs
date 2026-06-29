@@ -10,6 +10,7 @@ function read(relPath) {
 
 const rustRequestCompat = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs');
 const nativeReqOutboundBridge = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts');
+const nativeAdapterContext = read('sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/native-adapter-context.ts');
 const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
 const compatEngine = read('sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts');
 const functionMap = read('docs/architecture/function-map.yml');
@@ -37,6 +38,42 @@ for (const required of [
 ]) {
   if (!nativeReqOutboundBridge.includes(required) && !requiredExports.includes(required) && !compatEngine.includes(required)) {
     failures.push(`native request compat bridge missing: ${required}`);
+  }
+}
+
+for (const required of [
+  'readRuntimeControlFromAnyBoundMetadataCenter',
+  'readRequestTruthFromAnyBoundMetadataCenter',
+  'readProviderObservationFromAnyBoundMetadataCenter',
+]) {
+  if (!nativeAdapterContext.includes(required)) {
+    failures.push(`native adapter context must read req-outbound control from MetadataCenter only: ${required}`);
+  }
+}
+
+for (const forbidden of [
+  "readString('providerProtocol')",
+  "readString('providerId')",
+  "readString('providerKey')",
+  "readString('runtimeKey')",
+  "readString('requestId')",
+  "readString('clientRequestId')",
+  "readString('groupRequestId')",
+  "readString('sessionId')",
+  "readString('conversationId')",
+  "readString('entryEndpoint')",
+  "readString('routeId')",
+  "readString('modelId')",
+  "readString('clientModelId')",
+  "readString('originalModelId')",
+  "readRecord('capturedChatRequest')",
+  "readRecord('deepseek')",
+  "readRecord('anthropicThinkingConfig')",
+  "readRecord('anthropicThinkingBudgets')",
+  "readNumber('estimatedInputTokens')",
+]) {
+  if (nativeAdapterContext.includes(forbidden)) {
+    failures.push(`native adapter context must not read flat adapterContext shadow: ${forbidden}`);
   }
 }
 

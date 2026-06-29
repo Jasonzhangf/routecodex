@@ -7,7 +7,7 @@
 
 // feature_id: server.responses_request_handler_bridge_surface
 // feature_id: hub.chat_process_responses_continuation
-// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, captureResponsesPipelineRequestContextForHttp, finalizeResponsesPipelineResultForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
+// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, finalizeResponsesPipelineResultForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
 
 import type { AnyRecord } from './module-loader.js';
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
@@ -873,32 +873,6 @@ export async function captureResponsesRequestContextForHttp(args: {
   await captureResponsesRequestContextForRequest({
     ...args,
     entryKind: args.entryKind ?? 'responses',
-  });
-}
-
-export async function captureResponsesPipelineRequestContextForHttp(args: {
-  entryEndpoint?: string;
-  requestId: string;
-  requestContext: ResponsesRequestContextForHttp;
-  providerKey?: string;
-}): Promise<void> {
-  if (process.env.RESPONSES_DEBUG === '1') {
-    console.log('[responses-request-bridge] capture-pipeline-context', {
-      entryEndpoint: args.entryEndpoint,
-      requestId: args.requestId,
-      hasPayload: Boolean(args.requestContext?.payload),
-      hasContext: Boolean(args.requestContext?.context),
-      sessionId: args.requestContext?.sessionId,
-      conversationId: args.requestContext?.conversationId,
-    });
-  }
-  if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
-    return;
-  }
-  await captureResponsesRequestContextForHttp({
-    requestId: args.requestId,
-    ...args.requestContext,
-    providerKey: args.providerKey,
   });
 }
 

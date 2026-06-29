@@ -157,12 +157,6 @@ export declare function captureResponsesRequestContextForHttp(args: {
     matchedPort?: number;
     routingPolicyGroup?: string;
 }): Promise<void>;
-export declare function captureResponsesPipelineRequestContextForHttp(args: {
-    entryEndpoint?: string;
-    requestId: string;
-    requestContext: ResponsesRequestContextForHttp;
-    providerKey?: string;
-}): Promise<void>;
 export declare function attachResponsesRequestContextToResultForHttp(args: {
     entryEndpoint?: string;
     resultMetadata: Record<string, unknown> | undefined;

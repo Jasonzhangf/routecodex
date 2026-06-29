@@ -27,6 +27,7 @@ import {
 } from './executor/provider-response-converter.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
+import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
 import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
 
 // Import from new executor submodules
@@ -116,6 +117,15 @@ const REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER = {
   stage: 'HubReqOutbound05ProviderSemantic'
 } as const;
 
+function isSameMetadataCenterWriter(a: MetadataCenterWriter | undefined, b: MetadataCenterWriter): boolean {
+  return Boolean(
+    a
+    && a.module === b.module
+    && a.symbol === b.symbol
+    && a.stage === b.stage
+  );
+}
+
 export function writeProviderProtocolRuntimeControl(
   metadata: Record<string, unknown>,
   providerProtocol: string | undefined
@@ -132,9 +142,12 @@ export function writeProviderProtocolRuntimeControl(
     if (existing === providerProtocol) {
       return;
     }
-    throw new Error(
-      `MetadataCenter runtime_control.providerProtocol conflict: existing=${existing} selected=${providerProtocol}`
-    );
+    const existingSlot = center.snapshot().runtimeControl.providerProtocol;
+    if (!isSameMetadataCenterWriter(existingSlot?.writtenBy, REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER)) {
+      throw new Error(
+        `MetadataCenter runtime_control.providerProtocol conflict: existing=${existing} selected=${providerProtocol}`
+      );
+    }
   }
   center.writeRuntimeControl(
     'providerProtocol',
@@ -142,6 +155,104 @@ export function writeProviderProtocolRuntimeControl(
     REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER,
     'request provider protocol'
   );
+}
+
+function shouldCaptureResponsesConversationForEntry(entryEndpoint?: string): boolean {
+  return entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs';
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readContextSnapshot(metadata: Record<string, unknown>): Record<string, unknown> | undefined {
+  return readRecord(metadata.contextSnapshot) ?? readRecord(metadata.responsesContext);
+}
+
+function buildResponsesRequestContextFromOriginalPayload(
+  payload: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const input = Array.isArray(payload.input) ? payload.input : undefined;
+  const toolsRaw = Array.isArray(payload.tools) ? payload.tools : undefined;
+  if (!input && !toolsRaw) {
+    return undefined;
+  }
+  return {
+    ...(input ? { input } : {}),
+    ...(toolsRaw ? { toolsRaw } : {})
+  };
+}
+
+function readMatchedPort(metadata: Record<string, unknown>): number | undefined {
+  const candidates = [
+    metadata.matchedPort,
+    metadata.entryPort,
+    metadata.routecodexLocalPort,
+    metadata.localPort
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+      return Math.floor(candidate);
+    }
+  }
+  const centerPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
+  const parsed = typeof centerPortScope === 'string' ? Number(centerPortScope.trim()) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntry(args: {
+  input: PipelineExecutionInput;
+  metadata: Record<string, unknown>;
+  providerKey?: string;
+}): {
+  requestId: string;
+  payload: Record<string, unknown>;
+  context: Record<string, unknown>;
+  sessionId?: string;
+  conversationId?: string;
+  providerKey?: string;
+  entryKind: 'responses';
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+} | null {
+  if (!shouldCaptureResponsesConversationForEntry(args.input.entryEndpoint)) {
+    return null;
+  }
+  const payload = readRecord(args.input.body);
+  const context = payload
+    ? readContextSnapshot(args.metadata) ?? buildResponsesRequestContextFromOriginalPayload(payload)
+    : undefined;
+  if (!payload || !context) {
+    return null;
+  }
+  const requestTruth = readRuntimeRequestTruthIdentifiers(args.metadata);
+  const routingPolicyGroup =
+    readString(args.metadata.routecodexRoutingPolicyGroup)
+    ?? readString(args.metadata.routingPolicyGroup);
+  return {
+    requestId: args.input.requestId,
+    payload,
+    context,
+    ...requestTruth,
+    ...(args.providerKey ? { providerKey: args.providerKey } : {}),
+    entryKind: 'responses',
+    ...(readMatchedPort(args.metadata) !== undefined ? { matchedPort: readMatchedPort(args.metadata) } : {}),
+    ...(routingPolicyGroup ? { routingPolicyGroup } : {})
+  };
+}
+
+async function captureResponsesConversationRequestContextAtChatProcessEntry(args: {
+  input: PipelineExecutionInput;
+  metadata: Record<string, unknown>;
+  providerKey?: string;
+}): Promise<void> {
+  const captureArgs = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry(args);
+  if (!captureArgs) {
+    return;
+  }
+  await captureResponsesRequestContextForRequest(captureArgs);
 }
 
 function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>): string | undefined {
@@ -794,6 +905,11 @@ export class HubRequestExecutor implements RequestExecutor {
           && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
             ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, routeNameForAttempt) ?? []
             : [];
+        await captureResponsesConversationRequestContextAtChatProcessEntry({
+          input,
+          metadata: mergedMetadata,
+          providerKey: target.providerKey
+        });
         const defaultTierAvailableForAttempt = resolveDefaultTierAvailableForErrorErr05({
           tiers: routeTiersForAttempt,
           routePool: routePoolForAttempt,

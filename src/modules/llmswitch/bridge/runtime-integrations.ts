@@ -235,6 +235,11 @@ export async function captureResponsesRequestContextForRequest(args: {
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<void> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.captureRequestContext === "function") {
+    globalStore.captureRequestContext(args);
+    return;
+  }
   const mod = await getResponsesConversationModule();
   const fn = mod.captureResponsesRequestContext;
   if (typeof fn !== "function") {
@@ -266,6 +271,11 @@ export async function recordResponsesResponseForRequest(args: {
   routingPolicyGroup?: string;
   allowScopeContinuation?: boolean;
 }): Promise<void> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.recordResponse === "function") {
+    globalStore.recordResponse(args);
+    return;
+  }
   const mod = await getResponsesConversationModule();
   const resolvedFn = mod.recordResponsesResponse;
   if (typeof resolvedFn !== "function") {
@@ -279,6 +289,10 @@ export async function resumeResponsesConversation(
   submitPayload: AnyRecord,
   options?: { requestId?: string; entryKind?: 'responses' | 'chat' | 'messages'; continuationOwner?: 'direct' | 'relay'; matchedPort?: number; routingPolicyGroup?: string },
 ): Promise<{ payload: AnyRecord; meta: AnyRecord }> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.resumeConversation === "function") {
+    return globalStore.resumeConversation(responseId, submitPayload, options);
+  }
   const mod = await getResponsesConversationModule();
   const fn = mod.resumeResponsesConversation;
   if (typeof fn !== "function") {
@@ -299,6 +313,10 @@ export async function lookupResponsesContinuationByResponseId(
   entryKind?: 'responses' | 'chat' | 'messages';
   requestId?: string;
 } | null> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.lookupContinuationByResponseId === "function") {
+    return globalStore.lookupContinuationByResponseId(responseId, options);
+  }
   const mod = await getResponsesConversationModule();
   const fn = mod.lookupResponsesContinuationByResponseId;
   if (typeof fn !== 'function') {
@@ -314,6 +332,11 @@ export async function rebindResponsesConversationRequestId(
   if (!oldId || !newId || oldId === newId) {
     return;
   }
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.rebindRequestId === "function") {
+    globalStore.rebindRequestId(oldId, newId);
+    return;
+  }
   const mod = await getResponsesConversationModule();
   const fn = mod.rebindResponsesConversationRequestId;
   if (typeof fn === "function") {
@@ -325,6 +348,11 @@ export async function clearResponsesConversationByRequestId(
   requestId?: string,
 ): Promise<void> {
   if (!requestId) {
+    return;
+  }
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.clearRequest === "function") {
+    globalStore.clearRequest(requestId);
     return;
   }
   const mod = await getResponsesConversationModule();
@@ -339,6 +367,11 @@ export async function finalizeResponsesConversationRequestRetention(
   options?: { keepForSubmitToolOutputs?: boolean },
 ): Promise<void> {
   if (!requestId) {
+    return;
+  }
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.finalizeResponsesConversationRequestRetention === "function") {
+    globalStore.finalizeResponsesConversationRequestRetention(requestId, options);
     return;
   }
   const mod = await getResponsesConversationModule();
@@ -361,6 +394,10 @@ export async function resumeLatestResponsesContinuationByScope(args: {
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.resumeLatestContinuationByScope === "function") {
+    return globalStore.resumeLatestContinuationByScope(args);
+  }
   const mod = await getResponsesConversationModule();
   const fn = mod.resumeLatestResponsesContinuationByScope;
   if (typeof fn !== "function") {
@@ -381,6 +418,10 @@ export async function materializeLatestResponsesContinuationByScope(args: {
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
+  const globalStore = readGlobalResponsesConversationStore();
+  if (typeof globalStore?.materializeLatestContinuationByScope === "function") {
+    return globalStore.materializeLatestContinuationByScope(args);
+  }
   const mod = await getResponsesConversationModule();
   const fn = mod.materializeLatestResponsesContinuationByScope;
   if (typeof fn !== "function") {

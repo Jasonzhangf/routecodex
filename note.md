@@ -1,3 +1,9 @@
+# 2026-06-29 responses continuation request-label rebind blocker
+
+- 目标：继续排查 `missing_request_context` 在线回放失败，确认是 capture 没写入还是 response 侧拿错了 request key。
+- 结论：`request-executor` 在 providerContext resolve 后会把 `input.requestId` 重绑到 provider 级 request id，但 `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` 里 `resolveResponsesConversationRequestLabelWithinCore()` 仍优先使用 `MetadataCenter.requestTruth.requestId`。该字段在 handler 侧先写入旧 request id，导致 store 已 rebind 到新 key 后，response 侧继续用旧 key 查找，触发 `record.missing_request_context`。
+- 处理：把 response 侧 canonical label 选择改成“当前 requestLabel 优先，requestTruth 仅 fallback”，再补一条重绑回归测试。
+
 # 2026-06-29 servertool loop/scope TS shell deletion slice
 
 - 目标：继续清理 servertool TS 残留，删除不在 runtime reachable 图里的 loop/scope/loop-warning TS shells。

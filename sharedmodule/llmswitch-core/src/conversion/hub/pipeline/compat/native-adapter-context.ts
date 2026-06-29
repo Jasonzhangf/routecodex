@@ -1,7 +1,10 @@
 import type { AdapterContext } from '../../types/chat-envelope.js';
-import type { JsonObject } from '../../types/json.js';
 import type { NativeReqOutboundCompatAdapterContextInput } from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
-import { readRuntimeControlFromBoundMetadataCenter } from '../../../../servertool/metadata-center-carrier.js';
+import {
+  readProviderObservationFromAnyBoundMetadataCenter,
+  readRequestTruthFromAnyBoundMetadataCenter,
+  readRuntimeControlFromAnyBoundMetadataCenter
+} from '../../../../servertool/metadata-center-carrier.js';
 
 // Thin TS bridge only carries metadata center bound context into native compat.
 
@@ -9,29 +12,24 @@ export function buildNativeReqOutboundCompatAdapterContext(
   adapterContext?: AdapterContext
 ): NativeReqOutboundCompatAdapterContextInput {
   const row = (adapterContext ?? {}) as Record<string, unknown>;
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(row);
-
-  const readString = (key: string): string | undefined => {
-    const value = row[key];
-    return typeof value === 'string' && value.trim().length ? value.trim() : undefined;
-  };
-
-  const readNumber = (key: string): number | undefined => {
-    const value = row[key];
-    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-  };
-
-  const readRecord = (key: string): Record<string, unknown> | undefined => {
-    const value = row[key];
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(row);
+  const requestTruth = readRequestTruthFromAnyBoundMetadataCenter(row);
+  const providerObservation = readProviderObservationFromAnyBoundMetadataCenter(row);
+  const target = (() => {
+    const value = providerObservation?.target;
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return undefined;
     }
     return value as Record<string, unknown>;
+  })();
+
+  const readStringFrom = (source: Record<string, unknown> | undefined, key: string): string | undefined => {
+    const value = source?.[key];
+    return typeof value === 'string' && value.trim().length ? value.trim() : undefined;
   };
 
   return {
-    __rt: readRecord('__rt'),
-    compatibilityProfile: readString('compatibilityProfile'),
+    compatibilityProfile: readStringFrom(providerObservation, 'compatibilityProfile'),
     providerProtocol: (() => {
       const providerProtocol =
         typeof runtimeControl?.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
@@ -42,24 +40,17 @@ export function buildNativeReqOutboundCompatAdapterContext(
       }
       return providerProtocol;
     })(),
-    providerId: readString('providerId'),
-    providerKey: readString('providerKey'),
-    runtimeKey: readString('runtimeKey'),
-    requestId: readString('requestId') ?? adapterContext?.requestId,
-    clientRequestId: readString('clientRequestId'),
-    groupRequestId: readString('groupRequestId'),
-    sessionId: readString('sessionId'),
-    conversationId: readString('conversationId'),
-    entryEndpoint: readString('entryEndpoint') ?? adapterContext?.entryEndpoint,
-    routeId: readString('routeId') ?? adapterContext?.routeId,
-    capturedChatRequest: readRecord('capturedChatRequest') as JsonObject | undefined,
-    deepseek: readRecord('deepseek'),
-    anthropicThinkingConfig: readRecord('anthropicThinkingConfig'),
-    anthropicThinking: readString('anthropicThinking'),
-    anthropicThinkingBudgets: readRecord('anthropicThinkingBudgets'),
-    estimatedInputTokens: readNumber('estimatedInputTokens'),
-    modelId: readString('modelId'),
-    clientModelId: readString('clientModelId'),
-    originalModelId: readString('originalModelId')
+    providerId: readStringFrom(target, 'providerId') ?? readStringFrom(target, 'id'),
+    providerKey: readStringFrom(providerObservation, 'providerKey'),
+    requestId: readStringFrom(requestTruth, 'requestId'),
+    clientRequestId: readStringFrom(requestTruth, 'clientRequestId'),
+    sessionId: readStringFrom(requestTruth, 'sessionId'),
+    conversationId: readStringFrom(requestTruth, 'conversationId'),
+    entryEndpoint: readStringFrom(requestTruth, 'entryEndpoint'),
+    routeId: readStringFrom(runtimeControl, 'routeId'),
+    modelId:
+      readStringFrom(providerObservation, 'assignedModelId')
+      ?? readStringFrom(providerObservation, 'modelId'),
+    clientModelId: readStringFrom(providerObservation, 'clientModelId')
   };
 }
