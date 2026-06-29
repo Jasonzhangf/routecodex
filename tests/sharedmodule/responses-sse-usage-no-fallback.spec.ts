@@ -17,6 +17,7 @@ describe('responses SSE usage no-fallback boundary', () => {
     const response: ResponsesResponse = {
       id: 'resp_missing_usage',
       object: 'response',
+      created_at: 1781149537,
       status: 'completed',
       model: 'gpt-5.5',
       output: []
@@ -37,6 +38,7 @@ describe('responses SSE usage no-fallback boundary', () => {
     const response: ResponsesResponse = {
       id: 'resp_invalid_usage',
       object: 'response',
+      created_at: 1781149537,
       status: 'completed',
       model: 'gpt-5.5',
       output: [],
@@ -54,6 +56,27 @@ describe('responses SSE usage no-fallback boundary', () => {
 
     expect(text).toContain('event: response.error');
     expect(text).toContain('Invalid Responses usage.input_tokens');
+    expect(text).not.toContain('event: response.completed');
+    expect(text).not.toContain('event: response.done');
+  });
+
+  it('fails missing created_at instead of synthesizing the current time', async () => {
+    const converter = new ResponsesJsonToSseConverterRefactored();
+    const response: ResponsesResponse = {
+      id: 'resp_missing_created_at',
+      object: 'response',
+      status: 'completed',
+      model: 'gpt-5.5',
+      output: []
+    } as ResponsesResponse;
+
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_responses_missing_created_at'
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('event: response.error');
+    expect(text).toContain('Invalid Responses response: missing created_at');
     expect(text).not.toContain('event: response.completed');
     expect(text).not.toContain('event: response.done');
   });

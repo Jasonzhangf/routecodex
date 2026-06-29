@@ -95,6 +95,16 @@ for (const forbidden of [
   }
 }
 
+const responsesEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts');
+for (const forbidden of [
+  'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',
+  'response.created_at ?? Math.floor(Date.now() / 1000)',
+]) {
+  if (responsesEventGenerator.includes(forbidden)) {
+    failures.push(`Responses SSE generator must not synthesize created_at: ${forbidden}`);
+  }
+}
+
 const sharedOwnerFiles = [
   'sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts',
   'sharedmodule/llmswitch-core/src/sse/shared/writer.ts',

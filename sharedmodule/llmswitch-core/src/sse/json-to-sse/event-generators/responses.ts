@@ -154,11 +154,14 @@ function createResponsePayload(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
   const raw = response as Record<string, any>;
+  if (typeof response.created_at !== 'number' || !Number.isFinite(response.created_at) || response.created_at <= 0) {
+    throw new Error('Invalid Responses response: missing created_at');
+  }
   const usage = normalizeUsage(response.usage);
   const payload: Record<string, unknown> = {
     id: response.id,
     object: response.object ?? 'response',
-    created_at: response.created_at ?? Math.floor(Date.now() / 1000),
+    created_at: response.created_at,
     status: response.status ?? 'in_progress',
     model: response.model,
     output: response.output ?? [],
