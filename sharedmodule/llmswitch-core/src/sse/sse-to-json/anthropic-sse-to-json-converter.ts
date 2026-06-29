@@ -115,45 +115,10 @@ export class AnthropicSseToJsonConverter {
       return outcome.response;
     } catch (error) {
       context.eventStats.errors = (context.eventStats.errors ?? 0) + 1;
-      if (this.isTerminatedError(error)) {
-        try {
-          const salvaged = builder.getResult();
-          if (salvaged.success && salvaged.response) {
-            context.isCompleted = true;
-            context.eventStats.endTime = Date.now();
-            this.attachDecodeStats(salvaged.response, context);
-            return salvaged.response;
-          }
-        } catch {
-          // ignore salvage failure, fall through to wrapped error
-        }
-      }
       throw this.wrapError('ANTHROPIC_SSE_TO_JSON_FAILED', error as Error, options.requestId);
     } finally {
       this.contexts.delete(options.requestId);
     }
-  }
-
-  private isTerminatedError(error: unknown): boolean {
-    if (!error || typeof error !== 'object') {
-      return false;
-    }
-    const message = (error as { message?: unknown }).message;
-    const code = (error as { code?: unknown }).code;
-    const normalized = typeof message === 'string' ? message.toLowerCase() : '';
-    const normalizedCode = typeof code === 'string' ? code.toLowerCase() : '';
-    return (
-      normalized.includes('terminated') ||
-      normalizedCode.includes('terminated') ||
-      normalized.includes('upstream_stream_idle_timeout') ||
-      normalizedCode.includes('upstream_stream_idle_timeout') ||
-      normalized.includes('upstream_stream_no_content_timeout') ||
-      normalizedCode.includes('upstream_stream_no_content_timeout') ||
-      normalized.includes('upstream_stream_content_idle_timeout') ||
-      normalizedCode.includes('upstream_stream_content_idle_timeout') ||
-      normalized.includes('upstream_stream_timeout') ||
-      normalizedCode.includes('upstream_stream_timeout')
-    );
   }
 
   private resolveSseFailureMetadata(error: Error): SseFailureMetadata {

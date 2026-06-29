@@ -95,7 +95,10 @@ for (const relPath of sharedOwnerFiles) {
 }
 
 const providerNeutralProjectionFiles = [
+  'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
+  'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/response-builder.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts',
+  'sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts',
@@ -114,6 +117,7 @@ for (const relPath of providerNeutralProjectionFiles) {
   }
   for (const forbidden of [
     'tryMaterializeFinalResponse',
+    'getSalvageResult',
     'const salvaged =',
     'return salvaged',
   ]) {
