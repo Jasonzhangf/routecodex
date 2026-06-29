@@ -2,27 +2,12 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import {
+  normalizeServertoolProgressResultWithNative,
+  resolveServertoolProgressStageWithNative,
   resolveServertoolProgressToolNameWithNative,
   shouldUseServertoolGoldProgressHighlightWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { formatStopMessageCompareContext, readStopMessageCompareContext } from './metadata-center-carrier.js';
-
-function resolveStage(step: number, message: string): string {
-  const normalized = message.trim().toLowerCase();
-  if (normalized === 'matched' || step <= 1) return 'match';
-  if (normalized.startsWith('completed') || step >= 5) return 'final';
-  return 'followup';
-}
-
-function normalizeResult(message: string): string {
-  const normalized = message.trim().toLowerCase();
-  if (!normalized) return 'unknown';
-  const group = /^completed\s*\(([^)]+)\)/.exec(normalized);
-  if (group && group[1]) {
-    return 'completed_' + group[1].trim().replace(/[^a-z0-9]+/g, '_');
-  }
-  return normalized.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
-}
 
 const WHITE = '\u001b[97m';
 
@@ -111,8 +96,8 @@ export function createServertoolProgressLogger(args: CommonArgs) {
   const logProgress = (step: number, _total: number, message: string, extra?: Record<string, unknown>): void => {
     const flowId = typeof extra?.flowId === 'string' ? extra.flowId.trim() : '';
     const tool = resolveServertoolProgressToolNameWithNative({ flowId });
-    const stage = resolveStage(step, message);
-    const result = normalizeResult(message);
+    const stage = resolveServertoolProgressStageWithNative({ step, message });
+    const result = normalizeServertoolProgressResultWithNative({ message });
     const color = shouldUseServertoolGoldProgressHighlightWithNative({ flowId }) ? args.gold : args.yellow;
     const shouldPrintConsole = tool !== 'stop_message_auto';
     if (shouldPrintConsole) {

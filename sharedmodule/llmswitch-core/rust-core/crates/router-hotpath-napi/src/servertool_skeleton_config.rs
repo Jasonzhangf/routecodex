@@ -247,6 +247,56 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
         .map(str::to_string)
 }
 
+fn normalize_progress_token(value: &str) -> String {
+    let mut out = String::new();
+    let mut previous_sep = false;
+    for ch in value.trim().to_ascii_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            previous_sep = false;
+        } else if !previous_sep {
+            out.push('_');
+            previous_sep = true;
+        }
+    }
+    out.trim_matches('_').to_string()
+}
+
+fn resolve_progress_stage(step: i64, message: &str) -> String {
+    let normalized = message.trim().to_ascii_lowercase();
+    if normalized == "matched" || step <= 1 {
+        return "match".to_string();
+    }
+    if normalized.starts_with("completed") || step >= 5 {
+        return "final".to_string();
+    }
+    "followup".to_string()
+}
+
+fn normalize_progress_result(message: &str) -> String {
+    let normalized = message.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return "unknown".to_string();
+    }
+    if let Some(rest) = normalized.strip_prefix("completed") {
+        let rest = rest.trim_start();
+        if let Some(rest) = rest.strip_prefix('(') {
+            if let Some(end) = rest.find(')') {
+                let token = normalize_progress_token(&rest[..end]);
+                if !token.is_empty() {
+                    return format!("completed_{token}");
+                }
+            }
+        }
+    }
+    let token = normalize_progress_token(&normalized);
+    if token.is_empty() {
+        "unknown".to_string()
+    } else {
+        token
+    }
+}
+
 fn build_builtin_handler_entry_plan(document: &Value, name: &str) -> Value {
     let Some(canonical) = normalize_servertool_name(Some(&Value::String(name.to_string()))) else {
         return json!({ "action": "return_none" });
@@ -960,6 +1010,34 @@ pub fn should_use_servertool_gold_progress_highlight_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi]
+pub fn resolve_servertool_progress_stage_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let step = input
+        .get("step")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let message = input
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let output = resolve_progress_stage(step, message);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn normalize_servertool_progress_result_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let message = input
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let output = normalize_progress_result(message);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn resolve_servertool_followup_flow_profile(flow_id: &str) -> Value {
     let normalized_flow_id = flow_id.trim();
     if normalized_flow_id.is_empty() {
@@ -1008,15 +1086,17 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
 mod tests {
     use super::{
         build_servertool_dispatch_plan_input_json, build_servertool_outcome_plan_input_json,
-        get_default_servertool_skeleton_document_json, normalize_servertool_registration_spec_json,
-        plan_servertool_backend_execution_json, plan_servertool_builtin_auto_handler_entries_json,
+        get_default_servertool_skeleton_document_json, normalize_servertool_progress_result_json,
+        normalize_servertool_registration_spec_json, plan_servertool_backend_execution_json,
+        plan_servertool_builtin_auto_handler_entries_json,
         plan_servertool_builtin_handler_entry_json, plan_servertool_builtin_handler_names_json,
         plan_servertool_builtin_handler_record_entries_json, plan_servertool_followup_runtime_json,
         plan_servertool_handler_contract_json, plan_servertool_registry_lookup_from_skeleton_json,
         plan_servertool_skeleton_derived_config_json,
         resolve_servertool_builtin_handler_entry_json, resolve_servertool_followup_flow_profile,
-        resolve_servertool_progress_tool_name_json, resolve_servertool_registered_name_json,
-        resolve_servertool_tool_spec_json, should_use_servertool_gold_progress_highlight_json,
+        resolve_servertool_progress_stage_json, resolve_servertool_progress_tool_name_json,
+        resolve_servertool_registered_name_json, resolve_servertool_tool_spec_json,
+        should_use_servertool_gold_progress_highlight_json,
     };
     use serde_json::{json, Value};
 
@@ -1450,6 +1530,35 @@ mod tests {
         )
         .expect("regular highlight");
         assert_eq!(regular, "false");
+    }
+
+    #[test]
+    fn resolves_progress_stage_and_result_from_rust() {
+        let matched = resolve_servertool_progress_stage_json(
+            json!({ "step": 2, "message": " matched " }).to_string(),
+        )
+        .expect("matched stage");
+        assert_eq!(matched, "\"match\"");
+
+        let final_stage = resolve_servertool_progress_stage_json(
+            json!({ "step": 5, "message": "running" }).to_string(),
+        )
+        .expect("final stage");
+        assert_eq!(final_stage, "\"final\"");
+
+        let completed = normalize_servertool_progress_result_json(
+            json!({ "message": "completed (servertool cli projection; no reenter)" }).to_string(),
+        )
+        .expect("completed result");
+        assert_eq!(
+            completed,
+            "\"completed_servertool_cli_projection_no_reenter\""
+        );
+
+        let empty =
+            normalize_servertool_progress_result_json(json!({ "message": "   " }).to_string())
+                .expect("empty result");
+        assert_eq!(empty, "\"unknown\"");
     }
 
     #[test]

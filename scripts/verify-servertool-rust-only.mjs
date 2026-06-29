@@ -4117,6 +4117,8 @@ function checkServertoolFlowPresentationRustOwner() {
   for (const needle of [
     'pub fn resolve_servertool_progress_tool_name_json',
     'pub fn should_use_servertool_gold_progress_highlight_json',
+    'pub fn resolve_servertool_progress_stage_json',
+    'pub fn normalize_servertool_progress_result_json',
   ]) {
     assertContains(
       'servertool-flow-presentation-rust-owner',
@@ -4128,6 +4130,8 @@ function checkServertoolFlowPresentationRustOwner() {
   for (const needle of [
     'resolveServertoolProgressToolNameJson',
     'shouldUseServertoolGoldProgressHighlightJson',
+    'resolveServertoolProgressStageJson',
+    'normalizeServertoolProgressResultJson',
   ]) {
     assertContains(
       'servertool-flow-presentation-required-export',
@@ -4139,6 +4143,8 @@ function checkServertoolFlowPresentationRustOwner() {
   for (const needle of [
     'resolveServertoolProgressToolNameWithNative',
     'shouldUseServertoolGoldProgressHighlightWithNative',
+    'resolveServertoolProgressStageWithNative',
+    'normalizeServertoolProgressResultWithNative',
   ]) {
     assertContains(
       'servertool-flow-presentation-native-bridge',
@@ -4164,11 +4170,13 @@ function checkServertoolFlowPresentationRustOwner() {
     'progressConfig:',
     'toolNameByFlowId:',
     'goldHighlightFlowIds:',
+    'function resolveStage(',
+    'function normalizeResult(',
   ]) {
-    if (skeletonConfigShell.includes(keyword)) {
+    if (skeletonConfigShell.includes(keyword) || progressLogShell.includes(keyword)) {
       fail(
         'servertool-flow-presentation-no-skeleton-ts-owner',
-        `Forbidden TS skeleton progress presentation semantic "${keyword}" found in skeleton-config.ts`
+        `Forbidden TS progress presentation semantic "${keyword}" found in skeleton/progress shell`
       );
     }
   }

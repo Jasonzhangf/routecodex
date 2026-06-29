@@ -3,6 +3,8 @@ import { describe, expect, jest, test } from '@jest/globals';
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
+    normalizeServertoolProgressResultWithNative: jest.fn(() => 'running'),
+    resolveServertoolProgressStageWithNative: jest.fn(() => 'followup'),
     resolveServertoolProgressToolNameWithNative: jest.fn(() => 'fixture_tool'),
     shouldUseServertoolGoldProgressHighlightWithNative: jest.fn(() => false)
   })
@@ -32,6 +34,16 @@ jest.unstable_mockModule(
 );
 
 describe('progress-log-block fail-fast behavior', () => {
+  test('progress stage and result normalization are native-owned', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts', 'utf8')
+    );
+    expect(source).not.toContain('function resolveStage(');
+    expect(source).not.toContain('function normalizeResult(');
+    expect(source).toContain('resolveServertoolProgressStageWithNative({ step, message })');
+    expect(source).toContain('normalizeServertoolProgressResultWithNative({ message })');
+  });
+
   test('console logging failures are not converted to non-blocking warnings', async () => {
     const { createServertoolProgressLogger } = await import(
       '../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js'

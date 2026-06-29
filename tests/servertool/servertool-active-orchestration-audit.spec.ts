@@ -272,6 +272,17 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts',
+    forbidden: [
+      'function resolveStage(',
+      'function normalizeResult(',
+    ],
+    required: [
+      'resolveServertoolProgressStageWithNative({ step, message })',
+      'normalizeServertoolProgressResultWithNative({ message })',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/engine.ts',
     forbidden: [
       'function extractStoplessReasoningText(',
