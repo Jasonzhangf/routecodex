@@ -20,7 +20,7 @@ runFollowupMainline (360 行)
 ├── 入参组装: loopPayload, loopState, metadata   → backend-route-runtime-block.ts
 ├── 入参组装: followupInjectionPlan, executionMode → backend-route-runtime-block.ts
 ├── 副作用: assertAutoLimitNotExceeded           → backend-route-runtime-block.ts
-├── 副作用: evaluateStopMessageLoopGuard         → stop-message-loop-guard-block.ts
+├── 副作用: evaluateStopMessageLoopGuard         → Rust stop_message_loop_guard（旧 TS block 已删除）
 ├── 副作用: appendLoopWarning                   → 本文件 ~8 行
 ├── 副作用: applyFollowupRuntimeMetadata         → backend-route-runtime-block.ts
 ├── 副作用: applyFollowupDeltaPlan               → backend-route-origin-delta.ts

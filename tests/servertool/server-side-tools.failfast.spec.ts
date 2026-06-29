@@ -6,7 +6,6 @@ const TOOL_NAME = 'failfast_test_tool';
 let failfastInvocationCount = 0;
 const loadRoutingInstructionStateSyncMock = jest.fn();
 const applyPreCommandHooksToToolCallsMock = jest.fn(() => {});
-const resolveServertoolPersistentScopeKeyMock = jest.fn(() => null);
 const planServertoolResponseStageGateWithNativeMock = jest.fn(() => ({
   shouldBypass: false,
   nextAction: 'run_auto_hooks'
@@ -922,13 +921,6 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/state-scope.js',
-  () => ({
-    resolveServertoolPersistentScopeKey: resolveServertoolPersistentScopeKeyMock
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js',
   () => ({
     loadRoutingInstructionStateSync: loadRoutingInstructionStateSyncMock
@@ -1041,8 +1033,6 @@ describe('server-side-tools tool-error closed loop', () => {
     failfastInvocationCount = 0;
     loadRoutingInstructionStateSyncMock.mockReset();
     applyPreCommandHooksToToolCallsMock.mockReset();
-    resolveServertoolPersistentScopeKeyMock.mockReset();
-    resolveServertoolPersistentScopeKeyMock.mockReturnValue(null);
     planServertoolResponseStageGateWithNativeMock.mockReset();
     planServertoolResponseStageGateWithNativeMock.mockReturnValue({
       shouldBypass: false,
@@ -1238,7 +1228,6 @@ describe('server-side-tools tool-error closed loop', () => {
       providerProtocol: 'openai-responses'
     });
 
-    expect(resolveServertoolPersistentScopeKeyMock).not.toHaveBeenCalled();
     expect(loadRoutingInstructionStateSyncMock).not.toHaveBeenCalled();
     expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenCalledWith({
       runtimeControlPreCommandState: undefined

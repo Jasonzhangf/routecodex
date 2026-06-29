@@ -92,11 +92,8 @@ const TS_BACKEND_ROUTE_BOOTSTRAP_REPLAY = `${SERVERTOOL_TS_DIR}/backend-route-bo
 const TS_BACKEND_ROUTE_RESPONSE = `${SERVERTOOL_TS_DIR}/backend-route-response-block.ts`;
 const TS_BACKEND_ROUTE_SHADOW = `${SERVERTOOL_TS_DIR}/backend-route-shadow.ts`;
 const TS_VISION_ELIGIBILITY = `${SERVERTOOL_TS_DIR}/handlers/vision-eligibility.ts`;
-const TS_LOOP_STATE_BLOCK = `${SERVERTOOL_TS_DIR}/loop-state-block.ts`;
 const TS_STOP_GATEWAY_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-gateway-context.ts`;
 const TS_STOP_MESSAGE_COMPARE_CONTEXT = `${SERVERTOOL_TS_DIR}/stop-message-compare-context.ts`;
-const TS_STOP_MESSAGE_LOOP_GUARD = `${SERVERTOOL_TS_DIR}/stop-message-loop-guard-block.ts`;
-const TS_STOP_MESSAGE_LOOP_PAYLOAD = `${SERVERTOOL_TS_DIR}/stop-message-loop-payload-block.ts`;
 const TS_STOP_MESSAGE_COUNTER = `${SERVERTOOL_TS_DIR}/stop-message-counter.ts`;
 const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block.ts`;
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
@@ -195,6 +192,14 @@ const DELETED_SERVERTOOL_DATA_CONTEXT_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/origin-request-store.ts`,
   `${ROOT}/tests/servertool/origin-request-store.spec.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/handlers/followup-sanitize.ts`,
+];
+const DELETED_SERVERTOOL_LOOP_SCOPE_TS_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/loop-state-block.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/state-scope.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/stop-message-loop-guard-block.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts`,
+  `${ROOT}/tests/servertool/loop-state-block.spec.ts`,
+  `${ROOT}/tests/servertool/state-scope.metadata-center.spec.ts`,
 ];
 const SERVERTOOL_RUSTIFICATION_REQUIRED_VERIFICATION = Object.freeze({
   'hub.servertool_cli_projection': [
@@ -513,24 +518,24 @@ function assertStoplessSchemaFeedbackLock() {
     "expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop')"
   );
 
-  const loopState = readRequired(`${ROOT}/tests/servertool/loop-state-block.spec.ts`);
+  const loopStateContract = readRequired(RUST_SERVERTOOL_LOOP_STATE);
   assertContains(
     'stopless-repeat-reset-lock',
-    `${ROOT}/tests/servertool/loop-state-block.spec.ts`,
-    loopState,
-    'plans repeat state through native policy'
+    RUST_SERVERTOOL_LOOP_STATE,
+    loopStateContract,
+    'fn plan_increments_repeat_count_for_same_flow_and_payload()'
   );
   assertContains(
     'stopless-repeat-reset-lock',
-    `${ROOT}/tests/servertool/loop-state-block.spec.ts`,
-    loopState,
+    RUST_SERVERTOOL_LOOP_STATE,
+    loopStateContract,
+    'fn plan_resets_repeat_count_for_changed_payload()'
+  );
+  assertContains(
+    'stopless-repeat-reset-lock',
+    `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+    readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`),
     'repeatCount: 2'
-  );
-  assertContains(
-    'stopless-repeat-reset-lock',
-    `${ROOT}/tests/servertool/loop-state-block.spec.ts`,
-    loopState,
-    'repeatCount: 1'
   );
 }
 
@@ -1327,7 +1332,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   const orchestration = readRequired(CHAT_SERVERTOOL_ORCHESTRATION);
   const runtimeUtils = readRequired(STOP_MESSAGE_RUNTIME_UTILS);
   const routingState = readRequired(STOP_MESSAGE_ROUTING_STATE);
-  const stateScope = readRequired(SERVERTOOL_STATE_SCOPE);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const chatProcessWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`);
   const stopMessageAuto = readRequired(STOP_MESSAGE_AUTO_HANDLER);
@@ -1502,15 +1506,8 @@ function checkStopMessagePersistedLookupRustOwner() {
     runtimeUtils,
     'native-servertool-core-semantics.js'
   );
-  assertContains(
-    'stop-message-persisted-lookup-bridge',
-    SERVERTOOL_STATE_SCOPE,
-    stateScope,
-    'native-servertool-core-semantics.js'
-  );
   for (const [file, content] of [
     [STOP_MESSAGE_RUNTIME_UTILS, runtimeUtils],
-    [SERVERTOOL_STATE_SCOPE, stateScope],
   ]) {
     if (content.includes('native-chat-process-servertool-orchestration-semantics.js')) {
       fail(
@@ -2095,8 +2092,13 @@ function checkStopMessageLoopGuardRustOwner() {
   const rustLoopGuard = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_message_loop_guard.rs`);
   const rustFollowupCore = readRequired(RUST_FOLLOWUP_CORE);
   const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
-  const tsLoopGuard = readRequired(TS_STOP_MESSAGE_LOOP_GUARD);
-  const tsLoopPayload = readRequired(TS_STOP_MESSAGE_LOOP_PAYLOAD);
+  for (const file of DELETED_SERVERTOOL_LOOP_SCOPE_TS_FILES) {
+    assertMissingFile(
+      'servertool-loop-scope-ts-deleted',
+      file,
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; loop/scope control is Rust-owned`
+    );
+  }
 
   assertContains(
     'stop-message-loop-guard-rust-owner',
@@ -2117,56 +2119,12 @@ function checkStopMessageLoopGuardRustOwner() {
     'evaluateLoopGuardWithNative'
   );
   assertContains(
-    'stop-message-loop-guard-thin-shell',
-    TS_STOP_MESSAGE_LOOP_GUARD,
-    tsLoopGuard,
-    'evaluateLoopGuardWithNative'
-  );
-  assertContains(
     'stop-message-loop-warning-rust-owner',
     RUST_FOLLOWUP_CORE,
     rustFollowupCore,
     'pub fn inject_loop_warning'
   );
-  for (const keyword of [
-    'Fallback: pure TS',
-    'Date.now()',
-    'Math.floor',
-    'Math.max(0',
-    'elapsedMs >=',
-    'pairRepeatCount >=',
-  ]) {
-    if (tsLoopGuard.includes(keyword)) {
-      fail(
-        'stop-message-loop-guard-no-ts-fallback',
-        `Forbidden TS loop guard semantic "${keyword}" found in stop-message-loop-guard-block.ts`
-      );
-    }
-  }
-  for (const keyword of [
-    'appendStopMessageLoopWarning',
-    'warningText',
-    'repeatCountRaw',
-    'Number.isFinite',
-    'Math.floor',
-    'Math.max',
-    'messages.push',
-    '检测到 stopMessage 请求/响应参数已连续',
-  ]) {
-    if (tsLoopPayload.includes(keyword)) {
-      fail(
-        'stop-message-loop-warning-no-ts-duplicate',
-        `Forbidden TS loop-warning semantic "${keyword}" found in stop-message-loop-payload-block.ts`
-      );
-    }
-  }
-  assertContains(
-    'stop-message-loop-payload-thin-shell',
-    TS_STOP_MESSAGE_LOOP_PAYLOAD,
-    tsLoopPayload,
-    'buildServertoolReq04FollowupPayloadWithNative'
-  );
-  pass('stop-message-loop-guard-no-ts-fallback', 'stop-message loop guard TS block is a native fail-fast shell');
+  pass('stop-message-loop-guard-no-ts-fallback', 'stop-message loop guard TS shells are deleted; Rust owns loop guard');
   pass('stop-message-loop-warning-no-ts-duplicate', 'stop-message loop warning text/count policy is Rust/native-owned');
 }
 
@@ -3193,26 +3151,10 @@ function checkPendingSessionRustOwner() {
     pendingInjectionShell,
     'readRuntimeControlFromAnyBoundMetadataCenter'
   );
-  const stateScopeShell = readRequired(SERVERTOOL_STATE_SCOPE);
-  for (const marker of [
-    "from '../conversion/runtime-metadata.js'",
-    'readRuntimeMetadata(',
-    '__rt',
-    'stopMessageClientInjectSessionScope',
-    'stopMessageClientInjectScope',
-  ]) {
-    if (stateScopeShell.includes(marker)) {
-      fail(
-        'servertool-state-scope-metadata-center-only',
-        `state-scope.ts must resolve scope from MetadataCenter snapshot and native Rust, not legacy marker ${marker}`
-      );
-    }
-  }
-  assertContains(
+  assertMissingFile(
     'servertool-state-scope-metadata-center-only',
     SERVERTOOL_STATE_SCOPE,
-    stateScopeShell,
-    'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter'
+    'state-scope.ts must stay deleted; Rust persisted_lookup owns stop-message/session sticky scope resolution'
   );
   for (const needle of [
     'planPendingInjectionPersistWithNative',

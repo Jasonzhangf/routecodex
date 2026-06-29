@@ -853,7 +853,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts
       - docs
     forbidden_paths:
       - src/providers
@@ -861,7 +860,6 @@ owners:
       - sharedmodule/llmswitch-core/src/servertool/handlers
     required_tests:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-      - tests/servertool/loop-state-block.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
     required_gates:
       - npm run verify:servertool-rust-only
@@ -869,7 +867,7 @@ owners:
     migration_target: rust
     notes:
       - "Loop warning text and repeat-count policy stay Rust-owned in followup-core."
-      - "TS may only build the native seed payload and pass the native warning injector as callback glue."
+      - "Deleted TS loop-state/scope/loop-warning shells must not be restored; Rust/followup-core and Chat Process native bridge own this path."
       - "`appendStopMessageLoopWarning` must not return as a TS semantic owner/export."
 
   - feature_id: hub.servertool_rust_only_closeout
@@ -3227,7 +3225,6 @@ owners:
       - finalizeResponsesHandlerPayloadForHttp
       - shouldManageResponsesConversationForHttp
       - buildResponsesRequestContextForHttp
-      - captureResponsesPipelineRequestContextForHttp
       - attachResponsesRequestContextToResultForHttp
       - finalizeResponsesPipelineResultForHttp
       - prepareResponsesHandlerEntryForHttp

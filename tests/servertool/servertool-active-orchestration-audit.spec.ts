@@ -121,20 +121,6 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/state-scope.ts',
-    forbidden: [
-      "from '../conversion/runtime-metadata.js'",
-      'readRuntimeMetadata(',
-      'stopMessageClientInjectSessionScope',
-      'stopMessageClientInjectScope',
-    ],
-    required: [
-      'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
-      'resolveStopMessageSessionScopeWithNative',
-      'resolveServertoolStickyKeyWithNative',
-    ],
-  },
-  {
     file: 'sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts',
     forbidden: [],
     required: [

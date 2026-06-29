@@ -1,6 +1,7 @@
 //! Followup helper functions — pure Rust, no NAPI dependency.
 //!
 //! Small pure functions extracted from `servertool/followup-mainline-block.ts`.
+// feature_id: hub.servertool_loop_warning
 
 use serde::{Deserialize, Serialize};
 

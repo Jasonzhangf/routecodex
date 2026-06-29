@@ -80,7 +80,7 @@
 
 #### C. TS stop-message loop seed tools 回填
 
-文件：`sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts`
+旧文件：`sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts`（已删除）
 
 问题：
 - `buildStopMessageLoopPayload(...)` 从 captured seed 回填 `payload.tools`。
@@ -399,7 +399,7 @@
 | V2 | `src/server/runtime/http-server/executor/servertool-followup-dispatch.ts` | `captureNestedResponsesRequestContext` | 保存 `body.tools` 为 `toolsRaw/toolsNormalized` | 改 response-only carrier 或删除 |
 | V3 | `shared_responses_conversation_utils.rs` | `prepare_responses_conversation_entry` | context/payload tools 持久化 | 删除 |
 | V4 | `shared_responses_conversation_utils.rs` | resume/restore/materialize continuation | entry tools -> payload tools | 删除 |
-| V5 | `stop-message-loop-payload-block.ts` | `buildStopMessageLoopPayload` | seed tools -> payload tools | 删除 |
+| V5 | `stop-message-loop-payload-block.ts`（已删除） | `buildStopMessageLoopPayload` | seed tools -> payload tools | 删除且不得复活 |
 | V6 | `servertool_followup_delta.rs` | `apply_followup_delta_plan` | followup 专用 payload DSL | 收敛为等价客户端输入；字段 ops 删除/迁移 |
 | V7 | `servertool_followup_delta.rs` | `replace_tools` / `force_tool_choice` ops | 直接改 tools/tool_choice | 删除或移入 chatprocess policy |
 | V8 | `responses-openai-bridge*.ts` | `responsesContext/toolsRaw/restoredTools` | TS legacy context 参与 payload build | Rust 下沉；response-only 隔离 |
@@ -498,7 +498,7 @@
 |---|---|---|
 | V1/V2 | `tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts` | followup semantics 含 `clientToolsRaw` 时 nested body 不从 semantics 恢复 `tools` |
 | V3/V4 | Rust `shared_responses_conversation_utils.rs` tests | entry/context/payload 含 `tools` 时 resume/materialize payload 不含 entry tools |
-| V5 | `tests/servertool/stop-message-loop-payload-block.spec.ts` 或现有 servertool suite | captured seed 含 tools 时 loop payload 不含 tools |
+| V5 | `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 或现有 servertool suite | 旧 loop payload TS 文件不复活；captured seed 不参与 provider request |
 | V6/V7 | Rust `servertool_followup_delta.rs` tests | `replace_tools` / `force_tool_choice` 不再生成 live request fields；或该 DSL 删除后无导出 |
 | V8 | Responses bridge tests | `toolsRaw/restoredTools` 只能影响 client response projection，不能参与 request payload build |
 | V9 | `deepseek-web-request` compat tests | `__hub_capture.context.toolsRaw` 不会 restore 到 payload.tools |
@@ -557,7 +557,7 @@
 
 1. `servertool-followup-dispatch.ts`：删除所有从 `clientToolsRaw` / `semanticsTools` / `baselineTools` / `canonicalTools` 恢复 `body.tools` 的代码与测试期望。
 2. `shared_responses_conversation_utils.rs`：删除 entry/base payload/context 中 tools 的持久化与恢复；conversation continuation 只能 materialize 为 chatprocess 标准语义。
-3. `stop-message-loop-payload-block.ts`：删除 captured seed tools 回填；stopless followup 只注入下一轮用户意图和 stop schema 指令。
+3. `stop-message-loop-payload-block.ts` 已删除；禁止通过旧 TS payload helper 做 captured seed tools 回填。
 4. `servertool_followup_delta.rs`：删除或重构 followup 专用 `replace_tools` / `force_tool_choice` / request-field DSL；followup 只能构造等价客户端输入，不拥有 provider request patch 能力。
 5. `deepseek-web-request.ts` / DeepSeek helpers：删除 `__hub_capture.context.toolsRaw -> payload.tools` 和 wrapper `data.tools/messages/prompt` 作为请求补偿来源。
 6. Vercel/OpenAI SDK transport：删除 `mergePreservedOpenAiRequestFields(rawBody, builtBody)` 这类 raw merge；SDK options 必须由标准语义显式生成。

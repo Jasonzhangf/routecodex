@@ -128,7 +128,6 @@ verification:
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
-      - tests/servertool/loop-state-block.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
     smoke:
@@ -484,7 +483,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/followup-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs
-      - sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -495,7 +493,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Rust/followup-core owns warning text and repeat-count policy; TS must stay native payload/callback glue."
+      - "Rust/followup-core owns warning text and repeat-count policy; deleted TS loop-state/scope/payload shells must stay absent."
 
   - feature_id: hub.servertool_orchestration_policy
     change_risk: high
