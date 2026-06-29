@@ -303,6 +303,8 @@ const TARGETS = [
       'registerServerToolHandlerViaNativePlan',
       'handler: ServerToolHandler',
       'hasHandler:',
+      'function resolveBuiltinEntry(',
+      '.trim().toLowerCase()',
     ],
     required: [
       'planServertoolRegistryLookupFromSkeleton(',

@@ -3774,6 +3774,8 @@ function checkServertoolRegistryRustOwner() {
     'planServertoolRegistryRegistrationFromSkeleton',
     'hasHandler:',
     'handler: ServerToolHandler',
+    'function resolveBuiltinEntry(',
+    '.trim().toLowerCase()',
   ]) {
     if (registryRegistrationShell.includes(marker)) {
       fail(

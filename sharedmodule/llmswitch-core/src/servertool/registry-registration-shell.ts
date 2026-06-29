@@ -7,15 +7,6 @@ import {
   planServertoolRegistryLookupFromSkeleton
 } from './skeleton-config.js';
 
-function resolveBuiltinEntry(name: string): ServerToolHandlerEntry | undefined {
-  const rawName = typeof name === 'string' ? name.trim() : '';
-  if (!rawName) {
-    return undefined;
-  }
-  const canonicalName = rawName.toLowerCase();
-  return getBuiltinHandlerEntry(rawName) ?? getBuiltinHandlerEntry(canonicalName);
-}
-
 export const getServerToolHandlerViaNativePlan = (
   name: string
 ): ServerToolHandlerEntry | undefined => {
@@ -23,7 +14,10 @@ export const getServerToolHandlerViaNativePlan = (
     name: typeof name === 'string' ? name : ''
   });
   if (actionPlan.action === 'return_builtin') {
-    return resolveBuiltinEntry(actionPlan.canonicalName ?? name);
+    if (!actionPlan.canonicalName) {
+      throw new Error('[servertool] native registry lookup returned builtin without canonicalName');
+    }
+    return getBuiltinHandlerEntry(actionPlan.canonicalName);
   }
   return undefined;
 };

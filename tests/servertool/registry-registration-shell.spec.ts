@@ -52,6 +52,25 @@ describe('registry-registration-shell', () => {
     expect(getServerToolHandlerViaNativePlan('adhoc')).toBeUndefined();
   });
 
+  test('registry registration shell does not own builtin name normalization', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts', 'utf8')
+    );
+
+    expect(source).not.toContain('function resolveBuiltinEntry(');
+    expect(source).not.toContain('.trim().toLowerCase()');
+  });
+
+  test('fails fast when native builtin lookup omits canonicalName', () => {
+    planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
+      action: 'return_builtin',
+    });
+
+    expect(() => getServerToolHandlerViaNativePlan('Builtin')).toThrow(
+      'native registry lookup returned builtin without canonicalName'
+    );
+  });
+
   test('checks registered tool names through native skeleton config', () => {
     isServertoolRegisteredNameByConfigMock.mockReturnValueOnce(true);
     expect(isRegisteredServerToolNameViaNativeConfig('alpha')).toBe(true);
