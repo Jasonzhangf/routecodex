@@ -212,24 +212,45 @@ function normalizeUsage(usage: any): {
   output_tokens: number;
   total_tokens: number;
   input_tokens_details?: { cached_tokens?: number };
-} {
-  const fallback = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+} | undefined {
   if (!usage || typeof usage !== 'object') {
-    return fallback;
+    return undefined;
   }
 
   const asAny = usage as Record<string, unknown>;
-  const baseInputRaw = Number((asAny.input_tokens ?? asAny.prompt_tokens) as number);
-  const input = Number.isFinite(baseInputRaw) ? baseInputRaw : 0;
+  const readRequiredToken = (field: 'input_tokens' | 'output_tokens' | 'total_tokens', aliases: string[]): number | undefined => {
+    const sourceKey = [field, ...aliases].find((key) => Object.prototype.hasOwnProperty.call(asAny, key));
+    if (!sourceKey) {
+      return undefined;
+    }
+    const raw = Number(asAny[sourceKey] as number);
+    if (!Number.isFinite(raw) || raw < 0) {
+      throw new Error(`Invalid Responses usage.${sourceKey}`);
+    }
+    return Math.round(raw);
+  };
+
+  const input = readRequiredToken('input_tokens', ['prompt_tokens']);
+  const output = readRequiredToken('output_tokens', ['completion_tokens']);
+  const explicitTotal = readRequiredToken('total_tokens', []);
+  if (input === undefined && output === undefined && explicitTotal === undefined) {
+    throw new Error('Invalid Responses usage: missing token fields');
+  }
+
   let cachedRaw = Number(asAny.cache_read_input_tokens as number);
   if (!Number.isFinite(cachedRaw) && asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object') {
     const details = asAny.input_tokens_details as Record<string, unknown>;
     cachedRaw = Number(details.cached_tokens as number);
   }
-  const outputRaw = Number((asAny.output_tokens ?? asAny.completion_tokens) as number);
-  const output = Number.isFinite(outputRaw) ? outputRaw : 0;
-  const totalRaw = Number(asAny.total_tokens as number);
-  const total = Number.isFinite(totalRaw) ? totalRaw : input + output;
+  if (
+    (Object.prototype.hasOwnProperty.call(asAny, 'cache_read_input_tokens') ||
+      (asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object' &&
+        Object.prototype.hasOwnProperty.call(asAny.input_tokens_details as Record<string, unknown>, 'cached_tokens'))) &&
+    (!Number.isFinite(cachedRaw) || cachedRaw < 0)
+  ) {
+    throw new Error('Invalid Responses usage cached_tokens');
+  }
+  const total = explicitTotal ?? ((input ?? 0) + (output ?? 0));
 
   const normalized: {
     input_tokens: number;
@@ -237,13 +258,13 @@ function normalizeUsage(usage: any): {
     total_tokens: number;
     input_tokens_details?: { cached_tokens?: number };
   } = {
-    input_tokens: input,
-    output_tokens: output,
+    input_tokens: input ?? 0,
+    output_tokens: output ?? 0,
     total_tokens: total
   };
 
   if (Number.isFinite(cachedRaw)) {
-    normalized.input_tokens_details = { cached_tokens: cachedRaw };
+    normalized.input_tokens_details = { cached_tokens: Math.round(cachedRaw) };
   }
 
   return normalized;
@@ -945,16 +966,7 @@ export function buildResponseDoneEvent(
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
     data: {
-      response: {
-        id: response.id,
-        object: response.object ?? 'response',
-        created_at: response.created_at,
-        status: response.status ?? 'completed',
-        model: response.model,
-        output: response.output ?? [],
-        usage: response.usage,
-        ...((response as unknown as Record<string, unknown>).required_action ? { required_action: (response as unknown as Record<string, unknown>).required_action } : {})
-      }
+      response: createResponsePayload(response, { status: response.status ?? 'completed' })
     },
     sequenceNumber: baseEvent.sequenceNumber
   };
@@ -971,7 +983,7 @@ export function buildErrorEvent(
   const baseEvent = createBaseEvent(context, config);
 
   return {
-    type: 'error',
+    type: 'response.error',
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
