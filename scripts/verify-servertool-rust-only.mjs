@@ -4961,8 +4961,19 @@ function checkServertoolRustOutcomeCloseout() {
   }
   const dispatchPreparationShell = readRequired(TS_DISPATCH_PREPARATION_SHELL);
   for (const marker of [
+    "from '../conversion/runtime-metadata.js'",
+    'readRuntimeMetadata(',
+  ]) {
+    if (dispatchPreparationShell.includes(marker)) {
+      fail(
+        'servertool-dispatch-preparation-metadata-center-only',
+        `dispatch-preparation-shell.ts must use MetadataCenter snapshot instead of runtime metadata marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
     'export function prepareServertoolDispatchStage(',
-    'readRuntimeMetadata',
+    'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
     'resolveServertoolRuntimePreCommandState',
     'applyPreCommandHooksToToolCalls',
     'planServertoolToolCallDispatchWithNative'

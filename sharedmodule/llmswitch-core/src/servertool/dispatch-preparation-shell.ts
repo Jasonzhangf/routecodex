@@ -1,6 +1,5 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
-import { readRuntimeMetadata } from '../conversion/runtime-metadata.js';
 import {
   planServertoolToolCallDispatchWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
@@ -12,7 +11,10 @@ import {
 } from './execution-queue-shell.js';
 import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
 import { patchToolCallArgumentsById } from './orchestration-blocks.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
+import {
+  readProviderProtocolFromAnyBoundMetadataCenter,
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
+} from './metadata-center-carrier.js';
 
 export function prepareServertoolDispatchStage(args: {
   options: ServerSideToolEngineOptions;
@@ -29,7 +31,9 @@ export function prepareServertoolDispatchStage(args: {
   if (!providerProtocol) {
     throw new Error('Servertool dispatch preparation requires metadata center runtime_control.providerProtocol');
   }
-  const runtimeMetadata = readRuntimeMetadata(args.options.adapterContext as unknown as Record<string, unknown>);
+  const runtimeMetadata = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
+    args.options.adapterContext as Record<string, unknown>
+  );
   const runtimePreCommandState = resolveServertoolRuntimePreCommandState({
     adapterContext: args.options.adapterContext,
     requestId: args.options.requestId,

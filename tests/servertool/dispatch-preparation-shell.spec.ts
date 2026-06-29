@@ -16,7 +16,6 @@ function bindProviderProtocol(adapterContext: Record<string, unknown>, providerP
   }
 }
 
-const readRuntimeMetadataMock = jest.fn(() => undefined);
 const resolveServertoolRuntimePreCommandStateMock = jest.fn(() => undefined);
 const applyPreCommandHooksToToolCallsMock = jest.fn(() => {});
 const buildServertoolDispatchPlanInputMock = jest.fn((input: any) => input);
@@ -26,13 +25,6 @@ const planServertoolToolCallDispatchWithNativeMock = jest.fn((input: any) => ({
   noopToolCalls: []
 }));
 const patchToolCallArgumentsByIdMock = jest.fn();
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
-  () => ({
-    readRuntimeMetadata: readRuntimeMetadataMock
-  })
-);
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/pre-command-runtime-state-shell.js',
@@ -76,7 +68,6 @@ const { prepareServertoolDispatchStage } = await import(
 describe('dispatch-preparation-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    readRuntimeMetadataMock.mockReturnValue({ preCommandState: { tag: 'runtime' } });
     resolveServertoolRuntimePreCommandStateMock.mockReturnValue({ tag: 'resolved' });
   });
 
@@ -88,7 +79,9 @@ describe('dispatch-preparation-shell', () => {
       )
     );
 
-    expect(source).toContain('readRuntimeMetadata');
+    expect(source).not.toContain("from '../conversion/runtime-metadata.js'");
+    expect(source).not.toContain('readRuntimeMetadata(');
+    expect(source).toContain('readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter');
     expect(source).toContain('resolveServertoolRuntimePreCommandState');
     expect(source).toContain('applyPreCommandHooksToToolCalls');
     expect(source).toContain('planServertoolToolCallDispatchWithNative');
@@ -112,7 +105,6 @@ describe('dispatch-preparation-shell', () => {
       excludeToolCallNames: null
     });
 
-    expect(readRuntimeMetadataMock).toHaveBeenCalled();
     expect(resolveServertoolRuntimePreCommandStateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: 'req-1',
@@ -127,7 +119,15 @@ describe('dispatch-preparation-shell', () => {
     );
     expect(buildServertoolDispatchPlanInputMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        toolCalls
+        toolCalls,
+        runtimeMetadata: {
+          metadataCenterSnapshot: {
+            requestTruth: {},
+            runtimeControl: expect.objectContaining({
+              providerProtocol: 'openai-responses'
+            })
+          }
+        }
       })
     );
     expect(result.dispatchPlan.executableToolCalls).toEqual(toolCalls);
