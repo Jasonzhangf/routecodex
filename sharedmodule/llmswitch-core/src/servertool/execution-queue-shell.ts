@@ -4,7 +4,7 @@ import type {
   ServerToolExecution,
   ToolCall
 } from './types.js';
-import { getServerToolHandler, listAdHocRegisteredToolCallHandlerSpecs } from './registry.js';
+import { getServerToolHandler, listAdHocRegisteredToolCallHandlerSpecs } from './registry-orchestration-shell.js';
 import {
   planServertoolNoopOutcomeWithNative,
   buildServertoolDispatchPlanInputWithNative,

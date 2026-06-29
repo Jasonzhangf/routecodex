@@ -47,7 +47,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/registry.js',
+  '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js',
   () => ({
     getServerToolHandler,
     listAdHocRegisteredToolCallHandlerSpecs: jest.fn(() => [])

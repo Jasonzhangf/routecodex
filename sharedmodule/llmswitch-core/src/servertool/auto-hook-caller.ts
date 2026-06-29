@@ -6,7 +6,7 @@ import type {
   ServerToolHandlerResult
 } from './types.js';
 import { buildAutoHookQueuesFromConfig } from './orchestration-blocks.js';
-import { listAutoServerToolHooks } from './registry.js';
+import { listAutoServerToolHooks } from './registry-orchestration-shell.js';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
 import {
   planAutoHookExecutionDecisionWithNative,

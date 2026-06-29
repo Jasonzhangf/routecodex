@@ -161,6 +161,10 @@ const DELETED_CLI_RESULT_GUARD_TS_FILES = [
 const DELETED_SERVERTOOL_DISPATCH_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`,
 ];
+const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`,
+];
 const DELETED_STOPLESS_TRANSPARENT_FILES = [
   `${ROOT}/tests/servertool/stopless-sessionid-transparent.spec.ts`,
   `${ROOT}/docs/goals/stopless-sessionid-transparent-plan.md`,
@@ -197,10 +201,8 @@ const STOPLESS_SESSION_LOCK_FILES = [
 const SERVERTOOL_ACTIVE_ORCHESTRATION_AUDIT = `${ROOT}/tests/servertool/servertool-active-orchestration-audit.spec.ts`;
 const SERVERTOOL_ACTIVE_ORCHESTRATION_OWNER_FILES = [
   `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-  `${SERVERTOOL_TS_DIR}/execution-dispatch-outcome-shell.ts`,
   `${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`,
   `${SERVERTOOL_TS_DIR}/engine.ts`,
-  `${SERVERTOOL_TS_DIR}/registry-impl.ts`,
 ];
 const SERVERTOOL_DISPATCH_OUTCOME_FORBIDDEN_MARKERS = [
   'args.appendToolOutput(',
@@ -3451,7 +3453,13 @@ function checkServertoolRegistryRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const registryImpl = readRequired(`${SERVERTOOL_TS_DIR}/registry-impl.ts`);
+  for (const file of DELETED_SERVERTOOL_REGISTRY_FACADE_FILES) {
+    assertMissingFile(
+      'servertool-registry-facades-deleted',
+      file,
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import registry-orchestration-shell.ts directly`
+    );
+  }
   const registryRegistrationShell = readRequired(TS_REGISTRY_REGISTRATION_SHELL);
   const registryProjectionShell = readRequired(TS_REGISTRY_PROJECTION_SHELL);
   const registryOrchestrationShell = readRequired(TS_REGISTRY_ORCHESTRATION_SHELL);
@@ -3594,16 +3602,16 @@ function checkServertoolRegistryRustOwner() {
     "entry.registration.trigger === 'tool_call'",
     "entry.registration.trigger === 'auto'",
   ]) {
-    if (registryImpl.includes(keyword)) {
+    if (registryOrchestrationShell.includes(keyword)) {
       fail(
         'servertool-registry-no-ts-owner',
-        `Forbidden TS registry selection semantic "${keyword}" found in registry-impl.ts`
+        `Forbidden TS registry selection semantic "${keyword}" found in registry-orchestration-shell.ts`
       );
     }
   }
   pass(
     'servertool-registry-no-ts-owner',
-    'registry-impl.ts delegates register/get action selection to Rust native plan'
+    'registry-orchestration-shell.ts delegates register/get action selection to Rust native plan without registry facade files'
   );
 }
 
@@ -6377,40 +6385,6 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'planRuntimePreCommandStateRuntimeActionWithNative({',
         "import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';",
         'function getArray(value: unknown): JsonValue[] {',
-      ],
-    ],
-    [
-      `${SERVERTOOL_TS_DIR}/registry-impl.ts`,
-      [
-        'const toolHandlerRegistryImpl',
-        'const autoHandlerRegistryImpl',
-        'let autoHookOrderImpl = 0',
-        'function resolveAutoHookPhaseRank(',
-        '.sort((left, right) => {',
-        'const phaseRankDiff =',
-        'const priorityDiff =',
-        'const orderDiff =',
-        'export function registerServerToolHandlerImpl(',
-        'export function getServerToolHandlerImpl(',
-        'export function listRegisteredToolHandlerNamesImpl(',
-        'export function listAdHocRegisteredToolCallHandlerSpecsImpl(',
-        'export function listAutoHandlersForRegistryImpl(',
-        'export function collectAutoServerToolHooksImpl(',
-        'export function isRegisteredToolNameImpl(',
-        'export function listRegisteredToolHandlerRecordsImpl(',
-      ],
-    ],
-    [
-      `${SERVERTOOL_TS_DIR}/registry.ts`,
-      [
-        'collectAutoServerToolHooksImpl as listAutoServerToolHooks',
-        'getServerToolHandlerImpl as getServerToolHandler',
-        'isRegisteredToolNameImpl as isRegisteredServerToolName',
-        'listAdHocRegisteredToolCallHandlerSpecsImpl as listAdHocRegisteredToolCallHandlerSpecs',
-        'listAutoHandlersForRegistryImpl as listAutoServerToolHandlers',
-        'listRegisteredToolHandlerNamesImpl as listRegisteredServerToolHandlerNames',
-        'listRegisteredToolHandlerRecordsImpl as listRegisteredServerToolHandlerRecords',
-        'registerServerToolHandlerImpl as registerServerToolHandler',
       ],
     ],
   ]);

@@ -792,7 +792,7 @@ jest.unstable_mockModule(
   () => ({
     buildServertoolDispatchPlanInput: jest.fn((input: any) => input),
     runServertoolIoExecutionQueue: jest.fn(async (args: any) => {
-      const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry.js');
+      const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
       const state = {
         executedToolCalls: [],
         executedIds: new Set<string>(),
@@ -941,7 +941,7 @@ function bindTestMetadataCenter<T extends Record<string, unknown>>(
 }
 
 beforeAll(async () => {
-  const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry.js');
+  const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
   registerServerToolHandler = registry.registerServerToolHandler;
   const serverSideTools = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
   runServerSideToolEngine = serverSideTools.runServerSideToolEngine;

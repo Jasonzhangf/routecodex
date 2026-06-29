@@ -1,8 +1,40 @@
-import { describe, expect, test } from '@jest/globals';
-import {
+import { describe, expect, jest, test } from '@jest/globals';
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js',
+  () => ({
+    isServertoolRegisteredNameByConfig: jest.fn((name: string) => name === 'reasoningStop'),
+    normalizeServerToolRegistrationSpec: jest.fn((name: string, options?: { trigger?: string }) => ({
+      name,
+      trigger: options?.trigger ?? 'tool_call',
+      executionMode: 'guarded',
+      stripAfterExecute: true
+    })),
+    planServertoolRegistryLookupFromSkeleton: jest.fn(() => ({
+      action: 'return_builtin',
+      canonicalName: 'reasoningStop'
+    })),
+    planServertoolRegistryRegistrationFromSkeleton: jest.fn(() => ({ action: 'skip_builtin' })),
+    planServertoolBuiltinHandlerEntry: jest.fn(() => ({
+      action: 'return_entry',
+      entry: {
+        name: 'reasoningStop',
+        trigger: 'tool_call',
+        registration: {
+          name: 'reasoningStop',
+          trigger: 'tool_call',
+          executionMode: 'guarded'
+        }
+      }
+    })),
+    planServertoolBuiltinHandlerNames: jest.fn(() => ['reasoningStop'])
+  })
+);
+
+const {
   getServerToolHandler,
   isRegisteredServerToolName
-} from '../../sharedmodule/llmswitch-core/src/servertool/registry.js';
+} = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
 
 describe('servertool registry casing', () => {
   test('camelCase builtin reasoningStop resolves to a concrete tool_call handler', () => {
