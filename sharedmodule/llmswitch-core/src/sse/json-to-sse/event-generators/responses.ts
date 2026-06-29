@@ -40,11 +40,7 @@ function chunkText(text: string, config: ResponsesEventGeneratorConfig): string[
     // chunking explicitly disabled
     return [text];
   }
-  try {
-    return StringUtils.chunkString(text, size, cloneRegex(TEXT_CHUNK_BOUNDARY));
-  } catch {
-    return [text];
-  }
+  return StringUtils.chunkString(text, size, cloneRegex(TEXT_CHUNK_BOUNDARY));
 }
 
 function normalizeReasoningSummaryEntries(summary: ResponsesReasoningItem['summary'] | undefined): string[] {
