@@ -60,6 +60,9 @@ const registry = read('sharedmodule/llmswitch-core/src/sse/registry/sse-codec-re
 for (const forbidden of [
   'export type SseStreamLike = any',
   'export type SseStreamInput = any',
+  "return 'unknown'",
+  "?? 'unknown'",
+  'fallback?: string',
 ]) {
   if (registry.includes(forbidden)) {
     failures.push(`SSE registry must not expose any stream alias: ${forbidden}`);

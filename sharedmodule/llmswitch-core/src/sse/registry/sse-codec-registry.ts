@@ -68,30 +68,29 @@ export class SseCodecRegistry {
 
 export const defaultSseCodecRegistry = new SseCodecRegistry();
 
-function resolveModelId(payload: unknown, fallback?: string): string {
-  if (typeof fallback === 'string' && fallback.trim()) {
-    return fallback;
+function resolveModelId(payload: unknown, contextModel?: string): string {
+  if (typeof contextModel === 'string' && contextModel.trim()) {
+    return contextModel.trim();
   }
-  if (!payload || typeof payload !== 'object') {
-    return 'unknown';
-  }
-  const record = payload as Record<string, unknown>;
-  if (typeof record.model === 'string') {
-    return record.model;
-  }
-  if (record.modelVersion && typeof record.modelVersion === 'string') {
-    return record.modelVersion;
-  }
-  if (record.response && typeof record.response === 'object') {
-    const inner = record.response as Record<string, unknown>;
-    if (typeof inner.model === 'string') {
-      return inner.model;
+  if (payload && typeof payload === 'object') {
+    const record = payload as Record<string, unknown>;
+    if (typeof record.model === 'string' && record.model.trim()) {
+      return record.model.trim();
     }
-    if (typeof inner.modelVersion === 'string') {
-      return inner.modelVersion;
+    if (typeof record.modelVersion === 'string' && record.modelVersion.trim()) {
+      return record.modelVersion.trim();
+    }
+    if (record.response && typeof record.response === 'object') {
+      const inner = record.response as Record<string, unknown>;
+      if (typeof inner.model === 'string' && inner.model.trim()) {
+        return inner.model.trim();
+      }
+      if (typeof inner.modelVersion === 'string' && inner.modelVersion.trim()) {
+        return inner.modelVersion.trim();
+      }
     }
   }
-  return 'unknown';
+  throw new Error('Missing SSE model id');
 }
 
 function createChatCodec(): SseCodec {
@@ -107,7 +106,7 @@ function createChatCodec(): SseCodec {
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return chatConverters.sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
-        model: context.model ?? 'unknown',
+        model: resolveModelId(undefined, context.model),
         abortSignal: context.abortSignal,
         firstFrameTimeoutMs: context.firstFrameTimeoutMs,
         noContentTimeoutMs: context.noContentTimeoutMs,
@@ -135,7 +134,7 @@ function createResponsesCodec(): SseCodec {
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
       return responsesConverters.sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
-        model: context.model ?? 'unknown',
+        model: resolveModelId(undefined, context.model),
         abortSignal: context.abortSignal,
         firstFrameTimeoutMs: context.firstFrameTimeoutMs,
         noContentTimeoutMs: context.noContentTimeoutMs,
