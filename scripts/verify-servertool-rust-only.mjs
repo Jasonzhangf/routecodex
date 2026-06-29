@@ -3271,6 +3271,7 @@ function checkPreCommandHooksRustOwner() {
     'pub struct PreCommandHookAttemptPlan',
     'pub struct PreCommandHookCompletionInput',
     'pub struct PreCommandHookCompletionPlan',
+    'pub enum PreCommandHookCompletionAction',
     'pub fn plan_pre_command_hooks_config',
     'pub fn plan_runtime_pre_command_rule',
     'pub fn plan_runtime_pre_command_state_selection',
@@ -3362,6 +3363,31 @@ function checkPreCommandHooksRustOwner() {
     'planRuntimePreCommandStateRuntimeActionWithNative({'
   );
   const preCommandRuntimeShell = readRequired(`${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`);
+  const preCommandSpec = readRequired(`${ROOT}/tests/servertool/pre-command-hooks.spec.ts`);
+  assertContains(
+    'servertool-pre-command-hooks-fail-fast',
+    RUST_SERVERTOOL_PRE_COMMAND,
+    rustPreCommand,
+    'PreCommandHookCompletionAction::FailFast'
+  );
+  assertContains(
+    'servertool-pre-command-hooks-fail-fast',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    "record.action !== 'continue' && record.action !== 'fail_fast'"
+  );
+  assertContains(
+    'servertool-pre-command-hooks-fail-fast',
+    TS_PRE_COMMAND_HOOKS,
+    preCommandShell,
+    "completionPlan.action === 'fail_fast'"
+  );
+  assertContains(
+    'servertool-pre-command-hooks-fail-fast',
+    `${ROOT}/tests/servertool/pre-command-hooks.spec.ts`,
+    preCommandSpec,
+    'fails fast when jq expression is invalid'
+  );
   for (const keyword of [
     'loadRoutingInstructionStateSync',
     'resolveServertoolPersistentScopeKey',
@@ -3439,6 +3465,18 @@ function checkPreCommandHooksRustOwner() {
     fail(
       'servertool-pre-command-hooks-no-ts-owner',
       'pre-command-hooks.ts must not convert config load failures into disabled hooks'
+    );
+  }
+  const runPreCommandHooksBlock = extractFunctionBlock(preCommandShell, 'runPreCommandHooks');
+  if (
+    runPreCommandHooksBlock &&
+    runPreCommandHooksBlock.includes('catch (error)') &&
+    runPreCommandHooksBlock.includes('planPreCommandHookCompletionWithNative') &&
+    !runPreCommandHooksBlock.includes("completionPlan.action === 'fail_fast'")
+  ) {
+    fail(
+      'servertool-pre-command-hooks-fail-fast',
+      'pre-command-hooks.ts must not record hook execution errors and continue without consuming Rust completion action'
     );
   }
   pass(

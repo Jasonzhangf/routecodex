@@ -168,7 +168,15 @@ pub struct PreCommandHookCompletionInput {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreCommandHookCompletionPlan {
+    pub action: PreCommandHookCompletionAction,
     pub trace_event: PreCommandHookTraceEventPlan,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PreCommandHookCompletionAction {
+    Continue,
+    FailFast,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -360,10 +368,12 @@ pub fn plan_pre_command_hook_completion(
     );
     if let Some(message) = input.error_message.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         return PreCommandHookCompletionPlan {
+            action: PreCommandHookCompletionAction::FailFast,
             trace_event: pre_command_trace_event(trace_base, PreCommandHookTraceResult::Error, message),
         };
     }
     PreCommandHookCompletionPlan {
+        action: PreCommandHookCompletionAction::Continue,
         trace_event: pre_command_trace_event(
             trace_base,
             PreCommandHookTraceResult::Match,
@@ -665,8 +675,8 @@ mod tests {
         plan_pre_command_hooks_config, plan_runtime_pre_command_rule,
         plan_runtime_pre_command_state_runtime_action, plan_runtime_pre_command_state_selection,
         PreCommandHookAttemptAction, PreCommandHookAttemptInput, PreCommandHookCompletionInput,
-        PreCommandHookTraceResult, PreCommandHooksConfigPlanInput, RuntimePreCommandRulePlanInput,
-        RuntimePreCommandStateRuntimeAction, RuntimePreCommandStateRuntimeActionInput,
+        PreCommandHookCompletionAction, PreCommandHookTraceResult, PreCommandHooksConfigPlanInput,
+        RuntimePreCommandRulePlanInput, RuntimePreCommandStateRuntimeAction, RuntimePreCommandStateRuntimeActionInput,
         RuntimePreCommandStateSelectionAction, RuntimePreCommandStateSelectionInput,
         RuntimePreCommandStateSource,
     };
@@ -893,6 +903,7 @@ mod tests {
             changed: true,
             error_message: None,
         });
+        assert_eq!(completion.action, PreCommandHookCompletionAction::Continue);
         assert_eq!(completion.trace_event.result, PreCommandHookTraceResult::Match);
         assert_eq!(completion.trace_event.reason, "applied");
 
@@ -905,6 +916,7 @@ mod tests {
             changed: false,
             error_message: Some("jq_failed:1".to_string()),
         });
+        assert_eq!(error.action, PreCommandHookCompletionAction::FailFast);
         assert_eq!(error.trace_event.result, PreCommandHookTraceResult::Error);
         assert_eq!(error.trace_event.reason, "jq_failed:1");
     }

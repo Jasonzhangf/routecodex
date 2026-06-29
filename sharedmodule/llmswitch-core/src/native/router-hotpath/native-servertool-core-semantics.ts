@@ -198,6 +198,7 @@ export interface PreCommandHookAttemptPlan {
 }
 
 export interface PreCommandHookCompletionPlan {
+  action: 'continue' | 'fail_fast';
   traceEvent: AutoHookTraceEventPlan;
 }
 
@@ -3134,7 +3135,11 @@ function parsePreCommandHookCompletionPlan(value: unknown, capability: string): 
     throw new Error(`${capability} native returned invalid completion plan`);
   }
   const record = value as Record<string, unknown>;
+  if (record.action !== 'continue' && record.action !== 'fail_fast') {
+    throw new Error(`${capability} native returned invalid completion action`);
+  }
   return {
+    action: record.action,
     traceEvent: parseAutoHookTraceEventPlan(record.traceEvent, capability)
   };
 }

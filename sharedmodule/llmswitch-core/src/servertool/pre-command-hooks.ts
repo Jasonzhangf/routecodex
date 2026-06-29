@@ -202,17 +202,19 @@ export function runPreCommandHooks(options: PreCommandHookRunOptions): PreComman
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown_error');
-      traces.push(
-        planPreCommandHookCompletionWithNative({
-          hookId: execution.hookId,
-          priority: hook.priority,
-          queueIndex: index,
-          queueTotal: config.hooks.length,
-          matched: true,
-          changed: false,
-          errorMessage: message
-        }).traceEvent as ServerToolAutoHookTraceEvent
-      );
+      const completionPlan = planPreCommandHookCompletionWithNative({
+        hookId: execution.hookId,
+        priority: hook.priority,
+        queueIndex: index,
+        queueTotal: config.hooks.length,
+        matched: true,
+        changed: false,
+        errorMessage: message
+      });
+      traces.push(completionPlan.traceEvent as ServerToolAutoHookTraceEvent);
+      if (completionPlan.action === 'fail_fast') {
+        throw error;
+      }
     }
   }
 

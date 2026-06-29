@@ -251,7 +251,7 @@ describe('servertool pre-command hooks', () => {
     }
   });
 
-  test('keeps original command when jq expression is invalid', async () => {
+  test('fails fast when jq expression is invalid', async () => {
     const hookFile = path.join(HOOK_DIR, `pre-command-${Date.now()}-invalid.json`);
     fs.writeFileSync(
       hookFile,
@@ -274,7 +274,6 @@ describe('servertool pre-command hooks', () => {
     process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE = hookFile;
     resetPreCommandHooksCacheForTests();
 
-    const traces: ServerToolAutoHookTraceEvent[] = [];
     const adapterContext: AdapterContext = {
       requestId: 'req-pre-command-invalid',
       entryEndpoint: '/v1/responses',
@@ -282,25 +281,13 @@ describe('servertool pre-command hooks', () => {
     } as any;
     bindProviderProtocol(adapterContext as unknown as Record<string, unknown>, 'openai-responses');
 
-    const result = await runServerSideToolEngine({
-      chatResponse: buildToolCallResponse('echo still-original'),
+    await expect(runServerSideToolEngine({
+      chatResponse: buildToolCallResponse('echo should-fail'),
       adapterContext,
       entryEndpoint: '/v1/responses',
       requestId: 'req-pre-command-invalid',
-      providerProtocol: 'openai-responses',
-      onAutoHookTrace: (event) => traces.push(event)
-    });
-
-    const args = extractExecCommandArgs(result.finalChatResponse);
-    expect(args.cmd).toBe('echo still-original');
-    expect(
-      traces.some(
-        (event) =>
-          event.phase === 'pre_command' &&
-          event.hookId === 'invalid-jq' &&
-          event.result === 'error'
-      )
-    ).toBe(true);
+      providerProtocol: 'openai-responses'
+    })).rejects.toThrow(/jq_failed|jq_error/);
   });
 
   test('uses runtime precommand state from __rt and bypasses config fallback', async () => {
