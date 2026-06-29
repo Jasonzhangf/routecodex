@@ -938,16 +938,18 @@ export class ChatSseToJsonConverter {
     _context: SseToChatJsonContext
   ): Promise<void> {
     const rawPayload = typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? {});
-    let errorData: Record<string, unknown> | undefined;
-    try {
-      const parsed = event.parsedData !== undefined
-        ? event.parsedData
-        : JSON.parse(rawPayload);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        errorData = parsed as Record<string, unknown>;
-      }
-    } catch {
-      // keep raw payload only
+    const parsed = event.parsedData !== undefined
+      ? event.parsedData
+      : JSON.parse(rawPayload);
+    const errorData = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+    if (!errorData && event.parsedData !== undefined) {
+      throw ErrorUtils.createError(
+        'Invalid SSE error payload',
+        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
+        { event, rawPayload }
+      );
     }
 
     const errorMessage = errorData

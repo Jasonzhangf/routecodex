@@ -169,6 +169,7 @@ for (const relPath of providerNeutralProjectionFiles) {
     'return salvaged',
     'Ignore non-JSON lines so valid partial frames can still be recovered.',
     '忽略解析错误',
+    'keep raw payload only',
     'const fallback = { input_tokens: 0, output_tokens: 0, total_tokens: 0 }',
     "args = '{}'",
     "fallback = 'model'",

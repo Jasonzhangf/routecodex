@@ -6,7 +6,7 @@
 # 2026-06-29 chat SSE no-salvage boundary slice
 
 - 目标：删掉 `chat-sse-to-json-converter.ts` 里对同一 SSE chunk 多行 payload 的 partial salvage，改为坏 payload 直接失败。
-- 改动：`parseChatChunkPayload()` 只保留单次 `JSON.parse`；`processDoneEvent()` 不再吞 `chat.done` 解析错误；`verify-sse-architecture-boundary.mjs` 增加旧 salvage / 忽略解析错误注释 gate；新增 `tests/sharedmodule/chat-sse-no-salvage.spec.ts` 反向锁死 mixed-line payload 和 malformed done payload 都不得被恢复成成功响应。
+- 改动：`parseChatChunkPayload()` 只保留单次 `JSON.parse`；`processDoneEvent()` 不再吞 `chat.done` 解析错误；`processErrorEvent()` 不再保留 raw payload only；`verify-sse-architecture-boundary.mjs` 增加旧 salvage / 忽略解析错误 / keep raw payload only 注释 gate；新增 `tests/sharedmodule/chat-sse-no-salvage.spec.ts` 反向锁死 mixed-line payload、malformed done payload、malformed error payload 都不得被恢复成成功响应。
 - 已验证：`npm run jest:run -- --runTestsByPath tests/sharedmodule/chat-sse-no-salvage.spec.ts --runInBand` PASS；`npm run verify:sse-architecture-boundary` PASS；`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS；`git diff --check -- sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts scripts/architecture/verify-sse-architecture-boundary.mjs tests/sharedmodule/chat-sse-no-salvage.spec.ts` PASS。
 - 剩余：继续扫描 SSE 里其他仍在吞错/救活的最小切片，按已固定的 closeout 顺序继续收口。
 

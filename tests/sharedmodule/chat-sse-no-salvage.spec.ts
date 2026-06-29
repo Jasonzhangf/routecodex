@@ -40,4 +40,20 @@ describe('chat SSE no-salvage boundary', () => {
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
+
+  it('fails fast on malformed chat.error payloads instead of keeping raw payload only', async () => {
+    const sseText = [
+      'event: error',
+      'data: {"type":"error","message":',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_error_parse_error',
+      model: 'gpt-4o-mini'
+    })).rejects.toMatchObject({
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
 });
