@@ -230,6 +230,32 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts',
+    forbidden: [
+      'primaryAutoHookIds.length',
+      'engineResult.mode',
+      '!engineResult.execution',
+      "mode === 'passthrough'",
+      'function toEngineOverrides(',
+      'primaryAutoHookAttempt:',
+      'disableToolCallHandlers: true',
+      'includeAutoHookIds: primaryAutoHookIds',
+      'excludeAutoHookIds: primaryAutoHookIds',
+      'typeof startPlan.overrides.disableToolCallHandlers',
+      'Array.isArray(startPlan.overrides.includeAutoHookIds)',
+      'Array.isArray(startPlan.overrides.excludeAutoHookIds)',
+      'typeof overrides.disableToolCallHandlers',
+      'Array.isArray(overrides.includeAutoHookIds)',
+      'Array.isArray(overrides.excludeAutoHookIds)',
+    ],
+    required: [
+      'planEngineSelectionStartWithNative',
+      'planEngineSelectionAfterRunWithNative',
+      'const engineResult = await args.runEngine(startPlan.overrides);',
+      'return await args.runEngine(afterRunPlan.overrides ?? {});',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts',
     forbidden: [
       "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",

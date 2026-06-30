@@ -3780,6 +3780,12 @@ function checkEngineSelectionRustOwner() {
     'disableToolCallHandlers: true',
     'includeAutoHookIds: primaryAutoHookIds',
     'excludeAutoHookIds: primaryAutoHookIds',
+    'typeof startPlan.overrides.disableToolCallHandlers',
+    'Array.isArray(startPlan.overrides.includeAutoHookIds)',
+    'Array.isArray(startPlan.overrides.excludeAutoHookIds)',
+    'typeof overrides.disableToolCallHandlers',
+    'Array.isArray(overrides.includeAutoHookIds)',
+    'Array.isArray(overrides.excludeAutoHookIds)',
   ]) {
     if (engineSelectionShell.includes(keyword)) {
       fail(

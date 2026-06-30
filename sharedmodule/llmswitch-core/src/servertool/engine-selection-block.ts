@@ -18,34 +18,13 @@ export async function runPrimaryServerToolEngineSelection(args: {
       optionalPrimaryOrder: string[];
     }).optionalPrimaryOrder
   });
-  const engineResult = await args.runEngine({
-    ...(typeof startPlan.overrides.disableToolCallHandlers === 'boolean'
-      ? { disableToolCallHandlers: startPlan.overrides.disableToolCallHandlers }
-      : {}),
-    ...(Array.isArray(startPlan.overrides.includeAutoHookIds)
-      ? { includeAutoHookIds: startPlan.overrides.includeAutoHookIds }
-      : {}),
-    ...(Array.isArray(startPlan.overrides.excludeAutoHookIds)
-      ? { excludeAutoHookIds: startPlan.overrides.excludeAutoHookIds }
-      : {})
-  });
+  const engineResult = await args.runEngine(startPlan.overrides);
   const afterRunPlan = planEngineSelectionAfterRunWithNative({
     primaryAutoHookIds: startPlan.primaryAutoHookIds,
     engineResult
   });
   if (afterRunPlan.action === 'rerun_excluding_primary_hooks') {
-    const overrides = afterRunPlan.overrides ?? {};
-    return await args.runEngine({
-      ...(typeof overrides.disableToolCallHandlers === 'boolean'
-        ? { disableToolCallHandlers: overrides.disableToolCallHandlers }
-        : {}),
-      ...(Array.isArray(overrides.includeAutoHookIds)
-        ? { includeAutoHookIds: overrides.includeAutoHookIds }
-        : {}),
-      ...(Array.isArray(overrides.excludeAutoHookIds)
-        ? { excludeAutoHookIds: overrides.excludeAutoHookIds }
-        : {})
-    });
+    return await args.runEngine(afterRunPlan.overrides ?? {});
   }
   return engineResult;
 }
