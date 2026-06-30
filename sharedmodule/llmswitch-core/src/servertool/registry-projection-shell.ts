@@ -4,7 +4,7 @@ import type {
 } from './registry-types.js';
 import type {
   ServerToolRegisteredHandlerRecord
-} from './skeleton-config.js';
+} from '../native/router-hotpath/native-followup-mainline-semantics.js';
 import {
   planServertoolRegistryAutoHookDescriptorsWithNative,
   planServertoolRegistrySourceProjectionWithNative

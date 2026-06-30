@@ -746,9 +746,8 @@ let listRegisteredServerToolHandlerRecords: any;
 let buildAutoHookQueuesFromConfig: any;
 
 beforeAll(async () => {
-  const skeletonConfig = await import('../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js');
   const nativeServertoolOrchestration = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js');
-  buildServertoolAutoHookQueueConfig = skeletonConfig.buildServertoolAutoHookQueueConfig;
+  buildServertoolAutoHookQueueConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().autoHookQueueConfig;
   buildServertoolFollowupConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().followupConfig;
   buildServertoolPendingInjectionConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().pendingInjectionConfig;
   normalizeServerToolRegistrationSpec = (name: string, options: Record<string, unknown>) =>

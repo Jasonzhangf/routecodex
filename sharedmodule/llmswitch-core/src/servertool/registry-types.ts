@@ -1,4 +1,4 @@
-import type { ServerToolHandlerRegistrationSpec } from './skeleton-config.js';
+import type { ServerToolHandlerRegistrationSpec } from '../native/router-hotpath/native-followup-mainline-semantics.js';
 
 type TriggerMode = 'tool_call' | 'auto';
 type AutoHookPhase = 'pre' | 'default' | 'post';

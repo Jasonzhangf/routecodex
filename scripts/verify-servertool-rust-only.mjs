@@ -2976,7 +2976,6 @@ function checkFollowupMainlineNativeBridgeRustOwner() {
 // ── Check 14: skeleton config has Rust owner ──────────────────
 function checkServertoolSkeletonConfigRustOwner() {
   const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
-  const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
   const nativeWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
 
@@ -3016,50 +3015,12 @@ function checkServertoolSkeletonConfigRustOwner() {
       needle
     );
   }
-  for (const keyword of [
-    'function normalizeServerToolName',
-    'function normalizeAutoHookPhase',
-    'function normalizeInteger',
-    'Number.isFinite',
-    'Math.floor',
-    "key === 'websearch'",
-    "key === 'web-search'",
-    "trigger === 'auto' ? 'auto_hook' : 'guarded'",
-    'profile.noFollowup === true',
-    'profile.autoLimit === true',
-    'profile.contextDecorationMode ===',
-    'Object.fromEntries(',
-    'isServertoolEnabledByConfig',
-    'getServertoolToolSpec(name)?.enabled',
-    'export function getDefaultServertoolSkeletonDocument(',
-    'export function getServertoolToolSpec(',
-    'export function listServertoolToolSpecs(',
-    'export function planServertoolBuiltinHandlerEntry(',
-    'export function normalizeServerToolRegistrationSpec(',
-    'export function buildServertoolPendingInjectionConfig(',
-    'export function buildServertoolResponseHookGateConfig(',
-    'export function buildServertoolFollowupConfig(',
-    'export function buildServertoolStateConfig(',
-    'getDerivedConfig().toolSpecList',
-  ]) {
-    if (skeletonConfigShell.includes(keyword)) {
-      fail(
-        'servertool-skeleton-config-no-ts-owner',
-        `Forbidden TS skeleton semantic "${keyword}" found in skeleton-config.ts`
-      );
-    }
-  }
-  for (const needle of [
-    'planServertoolSkeletonDerivedConfigWithNative',
-  ]) {
-    assertContains(
-      'servertool-skeleton-config-ts-thin-shell',
-      TS_SERVERTOOL_SKELETON_CONFIG,
-      skeletonConfigShell,
-      needle
-    );
-  }
-  pass('servertool-skeleton-config-no-ts-owner', 'skeleton-config.ts is native-only shell for derived config and registration semantics');
+  assertMissingFile(
+    'servertool-skeleton-config-deleted',
+    TS_SERVERTOOL_SKELETON_CONFIG,
+    'skeleton-config.ts must stay physically deleted; runtime consumers call native wrappers directly'
+  );
+  pass('servertool-skeleton-config-no-ts-owner', 'skeleton-config.ts is physically deleted; Rust/native wrappers own skeleton config semantics');
 }
 
 function checkServertoolHookSkeletonRustOwner() {
@@ -3405,7 +3366,6 @@ function checkServertoolRegistryRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
   const skeletonConfigRust = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
   for (const file of DELETED_SERVERTOOL_REGISTRY_FACADE_FILES) {
     assertMissingFile(
@@ -3496,7 +3456,6 @@ function checkServertoolRegistryRustOwner() {
       requiredExports.includes(marker) ||
       napiBlocks.includes(marker) ||
       napiLib.includes(marker) ||
-      skeletonConfigShell.includes(marker) ||
       skeletonConfigRust.includes(marker)
     ) {
       fail(
@@ -3861,7 +3820,6 @@ function checkEngineSelectionRustOwner() {
 
 function checkServertoolFlowPresentationRustOwner() {
   const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
-  const skeletonConfigShell = readRequired(TS_SERVERTOOL_SKELETON_CONFIG);
   const progressLogShell = readRequired(`${SERVERTOOL_TS_DIR}/progress-log-block.ts`);
   const nativeWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
@@ -3944,10 +3902,10 @@ function checkServertoolFlowPresentationRustOwner() {
     'event.reason.trim().toLowerCase().replace',
     'compareContext.reason.toLowerCase().replace',
   ]) {
-    if (skeletonConfigShell.includes(keyword) || progressLogShell.includes(keyword)) {
+    if (progressLogShell.includes(keyword)) {
       fail(
         'servertool-flow-presentation-no-skeleton-ts-owner',
-        `Forbidden TS progress presentation semantic "${keyword}" found in skeleton/progress shell`
+        `Forbidden TS progress presentation semantic "${keyword}" found in progress shell`
       );
     }
   }
@@ -3957,7 +3915,7 @@ function checkServertoolFlowPresentationRustOwner() {
   );
   pass(
     'servertool-flow-presentation-no-skeleton-ts-owner',
-    'skeleton-config.ts has no progress presentation projection shell'
+    'skeleton-config.ts is deleted and progress-log-block.ts has no progress presentation projection owner'
   );
 }
 

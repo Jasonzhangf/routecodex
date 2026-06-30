@@ -1,5 +1,5 @@
 import type { ServerSideToolEngineOptions, ServerSideToolEngineResult } from './types.js';
-import { buildServertoolAutoHookQueueConfig } from './skeleton-config.js';
+import { planServertoolSkeletonDerivedConfigWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   planEngineSelectionAfterRunWithNative,
   planEngineSelectionStartWithNative,
@@ -14,7 +14,9 @@ export async function runPrimaryServerToolEngineSelection(args: {
   runEngine: ServerToolEngineRunner;
 }): Promise<ServerSideToolEngineResult> {
   const startPlan = planEngineSelectionStartWithNative({
-    primaryAutoHookIds: buildServertoolAutoHookQueueConfig().optionalPrimaryOrder
+    primaryAutoHookIds: (planServertoolSkeletonDerivedConfigWithNative().autoHookQueueConfig as {
+      optionalPrimaryOrder: string[];
+    }).optionalPrimaryOrder
   });
   const engineResult = await args.runEngine({
     ...(typeof startPlan.overrides.disableToolCallHandlers === 'boolean'

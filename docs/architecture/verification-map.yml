@@ -424,7 +424,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
       - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
       - sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts
-      - sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -435,7 +434,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Rust owns progress flow id normalization, tool-name lookup, and gold highlight policy; TS is a native wrapper only."
+      - "Rust owns progress flow id normalization, tool-name lookup, and gold highlight policy; deleted TS skeleton-config must not return."
 
   - feature_id: hub.servertool_loop_warning
     change_risk: high

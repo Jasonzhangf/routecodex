@@ -1,11 +1,6 @@
 import { describe, expect, jest, test } from '@jest/globals';
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js',
-  () => ({})
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
     resolveServertoolRegisteredNameWithNative: jest.fn((input: { name: string }) => input.name === 'reasoningStop'),

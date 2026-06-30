@@ -1,6 +1,6 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { buildServertoolAutoHookQueueConfig } from './skeleton-config.js';
 import {
+  planServertoolSkeletonDerivedConfigWithNative,
   planServertoolAutoHookQueuesWithNative,
   runServertoolOrchestrationMutationWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
@@ -47,7 +47,10 @@ export function buildAutoHookQueuesFromConfig<THook extends {
   optionalQueue: THook[];
   mandatoryQueue: THook[];
 } {
-  const queueConfig = buildServertoolAutoHookQueueConfig();
+  const queueConfig = planServertoolSkeletonDerivedConfigWithNative().autoHookQueueConfig as {
+    optionalPrimaryOrder: string[];
+    mandatoryOrder: string[];
+  };
   const nativePlan = planServertoolAutoHookQueuesWithNative({
     hooks: args.hooks.map((hook, sourceIndex) => ({
       id: hook.id,

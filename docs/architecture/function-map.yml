@@ -725,7 +725,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts
       - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
       - sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts
       - tests/servertool/servertool-progress-logging.spec.ts
@@ -744,7 +743,7 @@ owners:
     notes:
       - "Rust skeleton config owns flow id normalization, progress tool-name resolution, and gold highlight decisions."
       - "progress-log-block.ts may only call native flow presentation wrappers."
-      - "TS skeleton-config must not expose progress presentation projection helpers."
+      - "TS skeleton-config is physically deleted; progress presentation must stay in Rust/native wrappers."
       - "Do not restore local `normalizeFlowId`, `buildServertoolProgressConfig`, `toolNameByFlowId`, `goldHighlightFlowIds`, or Set-based highlight policy in TS."
 
   - feature_id: hub.servertool_loop_warning

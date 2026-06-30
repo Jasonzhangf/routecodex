@@ -1,6 +1,6 @@
 import {
   type ServerToolRegisteredHandlerRecord
-} from './skeleton-config.js';
+} from '../native/router-hotpath/native-followup-mainline-semantics.js';
 import {
   listBuiltinAutoHandlerEntries,
   listBuiltinHandlerRecordEntries,
