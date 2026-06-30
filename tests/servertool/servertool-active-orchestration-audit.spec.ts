@@ -222,6 +222,8 @@ const TARGETS = [
       'runServertoolResponseStageWithNative',
       'const responseStage =',
       'readFollowupClientInjectSourceWithNative',
+      'writeRuntimeControlToBoundMetadataCenter(',
+      'servertoolResponseOrchestration',
     ],
     required: [
       'planServertoolResponseStageGateWithNative',

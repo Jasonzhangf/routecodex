@@ -8,10 +8,7 @@ import {
   planServertoolResponseStageGateWithNative,
   detectProviderResponseShapeWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import {
-  readRuntimeControlFromBoundMetadataCenter,
-  writeRuntimeControlToBoundMetadataCenter
-} from './metadata-center-carrier.js';
+import { readRuntimeControlFromBoundMetadataCenter } from './metadata-center-carrier.js';
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 type ChatCompletionLike = JsonObject;
@@ -44,19 +41,6 @@ export async function runServertoolResponseStageOrchestrationShell(
       : undefined;
   if (!providerProtocol) {
     throw new Error('Servertool response stage orchestration requires metadata center runtime_control.providerProtocol');
-  }
-  if (runtimeControl?.servertoolResponseOrchestration === true) {
-    writeRuntimeControlToBoundMetadataCenter({
-      metadata: options.adapterContext as Record<string, unknown>,
-      key: 'servertoolResponseOrchestration',
-      value: true,
-      writer: {
-        module: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
-        symbol: 'runServertoolResponseStageOrchestrationShell',
-        stage: 'HubRespChatProcess03Governed'
-      },
-      reason: 'response-stage orchestration marker'
-    });
   }
   const responseStageGateInput = {
     payload: options.payload,

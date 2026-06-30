@@ -5458,6 +5458,8 @@ function checkResponseStageMetadataCenterOnly() {
     'record.runtime_control = {',
     'projectRuntimeControlSideChannel(options.adapterContext, runtimeControl);',
     'projectRuntimeControlSideChannel(',
+    'writeRuntimeControlToBoundMetadataCenter(',
+    'servertoolResponseOrchestration',
   ]) {
     if (responseStageShell.includes(marker)) {
       fail(
@@ -5468,8 +5470,6 @@ function checkResponseStageMetadataCenterOnly() {
   }
   for (const marker of [
     'readRuntimeControlFromBoundMetadataCenter(',
-    'writeRuntimeControlToBoundMetadataCenter(',
-    'servertoolResponseOrchestration',
   ]) {
     if (!responseStageShell.includes(marker)) {
       fail(
