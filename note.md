@@ -1,3 +1,11 @@
+# 2026-06-30: Responses SSE response payload native owner slice
+
+- SSE Rust 化继续收口 `sse.responses_encode_projection`：`responses.ts` 删除本地 `createResponsePayload` / `normalizeUsage` helper，`response.created/in_progress/completed/done/required_action` 的 response payload materialize 改走 Rust `normalizeResponsesSseResponsePayloadJson`。
+- Rust owner 位于 `responses_sse_event_payload.rs`：strict Responses usage 只接受 `input_tokens/output_tokens/total_tokens` 和 `input_tokens_details.cached_tokens`；legacy `prompt_tokens/completion_tokens` alias 仍 fail-fast，不恢复 fallback。
+- Wrapper `normalizeResponsesSseResponsePayloadWithNative` 对缺 native fail-fast，对 Rust 业务错误透传原始 message，避免把 usage/created_at contract error 污染成 native-unavailable。
+- 验证：Rust focused `responses_sse_event_payload` 6/6 PASS；native build PASS；focused Jest `responses-json-to-sse-usage + responses-sse-usage-no-fallback + responses-event-serializer-no-salvage + responses-sse-reasoning-summary-no-normalize` 15/15 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`，usage 保持 canonical。
+
 # 2026-06-30: Responses SSE canonical payload moved to Rust
 - `responses-sequencer.ts` 不再本地补 `data.type` / `sequence_number`；新增 native wrapper `canonicalizeResponsesSseEventPayloadWithNative()`，Rust owner 是 `responses_sse_event_payload.rs`。
 - Rust `canonicalize_responses_sse_event_payload` 负责 canonical payload materialize：缺 `data.type` 时补 event type，`sequenceNumber` 转 `sequence_number`；scalar payload 和 payload type mismatch fail-fast。

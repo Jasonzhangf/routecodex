@@ -109,6 +109,8 @@ for (const forbidden of [
 
 const responsesEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts');
 for (const forbidden of [
+  'function createResponsePayload(',
+  'function normalizeUsage(',
   'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',
   'response.created_at ?? Math.floor(Date.now() / 1000)',
   'prompt_tokens',

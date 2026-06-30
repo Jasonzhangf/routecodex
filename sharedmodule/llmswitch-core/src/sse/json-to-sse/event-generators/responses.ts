@@ -16,6 +16,7 @@ import type {
   ResponsesFunctionCallOutputItem
 } from '../../types/index.js';
 import { TimeUtils, StringUtils } from '../../shared/utils.js';
+import { normalizeResponsesSseResponsePayloadWithNative } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 const TEXT_CHUNK_BOUNDARY = /[\n\r\t，。、“”‘’！？,.\-:\u3000\s]/;
 
@@ -70,117 +71,11 @@ function normalizeReasoningSummaryField(summary: ResponsesReasoningItem['summary
   }));
 }
 
-function createResponsePayload(
+function buildResponsePayload(
   response: ResponsesResponse,
-  overrides: Record<string, unknown> = {}
+  status: string
 ): Record<string, unknown> {
-  const raw = response as Record<string, any>;
-  if (typeof response.created_at !== 'number' || !Number.isFinite(response.created_at) || response.created_at <= 0) {
-    throw new Error('Invalid Responses response: missing created_at');
-  }
-  const usage = normalizeUsage(response.usage);
-  const payload: Record<string, unknown> = {
-    id: response.id,
-    object: response.object ?? 'response',
-    created_at: response.created_at,
-    status: response.status ?? 'in_progress',
-    model: response.model,
-    output: response.output ?? [],
-    usage,
-    temperature: response.temperature,
-    top_p: response.top_p,
-    max_output_tokens: response.max_output_tokens,
-    user: response.user,
-    store: response.store,
-    truncation: response.truncation,
-    include: response.include,
-    parallel_tool_calls: response.parallel_tool_calls,
-    previous_response_id: response.previous_response_id
-  };
-
-  payload.background = raw.background ?? false;
-  payload.error = Object.prototype.hasOwnProperty.call(raw, 'error') ? raw.error : null;
-  payload.incomplete_details = Object.prototype.hasOwnProperty.call(raw, 'incomplete_details') ? raw.incomplete_details : null;
-
-  if (Object.prototype.hasOwnProperty.call(raw, 'instructions')) {
-    payload.instructions = raw.instructions;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(raw, 'include')) {
-    payload.include = raw.include;
-  }
-
-  Object.entries(overrides).forEach(([key, value]) => {
-    if (value === undefined) {
-      delete payload[key];
-    } else {
-      payload[key] = value;
-    }
-  });
-
-  Object.keys(payload).forEach(key => {
-    if (payload[key] === undefined) {
-      delete payload[key];
-    }
-  });
-
-  return payload;
-}
-
-function normalizeUsage(usage: any): {
-  input_tokens: number;
-  output_tokens: number;
-  total_tokens: number;
-  input_tokens_details?: { cached_tokens?: number };
-} | undefined {
-  if (!usage || typeof usage !== 'object') {
-    return undefined;
-  }
-
-  const asAny = usage as Record<string, unknown>;
-  const readRequiredToken = (field: 'input_tokens' | 'output_tokens' | 'total_tokens'): number | undefined => {
-    if (!Object.prototype.hasOwnProperty.call(asAny, field)) {
-      return undefined;
-    }
-    const raw = Number(asAny[field] as number);
-    if (!Number.isFinite(raw) || raw < 0) {
-      throw new Error(`Invalid Responses usage.${field}`);
-    }
-    return Math.round(raw);
-  };
-
-  const input = readRequiredToken('input_tokens');
-  const output = readRequiredToken('output_tokens');
-  const total = readRequiredToken('total_tokens');
-  if (input === undefined || output === undefined || total === undefined) {
-    throw new Error('Invalid Responses usage: missing token fields');
-  }
-
-  let cachedRaw = Number.NaN;
-  if (asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object') {
-    const details = asAny.input_tokens_details as Record<string, unknown>;
-    cachedRaw = Number(details.cached_tokens as number);
-  }
-  if (asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object' && (!Number.isFinite(cachedRaw) || cachedRaw < 0)) {
-    throw new Error('Invalid Responses usage cached_tokens');
-  }
-
-  const normalized: {
-    input_tokens: number;
-    output_tokens: number;
-    total_tokens: number;
-    input_tokens_details?: { cached_tokens?: number };
-  } = {
-    input_tokens: input ?? 0,
-    output_tokens: output ?? 0,
-    total_tokens: total
-  };
-
-  if (Number.isFinite(cachedRaw)) {
-    normalized.input_tokens_details = { cached_tokens: Math.round(cachedRaw) };
-  }
-
-  return normalized;
+  return normalizeResponsesSseResponsePayloadWithNative(response, status);
 }
 
 // 生成器配置
@@ -264,7 +159,7 @@ export function* buildResponseStartEvents(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
-  const basePayload = createResponsePayload(response, { status: 'in_progress' });
+  const basePayload = buildResponsePayload(response, 'in_progress');
   if (Object.prototype.hasOwnProperty.call(basePayload, 'output')) {
     basePayload.output = [];
   }
@@ -833,7 +728,7 @@ export function buildRequiredActionEvent(
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
     data: {
-      response: createResponsePayload(response, { status: response.status ?? 'requires_action' }),
+      response: buildResponsePayload(response, response.status ?? 'requires_action'),
       required_action: requiredAction
     },
     sequenceNumber: baseEvent.sequenceNumber
@@ -857,7 +752,7 @@ export function buildResponseCompletedEvent(
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
     data: {
-      response: createResponsePayload(response, { status: response.status ?? 'completed' })
+      response: buildResponsePayload(response, response.status ?? 'completed')
     },
     sequenceNumber: baseEvent.sequenceNumber
   };
@@ -879,7 +774,7 @@ export function buildResponseDoneEvent(
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
     data: {
-      response: createResponsePayload(response, { status: response.status ?? 'completed' })
+      response: buildResponsePayload(response, response.status ?? 'completed')
     },
     sequenceNumber: baseEvent.sequenceNumber
   };

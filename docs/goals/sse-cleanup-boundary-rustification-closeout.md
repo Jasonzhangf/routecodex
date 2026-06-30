@@ -165,6 +165,24 @@ Focused tests to use as slice gates:
 - Verification: focused Jest `responses-json-to-sse-context-no-dead-state + responses-json-to-sse-usage` PASS 4/4; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
 - Replay: real 4444 Responses sample replay succeeded with `reasoning_items=1`, `has_completed=true`, `has_done=true`, `has_error=false`, and canonical usage preserved.
 
+### 2026-06-30 Responses event serializer canonical-payload slice
+
+- Red evidence: `responses-event-serializer.ts` still wildcard-serialized any `response.*` event and auto-built semantic payloads by adding missing `type`, wrapping scalar data as `{ value }`, and adding `sequence_number` from the event envelope.
+- Fix: serializer now only accepts an explicit allowlist of Responses event types and only serializes object payloads whose `data.type` already matches the event type. Canonical payload materialization moved one step upstream to the Responses sequencer boundary so the serializer is pure wire formatting plus validation.
+- Positive tests: focused JSON->SSE tests still produce `response.completed` / `response.done` for normal Responses payloads, and real 4444 sample replay re-encodes without missing `type`.
+- Reverse tests/gates: `responses-event-serializer-no-salvage.spec.ts` proves missing payload type, scalar data, and unknown `response.*` event types fail-fast; `verify:sse-architecture-boundary` forbids wildcard `.type.startsWith('response.')`, `buildEventPayload`, payload type injection, scalar wrapping, and serializer-owned `sequence_number`.
+- Verification: focused Jest `responses-event-serializer-no-salvage + responses-json-to-sse-usage + responses-json-to-sse-context-no-dead-state + responses-sse-reasoning-summary-no-normalize` PASS 13/13; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Replay: real sample `/Volumes/extension/.rcc/codex-samples/openai-responses/ports/4444/req_1782794868950_3m64se1xv/provider-response_1.json` materializes then re-encodes with `completed=true`, `done=true`, `error=false`, `missingType=false`, output count `2`, and canonical usage preserved.
+
+### 2026-06-30 Responses SSE canonical payload moved to Rust
+
+- Red evidence: after the serializer slice, `responses-sequencer.ts` still locally canonicalized payload semantics by inserting `data.type` and `sequence_number` before the writer.
+- Fix: added Rust owner `responses_sse_event_payload::canonicalize_responses_sse_event_payload_json` plus NAPI export `canonicalizeResponsesSseEventPayloadJson`; TS sequencer now only calls `canonicalizeResponsesSseEventPayloadWithNative`.
+- Positive tests: focused JSON->SSE tests still produce terminal `response.completed` / `response.done`; native unit test proves missing payload `type` and `sequenceNumber` are canonicalized by Rust.
+- Reverse tests/gates: Rust rejects scalar payload and payload type mismatch; `verify:sse-architecture-boundary` forbids local TS canonicalization markers in `responses-sequencer.ts`.
+- Verification: Rust focused `responses_sse_event_payload` PASS 3/3; native hotpath build PASS; focused Jest 13/13 PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Replay: real 4444 sample `req_1782794868950_3m64se1xv` materializes then re-encodes with `completed=true`, `done=true`, `error=false`, `missingType=false`, `missingSequence=false`, output count `2`, and canonical usage preserved.
+
 ### 2026-06-30 Chat JSON->SSE usage alias fallback removed
 
 - Red evidence: `chat.ts::normalizeChatUsage` accepted Responses-style `input_tokens` / `output_tokens`, camelCase `promptTokens` / `completionTokens` / `inputTokens` / `outputTokens` / `totalTokens`, and computed missing `total_tokens`, making the TS chat SSE generator a second usage-normalization owner.
@@ -173,3 +191,12 @@ Focused tests to use as slice gates:
 - Reverse tests/gates: `chat-sse-usage-no-fallback.spec.ts` rejects Responses-style alias input and missing `total_tokens`; `verify:sse-architecture-boundary` now forbids alias markers and total-token synthesis in `event-generators/chat.ts`.
 - Verification: focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip` PASS 16/16; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
 - Replay: real chat sample `~/.rcc/codex-samples/openai-chat/ports/10000/req_1782778465399_hrxbpl3tz/provider-response_1.json` first materializes through `ChatSseToJsonConverter`, then re-encodes through `ChatJsonToSseConverterRefactored` with `has_done=true`, `has_error=false`, usage preserved as canonical `{"completion_tokens":38,"prompt_tokens":262815,"total_tokens":262846}`.
+
+### 2026-06-30 Responses SSE response payload native owner slice
+
+- Red evidence: `responses.ts` still owned `createResponsePayload` and local `normalizeUsage`, so Responses JSON->SSE terminal events kept a second TS payload/usage materialization path after serializer/sequencer canonicalization had moved out.
+- Fix: added Rust owner `responses_sse_event_payload::normalize_responses_sse_response_payload_json` plus NAPI export `normalizeResponsesSseResponsePayloadJson`; `responses.ts` now calls `normalizeResponsesSseResponsePayloadWithNative()` and no longer contains local `createResponsePayload` / `normalizeUsage`.
+- Positive tests: canonical Responses usage still projects into `response.completed`; missing usage remains omitted instead of synthetic zero-token usage.
+- Reverse tests/gates: Rust rejects missing `created_at` and legacy `prompt_tokens` / `completion_tokens` usage aliases; `verify:sse-architecture-boundary` now forbids `function createResponsePayload(` and `function normalizeUsage(` in the Responses generator.
+- Verification: Rust focused `responses_sse_event_payload` PASS 6/6; native hotpath build PASS; focused Jest `responses-json-to-sse-usage + responses-sse-usage-no-fallback + responses-event-serializer-no-salvage + responses-sse-reasoning-summary-no-normalize` PASS 15/15; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Replay: real 4444 sample `/Volumes/extension/.rcc/codex-samples/openai-responses/ports/4444/req_1782794868950_3m64se1xv/provider-response_1.json` materializes then re-encodes with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, output count `2`, and canonical usage preserved.

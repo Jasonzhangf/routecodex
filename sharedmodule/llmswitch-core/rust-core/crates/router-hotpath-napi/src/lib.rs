@@ -71,8 +71,8 @@ mod resp_process_stage1_tool_governance;
 mod resp_process_stage1_tool_governance_blocks;
 mod resp_process_stage2_finalize;
 mod responses_openai_codec;
-mod responses_sse_event_payload;
 mod responses_reasoning_registry;
+mod responses_sse_event_payload;
 mod server_contracts;
 mod servertool_core_blocks;
 mod servertool_followup_delta;
@@ -1919,6 +1919,18 @@ pub fn normalizeChatResponseReasoningToolsJson(
 pub fn canonicalize_responses_sse_event_payload_json(event_json: String) -> NapiResult<String> {
     responses_sse_event_payload::canonicalize_responses_sse_event_payload_json(event_json)
         .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "normalizeResponsesSseResponsePayloadJson")]
+pub fn normalize_responses_sse_response_payload_json(
+    response_json: String,
+    status_json: Option<String>,
+) -> NapiResult<String> {
+    responses_sse_event_payload::normalize_responses_sse_response_payload_json(
+        response_json,
+        status_json,
+    )
+    .map_err(napi::Error::from_reason)
 }
 
 #[napi(js_name = "hasRequestedToolsInSemanticsJson")]
