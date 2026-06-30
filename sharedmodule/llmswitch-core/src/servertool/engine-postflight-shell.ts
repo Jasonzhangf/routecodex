@@ -92,23 +92,20 @@ export async function runServertoolEnginePostflight(args: {
     });
     args.stageRecorder.record('servertool.execution', summary);
   }
+  const engineFinalResult = {
+    chat: engineResult.finalChatResponse,
+    executed: true,
+    flowId: engineResult.execution?.flowId
+  } as const;
 
   if (runtimeAction.action === 'return_servertool_cli_projection_final') {
     args.logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution?.flowId
-    };
+    return engineFinalResult;
   }
 
   if (runtimeAction.action === 'return_stop_message_terminal_final') {
     args.logProgress(5, totalSteps, 'completed (stop_message terminal)', { flowId });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution?.flowId
-    };
+    return engineFinalResult;
   }
 
   if (runtimeAction.action === 'build_stop_message_cli_projection') {

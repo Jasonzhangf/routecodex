@@ -6074,6 +6074,8 @@ function checkServertoolPostflightLoggingFailFast() {
   for (const marker of [
     'buildServertoolPostflightObservationSummaryWithNative({',
     "args.stageRecorder.record('servertool.execution', summary);",
+    'const engineFinalResult = {',
+    'return engineFinalResult;',
   ]) {
     if (!postflightSource.includes(marker)) {
       fail(

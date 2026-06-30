@@ -291,6 +291,8 @@ const TARGETS = [
     required: [
       'buildServertoolPostflightObservationSummaryWithNative({',
       "args.stageRecorder.record('servertool.execution', summary);",
+      'const engineFinalResult = {',
+      'return engineFinalResult;',
     ],
   },
   {
