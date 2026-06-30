@@ -1279,8 +1279,14 @@ mod tests {
         .unwrap();
         let messages = output["messages"].as_array().unwrap();
         assert_eq!(messages[1]["role"], serde_json::json!("assistant"));
-        assert_eq!(messages[1]["content"][0]["type"], serde_json::json!("tool_use"));
-        assert_eq!(messages[1]["content"][0]["id"], serde_json::json!("call_pwd"));
+        assert_eq!(
+            messages[1]["content"][0]["type"],
+            serde_json::json!("tool_use")
+        );
+        assert_eq!(
+            messages[1]["content"][0]["id"],
+            serde_json::json!("call_pwd")
+        );
         assert_eq!(
             messages[1]["content"][0]["name"],
             serde_json::json!("exec_command")

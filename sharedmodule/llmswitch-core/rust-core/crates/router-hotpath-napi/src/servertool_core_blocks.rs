@@ -21,10 +21,8 @@ use servertool_core::hook_skeleton_contract;
 use servertool_core::loop_state_contract;
 use servertool_core::orchestration_policy_contract;
 use servertool_core::outcome_contract;
-use servertool_core::pending_session_contract;
 use servertool_core::persisted_lookup;
 use servertool_core::postflight_observation_contract;
-use servertool_core::pre_command_hook_contract;
 use servertool_core::registry_contract;
 use servertool_core::response_stage_runtime_action_contract;
 use servertool_core::server_side_tool_entry_contract;
@@ -331,148 +329,6 @@ pub fn plan_persist_stop_message_state_json(input_json: &str) -> Result<String, 
     let plan = persisted_lookup::plan_persist_stop_message_state(&input)?;
     serde_json::to_string(&plan)
         .map_err(|e| format!("serialize persist stop-message state plan: {e}"))
-}
-
-pub fn resolve_pending_session_file_name_json(input_json: &str) -> Result<String, String> {
-    let input: pending_session_contract::PendingSessionFileInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize pending session file input: {e}"))?;
-    serde_json::to_string(&pending_session_contract::resolve_pending_file_name(&input))
-        .map_err(|e| format!("serialize pending session file name: {e}"))
-}
-
-pub fn resolve_pending_session_max_age_ms_json(input_json: &str) -> Result<String, String> {
-    let input: pending_session_contract::PendingSessionMaxAgeInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pending session max-age input: {e}"))?;
-    serde_json::to_string(&pending_session_contract::resolve_pending_max_age_ms(
-        &input,
-    ))
-    .map_err(|e| format!("serialize pending session max-age: {e}"))
-}
-
-pub fn plan_pending_session_save_json(input_json: &str) -> Result<String, String> {
-    let input: pending_session_contract::PendingSessionSaveInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize pending session save input: {e}"))?;
-    serde_json::to_string(&pending_session_contract::plan_pending_session_save(input))
-        .map_err(|e| format!("serialize pending session save plan: {e}"))
-}
-
-pub fn plan_pending_session_load_json(input_json: &str) -> Result<String, String> {
-    let input: pending_session_contract::PendingSessionLoadInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize pending session load input: {e}"))?;
-    serde_json::to_string(&pending_session_contract::plan_pending_session_load(input))
-        .map_err(|e| format!("serialize pending session load plan: {e}"))
-}
-
-pub fn plan_pending_injection_persist_json(input_json: &str) -> Result<String, String> {
-    let input: pending_session_contract::PendingInjectionPersistInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pending injection persist input: {e}"))?;
-    let plan = pending_session_contract::plan_pending_injection_persist(input)?;
-    serde_json::to_string(&plan).map_err(|e| format!("serialize pending injection plan: {e}"))
-}
-
-pub fn plan_pending_injection_persist_error_json(input_json: &str) -> Result<String, String> {
-    let input: pending_session_contract::PendingInjectionPersistErrorInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pending injection persist error input: {e}"))?;
-    serde_json::to_string(&pending_session_contract::plan_pending_injection_persist_error(input))
-        .map_err(|e| format!("serialize pending injection error plan: {e}"))
-}
-
-pub fn plan_pre_command_hooks_config_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::PreCommandHooksConfigPlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pre-command hooks config input: {e}"))?;
-    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hooks_config(
-        &input,
-    ))
-    .map_err(|e| format!("serialize pre-command hooks config plan: {e}"))
-}
-
-pub fn plan_pre_command_hooks_config_text_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::PreCommandHooksConfigTextPlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pre-command hooks config text input: {e}"))?;
-    let plan = pre_command_hook_contract::plan_pre_command_hooks_config_text(&input)?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize pre-command hooks config plan: {e}"))
-}
-
-pub fn plan_runtime_pre_command_rule_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::RuntimePreCommandRulePlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize runtime pre-command rule input: {e}"))?;
-    serde_json::to_string(&pre_command_hook_contract::plan_runtime_pre_command_rule(
-        &input,
-    ))
-    .map_err(|e| format!("serialize runtime pre-command rule plan: {e}"))
-}
-
-pub fn plan_runtime_pre_command_state_selection_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::RuntimePreCommandStateSelectionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize runtime pre-command state selection input: {e}"))?;
-    serde_json::to_string(
-        &pre_command_hook_contract::plan_runtime_pre_command_state_selection(&input),
-    )
-    .map_err(|e| format!("serialize runtime pre-command state selection plan: {e}"))
-}
-
-pub fn plan_runtime_pre_command_state_runtime_action_json(
-    input_json: &str,
-) -> Result<String, String> {
-    let input: pre_command_hook_contract::RuntimePreCommandStateRuntimeActionInput =
-        serde_json::from_str(input_json).map_err(|e| {
-            format!("deserialize runtime pre-command state runtime action input: {e}")
-        })?;
-    let plan = pre_command_hook_contract::plan_runtime_pre_command_state_runtime_action(&input)?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize runtime pre-command state runtime action plan: {e}"))
-}
-
-pub fn plan_pre_command_hook_attempt_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::PreCommandHookAttemptInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pre-command hook attempt input: {e}"))?;
-    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_attempt(
-        input,
-    ))
-    .map_err(|e| format!("serialize pre-command hook attempt plan: {e}"))
-}
-
-pub fn plan_pre_command_hook_completion_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::PreCommandHookCompletionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pre-command hook completion input: {e}"))?;
-    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_completion(input))
-        .map_err(|e| format!("serialize pre-command hook completion plan: {e}"))
-}
-
-pub fn plan_pre_command_hook_event_payload_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::PreCommandHookEventPayloadInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pre-command hook event payload input: {e}"))?;
-    serde_json::to_string(&pre_command_hook_contract::plan_pre_command_hook_event_payload(input))
-        .map_err(|e| format!("serialize pre-command hook event payload plan: {e}"))
-}
-
-pub fn parse_pre_command_jq_stdout_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::PreCommandStdoutParseInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pre-command jq stdout parse input: {e}"))?;
-    let plan = pre_command_hook_contract::parse_pre_command_jq_stdout(input)?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize pre-command jq stdout parse plan: {e}"))
-}
-
-pub fn parse_pre_command_runtime_script_stdout_json(input_json: &str) -> Result<String, String> {
-    let input: pre_command_hook_contract::PreCommandStdoutParseInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize pre-command runtime stdout parse input: {e}"))?;
-    let plan = pre_command_hook_contract::parse_pre_command_runtime_script_stdout(input)?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize pre-command runtime stdout parse plan: {e}"))
 }
 
 pub fn plan_auto_hook_runtime_attempt_json(input_json: &str) -> Result<String, String> {
@@ -1965,151 +1821,6 @@ mod tests {
     }
 
     #[test]
-    fn plans_pending_session_via_servertool_core_bridge() {
-        let file_name = resolve_pending_session_file_name_json(
-            &json!({ "sessionId": " bad/session id " }).to_string(),
-        )
-        .expect("file name");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&file_name).expect("json"),
-            json!("bad_session_id.json")
-        );
-
-        let max_age =
-            resolve_pending_session_max_age_ms_json(&json!({ "raw": "1500" }).to_string())
-                .expect("max age");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&max_age).expect("json"),
-            json!(1500)
-        );
-
-        let save = plan_pending_session_save_json(
-            &json!({
-                "sessionId": "sess-1",
-                "pending": {
-                    "createdAtMs": 1000,
-                    "afterToolCallIds": [" call-1 "],
-                    "messages": [{ "role": "assistant" }]
-                }
-            })
-            .to_string(),
-        )
-        .expect("save plan");
-        let save_plan: serde_json::Value = serde_json::from_str(&save).expect("save json");
-        assert_eq!(save_plan["fileName"], "sess-1.json");
-        assert_eq!(save_plan["payload"]["sessionId"], "sess-1");
-
-        let load = plan_pending_session_load_json(
-            &json!({
-                "raw": save_plan["payload"],
-                "nowMs": 1100,
-                "maxAgeMs": 1000
-            })
-            .to_string(),
-        )
-        .expect("load plan");
-        let load_plan: serde_json::Value = serde_json::from_str(&load).expect("load json");
-        assert_eq!(load_plan["action"], "use");
-        assert_eq!(load_plan["pending"]["afterToolCallIds"], json!(["call-1"]));
-
-        let persist = plan_pending_injection_persist_json(
-            &json!({
-                "pendingInjection": {
-                    "sessionId": " sess-1 ",
-                    "aliasSessionIds": ["sess-2", "sess-1"],
-                    "afterToolCallIds": [" call-2 "],
-                    "messages": [{ "role": "assistant" }]
-                },
-                "requestId": " req-1 ",
-                "flowId": " flow-1 ",
-                "createdAtMs": 2000
-            })
-            .to_string(),
-        )
-        .expect("persist injection plan");
-        let persist_plan: serde_json::Value =
-            serde_json::from_str(&persist).expect("persist injection json");
-        assert_eq!(persist_plan["action"], "persist");
-        assert_eq!(persist_plan["sessionIds"], json!(["sess-1", "sess-2"]));
-        assert_eq!(
-            persist_plan["records"][0]["pending"]["sourceRequestId"],
-            "req-1"
-        );
-
-        let error = plan_pending_injection_persist_error_json(
-            &json!({
-                "requestId": "req-1",
-                "flowId": "flow-1",
-                "sessionIds": ["sess-1"],
-                "reason": "disk full"
-            })
-            .to_string(),
-        )
-        .expect("persist injection error plan");
-        let error_plan: serde_json::Value =
-            serde_json::from_str(&error).expect("persist injection error json");
-        assert_eq!(error_plan["status"], 502);
-        assert_eq!(error_plan["details"]["sessionIds"], json!(["sess-1"]));
-    }
-
-    #[test]
-    fn plans_pre_command_hooks_via_servertool_core_bridge() {
-        let config = plan_pre_command_hooks_config_json(
-            &json!({
-                "raw": {
-                    "enabled": true,
-                    "hooks": [
-                        { "id": "second hook", "tool": "exec_command", "priority": 20, "jq": ".cmd = .cmd" },
-                        { "id": "first-hook", "tools": ["shell"], "priority": 10, "cmdRegex": "/^npm\\s+/g", "shell": "echo ok" }
-                    ]
-                }
-            })
-            .to_string(),
-        )
-        .expect("pre-command config plan");
-        let config_plan: serde_json::Value =
-            serde_json::from_str(&config).expect("pre-command config json");
-        assert_eq!(config_plan["enabled"], true);
-        assert_eq!(config_plan["hooks"][0]["id"], "first-hook");
-        assert_eq!(config_plan["hooks"][0]["cmdRegex"]["source"], "^npm\\s+");
-        assert_eq!(config_plan["hooks"][1]["id"], "second_hook");
-
-        let runtime = plan_runtime_pre_command_rule_json(
-            &json!({
-                "rawState": { "preCommandScriptPath": "/tmp/rewrite.sh" },
-                "envTimeoutMs": "1500",
-                "scriptPathAllowed": true
-            })
-            .to_string(),
-        )
-        .expect("runtime pre-command plan");
-        let runtime_plan: serde_json::Value =
-            serde_json::from_str(&runtime).expect("runtime pre-command json");
-        assert_eq!(runtime_plan["id"], "runtime_precommand:rewrite.sh");
-        assert_eq!(runtime_plan["timeoutMs"], 1500);
-        assert_eq!(runtime_plan["runtimeScriptPath"], "/tmp/rewrite.sh");
-
-        let payload = plan_pre_command_hook_event_payload_json(
-            &json!({
-                "requestId": "req-pre-command",
-                "entryEndpoint": "/v1/responses",
-                "providerProtocol": "openai-responses",
-                "toolName": " EXEC_COMMAND ",
-                "toolCallId": "call-1",
-                "toolArguments": json!({ "cmd": "npm test" }).to_string(),
-                "hookId": "hook-1"
-            })
-            .to_string(),
-        )
-        .expect("pre-command event payload plan");
-        let payload_plan: serde_json::Value =
-            serde_json::from_str(&payload).expect("pre-command event payload json");
-        assert_eq!(payload_plan["command"], "npm test");
-        assert_eq!(payload_plan["jqInput"]["cmd"], "npm test");
-        assert_eq!(payload_plan["eventPayload"]["toolName"], "exec_command");
-    }
-
-    #[test]
     fn plans_engine_selection_via_servertool_core_bridge() {
         let start = plan_engine_selection_start_json(
             &json!({
@@ -2505,67 +2216,6 @@ mod tests {
 }
 
 #[test]
-fn plans_runtime_pre_command_state_selection_via_servertool_core_bridge() {
-    let plan = plan_runtime_pre_command_state_selection_json(
-        &serde_json::json!({
-            "runtimeControlPreCommandState": { "preCommandScriptPath": "/tmp/runtime.sh" }
-        })
-        .to_string(),
-    )
-    .expect("state selection plan");
-    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(parsed["action"], "use_selected");
-    assert_eq!(parsed["source"], "runtime_control");
-    assert_eq!(
-        parsed["state"]["preCommandScriptPath"],
-        serde_json::Value::String("/tmp/runtime.sh".to_string())
-    );
-
-    let skip = plan_runtime_pre_command_state_selection_json(
-        &serde_json::json!({
-            "runtimeControlPreCommandState": null
-        })
-        .to_string(),
-    )
-    .expect("skip state selection plan");
-    let skip_parsed: serde_json::Value = serde_json::from_str(&skip).expect("parse skip plan");
-    assert_eq!(skip_parsed["action"], "use_selected");
-    assert_eq!(skip_parsed["source"], "none");
-    assert!(skip_parsed.get("state").is_none() || skip_parsed["state"].is_null());
-}
-
-#[test]
-fn plans_runtime_pre_command_state_runtime_action_via_servertool_core_bridge() {
-    let plan = plan_runtime_pre_command_state_runtime_action_json(
-        &serde_json::json!({
-            "runtimeControlPreCommandState": { "preCommandScriptPath": "/tmp/runtime.sh" }
-        })
-        .to_string(),
-    )
-    .expect("runtime action plan");
-    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse runtime action");
-    assert_eq!(parsed["action"], "use_selected");
-    assert_eq!(parsed["source"], "runtime_control");
-    assert_eq!(
-        parsed["state"]["preCommandScriptPath"],
-        serde_json::Value::String("/tmp/runtime.sh".to_string())
-    );
-
-    let empty_plan = plan_runtime_pre_command_state_runtime_action_json(
-        &serde_json::json!({
-            "runtimeControlPreCommandState": null
-        })
-        .to_string(),
-    )
-    .expect("runtime action empty plan");
-    let empty_parsed: serde_json::Value =
-        serde_json::from_str(&empty_plan).expect("parse runtime action empty");
-    assert_eq!(empty_parsed["action"], "use_selected");
-    assert_eq!(empty_parsed["source"], "none");
-    assert!(empty_parsed.get("state").is_none() || empty_parsed["state"].is_null());
-}
-
-#[test]
 fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
     let passthrough = plan_servertool_entry_preflight_json(
         &serde_json::json!({
@@ -2932,7 +2582,7 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
     let mixed_value: serde_json::Value = serde_json::from_str(&mixed).expect("parse mixed plan");
     assert_eq!(
         mixed_value["action"],
-        serde_json::json!("return_mixed_client_tools_pending_injection")
+        serde_json::json!("invalid_mixed_client_tools_outcome")
     );
     assert_eq!(
         mixed_value["reuseLastExecutionEnvelope"],
@@ -2942,17 +2592,7 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
         mixed_value["executionFlowId"],
         serde_json::json!("servertool_mixed")
     );
-    assert_eq!(
-        mixed_value["pendingInjection"],
-        serde_json::json!({
-            "sessionId": "sess_1",
-            "aliasSessionIds": ["alias_1"],
-            "afterToolCallIds": ["call_2"],
-            "messages": [{
-                "role": "assistant"
-            }]
-        })
-    );
+    assert!(mixed_value.get("pendingInjection").is_none());
 
     let missing = plan_servertool_execution_outcome_runtime_action_json(
         &serde_json::json!({
@@ -3301,26 +2941,24 @@ fn plans_servertool_registry_actions_via_servertool_core_bridge() {
 
 #[test]
 fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
-    let pending = plan_servertool_engine_runtime_action_json(
+    let terminal = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
-            "hasPendingInjection": true,
             "isStopMessageFlow": true,
             "hasServertoolCliProjectionContext": true,
             "stoplessAction": "terminal_final"
         })
         .to_string(),
     )
-    .expect("engine runtime action pending plan");
-    let pending_value: serde_json::Value =
-        serde_json::from_str(&pending).expect("parse pending plan");
+    .expect("engine runtime action terminal plan");
+    let terminal_value: serde_json::Value =
+        serde_json::from_str(&terminal).expect("parse terminal plan");
     assert_eq!(
-        pending_value["action"],
-        serde_json::json!("persist_pending_injection_and_return")
+        terminal_value["action"],
+        serde_json::json!("return_stop_message_terminal_final")
     );
 
     let cli_projection = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
-            "hasPendingInjection": false,
             "isStopMessageFlow": false,
             "hasServertoolCliProjectionContext": true,
             "stoplessAction": "continue"
@@ -3337,7 +2975,6 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
 
     let stopless_cli = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
-            "hasPendingInjection": false,
             "isStopMessageFlow": true,
             "hasServertoolCliProjectionContext": false,
             "stoplessAction": "cli_projection"

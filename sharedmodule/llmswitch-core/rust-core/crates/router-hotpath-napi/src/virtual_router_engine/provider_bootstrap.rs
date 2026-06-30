@@ -1057,10 +1057,7 @@ fn push_auth_entry(
     let type_info = interpret_auth_type(Some(type_source.as_str()));
     let entry_type = type_info.auth_type;
     if entry_type != "apiKey" {
-        return Err(format!(
-            "Provider {} auth.type must be apiKey",
-            provider_id
-        ));
+        return Err(format!("Provider {} auth.type must be apiKey", provider_id));
     }
     let raw_type_lower = raw_type_source.trim().to_lowercase();
     if raw_type_lower.contains("oauth") || raw_type_lower == "deepseek-account" {

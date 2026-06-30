@@ -342,11 +342,15 @@ mod tests {
             ServertoolRegistryLookupAction::ReturnBuiltin
         );
 
-        let retired_adhoc = plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
-            name: "custom_tool".to_string(),
-            builtin_entry_present: false,
-        });
-        assert_eq!(retired_adhoc.action, ServertoolRegistryLookupAction::ReturnNone);
+        let retired_adhoc =
+            plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
+                name: "custom_tool".to_string(),
+                builtin_entry_present: false,
+            });
+        assert_eq!(
+            retired_adhoc.action,
+            ServertoolRegistryLookupAction::ReturnNone
+        );
 
         let none = plan_servertool_registry_lookup_action(ServertoolRegistryLookupActionInput {
             name: "".to_string(),
@@ -494,10 +498,7 @@ mod tests {
             })
             .expect("source projection plan");
 
-        assert_eq!(
-            plan.registered_names,
-            vec!["stop_message_auto".to_string()]
-        );
+        assert_eq!(plan.registered_names, vec!["stop_message_auto".to_string()]);
         assert_eq!(
             plan.auto_handler_refs,
             vec![ServertoolRegistrySourceRefPlan {

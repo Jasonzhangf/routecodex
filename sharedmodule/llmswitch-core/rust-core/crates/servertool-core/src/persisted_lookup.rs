@@ -310,8 +310,7 @@ fn resolve_runtime_stopless_control_snapshot(
                 .and_then(|runtime_control| runtime_control.get("stopless"))
                 .and_then(Value::as_object)
         })?;
-    if read_trimmed_string(stopless.get("flowId")).as_deref() != Some(STOPLESS_FLOW_ID)
-    {
+    if read_trimmed_string(stopless.get("flowId")).as_deref() != Some(STOPLESS_FLOW_ID) {
         return None;
     }
     let max_repeats = read_js_nonnegative_integer(stopless.get("maxRepeats"))?;
@@ -1618,10 +1617,7 @@ mod tests {
             resolve_servertool_sticky_key(&metadata),
             "session:snapshot-session"
         );
-        assert_eq!(
-            resolve_routing_state_key(&metadata),
-            "snapshot-request"
-        );
+        assert_eq!(resolve_routing_state_key(&metadata), "snapshot-request");
     }
 
     #[test]
@@ -1748,10 +1744,7 @@ mod tests {
                 "reasonCode": "stop_schema_next_step_missing"
             }))
         );
-        assert_eq!(
-            snapshot.source.as_deref(),
-            Some(STOPLESS_STATE_SOURCE)
-        );
+        assert_eq!(snapshot.source.as_deref(), Some(STOPLESS_STATE_SOURCE));
     }
 
     #[test]

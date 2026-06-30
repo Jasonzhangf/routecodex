@@ -17,6 +17,7 @@ use super::super::time_utils::now_ms;
 const CONCURRENCY_BUSY_TTL_MS: i64 = 60_000;
 const DEFAULT_CONTEXT_WARN_RATIO: f64 = 0.9;
 
+#[derive(Clone)]
 pub(crate) struct VirtualRouterEngineCore {
     pub routing: RoutingPools,
     pub provider_registry: ProviderRegistry,

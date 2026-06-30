@@ -7,6 +7,12 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/registry.ts',
   'sharedmodule/llmswitch-core/src/servertool/registry-impl.ts',
   'sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts',
+  'sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts',
+  'sharedmodule/llmswitch-core/src/servertool/pre-command-runtime-state-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/pending-session.ts',
+  'sharedmodule/llmswitch-core/src/servertool/pending-injection-block.ts',
+  'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs',
+  'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs',
 ] as const;
 
 const TARGETS = [
@@ -105,29 +111,12 @@ const TARGETS = [
     forbidden: [
       "from '../conversion/runtime-metadata.js'",
       'readRuntimeMetadata(',
+      'resolveServertoolRuntimePreCommandState',
+      'applyPreCommandHooksToToolCalls',
     ],
     required: [
       'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
-      'resolveServertoolRuntimePreCommandState',
-      'applyPreCommandHooksToToolCalls',
       'planServertoolToolCallDispatchWithNative',
-    ],
-  },
-  {
-    file: 'sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts',
-    forbidden: [
-      'hook.toolNames.has(',
-      'hook.cmdRegex && !hook.cmdRegex.test(',
-      "reason: 'tool_mismatch'",
-      "reason: 'cmd_regex_mismatch'",
-      "result: 'miss'",
-      "result: 'match'",
-      "result: 'error'",
-      'const traceBase = {',
-    ],
-    required: [
-      'planPreCommandHookAttemptWithNative',
-      'planPreCommandHookCompletionWithNative',
     ],
   },
   {
@@ -221,14 +210,11 @@ const TARGETS = [
         "flowId: 'servertool_cli_projection'",
         'servertoolCliProjection: {',
       'readRuntimeControlFromAnyBoundMetadataCenter(',
-      'runtimeControlPreCommandState',
-      'planRuntimePreCommandStateRuntimeActionWithNative({',
       'const responseStagePlan = responseHookStagePlan.responseHookMatched ? responseHookStagePlan : planServertoolResponseStageGateWithNative(',
       "if (responseStageAutoHook.action === 'return_passthrough_bypass') {",
       'const stage = runServertoolResponseStageWithNative(chatResponse, requestId);',
       'replaceJsonObjectInPlace(chatResponse, normalizedPayload);',
       'readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);',
-      'applyPreCommandHooksToToolCalls({',
       'planServertoolToolCallDispatchWithNative(',
       'prepareServertoolDispatchStage(',
       'planServertoolExecutionBranchRuntimeAction(',

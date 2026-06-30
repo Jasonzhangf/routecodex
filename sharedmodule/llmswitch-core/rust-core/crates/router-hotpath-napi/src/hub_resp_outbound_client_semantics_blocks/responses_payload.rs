@@ -88,12 +88,32 @@ fn read_request_id(response: &Map<String, Value>, request_id_hint: Option<&str>)
 
 fn read_created_at(response: &Map<String, Value>) -> Value {
     if let Some(created_at) = response.get("created_at") {
-        return created_at.clone();
+        if created_at.as_i64().is_some_and(|value| value > 0)
+            || created_at.as_u64().is_some_and(|value| value > 0)
+        {
+            return created_at.clone();
+        }
     }
     if let Some(created) = response.get("created") {
-        return created.clone();
+        if created.as_i64().is_some_and(|value| value > 0)
+            || created.as_u64().is_some_and(|value| value > 0)
+        {
+            return created.clone();
+        }
     }
     Value::from(now_unix_seconds())
+}
+
+fn ensure_response_created_at(payload: &mut Value, source: &Map<String, Value>) {
+    let Some(row) = payload.as_object_mut() else {
+        return;
+    };
+    let has_valid_created_at = row
+        .get("created_at")
+        .is_some_and(|value| value.as_i64().is_some_and(|raw| raw > 0) || value.as_u64().is_some_and(|raw| raw > 0));
+    if !has_valid_created_at {
+        row.insert("created_at".to_string(), read_created_at(source));
+    }
 }
 
 fn read_failed_status_code(response: &Map<String, Value>) -> Option<String> {
@@ -627,6 +647,7 @@ pub(crate) fn build_responses_payload_from_chat_core(
         let mut sanitized = sanitize_responses_client_payload_for_replay_safety(&Value::Object(
             response_row.clone(),
         ));
+        ensure_response_created_at(&mut sanitized, response_row);
         strip_stop_schema_control_payload(&mut sanitized);
         return Ok(sanitized);
     }

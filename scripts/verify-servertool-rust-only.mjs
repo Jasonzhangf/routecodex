@@ -3081,117 +3081,25 @@ function checkServertoolHookSkeletonRustOwner() {
 }
 
 function checkPendingSessionRustOwner() {
-  const rustPendingSession = readRequired(RUST_SERVERTOOL_PENDING_SESSION);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
-  const pendingSessionShell = readRequired(TS_PENDING_SESSION);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-
-  for (const needle of [
-    'pub fn resolve_pending_file_name',
-    'pub fn resolve_pending_max_age_ms',
-    'pub fn plan_pending_session_save',
-    'pub fn plan_pending_session_load',
-    'pub fn plan_pending_injection_persist',
-    'pub fn plan_pending_injection_persist_error',
-  ]) {
-    assertContains(
-      'servertool-pending-session-rust-owner',
-      RUST_SERVERTOOL_PENDING_SESSION,
-      rustPendingSession,
-      needle
-    );
-  }
-  assertContains(
-    'servertool-pending-session-rust-owner',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
-    servertoolCoreLib,
-    'pub mod pending_session_contract'
+  assertMissingFile(
+    'servertool-pending-session-retired',
+    RUST_SERVERTOOL_PENDING_SESSION,
+    'servertool-core pending_session_contract.rs must stay physically deleted'
   );
-  for (const needle of [
-    'resolve_pending_session_file_name_json',
-    'resolve_pending_session_max_age_ms_json',
-    'plan_pending_session_save_json',
-    'plan_pending_session_load_json',
-    'plan_pending_injection_persist_json',
-    'plan_pending_injection_persist_error_json',
-  ]) {
-    assertContains(
-      'servertool-pending-session-native-export',
-      `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
-      napiBlocks,
-      needle
-    );
-  }
-  for (const needle of [
-    'pub fn resolve_pending_session_file_name_json',
-    'pub fn resolve_pending_session_max_age_ms_json',
-    'pub fn plan_pending_session_save_json',
-    'pub fn plan_pending_session_load_json',
-    'pub fn plan_pending_injection_persist_json',
-    'pub fn plan_pending_injection_persist_error_json',
-  ]) {
-    assertContains(
-      'servertool-pending-session-native-export',
-      RUST_ROUTER_HOTPATH_NAPI_LIB,
-      napiLib,
-      needle
-    );
-  }
-  for (const needle of [
-    'resolvePendingSessionFileNameJson',
-    'resolvePendingSessionMaxAgeMsJson',
-    'planPendingSessionSaveJson',
-    'planPendingSessionLoadJson',
-    'planPendingInjectionPersistJson',
-    'planPendingInjectionPersistErrorJson',
-  ]) {
-    assertContains(
-      'servertool-pending-session-required-export',
-      NATIVE_REQUIRED_EXPORTS,
-      requiredExports,
-      needle
-    );
-  }
-  for (const needle of [
-    'resolvePendingSessionFileNameWithNative',
-    'resolvePendingSessionMaxAgeMsWithNative',
-    'planPendingSessionSaveWithNative',
-    'planPendingSessionLoadWithNative',
-  ]) {
-    assertContains(
-      'servertool-pending-session-native-bridge',
-      NATIVE_SERVERTOOL_CORE_WRAPPER,
-      nativeWrapper,
-      needle
-    );
-    assertContains(
-      'servertool-pending-session-ts-thin-shell',
-      TS_PENDING_SESSION,
-      pendingSessionShell,
-      needle
-    );
-  }
-  const pendingInjectionShell = readRequired(TS_PENDING_INJECTION);
-  for (const marker of [
-    "from '../conversion/runtime-metadata.js'",
-    'readRuntimeMetadata(',
-    '__rt',
-  ]) {
-    if (pendingInjectionShell.includes(marker)) {
-      fail(
-        'servertool-pending-injection-metadata-center-only',
-        `pending-injection-block.ts must read sessionDir from MetadataCenter runtime_control, not runtime metadata marker ${marker}`
-      );
-    }
-  }
-  assertContains(
-    'servertool-pending-injection-metadata-center-only',
+  assertMissingFile(
+    'servertool-pending-session-retired',
+    TS_PENDING_SESSION,
+    'servertool pending-session.ts must stay physically deleted'
+  );
+  assertMissingFile(
+    'servertool-pending-session-retired',
     TS_PENDING_INJECTION,
-    pendingInjectionShell,
-    'readRuntimeControlFromAnyBoundMetadataCenter'
+    'servertool pending-injection-block.ts must stay physically deleted'
   );
   assertMissingFile(
     'servertool-state-scope-metadata-center-only',
@@ -3199,150 +3107,88 @@ function checkPendingSessionRustOwner() {
     'state-scope.ts must stay deleted; Rust persisted_lookup owns stop-message/session sticky scope resolution'
   );
   for (const needle of [
+    'pending_session_contract',
+    'resolve_pending_session_file_name_json',
+    'resolve_pending_session_max_age_ms_json',
+    'plan_pending_session_save_json',
+    'plan_pending_session_load_json',
+    'plan_pending_injection_persist_json',
+    'plan_pending_injection_persist_error_json',
+    'resolvePendingSessionFileNameJson',
+    'resolvePendingSessionMaxAgeMsJson',
+    'planPendingSessionSaveJson',
+    'planPendingSessionLoadJson',
+    'planPendingInjectionPersistJson',
+    'planPendingInjectionPersistErrorJson',
+    'resolvePendingSessionFileNameWithNative',
+    'resolvePendingSessionMaxAgeMsWithNative',
+    'planPendingSessionSaveWithNative',
+    'planPendingSessionLoadWithNative',
     'planPendingInjectionPersistWithNative',
     'planPendingInjectionPersistErrorWithNative',
   ]) {
-    assertContains(
-      'servertool-pending-injection-native-bridge',
-      NATIVE_SERVERTOOL_CORE_WRAPPER,
-      nativeWrapper,
-      needle
-    );
-    assertContains(
-      'servertool-pending-injection-ts-thin-shell',
-      TS_PENDING_INJECTION,
-      pendingInjectionShell,
-      needle
-    );
-  }
-  for (const keyword of [
-    'aliasSessionIds',
-    'Array.from(new Set',
-    '.filter((value)',
-    '.map((value) => value.trim())',
-    'sessionIds: uniqueSessionIds',
-    'afterToolCallIds: args.pendingInjection.afterToolCallIds',
-    'messages: args.pendingInjection.messages',
-    'sourceRequestId: args.requestId',
-    "code: 'SERVERTOOL_PENDING_INJECTION_FAILED'",
-    "category: 'INTERNAL_ERROR'",
-    'status = 502',
-  ]) {
-    if (pendingInjectionShell.includes(keyword)) {
-      fail(
-        'servertool-pending-injection-no-ts-owner',
-        `Forbidden TS pending-injection semantic "${keyword}" found in pending-injection-block.ts`
-      );
+    for (const [file, content] of [
+      [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib],
+      [`${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks],
+      [RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib],
+      [NATIVE_REQUIRED_EXPORTS, requiredExports],
+      [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper],
+    ]) {
+      if (content.includes(needle)) {
+        fail(
+          'servertool-pending-session-retired',
+          `${file.replace(`${ROOT}/`, '')} must not retain retired pending-session marker ${needle}`
+        );
+      }
     }
   }
   pass(
-    'servertool-pending-injection-no-ts-owner',
-    'pending-injection-block.ts is native-plan shell for session dedupe, save payload, and error envelope decisions'
-  );
-  for (const keyword of [
-    'DEFAULT_PENDING_MAX_AGE_MS',
-    'function sanitizeSegment',
-    'function coercePending',
-    'Number.parseInt',
-    'Number.isFinite',
-    'Math.floor',
-    '.replace(/[^a-zA-Z0-9_.-]/g',
-    'stale pending injection dropped session=${',
-    'invalid pending injection dropped: malformed payload',
-  ]) {
-    if (pendingSessionShell.includes(keyword)) {
-      fail(
-        'servertool-pending-session-no-ts-owner',
-        `Forbidden TS pending-session semantic "${keyword}" found in pending-session.ts`
-      );
-    }
-  }
-  for (const pattern of [
-    {
-      label: 'pending-session cleanup failure swallowed',
-      regex: /catch\s*\{[\s\S]{0,180}(?:ignore|no-op|keep original reason visible even if cleanup fails)/,
-    },
-    {
-      label: 'pending-session silent force cleanup wrapper',
-      regex: /dropPendingFile\s*\(/,
-    },
-    {
-      label: 'pending-session read failure converted into no pending',
-      regex: /pending injection read failed[\s\S]{0,500}return\s+null\s*;/,
-    },
-  ]) {
-    if (pattern.regex.test(pendingSessionShell)) {
-      fail(
-        'servertool-pending-session-fail-fast-io',
-        `${pattern.label} in pending-session.ts`
-      );
-    }
-  }
-  pass(
-    'servertool-pending-session-no-ts-owner',
-    'pending-session.ts is native-only shell for max-age, session file, payload coercion, and stale/malformed load decisions'
-  );
-  pass(
-    'servertool-pending-session-fail-fast-io',
-    'pending-session.ts returns null only for missing file and fails fast on parse/read/cleanup errors'
+    'servertool-pending-session-retired',
+    'servertool pending-session and pending-injection persistence are physically retired'
   );
 }
 
 function checkPreCommandHooksRustOwner() {
-  const rustPreCommand = readRequired(RUST_SERVERTOOL_PRE_COMMAND);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const preCommandShell = readRequired(TS_PRE_COMMAND_HOOKS);
   const serverSideToolsImpl = readRequired(`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`);
 
-  for (const needle of [
-    'feature_id: hub.servertool_pre_command_hooks',
-    'pub struct PreCommandHooksConfigPlanInput',
-    'pub struct PreCommandHooksConfigTextPlanInput',
-    'pub struct PreCommandHooksConfigPlan',
-    'pub struct PreCommandHookRulePlan',
-    'pub struct PreCommandRegexPlan',
-    'pub struct RuntimePreCommandRulePlanInput',
-    'pub struct RuntimePreCommandStateSelectionInput',
-    'pub struct RuntimePreCommandStateSelectionPlan',
-    'pub struct RuntimePreCommandStateRuntimeActionInput',
-    'pub struct RuntimePreCommandStateRuntimeActionPlan',
-    'pub struct PreCommandHookAttemptInput',
-    'pub struct PreCommandHookAttemptPlan',
-    'pub struct PreCommandHookCompletionInput',
-    'pub struct PreCommandHookCompletionPlan',
-    'pub struct PreCommandStdoutParseInput',
-    'pub struct PreCommandJqStdoutParsePlan',
-    'pub struct PreCommandRuntimeScriptStdoutParsePlan',
-    'pub enum PreCommandHookCompletionAction',
-    'pub enum PreCommandRuntimeScriptStdoutAction',
-    'pub fn plan_pre_command_hooks_config',
-    'pub fn plan_pre_command_hooks_config_text',
-    'pub fn plan_runtime_pre_command_rule',
-    'pub fn plan_runtime_pre_command_state_selection',
-    'pub fn plan_runtime_pre_command_state_runtime_action',
-    'pub fn plan_pre_command_hook_attempt',
-    'pub fn plan_pre_command_hook_completion',
-    'pub fn parse_pre_command_jq_stdout',
-    'pub fn parse_pre_command_runtime_script_stdout',
-  ]) {
-    assertContains(
-      'servertool-pre-command-hooks-rust-owner',
-      RUST_SERVERTOOL_PRE_COMMAND,
-      rustPreCommand,
-      needle
-    );
-  }
-  assertContains(
-    'servertool-pre-command-hooks-rust-owner',
-    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
-    servertoolCoreLib,
-    'pub mod pre_command_hook_contract'
+  assertMissingFile(
+    'servertool-pre-command-hooks-retired',
+    RUST_SERVERTOOL_PRE_COMMAND,
+    'servertool-core pre_command_hook_contract.rs must stay physically deleted'
+  );
+  assertMissingFile(
+    'servertool-pre-command-hooks-retired',
+    TS_PRE_COMMAND_HOOKS,
+    'servertool pre-command-hooks.ts must stay physically deleted'
+  );
+  assertMissingFile(
+    'servertool-pre-command-hooks-retired',
+    `${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`,
+    'servertool pre-command-runtime-state-shell.ts must stay physically deleted'
+  );
+  assertMissingFile(
+    'servertool-pre-command-hooks-retired',
+    `${ROOT}/tests/servertool/pre-command-hooks.spec.ts`,
+    'servertool pre-command-hooks.spec.ts must stay physically deleted'
+  );
+  assertMissingFile(
+    'servertool-pre-command-hooks-retired',
+    `${ROOT}/tests/servertool/pre-command-runtime-state-shell.spec.ts`,
+    'servertool pre-command-runtime-state-shell.spec.ts must stay physically deleted'
+  );
+  assertMissingFile(
+    'servertool-pre-command-hooks-retired',
+    `${ROOT}/docs/SERVERTOOL_PRE_COMMAND_HOOKS.md`,
+    'SERVERTOOL_PRE_COMMAND_HOOKS.md must stay physically deleted'
   );
   for (const needle of [
+    'feature_id: hub.servertool_pre_command_hooks',
+    'pre_command_hook_contract',
     'plan_pre_command_hooks_config_json',
     'plan_pre_command_hooks_config_text_json',
     'plan_runtime_pre_command_rule_json',
@@ -3350,35 +3196,9 @@ function checkPreCommandHooksRustOwner() {
     'plan_runtime_pre_command_state_runtime_action_json',
     'plan_pre_command_hook_attempt_json',
     'plan_pre_command_hook_completion_json',
+    'plan_pre_command_hook_event_payload_json',
     'parse_pre_command_jq_stdout_json',
     'parse_pre_command_runtime_script_stdout_json',
-  ]) {
-    assertContains(
-      'servertool-pre-command-hooks-native-export',
-      `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
-      napiBlocks,
-      needle
-    );
-  }
-  for (const needle of [
-    'pub fn plan_pre_command_hooks_config_json',
-    'pub fn plan_pre_command_hooks_config_text_json',
-    'pub fn plan_runtime_pre_command_rule_json',
-    'pub fn plan_runtime_pre_command_state_selection_json',
-    'pub fn plan_runtime_pre_command_state_runtime_action_json',
-    'pub fn plan_pre_command_hook_attempt_json',
-    'pub fn plan_pre_command_hook_completion_json',
-    'pub fn parse_pre_command_jq_stdout_json',
-    'pub fn parse_pre_command_runtime_script_stdout_json',
-  ]) {
-    assertContains(
-      'servertool-pre-command-hooks-native-export',
-      RUST_ROUTER_HOTPATH_NAPI_LIB,
-      napiLib,
-      needle
-    );
-  }
-  for (const needle of [
     'planPreCommandHooksConfigJson',
     'planPreCommandHooksConfigTextJson',
     'planRuntimePreCommandRuleJson',
@@ -3386,213 +3206,41 @@ function checkPreCommandHooksRustOwner() {
     'planRuntimePreCommandStateRuntimeActionJson',
     'planPreCommandHookAttemptJson',
     'planPreCommandHookCompletionJson',
+    'planPreCommandHookEventPayloadJson',
     'parsePreCommandJqStdoutJson',
     'parsePreCommandRuntimeScriptStdoutJson',
-  ]) {
-    assertContains(
-      'servertool-pre-command-hooks-required-export',
-      NATIVE_REQUIRED_EXPORTS,
-      requiredExports,
-      needle
-    );
-  }
-  for (const needle of [
     'planPreCommandHooksConfigWithNative',
     'planPreCommandHooksConfigTextWithNative',
     'planRuntimePreCommandRuleWithNative',
+    'planRuntimePreCommandStateRuntimeActionWithNative',
     'planPreCommandHookAttemptWithNative',
     'planPreCommandHookCompletionWithNative',
+    'planPreCommandHookEventPayloadWithNative',
     'parsePreCommandJqStdoutWithNative',
     'parsePreCommandRuntimeScriptStdoutWithNative',
-  ]) {
-    assertContains(
-      'servertool-pre-command-hooks-native-bridge',
-      NATIVE_SERVERTOOL_CORE_WRAPPER,
-      nativeWrapper,
-      needle
-    );
-    assertContains(
-      'servertool-pre-command-hooks-ts-thin-shell',
-      TS_PRE_COMMAND_HOOKS,
-      preCommandShell,
-      needle
-    );
-  }
-  for (const keyword of [
-    'const lines = stdout',
-    'JSON.parse(payload)',
-    'JSON.parse(content)',
-    'cleanedPayload',
-  ]) {
-    if (preCommandShell.includes(keyword)) {
-      fail(
-        'servertool-pre-command-hooks-no-ts-output-parser',
-        `Forbidden TS pre-command stdout parser "${keyword}" found in pre-command-hooks.ts`
-      );
-    }
-  }
-  assertContains(
-    'servertool-pre-command-hooks-runtime-selection-thin-shell',
-    `${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`),
-    'planRuntimePreCommandStateRuntimeActionWithNative({'
-  );
-  const preCommandRuntimeShell = readRequired(`${SERVERTOOL_TS_DIR}/pre-command-runtime-state-shell.ts`);
-  const preCommandSpec = readRequired(`${ROOT}/tests/servertool/pre-command-hooks.spec.ts`);
-  assertContains(
-    'servertool-pre-command-hooks-fail-fast',
-    RUST_SERVERTOOL_PRE_COMMAND,
-    rustPreCommand,
-    'PreCommandHookCompletionAction::FailFast'
-  );
-  assertContains(
-    'servertool-pre-command-hooks-fail-fast',
-    NATIVE_SERVERTOOL_CORE_WRAPPER,
-    nativeWrapper,
-    "record.action !== 'continue' && record.action !== 'fail_fast'"
-  );
-  assertContains(
-    'servertool-pre-command-hooks-fail-fast',
-    TS_PRE_COMMAND_HOOKS,
-    preCommandShell,
-    "completionPlan.action === 'fail_fast'"
-  );
-  assertContains(
-    'servertool-pre-command-hooks-fail-fast',
-    `${ROOT}/tests/servertool/pre-command-hooks.spec.ts`,
-    preCommandSpec,
-    'fails fast when jq expression is invalid'
-  );
-  for (const keyword of [
-    'loadRoutingInstructionStateSync',
-    'resolveServertoolPersistentScopeKey',
-    'createServertoolProviderProtocolErrorFromPlan',
-    'readProviderProtocolFromAnyBoundMetadataCenter',
-    'readRuntimeMetadata',
-    'directRuntimePreCommandState',
-    'runtimeMetadataPreCommandState',
-    'persistedState',
-    'persistedLoad',
-    '.__rt',
-  ]) {
-    if (preCommandRuntimeShell.includes(keyword)) {
-      fail(
-        'servertool-pre-command-runtime-control-only',
-        `pre-command-runtime-state-shell.ts must not read ${keyword}; preCommandState belongs to MetadataCenter runtime_control`
-      );
-    }
-  }
-  for (const keyword of [
-    'readRuntimeControlFromAnyBoundMetadataCenter',
+    'resolveServertoolRuntimePreCommandState',
+    'applyPreCommandHooksToToolCalls',
     'runtimeControlPreCommandState',
-    'runtimeControl?.preCommandState',
   ]) {
-    if (!preCommandRuntimeShell.includes(keyword)) {
-      fail(
-        'servertool-pre-command-runtime-control-only',
-        `pre-command-runtime-state-shell.ts must keep MetadataCenter runtime_control marker ${keyword}`
-      );
+    for (const [file, content] of [
+      [`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib],
+      [`${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks],
+      [RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib],
+      [NATIVE_REQUIRED_EXPORTS, requiredExports],
+      [NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper],
+      [`${SERVERTOOL_TS_DIR}/server-side-tools-impl.ts`, serverSideToolsImpl],
+    ]) {
+      if (content.includes(needle)) {
+        fail(
+          'servertool-pre-command-hooks-retired',
+          `${file.replace(`${ROOT}/`, '')} must not retain retired pre-command marker ${needle}`
+        );
+      }
     }
   }
   pass(
-    'servertool-pre-command-runtime-control-only',
-    'preCommandState reads only MetadataCenter runtime_control and never __rt/runtime-metadata/persisted state'
-  );
-  for (const keyword of [
-    'function normalizePreCommandHookRule',
-    'function sanitizeHookId',
-    'function normalizeHookId',
-    'function normalizeToolSet',
-    'function parseRegex',
-    'function normalizeTimeoutMs',
-    'function normalizePriority',
-    'Number.parseInt',
-    'Number.isFinite',
-    'Math.floor',
-    'Math.min',
-    'DEFAULT_TIMEOUT_MS',
-    'DEFAULT_TOOLS',
-    '.replace(/[^a-zA-Z0-9_.-]+/g',
-    'hook.toolNames.has(',
-    'hook.cmdRegex && !hook.cmdRegex.test(',
-    'function buildPreCommandHookEventPayload(',
-    'function parseToolArgumentsObject(',
-    'function extractCommandText(',
-    "reason: 'tool_mismatch'",
-    "reason: 'cmd_regex_mismatch'",
-    "result: 'miss'",
-    "result: 'match'",
-    "result: 'error'",
-    'const traceBase = {',
-    '// best-effort',
-  ]) {
-    if (preCommandShell.includes(keyword)) {
-      fail(
-        'servertool-pre-command-hooks-no-ts-owner',
-        `Forbidden TS pre-command hook semantic "${keyword}" found in pre-command-hooks.ts`
-      );
-    }
-  }
-  for (const [file, marker] of [
-    [
-      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs`,
-      'pub fn plan_pre_command_hook_event_payload',
-    ],
-    [
-      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`,
-      'plan_pre_command_hook_event_payload_json',
-    ],
-    [
-      `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`,
-      'pub fn plan_pre_command_hook_event_payload_json',
-    ],
-    [
-      NATIVE_REQUIRED_EXPORTS,
-      'planPreCommandHookEventPayloadJson',
-    ],
-    [
-      `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
-      'planPreCommandHookEventPayloadWithNative',
-    ],
-    [
-      TS_PRE_COMMAND_HOOKS,
-      'planPreCommandHookEventPayloadWithNative',
-    ],
-  ]) {
-    assertContains(
-      'servertool-pre-command-hook-event-payload-rust-owner',
-      file,
-      readRequired(file),
-      marker
-    );
-  }
-  if (/onAutoHookTrace[\s\S]{0,140}catch\s*\{/.test(preCommandShell)) {
-    fail(
-      'servertool-pre-command-hooks-no-ts-owner',
-      'pre-command-hooks.ts must not swallow pre-command trace callback failures'
-    );
-  }
-  if (/config load failed[\s\S]{0,700}config:\s*\{\s*enabled:\s*false,\s*hooks:\s*\[\]\s*\}/.test(preCommandShell)) {
-    fail(
-      'servertool-pre-command-hooks-no-ts-owner',
-      'pre-command-hooks.ts must not convert config load failures into disabled hooks'
-    );
-  }
-  const runPreCommandHooksBlock = extractFunctionBlock(preCommandShell, 'runPreCommandHooks');
-  if (
-    runPreCommandHooksBlock &&
-    runPreCommandHooksBlock.includes('catch (error)') &&
-    runPreCommandHooksBlock.includes('planPreCommandHookCompletionWithNative') &&
-    !runPreCommandHooksBlock.includes("completionPlan.action === 'fail_fast'")
-  ) {
-    fail(
-      'servertool-pre-command-hooks-fail-fast',
-      'pre-command-hooks.ts must not record hook execution errors and continue without consuming Rust completion action'
-    );
-  }
-  pass(
-    'servertool-pre-command-hooks-no-ts-owner',
-    'pre-command-hooks.ts is native-plan shell for config/rule normalization, hook id, tools, regex plan, timeout, and priority policy'
+    'servertool-pre-command-hooks-retired',
+    'servertool pre-command hooks are physically retired from runtime, NAPI exports, and TS native wrappers'
   );
 }
 
@@ -5344,8 +4992,6 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export function prepareServertoolDispatchStage(',
     'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
-    'resolveServertoolRuntimePreCommandState',
-    'applyPreCommandHooksToToolCalls',
     'planServertoolToolCallDispatchWithNative'
   ]) {
     if (!dispatchPreparationShell.includes(marker)) {

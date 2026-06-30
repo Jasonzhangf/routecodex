@@ -11,6 +11,7 @@ import type {
   RoutingDecision,
   RoutingDiagnostics,
   RoutingStatusSnapshot,
+  VirtualRouterDryRunDiagnostics,
   StopMessageStateSnapshot,
   PreCommandStateSnapshot,
   TargetMetadata,
@@ -67,6 +68,10 @@ export type VirtualRouterRuntime = {
   handleProviderError(event: ProviderErrorEvent): void;
   handleProviderSuccess(event: ProviderSuccessEvent): void;
   getStatus(): RoutingStatusSnapshot;
+  diagnoseRoute(
+    request: StandardizedRequest | ProcessedRequest | Record<string, unknown>,
+    metadata: RouterMetadataInput | Record<string, unknown>
+  ): VirtualRouterDryRunDiagnostics;
   resetProviderQuota(providerKey: string): void;
   recoverProviderQuota(providerKey: string): void;
   disableProviderQuota(providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number): void;
@@ -167,6 +172,18 @@ export class VirtualRouterEngine implements VirtualRouterRuntime {
 
   getStatus(): RoutingStatusSnapshot {
     return JSON.parse(this.nativeProxy.getStatus()) as RoutingStatusSnapshot;
+  }
+
+  diagnoseRoute(
+    request: StandardizedRequest | ProcessedRequest | Record<string, unknown>,
+    metadata: RouterMetadataInput | Record<string, unknown> = {}
+  ): VirtualRouterDryRunDiagnostics {
+    if (typeof this.nativeProxy.diagnoseRoute !== 'function') {
+      throw new Error('VirtualRouterEngineProxy.diagnoseRoute is not available');
+    }
+    const nativeMetadata = injectVirtualRouterRuntimeMetadata(metadata);
+    const raw = this.nativeProxy.diagnoseRoute(JSON.stringify(request), JSON.stringify(nativeMetadata));
+    return JSON.parse(raw) as VirtualRouterDryRunDiagnostics;
   }
 
   resetProviderQuota(providerKey: string): void {

@@ -32,15 +32,6 @@ use crate::virtual_router_engine::routing_state_store::{
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
-fn read_router_direct_inbound_protocol(metadata: &Value) -> Option<String> {
-    metadata
-        .get("routerDirectInboundProtocol")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
-}
-
 fn parse_retry_provider_key_target(raw: &str) -> Option<InstructionTarget> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -473,7 +464,6 @@ impl VirtualRouterEngineCore {
         }
 
         let bound_alias_prefix: Option<String> = None;
-        let router_direct_inbound_protocol = read_router_direct_inbound_protocol(metadata);
 
         let direct_model =
             parse_direct_provider_model(request_working.get("model"), &self.provider_registry);
@@ -513,15 +503,7 @@ impl VirtualRouterEngineCore {
                 let mut eligible: Vec<String> = Vec::new();
                 for key in candidate_keys {
                     if let Some(profile) = self.provider_registry.get(&key) {
-                        if profile.model_id.as_deref() == Some(&canonical_model_id)
-                            && router_direct_inbound_protocol
-                                .as_deref()
-                                .map(|protocol| {
-                                    self.provider_registry
-                                        .provider_protocol_matches(&key, protocol)
-                                })
-                                .unwrap_or(true)
-                        {
+                        if profile.model_id.as_deref() == Some(&canonical_model_id) {
                             eligible.push(key);
                         }
                     }
@@ -670,14 +652,17 @@ impl VirtualRouterEngineCore {
             }
         }
         let route_changed = selection.route_used != requested_route;
+        let reasoning =
+            append_reasoning_tag(&classification.reasoning, selection.reasoning_tag.clone());
         let decision = json!({
             "routeName": selection.route_used,
             "providerKey": selection.provider_key,
             "pool": selection.pool,
             "routePool": selection.route_pool,
             "poolId": selection.pool_id,
+            "defaultFloorProtected": selection.default_floor_protected,
             "confidence": classification.confidence,
-            "reasoning": classification.reasoning,
+            "reasoning": reasoning,
             "routeChanged": route_changed
         });
         let diagnostics = json!({
@@ -686,7 +671,8 @@ impl VirtualRouterEngineCore {
             "pool": selection.pool,
             "routePool": selection.route_pool,
             "poolId": selection.pool_id,
-            "reasoning": classification.reasoning,
+            "defaultFloorProtected": selection.default_floor_protected,
+            "reasoning": reasoning,
             "routeChanged": route_changed,
             "confidence": classification.confidence,
             "unavailableRoutePools": selection.unavailable_providers
@@ -786,6 +772,50 @@ mod tests {
         core
     }
 
+    fn build_context_spillover_route_test_core() -> VirtualRouterEngineCore {
+        let mut core = VirtualRouterEngineCore::new();
+        let config = json!({
+            "routing": {
+                "search": [{
+                    "id": "search-small-pool",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["spark.small"]
+                }],
+                "longcontext": [{
+                    "id": "longcontext-large-pool",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["mini.large"]
+                }],
+                "default": [{
+                    "id": "default-small-pool",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["spark.small"]
+                }]
+            },
+            "providers": {
+                "spark.small": {
+                    "providerKey": "spark.small",
+                    "providerType": "responses",
+                    "modelId": "gpt-5.3-codex-spark",
+                    "enabled": true,
+                    "maxContextTokens": 128
+                },
+                "mini.large": {
+                    "providerKey": "mini.large",
+                    "providerType": "responses",
+                    "modelId": "gpt-5.4-mini",
+                    "enabled": true,
+                    "maxContextTokens": 900000
+                }
+            }
+        });
+        core.initialize(&config).expect("init should succeed");
+        core
+    }
+
     #[test]
     fn route_selects_provider_for_default_route() {
         let mut core = build_route_test_core();
@@ -821,6 +851,39 @@ mod tests {
                 || provider_key.unwrap() == "anthropic.key1.claude-sonnet",
             "providerKey should be a configured provider, got: {}",
             provider_key.unwrap()
+        );
+    }
+
+    #[test]
+    fn route_reasoning_marks_context_spillover_to_longcontext() {
+        let mut core = build_context_spillover_route_test_core();
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "x ".repeat(5000) }
+            ]
+        });
+        let metadata = json!({
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-context-spillover-reason",
+                "routeHint": "search"
+            }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("route should spill over to longcontext");
+        let decision = result.get("decision").expect("should have decision");
+        assert_eq!(decision["routeName"].as_str(), Some("longcontext"));
+        assert_eq!(decision["providerKey"].as_str(), Some("mini.large"));
+        let reasoning = decision["reasoning"].as_str().unwrap_or_default();
+        assert!(
+            reasoning.contains("context:overflow-spillover"),
+            "route decision must expose context spillover reason, got reasoning={reasoning}"
         );
     }
 
@@ -946,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    fn router_direct_direct_model_rejects_cross_protocol_target() {
+    fn router_direct_direct_model_keeps_cross_protocol_target_for_relay_boundary() {
         let mut core = VirtualRouterEngineCore::new();
         let config = json!({
             "routing": {
@@ -981,16 +1044,19 @@ mod tests {
             }
         });
 
-        let error = core
+        let result = core
             .route(
                 unsafe { Env::from_raw(std::ptr::null_mut()) },
                 &request,
                 &metadata,
             )
-            .expect_err("router-direct direct_model must not select cross-protocol target");
+            .expect("router-direct direct_model protocol mismatch belongs to server direct/relay boundary");
 
-        assert!(error.contains("PROVIDER_NOT_AVAILABLE"));
-        assert!(error.contains("All providers unavailable for model mini27.MiniMax-M2.7"));
+        let decision = result.get("decision").expect("should have decision");
+        assert_eq!(
+            decision["providerKey"].as_str(),
+            Some("mini27.key1.MiniMax-M2.7")
+        );
     }
 
     #[test]

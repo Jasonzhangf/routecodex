@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use serde_json::{Map, Value};
 
 use crate::hub_reasoning_tool_normalizer::{
@@ -51,7 +53,14 @@ fn response_created_for_chat(response: &Map<String, Value>) -> Value {
         .get("created")
         .or_else(|| response.get("created_at"))
         .cloned()
-        .unwrap_or(Value::Null)
+        .unwrap_or_else(|| {
+            Value::Number(serde_json::Number::from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| duration.as_secs() as i64)
+                    .unwrap_or(0),
+            ))
+        })
 }
 
 fn response_finish_reason_for_chat(response: &Map<String, Value>, has_tool_calls: bool) -> Value {
@@ -301,6 +310,21 @@ pub(crate) fn normalize_openai_chat_reasoning_outbound(candidate: &Value) -> Opt
     let mut row = sanitize_chat_completion_like(&chat_candidate)?
         .as_object()?
         .clone();
+    if !row
+        .get("created")
+        .and_then(Value::as_i64)
+        .is_some_and(|created| created > 0)
+    {
+        row.insert(
+            "created".to_string(),
+            Value::Number(serde_json::Number::from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| duration.as_secs() as i64)
+                    .unwrap_or(0),
+            )),
+        );
+    }
     if let Some(choices) = row.get_mut("choices").and_then(Value::as_array_mut) {
         for choice in choices.iter_mut() {
             let Some(choice_row) = choice.as_object_mut() else {

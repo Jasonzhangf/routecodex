@@ -4,7 +4,6 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineResult
 } from './types.js';
-import { persistPendingServerToolInjection } from './pending-injection-block.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import { buildServertoolPostflightObservationSummaryWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
@@ -91,21 +90,6 @@ export async function runServertoolEnginePostflight(args: {
       engineResult
     });
     args.stageRecorder.record('servertool.execution', summary);
-  }
-
-  if (runtimeAction.action === 'persist_pending_injection_and_return' && engineResult.pendingInjection) {
-    await persistPendingServerToolInjection({
-      pendingInjection: engineResult.pendingInjection,
-      requestId: options.requestId,
-      flowId,
-      adapterContext: options.adapterContext
-    });
-    args.logProgress(5, totalSteps, 'completed (mixed tools; no reenter)', { flowId });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution?.flowId
-    };
   }
 
   if (runtimeAction.action === 'return_servertool_cli_projection_final') {

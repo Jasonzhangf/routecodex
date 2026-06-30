@@ -479,7 +479,7 @@ pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
                         "STOPLESS_CLI_RESULT_MALFORMED: schemaFeedback.reasonCode={reason_code} 没有注册的修复引导；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
                     ));
                 }
-            } else if !is_legal_minimal_no_schema_stopless_output(&row) {
+            } else if !is_legal_minimal_stopless_output(&row) {
                 parts.push(
                     "STOPLESS_CLI_RESULT_MALFORMED: 缺少 schemaGuidance，且 schemaFeedback.reasonCode/missingFields 不完整；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
                         .to_string(),
@@ -493,7 +493,7 @@ pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
     trimmed.to_string()
 }
 
-fn is_legal_minimal_no_schema_stopless_output(row: &Map<String, Value>) -> bool {
+fn is_legal_minimal_stopless_output(row: &Map<String, Value>) -> bool {
     let trigger_hint = row
         .get("input")
         .or_else(|| row.get("input_json"))
@@ -504,7 +504,10 @@ fn is_legal_minimal_no_schema_stopless_output(row: &Map<String, Value>) -> bool 
         })
         .or_else(|| read_trimmed_string(row.get("triggerHint")))
         .or_else(|| read_trimmed_string(row.get("trigger_hint")));
-    trigger_hint.as_deref() == Some("no_schema")
+    matches!(
+        trigger_hint.as_deref(),
+        Some("no_schema" | "non_terminal_schema")
+    )
 }
 
 fn read_stopless_schema_feedback_context(
@@ -3052,6 +3055,39 @@ mod tests {
         assert!(
             !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
             "minimal no_schema CLI output is legal and must not be treated as malformed: {text}"
+        );
+    }
+
+    #[test]
+    fn stop_hook_guidance_text_accepts_minimal_non_terminal_schema_cli_output() {
+        let text = build_stop_hook_guidance_text_from_output(
+            &json!({
+                "ok": true,
+                "kind": "stop_message_auto",
+                "tool": "stop_message_auto",
+                "summary": "停止检查需要继续",
+                "toolName": "stop_message_auto",
+                "flowId": "stop_message_flow",
+                "routeHint": "thinking",
+                "continuationPrompt": "继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。",
+                "repeatCount": 1,
+                "maxRepeats": 3,
+                "sessionId": "stopless-live-1782780421308",
+                "requestId": "openai-responses-XLC.key1-glm-5.2-20260630T084701341-424854-5137",
+                "input": {
+                    "flowId": "stop_message_flow",
+                    "maxRepeats": 3,
+                    "repeatCount": 1,
+                    "triggerHint": "non_terminal_schema"
+                }
+            })
+            .to_string(),
+        );
+        assert!(text.contains("上一轮执行结果：repeatCount=1/3。"));
+        assert!(text.contains("继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。"));
+        assert!(
+            !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
+            "minimal non_terminal_schema CLI output is legal and must not be treated as malformed: {text}"
         );
     }
 

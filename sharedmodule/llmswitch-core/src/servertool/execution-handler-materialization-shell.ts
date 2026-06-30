@@ -136,22 +136,6 @@ export function materializeNativeToolCallExecutionOutcome(args: {
     pendingInjectionMessagesResolved: outcomePlan.pendingInjectionMessagesResolved
   });
 
-  if (outcomeRuntimeActionPlan.action === 'return_mixed_client_tools_pending_injection') {
-    const clientResponse = args.base;
-    args.filterOutExecutedToolCalls(clientResponse, args.executionState.executedIds);
-    args.stripToolOutputs(clientResponse);
-    return {
-      mode: 'tool_flow',
-      finalChatResponse: clientResponse,
-      execution: { flowId: outcomeRuntimeActionPlan.executionFlowId },
-      ...(outcomeRuntimeActionPlan.pendingInjection
-        ? {
-            pendingInjection: outcomeRuntimeActionPlan.pendingInjection as ServerSideToolEngineResult['pendingInjection']
-          }
-        : {})
-    };
-  }
-
   if (outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome') {
     throw createServertoolProviderProtocolErrorFromPlan(
       planServertoolExecutionDispatchErrorWithNative({

@@ -42,14 +42,19 @@ fn resolve_continuation_sticky_scope_key(metadata_center_snapshot: &Value) -> Op
     }
 }
 
-fn read_provider_protocol(metadata_center_snapshot: &Value) -> Option<String> {
-    metadata_center_snapshot
-        .get("runtimeControl")
-        .and_then(|v| v.as_object())
-        .and_then(|rt| rt.get("providerProtocol"))
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+fn read_provider_protocol_for_routing_state(metadata_center_snapshot: &Value) -> Option<String> {
+    read_trimmed_string(metadata_center_snapshot.get("providerProtocol")).or_else(|| {
+        metadata_center_snapshot
+            .get("runtimeControl")
+            .and_then(|v| v.as_object())
+            .or_else(|| {
+                metadata_center_snapshot
+                    .get("runtime_control")
+                    .and_then(|v| v.as_object())
+            })
+            .and_then(|rt| rt.get("providerProtocol"))
+            .and_then(|value| read_trimmed_string(Some(value)))
+    })
 }
 
 pub(crate) fn is_continuation_request(metadata_center_snapshot: &Value) -> bool {
@@ -67,7 +72,9 @@ pub(crate) fn resolve_routing_state_key(metadata_center_snapshot: &Value) -> Str
         return sticky_scope_key;
     }
 
-    if read_provider_protocol(metadata_center_snapshot).as_deref() == Some("openai-responses") {
+    if read_provider_protocol_for_routing_state(metadata_center_snapshot).as_deref()
+        == Some("openai-responses")
+    {
         if let Some(request_id) = read_trimmed_string(metadata_center_snapshot.get("requestId")) {
             return request_id;
         }

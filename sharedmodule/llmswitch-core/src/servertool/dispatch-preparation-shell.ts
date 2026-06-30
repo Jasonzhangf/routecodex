@@ -4,13 +4,8 @@ import {
   planServertoolToolCallDispatchWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  applyPreCommandHooksToToolCalls,
-} from './pre-command-hooks.js';
-import {
   buildServertoolDispatchPlanInput
 } from './execution-queue-shell.js';
-import { resolveServertoolRuntimePreCommandState } from './pre-command-runtime-state-shell.js';
-import { patchToolCallArgumentsById } from './orchestration-blocks.js';
 import {
   readProviderProtocolFromAnyBoundMetadataCenter,
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
@@ -34,20 +29,6 @@ export function prepareServertoolDispatchStage(args: {
   const runtimeMetadata = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
     args.options.adapterContext as Record<string, unknown>
   );
-  const runtimePreCommandState = resolveServertoolRuntimePreCommandState({
-    adapterContext: args.options.adapterContext,
-    requestId: args.options.requestId,
-    entryEndpoint: args.options.entryEndpoint,
-    providerProtocol
-  });
-
-  applyPreCommandHooksToToolCalls({
-    options: args.options,
-    toolCalls: args.toolCalls,
-    runtimePreCommandState,
-    bases: [args.baseObject, args.baseForExecution],
-    patchToolCallArgumentsById
-  });
 
   return {
     dispatchPlan: planServertoolToolCallDispatchWithNative(

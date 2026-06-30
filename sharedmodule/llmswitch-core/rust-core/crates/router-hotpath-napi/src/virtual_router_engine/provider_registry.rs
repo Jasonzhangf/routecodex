@@ -74,17 +74,6 @@ impl ProviderRegistry {
             .unwrap_or(false)
     }
 
-    pub(crate) fn provider_protocol_matches(&self, provider_key: &str, protocol: &str) -> bool {
-        let expected = protocol.trim();
-        if expected.is_empty() {
-            return true;
-        }
-        self.providers
-            .get(provider_key)
-            .map(|profile| profile.provider_protocol == expected)
-            .unwrap_or(false)
-    }
-
     pub(crate) fn resolve_runtime_key_by_index(
         &self,
         provider_id: &str,
@@ -381,22 +370,6 @@ mod tests {
         });
         registry.load(providers.as_object().unwrap());
         assert!(!registry.has_capability("sdfv.key1.gpt-5.4", "multimodal"));
-    }
-
-    #[test]
-    fn provider_protocol_field_overrides_provider_type_protocol_inference() {
-        let mut registry = ProviderRegistry::default();
-        let providers = json!({
-            "responses.key1.gpt-5": {
-                "providerKey": "responses.key1.gpt-5",
-                "providerType": "openai",
-                "providerProtocol": "openai-responses",
-                "modelId": "gpt-5"
-            }
-        });
-        registry.load(providers.as_object().unwrap());
-        assert!(registry.provider_protocol_matches("responses.key1.gpt-5", "openai-responses"));
-        assert!(!registry.provider_protocol_matches("responses.key1.gpt-5", "openai-chat"));
     }
 
     #[test]

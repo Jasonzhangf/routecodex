@@ -32,7 +32,6 @@ pub struct ServertoolExecutionOutcomeRuntimeActionInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ServertoolExecutionOutcomeRuntimeAction {
-    ReturnMixedClientToolsPendingInjection,
     InvalidMixedClientToolsOutcome,
     ReuseLastExecutionFollowup,
     UseResolvedFollowup,
@@ -48,8 +47,6 @@ pub struct ServertoolExecutionOutcomeRuntimeActionPlan {
     pub selected_followup: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selected_execution_envelope: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pending_injection: Option<Value>,
     pub execution_flow_id: String,
 }
 
@@ -70,32 +67,11 @@ pub fn plan_servertool_execution_outcome_runtime_action(
         .to_string();
 
     if input.outcome_mode.trim() == "mixed_client_tools" {
-        let pending_injection = input
-            .pending_session_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .filter(|_| !input.pending_injection_messages_resolved.is_empty())
-            .map(|session_id| {
-                serde_json::json!({
-                    "sessionId": session_id,
-                    "aliasSessionIds": input.alias_session_ids,
-                    "afterToolCallIds": input.remaining_tool_call_ids,
-                    "messages": input.pending_injection_messages_resolved,
-                })
-            });
         return ServertoolExecutionOutcomeRuntimeActionPlan {
-            action: if input.requires_pending_injection
-                && input.followup_strategy.trim() == "pending_injection"
-            {
-                ServertoolExecutionOutcomeRuntimeAction::ReturnMixedClientToolsPendingInjection
-            } else {
-                ServertoolExecutionOutcomeRuntimeAction::InvalidMixedClientToolsOutcome
-            },
+            action: ServertoolExecutionOutcomeRuntimeAction::InvalidMixedClientToolsOutcome,
             reuse_last_execution_envelope: false,
             selected_followup: None,
             selected_execution_envelope: None,
-            pending_injection,
             execution_flow_id,
         };
     }
@@ -121,7 +97,6 @@ pub fn plan_servertool_execution_outcome_runtime_action(
             } else {
                 None
             },
-            pending_injection: None,
             execution_flow_id,
         };
     }
@@ -132,7 +107,6 @@ pub fn plan_servertool_execution_outcome_runtime_action(
             reuse_last_execution_envelope: false,
             selected_followup: input.resolved_followup,
             selected_execution_envelope: None,
-            pending_injection: None,
             execution_flow_id,
         };
     }
@@ -142,7 +116,6 @@ pub fn plan_servertool_execution_outcome_runtime_action(
         reuse_last_execution_envelope: false,
         selected_followup: None,
         selected_execution_envelope: None,
-        pending_injection: None,
         execution_flow_id,
     }
 }
@@ -152,7 +125,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn returns_mixed_pending_injection_when_contract_is_valid() {
+    fn rejects_mixed_pending_injection_after_feature_removal() {
         let plan = plan_servertool_execution_outcome_runtime_action(
             ServertoolExecutionOutcomeRuntimeActionInput {
                 outcome_mode: "mixed_client_tools".to_string(),
@@ -176,19 +149,10 @@ mod tests {
         );
         assert_eq!(
             plan.action,
-            ServertoolExecutionOutcomeRuntimeAction::ReturnMixedClientToolsPendingInjection
+            ServertoolExecutionOutcomeRuntimeAction::InvalidMixedClientToolsOutcome
         );
         assert!(!plan.reuse_last_execution_envelope);
         assert_eq!(plan.execution_flow_id, "mixed_flow");
-        assert_eq!(
-            plan.pending_injection,
-            Some(serde_json::json!({
-                "sessionId": "sess_1",
-                "aliasSessionIds": ["alias_1"],
-                "afterToolCallIds": ["call_2"],
-                "messages": [{ "role": "assistant" }]
-            }))
-        );
     }
 
     #[test]

@@ -5,7 +5,6 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 const TOOL_NAME = 'failfast_test_tool';
 let failfastInvocationCount = 0;
 const loadRoutingInstructionStateSyncMock = jest.fn();
-const applyPreCommandHooksToToolCallsMock = jest.fn(() => {});
 const planServertoolResponseStageGateWithNativeMock = jest.fn(() => ({
   shouldBypass: false,
   nextAction: 'run_auto_hooks'
@@ -62,22 +61,6 @@ const planServertoolEntryPreflightWithNativeMock = jest.fn((input: any) => {
   }
   return { action: 'continue_to_tool_flow' };
 });
-const planRuntimePreCommandStateRuntimeActionWithNativeMock = jest.fn((input: any) => {
-  const runtimeControl = input?.runtimeControlPreCommandState;
-  if (runtimeControl && typeof runtimeControl === 'object' && !Array.isArray(runtimeControl)) {
-    return {
-      action: 'use_selected',
-      source: 'runtime_control',
-      state: runtimeControl
-    };
-  }
-  return {
-    action: 'use_selected',
-    source: 'none',
-    state: undefined
-  };
-});
-
 function readDisconnectedFlag(adapterContext: any): boolean {
   const direct = adapterContext?.clientDisconnected;
   const nested = adapterContext?.clientConnectionState?.disconnected;
@@ -179,6 +162,15 @@ jest.unstable_mockModule(
     })),
     normalizeStopGatewayContextWithNative: jest.fn((value: any) => value),
     normalizeStopMessageCompareContextWithNative: jest.fn((value: any) => value),
+    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
+    parseServertoolCliProjectionToolArgumentsWithNative: jest.fn((input: any) => {
+      const raw = String(input?.arguments ?? '').trim();
+      const parsed = raw ? JSON.parse(raw) : {};
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('parseServertoolCliProjectionToolArgumentsJson native returned invalid payload');
+      }
+      return parsed;
+    }),
     planServertoolEntryContextWithNative: jest.fn((input: any) => ({
       includeToolCallNames: input?.includeToolCallHandlerNames,
       excludeToolCallNames: input?.excludeToolCallHandlerNames,
@@ -252,12 +244,6 @@ jest.unstable_mockModule(
       message: 'fetch failed: network error',
       details: {}
     })),
-    planPreCommandHooksConfigWithNative: jest.fn(() => ({
-      enabled: false,
-      hooks: []
-    })),
-    planRuntimePreCommandRuleWithNative: jest.fn(() => null),
-    planRuntimePreCommandStateRuntimeActionWithNative: planRuntimePreCommandStateRuntimeActionWithNativeMock,
     planServertoolMaterializationProgressWithNative: jest.fn((input: any) => {
       if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
         return { action: 'unsupported_backend_plan_kind' };
@@ -802,13 +788,6 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.js',
-  () => ({
-    applyPreCommandHooksToToolCalls: applyPreCommandHooksToToolCallsMock,
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js',
   () => ({
     buildServertoolDispatchPlanInput: jest.fn((input: any) => input),
@@ -994,7 +973,6 @@ describe('server-side-tools tool-error closed loop', () => {
   beforeEach(() => {
     failfastInvocationCount = 0;
     loadRoutingInstructionStateSyncMock.mockReset();
-    applyPreCommandHooksToToolCallsMock.mockReset();
     planServertoolResponseStageGateWithNativeMock.mockReset();
     planServertoolResponseStageGateWithNativeMock.mockReturnValue({
       shouldBypass: false,
@@ -1030,7 +1008,6 @@ describe('server-side-tools tool-error closed loop', () => {
     });
     planServertoolExecutionBranchWithNativeMock.mockClear();
     planServertoolEntryPreflightWithNativeMock.mockClear();
-    planRuntimePreCommandStateRuntimeActionWithNativeMock.mockClear();
   });
 
   test('fails fast through native client-disconnect policy before servertool execution', async () => {
@@ -1138,67 +1115,6 @@ describe('server-side-tools tool-error closed loop', () => {
       ],
       executedToolCallsLen: 1
     });
-  });
-
-  test('uses metadata center runtime_control preCommandState without loading persisted routing state', async () => {
-    const adapterContext: AdapterContext = bindTestMetadataCenter({
-      requestId: 'req-servertool-precommand-direct-1',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses',
-      runtimeControl: {
-        preCommandState: {
-          preCommandScriptPath: '/tmp/control-pre-command.sh'
-        }
-      }
-    } as any);
-
-    await runServerSideToolEngine({
-      chatResponse: makeToolCallResponse(),
-      adapterContext,
-      entryEndpoint: '/v1/responses',
-      requestId: 'req-servertool-precommand-direct-1',
-      providerProtocol: 'openai-responses'
-    });
-
-    expect(loadRoutingInstructionStateSyncMock).not.toHaveBeenCalled();
-    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenCalledWith({
-      runtimeControlPreCommandState: {
-        preCommandScriptPath: '/tmp/control-pre-command.sh'
-      }
-    });
-    expect(applyPreCommandHooksToToolCallsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimePreCommandState: {
-          preCommandScriptPath: '/tmp/control-pre-command.sh'
-        }
-      })
-    );
-  });
-
-  test('does not load persisted routing state when native pre-command selection sees no scope key', async () => {
-    const adapterContext: AdapterContext = bindTestMetadataCenter({
-      requestId: 'req-servertool-precommand-no-scope-1',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    } as any);
-
-    await runServerSideToolEngine({
-      chatResponse: makeToolCallResponse(),
-      adapterContext,
-      entryEndpoint: '/v1/responses',
-      requestId: 'req-servertool-precommand-no-scope-1',
-      providerProtocol: 'openai-responses'
-    });
-
-    expect(loadRoutingInstructionStateSyncMock).not.toHaveBeenCalled();
-    expect(planRuntimePreCommandStateRuntimeActionWithNativeMock).toHaveBeenCalledWith({
-      runtimeControlPreCommandState: undefined
-    });
-    expect(applyPreCommandHooksToToolCallsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimePreCommandState: undefined
-      })
-    );
   });
 
   test('does not pass legacy servertool support capability details into the native response-stage gate', async () => {

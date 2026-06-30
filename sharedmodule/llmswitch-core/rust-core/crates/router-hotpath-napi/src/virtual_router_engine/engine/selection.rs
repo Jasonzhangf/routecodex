@@ -25,6 +25,7 @@ use crate::virtual_router_engine::time_utils::now_ms;
 
 const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
 const ROUTE_POOL_COOLDOWN_WAIT_MAX_MS: i64 = 3 * 60 * 1000;
+const CONTEXT_SPILLOVER_REASONING_TAG: &str = "context:overflow-spillover";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,8 +104,16 @@ pub(crate) fn evaluate_singleton_route_pool_exhaustion(
 
 fn read_requested_route_policy_group(metadata: &Value) -> Option<String> {
     metadata
-        .get("routecodexRoutingPolicyGroup")
-        .and_then(|v| v.as_str())
+        .get("runtimeControl")
+        .and_then(|v| v.as_object())
+        .or_else(|| {
+            metadata
+                .get("runtime_control")
+                .and_then(|v| v.as_object())
+        })
+        .and_then(|rt| rt.get("routecodexRoutingPolicyGroup"))
+        .and_then(|value| value.as_str())
+        .or_else(|| metadata.get("routecodexRoutingPolicyGroup").and_then(|v| v.as_str()))
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())
@@ -127,15 +136,6 @@ fn read_forwarder_sticky_session_id(metadata: &Value) -> Option<String> {
         }
     }
     None
-}
-
-fn read_router_direct_inbound_protocol(metadata: &Value) -> Option<String> {
-    metadata
-        .get("routerDirectInboundProtocol")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
 }
 
 fn pool_matches_route_policy_group(
@@ -306,28 +306,6 @@ fn build_default_floor_candidates_ignoring_exclusions(
     )
 }
 
-fn filter_router_direct_protocol(
-    provider_registry: &ProviderRegistry,
-    candidates: Vec<String>,
-    router_direct_inbound_protocol: Option<&str>,
-) -> Vec<String> {
-    let Some(protocol) = router_direct_inbound_protocol
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return candidates;
-    };
-    let compatible: Vec<String> = candidates
-        .iter()
-        .filter(|key| provider_registry.provider_protocol_matches(key, protocol))
-        .cloned()
-        .collect();
-    if compatible.is_empty() {
-        return candidates;
-    }
-    compatible
-}
-
 impl VirtualRouterEngineCore {
     /// Apply standard candidate filters: routing state, excluded keys, and provider availability.
     /// This is the single filter chain used by all selection paths (forced, prefer, pool).
@@ -386,21 +364,15 @@ impl VirtualRouterEngineCore {
             .collect();
         let server_tool_required = metadata_requires_servertool(metadata);
         let forwarder_sticky_session_id = read_forwarder_sticky_session_id(metadata);
-        let router_direct_inbound_protocol = read_router_direct_inbound_protocol(metadata);
 
         if let Some(target) = &routing_state.forced_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let mut available = self.apply_standard_filters(
+                let available = self.apply_standard_filters(
                     env,
                     &resolved.keys,
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
-                );
-                available = filter_router_direct_protocol(
-                    &self.provider_registry,
-                    available,
-                    router_direct_inbound_protocol.as_deref(),
                 );
                 if let Some(forced_key) = available.into_iter().next() {
                     return Ok(SelectionResult::new(
@@ -414,12 +386,21 @@ impl VirtualRouterEngineCore {
             }
         }
 
-        let route_queue = build_route_queue(
+        let mut route_queue = build_route_queue(
             requested_route,
             &classification.candidates,
             features,
             &self.routing,
         );
+        let has_longcontext_route = route_has_targets(&self.routing, "longcontext");
+        if has_longcontext_route && !route_queue.iter().any(|route| route == "longcontext") {
+            if let Some(default_index) = route_queue.iter().position(|route| route == DEFAULT_ROUTE)
+            {
+                route_queue.insert(default_index, "longcontext".to_string());
+            } else {
+                route_queue.push("longcontext".to_string());
+            }
+        }
         if let Some(target) = &routing_state.prefer_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
                 let mut ordered_candidates: Vec<String> = Vec::new();
@@ -444,17 +425,12 @@ impl VirtualRouterEngineCore {
                         score_prefer_candidate(right, target, &self.provider_registry);
                     right_score.cmp(&left_score)
                 });
-                let mut available = self.apply_standard_filters(
+                let available = self.apply_standard_filters(
                     env,
                     &ordered_candidates,
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
-                );
-                available = filter_router_direct_protocol(
-                    &self.provider_registry,
-                    available,
-                    router_direct_inbound_protocol.as_deref(),
                 );
                 if !available.is_empty() {
                     let route_key_for_lb = format!(
@@ -502,11 +478,16 @@ impl VirtualRouterEngineCore {
                 .candidates
                 .iter()
                 .any(|candidate| candidate == "longcontext");
+        let mut context_spillover_active = longcontext_candidate_active;
+        let mut context_spillover_reasoning_tag: Option<String> = None;
         let mut unavailable_route_pools: Vec<Value> = Vec::new();
         let mut all_candidate_keys: Vec<String> = Vec::new();
         let mut default_floor_selection: Option<SelectionResult> = None;
 
         for route_name in route_queue {
+            if route_name == "longcontext" && !context_spillover_active {
+                continue;
+            }
             let mut pools = if requires_remote_video {
                 self.routing.get("video")
             } else if web_search_route_requested
@@ -611,7 +592,6 @@ impl VirtualRouterEngineCore {
                         key,
                         &excluded_keys,
                         forwarder_sticky_session_id.as_deref(),
-                        router_direct_inbound_protocol.as_deref(),
                         &mut unavailable_route_pools,
                         &route_name,
                         &pool.id,
@@ -655,29 +635,21 @@ impl VirtualRouterEngineCore {
                     &excluded_keys,
                     server_tool_required,
                 );
-                available = filter_router_direct_protocol(
-                    &self.provider_registry,
-                    available,
-                    router_direct_inbound_protocol.as_deref(),
-                );
+                let mut default_floor_protected = false;
                 if route_name == DEFAULT_ROUTE
                     && available.is_empty()
                     && floor_candidates.len() == 1
                 {
-                    let mut default_floor_available = self.apply_standard_filters(
+                    let default_floor_available = self.apply_standard_filters(
                         env,
                         &floor_candidates,
                         routing_state,
                         &HashSet::new(),
                         server_tool_required,
                     );
-                    default_floor_available = filter_router_direct_protocol(
-                        &self.provider_registry,
-                        default_floor_available,
-                        router_direct_inbound_protocol.as_deref(),
-                    );
                     if !default_floor_available.is_empty() {
                         available = default_floor_available;
+                        default_floor_protected = true;
                     }
                 }
                 if let Some(prefix) = bound_alias_prefix {
@@ -692,14 +664,26 @@ impl VirtualRouterEngineCore {
                 }
                 let tier_load_balancing =
                     resolve_tier_load_balancing(&pool, self.load_balancer.policy());
-                if longcontext_candidate_active {
-                    let (safe_context, risky_context, overflow_context) =
-                        classify_context_candidates(
-                            &self.provider_registry,
-                            &available,
-                            features.estimated_tokens,
-                            self.context_warn_ratio,
-                        );
+                let (safe_context, risky_context, overflow_context) = classify_context_candidates(
+                    &self.provider_registry,
+                    &available,
+                    features.estimated_tokens,
+                    self.context_warn_ratio,
+                );
+                let route_has_only_context_overflow = !available.is_empty()
+                    && safe_context.is_empty()
+                    && risky_context.is_empty()
+                    && !overflow_context.is_empty();
+                if route_name != "longcontext"
+                    && route_has_only_context_overflow
+                    && has_longcontext_route
+                {
+                    context_spillover_active = true;
+                    context_spillover_reasoning_tag =
+                        Some(CONTEXT_SPILLOVER_REASONING_TAG.to_string());
+                    continue;
+                }
+                if route_name == "longcontext" || longcontext_candidate_active {
                     if tier_load_balancing.strategy == "priority" {
                         let priority_candidates = preserve_priority_context_candidates(
                             &available,
@@ -812,6 +796,12 @@ impl VirtualRouterEngineCore {
                         Some(pool.id.clone()),
                     )
                     .with_route_params(pool.route_params.clone())
+                    .with_default_floor_protected(default_floor_protected)
+                    .with_reasoning_tag(
+                        (route_name == "longcontext")
+                            .then(|| context_spillover_reasoning_tag.clone())
+                            .flatten(),
+                    )
                     .with_unavailable_providers(
                         (!unavailable_route_pools.is_empty())
                             .then_some(Value::Array(unavailable_route_pools)),
@@ -857,7 +847,6 @@ impl VirtualRouterEngineCore {
         key: &str,
         excluded_keys: &HashSet<String>,
         forwarder_sticky_session_id: Option<&str>,
-        router_direct_inbound_protocol: Option<&str>,
         unavailable_route_pools: &mut Vec<Value>,
         route_name: &str,
         pool_id: &str,
@@ -876,30 +865,15 @@ impl VirtualRouterEngineCore {
             .unwrap_or_default();
         let mut available_real_keys: std::collections::HashSet<String> =
             std::collections::HashSet::new();
-        let mut protocol_compatible_real_keys: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
         for target in &cloned_targets {
             let available = !target.disabled
                 && !excluded_keys.contains(&target.provider_key)
                 && self.is_provider_available(env, &target.provider_key);
             if available {
                 available_real_keys.insert(target.provider_key.clone());
-                if router_direct_inbound_protocol
-                    .map(|protocol| {
-                        self.provider_registry
-                            .provider_protocol_matches(&target.provider_key, protocol)
-                    })
-                    .unwrap_or(true)
-                {
-                    protocol_compatible_real_keys.insert(target.provider_key.clone());
-                }
             }
         }
-        let selectable_real_keys = if protocol_compatible_real_keys.is_empty() {
-            &available_real_keys
-        } else {
-            &protocol_compatible_real_keys
-        };
+        let selectable_real_keys = available_real_keys;
 
         let selected = self.forwarder_registry.select(
             key,
@@ -1265,6 +1239,38 @@ pub(crate) fn build_provider_not_available_error(
             if let Some(route_pools) = unavailable_route_pool_value {
                 map.insert("unavailableRoutePools".to_string(), route_pools);
             }
+            if let Some(route_name) = primary_exhausted_route_name {
+                map.insert(
+                    "primaryExhaustedRouteName".to_string(),
+                    Value::String(route_name),
+                );
+            }
+            if !primary_exhausted_targets.is_empty() {
+                map.insert(
+                    "primaryExhaustedTargets".to_string(),
+                    Value::Array(
+                        primary_exhausted_targets
+                            .into_iter()
+                            .map(Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+        }
+        return format_virtual_router_error_with_details(
+            "PROVIDER_NOT_AVAILABLE",
+            message,
+            &details,
+        );
+    }
+
+    if let Some(route_pools) = unavailable_route_pool_value {
+        let mut details = json!({
+            "candidateProviderCount": candidate_keys.len(),
+            "candidateProviderKeys": candidate_keys,
+            "unavailableRoutePools": route_pools
+        });
+        if let Value::Object(ref mut map) = details {
             if let Some(route_name) = primary_exhausted_route_name {
                 map.insert(
                     "primaryExhaustedRouteName".to_string(),
@@ -2382,7 +2388,180 @@ mod tests {
     }
 
     #[test]
-    fn router_direct_filters_route_pool_to_inbound_protocol() {
+    fn provider_protocol_metadata_does_not_reorder_retry_candidates() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "XLC.key1.glm-5.2".to_string(),
+            json!({
+                "providerKey": "XLC.key1.glm-5.2",
+                "providerType": "openai",
+                "providerProtocol": "openai-chat",
+                "modelId": "glm-5.2",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "orangeai.key1.glm-5.2".to_string(),
+            json!({
+                "providerKey": "orangeai.key1.glm-5.2",
+                "providerType": "openai",
+                "providerProtocol": "openai-chat",
+                "modelId": "glm-5.2",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "minimax.key1.MiniMax-M3".to_string(),
+            json!({
+                "providerKey": "minimax.key1.MiniMax-M3",
+                "providerType": "anthropic",
+                "providerProtocol": "anthropic-messages",
+                "modelId": "MiniMax-M3",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "minimax_chat.key1.MiniMax-M3".to_string(),
+            json!({
+                "providerKey": "minimax_chat.key1.MiniMax-M3",
+                "providerType": "openai",
+                "providerProtocol": "openai-chat",
+                "modelId": "MiniMax-M3",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "longcontext".to_string(),
+                Value::Array(vec![json!({
+                    "id": "gateway-coding-5555-longcontext",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["XLC.key1.glm-5.2", "orangeai.key1.glm-5.2"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "gateway-coding-5555-default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["minimax.key1.MiniMax-M3", "minimax_chat.key1.MiniMax-M3"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let selected = core
+            .select_provider(
+                "longcontext",
+                &json!({
+                    "runtimeControl": {
+                        "providerProtocol": "openai-chat"
+                    },
+                    "excludedProviderKeys": [
+                        "XLC.key1.glm-5.2",
+                        "orangeai.key1.glm-5.2"
+                    ]
+                }),
+                &ClassificationResult {
+                    route_name: "longcontext".to_string(),
+                    confidence: 1.0,
+                    reasoning: "longcontext".to_string(),
+                    candidates: vec!["longcontext".to_string(), "default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("provider protocol metadata is not a VR target filter");
+
+        assert_eq!(selected.provider_key, "minimax.key1.MiniMax-M3");
+        assert_eq!(selected.route_used, "default");
+    }
+
+    #[test]
+    fn provider_protocol_metadata_does_not_filter_default_floor_target() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "XLC.key1.glm-5.2".to_string(),
+            json!({
+                "providerKey": "XLC.key1.glm-5.2",
+                "providerType": "openai",
+                "providerProtocol": "openai-chat",
+                "modelId": "glm-5.2",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "minimax.key1.MiniMax-M3".to_string(),
+            json!({
+                "providerKey": "minimax.key1.MiniMax-M3",
+                "providerType": "anthropic",
+                "providerProtocol": "anthropic-messages",
+                "modelId": "MiniMax-M3",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "longcontext".to_string(),
+                Value::Array(vec![json!({
+                    "id": "gateway-coding-5555-longcontext",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["XLC.key1.glm-5.2"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "gateway-coding-5555-default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["minimax.key1.MiniMax-M3"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let selected = core
+            .select_provider(
+                "longcontext",
+                &json!({
+                    "runtimeControl": {
+                        "providerProtocol": "openai-chat"
+                    },
+                    "excludedProviderKeys": ["XLC.key1.glm-5.2"]
+                }),
+                &ClassificationResult {
+                    route_name: "longcontext".to_string(),
+                    confidence: 1.0,
+                    reasoning: "longcontext".to_string(),
+                    candidates: vec!["longcontext".to_string(), "default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("protocol mismatch belongs to the direct/relay boundary, not VR availability");
+
+        assert_eq!(selected.provider_key, "minimax.key1.MiniMax-M3");
+        assert_eq!(selected.route_used, "default");
+    }
+
+    #[test]
+    fn router_direct_does_not_filter_route_pool_to_inbound_protocol() {
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
         providers.insert(
@@ -2450,9 +2629,10 @@ mod tests {
                 None,
                 unsafe { Env::from_raw(std::ptr::null_mut()) },
             )
-            .expect("router-direct must select a protocol-compatible target");
+            .expect("router-direct protocol mismatch belongs to server direct/relay boundary");
 
-        assert_eq!(selected.provider_key, "responses.key1.gpt-5");
+        assert_eq!(selected.provider_key, "chat.key1.chat-model");
+        assert_eq!(selected.route_used, "search");
     }
 
     #[test]
@@ -2754,6 +2934,97 @@ mod tests {
 
         assert_eq!(result.provider_key, "primary.risky");
         assert_eq!(result.route_used, "longcontext");
+    }
+
+    #[test]
+    fn non_longcontext_route_spills_to_longcontext_when_targets_overflow_context() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "spark.small".to_string(),
+            json!({
+                "providerKey": "spark.small",
+                "providerType": "responses",
+                "modelId": "gpt-5.3-codex-spark",
+                "enabled": true,
+                "maxContextTokens": 128000
+            }),
+        );
+        providers.insert(
+            "mini.large".to_string(),
+            json!({
+                "providerKey": "mini.large",
+                "providerType": "responses",
+                "modelId": "gpt-5.4-mini",
+                "enabled": true,
+                "maxContextTokens": 900000
+            }),
+        );
+        core.provider_registry.load(&providers);
+        core.context_warn_ratio = 0.9;
+        core.context_hard_limit = false;
+
+        let routing = Map::from_iter([
+            (
+                "tools".to_string(),
+                Value::Array(vec![json!({
+                    "id": "tools",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["spark.small"]
+                })]),
+            ),
+            (
+                "longcontext".to_string(),
+                Value::Array(vec![json!({
+                    "id": "longcontext",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["mini.large"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["spark.small"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let features = RoutingFeatures {
+            estimated_tokens: 167890,
+            has_tool_call_responses: true,
+            ..RoutingFeatures::default()
+        };
+        let result = core
+            .select_provider(
+                "tools",
+                &json!({}),
+                &ClassificationResult {
+                    route_name: "tools".to_string(),
+                    confidence: 1.0,
+                    reasoning: "tools:tool-request-detected".to_string(),
+                    candidates: vec!["tools".to_string(), "default".to_string()],
+                },
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("context overflow in tools route must spill to longcontext");
+
+        assert_eq!(result.provider_key, "mini.large");
+        assert_eq!(result.route_used, "longcontext");
+        assert_eq!(
+            result.reasoning_tag.as_deref(),
+            Some(CONTEXT_SPILLOVER_REASONING_TAG)
+        );
     }
 
     #[test]
@@ -3219,6 +3490,75 @@ mod tests {
         assert_eq!(selected.pool_id.as_deref(), Some("default-backstop"));
     }
 
+    #[test]
+    fn select_provider_preserves_default_singleton_floor_when_excluded() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for key in ["thinking.key1.model", "default.key1.model"] {
+            providers.insert(
+                key.to_string(),
+                json!({
+                    "providerKey": key,
+                    "providerType": "openai",
+                    "modelId": "model",
+                    "enabled": true
+                }),
+            );
+        }
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let routing = Map::from_iter([
+            (
+                "thinking".to_string(),
+                Value::Array(vec![json!({
+                    "id": "thinking-primary",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["thinking.key1.model"]
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "default-backstop",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["default.key1.model"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({
+                    "excludedProviderKeys": [
+                        "thinking.key1.model",
+                        "default.key1.model"
+                    ]
+                }),
+                &ClassificationResult {
+                    route_name: "thinking".to_string(),
+                    confidence: 1.0,
+                    reasoning: "thinking:user-input".to_string(),
+                    candidates: vec!["thinking".to_string(), "default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("default singleton floor must be preserved");
+
+        assert_eq!(selected.provider_key, "default.key1.model");
+        assert_eq!(selected.route_used, "default");
+        assert_eq!(selected.pool_id.as_deref(), Some("default-backstop"));
+        assert!(selected.default_floor_protected);
+    }
+
     // ============================================================
     // T4: Pool isolation by routePolicyGroup — based on real config.toml
     // ============================================================
@@ -3359,6 +3699,21 @@ mod tests {
             "coding group should see 1 pool for route 'thinking'"
         );
         assert_eq!(result[0].id, "coding-thinking-deepseek");
+    }
+
+    #[test]
+    fn route_policy_group_prefers_runtime_control_metadata_center_truth() {
+        let metadata = json!({
+            "routecodexRoutingPolicyGroup": "default",
+            "runtimeControl": {
+                "routecodexRoutingPolicyGroup": "coding"
+            }
+        });
+
+        assert_eq!(
+            read_requested_route_policy_group(&metadata),
+            Some("coding".to_string())
+        );
     }
 
     /// T4c: Un tagged pools must NOT leak into a port-scoped group.

@@ -141,18 +141,6 @@ export interface ServerSideToolEngineResult {
   finalChatResponse: JsonObject;
   execution?: ServerToolExecution;
   metadataWritePlan?: JsonObject;
-  /**
-   * When present, indicates a "mixed tools" flow:
-   * - servertools were executed and their tool results are persisted
-   * - remaining (non-servertool) tool_calls must be returned to client
-   * - on next request, servertool results will be injected after client tool results
-   */
-  pendingInjection?: {
-    sessionId: string;
-    aliasSessionIds?: string[];
-    afterToolCallIds: string[];
-    messages: JsonObject[];
-  };
 }
 
 /**

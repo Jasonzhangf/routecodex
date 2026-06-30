@@ -188,7 +188,11 @@ describe('provider response Rust native plan', () => {
             payload: expect.objectContaining({
               requestId: 'req_provider_response_native_plan_1',
               clientProtocol: 'openai-chat',
-              payload: result.body,
+              payload: expect.objectContaining({
+                id: 'chatcmpl_native_plan_1',
+                object: 'chat.completion',
+                created: expect.any(Number)
+              }),
               keepForSubmitToolOutputs: false
             })
           })
@@ -688,7 +692,11 @@ describe('provider response Rust native plan', () => {
             payload: expect.objectContaining({
               codec: 'openai-chat',
               requestId: 'req_provider_response_native_stream_plan_1',
-              payload: result.body
+              payload: expect.objectContaining({
+                id: 'chatcmpl_native_stream_plan_1',
+                object: 'chat.completion',
+                created: expect.any(Number)
+              })
             })
           }),
           expect.objectContaining({
@@ -696,7 +704,11 @@ describe('provider response Rust native plan', () => {
             payload: expect.objectContaining({
               requestId: 'req_provider_response_native_stream_plan_1',
               clientProtocol: 'openai-chat',
-              payload: result.body,
+              payload: expect.objectContaining({
+                id: 'chatcmpl_native_stream_plan_1',
+                object: 'chat.completion',
+                created: expect.any(Number)
+              }),
               keepForSubmitToolOutputs: false
             })
           })
@@ -748,7 +760,11 @@ describe('provider response Rust native plan', () => {
             payload: expect.objectContaining({
               requestId: 'req_provider_response_native_clock_plan_1',
               clientProtocol: 'openai-chat',
-              payload: result.body
+              payload: expect.objectContaining({
+                id: 'chatcmpl_native_clock_plan_1',
+                object: 'chat.completion',
+                created: expect.any(Number)
+              })
             })
           })
         ])
@@ -798,7 +814,11 @@ describe('provider response Rust native plan', () => {
             payload: expect.objectContaining({
               requestId: 'req_provider_response_native_websearch_plan_1',
               clientProtocol: 'openai-chat',
-              payload: result.body
+              payload: expect.objectContaining({
+                id: 'chatcmpl_native_websearch_plan_1',
+                object: 'chat.completion',
+                created: expect.any(Number)
+              })
             })
           })
         ])

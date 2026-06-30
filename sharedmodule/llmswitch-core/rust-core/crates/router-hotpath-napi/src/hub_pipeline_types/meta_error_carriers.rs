@@ -82,7 +82,12 @@ pub(crate) fn build_meta_route_03_from_metadata(
     };
     let runtime_control = source
         .get("runtime_control")
-        .and_then(|value| value.as_object());
+        .and_then(|value| value.as_object())
+        .or_else(|| {
+            source
+                .get("runtimeControl")
+                .and_then(|value| value.as_object())
+        });
 
     copy_normalized_string_array(source, &mut control, "allowedProviders");
     copy_normalized_string_array(source, &mut control, "excludedProviderKeys");
@@ -108,7 +113,10 @@ pub(crate) fn build_meta_route_03_from_metadata(
         control.insert("serverToolFollowup".to_string(), Value::Bool(true));
     }
     if let Some(runtime_control) = runtime_control {
+        copy_non_empty_string(runtime_control, &mut control, "routeHint");
+        copy_non_empty_string(runtime_control, &mut control, "routecodexRoutingPolicyGroup");
         copy_non_empty_string(runtime_control, &mut control, "serverToolFollowupSource");
+        copy_non_empty_string(runtime_control, &mut control, "providerProtocol");
     }
     if let Some(port) = source
         .get("routecodexLocalPort")
@@ -280,6 +288,38 @@ mod tests {
         );
         assert!(carrier.control().get("providerProtocol").is_none());
         assert!(carrier.control().get("metadata").is_none());
+    }
+
+    #[test]
+    fn builds_meta_route_03_carries_runtime_provider_protocol() {
+        let carrier = build_meta_route_03_from_metadata(&json!({
+            "runtimeControl": {
+                "providerProtocol": " openai-chat "
+            }
+        }));
+        assert_eq!(
+            carrier.get_string("providerProtocol").as_deref(),
+            Some("openai-chat")
+        );
+    }
+
+    #[test]
+    fn builds_meta_route_03_prefers_runtime_route_controls() {
+        let carrier = build_meta_route_03_from_metadata(&json!({
+            "routeHint": " thinking ",
+            "routecodexRoutingPolicyGroup": " default ",
+            "runtimeControl": {
+                "routeHint": " search ",
+                "routecodexRoutingPolicyGroup": " gateway_priority_5555 "
+            }
+        }));
+        assert_eq!(carrier.get_string("routeHint").as_deref(), Some("search"));
+        assert_eq!(
+            carrier
+                .get_string("routecodexRoutingPolicyGroup")
+                .as_deref(),
+            Some("gateway_priority_5555")
+        );
     }
 
     #[test]

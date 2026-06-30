@@ -141,7 +141,11 @@ impl HubPipelineEngine {
             return Ok(route);
         }
         if has_explicit_provider_retry_exclusions(metadata) {
-            return self.select_explicit_provider_retry_route(request, metadata, metadata_center_snapshot);
+            return self.select_explicit_provider_retry_route(
+                request,
+                metadata,
+                metadata_center_snapshot,
+            );
         }
         Err(HubPipelineError::new(
             "hub_pipeline_missing_preselected_route",
@@ -176,15 +180,25 @@ impl HubPipelineEngine {
             .map_err(|message| {
                 HubPipelineError::new(
                     "hub_pipeline_virtual_router_retry_init_failed",
-                    format!("Rust HubPipeline explicit provider retry VR init failed: {}", message),
+                    format!(
+                        "Rust HubPipeline explicit provider retry VR init failed: {}",
+                        message
+                    ),
                 )
             })?;
         router
-            .route(unsafe { Env::from_raw(std::ptr::null_mut()) }, request, &metadata_for_router)
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                request,
+                &metadata_for_router,
+            )
             .map_err(|message| {
                 HubPipelineError::new(
                     "hub_pipeline_virtual_router_retry_route_failed",
-                    format!("Rust HubPipeline explicit provider retry VR route failed: {}", message),
+                    format!(
+                        "Rust HubPipeline explicit provider retry VR route failed: {}",
+                        message
+                    ),
                 )
             })
     }
@@ -994,6 +1008,9 @@ fn plan_resp_chatprocess_03_servertool_runtime_actions(
     chatprocess_payload: &Value,
     request_id: &str,
 ) {
+    if !is_stop_message_response_runtime_enabled(metadata) {
+        return;
+    }
     let stop_gateway = inspect_stop_gateway_signal(&chatprocess_payload.to_string())
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
@@ -1014,6 +1031,33 @@ fn plan_resp_chatprocess_03_servertool_runtime_actions(
             }),
         });
     }
+}
+
+fn is_stop_message_response_runtime_enabled(metadata: &Value) -> bool {
+    metadata
+        .get("stopMessageEnabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || metadata
+            .get("routecodexPortStopMessageEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || metadata
+            .get("__rt")
+            .and_then(|rt| rt.get("stopMessageEnabled"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || metadata
+            .get("__rt")
+            .and_then(|rt| rt.get("routecodexPortStopMessageEnabled"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || metadata
+            .get("runtimeControl")
+            .and_then(|runtime| runtime.get("stopless"))
+            .and_then(|stopless| stopless.get("active"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {

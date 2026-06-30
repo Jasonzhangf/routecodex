@@ -736,7 +736,10 @@ mod tests {
             .expect("semantics input");
         assert_eq!(semantics_input.len(), 1);
         assert_eq!(semantics_input[0]["type"], json!("function_call_output"));
-        assert_eq!(semantics_input[0]["tool_call_id"], json!("call_stopless_round1"));
+        assert_eq!(
+            semantics_input[0]["tool_call_id"],
+            json!("call_stopless_round1")
+        );
     }
 
     #[test]

@@ -233,7 +233,6 @@ export async function runServerToolOrchestrationShell(
   const stoplessPlan = stoplessExecutionPlan.orchestrationPlan;
   const hasServertoolCliProjectionContext = stoplessExecution.flowId === 'servertool_cli_projection';
   const runtimeAction = planServertoolEngineRuntimeActionWithNative({
-    hasPendingInjection: Boolean(engineResult.pendingInjection),
     isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
     hasServertoolCliProjectionContext,
     stoplessAction: stoplessPlan.action

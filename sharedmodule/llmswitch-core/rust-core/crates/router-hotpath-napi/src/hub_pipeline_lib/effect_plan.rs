@@ -83,10 +83,19 @@ fn normalize_stream_pipe_payload(payload: &Value) -> Result<Value, String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "Rust HubPipeline streamPipe effect missing requestId".to_string())?;
-    Ok(json!({
+    let mut output = json!({
         "codec": codec,
         "requestId": request_id,
-    }))
+    });
+    if let Some(output_record) = output.as_object_mut() {
+        if let Some(client_payload) = record.get("payload").filter(|value| value.is_object()) {
+            output_record.insert("payload".to_string(), client_payload.clone());
+        }
+        if let Some(client_body) = record.get("body").filter(|value| value.is_object()) {
+            output_record.insert("body".to_string(), client_body.clone());
+        }
+    }
+    Ok(output)
 }
 
 fn normalize_stop_gateway_payload(payload: &Value) -> Result<Value, String> {
@@ -351,7 +360,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             output["streamPipe"],
-            json!({ "codec": "openai-chat", "requestId": "req-1" })
+            json!({ "codec": "openai-chat", "requestId": "req-1", "payload": { "ignored": true } })
         );
         assert_eq!(output["runtimeStateWrite"]["requestId"], json!("req-1"));
         assert_eq!(

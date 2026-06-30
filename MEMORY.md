@@ -1,3 +1,24 @@
+# 2026-06-30: servertool precommand/pending-session retired
+- `pre-command-hooks` / `pending-session` / `pending-injection` 已从 servertool runtime 物理退役；对应 Rust contract、TS wrapper、spec 已删除。
+- stopless 的 session truth 仍是当前 request 的 `requestTruth.sessionId`，并由 `MetadataCenter.runtime_control.stopless` + current request tool output 推进；`sessionDir` / `servertool-pending/*` 不再是必需持久化真源。
+- `hub.servertool_followup` 仍是 active Rust owner，不能把它当成已经删除的死语义；如果未来要移除，需要单独的主链重构和 gate 收口。
+
+# 2026-06-30: foundation contract added before routing
+- Added `docs/agent-routing/05-foundation-contract.md` as the top-level completion contract.
+- `docs/agent-routing/00-entry-routing.md` now points to foundation contract before any route split.
+- `AGENTS.md`, `coding-principals`, `feature-dev`, and `dev-flow` now all share the same default runtime-change closure loop: `red/failing sample -> unique owner fix -> build/install -> restart -> health/smoke -> old-sample replay -> full gate`.
+- Evidence: docs readback + `git diff --check` pass.
+
+# 2026-06-30: 10000/5555 routing fallback should prefer minimax-m3
+- `~/.rcc/config.toml` (`/Volumes/extension/.rcc/config.toml`) 的 `gateway_coding_10000` 与 `gateway_priority_5555` 路由兜底已统一为 `fwd.minimax.MiniMax-M3`。
+- 10000 已去掉 `mimo.mimo-v2.5` 作为 fallback；5555 已去掉 `fwd.minimax.MiniMax-M2.7` 作为后续 fallback，tools/search/web_search/default 仅保留优先主模型 + minimax-m3。
+- 验证链：`routecodex config validate`；`routecodex restart --port 5520`；`/health` on 5520/10000/5555 全部 ready。
+
+# 2026-06-30: 4444 tools/search also require minimax-m3 fallback
+- `gateway_glm_4444` tools/search/web_search/multimodal/default must include `fwd.minimax.MiniMax-M3` after `fwd.gpt.gpt-5.3-codex-spark`. Without M3, `cc` transport failure plus `ykk` 503 `system_memory_overloaded` exhausts the Spark pool and `/v1/responses` fails at routing with `PROVIDER_NOT_AVAILABLE` projected as 502.
+- Runtime config truth: `~/.rcc/config.toml` now sets those 4444 routes to `["fwd.gpt.gpt-5.3-codex-spark", "fwd.minimax.MiniMax-M3"]`; `routecodex config validate` and `127.0.0.1:4444/health` passed on RouteCodex `0.90.3313`.
+- Validation sample: user failure `openai-responses-router-gpt-5.5-20260630T082343839-424714-4997` was preceded by Spark pool exhaustion; after config fix, a real 4444 `/v1/responses` probe returned `response.completed` with `4444 fallback probe ok` and logs no longer showed immediate `PROVIDER_NOT_AVAILABLE` for tools/search requests.
+
 # 2026-06-29: Anthropic tool_result turn boundary
 - Rust `anthropic_openai_codec` must not merge a user `tool_result` turn with the following ordinary user text / placeholder text turn; only adjacent `tool_result`-only user turns may merge.
 - This prevents tool execution results from absorbing later user-facing continuation text into the same Anthropic user turn, which can corrupt provider-facing tool history. Keep the whitebox tests `build_anthropic_from_openai_chat_keeps_tool_result_separate_*` as the regression lock.
@@ -8,6 +29,11 @@
 - `MetadataCenter` may keep a JS compatibility mirror named `__metadataCenter`, but it must be non-enumerable; enumerable mirrors can leak through object spread / JSON snapshot into provider request samples.
 - Runtime bug verification requires checking canonical samples under `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/provider-request*.json`, not just transport logs. Regression sample `req_1782777285968_648ee193` on port 10000 proves both first and retry provider requests omit `__metadataCenter` and return HTTP 200.
 - After global install, sample `req_1782778804787_45cbed3f` on port 10000 with RouteCodex `0.90.3312` re-proved both provider requests omit `metadata` / `__metadataCenter` and provider responses are HTTP 200.
+
+# 2026-06-30: internal debug error numbering boundary
+- `debug.internal_error_numbering` is the sole owner for RouteCodex internal debug `500-1xx/2xx/3xx` codes and envelope construction; call sites must not scatter `500-*` literals or wrap external/provider/upstream/client errors as internal envelopes.
+- External transport/provider failures such as `ECONNRESET` / `fetch failed` should log as `source=external_transport` with a compact reason and optional `ExternalErrorLink`; only RouteCodex-owned internal failures, such as VR retry route failure, should print an internal code like `internalCode=500-130`.
+- When diagnosing `fetch failed`, verify DNS/route first: on 2026-06-30 `xlapis.com` and `api2.orangeai.cc` resolved locally to `198.18.*` reserved addresses while public DNS returned public IPs, proving the visible transport error was caused by DNS/proxy routing rather than an internal `500-*` failure.
 
 # 2026-06-29: SSE partial-stream salvage fallback removed
 - Chat/Responses SSE decode projection 不允许在 stream terminated / timeout 后把已收到的 partial chunks salvage 成成功响应；错误必须显式进入 SSE decode error path。
@@ -34,6 +60,11 @@
 # 2026-06-29: provider-response duplicate V2 orchestration owner rejected
 - Provider response orchestration 主线当前 Rust 真源是 `hub_pipeline_lib/engine.rs` 产出的 response effect plan，以及 `hub_pipeline_lib/effect_plan.rs` 的 native effect plan normalizer / servertool runtime action planner。
 - 禁止新增独立 `provider_response_orchestration_v2` / `native-provider-response-orchestration-v2` / `native-provider-response-sse-materialize-fallback` 第二 owner；这类未接入 planner 会复制 SSE materialization、usage normalization、servertool plan、streamPipe 和 metadata write semantics，必须物理删除并用 residue audit 防复活。
+
+# 2026-06-30: provider-response streamPipe timestamp and stopMessage action gates
+- Provider-response stream encode 的 `created/created_at` 必须由 Rust client projection owner 在进入 SSE codec 前保证为正数；`created_at:0` / missing timestamp 不能在 TS SSE codec 或 handler 中补 fallback，应该在 `responses_payload.rs` / chat projection owner 修。
+- `servertoolRuntimeAction` 只能在 stopMessage/stopless runtime 明确 active 时由 Rust response planning 生成；普通 `finish_reason:"stop"` streaming path 不得生成 action，否则 TS IO shell 可能把 action payload 当 post-governance payload 覆盖 Rust `streamPipe.payload`。
+- TS `provider-response.ts` 只允许在 servertool orchestration 实际 `executed` 后做 post-servertool client projection；未执行 action plan 不得改变 payload。正反测试应同时覆盖普通 stream 无 action、stopMessage active 有 action、Responses existing payload `created_at:0` 被 Rust 修正。
 
 # 2026-06-29: stopless followup-flow skip branch removed
 - `serverToolFollowup` 不再是 stop-message auto handler 的 skip / recursion guard truth；stopless 决策不得读取 `followup_flow_id` 或 `runtime_control.serverToolFollowup` 来返回 `skip_servertool_followup_hop`。
@@ -91,3 +122,20 @@
 - 2026-06-29 token estimator wrapper slice：`native-virtual-router-runtime.ts` 的 `countRequestTokens` / `computeRequestTokens` 已改为共享 `callNativeJson('estimateVirtualRouterRequestTokensJson', ...)`；本地 `loadNativeRouterHotpathBindingForInternalUse` / `readNativeFunction` 已移除，empty / invalid / invalid-token-count 仍 fail-fast。
 - 新门禁：`verify-vr-no-ts-runtime` 现在同时锁 `native-virtual-router-runtime.ts`，禁止 token estimator wrapper 重新长回本地 native binding plumbing。
 - 已验证：`npm run verify:vr-no-ts-runtime`、`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p tsconfig.json --pretty false`、`node ../../node_modules/jest/bin/jest.js --config jest.config.cjs --runInBand --runTestsByPath tests/router/token-counter-media-ignore.test.ts`、`git diff --check`。
+# 2026-06-30: route entry hard query gate added
+- 项目入口与调试技能已补硬查询门槛：每个改实现任务必须先读 `docs/agent-routing/05-foundation-contract.md`，再查 `docs/architecture/function-map.yml`、`docs/architecture/mainline-call-map.yml`、`docs/architecture/verification-map.yml` 和对应 wiki/mainline source。
+- 入口、运行时路由、`rcc-dev-skills` 现在都明确要求：1-2 次内定位不到唯一 owner / 唯一主线边，就先补 map/contract，再动实现；验证后必须做 architecture review，排查 fallback、临时绕路、补丁式修复和错层修复。
+
+# 2026-06-30: Responses SSE terminal detection must be chunk-safe
+- 若 `/v1/responses` 客户端报 `stream closed before response.completed`，先对照 provider snapshot 与 client snapshot：upstream `provider-response_*.json` 已有 `event: response.completed` 时，不要补 synthetic terminal，应查 server SSE transport 是否把终态识别绑在单 chunk 文本上。
+- `handler-response-sse.ts` 的终态状态机必须跨 chunk 扫描 `event: response.completed/response.done/response.error` 与 `data.type` 终态；SSE chunk 边界不可作为协议语义边界。
+
+# 2026-06-30: servertool rustification audit snapshot
+- `docs/architecture/function-map.yml` 已把 servertool 主要语义 owner 挂到 Rust `servertool-core` / `router-hotpath-napi`，但 `docs/architecture/mainline-call-map.yml` 的 `servertool.hook_skeleton.mainline` 仍是 `binding pending`，说明 runtime 主线还没完全锚定。
+- 仍含明显 TS 语义的重点模块：`engine-orchestration-shell.ts`（stopless 本地 JSON parse）、`pending-session.ts`（文件 IO + JSON parse/write）、`pre-command-hooks.ts`（config IO + shell/jq/runtime 编排）、`response-stage-orchestration-shell.ts`（response-stage gate + runtime control 写回）、`execution-stage-shell.ts` / `execution-queue-shell.ts` / `execution-handler-materialization-shell.ts`（执行编排 glue）。
+- 现阶段最稳妥的 rust 化顺序：先收 `pending-session` / `pre-command-hooks` / `engine-orchestration` 三块真语义，再继续收 execution/response orchestration glue，最后把 registry / selection / preflight / runtime-action / skip / outcome / handler / state 逐块压成最小 native wrapper。
+
+# 2026-06-30: VR default floor diagnostics boundary
+- Virtual Router 的 default pool 最后目标是硬保护：即使 `excludedProviderKeys` 包含该 default singleton，也不能把 default 池排空后返回 `PROVIDER_NOT_AVAILABLE`。
+- 在线 diagnostics / dry-run 不能用“排除所有 default 目标”来制造问题样本；正确做法是返回命中 default singleton，并显式标记 `defaultFloorProtected=true`，说明这是 default floor 保护，而不是 provider 切换失败。
+- 修改 VR selection / retry exclusion 逻辑前必须检查 default route object 和 default pool singleton 保护，不能把 provider exclusion 当成物理移除 default target。

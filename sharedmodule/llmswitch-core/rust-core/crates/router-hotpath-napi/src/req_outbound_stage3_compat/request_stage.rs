@@ -187,7 +187,6 @@ pub fn run_req_outbound_stage3_compat(
             }
             return Ok(build_compat_result(payload, None));
         }
-
     }
 
     Ok(build_compat_result(payload, None))

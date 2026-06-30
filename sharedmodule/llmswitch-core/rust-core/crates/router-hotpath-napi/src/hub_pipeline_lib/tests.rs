@@ -1474,8 +1474,17 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
         .iter()
         .filter(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("runtimeStateWrite"))
         .count();
+    let servertool_runtime_action_count = output
+        .effect_plan
+        .effects
+        .iter()
+        .filter(|effect| {
+            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+        })
+        .count();
     assert_eq!(stream_pipe_count, 1);
     assert_eq!(runtime_state_write_count, 1);
+    assert_eq!(servertool_runtime_action_count, 0);
     let effect = output
         .effect_plan
         .effects
@@ -1490,6 +1499,12 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
     assert_eq!(effect.payload["requestId"], json!("req-stream-1"));
     let payload = output.payload.unwrap();
     assert_eq!(effect.payload["payload"], payload);
+    assert!(
+        effect.payload["payload"]["created"]
+            .as_i64()
+            .is_some_and(|created| created > 0),
+        "Rust streamPipe payload must be directly encodable by openai-chat SSE codec"
+    );
     let runtime_effect = output
         .effect_plan
         .effects
@@ -1530,6 +1545,8 @@ fn response_stream_stop_with_runtime_callbacks_returns_stream_and_servertool_eff
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses",
                 "stream": true,
+                "stopMessageEnabled": true,
+                "routecodexPortStopMessageEnabled": true,
                 "runtimeEffects": { "clientInjectDispatch": true }
             }),
             metadata_center_snapshot: json!(null),

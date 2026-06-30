@@ -148,9 +148,7 @@ fn inject_stopless_system_instruction(request: &mut Map<String, Value>) {
     }
 }
 
-fn should_inject_stopless_system_instruction(
-    center: &MetadataCenter,
-) -> bool {
+fn should_inject_stopless_system_instruction(center: &MetadataCenter) -> bool {
     center.stop_message_enabled().unwrap_or(false)
 }
 
@@ -691,9 +689,7 @@ pub fn apply_req_process_tool_governance(
     if has_terminal_stopless_turn {
         strip_stopless_terminal_controls(&mut request);
     }
-    if should_inject_stopless_system_instruction(&metadata_center)
-        && !has_terminal_stopless_turn
-    {
+    if should_inject_stopless_system_instruction(&metadata_center) && !has_terminal_stopless_turn {
         inject_stopless_system_instruction(&mut request);
         inject_reasoning_stop_tool(&mut request);
     }

@@ -9,6 +9,8 @@ pub(super) struct SelectionResult {
     pub pool_id: Option<String>,
     pub route_params: Option<Map<String, Value>>,
     pub unavailable_providers: Option<Value>,
+    pub reasoning_tag: Option<String>,
+    pub default_floor_protected: bool,
 }
 
 impl SelectionResult {
@@ -27,6 +29,8 @@ impl SelectionResult {
             pool_id,
             route_params: None,
             unavailable_providers: None,
+            reasoning_tag: None,
+            default_floor_protected: false,
         }
     }
 
@@ -40,6 +44,16 @@ impl SelectionResult {
         unavailable_providers: Option<Value>,
     ) -> Self {
         self.unavailable_providers = unavailable_providers;
+        self
+    }
+
+    pub(super) fn with_reasoning_tag(mut self, reasoning_tag: Option<String>) -> Self {
+        self.reasoning_tag = reasoning_tag;
+        self
+    }
+
+    pub(super) fn with_default_floor_protected(mut self, protected: bool) -> Self {
+        self.default_floor_protected = protected;
         self
     }
 }

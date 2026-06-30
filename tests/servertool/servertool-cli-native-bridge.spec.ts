@@ -12,7 +12,6 @@ import {
   planServertoolExecutionLoopRuntimeActionWithNative,
   planServertoolExecutionOutcomeRuntimeActionWithNative,
   planServertoolEntryPreflightWithNative,
-  planRuntimePreCommandStateRuntimeActionWithNative,
   planServertoolResponseStageRuntimeActionWithNative,
   planServertoolRegistryAutoHookDescriptorsWithNative,
   planServertoolRegistryLookupActionWithNative,
@@ -150,18 +149,16 @@ describe('servertool CLI native bridge', () => {
   it('uses Rust-owned engine runtime-action planning for orchestration shell exits', () => {
     expect(
       planServertoolEngineRuntimeActionWithNative({
-        hasPendingInjection: true,
         isStopMessageFlow: true,
         hasServertoolCliProjectionContext: true,
         stoplessAction: 'terminal_final'
       })
     ).toEqual({
-      action: 'persist_pending_injection_and_return'
+      action: 'return_stop_message_terminal_final'
     });
 
     expect(
       planServertoolEngineRuntimeActionWithNative({
-        hasPendingInjection: false,
         isStopMessageFlow: false,
         hasServertoolCliProjectionContext: true,
         stoplessAction: 'cli_projection'
@@ -172,7 +169,6 @@ describe('servertool CLI native bridge', () => {
 
     expect(
       planServertoolEngineRuntimeActionWithNative({
-        hasPendingInjection: false,
         isStopMessageFlow: true,
         stoplessAction: 'cli_projection'
       })
@@ -347,14 +343,8 @@ describe('servertool CLI native bridge', () => {
         flowId: 'servertool_mixed'
       })
     ).toEqual({
-      action: 'return_mixed_client_tools_pending_injection',
+      action: 'invalid_mixed_client_tools_outcome',
       reuseLastExecutionEnvelope: false,
-      pendingInjection: {
-        sessionId: 'sess_1',
-        aliasSessionIds: ['alias_1'],
-        afterToolCallIds: ['call_2'],
-        messages: [{ role: 'assistant' }]
-      },
       executionFlowId: 'servertool_mixed'
     });
 
@@ -563,31 +553,6 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'return_passthrough_no_auto_hook_result'
-    });
-  });
-
-  it('uses Rust-owned pre-command runtime action planning', () => {
-    expect(
-      planRuntimePreCommandStateRuntimeActionWithNative({
-        runtimeControlPreCommandState: {
-          preCommandScriptPath: '/tmp/runtime-pre-command.sh'
-        }
-      })
-    ).toEqual({
-      action: 'use_selected',
-      source: 'runtime_control',
-      state: {
-        preCommandScriptPath: '/tmp/runtime-pre-command.sh'
-      }
-    });
-
-    expect(
-      planRuntimePreCommandStateRuntimeActionWithNative({
-        runtimeControlPreCommandState: null
-      })
-    ).toEqual({
-      action: 'use_selected',
-      source: 'none'
     });
   });
 

@@ -113,6 +113,60 @@ fn normalize_openai_chat_reasoning_outbound_projects_responses_payload_to_chat_c
 }
 
 #[test]
+fn normalize_openai_chat_reasoning_outbound_supplies_created_for_responses_payload_without_timestamp() {
+    let payload = serde_json::json!({
+        "id": "resp_no_created",
+        "object": "response",
+        "model": "gpt-5.5",
+        "status": "completed",
+        "output": [{
+            "id": "msg_no_created",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "pong" }]
+        }],
+        "output_text": "pong"
+    });
+
+    let output = normalize_openai_chat_reasoning_outbound(&payload).expect("projected chat");
+
+    assert_eq!(
+        output["object"],
+        Value::String("chat.completion".to_string())
+    );
+    assert!(
+        output["created"].as_i64().is_some_and(|created| created > 0),
+        "Rust openai-chat client projection must provide created for SSE codec"
+    );
+}
+
+#[test]
+fn normalize_openai_chat_reasoning_outbound_supplies_created_for_chat_completion_without_timestamp() {
+    let payload = serde_json::json!({
+        "id": "chatcmpl_no_created",
+        "object": "chat.completion",
+        "model": "gpt-5.5",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": { "role": "assistant", "content": "pong" }
+        }]
+    });
+
+    let output = normalize_openai_chat_reasoning_outbound(&payload).expect("projected chat");
+
+    assert_eq!(
+        output["object"],
+        Value::String("chat.completion".to_string())
+    );
+    assert!(
+        output["created"].as_i64().is_some_and(|created| created > 0),
+        "Rust openai-chat client projection must provide created for chat SSE codec"
+    );
+}
+
+#[test]
 fn normalize_responses_usage_projects_responses_only_fields_from_anthropic_cache_shape() {
     let usage = json!({
         "cache_read_input_tokens": 28672,
@@ -3255,4 +3309,57 @@ fn build_responses_payload_from_chat_json_matches_core_shape() {
         row.remove("created_at");
     }
     assert_eq!(stable_json_out, stable_core);
+}
+
+#[test]
+fn build_responses_payload_from_chat_core_supplies_created_at_for_existing_response_payload() {
+    let payload = serde_json::json!({
+        "id": "resp_existing_without_created_at",
+        "object": "response",
+        "created_at": 0,
+        "status": "requires_action",
+        "model": "gpt-test",
+        "output": [{
+            "id": "fc_existing_call",
+            "type": "function_call",
+            "status": "completed",
+            "name": "exec_command",
+            "call_id": "call_existing",
+            "arguments": "{\"cmd\":\"pwd\"}"
+        }],
+        "required_action": {
+            "type": "submit_tool_outputs",
+            "submit_tool_outputs": {
+                "tool_calls": [{
+                    "id": "call_existing",
+                    "type": "function",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }]
+            }
+        }
+    });
+
+    let output = build_responses_payload_from_chat_core(
+        &payload,
+        Some("req_existing_response_created_at"),
+        &serde_json::json!({}),
+    )
+    .expect("responses payload");
+
+    assert_eq!(
+        output["object"],
+        Value::String("response".to_string())
+    );
+    assert!(
+        output["created_at"]
+            .as_i64()
+            .is_some_and(|created_at| created_at > 0),
+        "Rust Responses client projection must provide created_at before SSE encoding"
+    );
+    assert_eq!(
+        output["status"],
+        Value::String("requires_action".to_string())
+    );
+    assert!(output["required_action"].is_object());
 }

@@ -612,6 +612,7 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts-sse-body-text-reader', pattern: /function\s+readProviderResponseSseText\s*\(/ },
       { label: 'ts-sse-marker-classifier', pattern: /function\s+isProviderResponseSseMarker\s*\(/ },
       { label: 'ts-sse-marker-signal', pattern: /function\s+hasProviderSseMarkerSignal\s*\(/ },
+      { label: 'ts-provider-sse-read-error-wrapper', pattern: /function\s+buildProviderSseStreamReadError\s*\(/ },
       { label: 'exports zero-consumer provider response options type shell', pattern: /export\s+interface\s+ProviderResponseConversionOptions\b/ },
       { label: 'exports zero-consumer provider response result type shell', pattern: /export\s+interface\s+ProviderResponseConversionResult\b/ },
       { label: 'dead hub stage top attach helper', pattern: /function\s+attachHubStageTopToContext\s*\(/ },

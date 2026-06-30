@@ -1684,8 +1684,7 @@ mod tests {
     }
 
     #[test]
-    fn build_anthropic_from_openai_chat_keeps_tool_result_separate_from_user_image_placeholder(
-    ) {
+    fn build_anthropic_from_openai_chat_keeps_tool_result_separate_from_user_image_placeholder() {
         let payload = json!({
             "model": "MiniMax-M3",
             "messages": [

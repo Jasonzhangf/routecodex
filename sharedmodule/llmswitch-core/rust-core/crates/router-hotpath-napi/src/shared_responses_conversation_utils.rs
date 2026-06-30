@@ -629,7 +629,7 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
                 if let Some(schema_guidance) = render_stopless_schema_guidance_text(&guidance) {
                     parts.push(schema_guidance);
                 }
-            } else if !is_legal_minimal_no_schema_stopless_output(&row) {
+            } else if !is_legal_minimal_stopless_output(&row) {
                 parts.push(
                     "STOPLESS_CLI_RESULT_MALFORMED: 缺少 schemaGuidance，且 schemaFeedback.reasonCode/missingFields 不完整；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
                         .to_string(),
@@ -643,7 +643,7 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
     trimmed.to_string()
 }
 
-fn is_legal_minimal_no_schema_stopless_output(row: &Map<String, Value>) -> bool {
+fn is_legal_minimal_stopless_output(row: &Map<String, Value>) -> bool {
     let trigger_hint = row
         .get("input")
         .or_else(|| row.get("input_json"))
@@ -654,7 +654,10 @@ fn is_legal_minimal_no_schema_stopless_output(row: &Map<String, Value>) -> bool 
         })
         .or_else(|| read_trimmed_string(row.get("triggerHint")))
         .or_else(|| read_trimmed_string(row.get("trigger_hint")));
-    trigger_hint.as_deref() == Some("no_schema")
+    matches!(
+        trigger_hint.as_deref(),
+        Some("no_schema" | "non_terminal_schema")
+    )
 }
 
 fn read_stopless_schema_feedback_context(
@@ -1502,10 +1505,9 @@ fn resume_responses_conversation_payload(
     let (normalized_items, submitted_details) =
         normalize_submitted_tool_outputs(&tool_outputs, &merged_input)?;
     merged_input.extend(normalized_items);
-    let full_input =
-        remove_auto_stop_hook_assistant_echoes_in_history(normalize_responses_history_items(
-            merged_input,
-        ));
+    let full_input = remove_auto_stop_hook_assistant_echoes_in_history(
+        normalize_responses_history_items(merged_input),
+    );
     payload.insert("input".to_string(), Value::Array(full_input.clone()));
 
     let stream = submit_payload
@@ -1923,7 +1925,9 @@ fn raw_suffix_for_normalized_delta(
     normalized_items: &[Value],
     normalized_delta: &[Value],
 ) -> Vec<Value> {
-    let start = normalized_items.len().saturating_sub(normalized_delta.len());
+    let start = normalized_items
+        .len()
+        .saturating_sub(normalized_delta.len());
     raw_items.get(start..).unwrap_or(&[]).to_vec()
 }
 
@@ -1939,8 +1943,7 @@ fn restore_responses_continuation_payload(
     let incoming_input = clone_optional_array(incoming_obj.get("input"));
     let continuation_owner = read_continuation_owner(&entry_obj);
     let released_prefix_raw = clone_array(entry_obj.get("releasedInputPrefix"));
-    let released_prefix =
-        normalize_responses_history_items(released_prefix_raw.clone());
+    let released_prefix = normalize_responses_history_items(released_prefix_raw.clone());
 
     let Some(response_id) = last_response_id else {
         return Value::Null;
@@ -2011,10 +2014,7 @@ fn restore_responses_continuation_payload(
         }
     }
 
-    payload.insert(
-        "input".to_string(),
-        Value::Array(delta_input.clone()),
-    );
+    payload.insert("input".to_string(), Value::Array(delta_input.clone()));
     payload.insert(
         "previous_response_id".to_string(),
         Value::String(response_id.clone()),
@@ -2732,6 +2732,19 @@ mod tests {
         assert!(
             !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
             "minimal no_schema CLI output is legal and must not be treated as malformed: {text}"
+        );
+    }
+
+    #[test]
+    fn stopless_resume_guidance_accepts_minimal_non_terminal_schema_cli_output() {
+        let text = build_stop_hook_guidance_text_from_output(
+            "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"停止检查需要继续\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。\",\"repeatCount\":1,\"maxRepeats\":3,\"sessionId\":\"stopless-live-1782780421308\",\"requestId\":\"openai-responses-XLC.key1-glm-5.2-20260630T084701341-424854-5137\",\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"non_terminal_schema\"}}"
+        );
+        assert!(text.contains("上一轮执行结果：repeatCount=1/3。"));
+        assert!(text.contains("继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。"));
+        assert!(
+            !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
+            "minimal non_terminal_schema CLI output is legal and must not be treated as malformed: {text}"
         );
     }
 

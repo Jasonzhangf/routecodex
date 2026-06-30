@@ -5,18 +5,15 @@ use crate::req_outbound_stage3_compat::shared_tool_text_guidance::build_tool_tex
 #[test]
 fn test_req_profile_responses_instructions_to_input_trims_html_and_lifts_system_message() {
     let mut payload = json!({
-            "model": "gpt-4.1",
-            "instructions": "  <b>System</b> instruction  ",
-            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
-        });
+        "model": "gpt-4.1",
+        "instructions": "  <b>System</b> instruction  ",
+        "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
+    });
     let root = payload.as_object_mut().unwrap();
     apply_responses_instructions_to_input(root);
     assert!(payload.get("instructions").is_none());
     assert_eq!(payload["input"][0]["role"], "system");
-    assert_eq!(
-        payload["input"][0]["content"][0]["type"],
-        "input_text"
-    );
+    assert_eq!(payload["input"][0]["content"][0]["type"], "input_text");
     assert_eq!(
         payload["input"][0]["content"][0]["text"],
         "System instruction"
@@ -194,7 +191,6 @@ fn test_req_profile_responses_tool_parameters_fallback_to_object_schema() {
     assert_eq!(tools[0]["parameters"]["additionalProperties"], true);
 }
 
-
 #[test]
 fn test_req_profile_responses_crs_strips_temperature() {
     let input = ReqOutboundCompatInput {
@@ -232,10 +228,6 @@ fn test_req_profile_responses_crs_strips_temperature() {
     assert_eq!(result.applied_profile, Some("responses:crs".to_string()));
     assert!(result.payload.get("temperature").is_none());
 }
-
-
-
-
 
 #[test]
 fn test_req_profile_chat_lmstudio_native_applied() {
@@ -676,7 +668,6 @@ fn test_req_profile_anthropic_thinking_history_injects_reasoning_content() {
     assert_eq!(result.payload["messages"][4]["content"], "");
 }
 
-
 #[test]
 fn test_req_profile_anthropic_thinking_history_respects_disabled_thinking() {
     let input = ReqOutboundCompatInput {
@@ -1078,18 +1069,6 @@ fn test_req_profile_chat_glm_auto_thinking_skips_glm_4_6v() {
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.payload.get("thinking").is_none());
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[test]
 fn test_tool_text_instruction_does_not_own_apply_patch_contract_anymore() {

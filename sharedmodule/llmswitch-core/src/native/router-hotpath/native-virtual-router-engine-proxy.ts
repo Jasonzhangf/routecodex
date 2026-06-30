@@ -6,6 +6,7 @@ export interface NativeVirtualRouterEngineProxy {
   updateDeps(deps: object): void;
   updateVirtualRouterConfig(configJson: string): void;
   route(requestJson: string, metadataJson: string): string;
+  diagnoseRoute?(requestJson: string, metadataJson: string): string;
   getStopMessageState(metadataJson: string): string;
   getPreCommandState(metadataJson: string): string;
   markProviderCooldown(providerKey: string, cooldownMs?: number): void;

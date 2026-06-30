@@ -840,10 +840,7 @@ fn serialize_schema_gate(gate: &SchemaGateResult) -> Value {
     Value::Object(m)
 }
 
-fn run_stop_message_auto_handler_native(
-    decision: &StopMessageDecision,
-    base: &Value,
-) -> Value {
+fn run_stop_message_auto_handler_native(decision: &StopMessageDecision, base: &Value) -> Value {
     // This mirrors the logic from the existing run_stop_message_auto_handler_json
     // in chat_servertool_orchestration.rs. In production the NAPI call is used;
     // here we provide a minimal inline version.

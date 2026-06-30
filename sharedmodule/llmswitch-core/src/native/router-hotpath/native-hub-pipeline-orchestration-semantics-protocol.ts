@@ -51,6 +51,8 @@ export type ProviderResponseRuntimeEffectPlan = {
   streamPipe?: {
     codec: string;
     requestId: string;
+    payload?: Record<string, unknown>;
+    body?: Record<string, unknown>;
   } | null;
   runtimeStateWrite?: Record<string, unknown> | null;
   stoplessMetadataCenterWrite?: Record<string, unknown> | null;

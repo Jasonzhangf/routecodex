@@ -602,6 +602,7 @@ export interface RoutingStatusSnapshot {
     string,
     {
       providers: string[];
+      pools?: VirtualRouterRoutePoolStatus[];
       hits: number;
       lastUsedProvider?: string;
       lastHit?: {
@@ -617,6 +618,33 @@ export interface RoutingStatusSnapshot {
   >;
   health: ProviderHealthState[];
   forwarders?: ForwarderStatusState[];
+}
+
+export interface VirtualRouterRoutePoolStatus {
+  routeName: string;
+  poolId: string;
+  poolPriority?: number;
+  poolMode?: string;
+  configuredTargets: string[];
+  resolvedTargets: string[];
+  resolvedForwarders?: Array<Record<string, unknown>>;
+  availableTargets: string[];
+  unavailableProviders?: Array<Record<string, unknown>>;
+  defaultFloor?: boolean;
+}
+
+export interface VirtualRouterDryRunDiagnostics {
+  ok: boolean;
+  status?: RoutingStatusSnapshot;
+  target?: Record<string, unknown>;
+  routeResult?: Record<string, unknown>;
+  decision?: Record<string, unknown>;
+  error?: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown> | null;
+    raw?: string;
+  };
 }
 
 export interface ForwarderStatusState {

@@ -35,6 +35,23 @@ fn read_nonempty_string(value: Option<&Value>) -> Option<String> {
     }
 }
 
+fn read_created_seconds(value: Option<&Value>) -> Option<i64> {
+    let raw = value?;
+    if let Some(created) = raw.as_i64() {
+        if created > 0 {
+            return Some(created);
+        }
+        return None;
+    }
+    if let Some(created) = raw.as_u64() {
+        if created > 0 {
+            return Some(created as i64);
+        }
+        return None;
+    }
+    None
+}
+
 fn flatten_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -281,6 +298,19 @@ pub(crate) fn build_openai_chat_response_from_anthropic_message(
         "model".to_string(),
         Value::String(read_trimmed_string(row.get("model")).unwrap_or_default()),
     );
+    if let Some(created) = read_created_seconds(row.get("created"))
+        .or_else(|| read_created_seconds(row.get("created_at")))
+    {
+        chat.insert(
+            "created".to_string(),
+            Value::Number(serde_json::Number::from(created)),
+        );
+    } else {
+        chat.insert(
+            "created".to_string(),
+            Value::Number(serde_json::Number::from(chrono::Utc::now().timestamp())),
+        );
+    }
     chat.insert(
         "choices".to_string(),
         Value::Array(vec![Value::Object(Map::from_iter([
@@ -581,9 +611,32 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
         match kind.as_str() {
             "message_start" => {
                 if let Some(start_message) = event_row.get("message").and_then(Value::as_object) {
-                    for key in ["id", "type", "role", "model", "usage"] {
+                    for key in [
+                        "id",
+                        "type",
+                        "role",
+                        "model",
+                        "usage",
+                        "created",
+                        "created_at",
+                    ] {
                         if let Some(value) = start_message.get(key) {
                             message.insert(key.to_string(), value.clone());
+                        }
+                    }
+                    if message.get("created").is_none() {
+                        if let Some(created) = read_created_seconds(start_message.get("created")) {
+                            message.insert(
+                                "created".to_string(),
+                                Value::Number(serde_json::Number::from(created)),
+                            );
+                        } else if let Some(created_at) =
+                            read_created_seconds(start_message.get("created_at"))
+                        {
+                            message.insert(
+                                "created".to_string(),
+                                Value::Number(serde_json::Number::from(created_at)),
+                            );
                         }
                     }
                 }
@@ -694,6 +747,12 @@ fn materialize_anthropic_sse_body_text(body_text: &str) -> Result<Value, String>
             "Anthropic SSE response did not contain materializable content blocks".to_string(),
         );
     }
+    if message.get("created").is_none() {
+        message.insert(
+            "created".to_string(),
+            Value::Number(serde_json::Number::from(chrono::Utc::now().timestamp())),
+        );
+    }
     message.insert("content".to_string(), Value::Array(content));
     if let Some(stop_reason) = stop_reason {
         message.insert("stop_reason".to_string(), Value::String(stop_reason));
@@ -791,6 +850,27 @@ mod tests {
         assert_eq!(tool_call["id"], "call_1");
         assert_eq!(tool_call["function"]["name"], "exec_command");
         assert_eq!(tool_call["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+    }
+
+    #[test]
+    fn builds_chat_response_from_anthropic_sse_includes_created_timestamp() {
+        let body_text = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_created\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"mimo-v2.5\",\"content\":[]}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"created ok\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let output = build_openai_chat_response_from_anthropic_message(
+            &json!({ "mode": "sse", "bodyText": body_text }),
+            "req_created",
+        )
+        .expect("chat response from anthropic sse");
+        assert!(output["created"].as_i64().unwrap_or_default() > 0);
+        assert_eq!(output["choices"][0]["message"]["content"], "created ok");
     }
 
     #[test]
