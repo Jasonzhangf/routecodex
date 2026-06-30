@@ -1,11 +1,11 @@
 import type { ServerToolHandlerContext, ServerToolHandlerResult } from './types.js';
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import {
-  planServertoolBuiltinAutoHandlerEntries,
-  planServertoolBuiltinHandlerRecordEntries,
-  planServertoolBuiltinHandlerNames,
-  resolveServertoolBuiltinHandlerEntry
-} from './skeleton-config.js';
+  planServertoolBuiltinAutoHandlerEntriesWithNative,
+  planServertoolBuiltinHandlerNamesWithNative,
+  planServertoolBuiltinHandlerRecordEntriesWithNative,
+  resolveServertoolBuiltinHandlerEntryWithNative
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { runStoplessBuiltinHandlerForRuntimeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 async function runBuiltinHandlerForRuntimeNapi(
@@ -35,7 +35,7 @@ export async function __executeBuiltinHandlerForRuntime(
 }
 
 export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | undefined {
-  const entry = resolveServertoolBuiltinHandlerEntry(name);
+  const entry = resolveServertoolBuiltinHandlerEntryWithNative({ name });
   if (!entry) {
     return undefined;
   }
@@ -43,13 +43,13 @@ export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | u
 }
 
 export function listBuiltinHandlerNames(): string[] {
-  return planServertoolBuiltinHandlerNames();
+  return planServertoolBuiltinHandlerNamesWithNative().names;
 }
 
 export function listBuiltinAutoHandlerEntries(): ServerToolHandlerEntry[] {
-  return planServertoolBuiltinAutoHandlerEntries() as unknown as ServerToolHandlerEntry[];
+  return planServertoolBuiltinAutoHandlerEntriesWithNative().entries as unknown as ServerToolHandlerEntry[];
 }
 
 export function listBuiltinHandlerRecordEntries(): ServerToolHandlerEntry[] {
-  return planServertoolBuiltinHandlerRecordEntries() as unknown as ServerToolHandlerEntry[];
+  return planServertoolBuiltinHandlerRecordEntriesWithNative().entries as unknown as ServerToolHandlerEntry[];
 }

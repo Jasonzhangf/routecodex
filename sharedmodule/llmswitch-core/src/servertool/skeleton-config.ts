@@ -12,12 +12,7 @@ import type {
 } from '../native/router-hotpath/native-followup-mainline-semantics.js';
 import {
   normalizeServertoolRegistrationSpecWithNative,
-  planServertoolBuiltinAutoHandlerEntriesWithNative,
-  planServertoolBuiltinHandlerNamesWithNative,
-  planServertoolBuiltinHandlerRecordEntriesWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
-  resolveServertoolRegisteredNameWithNative,
-  resolveServertoolBuiltinHandlerEntryWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export type {
@@ -81,26 +76,6 @@ type ServertoolSkeletonDerivedConfig = {
 
 function getDerivedConfig(): ServertoolSkeletonDerivedConfig {
   return planServertoolSkeletonDerivedConfigWithNative() as ServertoolSkeletonDerivedConfig;
-}
-
-export function resolveServertoolBuiltinHandlerEntry(name: string): Record<string, unknown> | null {
-  return resolveServertoolBuiltinHandlerEntryWithNative({ name }) as Record<string, unknown> | null;
-}
-
-export function planServertoolBuiltinHandlerNames(): string[] {
-  return planServertoolBuiltinHandlerNamesWithNative().names;
-}
-
-export function planServertoolBuiltinAutoHandlerEntries(): Record<string, unknown>[] {
-  return planServertoolBuiltinAutoHandlerEntriesWithNative().entries;
-}
-
-export function planServertoolBuiltinHandlerRecordEntries(): Record<string, unknown>[] {
-  return planServertoolBuiltinHandlerRecordEntriesWithNative().entries;
-}
-
-export function isServertoolRegisteredNameByConfig(name: string): boolean {
-  return resolveServertoolRegisteredNameWithNative({ name });
 }
 
 export function normalizeServerToolRegistrationSpec(

@@ -9,7 +9,7 @@ import {
 import {
   getServerToolHandlerViaNativePlan
 } from './registry-registration-shell.js';
-import { isServertoolRegisteredNameByConfig } from './skeleton-config.js';
+import { resolveServertoolRegisteredNameWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   projectAutoServerToolHookDescriptors,
   projectRegistrySources
@@ -55,7 +55,7 @@ export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
 };
 
 export function isRegisteredServerToolName(name: string): boolean {
-  return isServertoolRegisteredNameByConfig(name);
+  return resolveServertoolRegisteredNameWithNative({ name });
 }
 
 export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHandlerRecord[] {

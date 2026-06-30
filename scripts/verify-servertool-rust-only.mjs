@@ -3569,8 +3569,8 @@ function checkServertoolRegistryRustOwner() {
     'projectRegistrySources('
   );
   for (const needle of [
-    'isServertoolRegisteredNameByConfig',
-    'return isServertoolRegisteredNameByConfig(name);',
+    'resolveServertoolRegisteredNameWithNative',
+    'return resolveServertoolRegisteredNameWithNative({ name });',
   ]) {
     assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
   }
@@ -5919,10 +5919,10 @@ function checkServertoolEngineStoplessSessionThinShell() {
   }
   for (const marker of [
     'runStoplessBuiltinHandlerForRuntimeWithNative(',
-    'resolveServertoolBuiltinHandlerEntry(',
-    'planServertoolBuiltinHandlerNames(',
-    'planServertoolBuiltinAutoHandlerEntries(',
-    'planServertoolBuiltinHandlerRecordEntries(',
+    'resolveServertoolBuiltinHandlerEntryWithNative(',
+    'planServertoolBuiltinHandlerNamesWithNative(',
+    'planServertoolBuiltinAutoHandlerEntriesWithNative(',
+    'planServertoolBuiltinHandlerRecordEntriesWithNative(',
   ]) {
     if (!builtinHandlerCatalogSource.includes(marker)) {
       fail(

@@ -89,11 +89,16 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts',
     forbidden: [
       'isServertoolEnabledByConfig',
+      'export function isServertoolRegisteredNameByConfig(',
       'getServertoolToolSpec(name)?.enabled',
       'export function getDefaultServertoolSkeletonDocument(',
       'export function getServertoolToolSpec(',
       'export function listServertoolToolSpecs(',
       'export function planServertoolBuiltinHandlerEntry(',
+      'export function resolveServertoolBuiltinHandlerEntry(',
+      'export function planServertoolBuiltinHandlerNames(',
+      'export function planServertoolBuiltinAutoHandlerEntries(',
+      'export function planServertoolBuiltinHandlerRecordEntries(',
       'getDerivedConfig().toolSpecList',
     ],
     required: [
@@ -506,11 +511,12 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts',
     forbidden: [
       'isRegisteredServerToolNameViaNativeConfig',
+      'isServertoolRegisteredNameByConfig',
       'type ServerToolHandlerRegistrationSpec',
     ],
     required: [
-      'isServertoolRegisteredNameByConfig',
-      'return isServertoolRegisteredNameByConfig(name);',
+      'resolveServertoolRegisteredNameWithNative',
+      'return resolveServertoolRegisteredNameWithNative({ name });',
     ],
   },
 ] as const;
@@ -550,7 +556,7 @@ describe('stop-message-auto native-catalog audit', () => {
     expect(source).toContain('runStoplessBuiltinHandlerForRuntimeWithNative');
     expect(source).toContain('runBuiltinHandlerForRuntimeNapi');
     expect(source).toContain('function runBuiltinHandler(');
-    expect(source).toContain('resolveServertoolBuiltinHandlerEntry');
+    expect(source).toContain('resolveServertoolBuiltinHandlerEntryWithNative');
 
     const forbidden = [
       'runStoplessAutoHandlerRuntimeJson',
@@ -599,7 +605,7 @@ describe('stop-message-auto native-catalog audit', () => {
     ];
     const hits = forbidden.filter((marker) => source.includes(marker));
     expect(hits).toEqual([]);
-    expect(source).toContain('planServertoolBuiltinAutoHandlerEntries');
-    expect(source).toContain('planServertoolBuiltinHandlerRecordEntries');
+    expect(source).toContain('planServertoolBuiltinAutoHandlerEntriesWithNative');
+    expect(source).toContain('planServertoolBuiltinHandlerRecordEntriesWithNative');
   });
 });
