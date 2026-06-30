@@ -2,8 +2,6 @@ import type { ServerToolHandlerContext, ServerToolHandlerResult } from './types.
 import type { ServerToolHandlerEntry } from './registry-types.js';
 import {
   planServertoolBuiltinAutoHandlerEntriesWithNative,
-  planServertoolBuiltinHandlerNamesWithNative,
-  planServertoolBuiltinHandlerRecordEntriesWithNative,
   resolveServertoolBuiltinHandlerEntryWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { runStoplessBuiltinHandlerForRuntimeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -28,14 +26,6 @@ export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | u
   return entry as unknown as ServerToolHandlerEntry;
 }
 
-export function listBuiltinHandlerNames(): string[] {
-  return planServertoolBuiltinHandlerNamesWithNative().names;
-}
-
 export function listBuiltinAutoHandlerEntries(): ServerToolHandlerEntry[] {
   return planServertoolBuiltinAutoHandlerEntriesWithNative().entries as unknown as ServerToolHandlerEntry[];
-}
-
-export function listBuiltinHandlerRecordEntries(): ServerToolHandlerEntry[] {
-  return planServertoolBuiltinHandlerRecordEntriesWithNative().entries as unknown as ServerToolHandlerEntry[];
 }

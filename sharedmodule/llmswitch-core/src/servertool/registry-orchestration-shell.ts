@@ -1,19 +1,13 @@
 import {
-  type ServerToolRegisteredHandlerRecord
-} from '../native/router-hotpath/native-followup-mainline-semantics.js';
-import {
   getBuiltinHandlerEntry,
-  listBuiltinAutoHandlerEntries,
-  listBuiltinHandlerRecordEntries,
-  listBuiltinHandlerNames
+  listBuiltinAutoHandlerEntries
 } from './builtin-handler-catalog.js';
 import {
   planServertoolRegistryLookupFromSkeletonWithNative,
   resolveServertoolRegisteredNameWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  projectAutoServerToolHookDescriptors,
-  projectRegistrySources
+  projectAutoServerToolHookDescriptors
 } from './registry-projection-shell.js';
 import type {
   ServerToolAutoHookDescriptor,
@@ -40,21 +34,9 @@ export const getServerToolHandler = (
   return undefined;
 };
 
-function projectCurrentRegistrySources(): {
-  registeredNames: string[];
-  autoHandlers: ServerToolHandlerEntry[];
-  registeredRecords: ServerToolRegisteredHandlerRecord[];
-} {
-  return projectRegistrySources({
-    builtinNames: listBuiltinHandlerNames(),
-    builtinAutoHandlerEntries: listBuiltinAutoHandlerEntries(),
-    builtinRecordEntries: listBuiltinHandlerRecordEntries()
-  });
-}
-
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
   return projectAutoServerToolHookDescriptors({
-    entries: projectCurrentRegistrySources().autoHandlers
+    entries: listBuiltinAutoHandlerEntries()
   });
 };
 

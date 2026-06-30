@@ -418,12 +418,12 @@ const TARGETS = [
       'function canonicalName(',
       '.trim().toLowerCase()',
       'native registry source projection mismatch',
+      'planServertoolRegistrySourceProjectionWithNative',
+      'projectRegistrySources',
     ],
     required: [
       'planServertoolRegistryAutoHookDescriptorsWithNative',
       'projectAutoServerToolHookDescriptors',
-      'planServertoolRegistrySourceProjectionWithNative',
-      'projectRegistrySources',
     ],
   },
   {
@@ -436,6 +436,10 @@ const TARGETS = [
       'getServerToolHandlerViaNativePlan',
       'export function listRegisteredServerToolHandlerNames(',
       'export function listRegisteredServerToolHandlerRecords(',
+      'projectCurrentRegistrySources',
+      'projectRegistrySources',
+      'listBuiltinHandlerNames',
+      'listBuiltinHandlerRecordEntries',
     ],
     required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
@@ -530,6 +534,5 @@ describe('stop-message-auto native-catalog audit', () => {
     const hits = forbidden.filter((marker) => source.includes(marker));
     expect(hits).toEqual([]);
     expect(source).toContain('planServertoolBuiltinAutoHandlerEntriesWithNative');
-    expect(source).toContain('planServertoolBuiltinHandlerRecordEntriesWithNative');
   });
 });

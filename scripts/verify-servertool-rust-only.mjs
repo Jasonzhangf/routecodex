@@ -3529,20 +3529,11 @@ function checkServertoolRegistryRustOwner() {
   }
   for (const needle of [
     'planServertoolRegistryAutoHookDescriptorsWithNative({',
-    'planServertoolRegistrySourceProjectionWithNative({',
     'planServertoolRegistryAutoHookDescriptorsWithNative',
-    'planServertoolRegistrySourceProjectionWithNative',
     'projectAutoServerToolHookDescriptors',
-    'projectRegistrySources',
   ]) {
     assertContains('servertool-registry-projection-shell', TS_REGISTRY_PROJECTION_SHELL, registryProjectionShell, needle);
   }
-  assertContains(
-    'servertool-registry-orchestration-shell',
-    TS_REGISTRY_ORCHESTRATION_SHELL,
-    registryOrchestrationShell,
-    'projectRegistrySources('
-  );
   for (const needle of [
     'resolveServertoolRegisteredNameWithNative',
     'return resolveServertoolRegisteredNameWithNative({ name });',
@@ -3569,6 +3560,10 @@ function checkServertoolRegistryRustOwner() {
     'export const listAutoServerToolHandlers',
     'export function listRegisteredServerToolHandlerNames(',
     'export function listRegisteredServerToolHandlerRecords(',
+    'projectCurrentRegistrySources',
+    'projectRegistrySources',
+    'listBuiltinHandlerNames',
+    'listBuiltinHandlerRecordEntries',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
@@ -3587,6 +3582,8 @@ function checkServertoolRegistryRustOwner() {
     'adHocRecords',
     'adHocAutoHandlerNames',
     "source: 'adhoc'",
+    'planServertoolRegistrySourceProjectionWithNative',
+    'projectRegistrySources',
   ]) {
     if (registryProjectionShell.includes(marker)) {
       fail(
@@ -3597,7 +3594,7 @@ function checkServertoolRegistryRustOwner() {
   }
   pass(
     'servertool-registry-orchestration-no-ts-source-merge',
-    'registry-orchestration-shell.ts delegates source merge/order/grouping to Rust source projection'
+    'registry-orchestration-shell.ts consumes native builtin auto-hook entries without TS registry source projection'
   );
   for (const keyword of [
     'planServertoolRegistryRegistrationActionWithNative',
@@ -5792,9 +5789,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
   for (const marker of [
     'runStoplessBuiltinHandlerForRuntimeWithNative(',
     'resolveServertoolBuiltinHandlerEntryWithNative(',
-    'planServertoolBuiltinHandlerNamesWithNative(',
     'planServertoolBuiltinAutoHandlerEntriesWithNative(',
-    'planServertoolBuiltinHandlerRecordEntriesWithNative(',
   ]) {
     if (!builtinHandlerCatalogSource.includes(marker)) {
       fail(

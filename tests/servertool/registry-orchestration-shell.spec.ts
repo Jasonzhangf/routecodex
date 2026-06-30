@@ -2,8 +2,6 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const getBuiltinHandlerEntryMock = jest.fn();
 const listBuiltinAutoHandlerEntriesMock = jest.fn();
-const listBuiltinHandlerRecordEntriesMock = jest.fn();
-const listBuiltinHandlerNamesMock = jest.fn();
 const planServertoolRegistryLookupFromSkeletonWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
@@ -11,8 +9,6 @@ jest.unstable_mockModule(
   () => ({
     getBuiltinHandlerEntry: getBuiltinHandlerEntryMock,
     listBuiltinAutoHandlerEntries: listBuiltinAutoHandlerEntriesMock,
-    listBuiltinHandlerRecordEntries: listBuiltinHandlerRecordEntriesMock,
-    listBuiltinHandlerNames: listBuiltinHandlerNamesMock,
   })
 );
 
@@ -34,13 +30,10 @@ describe('registry-orchestration-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     listBuiltinAutoHandlerEntriesMock.mockReturnValue([]);
-    listBuiltinHandlerRecordEntriesMock.mockReturnValue([]);
-    listBuiltinHandlerNamesMock.mockReturnValue([]);
   });
 
   test('returns builtin entry and ignores retired ad-hoc lookup plans', () => {
     const builtin = { name: 'builtin' };
-    listBuiltinHandlerNamesMock.mockReturnValue(['builtin']);
     getBuiltinHandlerEntryMock.mockReturnValue(builtin);
 
     planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
