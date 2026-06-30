@@ -7,6 +7,7 @@
 - Provider wire body must never carry internal metadata carriers. `metadata` and `__metadataCenter` are both internal-control fields at provider-boundary time; OpenAI SDK call options and Anthropic provider wire executor must fail-fast if either key is present.
 - `MetadataCenter` may keep a JS compatibility mirror named `__metadataCenter`, but it must be non-enumerable; enumerable mirrors can leak through object spread / JSON snapshot into provider request samples.
 - Runtime bug verification requires checking canonical samples under `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/provider-request*.json`, not just transport logs. Regression sample `req_1782777285968_648ee193` on port 10000 proves both first and retry provider requests omit `__metadataCenter` and return HTTP 200.
+- After global install, sample `req_1782778804787_45cbed3f` on port 10000 with RouteCodex `0.90.3312` re-proved both provider requests omit `metadata` / `__metadataCenter` and provider responses are HTTP 200.
 
 # 2026-06-29: SSE partial-stream salvage fallback removed
 - Chat/Responses SSE decode projection 不允许在 stream terminated / timeout 后把已收到的 partial chunks salvage 成成功响应；错误必须显式进入 SSE decode error path。
