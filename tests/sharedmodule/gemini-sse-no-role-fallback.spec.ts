@@ -28,6 +28,7 @@ describe('gemini SSE no-fallback boundary', () => {
     const sequencer = createGeminiSequencer();
     const events = await collectEvents(sequencer.sequenceResponse(response));
 
+    expect(events.every((event) => !Object.prototype.hasOwnProperty.call(event as object, 'sequenceNumber'))).toBe(true);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'gemini.data',

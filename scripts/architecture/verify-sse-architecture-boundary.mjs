@@ -300,9 +300,10 @@ for (const forbidden of [
 const geminiSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts');
 for (const forbidden of [
   'parts.filter((part): part is GeminiContentPart => Boolean(part))',
+  'sequenceNumber: 0',
 ]) {
   if (geminiSequencer.includes(forbidden)) {
-    failures.push(`Gemini SSE sequencer must not silently drop invalid content parts: ${forbidden}`);
+    failures.push(`Gemini SSE sequencer must not synthesize fallback event truth: ${forbidden}`);
   }
 }
 

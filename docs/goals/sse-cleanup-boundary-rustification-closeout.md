@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Gemini SSE fixed sequence number removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `sequenceNumber: 0` and failed before the fix. Focused Jest also failed because valid Gemini events carried a fixed synthesized `sequenceNumber`.
+- Fix: `gemini-sequencer.ts::createEvent()` no longer writes `sequenceNumber: 0`; Gemini wire output remains `event:` / `data:` only through the serializer.
+- Positive / reverse tests: `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` now asserts valid Gemini events do not carry an own `sequenceNumber` property while preserving valid data/done output; existing reverse tests still cover missing role and null part fail-fast.
+- Verification: focused Jest `gemini-sse-no-role-fallback` PASS 3/3; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: source replay `eventCount=2`, `dataEvents=1`, `doneEvents=1`, `hasSequenceNumber=false`, `hasPartText=true`, `hasDone=true`.
+- Real sample gap: no Gemini provider-response samples were found under `~/.rcc/codex-samples` or `/Volumes/extension/.rcc/codex-samples`.
+
 ### 2026-07-01 Gemini SSE content parts no silent drop slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `parts.filter((part): part is GeminiContentPart => Boolean(part))` and failed before the fix, proving `gemini-sequencer.ts` silently dropped invalid content parts.

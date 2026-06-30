@@ -29,8 +29,7 @@ function createEvent(type: GeminiSseEvent['type'], data: GeminiChunkEventData | 
     protocol: 'gemini-chat',
     direction: 'json_to_sse',
     timestamp: Date.now(),
-    data,
-    sequenceNumber: 0
+    data
   };
 }
 
