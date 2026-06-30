@@ -2692,8 +2692,8 @@ function checkServertoolExecutionDispatchRustOwner() {
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   assertContains(
     'servertool-execution-dispatch-rust-owner',
-    TS_EXECUTION_QUEUE_SHELL,
-    executionQueueShell,
+    `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`,
+    readRequired(`${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`),
     'buildServertoolDispatchPlanInputWithNative'
   );
   assertContains(

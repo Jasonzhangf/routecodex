@@ -50,7 +50,6 @@ const TARGETS = [
     forbidden: [],
     required: [
       'runServertoolIoExecutionQueue',
-      'buildServertoolDispatchPlanInput',
       'planServertoolExecutionLoopRuntimeActionWithNative',
       'createServertoolProviderProtocolErrorFromPlan',
     ],

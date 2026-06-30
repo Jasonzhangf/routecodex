@@ -163,6 +163,7 @@ describe('execution-queue-shell', () => {
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('planServertoolExecutionLoopRuntimeActionWithNative');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
+    expect(source).not.toContain('buildServertoolDispatchPlanInputWithNative');
   });
 
   test('executes materialized handler result and records execution', async () => {

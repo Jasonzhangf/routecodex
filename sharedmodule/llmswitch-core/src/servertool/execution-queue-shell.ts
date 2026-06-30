@@ -7,7 +7,6 @@ import type {
 import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {
   planServertoolNoopOutcomeWithNative,
-  buildServertoolDispatchPlanInputWithNative,
   planServertoolToolCallDispatchWithNative,
   buildServertoolHandlerErrorToolOutputPayloadWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
