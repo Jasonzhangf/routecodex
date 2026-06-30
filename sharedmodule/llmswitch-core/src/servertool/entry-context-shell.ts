@@ -45,6 +45,10 @@ export function resolveServertoolEntryContext(args: {
     includeAutoHookIds: args.options.includeAutoHookIds,
     excludeAutoHookIds: args.options.excludeAutoHookIds
   });
+  const includeToolCallNames = tokenSetFromNativePlan(entryContextPlan.includeToolCallNames);
+  const excludeToolCallNames = tokenSetFromNativePlan(entryContextPlan.excludeToolCallNames);
+  const includeAutoHookIds = tokenSetFromNativePlan(entryContextPlan.includeAutoHookIds);
+  const excludeAutoHookIds = tokenSetFromNativePlan(entryContextPlan.excludeAutoHookIds);
 
   return {
     action: 'continue',
@@ -58,10 +62,10 @@ export function resolveServertoolEntryContext(args: {
       providerProtocol,
       runtimeMetadata: runtimeMetadataSnapshot
     },
-    includeToolCallNames: tokenSetFromNativePlan(entryContextPlan.includeToolCallNames),
-    excludeToolCallNames: tokenSetFromNativePlan(entryContextPlan.excludeToolCallNames),
-    includeAutoHookIds: tokenSetFromNativePlan(entryContextPlan.includeAutoHookIds),
-    excludeAutoHookIds: tokenSetFromNativePlan(entryContextPlan.excludeAutoHookIds)
+    includeToolCallNames,
+    excludeToolCallNames,
+    includeAutoHookIds,
+    excludeAutoHookIds
   };
 }
 

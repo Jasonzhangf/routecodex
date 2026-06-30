@@ -5077,10 +5077,10 @@ function checkServertoolRustOutcomeCloseout() {
     'export function resolveServertoolEntryContext(',
     'export function asServertoolJsonObject(',
     'planServertoolEntryContextWithNative',
-    'includeToolCallNames: tokenSetFromNativePlan',
-    'excludeToolCallNames: tokenSetFromNativePlan',
-    'includeAutoHookIds: tokenSetFromNativePlan',
-    'excludeAutoHookIds: tokenSetFromNativePlan'
+    'const includeToolCallNames = tokenSetFromNativePlan(entryContextPlan.includeToolCallNames);',
+    'const excludeToolCallNames = tokenSetFromNativePlan(entryContextPlan.excludeToolCallNames);',
+    'const includeAutoHookIds = tokenSetFromNativePlan(entryContextPlan.includeAutoHookIds);',
+    'const excludeAutoHookIds = tokenSetFromNativePlan(entryContextPlan.excludeAutoHookIds);',
   ]) {
     if (!entryContextShell.includes(marker)) {
       fail(

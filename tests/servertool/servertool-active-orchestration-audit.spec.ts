@@ -154,7 +154,7 @@ const TARGETS = [
       'resolveServertoolEntryContext',
       'asServertoolJsonObject',
       'planServertoolEntryContextWithNative',
-      'includeToolCallNames: tokenSetFromNativePlan',
+      'const includeToolCallNames = tokenSetFromNativePlan(entryContextPlan.includeToolCallNames);',
     ],
   },
   {
