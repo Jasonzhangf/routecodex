@@ -397,6 +397,8 @@ const TARGETS = [
       'normalizeServertoolProgressResultWithNative({ message })',
       'normalizeServertoolProgressTokenWithNative({ value: event.reason })',
       'normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })',
+      'export function appendServertoolMatchSkippedProgressEvent(',
+      'readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext',
     ],
   },
   {

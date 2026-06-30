@@ -48,8 +48,13 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('[servertool][non-blocking]');
     expect(source).not.toContain('export function createServertoolObservation(');
     expect(source).not.toContain('createServertoolProgressLogger({');
+    expect(source).toContain('appendServertoolMatchSkippedProgressEvent({');
+    expect(source).not.toContain('appendServerToolProgressFileEvent({');
+    expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
+    expect(source).not.toContain(
+      'Servertool observation requires metadata center runtime_control.providerProtocol'
+    );
     expect(source).toContain("args.stageRecorder?.record('servertool.match'");
-    expect(source).toContain('appendServerToolProgressFileEvent({');
     expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/match-log-block.ts')).toBe(false);
     expect(orchestrationSource).toContain('function createProgressObservation(');
     expect(orchestrationSource).toContain('createServertoolProgressLogger({');

@@ -1,8 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
-import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import type { ServerToolExecution } from './types.js';
-import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
+import { appendServertoolMatchSkippedProgressEvent } from './progress-log-block.js';
 
 export function recordServertoolEngineMatchSkipped(args: {
   requestId: string;
@@ -12,11 +11,6 @@ export function recordServertoolEngineMatchSkipped(args: {
   stageRecorder?: StageRecorder;
   adapterContext?: AdapterContext;
 }): void {
-  const providerProtocol =
-    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown> | undefined);
-  if (!providerProtocol) {
-    throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol');
-  }
   const skipReason = args.skipReason.trim();
   if (!skipReason) {
     throw new Error('Servertool match skipped requires native skipReason');
@@ -26,16 +20,11 @@ export function recordServertoolEngineMatchSkipped(args: {
     mode: args.engineMode,
     reason: skipReason
   });
-  appendServerToolProgressFileEvent({
+  appendServertoolMatchSkippedProgressEvent({
     requestId: args.requestId,
-    flowId: 'none',
-    tool: 'none',
-    stage: 'match',
-    result: 'skipped_' + skipReason,
-    message: 'skipped (' + skipReason + ')',
-    step: 0,
     entryEndpoint: args.entryEndpoint,
-    providerProtocol
+    adapterContext: args.adapterContext,
+    skipReason
   });
 }
 

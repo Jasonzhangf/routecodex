@@ -222,3 +222,27 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     logStopCompare
   };
 }
+
+export function appendServertoolMatchSkippedProgressEvent(args: {
+  requestId: string;
+  entryEndpoint: string;
+  adapterContext?: AdapterContext;
+  skipReason: string;
+}): void {
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown> | undefined);
+  if (!providerProtocol) {
+    throw new Error('Servertool progress logger requires metadata center runtime_control.providerProtocol');
+  }
+  appendServerToolProgressFileEvent({
+    requestId: args.requestId,
+    flowId: 'none',
+    tool: 'none',
+    stage: 'match',
+    result: 'skipped_' + args.skipReason,
+    message: 'skipped (' + args.skipReason + ')',
+    step: 0,
+    entryEndpoint: args.entryEndpoint,
+    providerProtocol
+  });
+}

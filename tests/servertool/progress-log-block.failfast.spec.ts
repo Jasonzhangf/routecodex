@@ -76,6 +76,38 @@ describe('progress-log-block fail-fast behavior', () => {
     expect(source).toContain('normalizeServertoolProgressResultWithNative({ message })');
     expect(source).toContain('normalizeServertoolProgressTokenWithNative({ value: event.reason })');
     expect(source).toContain('normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })');
+    expect(source).toContain('export function appendServertoolMatchSkippedProgressEvent(');
+    expect(source).toContain('readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext');
+  });
+
+  test('match skipped progress event reads protocol in progress log owner', async () => {
+    const { appendServertoolMatchSkippedProgressEvent } = await import(
+      '../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js'
+    );
+    const { appendServerToolProgressFileEvent } = await import(
+      '../../sharedmodule/llmswitch-core/src/servertool/log/progress-file.js'
+    );
+
+    appendServertoolMatchSkippedProgressEvent({
+      requestId: 'req-match-skipped-progress',
+      entryEndpoint: '/v1/responses',
+      adapterContext: bindProviderProtocol({}) as any,
+      skipReason: 'passthrough'
+    });
+
+    expect(appendServerToolProgressFileEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'req-match-skipped-progress',
+        flowId: 'none',
+        tool: 'none',
+        stage: 'match',
+        result: 'skipped_passthrough',
+        message: 'skipped (passthrough)',
+        step: 0,
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses'
+      })
+    );
   });
 
   test('console logging failures are not converted to non-blocking warnings', async () => {

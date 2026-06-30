@@ -5060,6 +5060,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export function logServertoolNonBlocking(',
     '[servertool][non-blocking]',
+    'readProviderProtocolFromAnyBoundMetadataCenter',
+    "throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol')",
   ]) {
     if (engineObservationShell.includes(marker)) {
       fail(
@@ -5070,8 +5072,7 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     "args.stageRecorder?.record('servertool.match'",
-    'appendServerToolProgressFileEvent({',
-    "throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol')",
+    'appendServertoolMatchSkippedProgressEvent({',
   ]) {
     if (!engineObservationShell.includes(marker)) {
       fail(
