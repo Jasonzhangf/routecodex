@@ -5085,8 +5085,7 @@ function checkServertoolRustOutcomeCloseout() {
     'function planStoplessEngineRuntime(',
     'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
     'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
-    'const postflightEngineResult = {',
-    'engineResult: postflightEngineResult,',
+    'engineResult: {',
     'runServertoolEnginePostflight({',
   ]) {
     if (!engineOrchestrationShell.includes(marker)) {
@@ -5290,6 +5289,17 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-response-stage-orchestration-thin-shell',
         `response-stage-orchestration-shell.ts must not retain retired input marker ${keyword}`
+      );
+    }
+  }
+  for (const marker of [
+    'const postflightEngineResult = {',
+    'engineResult: postflightEngineResult,',
+  ]) {
+    if (engineOrchestrationShell.includes(marker)) {
+      fail(
+        'servertool-engine-orchestration-no-local-carrier',
+        `engine-orchestration-shell.ts must not restore local postflight carrier marker ${marker}`
       );
     }
   }

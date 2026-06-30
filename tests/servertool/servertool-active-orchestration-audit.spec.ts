@@ -389,12 +389,14 @@ const TARGETS = [
       'const stoplessExecutionInput = {',
       'const hasServertoolCliProjectionContext =',
       'planStoplessExecutionWithNative(stoplessExecutionInput)',
+      'const postflightEngineResult = {',
+      'engineResult: postflightEngineResult,',
     ],
     required: [
       'function planStoplessEngineRuntime(',
       'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
       'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
-      'engineResult: postflightEngineResult,',
+      'engineResult: {',
     ],
   },
   {

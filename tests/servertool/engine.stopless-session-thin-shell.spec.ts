@@ -53,8 +53,8 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).toContain('const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({');
     expect(source).not.toContain('const stoplessExecutionInput = {');
     expect(source).not.toContain('const hasServertoolCliProjectionContext =');
-    expect(source).toContain('const postflightEngineResult = {');
-    expect(source).toContain('engineResult: postflightEngineResult,');
+    expect(source).not.toContain('const postflightEngineResult = {');
+    expect(source).toContain('engineResult: {');
   });
 
   test('runServerToolOrchestration routes synthetic/direct preflight through native planning', () => {

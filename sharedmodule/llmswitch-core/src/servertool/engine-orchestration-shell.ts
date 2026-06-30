@@ -216,16 +216,15 @@ export async function runServerToolOrchestrationShell(
     logStopCompare('trigger', flowId);
   }
   logProgress(1, totalSteps, 'matched', { flowId });
-  const postflightEngineResult = {
-    ...engineResult,
-    execution: stoplessExecution as unknown as typeof engineResult.execution
-  };
   return runServertoolEnginePostflight({
     options: {
       requestId: options.requestId,
       adapterContext: options.adapterContext
     },
-    engineResult: postflightEngineResult,
+    engineResult: {
+      ...engineResult,
+      execution: stoplessExecution as unknown as typeof engineResult.execution
+    },
     runtimeAction,
     flowId,
     totalSteps,
