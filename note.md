@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE candidate parts empty-success fallback removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 `return [];` 禁止 marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明候选有 role 但缺 `content.parts` 时会被当空 parts 继续输出 `gemini.done`。
+- Fix：`gemini-sequencer.ts::getCandidateParts()` 对缺失/非数组 parts 直接 fail-fast 抛 `Invalid Gemini candidate: missing parts`；合法 parts 原样遍历，不再合成空候选。
+- Verification：focused Jest `gemini-sse-no-role-fallback` 5/5 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`build:base` PASS；source replay `eventCount=2 dataEvents=1 doneEvents=1 missingPartsFailed=true`。真实 Gemini provider-response 样本缺口仍在。
+
 # 2026-07-01: Gemini SSE candidates empty-success fallback removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 `Array.isArray(response.candidates) ? response.candidates : []` 禁止 marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明缺失 `response.candidates` 会被当空数组继续输出 `gemini.done`。
 - Fix：`gemini-sequencer.ts` 要求 `response.candidates` 必须是数组；缺失/非数组直接 fail-fast 抛 `Invalid Gemini response: missing candidates`，合法 candidates 原样遍历并输出 data/done。

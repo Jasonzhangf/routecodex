@@ -314,6 +314,7 @@ for (const forbidden of [
   'sequenceNumber: 0',
   'timestamp: Date.now()',
   'Array.isArray(response.candidates) ? response.candidates : []',
+  'return [];',
 ]) {
   if (geminiSequencer.includes(forbidden)) {
     failures.push(`Gemini SSE sequencer must not synthesize fallback event truth: ${forbidden}`);

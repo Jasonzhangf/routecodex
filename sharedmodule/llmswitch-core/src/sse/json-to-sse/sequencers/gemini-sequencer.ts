@@ -55,7 +55,7 @@ function getCandidateParts(candidate: GeminiCandidate): GeminiContentPart[] {
     }
     return parts;
   }
-  return [];
+  throw new Error('Invalid Gemini candidate: missing parts');
 }
 
 export function createGeminiSequencer(config?: Partial<GeminiSequencerConfig>) {

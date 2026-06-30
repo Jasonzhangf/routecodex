@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE candidate parts must not default to an empty candidate
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts::getCandidateParts()` must not `return []` when `candidate.content.parts` is missing or malformed; missing parts fail fast with `Invalid Gemini candidate: missing parts`.
+- `verify:sse-architecture-boundary` and `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` lock this no-empty-candidate boundary.
+- Verification for this slice included focused Gemini Jest, SSE architecture gate, sharedmodule/root TypeScript, responses SSE business gate, `build:base`, and source replay with `eventCount=2`, `dataEvents=1`, `doneEvents=1`, and `missingPartsFailed=true`. Real Gemini provider-response replay remains unavailable.
+
 # 2026-07-01: Gemini SSE candidates must not default to an empty success stream
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts` must not use `Array.isArray(response.candidates) ? response.candidates : []`; missing/non-array candidates are invalid provider response shape and fail fast with `Invalid Gemini response: missing candidates`.
 - `verify:sse-architecture-boundary` and `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` lock this no-empty-success boundary.

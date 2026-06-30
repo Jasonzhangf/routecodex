@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Gemini SSE candidate parts empty-success fallback removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `return [];` for `gemini-sequencer.ts` and failed before the fix. Focused Jest also failed because a candidate with a role but missing `content.parts` resolved successfully into only a `gemini.done` event.
+- Fix: `gemini-sequencer.ts::getCandidateParts()` now requires `candidate.content.parts` to be an array. Missing or malformed parts fail fast with `Invalid Gemini candidate: missing parts`; valid parts are preserved unchanged.
+- Positive / reverse tests: `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` now covers missing candidate parts fail-fast; existing positive and reverse cases still cover valid data/done output, missing candidates, missing role, and null content part fail-fast.
+- Verification: focused Jest `gemini-sse-no-role-fallback` PASS 5/5; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
+- Replay evidence: source replay `eventCount=2`, `dataEvents=1`, `doneEvents=1`, `missingPartsFailed=true`, `missingPartsMessage="Invalid Gemini candidate: missing parts"`.
+- Real sample gap: no Gemini provider-response samples were found under the current sample stores, so this slice uses source replay as the available substitute.
+
 ### 2026-07-01 Gemini SSE candidates empty-success fallback removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `Array.isArray(response.candidates) ? response.candidates : []` and failed before the fix. Focused Jest also failed because missing `response.candidates` resolved successfully into a `gemini.done` event with `candidates: []`.
