@@ -16,6 +16,7 @@ export async function finalizeServertoolResponseStage(args: {
   excludeAutoHookIds: Set<string> | null;
   initialResponseStageGatePlan?: Record<string, unknown>;
 }): Promise<ServerSideToolEngineResult> {
+  const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;
   const responseStagePlan =
     args.initialResponseStageGatePlan?.responseHookMatched === true
       ? args.initialResponseStageGatePlan
@@ -35,10 +36,10 @@ export async function finalizeServertoolResponseStage(args: {
     responseStageGatePlan: responseStagePlan as Record<string, unknown>
   });
   if (responseStageAutoHook.action === 'return_passthrough_bypass') {
-    return { mode: 'passthrough', finalChatResponse: args.baseObject };
+    return passthroughResult;
   }
   if (responseStageAutoHook.action === 'return_auto_hook_result') {
     return responseStageAutoHook.result;
   }
-  return { mode: 'passthrough', finalChatResponse: args.baseObject };
+  return passthroughResult;
 }

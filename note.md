@@ -3,6 +3,13 @@
 - current-request behavior: 只要 `routePoolRemainingAfterExclusion` 仍有候选，或 `defaultPoolAvailable=true`，`mayProject=false`，执行器会继续 `exclude_and_reroute`，不会立刻 client-visible。
 - recovery behavior: 失败 provider 在当前请求链里会被排除/冷却；下一次新请求是否再命中，取决于 VR 里 health/quota/default truth 是否已恢复，不存在 priority 专用的“自动复活”分支。
 
+# 2026-06-30: response-stage finalize single passthrough return
+
+- `response-stage-finalize-shell.ts` 里的两处重复 passthrough 返回已合并成单点 `passthroughResult`，避免 finalize shell 继续保留第二份等价本地返回壳。
+- `servertool-active-orchestration-audit` 已同步锁新形态：必须保留 `const passthroughResult = ...` 和 `return passthroughResult;`。
+- 语义不变：`return_passthrough_bypass` 与 `continue_without_result` 仍都回到相同 passthrough 结果；Rust 继续拥有 response-stage gate/runtime action 语义。
+- 验证：focused Jest `response-stage-finalize-shell + response-stage-prepass-shell + response-stage-auto-hook-shell + servertool-active-orchestration-audit` 43 passed；sharedmodule TS PASS；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；`verify:architecture-mainline-call-map` PASS；`git diff --check` PASS。
+
 # 2026-06-30: response-stage auto-hook repeated gate reads collapsed
 
 - `response-stage-auto-hook-shell.ts` 现在只在入口读取一次 `responseHookRequired` 和 `responseHookName`，再复用给 pre/post native runtime action 与 required-hook-empty error。

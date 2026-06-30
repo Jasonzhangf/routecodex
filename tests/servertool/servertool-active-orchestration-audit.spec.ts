@@ -88,7 +88,8 @@ const TARGETS = [
     required: [
       'planServertoolResponseStageGateWithNative',
       'runServertoolResponseStageAutoHookPass',
-      "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
+      "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
+      'return passthroughResult;',
     ],
   },
   {
