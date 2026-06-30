@@ -12,11 +12,7 @@ import { resolveServertoolEntryContext } from './entry-context-shell.js';
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
-  const base =
-    options.chatResponse && typeof options.chatResponse === 'object' && !Array.isArray(options.chatResponse)
-      ? options.chatResponse
-      : null;
-  const entryPreflight = runServertoolEntryPreflight({ options, base });
+  const entryPreflight = runServertoolEntryPreflight({ options });
   if (entryPreflight.action === 'return_result') {
     return entryPreflight.result;
   }
