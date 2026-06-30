@@ -75,6 +75,17 @@ describe('anthropic SSE required fields no-fallback boundary', () => {
     ))).rejects.toThrow('Invalid Anthropic tool_use block: missing id');
   });
 
+  it('throws when a content block is null instead of silently skipping it', async () => {
+    const sequencer = createAnthropicSequencer();
+
+    await expect(collectEvents(sequencer.sequenceResponse(
+      baseResponse({
+        content: [null as unknown as AnthropicMessageResponse['content'][number]]
+      }),
+      'req_anthropic_null_content_block'
+    ))).rejects.toThrow('Invalid Anthropic content block at index 0');
+  });
+
   it('throws when stop_reason is missing instead of defaulting to end_turn', async () => {
     const sequencer = createAnthropicSequencer();
 

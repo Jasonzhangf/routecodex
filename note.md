@@ -1,3 +1,8 @@
+# 2026-07-01: Anthropic SSE content block silent skip removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 Anthropic `if (!block || typeof block !== 'object') continue;` marker 后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明 `anthropic-sequencer.ts` 会静默跳过非法 content block。
+- Fix：`anthropic-sequencer.ts` 现在对非法 content block 直接 fail-fast 抛 `Invalid Anthropic content block at index <n>`，不再继续吞掉数据；Anthropic 事件流保留显式 `message_start` / `message_delta` / `message_stop`。
+- Verification：focused Jest `anthropic-sse-required-fields-no-fallback` 6/6 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`git diff --check` PASS；source replay 仍保持 `hasTimestamp=false`。真实 Anthropic 成功样本缺口仍在：只找到 429 provider-error 快照。
+
 # 2026-07-01: Anthropic SSE timestamp synthesis removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 Anthropic `timestamp: Date.now()` marker 后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明 `anthropic-sequencer.ts` 对有效事件合成本地 timestamp。
 - Fix：`AnthropicSseEventBase` 不再继承要求 `timestamp` 的 `BaseSseEvent`，`createEvent()` 不再写 `timestamp: Date.now()`；Anthropic serializer 仍只使用显式 `event` / `type` 与 `data` 写 wire frame。

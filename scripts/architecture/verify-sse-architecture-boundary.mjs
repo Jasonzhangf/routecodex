@@ -283,6 +283,7 @@ const anthropicSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse
 for (const forbidden of [
   "response.stop_reason ?? 'end_turn'",
   'timestamp: Date.now()',
+  "if (!block || typeof block !== 'object') continue;",
 ]) {
   if (anthropicSequencer.includes(forbidden)) {
     failures.push(`Anthropic SSE sequencer must not synthesize fallback/event envelope truth: ${forbidden}`);

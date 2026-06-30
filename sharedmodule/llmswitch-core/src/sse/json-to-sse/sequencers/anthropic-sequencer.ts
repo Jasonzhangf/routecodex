@@ -80,8 +80,10 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
       });
 
       let index = 0;
-      for (const block of response.content || []) {
-        if (!block || typeof block !== 'object') continue;
+      for (const [blockIndex, block] of (response.content || []).entries()) {
+        if (!block || typeof block !== 'object') {
+          throw new Error(`Invalid Anthropic content block at index ${blockIndex}`);
+        }
         if (block.type === 'text') {
           yield createEvent('content_block_start', { index, content_block: { type: 'text' } });
           for (const chunk of chunkText(block.text ?? '', finalConfig.chunkSize)) {
