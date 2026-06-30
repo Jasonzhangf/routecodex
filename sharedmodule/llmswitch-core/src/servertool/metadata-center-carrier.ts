@@ -1,7 +1,6 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import {
-  formatStopMessageCompareContextWithNative,
   inspectStopGatewaySignalWithNative,
   normalizeStopMessageCompareContextWithNative,
   type StopGatewayContext,
@@ -239,8 +238,4 @@ export function readStopMessageCompareContext(adapterContext: unknown): StopMess
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as Record<string, unknown>);
   const raw = runtimeControl?.[STOP_MESSAGE_COMPARE_KEY];
   return normalizeStopMessageCompareContextWithNative(raw);
-}
-
-export function formatStopMessageCompareContext(context: StopMessageCompareContext | undefined): string {
-  return formatStopMessageCompareContextWithNative(context);
 }

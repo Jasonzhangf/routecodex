@@ -30,8 +30,14 @@ jest.unstable_mockModule(
       active: true,
       used: 1,
       left: 1
-    })),
-    formatStopMessageCompareContext: jest.fn(
+    }))
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    formatStopMessageCompareContextWithNative: jest.fn(
       () => 'decision=trigger reason=matched used=1 left=1 active=true'
     )
   })

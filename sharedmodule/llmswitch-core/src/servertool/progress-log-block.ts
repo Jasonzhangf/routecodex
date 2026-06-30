@@ -9,7 +9,8 @@ import {
   resolveServertoolProgressToolNameWithNative,
   shouldUseServertoolGoldProgressHighlightWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { formatStopMessageCompareContext, readStopMessageCompareContext } from './metadata-center-carrier.js';
+import { formatStopMessageCompareContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { readStopMessageCompareContext } from './metadata-center-carrier.js';
 
 const WHITE = '\u001b[97m';
 
@@ -157,7 +158,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
 
   const logStopCompare = (stage: 'entry' | 'trigger', flowId?: string): void => {
     const compareContext = readStopMessageCompareContext(args.adapterContext);
-    const summary = formatStopMessageCompareContext(compareContext);
+    const summary = formatStopMessageCompareContextWithNative(compareContext);
     const viewStage = stage === 'trigger' ? 'match' : 'entry';
     const flowToken = normalizeServertoolProgressFlowIdWithNative({ value: flowId });
     const compareResult = compareContext

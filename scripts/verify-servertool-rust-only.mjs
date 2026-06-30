@@ -2322,6 +2322,7 @@ function checkStopMessageCompareContextRustOwner() {
     'ignore metadata write failures',
     'catch',
     'decision=unknown reason=no_context',
+    'export function formatStopMessageCompareContext(',
     '../conversion/runtime-metadata.js',
     'ensureRuntimeMetadata',
     'readRuntimeMetadata',
@@ -2352,12 +2353,6 @@ function checkStopMessageCompareContextRustOwner() {
     TS_METADATA_CENTER_CARRIER,
     metadataCenterCarrier,
     'normalizeStopMessageCompareContextWithNative'
-  );
-  assertContains(
-    'stop-message-compare-context-metadata-carrier',
-    TS_METADATA_CENTER_CARRIER,
-    metadataCenterCarrier,
-    'formatStopMessageCompareContextWithNative'
   );
   pass(
     'stop-message-compare-context-metadata-center-only',

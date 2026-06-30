@@ -2,10 +2,12 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
   attachStopMessageCompareContext,
-  formatStopMessageCompareContext,
   readStopMessageCompareContext,
   type StopMessageCompareContext
 } from '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js';
+import {
+  formatStopMessageCompareContextWithNative
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.ts';
 
 const BASE_CONTEXT: StopMessageCompareContext = {
@@ -82,7 +84,7 @@ describe('servertool stop-message compare context', () => {
   });
 
   test('formats compare summary through native owner', () => {
-    expect(formatStopMessageCompareContext({
+    expect(formatStopMessageCompareContextWithNative({
       ...BASE_CONTEXT,
       armed: false,
       mode: 'off',
@@ -171,6 +173,6 @@ describe('servertool stop-message compare context', () => {
     }));
 
     expect(invalid).toBeUndefined();
-    expect(formatStopMessageCompareContext(invalid)).toBe('decision=unknown reason=no_context');
+    expect(formatStopMessageCompareContextWithNative(invalid)).toBe('decision=unknown reason=no_context');
   });
 });
