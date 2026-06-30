@@ -152,6 +152,13 @@ const responsesJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/js
 for (const forbidden of [
   'responsesRequest: {} as any',
   'outputItemStates: new Map()',
+  'CONTEXT_TTL_MS',
+  'MAX_CONTEXTS',
+  'pruneResponsesContexts(',
+  'private contexts = new Map<string, ResponsesJsonToSseContext>()',
+  'getContext(requestId: string)',
+  'clearContext(requestId: string)',
+  'getActiveContexts(): Map<string, ResponsesJsonToSseContext>',
 ]) {
   if (responsesJsonToSseConverter.includes(forbidden)) {
     failures.push(`Responses JSON->SSE converter must not keep dead context state: ${forbidden}`);

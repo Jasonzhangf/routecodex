@@ -50,4 +50,20 @@ describe('responses JSON-to-SSE context dead-state boundary', () => {
     expect(source).not.toContain('responsesRequest: {} as any');
     expect(source).not.toContain('outputItemStates: new Map()');
   });
+
+  it('does not keep converter-level context cache or active-context APIs', () => {
+    const sourcePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts'
+    );
+    const source = fs.readFileSync(sourcePath, 'utf8');
+
+    expect(source).not.toContain('CONTEXT_TTL_MS');
+    expect(source).not.toContain('MAX_CONTEXTS');
+    expect(source).not.toContain('pruneResponsesContexts');
+    expect(source).not.toContain('private contexts = new Map');
+    expect(source).not.toContain('getActiveContexts(');
+    expect(source).not.toContain('getContext(');
+    expect(source).not.toContain('clearContext(');
+  });
 });

@@ -18,39 +18,12 @@ import { ErrorUtils } from '../shared/utils.js';
 import { createResponsesSequencer } from './sequencers/responses-sequencer.js';
 import { createResponsesStreamWriter } from '../shared/writer.js';
 
-
-// Memory management constants
-const CONTEXT_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_CONTEXTS = 2048;
-
-/**
- * Prune contexts by TTL and max-size
- */
-function pruneResponsesContexts(contexts: Map<string, ResponsesJsonToSseContext>): void {
-  const now = Date.now();
-  // TTL sweep
-  for (const [id, ctx] of contexts) {
-    if (now - ctx.startTime > CONTEXT_TTL_MS) {
-      contexts.delete(id);
-    }
-  }
-  // Max-size protection: remove oldest 25% if at capacity
-  if (contexts.size >= MAX_CONTEXTS) {
-    const sorted = [...contexts.entries()].sort((a, b) => a[1].startTime - b[1].startTime);
-    const toRemove = Math.ceil(sorted.length * 0.25);
-    for (let i = 0; i < toRemove; i++) {
-      contexts.delete(sorted[i][0]);
-    }
-  }
-}
-
 /**
  * 重构后的Responses JSON到SSE转换器
  * 采用函数化架构，专注于编排而非具体业务逻辑
  */
 export class ResponsesJsonToSseConverterRefactored {
   private config = DEFAULT_RESPONSES_CONVERSION_CONFIG;
-  private contexts = new Map<string, ResponsesJsonToSseContext>();
 
   constructor(config?: Partial<typeof DEFAULT_RESPONSES_CONVERSION_CONFIG>) {
     if (config) {
@@ -65,8 +38,6 @@ export class ResponsesJsonToSseConverterRefactored {
     response: ResponsesResponse,
     options: ResponsesJsonToSseOptions
   ): Promise<ResponsesSseEventStream> {
-    // TTL + max-size prune on every public entry
-    pruneResponsesContexts(this.contexts);
     try {
       this.validateResponse(response);
     } catch (error) {
@@ -75,7 +46,6 @@ export class ResponsesJsonToSseConverterRefactored {
 
     // 1. 创建上下文
     const context = this.createResponseContext(response, options);
-    this.contexts.set(options.requestId, context);
 
     // 2. 创建底层流
     const stream = new PassThrough({ objectMode: true });
@@ -133,8 +103,6 @@ export class ResponsesJsonToSseConverterRefactored {
 
     } catch (error) {
       throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, context.requestId);
-    } finally {
-      this.contexts.delete(context.requestId);
     }
   }
 
@@ -221,7 +189,6 @@ export class ResponsesJsonToSseConverterRefactored {
 
     if (stream.writable) {
       stream.destroy(wrappedError);
-    this.contexts.delete(context.requestId);
     }
   }
 
@@ -234,7 +201,6 @@ export class ResponsesJsonToSseConverterRefactored {
 
     if (stream.writable) {
       stream.end();
-    this.contexts.delete(context.requestId);
     }
   }
 
@@ -251,7 +217,6 @@ export class ResponsesJsonToSseConverterRefactored {
 
     if (stream.writable) {
       stream.destroy(error);
-      this.contexts.delete(context.requestId);
     }
   }
 
@@ -275,37 +240,13 @@ export class ResponsesJsonToSseConverterRefactored {
     return {
       requestId: options.requestId,
       model: response.model,
-      responsesResponse: response,
       options,
       startTime: Date.now(),
       sequenceCounter: 0,
       outputIndexCounter: 0,
       contentIndexCounter: new Map(),
-      isStreaming: true,
-      currentResponse: response,
       eventStats
     };
-  }
-
-  /**
-   * 获取上下文
-   */
-  getContext(requestId: string): ResponsesJsonToSseContext | undefined {
-    return this.contexts.get(requestId);
-  }
-
-  /**
-   * 清理上下文
-   */
-  clearContext(requestId: string): void {
-    this.contexts.delete(requestId);
-  }
-
-  /**
-   * 获取所有活跃的上下文
-   */
-  getActiveContexts(): Map<string, ResponsesJsonToSseContext> {
-    return new Map(this.contexts);
   }
 }
 

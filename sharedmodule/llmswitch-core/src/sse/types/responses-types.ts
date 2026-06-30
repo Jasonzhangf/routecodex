@@ -76,9 +76,6 @@ export interface ResponsesJsonToSseContext {
   sequenceCounter: number;
   outputIndexCounter: number;
   contentIndexCounter: Map<string, number>;
-  isStreaming: boolean;
-  currentResponse: Partial<ResponsesResponse>;
-  responsesResponse?: ResponsesResponse;
   eventStats: ResponsesEventStats;
 }
 

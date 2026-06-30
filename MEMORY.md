@@ -1,3 +1,8 @@
+# 2026-07-01: Responses JSON->SSE converter must not keep request context cache
+- `ResponsesJsonToSseConverterRefactored` must not maintain converter-level `contexts` maps, TTL pruning, `getContext`, `clearContext`, or `getActiveContexts`. Responses JSON->SSE encode is a finite projection stream; per-request stats may live in the returned stream context, but long-lived converter state is not an owner.
+- Gate: `verify:sse-architecture-boundary` forbids `CONTEXT_TTL_MS`, `MAX_CONTEXTS`, `pruneResponsesContexts`, and the active-context APIs in the Responses JSON->SSE converter.
+- Verification: focused Responses SSE/context Jest 40/40, `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, sharedmodule/root TypeScript checks, and `git diff --check` passed. No live replay was run for this slice.
+
 # 2026-07-01: Responses JSON->SSE validation cannot be disabled
 - `responses-sequencer.ts` must not expose an `enableValidation` / validation-disable switch. Responses JSON->SSE encode projection must always fail fast for missing response fields, unknown output item types, and content-part limit violations.
 - Red evidence: before the fix, `sequenceResponse(..., { enableValidation:false })` silently skipped an unknown output item and still emitted `response.completed` / `response.done`.
