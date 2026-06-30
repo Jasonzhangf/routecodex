@@ -33,6 +33,7 @@ import {
 } from '../event-generators/responses.js';
 import type { ResponsesEventGeneratorContext, ResponsesEventGeneratorConfig } from '../event-generators/responses.js';
 import { expandResponsesMessageItem } from '../../shared/responses-output-normalizer.js';
+import { canonicalizeResponsesSseEventPayloadWithNative } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 // 排列器配置
 export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig {
@@ -113,26 +114,6 @@ async function* withDelay(
       await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs));
     }
   }
-}
-
-function canonicalizeResponsesEventPayload(event: ResponsesSseEvent): ResponsesSseEvent {
-  if (!event.data || typeof event.data !== 'object' || Array.isArray(event.data)) {
-    throw new Error(`Responses event payload must be an object before serialization: ${event.type}`);
-  }
-  const data = event.data as Record<string, unknown>;
-  if (typeof data.type === 'string' && data.type !== event.type) {
-    throw new Error(`Responses event payload type mismatch: event=${event.type} payload=${data.type}`);
-  }
-  return {
-    ...event,
-    data: {
-      type: event.type,
-      ...data,
-      ...(event.sequenceNumber !== undefined && !Object.prototype.hasOwnProperty.call(data, 'sequence_number')
-        ? { sequence_number: event.sequenceNumber }
-        : {})
-    }
-  };
 }
 
 /**
@@ -343,7 +324,7 @@ export async function* sequenceResponse(
   config: ResponsesSequencerConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
 ): AsyncGenerator<ResponsesSseEvent> {
   for await (const event of sequenceResponseCore(response, context, config)) {
-    yield canonicalizeResponsesEventPayload(event);
+    yield canonicalizeResponsesSseEventPayloadWithNative(event) as unknown as ResponsesSseEvent;
   }
 }
 

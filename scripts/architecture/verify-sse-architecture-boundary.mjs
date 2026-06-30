@@ -135,6 +135,18 @@ for (const forbidden of [
   }
 }
 
+const responsesSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts');
+for (const forbidden of [
+  'function canonicalizeResponsesEventPayload(',
+  'data: {\n      type: event.type,',
+  'sequence_number: event.sequenceNumber',
+  'Responses event payload type mismatch: event=',
+]) {
+  if (responsesSequencer.includes(forbidden)) {
+    failures.push(`Responses sequencer must not locally canonicalize SSE payload semantics: ${forbidden}`);
+  }
+}
+
 const chatEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts');
 for (const forbidden of [
   'id: context.responseId ?? context.requestId',

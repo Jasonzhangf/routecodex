@@ -3,9 +3,6 @@ import {
   planServertoolOutcomeWithNative,
   planServertoolToolCallDispatchWithNative
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import {
-  buildServertoolDispatchPlanInput
-} from '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js';
 import { buildServertoolDispatchPlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { buildServertoolOutcomePlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { listServertoolToolSpecs } from '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js';
@@ -47,7 +44,7 @@ describe('server-side-tools native dispatch planner', () => {
 
   test('builds dispatch-plan handler truth from Rust skeleton config', () => {
     const spec = executableToolSpec();
-    const input = buildServertoolDispatchPlanInput({
+    const input = buildServertoolDispatchPlanInputWithNative({
       toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
       disableToolCallHandlers: false
     });
@@ -73,7 +70,7 @@ describe('server-side-tools native dispatch planner', () => {
     const spec = executableToolSpec();
 
     const included = planServertoolToolCallDispatchWithNative(
-      buildServertoolDispatchPlanInput({
+      buildServertoolDispatchPlanInputWithNative({
         toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
         disableToolCallHandlers: false,
         includeToolCallHandlerNames: [spec.name]
@@ -82,7 +79,7 @@ describe('server-side-tools native dispatch planner', () => {
     expect(included.executableToolCalls).toHaveLength(1);
 
     const excluded = planServertoolToolCallDispatchWithNative(
-      buildServertoolDispatchPlanInput({
+      buildServertoolDispatchPlanInputWithNative({
         toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
         disableToolCallHandlers: false,
         excludeToolCallHandlerNames: [spec.name]
@@ -94,7 +91,7 @@ describe('server-side-tools native dispatch planner', () => {
   test('disables all tool_call handlers without mutating tool list', () => {
     const spec = executableToolSpec();
     const plan = planServertoolToolCallDispatchWithNative(
-      buildServertoolDispatchPlanInput({
+      buildServertoolDispatchPlanInputWithNative({
         toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
         disableToolCallHandlers: true
       })

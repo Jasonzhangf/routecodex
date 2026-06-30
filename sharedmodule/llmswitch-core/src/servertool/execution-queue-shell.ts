@@ -29,26 +29,6 @@ import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-b
 
 export type { ServertoolExecutedRecord, ServertoolExecutionLoopState };
 
-export const buildServertoolDispatchPlanInput = (args: {
-  toolCalls: ToolCall[];
-  disableToolCallHandlers: boolean;
-  includeToolCallHandlerNames?: string[];
-  excludeToolCallHandlerNames?: string[];
-  runtimeMetadata?: JsonObject;
-}) => {
-  return buildServertoolDispatchPlanInputWithNative({
-    toolCalls: args.toolCalls,
-    disableToolCallHandlers: args.disableToolCallHandlers,
-    ...(args.includeToolCallHandlerNames?.length
-      ? { includeToolCallHandlerNames: args.includeToolCallHandlerNames }
-      : {}),
-    ...(args.excludeToolCallHandlerNames?.length
-      ? { excludeToolCallHandlerNames: args.excludeToolCallHandlerNames }
-      : {}),
-    runtimeMetadata: args.runtimeMetadata
-  });
-};
-
 export async function runServertoolIoExecutionQueue(args: {
   dispatchPlan: ReturnType<typeof planServertoolToolCallDispatchWithNative>;
   options: ServerSideToolEngineOptions;

@@ -141,11 +141,13 @@ const TARGETS = [
       'readRuntimeMetadata(',
       'resolveServertoolRuntimePreCommandState',
       'applyPreCommandHooksToToolCalls',
+      'buildServertoolDispatchPlanInput(',
     ],
     required: [
       'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
       'planServertoolToolCallDispatchWithNative',
-      'const dispatchPlanInput = buildServertoolDispatchPlanInput({',
+      'buildServertoolDispatchPlanInputWithNative',
+      'const dispatchPlanInput = buildServertoolDispatchPlanInputWithNative({',
       'dispatchPlan: planServertoolToolCallDispatchWithNative(dispatchPlanInput)',
     ],
   },
@@ -411,6 +413,7 @@ const TARGETS = [
       '.trim().toLowerCase()',
       'isRegisteredServerToolNameViaNativeConfig',
       'isServertoolRegisteredNameByConfig',
+      'buildServertoolDispatchPlanInputWithNative',
     ],
     required: [
       'const registryLookupInput = {',

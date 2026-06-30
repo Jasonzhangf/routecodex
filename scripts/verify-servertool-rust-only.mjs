@@ -5033,6 +5033,7 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     "from '../conversion/runtime-metadata.js'",
     'readRuntimeMetadata(',
+    'buildServertoolDispatchPlanInput(',
   ]) {
     if (dispatchPreparationShell.includes(marker)) {
       fail(
@@ -5045,7 +5046,8 @@ function checkServertoolRustOutcomeCloseout() {
     'export function prepareServertoolDispatchStage(',
     'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
     'planServertoolToolCallDispatchWithNative',
-    'const dispatchPlanInput = buildServertoolDispatchPlanInput({',
+    'buildServertoolDispatchPlanInputWithNative',
+    'const dispatchPlanInput = buildServertoolDispatchPlanInputWithNative({',
     'dispatchPlan: planServertoolToolCallDispatchWithNative(dispatchPlanInput)'
   ]) {
     if (!dispatchPreparationShell.includes(marker)) {

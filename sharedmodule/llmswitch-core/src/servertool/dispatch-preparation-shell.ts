@@ -3,9 +3,7 @@ import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
 import {
   planServertoolToolCallDispatchWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import {
-  buildServertoolDispatchPlanInput
-} from './execution-queue-shell.js';
+import { buildServertoolDispatchPlanInputWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   readProviderProtocolFromAnyBoundMetadataCenter,
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
@@ -29,7 +27,7 @@ export function prepareServertoolDispatchStage(args: {
   const runtimeMetadata = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
     args.options.adapterContext as Record<string, unknown>
   );
-  const dispatchPlanInput = buildServertoolDispatchPlanInput({
+  const dispatchPlanInput = buildServertoolDispatchPlanInputWithNative({
     toolCalls: args.toolCalls,
     disableToolCallHandlers: args.options.disableToolCallHandlers === true,
     ...(args.includeToolCallNames ? { includeToolCallHandlerNames: [...args.includeToolCallNames] } : {}),
