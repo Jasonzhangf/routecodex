@@ -5147,6 +5147,10 @@ function checkServertoolRustOutcomeCloseout() {
     'export async function runServertoolExecutionStage(',
     'prepareServertoolDispatchStage',
     'planServertoolExecutionBranchRuntimeAction',
+    'const preExecutionBranchInput = {',
+    'const preExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(preExecutionBranchInput);',
+    'const postExecutionBranchInput = {',
+    'const postExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(postExecutionBranchInput);',
     'runServertoolIoExecutionQueue',
     'materializeNativeToolCallExecutionOutcome',
     'finalizeServertoolResponseStage'

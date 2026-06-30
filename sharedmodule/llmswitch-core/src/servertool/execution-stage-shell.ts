@@ -34,10 +34,11 @@ export async function runServertoolExecutionStage(args: {
     excludeToolCallNames: args.excludeToolCallNames
   });
 
-  const preExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction({
+  const preExecutionBranchInput = {
     executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: 0
-  });
+  };
+  const preExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(preExecutionBranchInput);
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
     return buildServertoolCliProjectionBranchResult({
       options: args.options,
@@ -54,10 +55,11 @@ export async function runServertoolExecutionStage(args: {
     baseForExecution
   });
 
-  const postExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction({
+  const postExecutionBranchInput = {
     executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: executionState.executedToolCalls.length
-  });
+  };
+  const postExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(postExecutionBranchInput);
   if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {
     return materializeNativeToolCallExecutionOutcome({
       base: args.baseObject,
