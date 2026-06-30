@@ -47,7 +47,9 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts',
-    forbidden: [],
+    forbidden: [
+      '  ToolCall\n} from \'./types.js\';',
+    ],
     required: [
       'runServertoolIoExecutionQueue',
       'planServertoolExecutionLoopRuntimeActionWithNative',
@@ -93,6 +95,7 @@ const TARGETS = [
       'if (mandatoryResult) {',
       'const toolFlowResult: ServerSideToolEngineResult = {',
       'return toolFlowResult;',
+      'ServerToolHandlerPlan',
     ],
     required: [
       'function planAutoHookRuntimeAttempt(',
@@ -189,7 +192,8 @@ const TARGETS = [
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts',
     forbidden: [
-      "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;"
+      "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
+      "import type { JsonObject } from '../conversion/hub/types/json.js';",
     ],
     required: [
       'orchestrateServertoolEngine',
@@ -471,6 +475,7 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts',
     forbidden: [
       'isRegisteredServerToolNameViaNativeConfig',
+      'type ServerToolHandlerRegistrationSpec',
     ],
     required: [
       'isServertoolRegisteredNameByConfig',

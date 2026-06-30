@@ -2758,6 +2758,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'state.executedFlowIds.push(',
     'state.lastExecution = execution',
     'const newKeys = new Set(Object.keys(nextChatResponse));',
+    "  ToolCall\n} from './types.js';",
   ]) {
     if (executionQueueShell.includes(keyword)) {
       fail(
@@ -3346,6 +3347,7 @@ function checkAutoHookExecutionRustOwner() {
     "reason: 'predicate_false'",
     "reason: 'matched_without_flow'",
     "reason: 'empty_materialized_result'",
+    'ServerToolHandlerPlan',
     "hook.execution.kind === 'builtin'",
     "hook.execution?.kind !== 'adhoc'",
     'hook.execution.handler',
@@ -3571,6 +3573,7 @@ function checkServertoolRegistryRustOwner() {
     'projectRegisteredServerToolHandlerRecords({',
     'registerServerToolHandler',
     'ServerToolHandler,',
+    'type ServerToolHandlerRegistrationSpec',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
@@ -5202,6 +5205,7 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
+    "import type { JsonObject } from '../conversion/hub/types/json.js';",
   ]) {
     if (runServerSideToolEngineShell.includes(marker)) {
       fail(

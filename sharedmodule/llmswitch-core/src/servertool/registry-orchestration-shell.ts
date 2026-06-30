@@ -1,5 +1,4 @@
 import {
-  type ServerToolHandlerRegistrationSpec,
   type ServerToolRegisteredHandlerRecord
 } from './skeleton-config.js';
 import {

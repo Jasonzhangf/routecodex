@@ -3,7 +3,6 @@ import type {
   ServerSideToolEngineResult,
   ServerToolHandlerContext
 } from './types.js';
-import type { JsonObject } from '../conversion/hub/types/json.js';
 import { extractToolCallsFromResponseStage } from './extract-tool-calls-shell.js';
 import { runServertoolEntryPreflight } from './entry-preflight-shell.js';
 import { runServertoolResponseStagePrePass } from './response-stage-prepass-shell.js';

@@ -1,8 +1,7 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineOptions,
-  ServerToolExecution,
-  ToolCall
+  ServerToolExecution
 } from './types.js';
 import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {

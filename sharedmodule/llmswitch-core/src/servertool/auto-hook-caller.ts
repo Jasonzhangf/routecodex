@@ -2,7 +2,6 @@ import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
   ServerToolHandlerContext,
-  ServerToolHandlerPlan,
   ServerToolHandlerResult
 } from './types.js';
 import { buildAutoHookQueuesFromConfig } from './orchestration-blocks.js';
