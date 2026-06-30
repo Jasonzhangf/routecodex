@@ -5229,12 +5229,12 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'planServertoolResponseStageGateWithNative',
-    'const responseStageGateInput = {',
-    'const gatePlan = planServertoolResponseStageGateWithNative(responseStageGateInput);',
+    'function planServertoolResponseStageGate(',
+    'const gatePlan = planServertoolResponseStageGate({',
     'detectProviderResponseShapeWithNative',
-    'const orchestrationInput = {',
-    'const orchestration = await runServerToolOrchestration(orchestrationInput);',
+    'function buildServertoolResponseStageOrchestrationInput(',
+    'const orchestration = await runServerToolOrchestration(',
+    'buildServertoolResponseStageOrchestrationInput({',
     'runServerToolOrchestration',
     'const bypassResult: ServertoolResponseStageShellResult = {',
     'return bypassResult;',
@@ -5245,6 +5245,17 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-response-stage-orchestration-thin-shell',
         `response-stage-orchestration-shell.ts must keep thin orchestration marker ${marker}`
+      );
+    }
+  }
+  for (const keyword of [
+    'responseStageGateInput',
+    'orchestrationInput',
+  ]) {
+    if (responseStageOrchestrationShell.includes(keyword)) {
+      fail(
+        'servertool-response-stage-orchestration-thin-shell',
+        `response-stage-orchestration-shell.ts must not retain retired input marker ${keyword}`
       );
     }
   }

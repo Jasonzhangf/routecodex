@@ -12,6 +12,38 @@ import { readRuntimeControlFromBoundMetadataCenter } from './metadata-center-car
 
 type ChatCompletionLike = JsonObject;
 
+function planServertoolResponseStageGate(args: {
+  payload: ChatCompletionLike;
+  adapterContext: Record<string, unknown>;
+  runtimeControl: JsonObject;
+  allowFollowup: boolean;
+}) {
+  return planServertoolResponseStageGateWithNative({
+    payload: args.payload,
+    adapterContext: args.adapterContext,
+    runtimeControl: args.runtimeControl,
+    allowFollowup: args.allowFollowup
+  });
+}
+
+function buildServertoolResponseStageOrchestrationInput(args: {
+  payload: ChatCompletionLike;
+  adapterContext: AdapterContext;
+  requestId: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  stageRecorder?: StageRecorder;
+}) {
+  return {
+    chat: args.payload as JsonObject,
+    adapterContext: args.adapterContext,
+    requestId: args.requestId,
+    entryEndpoint: args.entryEndpoint,
+    providerProtocol: args.providerProtocol,
+    stageRecorder: args.stageRecorder
+  };
+}
+
 export interface ServertoolResponseStageShellOptions {
   payload: ChatCompletionLike;
   adapterContext: AdapterContext;
@@ -40,13 +72,12 @@ export async function runServertoolResponseStageOrchestrationShell(
   if (!providerProtocol) {
     throw new Error('Servertool response stage orchestration requires metadata center runtime_control.providerProtocol');
   }
-  const responseStageGateInput = {
+  const gatePlan = planServertoolResponseStageGate({
     payload: options.payload,
     adapterContext: options.adapterContext as Record<string, unknown>,
     runtimeControl,
     allowFollowup: options.allowFollowup === true
-  };
-  const gatePlan = planServertoolResponseStageGateWithNative(responseStageGateInput);
+  });
 
   if (gatePlan.nextAction === 'bypass') {
     recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
@@ -67,15 +98,16 @@ export async function runServertoolResponseStageOrchestrationShell(
 
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
   const orchestrationStart = Date.now();
-  const orchestrationInput = {
-    chat: options.payload as JsonObject,
-    adapterContext: options.adapterContext,
-    requestId: options.requestId,
-    entryEndpoint: options.entryEndpoint,
-    providerProtocol,
-    stageRecorder: options.stageRecorder
-  };
-  const orchestration = await runServerToolOrchestration(orchestrationInput);
+  const orchestration = await runServerToolOrchestration(
+    buildServertoolResponseStageOrchestrationInput({
+      payload: options.payload,
+      adapterContext: options.adapterContext,
+      requestId: options.requestId,
+      entryEndpoint: options.entryEndpoint,
+      providerProtocol,
+      stageRecorder: options.stageRecorder
+    })
+  );
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'completed', {
     elapsedMs: Date.now() - orchestrationStart,
     executed: orchestration.executed,
