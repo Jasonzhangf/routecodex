@@ -137,7 +137,7 @@ export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(
   return readRequestTruthSessionIdFromBoundMetadataCenter(metadata);
 }
 
-export function readRequestTruthFromAnyBoundMetadataCenter(
+function readRequestTruthFromAnyBoundMetadataCenter(
   target: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
   if (!target) {
@@ -154,7 +154,7 @@ export function readRequestTruthFromAnyBoundMetadataCenter(
   return metadata ? readRequestTruthFromAnyBoundMetadataCenter(metadata) : undefined;
 }
 
-export function readProviderObservationFromAnyBoundMetadataCenter(
+function readProviderObservationFromAnyBoundMetadataCenter(
   target: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
   if (!target) {

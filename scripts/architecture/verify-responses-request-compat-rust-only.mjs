@@ -42,9 +42,10 @@ for (const required of [
 }
 
 for (const required of [
-  'readRuntimeControlFromAnyBoundMetadataCenter',
-  'readRequestTruthFromAnyBoundMetadataCenter',
-  'readProviderObservationFromAnyBoundMetadataCenter',
+  'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
+  'metadataCenterSnapshot?.runtimeControl',
+  'metadataCenterSnapshot?.requestTruth',
+  'metadataCenterSnapshot?.providerObservation',
 ]) {
   if (!nativeAdapterContext.includes(required)) {
     failures.push(`native adapter context must read req-outbound control from MetadataCenter only: ${required}`);

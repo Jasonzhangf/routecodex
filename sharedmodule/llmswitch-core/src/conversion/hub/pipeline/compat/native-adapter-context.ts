@@ -1,9 +1,7 @@
 import type { AdapterContext } from '../../types/chat-envelope.js';
 import type { NativeReqOutboundCompatAdapterContextInput } from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 import {
-  readProviderObservationFromAnyBoundMetadataCenter,
-  readRequestTruthFromAnyBoundMetadataCenter,
-  readRuntimeControlFromAnyBoundMetadataCenter
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from '../../../../servertool/metadata-center-carrier.js';
 
 // Thin TS bridge only carries metadata center bound context into native compat.
@@ -12,9 +10,11 @@ export function buildNativeReqOutboundCompatAdapterContext(
   adapterContext?: AdapterContext
 ): NativeReqOutboundCompatAdapterContextInput {
   const row = (adapterContext ?? {}) as Record<string, unknown>;
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(row);
-  const requestTruth = readRequestTruthFromAnyBoundMetadataCenter(row);
-  const providerObservation = readProviderObservationFromAnyBoundMetadataCenter(row);
+  const metadataCenterSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(row)
+    ?.metadataCenterSnapshot as Record<string, unknown> | undefined;
+  const runtimeControl = metadataCenterSnapshot?.runtimeControl as Record<string, unknown> | undefined;
+  const requestTruth = metadataCenterSnapshot?.requestTruth as Record<string, unknown> | undefined;
+  const providerObservation = metadataCenterSnapshot?.providerObservation as Record<string, unknown> | undefined;
   const target = (() => {
     const value = providerObservation?.target;
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
