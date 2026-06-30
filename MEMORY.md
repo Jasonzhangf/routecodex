@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE done metadata must fail fast on malformed candidates
+- Valid Gemini `gemini.data` / `gemini.done` replay remains intact, but malformed `gemini.done.candidates` must not be silently skipped.
+- `gemini-sse-to-json-converter.ts` now fails fast on invalid done-frame candidate metadata with `Invalid Gemini done event: invalid candidate at index <n>`.
+- Verification: focused `sse-parser-no-recovery` Jest, SSE architecture gate, sharedmodule/root TypeScript checks, `verify:responses-sse-business-module`, `build:base`, `git diff --check`, and source replay all passed. No real Gemini provider-response sample was found in current sample stores.
+
 # 2026-07-01: SSE decode must fail malformed semantic chunks, not skip them
 - Gemini SSE decode must not `return` past `gemini.data` frames with missing `part`; malformed data frames fail fast with `Invalid Gemini data event: missing part`.
 - Chat SSE decode may allow proven inert tail chunks after response truth is established, but non-object `chat_chunk` payloads are malformed and must fail fast with `Invalid chat_chunk payload`; never use `continue` to silently skip malformed semantic chunks.

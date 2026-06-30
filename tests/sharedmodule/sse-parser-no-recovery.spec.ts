@@ -83,4 +83,18 @@ describe('SSE parser no-recovery boundary', () => {
       model: 'gemini-test'
     })).rejects.toThrow('Invalid Gemini data event: invalid part at index 0');
   });
+
+  it('fails Gemini done frames with invalid candidate metadata instead of silently skipping it', async () => {
+    const converter = new GeminiSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([
+      'event: gemini.data\n',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"output","candidateIndex":0,"partIndex":0,"role":"model","part":{"text":"hello"}}\n\n',
+      'event: gemini.done\n',
+      'data: {"type":"gemini.done","protocol":"gemini-chat","direction":"output","candidates":[null]}\n\n'
+    ]), {
+      requestId: 'req_gemini_invalid_done_candidate_no_swallow',
+      model: 'gemini-test'
+    })).rejects.toThrow('Invalid Gemini done event: invalid candidate at index 0');
+  });
 });

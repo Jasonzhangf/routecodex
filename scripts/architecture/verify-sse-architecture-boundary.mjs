@@ -332,6 +332,7 @@ for (const forbidden of [
 const geminiSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts');
 for (const forbidden of [
   'if (!part || typeof part !== \'object\') {\n      return [part];\n    }',
+  'if (!entry || typeof entry.index !== \'number\') continue;',
 ]) {
   if (geminiSseToJsonConverter.includes(forbidden)) {
     failures.push(`Gemini SSE decode must not pass malformed data parts through: ${forbidden}`);

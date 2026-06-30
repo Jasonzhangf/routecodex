@@ -1,3 +1,9 @@
+# 2026-07-01: Gemini SSE done metadata fail-fast
+- Scope: SSE Rustification closeout, `sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts`.
+- Finding: `gemini.done` still iterated `donePayload.candidates` with a silent skip for entries missing `index`, so malformed done metadata could disappear instead of failing.
+- Fix: invalid Gemini done candidate metadata now fails fast with `Invalid Gemini done event: invalid candidate at index <n>`; the old skip marker is forbidden by `verify:sse-architecture-boundary`.
+- Verification: focused `sse-parser-no-recovery` Jest 6/6 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `build:base` PASS; `git diff --check` PASS; source replay valid `text=hello/finishReason=STOP` and invalid `candidates:[null]` fail-fast. No real Gemini provider-response sample found.
+
 # 2026-07-01 Gemini SSE decode scalar part fail-fast
 - Scope: SSE Rustification closeout, `sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts`.
 - Finding: decode-side `normalizeReasoningPart()` still returned `[part]` for non-object `gemini.data.part`, so scalar semantic data could materialize into candidate parts.

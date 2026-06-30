@@ -90,6 +90,13 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Gemini SSE done candidate metadata fail-fast slice
+
+- Red evidence: focused `tests/sharedmodule/sse-parser-no-recovery.spec.ts` covered `gemini.done` with invalid `candidates` metadata, and the old implementation would have silently skipped malformed entries.
+- Fix: `sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts` now fail-fasts on invalid done-frame candidate metadata with `Invalid Gemini done event: invalid candidate at index <n>` instead of skipping bad entries.
+- Positive / reverse tests: valid Gemini data/done replay still materializes `text=hello` and `finishReason=STOP`; invalid `candidates:[null]` replay fails fast with no silent skip.
+- Verification: focused `sse-parser-no-recovery` Jest PASS 6/6; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `npx tsc -p tsconfig.json --noEmit --pretty false` PASS; `git diff --check` PASS; `npm run build:base` PASS; source replay valid/invalid Gemini done metadata PASS. No real Gemini provider-response sample was found in current sample stores.
+
 ### 2026-07-01 Gemini SSE decode scalar part fail-fast slice
 
 - Residue evidence: `gemini-sse-to-json-converter.ts::normalizeReasoningPart()` still returned `[part]` for non-object `gemini.data` parts, allowing malformed scalar provider content to materialize into `candidate.content.parts`.
