@@ -3299,8 +3299,7 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planAutoHookCallerFinalizationJson');
   assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookRuntimeAttemptWithNative');
   assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookCallerFinalizationWithNative');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'function planAutoHookRuntimeAttempt(');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const attemptPlan = planAutoHookRuntimeAttempt({');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const attemptPlan = planAutoHookRuntimeAttemptWithNative({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalQueueName = queueOrder[queueOrder.length - 1]?.queueName;');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalQueue = queue.queueName === finalQueueName;');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationPlan = planAutoHookCallerFinalizationWithNative({');
@@ -3311,6 +3310,8 @@ function checkAutoHookExecutionRustOwner() {
     'errorAttemptInput',
     'runtimeAttemptInput',
     'callerFinalizationInput',
+    'function planAutoHookRuntimeAttempt(',
+    'const attemptPlan = planAutoHookRuntimeAttempt({',
     'function planAutoHookCallerFinalization(',
     'const finalizationPlan = planAutoHookCallerFinalization({',
     'const toolFlowResult: ServerSideToolEngineResult = {',

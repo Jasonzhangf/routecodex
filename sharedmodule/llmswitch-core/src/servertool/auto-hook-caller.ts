@@ -24,34 +24,6 @@ type AutoHookExecutionItem = {
   execution: ServerToolExecutionDescriptor;
 };
 
-function planAutoHookRuntimeAttempt(args: {
-  hookId: string;
-  phase: string;
-  priority: number;
-  queue: string;
-  queueIndex: number;
-  queueTotal: number;
-  message?: string;
-  hasPlannedResult?: boolean;
-  hasMaterializedResult?: boolean;
-  materializedFlowId?: string;
-}) {
-  return planAutoHookRuntimeAttemptWithNative({
-    hookId: args.hookId,
-    phase: args.phase,
-    priority: args.priority,
-    queue: args.queue,
-    queueIndex: args.queueIndex,
-    queueTotal: args.queueTotal,
-    ...(typeof args.message === 'string' ? { message: args.message } : {}),
-    ...(typeof args.hasPlannedResult === 'boolean' ? { hasPlannedResult: args.hasPlannedResult } : {}),
-    ...(typeof args.hasMaterializedResult === 'boolean' ? { hasMaterializedResult: args.hasMaterializedResult } : {}),
-    ...(typeof args.materializedFlowId === 'string' && args.materializedFlowId.trim()
-      ? { materializedFlowId: args.materializedFlowId.trim() }
-      : {})
-  });
-}
-
 export async function runAutoHookExecutionQueue(args: {
   queueName: ServerToolAutoHookTraceEvent['queue'];
   hooks: AutoHookExecutionItem[];
@@ -78,7 +50,7 @@ export async function runAutoHookExecutionQueue(args: {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-      const attemptPlan = planAutoHookRuntimeAttempt({
+      const attemptPlan = planAutoHookRuntimeAttemptWithNative({
         ...traceBase,
         message
       });
@@ -92,7 +64,7 @@ export async function runAutoHookExecutionQueue(args: {
       result = await materializeServertoolPlannedResult(planned as any, args.options);
     }
 
-    const attemptPlan = planAutoHookRuntimeAttempt({
+    const attemptPlan = planAutoHookRuntimeAttemptWithNative({
       ...traceBase,
       hasPlannedResult: Boolean(planned),
       hasMaterializedResult: Boolean(result),
