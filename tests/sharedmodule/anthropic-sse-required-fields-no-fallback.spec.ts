@@ -56,4 +56,13 @@ describe('anthropic SSE required fields no-fallback boundary', () => {
       'req_anthropic_missing_tool_id'
     ))).rejects.toThrow('Invalid Anthropic tool_use block: missing id');
   });
+
+  it('throws when stop_reason is missing instead of defaulting to end_turn', async () => {
+    const sequencer = createAnthropicSequencer();
+
+    await expect(collectEvents(sequencer.sequenceResponse(
+      baseResponse({ stop_reason: undefined }),
+      'req_anthropic_missing_stop_reason'
+    ))).rejects.toThrow('Invalid Anthropic response: missing stop_reason');
+  });
 });

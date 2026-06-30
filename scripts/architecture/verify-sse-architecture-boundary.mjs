@@ -279,6 +279,15 @@ for (const forbidden of [
   }
 }
 
+const anthropicSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts');
+for (const forbidden of [
+  "response.stop_reason ?? 'end_turn'",
+]) {
+  if (anthropicSequencer.includes(forbidden)) {
+    failures.push(`Anthropic SSE sequencer must not synthesize stop_reason fallback: ${forbidden}`);
+  }
+}
+
 const geminiEventSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts');
 for (const forbidden of [
   "event.event ?? event.type ?? 'gemini.data'",

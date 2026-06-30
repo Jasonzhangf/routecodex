@@ -1,3 +1,8 @@
+# 2026-07-01: Anthropic SSE stop_reason fallback removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 `response.stop_reason ?? 'end_turn'` marker 后先红，证明 `anthropic-sequencer.ts` 仍会在缺少 provider stop_reason 时合成 `end_turn`。
+- Fix：`createAnthropicSequencer().sequenceResponse()` 在缺少 `response.stop_reason` 时 fail-fast 抛 `Invalid Anthropic response: missing stop_reason`，`message_delta.delta.stop_reason` 只使用 provider 显式真相；focused spec 增加反向缺失 stop_reason 用例。
+- Verification：focused Jest `anthropic-sse-required-fields-no-fallback` 4/4 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；`build:base` PASS；`git diff --check` PASS；source replay `eventCount=6 hasMessageDelta=true hasExplicitStopReason=true fallbackMarkerPresent=false missingStopFailed=true`。真实 Anthropic 成功样本缺口：当前 `~/.rcc/codex-samples/anthropic-messages` 与 `/Volumes/extension/.rcc/codex-samples/anthropic-messages` 仅找到 429 provider-error 快照，未找到成功 provider-response SSE/JSON 可重放样本。
+
 # 2026-07-01: Anthropic/Gemini SSE serializer event fallback removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 Anthropic `: 'message')` / payload type fallback marker 与 Gemini `event.event ?? event.type ?? 'gemini.data'` marker 后先红；新增 focused spec 也先红，证明 serializer 会在缺少 event/type 时默认合成事件名。
 - Fix：`anthropic-event-serializer.ts` / `gemini-event-serializer.ts` 删除默认事件名 fallback；现在只接受显式 `event` 或 `type`，缺失/空值直接 fail-fast。TS serializer 保留纯 wire framing，不再从 payload 或默认常量推断 event type。

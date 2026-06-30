@@ -169,9 +169,12 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
         }
       }
 
+      if (!response.stop_reason) {
+        throw new Error('Invalid Anthropic response: missing stop_reason');
+      }
       yield createEvent('message_delta', {
         delta: {
-          stop_reason: response.stop_reason ?? 'end_turn',
+          stop_reason: response.stop_reason,
           usage: response.usage
         }
       });

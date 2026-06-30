@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Anthropic SSE stop_reason fallback removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `response.stop_reason ?? 'end_turn'` and failed before the fix, proving `anthropic-sequencer.ts` still synthesized a default `stop_reason`.
+- Fix: `createAnthropicSequencer().sequenceResponse()` now fail-fasts when `response.stop_reason` is missing; `message_delta.delta.stop_reason` uses only provider truth.
+- Positive / reverse tests: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` now covers explicit id/role/tool id and the reverse missing `stop_reason` fail-fast.
+- Verification: focused Jest `anthropic-sse-required-fields-no-fallback` PASS 4/4; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: source replay `eventCount=6`, `hasMessageDelta=true`, `hasExplicitStopReason=true`, `fallbackMarkerPresent=false`, `missingStopFailed=true`.
+- Real sample gap: current Anthropic sample directories only contain 429 provider-error snapshots, not a successful provider-response SSE/JSON replay sample.
+
 ### 2026-07-01 Anthropic/Gemini SSE serializer event fallback removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers for Anthropic serializer default event synthesis (`: 'message')` and payload-derived type fallback) and Gemini serializer default event synthesis (`event.event ?? event.type ?? 'gemini.data'`). The gate failed on the existing TS fallback. Focused Jest also failed before the fix because missing event/type did not throw.
