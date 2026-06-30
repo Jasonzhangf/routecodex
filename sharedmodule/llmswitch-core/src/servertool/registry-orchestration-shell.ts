@@ -1,8 +1,7 @@
 import {
   planServertoolBuiltinAutoHandlerEntriesWithNative,
   planServertoolRegistryLookupFromSkeletonWithNative,
-  resolveServertoolBuiltinHandlerEntryWithNative,
-  resolveServertoolRegisteredNameWithNative
+  resolveServertoolBuiltinHandlerEntryWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   planServertoolRegistryAutoHookDescriptorsWithNative
@@ -61,7 +60,3 @@ export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
     };
   });
 };
-
-export function isRegisteredServerToolName(name: string): boolean {
-  return resolveServertoolRegisteredNameWithNative({ name });
-}

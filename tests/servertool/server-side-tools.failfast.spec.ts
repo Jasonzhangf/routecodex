@@ -760,7 +760,6 @@ jest.unstable_mockModule(
         ? { action: 'return_builtin', canonicalName: name }
         : { action: 'return_none', canonicalName: name };
     }),
-    resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
     normalizeServertoolRegistrationSpecWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
       if (!name) {

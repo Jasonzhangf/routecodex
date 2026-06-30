@@ -462,12 +462,12 @@ const TARGETS = [
       'listBuiltinHandlerRecordEntries',
       "from './registry-projection-shell.js'",
       'projectAutoServerToolHookDescriptors',
+      'export function isRegisteredServerToolName(',
+      'resolveServertoolRegisteredNameWithNative',
     ],
     required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
       'planServertoolRegistryAutoHookDescriptorsWithNative({',
-      'resolveServertoolRegisteredNameWithNative',
-      'return resolveServertoolRegisteredNameWithNative({ name });',
     ],
   },
 ] as const;

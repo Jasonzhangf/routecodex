@@ -3509,6 +3509,8 @@ function checkServertoolRegistryRustOwner() {
     'getServerToolHandlerViaNativePlan',
     'export function listRegisteredServerToolHandlerNames(',
     'export function listRegisteredServerToolHandlerRecords(',
+    'export function isRegisteredServerToolName(',
+    'resolveServertoolRegisteredNameWithNative',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
@@ -3533,12 +3535,6 @@ function checkServertoolRegistryRustOwner() {
   for (const needle of [
     'planServertoolRegistryLookupFromSkeletonWithNative({',
     'planServertoolRegistryAutoHookDescriptorsWithNative({',
-  ]) {
-    assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
-  }
-  for (const needle of [
-    'resolveServertoolRegisteredNameWithNative',
-    'return resolveServertoolRegisteredNameWithNative({ name });',
   ]) {
     assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
   }

@@ -240,9 +240,6 @@ jest.unstable_mockModule(
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(
       mockRegistryLookupFromSkeleton
     ),
-    resolveServertoolRegisteredNameWithNative: jest.fn((input: any) =>
-      Boolean(mockToolSpec(input.name)?.enabled)
-    ),
     planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
       const name = String(input.name ?? '').trim().toLowerCase();
       if (name !== 'stop_message_auto') {
@@ -464,9 +461,6 @@ jest.unstable_mockModule(
     }),
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(
       mockRegistryLookupFromSkeleton
-    ),
-    resolveServertoolRegisteredNameWithNative: jest.fn((input: any) =>
-      Boolean(mockToolSpec(input.name)?.enabled)
     ),
     planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
       const name = String(input.name ?? '').trim().toLowerCase();

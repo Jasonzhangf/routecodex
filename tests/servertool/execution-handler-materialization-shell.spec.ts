@@ -44,7 +44,6 @@ jest.unstable_mockModule(
     planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({ entries: [] })),
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(() => ({ action: 'return_none' })),
     planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({ toolSpecList: [] })),
-    resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
     resolveServertoolBuiltinHandlerEntryWithNative: jest.fn(() => null),
     resolveServertoolToolSpecWithNative: jest.fn(() => null),
     planServertoolOutcomeWithNative

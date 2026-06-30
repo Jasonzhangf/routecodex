@@ -11,7 +11,6 @@ jest.unstable_mockModule(
     planServertoolBuiltinAutoHandlerEntriesWithNative: listBuiltinAutoHandlerEntriesMock,
     planServertoolRegistryLookupFromSkeletonWithNative: planServertoolRegistryLookupFromSkeletonWithNativeMock,
     resolveServertoolBuiltinHandlerEntryWithNative: getBuiltinHandlerEntryMock,
-    resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
   })
 );
 
@@ -120,6 +119,8 @@ describe('registry-orchestration-shell', () => {
       fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts', 'utf8')
     );
 
+    expect(source).not.toContain('export function isRegisteredServerToolName(');
+    expect(source).not.toContain('resolveServertoolRegisteredNameWithNative');
     expect(source).not.toContain('isRegisteredServerToolNameViaNativeConfig');
     expect(source).not.toContain('isServertoolRegisteredNameByConfig');
   });
