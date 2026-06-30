@@ -711,6 +711,120 @@ pub fn build_responses_sse_content_part_descriptor_json(
     })
 }
 
+pub fn build_responses_sse_output_item_event_payload(
+    output_item: Value,
+    output_index: i64,
+    lifecycle: &str,
+) -> Result<Value, String> {
+    let item = build_responses_sse_output_item_descriptor(output_item, Some(lifecycle))?;
+    let mut payload = Map::new();
+    payload.insert("output_index".to_string(), Value::from(output_index));
+    payload.insert("item".to_string(), item);
+    Ok(Value::Object(payload))
+}
+
+pub fn build_responses_sse_output_item_event_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> Result<String, String> {
+    let lifecycle = lifecycle_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Responses output item event payload lifecycle is required".to_string())?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses output item event payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(source) = payload.as_object() else {
+        return Err("Responses output item event payload expected object".to_string());
+    };
+    let output_item = source
+        .get("output_item")
+        .cloned()
+        .ok_or_else(|| "Responses output item event payload missing output_item".to_string())?;
+    let output_index = source
+        .get("output_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses output item event payload missing output_index".to_string())?;
+    let output =
+        build_responses_sse_output_item_event_payload(output_item, output_index, lifecycle)?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses output item event payload JSON: {}",
+            error
+        )
+    })
+}
+
+pub fn build_responses_sse_content_part_event_payload(
+    content_part: Option<Value>,
+    output_index: i64,
+    item_id: &str,
+    content_index: i64,
+    lifecycle: &str,
+) -> Result<Value, String> {
+    let mut payload = Map::new();
+    payload.insert("output_index".to_string(), Value::from(output_index));
+    payload.insert("item_id".to_string(), Value::String(item_id.to_string()));
+    payload.insert("content_index".to_string(), Value::from(content_index));
+    if let Some(content_part) = content_part {
+        let part = build_responses_sse_content_part_descriptor(content_part, Some(lifecycle))?;
+        payload.insert("part".to_string(), part);
+    } else if lifecycle == "added" {
+        return Err("Responses content part event payload missing content_part".to_string());
+    }
+    Ok(Value::Object(payload))
+}
+
+pub fn build_responses_sse_content_part_event_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> Result<String, String> {
+    let lifecycle = lifecycle_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Responses content part event payload lifecycle is required".to_string())?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses content part event payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(source) = payload.as_object() else {
+        return Err("Responses content part event payload expected object".to_string());
+    };
+    let content_part = source.get("content_part").cloned();
+    let output_index = source
+        .get("output_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses content part event payload missing output_index".to_string())?;
+    let item_id = source
+        .get("item_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Responses content part event payload missing item_id".to_string())?;
+    let content_index = source
+        .get("content_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses content part event payload missing content_index".to_string())?;
+    let output = build_responses_sse_content_part_event_payload(
+        content_part,
+        output_index,
+        item_id,
+        content_index,
+        lifecycle,
+    )?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses content part event payload JSON: {}",
+            error
+        )
+    })
+}
+
 pub fn build_responses_sse_function_call_arguments_delta_payload(
     output_index: i64,
     item_id: &str,
@@ -1378,6 +1492,61 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Responses content part descriptor missing type"));
+    }
+
+    #[test]
+    fn builds_responses_sse_output_item_event_payload_with_added_item() {
+        let output = build_responses_sse_output_item_event_payload(
+            json!({
+                "id": "msg_1",
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": "hello" }]
+            }),
+            7,
+            "added",
+        )
+        .unwrap();
+
+        assert_eq!(output["output_index"], json!(7));
+        assert_eq!(output["item"]["status"], json!("in_progress"));
+        assert_eq!(output["item"]["content"], json!([]));
+    }
+
+    #[test]
+    fn builds_responses_sse_content_part_event_payload_with_done_part() {
+        let output = build_responses_sse_content_part_event_payload(
+            Some(json!({
+                "type": "output_text",
+                "text": "final text",
+                "annotations": [{ "type": "file_citation" }],
+                "logprobs": [{ "token": "x" }]
+            })),
+            7,
+            "msg_1",
+            1,
+            "done",
+        )
+        .unwrap();
+
+        assert_eq!(output["output_index"], json!(7));
+        assert_eq!(output["item_id"], json!("msg_1"));
+        assert_eq!(output["content_index"], json!(1));
+        assert_eq!(output["part"]["type"], json!("output_text"));
+        assert_eq!(output["part"]["text"], json!("final text"));
+    }
+
+    #[test]
+    fn builds_responses_sse_content_part_event_payload_without_part_for_done() {
+        let output = build_responses_sse_content_part_event_payload(None, 7, "msg_1", 1, "done")
+            .unwrap();
+
+        assert_eq!(output, json!({
+            "output_index": 7,
+            "item_id": "msg_1",
+            "content_index": 1
+        }));
     }
 
     #[test]

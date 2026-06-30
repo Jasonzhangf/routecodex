@@ -16,10 +16,10 @@ import {
   buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative,
   buildResponsesSseFunctionCallArgumentsDonePayloadWithNative,
   buildResponsesSseErrorPayloadWithNative,
-  buildResponsesSseContentPartDescriptorWithNative,
+  buildResponsesSseContentPartEventPayloadWithNative,
   buildResponsesSseOutputTextDeltaPayloadWithNative,
   buildResponsesSseOutputTextDonePayloadWithNative,
-  buildResponsesSseOutputItemDescriptorWithNative,
+  buildResponsesSseOutputItemEventPayloadWithNative,
   buildResponsesSseReasoningDeltaPayloadWithNative,
   buildResponsesSseReasoningSummaryPayloadWithNative,
   buildResponsesSseResponseEventPayloadWithNative,
@@ -173,17 +173,18 @@ export function buildOutputItemStartEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
-  const item = buildResponsesSseOutputItemDescriptorWithNative(outputItem, 'added');
+  const item = buildResponsesSseOutputItemEventPayloadWithNative(
+    'added',
+    context.outputIndexCounter,
+    outputItem
+  );
 
   return {
     type: 'response.output_item.added',
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      output_index: context.outputIndexCounter,
-      item
-    },
+    data: item,
     sequenceNumber: baseEvent.sequenceNumber
   };
 }
@@ -200,19 +201,20 @@ export function buildContentPartStartEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
-  const part = buildResponsesSseContentPartDescriptorWithNative(content, 'added');
+  const part = buildResponsesSseContentPartEventPayloadWithNative(
+    'added',
+    context.outputIndexCounter,
+    outputItemId,
+    contentIndex,
+    content
+  );
 
   return {
     type: 'response.content_part.added',
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      output_index: context.outputIndexCounter,
-      item_id: outputItemId,
-      content_index: contentIndex,
-      part
-    },
+    data: part,
     sequenceNumber: baseEvent.sequenceNumber
   };
 }
@@ -265,20 +267,26 @@ export function buildContentPartDoneEvent(
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
   const part = content
-    ? buildResponsesSseContentPartDescriptorWithNative(content, 'done')
-    : undefined;
+    ? buildResponsesSseContentPartEventPayloadWithNative(
+        'done',
+        context.outputIndexCounter,
+        outputItemId,
+        contentIndex,
+        content
+      )
+    : buildResponsesSseContentPartEventPayloadWithNative(
+        'done',
+        context.outputIndexCounter,
+        outputItemId,
+        contentIndex
+      );
 
   return {
     type: 'response.content_part.done',
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      output_index: context.outputIndexCounter,
-      item_id: outputItemId,
-      content_index: contentIndex,
-      ...(part ? { part } : {})
-    },
+    data: part,
     sequenceNumber: baseEvent.sequenceNumber
   };
 }
@@ -604,17 +612,18 @@ export function buildOutputItemDoneEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
-  const item = buildResponsesSseOutputItemDescriptorWithNative(outputItem, 'done');
+  const item = buildResponsesSseOutputItemEventPayloadWithNative(
+    'done',
+    context.outputIndexCounter,
+    outputItem
+  );
 
   return {
     type: 'response.output_item.done',
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      output_index: context.outputIndexCounter,
-      item
-    },
+    data: item,
     sequenceNumber: baseEvent.sequenceNumber
   };
 }

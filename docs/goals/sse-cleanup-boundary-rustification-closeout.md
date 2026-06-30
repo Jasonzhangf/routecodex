@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses SSE output/content wrapper payload native owner slice
+
+- Red evidence: after adding `output_index: context.outputIndexCounter,`, `item_id: outputItemId,`, and `content_index: contentIndex,` as forbidden markers, `npm run verify:sse-architecture-boundary` failed on `responses.ts`, proving `response.output_item.*` and `response.content_part.*` wrapper payloads still lived in TS.
+- Fix: added Rust owners `buildResponsesSseOutputItemEventPayloadJson` and `buildResponsesSseContentPartEventPayloadJson`; TS now calls native wrappers for `response.output_item.added/done` and `response.content_part.added/done` while only wrapping the SSE event envelope.
+- Positive / reverse tests: Rust covers output item wrapper payloads, content part wrapper payloads with `part`, and content_part done without `part`; Jest covers sequenced output item/content part wrapper projection.
+- Verification: native build PASS; Rust focused `output_item_event_payload` PASS 1/1 and `content_part_event_payload` PASS 2/2; focused Jest 29/29 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `outputItemEvents=4`, `contentPartEvents=0`, and `badWrapper=0`.
+
 ### 2026-06-30 Responses SSE response event payload native owner slice
 
 - Red evidence: after adding `basePayload.output = []` as a forbidden marker, `npm run verify:sse-architecture-boundary` failed on `buildResponseStartEvents()`, proving response start payload mutation still lived in TS.

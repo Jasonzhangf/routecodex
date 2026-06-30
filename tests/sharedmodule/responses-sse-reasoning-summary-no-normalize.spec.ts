@@ -96,6 +96,70 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
     });
   });
 
+  it('builds output item and content part payload wrappers through native owner', async () => {
+    const events = await collectEvents({
+      id: 'resp_item_payload_native',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'msg_1',
+        type: 'message',
+        status: 'completed',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'hello', annotations: [{ type: 'citation' }], logprobs: [] }]
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    });
+
+    const itemAdded = events.find((event) => event.type === 'response.output_item.added');
+    const partAdded = events.find((event) => event.type === 'response.content_part.added');
+    const partDone = events.find((event) => event.type === 'response.content_part.done');
+    const itemDone = events.find((event) => event.type === 'response.output_item.done');
+
+    expect(itemAdded?.data).toMatchObject({
+      output_index: 0,
+      item: {
+        id: 'msg_1',
+        type: 'message',
+        status: 'in_progress',
+        content: []
+      }
+    });
+    expect(partAdded?.data).toMatchObject({
+      output_index: 0,
+      item_id: 'msg_1',
+      content_index: 0,
+      part: {
+        type: 'output_text',
+        text: '',
+        annotations: [{ type: 'citation' }],
+        logprobs: []
+      }
+    });
+    expect(partDone?.data).toMatchObject({
+      output_index: 0,
+      item_id: 'msg_1',
+      content_index: 0,
+      part: {
+        type: 'output_text',
+        text: 'hello',
+        annotations: [{ type: 'citation' }],
+        logprobs: []
+      }
+    });
+    expect(itemDone?.data).toMatchObject({
+      output_index: 0,
+      item: {
+        id: 'msg_1',
+        type: 'message',
+        status: 'completed',
+        content: [{ type: 'output_text', text: 'hello', annotations: [{ type: 'citation' }], logprobs: [] }]
+      }
+    });
+  });
+
   it('normalizes reasoning summary entries through the native owner verbatim', () => {
     const summary = normalizeResponsesSseReasoningSummaryWithNative([
       '- inspect `file.ts`',

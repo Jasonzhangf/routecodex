@@ -1,3 +1,10 @@
+# 2026-06-30: Responses SSE output/content wrapper payload native owner slice
+- `responses.ts` 的 `response.output_item.added/done` 与 `response.content_part.added/done` 外层 wrapper payload 下沉到 Rust `buildResponsesSseOutputItemEventPayloadJson` / `buildResponsesSseContentPartEventPayloadJson`，TS 只保留 SSE envelope。
+- 红测：`verify:sse-architecture-boundary` 先红，命中 `output_index: context.outputIndexCounter,` / `item_id: outputItemId,`。
+- 关键边界：content_part done 缺少 part 时也由 Rust owner 产出 `{ output_index, item_id, content_index }`，TS 不保留例外拼装分支。
+- 验证：native build PASS；Rust `output_item_event_payload` 1/1 PASS + `content_part_event_payload` 2/2 PASS；focused Jest 29/29 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE 成功，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`、`outputItemEvents=4`、`contentPartEvents=0`、`badWrapper=0`。
+
 # 2026-06-30: Responses SSE response event payload native owner slice
 - `responses.ts` 的 `response.created` / `response.in_progress` / `response.completed` / `response.done` / `response.required_action` data payload 下沉到 Rust `buildResponsesSseResponseEventPayloadJson`，TS 只保留 SSE envelope。
 - 红测：`verify:sse-architecture-boundary` 先红，命中 `basePayload.output = []`。

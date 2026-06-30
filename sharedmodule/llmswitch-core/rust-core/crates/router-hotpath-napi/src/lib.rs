@@ -1975,6 +1975,30 @@ pub fn build_responses_sse_content_part_descriptor_json(
     .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildResponsesSseOutputItemEventPayloadJson")]
+pub fn build_responses_sse_output_item_event_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_output_item_event_payload_json(
+        payload_json,
+        lifecycle_json,
+    )
+    .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildResponsesSseContentPartEventPayloadJson")]
+pub fn build_responses_sse_content_part_event_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_content_part_event_payload_json(
+        payload_json,
+        lifecycle_json,
+    )
+    .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "buildResponsesSseOutputTextDonePayloadJson")]
 pub fn build_responses_sse_output_text_done_payload_json(
     payload_json: String,
