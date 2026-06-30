@@ -85,7 +85,6 @@ export type NativeServertoolNoopOutcome = {
   chatResponse: Record<string, unknown>;
   flowId: string;
   toolContent: Record<string, unknown>;
-  followup: Record<string, unknown>;
 };
 
 const NON_BLOCKING_SERVERTOOL_ORCHESTRATION_LOG_THROTTLE_MS = 60_000;
@@ -445,10 +444,6 @@ export function buildServertoolOutcomePlanInputWithNative(input: {
   executionState: unknown;
   adapterContext?: unknown;
   baseForExecution?: unknown;
-  sessionId?: string;
-  conversationId?: string;
-  toolOutputs?: unknown[];
-  pendingInjectionMessageKinds?: string[];
 }): NativeServertoolOutcomePlanInput {
   const capability = 'buildServertoolOutcomePlanInputJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolOutcomePlanInput>(capability, reason);
@@ -858,11 +853,6 @@ export function planServertoolOutcomeWithNative(input: {
   }>;
   executedFlowIds: string[];
   lastExecutionFlowId?: string;
-  hasLastExecutionFollowup: boolean;
-  sessionId?: string;
-  conversationId?: string;
-  toolOutputs?: unknown[];
-  pendingInjectionMessageKinds?: string[];
 }): NativeServertoolOutcomePlan {
   const capability = 'planServertoolOutcomeJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolOutcomePlan>(capability, reason);
@@ -896,16 +886,14 @@ export function planServertoolNoopOutcomeWithNative(input: {
     if (
       !row.chatResponse || typeof row.chatResponse !== 'object' ||
       typeof row.flowId !== 'string' ||
-      !row.toolContent || typeof row.toolContent !== 'object' ||
-      !row.followup || typeof row.followup !== 'object'
+      !row.toolContent || typeof row.toolContent !== 'object'
     ) {
       return fail('invalid shape');
     }
     return {
       chatResponse: row.chatResponse as Record<string, unknown>,
       flowId: row.flowId,
-      toolContent: row.toolContent as Record<string, unknown>,
-      followup: row.followup as Record<string, unknown>
+      toolContent: row.toolContent as Record<string, unknown>
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

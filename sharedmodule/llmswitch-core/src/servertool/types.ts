@@ -40,38 +40,6 @@ export interface ServerSideToolEngineOptions {
   onAutoHookTrace?: (event: ServerToolAutoHookTraceEvent) => void;
 }
 
-export type ServerToolFollowupInjectionOp =
-  | { op: 'append_assistant_message'; required?: boolean }
-  | { op: 'append_tool_messages_from_tool_outputs'; required?: boolean }
-  | { op: 'inject_system_text'; text: string }
-  | { op: 'append_user_text'; text: string }
-  | { op: 'inject_vision_summary'; summary: string }
-  | { op: 'rebuild_vision_followup'; summary: string; originalPrompt?: string }
-  | { op: 'trim_openai_messages'; maxNonSystemMessages: number }
-  | { op: 'compact_tool_content'; maxChars: number };
-
-export type ServerToolFollowupInjectionPlan = {
-  ops: ServerToolFollowupInjectionOp[];
-};
-
-export type ServerToolFollowupPlan =
-  | {
-    requestIdSuffix: string;
-    payload: JsonObject;
-    metadata?: JsonObject;
-    entryEndpoint?: string;
-  }
-  | {
-    requestIdSuffix: string;
-    injection: ServerToolFollowupInjectionPlan;
-    metadata?: JsonObject;
-    entryEndpoint?: string;
-  }
-  | {
-    requestIdSuffix: string;
-    metadata?: JsonObject;
-  };
-
 export type ServerToolBackendPlan =
   | {
     kind: 'vision_analysis';
@@ -126,7 +94,6 @@ export interface ServerToolHandlerPlan {
 
 export interface ServerToolExecution {
   flowId: string;
-  followup?: ServerToolFollowupPlan;
   stopMessageReservation?: {
     stickyKey: string;
     previousState: Record<string, unknown> | null;

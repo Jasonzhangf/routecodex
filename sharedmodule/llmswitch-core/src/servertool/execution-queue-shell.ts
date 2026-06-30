@@ -139,8 +139,7 @@ export async function runServertoolIoExecutionQueue(args: {
       base: args.baseForExecution as Record<string, unknown>
     });
     const {
-      flowId: noopFlowId,
-      followup: noopFollowup
+      flowId: noopFlowId
     } = noopResult;
 
     replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse as JsonObject);
@@ -154,8 +153,7 @@ export async function runServertoolIoExecutionQueue(args: {
         executionMode: toolCall.executionMode,
         stripAfterExecute: toolCall.stripAfterExecute
       },
-      noopFlowId,
-      noopFollowup
+      noopFlowId
     });
     appendExecutedToolRecordFromNative(
       executionState,

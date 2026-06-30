@@ -195,11 +195,6 @@ struct ServertoolOutcomePlannerInput {
     executed_tool_calls: Vec<ServertoolOutcomeExecutedToolCallInput>,
     executed_flow_ids: Vec<String>,
     last_execution_flow_id: Option<String>,
-    has_last_execution_followup: bool,
-    session_id: Option<String>,
-    conversation_id: Option<String>,
-    tool_outputs: Option<Vec<Value>>,
-    pending_injection_message_kinds: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -217,102 +212,9 @@ struct ServertoolOutcomeExecutedToolCallInput {
 struct ServertoolOutcomePlanOutput {
     outcome_mode: String,
     remaining_tool_call_ids: Vec<String>,
-    pending_session_id: Option<String>,
-    alias_session_ids: Vec<String>,
-    pending_injection_message_kinds: Vec<String>,
-    pending_injection_messages_resolved: Vec<Value>,
     flow_id: Option<String>,
-    use_last_execution_followup: bool,
-    use_generic_followup: bool,
-    followup_strategy: String,
     requires_pending_injection: bool,
     primary_execution_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    resolved_followup: Option<Value>,
-}
-
-fn build_pending_injection_messages_resolved(
-    message_kinds: &[String],
-    executed_tool_calls: &[ServertoolOutcomeExecutedToolCallInput],
-    tool_outputs: &[Value],
-) -> Result<Vec<Value>, String> {
-    let mut out = Vec::new();
-    let allow_ids: std::collections::HashSet<&str> = executed_tool_calls
-        .iter()
-        .map(|entry| entry.id.trim())
-        .filter(|value| !value.is_empty())
-        .collect();
-
-    for raw in message_kinds {
-        let kind = raw.trim();
-        if kind.is_empty() {
-            continue;
-        }
-        if kind == "assistant_tool_calls" {
-            let tool_calls = executed_tool_calls
-                .iter()
-                .map(|entry| {
-                    serde_json::json!({
-                        "id": entry.id,
-                        "type": "function",
-                        "function": {
-                            "name": entry.name,
-                            "arguments": entry.arguments
-                        }
-                    })
-                })
-                .collect::<Vec<_>>();
-            out.push(serde_json::json!({
-                "role": "assistant",
-                "content": Value::Null,
-                "tool_calls": tool_calls
-            }));
-            continue;
-        }
-        if kind == "tool_outputs" {
-            for entry in tool_outputs {
-                let Some(record) = entry.as_object() else {
-                    return Err("toolOutputs entry must be an object".to_string());
-                };
-                let Some(tool_call_id) = record
-                    .get("tool_call_id")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                else {
-                    return Err("toolOutputs entry missing non-empty tool_call_id".to_string());
-                };
-                if !allow_ids.contains(tool_call_id) {
-                    continue;
-                }
-                let name = record
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or("tool");
-                let content = match record.get("content") {
-                    Some(Value::String(value)) => value.clone(),
-                    Some(value) => serde_json::to_string(value).map_err(|error| {
-                        format!("toolOutputs content serialization failed: {}", error)
-                    })?,
-                    None => "null".to_string(),
-                };
-                out.push(serde_json::json!({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "name": name,
-                    "content": content
-                }));
-            }
-            continue;
-        }
-        return Err(format!(
-            "unsupported pending injection message kind: {}",
-            kind
-        ));
-    }
-    Ok(out)
 }
 
 fn normalize_nonempty_string_vec(values: Option<&Vec<String>>) -> Vec<String> {
@@ -1833,7 +1735,6 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         flow_id: String,
         /// The injected tool output content.
         tool_content: Value,
-        followup: Value,
     }
 
     let input: NoopInput =
@@ -1846,14 +1747,9 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
             input.tool_name
         )));
     }
-    let visible_summary =
+    let _visible_summary =
         resolve_continue_execution_visible_summary(input.tool_arguments.as_deref())
             .map_err(napi::Error::from_reason)?;
-    let client_inject_text = if visible_summary.is_empty() {
-        "继续执行".to_string()
-    } else {
-        visible_summary.clone()
-    };
 
     // Build the standard noop tool output content
     let tool_content = serde_json::json!({
@@ -1879,27 +1775,10 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
     if let Some(obj) = chat_response.as_object_mut() {
         obj.insert("tool_outputs".to_string(), Value::Array(new_outputs));
     }
-    let followup = serde_json::json!({
-        "requestIdSuffix": ":continue_execution_followup",
-        "injection": {
-            "ops": [
-                {"op": "append_assistant_message", "required": true},
-                {"op": "append_tool_messages_from_tool_outputs", "required": true}
-            ]
-        },
-        "metadata": {
-            "clientInjectOnly": true,
-            "clientInjectText": client_inject_text,
-            "clientInjectSource": "servertool.continue_execution",
-            "visibleSummary": visible_summary
-        }
-    });
-
     let output = NoopOutput {
         chat_response,
         flow_id: "continue_execution_flow".to_string(),
         tool_content,
-        followup,
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -2281,8 +2160,6 @@ pub fn plan_stop_message_auto_handler_json(input_json: String) -> NapiResult<Str
 pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
     let input: ServertoolOutcomePlannerInput =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let configured_pending_injection_message_kinds =
-        normalize_nonempty_string_vec(input.pending_injection_message_kinds.as_ref());
     let executed_ids: Vec<String> = input
         .executed_tool_calls
         .iter()
@@ -2293,17 +2170,9 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
         let output = ServertoolOutcomePlanOutput {
             outcome_mode: "none".to_string(),
             remaining_tool_call_ids: Vec::new(),
-            pending_session_id: None,
-            alias_session_ids: Vec::new(),
-            pending_injection_message_kinds: Vec::new(),
-            pending_injection_messages_resolved: Vec::new(),
             flow_id: None,
-            use_last_execution_followup: false,
-            use_generic_followup: false,
-            followup_strategy: "none".to_string(),
             requires_pending_injection: false,
             primary_execution_mode: None,
-            resolved_followup: None,
         };
         return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
@@ -2334,41 +2203,12 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
         } else {
             None
         };
-        let session_id = input
-            .session_id
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let pending_session_id = session_id.clone();
-        let alias_session_ids = Vec::new();
-        let pending_injection_message_kinds =
-            if configured_pending_injection_message_kinds.is_empty() {
-                vec![
-                    "assistant_tool_calls".to_string(),
-                    "tool_outputs".to_string(),
-                ]
-            } else {
-                configured_pending_injection_message_kinds
-            };
-        let pending_injection_messages_resolved = build_pending_injection_messages_resolved(
-            pending_injection_message_kinds.as_slice(),
-            input.executed_tool_calls.as_slice(),
-            input.tool_outputs.as_deref().unwrap_or(&[]),
-        )
-        .map_err(napi::Error::from_reason)?;
         let output = ServertoolOutcomePlanOutput {
             outcome_mode: "mixed_client_tools".to_string(),
             remaining_tool_call_ids,
-            pending_session_id,
-            alias_session_ids,
-            pending_injection_message_kinds,
-            pending_injection_messages_resolved,
             flow_id: Some("servertool_mixed".to_string()),
-            use_last_execution_followup: false,
-            use_generic_followup: false,
-            followup_strategy: "pending_injection".to_string(),
             requires_pending_injection: true,
             primary_execution_mode,
-            resolved_followup: None,
         };
         return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
@@ -2394,8 +2234,6 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
     } else {
         Some("servertool_multi".to_string())
     };
-    let use_last_execution_followup =
-        input.executed_tool_calls.len() == 1 && input.has_last_execution_followup;
     let primary_execution_mode = if input.executed_tool_calls.len() == 1 {
         input.executed_tool_calls.first().and_then(|entry| {
             let mode = entry.execution_mode.trim();
@@ -2411,33 +2249,9 @@ pub fn plan_servertool_outcome_json(input_json: String) -> NapiResult<String> {
     let output = ServertoolOutcomePlanOutput {
         outcome_mode: "servertool_only".to_string(),
         remaining_tool_call_ids,
-        pending_session_id: None,
-        alias_session_ids: Vec::new(),
-        pending_injection_message_kinds: Vec::new(),
-        pending_injection_messages_resolved: Vec::new(),
         flow_id,
-        use_last_execution_followup,
-        use_generic_followup: !use_last_execution_followup,
-        followup_strategy: if use_last_execution_followup {
-            "reuse_last_execution".to_string()
-        } else {
-            "generic_tool_outputs".to_string()
-        },
         requires_pending_injection: false,
         primary_execution_mode,
-        resolved_followup: if use_last_execution_followup {
-            None
-        } else {
-            Some(serde_json::json!({
-                "requestIdSuffix": ":servertool_followup",
-                "injection": {
-                    "ops": [
-                        { "op": "append_assistant_message", "required": true },
-                        { "op": "append_tool_messages_from_tool_outputs", "required": true }
-                    ]
-                }
-            }))
-        },
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -3647,7 +3461,7 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_servertool_outcome_prefers_mixed_branch_with_pending_session_target() {
+    fn test_plan_servertool_outcome_prefers_mixed_branch_with_pending_injection_contract() {
         let raw = serde_json::json!({
             "toolCalls": [
                 { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" },
@@ -3663,10 +3477,7 @@ mod tests {
                 }
             ],
             "executedFlowIds": ["sample_done"],
-            "lastExecutionFlowId": "sample_done",
-            "hasLastExecutionFollowup": true,
-            "sessionId": "sess_1",
-            "conversationId": "conv_1"
+            "lastExecutionFlowId": "sample_done"
         });
         let output = plan_servertool_outcome_json(raw.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
@@ -3675,12 +3486,8 @@ mod tests {
             Some("mixed_client_tools")
         );
         assert_eq!(
-            parsed.get("pendingSessionId").and_then(|v| v.as_str()),
-            Some("sess_1")
-        );
-        assert_eq!(
-            parsed.get("followupStrategy").and_then(|v| v.as_str()),
-            Some("pending_injection")
+            parsed.get("flowId").and_then(|v| v.as_str()),
+            Some("servertool_mixed")
         );
         assert_eq!(
             parsed
@@ -3694,21 +3501,14 @@ mod tests {
         );
         assert_eq!(
             parsed
-                .get("pendingInjectionMessageKinds")
-                .and_then(|v| v.as_array())
-                .map(|entries| entries
-                    .iter()
-                    .filter_map(|entry| entry.as_str())
-                    .collect::<Vec<_>>()),
-            Some(vec!["assistant_tool_calls", "tool_outputs"])
-        );
-        assert_eq!(
-            parsed
                 .get("remainingToolCallIds")
                 .and_then(|v| v.as_array())
                 .map(|entries| entries.len()),
             Some(1)
         );
+        assert!(parsed.get("pendingSessionId").is_none());
+        assert!(parsed.get("followupStrategy").is_none());
+        assert!(parsed.get("pendingInjectionMessageKinds").is_none());
     }
 
     #[test]
@@ -3728,9 +3528,7 @@ mod tests {
                 }
             ],
             "executedFlowIds": ["sample_done"],
-            "lastExecutionFlowId": "sample_done",
-            "hasLastExecutionFollowup": true,
-            "conversationId": "conv_only_1"
+            "lastExecutionFlowId": "sample_done"
         });
         let output = plan_servertool_outcome_json(raw.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
@@ -3738,21 +3536,23 @@ mod tests {
             parsed.get("outcomeMode").and_then(|v| v.as_str()),
             Some("mixed_client_tools")
         );
-        assert!(
-            parsed.get("pendingSessionId").is_none()
-                || parsed.get("pendingSessionId") == Some(&serde_json::Value::Null)
+        assert_eq!(
+            parsed.get("flowId").and_then(|v| v.as_str()),
+            Some("servertool_mixed")
         );
         assert_eq!(
             parsed
-                .get("aliasSessionIds")
+                .get("remainingToolCallIds")
                 .and_then(|v| v.as_array())
                 .map(|entries| entries.len()),
-            Some(0)
+            Some(1)
         );
+        assert!(parsed.get("pendingSessionId").is_none());
+        assert!(parsed.get("aliasSessionIds").is_none());
     }
 
     #[test]
-    fn test_plan_servertool_outcome_resolves_single_followup_path() {
+    fn test_plan_servertool_outcome_resolves_single_execution_contract_path() {
         let raw = serde_json::json!({
             "toolCalls": [
                 { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" }
@@ -3767,8 +3567,7 @@ mod tests {
                 }
             ],
             "executedFlowIds": ["sample_done"],
-            "lastExecutionFlowId": "sample_done",
-            "hasLastExecutionFollowup": true
+            "lastExecutionFlowId": "sample_done"
         });
         let output = plan_servertool_outcome_json(raw.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
@@ -3782,20 +3581,6 @@ mod tests {
         );
         assert_eq!(
             parsed
-                .get("useLastExecutionFollowup")
-                .and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        assert_eq!(
-            parsed.get("useGenericFollowup").and_then(|v| v.as_bool()),
-            Some(false)
-        );
-        assert_eq!(
-            parsed.get("followupStrategy").and_then(|v| v.as_str()),
-            Some("reuse_last_execution")
-        );
-        assert_eq!(
-            parsed
                 .get("requiresPendingInjection")
                 .and_then(|v| v.as_bool()),
             Some(false)
@@ -3804,17 +3589,14 @@ mod tests {
             parsed.get("primaryExecutionMode").and_then(|v| v.as_str()),
             Some("client_inject_only")
         );
-        assert_eq!(
-            parsed
-                .get("pendingInjectionMessageKinds")
-                .and_then(|v| v.as_array())
-                .map(|entries| entries.len()),
-            Some(0)
-        );
+        assert!(parsed.get("useLastExecutionFollowup").is_none());
+        assert!(parsed.get("useGenericFollowup").is_none());
+        assert!(parsed.get("followupStrategy").is_none());
+        assert!(parsed.get("pendingInjectionMessageKinds").is_none());
     }
 
     #[test]
-    fn test_plan_servertool_outcome_resolves_generic_followup_ops_when_last_followup_missing() {
+    fn test_plan_servertool_outcome_returns_execution_contract_without_followup_ops() {
         let raw = serde_json::json!({
             "toolCalls": [
                 { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" }
@@ -3829,8 +3611,7 @@ mod tests {
                 }
             ],
             "executedFlowIds": ["sample_done"],
-            "lastExecutionFlowId": "sample_done",
-            "hasLastExecutionFollowup": false
+            "lastExecutionFlowId": "sample_done"
         });
         let output = plan_servertool_outcome_json(raw.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
@@ -3839,9 +3620,16 @@ mod tests {
             Some("servertool_only")
         );
         assert_eq!(
-            parsed.get("followupStrategy").and_then(|v| v.as_str()),
-            Some("generic_tool_outputs")
+            parsed.get("flowId").and_then(|v| v.as_str()),
+            Some("sample_done")
         );
+        assert_eq!(
+            parsed
+                .get("requiresPendingInjection")
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert!(parsed.get("followupStrategy").is_none());
     }
 
     #[test]

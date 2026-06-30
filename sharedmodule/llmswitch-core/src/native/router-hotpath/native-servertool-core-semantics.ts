@@ -196,7 +196,6 @@ export interface ServertoolCliProjectionExecutionContextOutput {
 
 export interface NativeServertoolExecutionSummary {
   flowId: string;
-  followup?: unknown;
   context?: unknown;
 }
 
@@ -251,11 +250,9 @@ export interface ServertoolEngineSkipPlan {
 export interface ServertoolExecutionOutcomeRuntimeActionPlan {
   action:
     | 'invalid_mixed_client_tools_outcome'
-    | 'reuse_last_execution_followup'
-    | 'use_resolved_followup'
-    | 'missing_followup_contract';
+    | 'return_execution_contract'
+    | 'missing_servertool_execution_contract';
   reuseLastExecutionEnvelope?: boolean;
-  selectedFollowup?: unknown;
   selectedExecutionEnvelope?: unknown;
   executionFlowId: string;
 }
@@ -1980,20 +1977,10 @@ export function planServertoolEngineSkipWithNative(input: {
 
 export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
   outcomeMode: string;
-  requiresPendingInjection: boolean;
-  followupStrategy: string;
-  useLastExecutionFollowup: boolean;
-  hasLastExecutionFollowup: boolean;
-  hasResolvedFollowup: boolean;
   hasLastExecution: boolean;
   executedToolCallsLen: number;
   lastExecution?: unknown;
-  resolvedFollowup?: unknown;
   flowId?: string;
-  pendingSessionId?: string;
-  aliasSessionIds?: string[];
-  remainingToolCallIds?: string[];
-  pendingInjectionMessagesResolved?: unknown[];
 }): ServertoolExecutionOutcomeRuntimeActionPlan {
   const capability = 'planServertoolExecutionOutcomeRuntimeActionJson';
   const fn = readNativeFunction(capability);
@@ -2011,18 +1998,14 @@ export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
   const record = parsed as Record<string, unknown>;
   if (
     record.action !== 'invalid_mixed_client_tools_outcome' &&
-    record.action !== 'reuse_last_execution_followup' &&
-    record.action !== 'use_resolved_followup' &&
-    record.action !== 'missing_followup_contract'
+    record.action !== 'return_execution_contract' &&
+    record.action !== 'missing_servertool_execution_contract'
   ) {
     throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native returned invalid action');
   }
   return {
     action: record.action,
     reuseLastExecutionEnvelope: record.reuseLastExecutionEnvelope === true,
-    ...(record.selectedFollowup !== undefined
-      ? { selectedFollowup: record.selectedFollowup }
-      : {}),
     ...(record.selectedExecutionEnvelope !== undefined
       ? { selectedExecutionEnvelope: record.selectedExecutionEnvelope }
       : {}),
@@ -2081,7 +2064,6 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     stripAfterExecute?: boolean;
   };
   noopFlowId?: string;
-  noopFollowup?: unknown;
 }): ServertoolExecutionLoopEffectPlan {
   const capability = 'planServertoolExecutionLoopEffectJson';
   const fn = readNativeFunction(capability);
@@ -2120,8 +2102,7 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
       ...(typeof toolCall.stripAfterExecute === 'boolean' ? { stripAfterExecute: toolCall.stripAfterExecute } : {})
     },
     execution: {
-      flowId: execution.flowId,
-      ...(execution.followup !== undefined ? { followup: execution.followup } : {})
+      flowId: execution.flowId
     }
   };
 }
@@ -2953,16 +2934,12 @@ export function planServertoolExecutionDispatchErrorWithNative(input:
       kind: 'invalid_mixed_client_tools_outcome';
       requestId: string;
       outcomeMode: string;
-      followupStrategy: string;
       requiresPendingInjection: boolean;
     }
   | {
-      kind: 'missing_followup_contract';
+      kind: 'missing_servertool_execution_contract';
       requestId: string;
       outcomeMode: string;
-      followupStrategy: string;
-      useLastExecutionFollowup: boolean;
-      useGenericFollowup: boolean;
     }
 ): ServertoolErrorPlan {
   return parseServertoolErrorPlan(

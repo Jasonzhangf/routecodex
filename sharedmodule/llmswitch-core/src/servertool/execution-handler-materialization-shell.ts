@@ -21,7 +21,6 @@ import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
   ServerToolExecution,
-  ServerToolFollowupPlan,
   ServerToolHandlerContext,
   ServerToolHandlerPlan,
   ServerToolHandlerResult,
@@ -38,7 +37,6 @@ export interface ServertoolExecutedRecord {
   };
   execution?: {
     flowId: string;
-    followup?: unknown;
   };
 }
 
@@ -48,7 +46,6 @@ export interface ServertoolExecutionLoopState {
   executedFlowIds: string[];
   lastExecution?: {
     flowId: string;
-    followup?: unknown;
   };
 }
 
@@ -79,22 +76,12 @@ export const buildServertoolOutcomePlanInput = (args: {
   executionState: ServertoolExecutionLoopState;
   adapterContext?: unknown;
   baseForExecution?: unknown;
-  sessionId?: string;
-  conversationId?: string;
-  toolOutputs?: unknown[];
-  pendingInjectionMessageKinds?: string[];
 }) => {
   return buildServertoolOutcomePlanInputWithNative({
     toolCalls: args.toolCalls,
     executionState: args.executionState,
     ...(args.adapterContext !== undefined ? { adapterContext: args.adapterContext } : {}),
     ...(args.baseForExecution !== undefined ? { baseForExecution: args.baseForExecution } : {}),
-    ...(args.sessionId ? { sessionId: args.sessionId } : {}),
-    ...(args.conversationId ? { conversationId: args.conversationId } : {}),
-    ...(args.toolOutputs?.length ? { toolOutputs: args.toolOutputs } : {}),
-    ...(args.pendingInjectionMessageKinds?.length
-      ? { pendingInjectionMessageKinds: args.pendingInjectionMessageKinds }
-      : {}),
   });
 };
 
@@ -106,7 +93,6 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   executionState: ServertoolExecutionLoopState;
   filterOutExecutedToolCalls: (chatResponse: JsonObject, executedIds: Set<string>) => void;
   stripToolOutputs: (base: JsonObject) => void;
-  pendingInjectionMessageKinds: string[];
 }): ServerSideToolEngineResult {
   const outcomePlan = planServertoolOutcomeWithNative(
     buildServertoolOutcomePlanInput({
@@ -114,62 +100,42 @@ export function materializeNativeToolCallExecutionOutcome(args: {
       executionState: args.executionState,
       adapterContext: args.options.adapterContext,
       baseForExecution: args.baseForExecution,
-      pendingInjectionMessageKinds: args.pendingInjectionMessageKinds,
     })
   );
 
   const outcomeRuntimeActionPlan = planServertoolExecutionOutcomeRuntimeActionWithNative({
     outcomeMode: outcomePlan.outcomeMode,
-    requiresPendingInjection: outcomePlan.requiresPendingInjection,
-    followupStrategy: outcomePlan.followupStrategy,
-    useLastExecutionFollowup: outcomePlan.useLastExecutionFollowup,
-    hasLastExecutionFollowup: Boolean(args.executionState.lastExecution?.followup),
-    hasResolvedFollowup: Boolean(outcomePlan.resolvedFollowup),
     hasLastExecution: Boolean(args.executionState.lastExecution),
     executedToolCallsLen: args.executionState.executedToolCalls.length,
     lastExecution: args.executionState.lastExecution,
-    resolvedFollowup: outcomePlan.resolvedFollowup,
-    flowId: outcomePlan.flowId,
-    pendingSessionId: outcomePlan.pendingSessionId,
-    aliasSessionIds: outcomePlan.aliasSessionIds,
-    remainingToolCallIds: outcomePlan.remainingToolCallIds,
-    pendingInjectionMessagesResolved: outcomePlan.pendingInjectionMessagesResolved
+    flowId: outcomePlan.flowId
   });
 
   if (outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome') {
     throw createServertoolProviderProtocolErrorFromPlan(
       planServertoolExecutionDispatchErrorWithNative({
-        kind: 'invalid_mixed_client_tools_outcome',
-        requestId: args.options.requestId,
-        outcomeMode: outcomePlan.outcomeMode,
-        followupStrategy: outcomePlan.followupStrategy,
-        requiresPendingInjection: outcomePlan.requiresPendingInjection
+            kind: 'invalid_mixed_client_tools_outcome',
+            requestId: args.options.requestId,
+            outcomeMode: outcomePlan.outcomeMode,
+            requiresPendingInjection: outcomePlan.requiresPendingInjection
       })
     );
   }
 
-  const followup = outcomeRuntimeActionPlan.selectedFollowup as ServerToolFollowupPlan | undefined;
-  if (!followup) {
+  if (outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract') {
     throw createServertoolProviderProtocolErrorFromPlan(
       planServertoolExecutionDispatchErrorWithNative({
-        kind: 'missing_followup_contract',
-        requestId: args.options.requestId,
-        outcomeMode: outcomePlan.outcomeMode,
-        followupStrategy: outcomePlan.followupStrategy,
-        useLastExecutionFollowup: outcomePlan.useLastExecutionFollowup,
-        useGenericFollowup: outcomePlan.useGenericFollowup
-      })
+            kind: 'missing_servertool_execution_contract',
+            requestId: args.options.requestId,
+            outcomeMode: outcomePlan.outcomeMode
+          })
     );
   }
   return {
     mode: 'tool_flow',
     finalChatResponse: args.baseForExecution,
     execution: {
-      ...(outcomeRuntimeActionPlan.reuseLastExecutionEnvelope === true
-        ? (outcomeRuntimeActionPlan.selectedExecutionEnvelope as Record<string, unknown> | undefined)
-        : ({ flowId: outcomeRuntimeActionPlan.executionFlowId } as any)),
-      flowId: outcomeRuntimeActionPlan.executionFlowId,
-      followup
+      flowId: outcomeRuntimeActionPlan.executionFlowId
     }
   };
 }

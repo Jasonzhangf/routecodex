@@ -70,6 +70,8 @@ jest.unstable_mockModule(
     planServertoolHandlerRuntimeActionWithNative: jest.fn(() => ({
       action: 'return_materialized_result'
     })),
+    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
+    parseServertoolCliProjectionToolArgumentsWithNative: jest.fn(() => ({})),
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionOutcomeRuntimeActionWithNative
   })
@@ -126,52 +128,24 @@ describe('execution-handler-materialization-shell', () => {
     planServertoolExecutionOutcomeRuntimeActionWithNative.mockImplementation((input: any) => {
       if (input?.outcomeMode === 'mixed_client_tools') {
         return {
-          action: input?.requiresPendingInjection === true &&
-              input?.followupStrategy === 'pending_injection'
-            ? 'return_mixed_client_tools_pending_injection'
-            : 'invalid_mixed_client_tools_outcome',
+          action: 'invalid_mixed_client_tools_outcome',
           reuseLastExecutionEnvelope: false,
-          pendingInjection:
-            input?.pendingSessionId && Array.isArray(input?.pendingInjectionMessagesResolved) && input.pendingInjectionMessagesResolved.length > 0
-              ? {
-                  sessionId: input.pendingSessionId,
-                  aliasSessionIds: input.aliasSessionIds ?? [],
-                  afterToolCallIds: input.remainingToolCallIds ?? [],
-                  messages: input.pendingInjectionMessagesResolved
-                }
-              : undefined,
           executionFlowId: typeof input?.flowId === 'string' && input.flowId.trim()
             ? input.flowId
             : 'servertool_mixed'
         };
       }
-      if (
-        input?.useLastExecutionFollowup === true &&
-        input?.followupStrategy === 'reuse_last_execution' &&
-        input?.lastExecution?.followup
-      ) {
+      if (input?.hasLastExecution === true || input?.hasResolvedFollowup === true || Number(input?.executedToolCallsLen ?? 0) > 0) {
         return {
-          action: 'reuse_last_execution_followup',
-          reuseLastExecutionEnvelope: input?.executedToolCallsLen === 1,
-          selectedFollowup: input.lastExecution.followup,
-          selectedExecutionEnvelope: input.lastExecution,
-          executionFlowId: typeof input?.flowId === 'string' && input.flowId.trim()
-            ? input.flowId
-            : 'servertool_multi'
-        };
-      }
-      if (input?.resolvedFollowup) {
-        return {
-          action: 'use_resolved_followup',
+          action: 'return_execution_contract',
           reuseLastExecutionEnvelope: false,
-          selectedFollowup: input.resolvedFollowup,
           executionFlowId: typeof input?.flowId === 'string' && input.flowId.trim()
             ? input.flowId
             : 'servertool_multi'
         };
       }
       return {
-        action: 'missing_followup_contract',
+        action: 'missing_servertool_execution_contract',
         reuseLastExecutionEnvelope: false,
         executionFlowId: typeof input?.flowId === 'string' && input.flowId.trim()
           ? input.flowId
@@ -190,7 +164,7 @@ describe('execution-handler-materialization-shell', () => {
 
     expect(source).toContain('adapterContext: args.options.adapterContext');
     expect(source).toContain('baseForExecution: args.baseForExecution');
-    expect(source).toContain('const clientResponse = args.base;');
+    expect(source).toContain('finalChatResponse: args.baseForExecution');
     expect(source).not.toContain('structuredClone(args.base)');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId ===');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===');
@@ -201,14 +175,8 @@ describe('execution-handler-materialization-shell', () => {
   test('uses native dispatch contract error for invalid mixed-client-tools outcome contract', () => {
     planServertoolOutcomeWithNative.mockReturnValue({
       outcomeMode: 'mixed_client_tools',
-      followupStrategy: 'reuse_last_execution',
       requiresPendingInjection: false,
-      pendingInjectionMessagesResolved: [],
-      pendingSessionId: '',
-      aliasSessionIds: [],
       remainingToolCallIds: [],
-      useLastExecutionFollowup: false,
-      useGenericFollowup: false
     });
 
     expect(() =>
@@ -223,33 +191,21 @@ describe('execution-handler-materialization-shell', () => {
           executedFlowIds: []
         },
         filterOutExecutedToolCalls: jest.fn(),
-        stripToolOutputs: jest.fn(),
-        pendingInjectionMessageKinds: []
+        stripToolOutputs: jest.fn()
       })
     ).toThrow('[native-dispatch-contract] invalid_mixed_client_tools_outcome');
 
     expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
       outcomeMode: 'mixed_client_tools',
-      requiresPendingInjection: false,
-      followupStrategy: 'reuse_last_execution',
-      useLastExecutionFollowup: false,
-      hasLastExecutionFollowup: false,
-      hasResolvedFollowup: false,
       hasLastExecution: false,
       executedToolCallsLen: 0,
       lastExecution: undefined,
-      resolvedFollowup: undefined,
-      flowId: undefined,
-      pendingSessionId: '',
-      aliasSessionIds: [],
-      remainingToolCallIds: [],
-      pendingInjectionMessagesResolved: []
+      flowId: undefined
     });
     expect(planServertoolExecutionDispatchErrorWithNative).toHaveBeenCalledWith({
       kind: 'invalid_mixed_client_tools_outcome',
       requestId: 'req-invalid-mixed-1',
       outcomeMode: 'mixed_client_tools',
-      followupStrategy: 'reuse_last_execution',
       requiresPendingInjection: false
     });
   });
@@ -257,15 +213,8 @@ describe('execution-handler-materialization-shell', () => {
   test('uses native dispatch contract error for missing followup contract', () => {
     planServertoolOutcomeWithNative.mockReturnValue({
       outcomeMode: 'servertool_only',
-      followupStrategy: 'resolved_followup',
       requiresPendingInjection: false,
-      pendingInjectionMessagesResolved: [],
-      pendingSessionId: '',
-      aliasSessionIds: [],
       remainingToolCallIds: [],
-      resolvedFollowup: null,
-      useLastExecutionFollowup: false,
-      useGenericFollowup: true,
       flowId: 'servertool_multi'
     });
 
@@ -281,50 +230,29 @@ describe('execution-handler-materialization-shell', () => {
           executedFlowIds: []
         },
         filterOutExecutedToolCalls: jest.fn(),
-        stripToolOutputs: jest.fn(),
-        pendingInjectionMessageKinds: []
+        stripToolOutputs: jest.fn()
       })
-    ).toThrow('[native-dispatch-contract] missing_followup_contract');
+    ).toThrow('[native-dispatch-contract] missing_servertool_execution_contract');
 
     expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
       outcomeMode: 'servertool_only',
-      requiresPendingInjection: false,
-      followupStrategy: 'resolved_followup',
-      useLastExecutionFollowup: false,
-      hasLastExecutionFollowup: false,
-      hasResolvedFollowup: false,
       hasLastExecution: false,
       executedToolCallsLen: 0,
       lastExecution: undefined,
-      resolvedFollowup: null,
-      flowId: 'servertool_multi',
-      pendingSessionId: '',
-      aliasSessionIds: [],
-      remainingToolCallIds: [],
-      pendingInjectionMessagesResolved: []
+      flowId: 'servertool_multi'
     });
     expect(planServertoolExecutionDispatchErrorWithNative).toHaveBeenCalledWith({
-      kind: 'missing_followup_contract',
+      kind: 'missing_servertool_execution_contract',
       requestId: 'req-missing-followup-1',
-      outcomeMode: 'servertool_only',
-      followupStrategy: 'resolved_followup',
-      useLastExecutionFollowup: false,
-      useGenericFollowup: true
+      outcomeMode: 'servertool_only'
     });
   });
 
   test('uses Rust-owned execution outcome runtime action planning', () => {
     planServertoolOutcomeWithNative.mockReturnValue({
       outcomeMode: 'servertool_only',
-      followupStrategy: 'reuse_last_execution',
       requiresPendingInjection: false,
-      pendingInjectionMessagesResolved: [],
-      pendingSessionId: '',
-      aliasSessionIds: [],
       remainingToolCallIds: [],
-      resolvedFollowup: { requestIdSuffix: ':should_not_win' },
-      useLastExecutionFollowup: true,
-      useGenericFollowup: false,
       flowId: 'servertool_multi'
     });
 
@@ -344,8 +272,7 @@ describe('execution-handler-materialization-shell', () => {
         } as any
       },
       filterOutExecutedToolCalls: jest.fn(),
-      stripToolOutputs: jest.fn(),
-      pendingInjectionMessageKinds: []
+      stripToolOutputs: jest.fn()
     });
 
     expect(buildServertoolOutcomePlanInputWithNative).toHaveBeenCalledWith(
@@ -367,11 +294,6 @@ describe('execution-handler-materialization-shell', () => {
     );
     expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
       outcomeMode: 'servertool_only',
-      requiresPendingInjection: false,
-      followupStrategy: 'reuse_last_execution',
-      useLastExecutionFollowup: true,
-      hasLastExecutionFollowup: true,
-      hasResolvedFollowup: true,
       hasLastExecution: true,
       executedToolCallsLen: 1,
       lastExecution: {
@@ -379,81 +301,47 @@ describe('execution-handler-materialization-shell', () => {
         followup: { requestIdSuffix: ':reuse_last_execution' },
         context: { kept: true }
       },
-      resolvedFollowup: { requestIdSuffix: ':should_not_win' },
-      flowId: 'servertool_multi',
-      pendingSessionId: '',
-      aliasSessionIds: [],
-      remainingToolCallIds: [],
-      pendingInjectionMessagesResolved: []
+      flowId: 'servertool_multi'
     });
     expect(result.execution).toMatchObject({
-      flowId: 'servertool_multi',
-      followup: {
-        requestIdSuffix: ':reuse_last_execution'
-      },
-      context: {
-        kept: true
-      }
+      flowId: 'servertool_multi'
     });
   });
 
-  test('uses Rust-owned pending-injection projection instead of TS local assembly', () => {
+  test('rejects retired pending-injection projection', () => {
     planServertoolOutcomeWithNative.mockReturnValue({
       outcomeMode: 'mixed_client_tools',
-      followupStrategy: 'pending_injection',
       requiresPendingInjection: true,
-      pendingInjectionMessagesResolved: [{ role: 'assistant', content: 'queued' }],
-      pendingSessionId: 'sess_pending_1',
-      aliasSessionIds: ['alias_pending_1'],
       remainingToolCallIds: ['call_pending_2'],
-      useLastExecutionFollowup: false,
-      useGenericFollowup: false,
       flowId: 'servertool_mixed'
     });
 
     const filterOutExecutedToolCalls = jest.fn();
     const stripToolOutputs = jest.fn();
-    const result = materializeNativeToolCallExecutionOutcome({
-      base: { id: 'base-pending-1' } as any,
-      baseForExecution: { id: 'base-pending-1' } as any,
-      options: { requestId: 'req-pending-injection-1', adapterContext: {} } as any,
-      toolCalls: [],
-      executionState: {
-        executedToolCalls: [],
-        executedIds: new Set<string>(),
-        executedFlowIds: []
-      },
-      filterOutExecutedToolCalls,
-      stripToolOutputs,
-      pendingInjectionMessageKinds: []
-    });
-
-    expect(result.execution).toEqual({ flowId: 'servertool_mixed' });
-    expect(result.pendingInjection).toEqual({
-      sessionId: 'sess_pending_1',
-      aliasSessionIds: ['alias_pending_1'],
-      afterToolCallIds: ['call_pending_2'],
-      messages: [{ role: 'assistant', content: 'queued' }]
-    });
+    expect(() =>
+      materializeNativeToolCallExecutionOutcome({
+        base: { id: 'base-pending-1' } as any,
+        baseForExecution: { id: 'base-pending-1' } as any,
+        options: { requestId: 'req-pending-injection-1', adapterContext: {} } as any,
+        toolCalls: [],
+        executionState: {
+          executedToolCalls: [],
+          executedIds: new Set<string>(),
+          executedFlowIds: []
+        },
+        filterOutExecutedToolCalls,
+        stripToolOutputs
+      })
+    ).toThrow('[native-dispatch-contract] invalid_mixed_client_tools_outcome');
     expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
       outcomeMode: 'mixed_client_tools',
-      requiresPendingInjection: true,
-      followupStrategy: 'pending_injection',
-      useLastExecutionFollowup: false,
-      hasLastExecutionFollowup: false,
-      hasResolvedFollowup: false,
       hasLastExecution: false,
       executedToolCallsLen: 0,
       lastExecution: undefined,
-      resolvedFollowup: undefined,
-      flowId: 'servertool_mixed',
-      pendingSessionId: 'sess_pending_1',
-      aliasSessionIds: ['alias_pending_1'],
-      remainingToolCallIds: ['call_pending_2'],
-      pendingInjectionMessagesResolved: [{ role: 'assistant', content: 'queued' }]
+      flowId: 'servertool_mixed'
     });
-    expect(filterOutExecutedToolCalls).toHaveBeenCalledTimes(1);
-    expect(stripToolOutputs).toHaveBeenCalledTimes(1);
+    expect(filterOutExecutedToolCalls).not.toHaveBeenCalled();
+    expect(stripToolOutputs).not.toHaveBeenCalled();
   });
 
   test('builds outcome-plan input through Rust owner instead of local TS branch assembly', () => {
@@ -467,22 +355,14 @@ describe('execution-handler-materialization-shell', () => {
       toolCalls: [{ id: 'call_dispatch_1', name: 'web_search', arguments: '{}' }],
       executionState,
       adapterContext: { sessionId: 'sess_dispatch_1' },
-      baseForExecution: { id: 'base-dispatch-1' },
-      sessionId: 'sess_dispatch_1',
-      conversationId: 'conv_dispatch_1',
-      toolOutputs: [{ tool_call_id: 'call_dispatch_1' }],
-      pendingInjectionMessageKinds: ['assistant_tool_calls', 'tool_outputs']
+      baseForExecution: { id: 'base-dispatch-1' }
     });
 
     expect(input).toMatchObject({
       toolCalls: [{ id: 'call_dispatch_1', name: 'web_search', arguments: '{}' }],
       executionState,
       adapterContext: { sessionId: 'sess_dispatch_1' },
-      baseForExecution: { id: 'base-dispatch-1' },
-      sessionId: 'sess_dispatch_1',
-      conversationId: 'conv_dispatch_1',
-      toolOutputs: [{ tool_call_id: 'call_dispatch_1' }],
-      pendingInjectionMessageKinds: ['assistant_tool_calls', 'tool_outputs']
+      baseForExecution: { id: 'base-dispatch-1' }
     });
   });
 });

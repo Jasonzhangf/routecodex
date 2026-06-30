@@ -1,3 +1,9 @@
+# 2026-06-30: servertool execution followup contract retired
+
+- Verified: servertool execution outcome no longer owns a followup/pending-injection contract. Runtime outcome input/output and execution materialization now reduce to execution contract fields (`outcomeMode`, `flowId`, `requiresPendingInjection`, `remainingToolCallIds`, `primaryExecutionMode`) and `ServerToolExecution.flowId`; old fields such as `followupStrategy`, `resolvedFollowup`, `pendingSessionId`, `aliasSessionIds`, `pendingInjectionMessageKinds`, `hasLastExecutionFollowup`, and `pendingInjectionMessagesResolved` are absent from active runtime output and remain only as negative assertions in Rust/Jest tests.
+- Boundary: stopless still uses current request/session identity (`requestTruth.sessionId` and CLI command payload session/request ids). Do not restore retired `pending-session`, `sessionDir`, or `servertool-pending/*` file persistence to solve stopless progression.
+- Verification evidence: root/sharedmodule TypeScript PASS; focused servertool Jest 52 passed; `servertool-core execution_outcome_runtime_action_contract` 6 passed; `router-hotpath-napi` bridge/skeleton focused Rust tests passed; native hotpath build PASS; `verify:servertool-rust-only`, `verify:function-map-compile-gate`, and `verify:architecture-mainline-call-map` PASS.
+
 # 2026-06-30: servertool precommand/pending-session retired
 - `pre-command-hooks` / `pending-session` / `pending-injection` 已从 servertool runtime 物理退役；对应 Rust contract、TS wrapper、spec 已删除。
 - stopless 的 session truth 仍是当前 request 的 `requestTruth.sessionId`，并由 `MetadataCenter.runtime_control.stopless` + current request tool output 推进；`sessionDir` / `servertool-pending/*` 不再是必需持久化真源。

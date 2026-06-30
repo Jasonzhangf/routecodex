@@ -2,7 +2,7 @@ import { describe, expect, test } from '@jest/globals';
 import { planServertoolOutcomeWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 describe('execution-shell native outcome contract', () => {
-  test('native outcome plan resolves generic followup payload when last execution followup is absent', () => {
+  test('native outcome plan returns execution contract without followup payload', () => {
     const outcome = planServertoolOutcomeWithNative({
       toolCalls: [{ id: 'call_1', name: 'sample_client_tool', arguments: '{}' }],
       executedToolCalls: [
@@ -15,21 +15,14 @@ describe('execution-shell native outcome contract', () => {
         }
       ],
       executedFlowIds: ['sample_done'],
-      lastExecutionFlowId: 'sample_done',
-      hasLastExecutionFollowup: false
+      lastExecutionFlowId: 'sample_done'
     });
 
     expect(outcome.outcomeMode).toBe('servertool_only');
-    expect(outcome.followupStrategy).toBe('generic_tool_outputs');
-    expect(outcome.useGenericFollowup).toBe(true);
-    expect(outcome.resolvedFollowup).toEqual({
-      requestIdSuffix: ':servertool_followup',
-      injection: {
-        ops: [
-          { op: 'append_assistant_message', required: true },
-          { op: 'append_tool_messages_from_tool_outputs', required: true }
-        ]
-      }
-    });
+    expect(outcome.flowId).toBe('sample_done');
+    expect(outcome.requiresPendingInjection).toBe(false);
+    expect((outcome as any).followupStrategy).toBeUndefined();
+    expect((outcome as any).useGenericFollowup).toBeUndefined();
+    expect((outcome as any).resolvedFollowup).toBeUndefined();
   });
 });

@@ -220,62 +220,27 @@ describe('execution queue dispatch runtime', () => {
           stripAfterExecute: true
         },
         execution: {
-          flowId: String(input?.noopFlowId ?? 'continue_execution_flow'),
-          ...(input?.noopFollowup !== undefined ? { followup: input.noopFollowup } : {})
+          flowId: String(input?.noopFlowId ?? 'continue_execution_flow')
         }
       };
     });
     planServertoolExecutionOutcomeRuntimeActionWithNative.mockImplementation((input: any) => {
       if (input?.outcomeMode === 'mixed_client_tools') {
         return {
-          action: input?.requiresPendingInjection === true &&
-              input?.followupStrategy === 'pending_injection'
-            ? 'return_mixed_client_tools_pending_injection'
-            : 'invalid_mixed_client_tools_outcome',
+          action: 'invalid_mixed_client_tools_outcome',
           reuseLastExecutionEnvelope: false,
-          pendingInjection:
-            input?.pendingSessionId && Array.isArray(input?.pendingInjectionMessagesResolved) && input.pendingInjectionMessagesResolved.length > 0
-              ? {
-                  sessionId: input.pendingSessionId,
-                  ...(Array.isArray(input.aliasSessionIds) && input.aliasSessionIds.length > 0
-                    ? { aliasSessionIds: input.aliasSessionIds }
-                    : {}),
-                  afterToolCallIds: Array.isArray(input.remainingToolCallIds)
-                    ? input.remainingToolCallIds
-                    : [],
-                  messages: input.pendingInjectionMessagesResolved
-                }
-              : undefined,
           executionFlowId: String(input?.flowId ?? 'servertool_mixed')
         };
       }
-      if (
-        input?.useLastExecutionFollowup === true &&
-        input?.followupStrategy === 'reuse_last_execution' &&
-        input?.hasLastExecutionFollowup === true
-      ) {
+      if (input?.hasLastExecution === true || input?.hasResolvedFollowup === true || Number(input?.executedToolCallsLen ?? 0) > 0) {
         return {
-          action: 'reuse_last_execution_followup',
-          reuseLastExecutionEnvelope:
-            input?.hasLastExecution === true && Number(input?.executedToolCallsLen ?? 0) === 1,
-          selectedFollowup: input?.lastExecution?.followup,
-          selectedExecutionEnvelope:
-            input?.hasLastExecution === true && Number(input?.executedToolCallsLen ?? 0) === 1
-              ? input?.lastExecution
-              : undefined,
-          executionFlowId: String(input?.flowId ?? 'servertool_multi')
-        };
-      }
-      if (input?.hasResolvedFollowup === true) {
-        return {
-          action: 'use_resolved_followup',
+          action: 'return_execution_contract',
           reuseLastExecutionEnvelope: false,
-          selectedFollowup: input?.resolvedFollowup,
           executionFlowId: String(input?.flowId ?? 'servertool_multi')
         };
       }
       return {
-        action: 'missing_followup_contract',
+        action: 'missing_servertool_execution_contract',
         reuseLastExecutionEnvelope: false,
         executionFlowId: String(input?.flowId ?? 'servertool_multi')
       };
@@ -546,8 +511,7 @@ describe('execution queue dispatch runtime', () => {
         executionMode: 'guarded',
         stripAfterExecute: false
       },
-      noopFlowId: 'continue_execution_flow',
-      noopFollowup: { requestIdSuffix: ':continue_execution_followup' }
+      noopFlowId: 'continue_execution_flow'
     });
     expect(result.executedToolCalls[0]).toMatchObject({
       toolCall: {
@@ -558,8 +522,7 @@ describe('execution queue dispatch runtime', () => {
         stripAfterExecute: true
       },
       execution: {
-        flowId: 'continue_execution_flow',
-        followup: { requestIdSuffix: ':continue_execution_followup' }
+        flowId: 'continue_execution_flow'
       }
     });
   });

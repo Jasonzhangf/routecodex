@@ -17,18 +17,14 @@ pub struct ServertoolDispatchSpecMismatchErrorInput {
 pub struct ServertoolInvalidMixedClientToolsOutcomeErrorInput {
     pub request_id: String,
     pub outcome_mode: String,
-    pub followup_strategy: String,
     pub requires_pending_injection: bool,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ServertoolMissingFollowupContractErrorInput {
+pub struct ServertoolMissingExecutionContractErrorInput {
     pub request_id: String,
     pub outcome_mode: String,
-    pub followup_strategy: String,
-    pub use_last_execution_followup: bool,
-    pub use_generic_followup: bool,
 }
 
 pub fn plan_servertool_dispatch_spec_mismatch_error(
@@ -64,26 +60,22 @@ pub fn plan_servertool_invalid_mixed_client_tools_outcome_error(
         "details": {
             "requestId": input.request_id.trim(),
             "outcomeMode": input.outcome_mode.trim(),
-            "followupStrategy": input.followup_strategy.trim(),
             "requiresPendingInjection": input.requires_pending_injection,
         }
     })
 }
 
-pub fn plan_servertool_missing_followup_contract_error(
-    input: &ServertoolMissingFollowupContractErrorInput,
+pub fn plan_servertool_missing_execution_contract_error(
+    input: &ServertoolMissingExecutionContractErrorInput,
 ) -> Value {
     serde_json::json!({
-        "message": "[servertool] missing native followup contract for servertool-only outcome",
+        "message": "[servertool] missing native execution contract for servertool-only outcome",
         "code": "SERVERTOOL_HANDLER_FAILED",
         "category": "INTERNAL_ERROR",
         "status": 500,
         "details": {
             "requestId": input.request_id.trim(),
             "outcomeMode": input.outcome_mode.trim(),
-            "followupStrategy": input.followup_strategy.trim(),
-            "useLastExecutionFollowup": input.use_last_execution_followup,
-            "useGenericFollowup": input.use_generic_followup,
         }
     })
 }
@@ -93,9 +85,9 @@ mod tests {
     use super::{
         plan_servertool_dispatch_spec_mismatch_error,
         plan_servertool_invalid_mixed_client_tools_outcome_error,
-        plan_servertool_missing_followup_contract_error, ServertoolDispatchSpecMismatchErrorInput,
+        plan_servertool_missing_execution_contract_error, ServertoolDispatchSpecMismatchErrorInput,
         ServertoolInvalidMixedClientToolsOutcomeErrorInput,
-        ServertoolMissingFollowupContractErrorInput,
+        ServertoolMissingExecutionContractErrorInput,
     };
 
     #[test]
@@ -122,7 +114,6 @@ mod tests {
             &ServertoolInvalidMixedClientToolsOutcomeErrorInput {
                 request_id: "req-2".to_string(),
                 outcome_mode: "mixed_client_tools".to_string(),
-                followup_strategy: "reuse_last_execution".to_string(),
                 requires_pending_injection: false,
             },
         );
@@ -134,20 +125,17 @@ mod tests {
     }
 
     #[test]
-    fn plans_missing_followup_contract_error() {
-        let plan = plan_servertool_missing_followup_contract_error(
-            &ServertoolMissingFollowupContractErrorInput {
+    fn plans_missing_execution_contract_error() {
+        let plan = plan_servertool_missing_execution_contract_error(
+            &ServertoolMissingExecutionContractErrorInput {
                 request_id: "req-3".to_string(),
                 outcome_mode: "servertool_only".to_string(),
-                followup_strategy: "resolved_followup".to_string(),
-                use_last_execution_followup: false,
-                use_generic_followup: true,
             },
         );
         assert_eq!(
             plan["message"],
-            "[servertool] missing native followup contract for servertool-only outcome"
+            "[servertool] missing native execution contract for servertool-only outcome"
         );
-        assert_eq!(plan["details"]["useGenericFollowup"], true);
+        assert_eq!(plan["details"]["outcomeMode"], "servertool_only");
     }
 }

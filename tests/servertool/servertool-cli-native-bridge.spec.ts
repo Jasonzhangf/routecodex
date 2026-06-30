@@ -329,17 +329,8 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolExecutionOutcomeRuntimeActionWithNative({
         outcomeMode: 'mixed_client_tools',
-        requiresPendingInjection: true,
-        followupStrategy: 'pending_injection',
-        useLastExecutionFollowup: false,
-        hasLastExecutionFollowup: false,
-        hasResolvedFollowup: false,
         hasLastExecution: false,
         executedToolCallsLen: 0,
-        pendingSessionId: 'sess_1',
-        aliasSessionIds: ['alias_1'],
-        remainingToolCallIds: ['call_2'],
-        pendingInjectionMessagesResolved: [{ role: 'assistant' }],
         flowId: 'servertool_mixed'
       })
     ).toEqual({
@@ -351,11 +342,6 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolExecutionOutcomeRuntimeActionWithNative({
         outcomeMode: 'servertool_only',
-        requiresPendingInjection: false,
-        followupStrategy: 'reuse_last_execution',
-        useLastExecutionFollowup: true,
-        hasLastExecutionFollowup: true,
-        hasResolvedFollowup: true,
         hasLastExecution: true,
         executedToolCallsLen: 1,
         lastExecution: {
@@ -363,18 +349,11 @@ describe('servertool CLI native bridge', () => {
           followup: { requestIdSuffix: ':reuse' },
           context: { kept: true }
         },
-        resolvedFollowup: { requestIdSuffix: ':resolved' },
         flowId: 'servertool_multi'
       })
     ).toEqual({
-      action: 'reuse_last_execution_followup',
-      reuseLastExecutionEnvelope: true,
-      selectedFollowup: { requestIdSuffix: ':reuse' },
-      selectedExecutionEnvelope: {
-        flowId: 'flow_1',
-        followup: { requestIdSuffix: ':reuse' },
-        context: { kept: true }
-      },
+      action: 'return_execution_contract',
+      reuseLastExecutionEnvelope: false,
       executionFlowId: 'servertool_multi'
     });
   });
@@ -463,10 +442,7 @@ describe('servertool CLI native bridge', () => {
           executionMode: 'guarded',
           stripAfterExecute: false
         },
-        noopFlowId: 'continue_execution_flow',
-        noopFollowup: {
-          requestIdSuffix: ':continue_execution_followup'
-        }
+        noopFlowId: 'continue_execution_flow'
       })
     ).toEqual({
       toolCall: {
@@ -477,10 +453,7 @@ describe('servertool CLI native bridge', () => {
         stripAfterExecute: true
       },
       execution: {
-        flowId: 'continue_execution_flow',
-        followup: {
-          requestIdSuffix: ':continue_execution_followup'
-        }
+        flowId: 'continue_execution_flow'
       }
     });
   });

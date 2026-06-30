@@ -102,17 +102,9 @@ export type ServertoolDispatchPlanInputPayload = {
 export type ServertoolOutcomePlanPayload = {
   outcomeMode: string;
   remainingToolCallIds: string[];
-  pendingSessionId?: string | null;
-  aliasSessionIds: string[];
-  pendingInjectionMessageKinds: string[];
-  pendingInjectionMessagesResolved: unknown[];
   flowId?: string | null;
-  useLastExecutionFollowup: boolean;
-  useGenericFollowup: boolean;
-  followupStrategy: string;
   requiresPendingInjection: boolean;
   primaryExecutionMode?: string | null;
-  resolvedFollowup?: unknown;
 };
 
 export type ServertoolHandlerContractPlanPayload = {
@@ -132,11 +124,6 @@ export type ServertoolOutcomePlanInputPayload = {
   executedToolCalls: ServertoolOutcomePlanInputExecutedToolCallPayload[];
   executedFlowIds: string[];
   lastExecutionFlowId?: string | null;
-  hasLastExecutionFollowup: boolean;
-  sessionId?: string | null;
-  conversationId?: string | null;
-  toolOutputs?: unknown[] | null;
-  pendingInjectionMessageKinds?: string[] | null;
 };
 
 export type ServertoolResponseStageGatePayload = {
@@ -487,17 +474,9 @@ export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcom
     | {
       outcomeMode?: unknown;
       remainingToolCallIds?: unknown;
-      pendingSessionId?: unknown;
-      aliasSessionIds?: unknown;
-      pendingInjectionMessageKinds?: unknown;
-      pendingInjectionMessagesResolved?: unknown;
       flowId?: unknown;
-      useLastExecutionFollowup?: unknown;
-      useGenericFollowup?: unknown;
-      followupStrategy?: unknown;
       requiresPendingInjection?: unknown;
       primaryExecutionMode?: unknown;
-      resolvedFollowup?: unknown;
     }
     | typeof JSON_PARSE_FAILED;
   if (
@@ -505,12 +484,6 @@ export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcom
     !parsed ||
     typeof parsed.outcomeMode !== 'string' ||
     !Array.isArray(parsed.remainingToolCallIds) ||
-    !Array.isArray(parsed.aliasSessionIds) ||
-    !Array.isArray(parsed.pendingInjectionMessageKinds) ||
-    !Array.isArray(parsed.pendingInjectionMessagesResolved) ||
-    typeof parsed.useLastExecutionFollowup !== 'boolean' ||
-    typeof parsed.useGenericFollowup !== 'boolean' ||
-    typeof parsed.followupStrategy !== 'string' ||
     typeof parsed.requiresPendingInjection !== 'boolean'
   ) {
     return null;
@@ -520,28 +493,12 @@ export function parseServertoolOutcomePlanPayload(raw: string): ServertoolOutcom
     remainingToolCallIds: parsed.remainingToolCallIds
       .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       .map((entry) => entry.trim()),
-    ...(typeof parsed.pendingSessionId === 'string' && parsed.pendingSessionId.trim()
-      ? { pendingSessionId: parsed.pendingSessionId.trim() }
-      : parsed.pendingSessionId === null
-        ? { pendingSessionId: null }
-        : {}),
-    aliasSessionIds: parsed.aliasSessionIds
-      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      .map((entry) => entry.trim()),
-    pendingInjectionMessageKinds: parsed.pendingInjectionMessageKinds
-      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      .map((entry) => entry.trim()),
-    pendingInjectionMessagesResolved: parsed.pendingInjectionMessagesResolved,
     ...(typeof parsed.flowId === 'string' && parsed.flowId.trim()
       ? { flowId: parsed.flowId.trim() }
       : parsed.flowId === null
         ? { flowId: null }
         : {}),
-    useLastExecutionFollowup: parsed.useLastExecutionFollowup,
-    useGenericFollowup: parsed.useGenericFollowup,
-    followupStrategy: parsed.followupStrategy,
     requiresPendingInjection: parsed.requiresPendingInjection,
-    ...(parsed.resolvedFollowup !== undefined ? { resolvedFollowup: parsed.resolvedFollowup } : {}),
     ...(typeof parsed.primaryExecutionMode === 'string' && parsed.primaryExecutionMode.trim()
       ? { primaryExecutionMode: parsed.primaryExecutionMode.trim() }
       : parsed.primaryExecutionMode === null
@@ -557,11 +514,6 @@ export function parseServertoolOutcomePlanInputPayload(raw: string): ServertoolO
       executedToolCalls?: unknown;
       executedFlowIds?: unknown;
       lastExecutionFlowId?: unknown;
-      hasLastExecutionFollowup?: unknown;
-      sessionId?: unknown;
-      conversationId?: unknown;
-      toolOutputs?: unknown;
-      pendingInjectionMessageKinds?: unknown;
     }
     | typeof JSON_PARSE_FAILED;
   if (
@@ -569,8 +521,7 @@ export function parseServertoolOutcomePlanInputPayload(raw: string): ServertoolO
     !parsed ||
     !Array.isArray(parsed.toolCalls) ||
     !Array.isArray(parsed.executedToolCalls) ||
-    !Array.isArray(parsed.executedFlowIds) ||
-    typeof parsed.hasLastExecutionFollowup !== 'boolean'
+    !Array.isArray(parsed.executedFlowIds)
   ) {
     return null;
   }
@@ -595,40 +546,15 @@ export function parseServertoolOutcomePlanInputPayload(raw: string): ServertoolO
   const executedFlowIds = parsed.executedFlowIds
     .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
     .map((entry) => entry.trim());
-  const pendingInjectionMessageKinds = Array.isArray(parsed.pendingInjectionMessageKinds)
-    ? parsed.pendingInjectionMessageKinds
-        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-        .map((entry) => entry.trim())
-    : parsed.pendingInjectionMessageKinds === null
-      ? null
-      : undefined;
-  const toolOutputs = Array.isArray(parsed.toolOutputs)
-    ? parsed.toolOutputs
-    : parsed.toolOutputs === null
-      ? null
-      : undefined;
   return {
     toolCalls,
     executedToolCalls,
     executedFlowIds,
-    hasLastExecutionFollowup: parsed.hasLastExecutionFollowup,
     ...(typeof parsed.lastExecutionFlowId === 'string' && parsed.lastExecutionFlowId.trim()
       ? { lastExecutionFlowId: parsed.lastExecutionFlowId.trim() }
       : parsed.lastExecutionFlowId === null
         ? { lastExecutionFlowId: null }
         : {}),
-    ...(typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
-      ? { sessionId: parsed.sessionId.trim() }
-      : parsed.sessionId === null
-        ? { sessionId: null }
-        : {}),
-    ...(typeof parsed.conversationId === 'string' && parsed.conversationId.trim()
-      ? { conversationId: parsed.conversationId.trim() }
-      : parsed.conversationId === null
-        ? { conversationId: null }
-        : {}),
-    ...(toolOutputs !== undefined ? { toolOutputs } : {}),
-    ...(pendingInjectionMessageKinds !== undefined ? { pendingInjectionMessageKinds } : {})
   };
 }
 

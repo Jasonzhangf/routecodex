@@ -139,29 +139,19 @@ describe('server-side-tools native dispatch planner', () => {
           { id: 'call_dispatch_1', name: spec.name, arguments: '{}' },
           { id: 'call_dispatch_2', name: 'client_side_tool', arguments: '{}' }
         ],
-        executionState,
-        sessionId: 'sess_dispatch_1',
-        conversationId: 'conv_dispatch_1',
-        toolOutputs: [
-          {
-            tool_call_id: 'call_dispatch_1',
-            name: spec.name,
-            content: JSON.stringify({ ok: true, tool: spec.name })
-          }
-        ],
-        pendingInjectionMessageKinds: ['assistant_tool_calls', 'tool_outputs']
+        executionState
       })
     );
 
     expect(outcome).toMatchObject({
       outcomeMode: 'mixed_client_tools',
-      followupStrategy: 'pending_injection',
       requiresPendingInjection: true,
       primaryExecutionMode: spec.executionMode,
-      pendingSessionId: 'sess_dispatch_1'
+      flowId: 'servertool_mixed'
     });
     expect(outcome.remainingToolCallIds).toEqual(['call_dispatch_2']);
-    expect(outcome.aliasSessionIds).toEqual([]);
-    expect(outcome.pendingInjectionMessageKinds).toEqual(['assistant_tool_calls', 'tool_outputs']);
+    expect((outcome as any).followupStrategy).toBeUndefined();
+    expect((outcome as any).pendingSessionId).toBeUndefined();
+    expect((outcome as any).pendingInjectionMessageKinds).toBeUndefined();
   });
 });

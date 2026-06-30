@@ -453,23 +453,8 @@ jest.unstable_mockModule(
       return {
         outcomeMode: 'servertool_only',
         flowId: `${toolName}_error`,
-        followupStrategy: 'generic_tool_outputs',
-        useGenericFollowup: true,
-        useLastExecutionFollowup: false,
         requiresPendingInjection: false,
-        pendingInjectionMessagesResolved: [],
-        pendingInjectionMessageKinds: [],
-        remainingToolCallIds: [],
-        aliasSessionIds: [],
-        resolvedFollowup: {
-          requestIdSuffix: ':servertool_followup',
-          injection: {
-            ops: [
-              { op: 'append_assistant_message', required: true },
-              { op: 'append_tool_messages_from_tool_outputs', required: true }
-            ]
-          }
-        }
+        remainingToolCallIds: []
       };
     }),
     planServertoolHandlerContractErrorWithNative: jest.fn((input: any) => {

@@ -37,7 +37,7 @@ export function recordServertoolMatchHit(args: {
   args.stageRecorder?.record('servertool.match', {
     matched: true,
     flowId,
-    hasFollowup: Boolean(args.execution.followup)
+  hasFollowup: false
   });
   return flowId;
 }

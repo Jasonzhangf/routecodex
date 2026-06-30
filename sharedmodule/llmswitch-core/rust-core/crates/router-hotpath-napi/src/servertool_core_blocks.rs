@@ -627,17 +627,17 @@ pub fn plan_servertool_execution_dispatch_error_json(input_json: &str) -> Result
             )
             .map_err(|e| format!("serialize invalid mixed client tools outcome error plan: {e}"))
         }
-        "missing_followup_contract" => {
-            let parsed: execution_dispatch_contract::ServertoolMissingFollowupContractErrorInput =
+        "missing_servertool_execution_contract" => {
+            let parsed: execution_dispatch_contract::ServertoolMissingExecutionContractErrorInput =
                 serde_json::from_value(input).map_err(|e| {
-                    format!("deserialize missing followup contract error input: {e}")
+                    format!("deserialize missing execution contract error input: {e}")
                 })?;
             serde_json::to_string(
-                &execution_dispatch_contract::plan_servertool_missing_followup_contract_error(
+                &execution_dispatch_contract::plan_servertool_missing_execution_contract_error(
                     &parsed,
                 ),
             )
-            .map_err(|e| format!("serialize missing followup contract error plan: {e}"))
+            .map_err(|e| format!("serialize missing execution contract error plan: {e}"))
         }
         _ => Err(format!(
             "deserialize servertool execution-dispatch error input: unknown kind {kind}"
@@ -2561,20 +2561,9 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
     let mixed = plan_servertool_execution_outcome_runtime_action_json(
         &serde_json::json!({
             "outcomeMode": "mixed_client_tools",
-            "requiresPendingInjection": true,
-            "followupStrategy": "pending_injection",
-            "useLastExecutionFollowup": false,
-            "hasLastExecutionFollowup": false,
-            "hasResolvedFollowup": false,
             "hasLastExecution": false,
             "executedToolCallsLen": 0,
-            "flowId": "servertool_mixed",
-            "pendingSessionId": "sess_1",
-            "aliasSessionIds": ["alias_1"],
-            "remainingToolCallIds": ["call_2"],
-            "pendingInjectionMessagesResolved": [{
-                "role": "assistant"
-            }]
+            "flowId": "servertool_mixed"
         })
         .to_string(),
     )
@@ -2597,11 +2586,6 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
     let missing = plan_servertool_execution_outcome_runtime_action_json(
         &serde_json::json!({
             "outcomeMode": "servertool_only",
-            "requiresPendingInjection": false,
-            "followupStrategy": "generic",
-            "useLastExecutionFollowup": false,
-            "hasLastExecutionFollowup": false,
-            "hasResolvedFollowup": false,
             "hasLastExecution": false,
             "executedToolCallsLen": 0
         })
@@ -2612,17 +2596,12 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
         serde_json::from_str(&missing).expect("parse missing plan");
     assert_eq!(
         missing_value["action"],
-        serde_json::json!("missing_followup_contract")
+        serde_json::json!("missing_servertool_execution_contract")
     );
 
     let reuse = plan_servertool_execution_outcome_runtime_action_json(
         &serde_json::json!({
             "outcomeMode": "servertool_only",
-            "requiresPendingInjection": false,
-            "followupStrategy": "reuse_last_execution",
-            "useLastExecutionFollowup": true,
-            "hasLastExecutionFollowup": true,
-            "hasResolvedFollowup": true,
             "hasLastExecution": true,
             "executedToolCallsLen": 1,
             "flowId": "servertool_multi",
@@ -2634,9 +2613,6 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
                 "context": {
                     "kept": true
                 }
-            },
-            "resolvedFollowup": {
-                "requestIdSuffix": ":resolved"
             }
         })
         .to_string(),
@@ -2645,34 +2621,18 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
     let reuse_value: serde_json::Value = serde_json::from_str(&reuse).expect("parse reuse plan");
     assert_eq!(
         reuse_value["action"],
-        serde_json::json!("reuse_last_execution_followup")
+        serde_json::json!("return_execution_contract")
     );
     assert_eq!(
         reuse_value["reuseLastExecutionEnvelope"],
-        serde_json::json!(true)
+        serde_json::json!(false)
     );
     assert_eq!(
         reuse_value["executionFlowId"],
         serde_json::json!("servertool_multi")
     );
-    assert_eq!(
-        reuse_value["selectedFollowup"],
-        serde_json::json!({
-            "requestIdSuffix": ":reuse"
-        })
-    );
-    assert_eq!(
-        reuse_value["selectedExecutionEnvelope"],
-        serde_json::json!({
-            "flowId": "flow_1",
-            "followup": {
-                "requestIdSuffix": ":reuse"
-            },
-            "context": {
-                "kept": true
-            }
-        })
-    );
+    assert!(reuse_value.as_object().is_some_and(|row| row.len() == 3));
+    assert!(reuse_value.get("selectedExecutionEnvelope").is_none());
 }
 
 #[test]
@@ -2747,10 +2707,7 @@ fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
                 "executionMode": "guarded",
                 "stripAfterExecute": false
             },
-            "noopFlowId": "continue_execution_flow",
-            "noopFollowup": {
-                "requestIdSuffix": ":continue_execution_followup"
-            }
+            "noopFlowId": "continue_execution_flow"
         })
         .to_string(),
     )

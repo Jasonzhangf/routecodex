@@ -71,8 +71,7 @@ export async function runServertoolExecutionStage(args: {
       toolCalls: args.toolCalls,
       executionState,
       filterOutExecutedToolCalls,
-      stripToolOutputs,
-      pendingInjectionMessageKinds: []
+      stripToolOutputs
     });
   }
 

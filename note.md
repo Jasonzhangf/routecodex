@@ -1,3 +1,9 @@
+# 2026-06-30: servertool execution followup contract retired
+- 本 slice 已把 servertool execution outcome 的旧 followup/pending-injection contract 收口为 execution contract：`ServerToolExecution` 只保留 `flowId`，`plan_servertool_outcome_json` / `build_servertool_outcome_plan_input_json` 不再输出 `followupStrategy`、`resolvedFollowup`、`pendingSessionId`、`aliasSessionIds`、`pendingInjectionMessageKinds`、`hasLastExecutionFollowup`、`pendingInjectionMessagesResolved` 等旧字段。
+- `execution-handler-materialization-shell.ts` 只把 outcome mode、execution existence、flowId 交给 Rust runtime action planner；mixed client tools/pending injection 仍 fail-fast，不再生成 followup/pending injection plan。
+- stopless session 结论不变：保留 `requestTruth.sessionId` / CLI command payload 的当前请求身份语义；不恢复 `pending-session`、`sessionDir`、`servertool-pending/*` 文件持久化。
+- 验证：root TS / sharedmodule TS PASS；7 个 focused servertool Jest 52 passed；`servertool-core execution_outcome_runtime_action_contract` 6 passed；`router-hotpath-napi plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge` 1 passed；`servertool_skeleton_config` 17 passed；`build-native-hotpath` PASS；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；`verify:architecture-mainline-call-map` PASS。
+
 # 2026-06-30: servertool precommand/pending-session retire, followup still active
 - 已确认并物理删除的退役面：`pre-command-hooks.ts`、`pre-command-runtime-state-shell.ts`、`pending-session.ts`、`pending-injection-block.ts` 及对应 Rust contract / tests。
 - stopless 仍使用 `requestTruth.sessionId` 作为当前 request identity / count key；不再需要 `pending-session` / `sessionDir` / `servertool-pending/*` 文件持久化。
