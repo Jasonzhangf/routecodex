@@ -43,14 +43,6 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js',
-  () => ({
-    filterOutExecutedToolCalls: jest.fn(),
-    stripToolOutputs: jest.fn()
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.js',
   () => ({
     finalizeServertoolResponseStage

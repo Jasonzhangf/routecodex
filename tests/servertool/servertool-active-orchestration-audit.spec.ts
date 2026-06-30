@@ -66,6 +66,13 @@ const TARGETS = [
     forbidden: [
       'export function appendToolOutput(',
       "nativeRecord({ op: 'append_tool_output'",
+      'export function buildAssistantToolCallMessage(',
+      'export function buildToolMessagesFromOutputs(',
+      'export function stripToolOutputs(',
+      'export function patchToolCallArgumentsById(',
+      'export function filterOutExecutedToolCalls(',
+      'function nativeArray(',
+      'function nativeRecord(',
     ],
   },
   {

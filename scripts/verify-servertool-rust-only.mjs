@@ -2905,6 +2905,23 @@ function checkServertoolExecutionDispatchRustOwner() {
     readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
     '.filter((entry): entry is JsonObject'
   );
+  for (const marker of [
+    'export function buildAssistantToolCallMessage(',
+    'export function buildToolMessagesFromOutputs(',
+    'export function stripToolOutputs(',
+    'export function patchToolCallArgumentsById(',
+    'export function filterOutExecutedToolCalls(',
+    'function nativeArray(',
+    'function nativeRecord(',
+    'runServertoolOrchestrationMutationWithNative'
+  ]) {
+    assertMissing(
+      'servertool-orchestration-blocks-dead-mutation-facades-deleted',
+      `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
+      readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
+      marker
+    );
+  }
 }
 
 // ── Check 13: followup mainline bridge is Rust-owned ──────────

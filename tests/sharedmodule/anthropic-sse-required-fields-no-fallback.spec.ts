@@ -18,11 +18,29 @@ function baseResponse(overrides: Partial<AnthropicMessageResponse> = {}): Anthro
     role: 'assistant',
     model: 'claude-test',
     content: [{ type: 'text', text: 'hello' }],
+    stop_reason: 'end_turn',
     ...overrides
   };
 }
 
 describe('anthropic SSE required fields no-fallback boundary', () => {
+  it('preserves valid Anthropic event flow without synthesizing timestamps', async () => {
+    const sequencer = createAnthropicSequencer();
+
+    const events = await collectEvents(sequencer.sequenceResponse(
+      baseResponse(),
+      'req_anthropic_valid_no_timestamp'
+    ));
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'message_start' }),
+      expect.objectContaining({ type: 'content_block_delta' }),
+      expect.objectContaining({ type: 'message_delta' }),
+      expect.objectContaining({ type: 'message_stop' })
+    ]));
+    expect(events.some((event) => Object.prototype.hasOwnProperty.call(event as object, 'timestamp'))).toBe(false);
+  });
+
   it('throws when response id is missing instead of generating one from request id', async () => {
     const sequencer = createAnthropicSequencer();
 

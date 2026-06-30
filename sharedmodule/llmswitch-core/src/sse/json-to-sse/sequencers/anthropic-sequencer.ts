@@ -23,7 +23,6 @@ function createEvent(type: AnthropicSseEvent['type'], data: Record<string, unkno
   return {
     type,
     event: type,
-    timestamp: Date.now(),
     protocol: 'anthropic-messages',
     direction: 'json_to_sse',
     data: { type, ...data }

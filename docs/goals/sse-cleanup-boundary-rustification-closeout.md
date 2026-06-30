@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Anthropic SSE timestamp synthesis removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `timestamp: Date.now()` for `anthropic-sequencer.ts` and failed before the fix. Focused Jest also failed because valid Anthropic events carried an own `timestamp` property.
+- Fix: `AnthropicSseEventBase` no longer inherits the required `BaseSseEvent.timestamp` field, and `anthropic-sequencer.ts::createEvent()` no longer writes a local timestamp. Anthropic wire output remains explicit `event:` / `data:` framing through the serializer.
+- Positive / reverse tests: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` asserts valid Anthropic events do not carry own `timestamp` while preserving `message_start`, `message_delta`, and `message_stop`; existing reverse tests cover missing id, role, tool id, and stop_reason fail-fast.
+- Verification: focused Jest `anthropic-sse-required-fields-no-fallback` PASS 5/5; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: source replay `eventCount=6`, `hasTimestamp=false`, `hasMessageStart=true`, `hasMessageDelta=true`, `hasMessageStop=true`, `hasExplicitStopReason=true`.
+- Real sample gap: current Anthropic sample directories contain 429 provider-error snapshots only, not a successful provider-response SSE/JSON replay sample.
+
 ### 2026-07-01 Gemini SSE timestamp synthesis removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `timestamp: Date.now()` for `gemini-sequencer.ts` and failed before the fix. Focused Jest also failed because valid Gemini events carried an own `timestamp` property.

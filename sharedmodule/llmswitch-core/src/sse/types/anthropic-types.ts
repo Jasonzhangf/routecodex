@@ -1,4 +1,4 @@
-import type { BaseSseEvent, StreamDirection } from './core-interfaces.js';
+import type { StreamDirection } from './core-interfaces.js';
 import type { ChatReasoningMode } from './chat-types.js';
 
 /**
@@ -140,7 +140,7 @@ export type AnthropicSseEventType =
   | 'message_stop';
 
 export interface AnthropicSseEventBase<T extends AnthropicSseEventType = AnthropicSseEventType>
-  extends BaseSseEvent {
+{
   type: T;
   event?: T;
   protocol: 'anthropic-messages';
