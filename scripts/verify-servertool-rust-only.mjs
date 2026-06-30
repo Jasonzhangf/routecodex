@@ -2477,6 +2477,10 @@ function checkOrchestrationPolicyRustOwner() {
     'targetProviderKey',
     'ProviderProtocolError',
     'inspectStopGatewaySignal',
+    'const timeoutPolicyInput = {',
+    'const followupTimeoutPolicyInput = {',
+    'parseServertoolTimeoutMsWithNative(timeoutPolicyInput)',
+    'parseServertoolTimeoutMsWithNative(followupTimeoutPolicyInput)',
   ]) {
     if (tsShell.includes(keyword)) {
       fail(
@@ -2511,10 +2515,8 @@ function checkOrchestrationPolicyRustOwner() {
   }
   for (const needle of [
     'parseServertoolTimeoutMsWithNative',
-    'const timeoutPolicyInput = { raw: raw || undefined };',
-    'return parseServertoolTimeoutMsWithNative(timeoutPolicyInput);',
-    'const followupTimeoutPolicyInput = { raw: raw || undefined };',
-    'return parseServertoolTimeoutMsWithNative(followupTimeoutPolicyInput);',
+    'function resolveServerToolTimeoutMsFromEnv(',
+    'return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });',
     'readClientInjectOnlyWithNative',
     'normalizeClientInjectTextWithNative',
     'compactFollowupErrorReasonWithNative',

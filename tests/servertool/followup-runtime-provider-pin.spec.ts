@@ -53,15 +53,15 @@ describe('servertool sticky provider pin', () => {
     }
   });
 
-  test('keeps timeout native parse inputs as thin local carriers', () => {
+  test('keeps timeout native parse inputs behind a single thin helper', () => {
     const source = fs.readFileSync(
       'sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts',
       'utf8'
     );
-    expect(source).toContain('const timeoutPolicyInput = { raw: raw || undefined };');
-    expect(source).toContain('return parseServertoolTimeoutMsWithNative(timeoutPolicyInput);');
-    expect(source).toContain('const followupTimeoutPolicyInput = { raw: raw || undefined };');
-    expect(source).toContain('return parseServertoolTimeoutMsWithNative(followupTimeoutPolicyInput);');
+    expect(source).toContain('function resolveServerToolTimeoutMsFromEnv(');
+    expect(source).toContain('return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });');
+    expect(source).not.toContain('const timeoutPolicyInput = {');
+    expect(source).not.toContain('const followupTimeoutPolicyInput = {');
   });
 
   test('normalizes client inject policy through native contract', () => {
