@@ -1,4 +1,5 @@
 import { describe, expect, jest, test } from '@jest/globals';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
@@ -24,6 +25,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
   () => ({
+    readProviderProtocolFromAnyBoundMetadataCenter: jest.fn(() => 'openai-responses'),
     readStopMessageCompareContext: jest.fn(() => ({
       decision: 'trigger',
       reason: 'matched',
@@ -44,6 +46,19 @@ jest.unstable_mockModule(
 );
 
 describe('progress-log-block fail-fast behavior', () => {
+  function bindProviderProtocol(adapterContext: Record<string, unknown>): Record<string, unknown> {
+    MetadataCenter.attach(adapterContext).writeRuntimeControl(
+      'providerProtocol',
+      'openai-responses',
+      {
+        module: 'tests/servertool/progress-log-block.failfast.spec.ts',
+        symbol: 'bindProviderProtocol',
+        stage: 'test'
+      }
+    );
+    return adapterContext;
+  }
+
   test('progress stage and result normalization are native-owned', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile('sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts', 'utf8')
@@ -74,8 +89,7 @@ describe('progress-log-block fail-fast behavior', () => {
     const logger = createServertoolProgressLogger({
       requestId: 'req-progress-console-failfast',
       entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses',
-      adapterContext: {} as any,
+      adapterContext: bindProviderProtocol({}) as any,
       blue: '',
       yellow: '',
       gold: '',
@@ -104,8 +118,7 @@ describe('progress-log-block fail-fast behavior', () => {
     const logger = createServertoolProgressLogger({
       requestId: 'req-progress-stage-failfast',
       entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses',
-      adapterContext: {} as any,
+      adapterContext: bindProviderProtocol({}) as any,
       stageRecorder: stageRecorder as any,
       blue: '',
       yellow: '',

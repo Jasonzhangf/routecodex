@@ -10,7 +10,10 @@ import {
   shouldUseServertoolGoldProgressHighlightWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { formatStopMessageCompareContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { readStopMessageCompareContext } from './metadata-center-carrier.js';
+import {
+  readProviderProtocolFromAnyBoundMetadataCenter,
+  readStopMessageCompareContext
+} from './metadata-center-carrier.js';
 
 const WHITE = '\u001b[97m';
 
@@ -50,7 +53,6 @@ function compactStopCompareSummary(summary: string): string {
 type CommonArgs = {
   requestId: string;
   entryEndpoint: string;
-  providerProtocol: string;
   adapterContext: AdapterContext;
   stageRecorder?: StageRecorder;
   blue: string;
@@ -60,6 +62,11 @@ type CommonArgs = {
 };
 
 export function createServertoolProgressLogger(args: CommonArgs) {
+  const providerProtocol =
+    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>);
+  if (!providerProtocol) {
+    throw new Error('Servertool progress logger requires metadata center runtime_control.providerProtocol');
+  }
   let stopEntryBrief: Record<string, string> | null = null;
   let stopMatchBrief: Record<string, string> | null = null;
 
@@ -88,7 +95,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       message: result,
       step: stage === 'entry' ? 0 : 2,
       entryEndpoint: args.entryEndpoint,
-      providerProtocol: args.providerProtocol
+      providerProtocol
     });
   };
 
@@ -116,7 +123,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       message,
       step,
       entryEndpoint: args.entryEndpoint,
-      providerProtocol: args.providerProtocol
+      providerProtocol
     });
   };
 
@@ -141,7 +148,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       message: `${event.result} (${event.reason}) queue=${event.queue}[${event.queueIndex}/${event.queueTotal}] phase=${event.phase} priority=${event.priority}`,
       step: 2,
       entryEndpoint: args.entryEndpoint,
-      providerProtocol: args.providerProtocol
+      providerProtocol
     });
     args.stageRecorder?.record('servertool.hook', {
       hookId: event.hookId,
@@ -173,7 +180,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       message: summary,
       step: stage === 'entry' ? 1 : 3,
       entryEndpoint: args.entryEndpoint,
-      providerProtocol: args.providerProtocol
+      providerProtocol
     });
     if (compareContext?.decision === 'trigger') {
       const compact = compactStopCompareSummary(summary);

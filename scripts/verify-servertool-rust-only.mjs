@@ -5026,6 +5026,9 @@ function checkServertoolRustOutcomeCloseout() {
     'createServertoolObservation({',
     'export const runServerToolOrchestration = runServerToolOrchestrationShell;',
     "from './server-side-tools-impl.js'",
+    'readProviderProtocolFromAnyBoundMetadataCenter',
+    'providerProtocol: args.providerProtocol',
+    'Servertool engine orchestration requires metadata center runtime_control.providerProtocol',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(

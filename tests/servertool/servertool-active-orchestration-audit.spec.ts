@@ -436,6 +436,9 @@ const TARGETS = [
       'function createServerToolEngineRunner(',
       'type ServerToolEngineRunner =',
       "from './orchestration-policy-block.js'",
+      'readProviderProtocolFromAnyBoundMetadataCenter',
+      'providerProtocol: args.providerProtocol',
+      'Servertool engine orchestration requires metadata center runtime_control.providerProtocol',
     ],
     required: [
       'parseServertoolTimeoutMsWithNative({ raw: raw || undefined })',

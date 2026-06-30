@@ -53,7 +53,8 @@ describe('engine-observation-shell', () => {
     expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/match-log-block.ts')).toBe(false);
     expect(orchestrationSource).toContain('function createProgressObservation(');
     expect(orchestrationSource).toContain('createServertoolProgressLogger({');
-    expect(orchestrationSource).toContain(
+    expect(orchestrationSource).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
+    expect(orchestrationSource).not.toContain(
       'Servertool engine orchestration requires metadata center runtime_control.providerProtocol'
     );
   });
@@ -264,6 +265,8 @@ describe('engine-observation-shell', () => {
 
     expect(source).toContain('export async function runServerToolOrchestrationShell(');
     expect(source).not.toMatch(/export interface ServerToolOrchestrationOptions\s*\{[\s\S]{0,220}providerProtocol:\s*string;/);
+    expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
+    expect(source).not.toContain('providerProtocol: args.providerProtocol');
     expect(source).toContain('createProgressObservation({');
     expect(source).toContain('runEnginePreflight({');
     expect(source).toContain('planServertoolEngineSkipWithNative({');

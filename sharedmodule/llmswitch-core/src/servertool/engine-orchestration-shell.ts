@@ -20,7 +20,6 @@ import {
 import { createServertoolProgressLogger } from './progress-log-block.js';
 import { runEnginePreflight } from './engine-preflight-shell.js';
 import {
-  readProviderProtocolFromAnyBoundMetadataCenter,
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter,
   readRuntimeControlFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
@@ -52,7 +51,6 @@ type ServertoolProgressLogger = ReturnType<typeof createServertoolProgressLogger
 function createProgressObservation(args: {
   requestId: string;
   entryEndpoint: string;
-  providerProtocol: string;
   adapterContext: AdapterContext;
   stageRecorder?: StageRecorder;
 }): {
@@ -64,7 +62,6 @@ function createProgressObservation(args: {
   return createServertoolProgressLogger({
     requestId: args.requestId,
     entryEndpoint: args.entryEndpoint,
-    providerProtocol: args.providerProtocol,
     adapterContext: args.adapterContext,
     stageRecorder: args.stageRecorder,
     blue: '\x1b[38;5;39m',
@@ -86,11 +83,6 @@ function resolveServerToolTimeoutMs(): number {
 export async function runServerToolOrchestrationShell(
   options: ServerToolOrchestrationOptions
 ): Promise<ServerToolOrchestrationResult> {
-  const providerProtocol =
-    readProviderProtocolFromAnyBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
-  if (!providerProtocol) {
-    throw new Error('Servertool engine orchestration requires metadata center runtime_control.providerProtocol');
-  }
   const {
     logStopEntry,
     logProgress,
@@ -99,7 +91,6 @@ export async function runServerToolOrchestrationShell(
   } = createProgressObservation({
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
-    providerProtocol,
     adapterContext: options.adapterContext,
     stageRecorder: options.stageRecorder
   });
