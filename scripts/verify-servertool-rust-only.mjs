@@ -5098,6 +5098,8 @@ function checkServertoolRustOutcomeCloseout() {
     'args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs',
     'function planStoplessEngineRuntime(',
     'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
+    'function createServerToolEngineRunner(',
+    'type ServerToolEngineRunner =',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(

@@ -186,6 +186,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildChatSseRoleDeltaPayloadJson",
   "buildChatSseContentDeltaPayloadJson",
   "buildChatSseReasoningDeltaPayloadJson",
+  "buildChatSseToolCallArgsDeltaPayloadJson",
   "planResponsesSseErrorRecoveryJson",
   "normalizeMessageReasoningToolsJson",
   "normalizeOpenaiMessageJson",

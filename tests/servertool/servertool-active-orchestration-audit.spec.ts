@@ -427,6 +427,8 @@ const TARGETS = [
       'planStoplessExecutionWithNative(stoplessExecutionInput)',
       'const postflightEngineResult = {',
       'engineResult: postflightEngineResult,',
+      'function createServerToolEngineRunner(',
+      'type ServerToolEngineRunner =',
     ],
     required: [
       'const stoplessExecutionPlan = planStoplessExecutionWithNative({',

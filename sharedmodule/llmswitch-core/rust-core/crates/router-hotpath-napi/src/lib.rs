@@ -2175,6 +2175,12 @@ pub fn build_chat_sse_reasoning_delta_payload_json(input_json: String) -> NapiRe
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildChatSseToolCallArgsDeltaPayloadJson")]
+pub fn build_chat_sse_tool_call_args_delta_payload_json(input_json: String) -> NapiResult<String> {
+    chat_sse_event_payload::build_chat_sse_tool_call_args_delta_payload_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "planResponsesSseErrorRecoveryJson")]
 pub fn plan_responses_sse_error_recovery_json(input_json: String) -> NapiResult<String> {
     responses_sse_event_payload::plan_responses_sse_error_recovery_json(input_json)

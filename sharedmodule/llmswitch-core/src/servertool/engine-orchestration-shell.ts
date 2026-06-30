@@ -49,30 +49,6 @@ export interface ServerToolOrchestrationResult {
 }
 
 type ServerToolEngineResult = Awaited<ReturnType<typeof runServerSideToolEngine>>;
-type ServerToolEngineRunner = (
-  overrides: Partial<ServerSideToolEngineOptions>
-) => Promise<ServerToolEngineResult>;
-
-function createServerToolEngineRunner(args: {
-  engineOptions: ServerSideToolEngineOptions;
-  serverToolTimeoutMs: number;
-  requestId: string;
-}): ServerToolEngineRunner {
-  return (overrides) =>
-    withTimeout(
-      runServerSideToolEngine({
-        ...args.engineOptions,
-        ...overrides
-      }),
-      args.serverToolTimeoutMs,
-      () =>
-        createServerToolTimeoutError({
-          requestId: args.requestId,
-          phase: 'engine',
-          timeoutMs: args.serverToolTimeoutMs
-        })
-    );
-}
 
 export async function runServerToolOrchestrationShell(
   options: ServerToolOrchestrationOptions
@@ -119,13 +95,21 @@ export async function runServerToolOrchestrationShell(
     onAutoHookTrace: logAutoHookTrace
   };
 
-  const runEngine = createServerToolEngineRunner({
-    engineOptions,
-    serverToolTimeoutMs,
-    requestId: options.requestId
-  });
   const engineResult = await runPrimaryServerToolEngineSelection({
-    runEngine
+    runEngine: (overrides: Partial<ServerSideToolEngineOptions>): Promise<ServerToolEngineResult> =>
+      withTimeout(
+        runServerSideToolEngine({
+          ...engineOptions,
+          ...overrides
+        }),
+        serverToolTimeoutMs,
+        () =>
+          createServerToolTimeoutError({
+            requestId: options.requestId,
+            phase: 'engine',
+            timeoutMs: serverToolTimeoutMs
+          })
+      )
   });
   const engineSkipPlan = planServertoolEngineSkipWithNative({
     engineMode: engineResult.mode,

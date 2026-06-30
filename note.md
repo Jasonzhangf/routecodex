@@ -1,3 +1,8 @@
+# 2026-07-01: Chat SSE tool-call args delta payload Rust owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 Chat `function: { arguments: args }` marker 后先红，证明 Chat tool-call arguments delta chunk payload 仍由 TS 合成。
+- Fix：新增 Rust/NAPI `buildChatSseToolCallArgsDeltaPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildToolCallArgsDeltas()` 只取 base context、调用 native payload、封装 native envelope。
+- Verification：Rust `chat_sse_tool_call_args_delta_payload` 2/2 PASS；native build PASS；focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic + chat-sse-function-call-args-no-fallback` 23/23 PASS；native export-list subtest PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；真实 chat replay `done=true error=false malformedWire=0 chatChunkCount=4 toolStartChunks=1 toolArgsChunks=1 toolArgBytes=75 finishChunks=1`。
+
 # 2026-07-01: Chat SSE reasoning delta payload Rust owner
 - Red evidence：`verify:sse-architecture-boundary` 新增 Chat `delta: { reasoning, reasoning_content: reasoning }` marker 后先红，证明 Chat reasoning delta chunk payload 仍由 TS 合成。
 - Fix：新增 Rust/NAPI `buildChatSseReasoningDeltaPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildReasoningDeltas()` 只取 base context、调用 native payload、封装 native envelope。

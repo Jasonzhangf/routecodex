@@ -264,5 +264,6 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('runServertoolEnginePostflight({');
     expect(source).not.toContain('effectiveServerToolTimeoutMs');
     expect(source).not.toContain('args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs');
+    expect(source).not.toContain('function createServerToolEngineRunner(');
   });
 });

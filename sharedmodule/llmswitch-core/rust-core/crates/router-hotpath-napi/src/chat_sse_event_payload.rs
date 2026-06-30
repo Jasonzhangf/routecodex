@@ -216,6 +216,64 @@ pub fn build_chat_sse_reasoning_delta_payload_json(input_json: String) -> Result
     .map_err(|error| format!("Failed to serialize Chat SSE reasoning delta payload JSON: {}", error))
 }
 
+pub fn build_chat_sse_tool_call_args_delta_payload_json(
+    input_json: String,
+) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        format!(
+            "Failed to parse Chat SSE tool call args delta payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(input) = input.as_object() else {
+        return Err("Chat SSE tool call args delta payload expected object".to_string());
+    };
+    let response_id = read_required_string(input, "response_id", "tool call args delta payload")?;
+    let model = read_required_string(input, "model", "tool call args delta payload")?;
+    let arguments = read_required_string(input, "arguments", "tool call args delta payload")?;
+    let created = read_required_i64(input, "created", "tool call args delta payload")?;
+    if created <= 0 {
+        return Err("Chat SSE tool call args delta payload created must be positive".to_string());
+    }
+    let choice_index = read_required_i64(input, "choice_index", "tool call args delta payload")?;
+    if choice_index < 0 {
+        return Err(
+            "Chat SSE tool call args delta payload choice_index must be non-negative".to_string(),
+        );
+    }
+    let tool_call_index = read_required_i64(input, "tool_call_index", "tool call args delta payload")?;
+    if tool_call_index < 0 {
+        return Err(
+            "Chat SSE tool call args delta payload tool_call_index must be non-negative"
+                .to_string(),
+        );
+    }
+
+    serde_json::to_string(&serde_json::json!({
+        "id": response_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": choice_index,
+            "delta": {
+                "tool_calls": [{
+                    "index": tool_call_index,
+                    "function": { "arguments": arguments }
+                }]
+            },
+            "logprobs": null,
+            "finish_reason": null
+        }]
+    }))
+    .map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE tool call args delta payload JSON: {}",
+            error
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,5 +487,51 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("missing reasoning"));
+    }
+
+    #[test]
+    fn builds_chat_sse_tool_call_args_delta_payload() {
+        let output = build_chat_sse_tool_call_args_delta_payload_json(
+            json!({
+                "response_id": "chatcmpl_tool_args_delta",
+                "created": 1782778489,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "tool_call_index": 2,
+                "arguments": "{\"cmd\":\"pwd\"}"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["id"], json!("chatcmpl_tool_args_delta"));
+        assert_eq!(parsed["object"], json!("chat.completion.chunk"));
+        assert_eq!(parsed["created"], json!(1782778489));
+        assert_eq!(parsed["model"], json!("gpt-test"));
+        assert_eq!(parsed["choices"][0]["index"], json!(0));
+        assert_eq!(parsed["choices"][0]["delta"]["tool_calls"][0]["index"], json!(2));
+        assert_eq!(
+            parsed["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+            json!("{\"cmd\":\"pwd\"}")
+        );
+        assert_eq!(parsed["choices"][0]["finish_reason"], Value::Null);
+    }
+
+    #[test]
+    fn rejects_chat_sse_tool_call_args_delta_payload_missing_arguments() {
+        let err = build_chat_sse_tool_call_args_delta_payload_json(
+            json!({
+                "response_id": "chatcmpl_tool_args_delta",
+                "created": 1782778489,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "tool_call_index": 2
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("missing arguments"));
     }
 }
