@@ -5070,6 +5070,17 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
+  for (const marker of [
+    'effectiveServerToolTimeoutMs',
+    'args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs',
+  ]) {
+    if (engineOrchestrationShell.includes(marker)) {
+      fail(
+        'servertool-engine-orchestration-no-dead-timeout-carrier',
+        `engine-orchestration-shell.ts must not retain dead timeout carrier marker ${marker}`
+      );
+    }
+  }
   const engineObservationShell = readRequired(TS_ENGINE_OBSERVATION_SHELL);
   for (const marker of [
     'export function logServertoolNonBlocking(',

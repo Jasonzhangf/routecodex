@@ -55,7 +55,6 @@ type ServerToolEngineRunner = (
 
 function createServerToolEngineRunner(args: {
   engineOptions: ServerSideToolEngineOptions;
-  effectiveServerToolTimeoutMs: number;
   serverToolTimeoutMs: number;
   requestId: string;
 }): ServerToolEngineRunner {
@@ -65,12 +64,12 @@ function createServerToolEngineRunner(args: {
         ...args.engineOptions,
         ...overrides
       }),
-      args.effectiveServerToolTimeoutMs,
+      args.serverToolTimeoutMs,
       () =>
         createServerToolTimeoutError({
           requestId: args.requestId,
           phase: 'engine',
-          timeoutMs: args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs
+          timeoutMs: args.serverToolTimeoutMs
         })
     );
 }
@@ -111,7 +110,6 @@ export async function runServerToolOrchestrationShell(
   const stopSignal = preflight.stopSignal;
 
   const serverToolTimeoutMs = resolveServerToolTimeoutMs();
-  const effectiveServerToolTimeoutMs = serverToolTimeoutMs;
   const engineOptions: ServerSideToolEngineOptions = {
     chatResponse: options.chat,
     adapterContext: options.adapterContext,
@@ -123,7 +121,6 @@ export async function runServerToolOrchestrationShell(
 
   const runEngine = createServerToolEngineRunner({
     engineOptions,
-    effectiveServerToolTimeoutMs,
     serverToolTimeoutMs,
     requestId: options.requestId
   });

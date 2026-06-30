@@ -224,6 +224,7 @@ const TARGETS = [
       'readFollowupClientInjectSourceWithNative',
       'writeRuntimeControlToBoundMetadataCenter(',
       'servertoolResponseOrchestration',
+      'providerProtocol: ProviderProtocol;',
     ],
     required: [
       'planServertoolResponseStageGateWithNative',

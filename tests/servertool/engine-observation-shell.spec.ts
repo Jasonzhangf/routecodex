@@ -260,5 +260,7 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('const stoplessExecutionInput = {');
     expect(source).toContain('const stoplessExecutionPlan = planStoplessExecutionWithNative(stoplessExecutionInput);');
     expect(source).toContain('runServertoolEnginePostflight({');
+    expect(source).not.toContain('effectiveServerToolTimeoutMs');
+    expect(source).not.toContain('args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs');
   });
 });

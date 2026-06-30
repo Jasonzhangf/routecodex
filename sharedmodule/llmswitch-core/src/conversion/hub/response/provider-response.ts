@@ -220,7 +220,6 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         adapterContext: args.context,
         requestId: args.requestId,
         entryEndpoint: args.entryEndpoint,
-        providerProtocol: args.providerProtocol,
         ...(allowFollowup ? { allowFollowup: true } : {}),
         stageRecorder: args.stageRecorder
       });

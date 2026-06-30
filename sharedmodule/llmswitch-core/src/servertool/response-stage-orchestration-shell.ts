@@ -11,14 +11,12 @@ import {
 import { readRuntimeControlFromBoundMetadataCenter } from './metadata-center-carrier.js';
 
 type ChatCompletionLike = JsonObject;
-type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 
 export interface ServertoolResponseStageShellOptions {
   payload: ChatCompletionLike;
   adapterContext: AdapterContext;
   requestId: string;
   entryEndpoint: string;
-  providerProtocol: ProviderProtocol;
   allowFollowup?: boolean;
   stageRecorder?: StageRecorder;
 }
