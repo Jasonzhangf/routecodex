@@ -1,3 +1,8 @@
+# 2026-07-01: Anthropic SSE text block empty fallback removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 Anthropic `block.text ?? ''` marker 后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明缺失 text 会被当成空字符串继续输出空 content block。
+- Fix：`anthropic-sequencer.ts` 对 text block 缺少 string `text` 直接 fail-fast 抛 `Invalid Anthropic text block: missing text`；合法 text 仍按 chunk 输出，不再用空串兜底。
+- Verification：focused Jest `anthropic-sse-required-fields-no-fallback` 7/7 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`git diff --check` PASS；source replay `eventCount=6 hasTimestamp=false hasTextDelta=true hasMessageStop=true missingTextFailed=true`。真实 Anthropic 成功样本缺口仍在：只找到 429 provider-error 快照。
+
 # 2026-07-01: Anthropic SSE content block silent skip removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 Anthropic `if (!block || typeof block !== 'object') continue;` marker 后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明 `anthropic-sequencer.ts` 会静默跳过非法 content block。
 - Fix：`anthropic-sequencer.ts` 现在对非法 content block 直接 fail-fast 抛 `Invalid Anthropic content block at index <n>`，不再继续吞掉数据；Anthropic 事件流保留显式 `message_start` / `message_delta` / `message_stop`。

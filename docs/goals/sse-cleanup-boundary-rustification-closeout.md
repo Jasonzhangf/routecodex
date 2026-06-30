@@ -108,6 +108,15 @@ Focused tests to use as slice gates:
 - Replay evidence: source replay still shows `hasTimestamp=false` and the standard Anthropic event flow.
 - Real sample gap: current Anthropic sample directories still contain 429 provider-error snapshots only, not a successful provider-response SSE/JSON replay sample.
 
+### 2026-07-01 Anthropic SSE text block empty fallback removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `block.text ?? ''` for `anthropic-sequencer.ts` and failed before the fix. Focused Jest also failed because a text block with missing text was converted into an empty content block.
+- Fix: `anthropic-sequencer.ts` now requires text blocks to carry string `text`; missing text fails fast with `Invalid Anthropic text block: missing text`.
+- Positive / reverse tests: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` now asserts valid Anthropic text delta output plus missing text fail-fast; existing reverse tests still cover invalid content block, missing id, role, tool id, and stop_reason.
+- Verification: focused Jest `anthropic-sse-required-fields-no-fallback` PASS 7/7; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `git diff --check` PASS.
+- Replay evidence: source replay `eventCount=6`, `hasTimestamp=false`, `hasTextDelta=true`, `hasMessageStop=true`, `missingTextFailed=true`.
+- Real sample gap: current Anthropic sample directories still contain 429 provider-error snapshots only, not a successful provider-response SSE/JSON replay sample.
+
 ### 2026-07-01 Gemini SSE timestamp synthesis removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `timestamp: Date.now()` for `gemini-sequencer.ts` and failed before the fix. Focused Jest also failed because valid Gemini events carried an own `timestamp` property.

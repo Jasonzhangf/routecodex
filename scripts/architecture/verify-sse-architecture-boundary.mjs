@@ -284,6 +284,7 @@ for (const forbidden of [
   "response.stop_reason ?? 'end_turn'",
   'timestamp: Date.now()',
   "if (!block || typeof block !== 'object') continue;",
+  "block.text ?? ''",
 ]) {
   if (anthropicSequencer.includes(forbidden)) {
     failures.push(`Anthropic SSE sequencer must not synthesize fallback/event envelope truth: ${forbidden}`);

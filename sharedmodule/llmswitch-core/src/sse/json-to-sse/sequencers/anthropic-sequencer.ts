@@ -85,8 +85,11 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
           throw new Error(`Invalid Anthropic content block at index ${blockIndex}`);
         }
         if (block.type === 'text') {
+          if (typeof block.text !== 'string') {
+            throw new Error('Invalid Anthropic text block: missing text');
+          }
           yield createEvent('content_block_start', { index, content_block: { type: 'text' } });
-          for (const chunk of chunkText(block.text ?? '', finalConfig.chunkSize)) {
+          for (const chunk of chunkText(block.text, finalConfig.chunkSize)) {
             if (!chunk) continue;
             yield createEvent('content_block_delta', {
               index,
