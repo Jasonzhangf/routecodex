@@ -1,3 +1,9 @@
+# 2026-06-30: servertool response-stage dead native parse removed
+
+- 本 slice 删除 `response-stage-orchestration-shell.ts` 中未消费的 `runServertoolResponseStageWithNative(options.payload, requestId)` 调用和 import；该 shell 不再做“调用 native response stage 但不使用结果”的假语义。
+- 防复活：`servertool-active-orchestration-audit` 与 `verify-servertool-rust-only` 禁止 `response-stage-orchestration-shell.ts` 重新出现 `runServertoolResponseStageWithNative` / `const responseStage =`，并要求保留 gate/shape/orchestration thin-shell marker。
+- 验证：focused Jest `servertool-active-orchestration-audit` 35 passed；sharedmodule TS PASS；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；`verify:architecture-mainline-call-map` PASS；`git diff --check` PASS。
+
 # 2026-06-30: servertool execution-stage stop_message_auto TS special-case removed
 
 - 本 slice 将 `execution-stage-shell.ts` 中 `stop_message_auto` CLI pre-projection 豁免从 TS 分支移到 Rust `servertool-core/src/execution_branch_contract.rs`。

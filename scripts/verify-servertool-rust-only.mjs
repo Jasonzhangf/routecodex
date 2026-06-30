@@ -5110,6 +5110,7 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   const executionStageShell = readRequired(TS_EXECUTION_STAGE_SHELL);
+  const responseStageOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-orchestration-shell.ts`);
   for (const marker of [
     'export async function runServertoolExecutionStage(',
     'prepareServertoolDispatchStage',
@@ -5134,6 +5135,29 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-execution-stage-no-payload-clone',
         `execution-stage-shell.ts must not deep-copy servertool payload marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'runServertoolResponseStageWithNative',
+    'const responseStage =',
+  ]) {
+    if (responseStageOrchestrationShell.includes(marker)) {
+      fail(
+        'servertool-response-stage-orchestration-no-dead-stage',
+        `response-stage-orchestration-shell.ts must not retain unused response stage marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'planServertoolResponseStageGateWithNative',
+    'detectProviderResponseShapeWithNative',
+    'runServerToolOrchestration',
+  ]) {
+    if (!responseStageOrchestrationShell.includes(marker)) {
+      fail(
+        'servertool-response-stage-orchestration-thin-shell',
+        `response-stage-orchestration-shell.ts must keep thin orchestration marker ${marker}`
       );
     }
   }

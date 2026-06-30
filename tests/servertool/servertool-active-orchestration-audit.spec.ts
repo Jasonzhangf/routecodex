@@ -182,6 +182,18 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+    forbidden: [
+      'runServertoolResponseStageWithNative',
+      'const responseStage =',
+    ],
+    required: [
+      'planServertoolResponseStageGateWithNative',
+      'detectProviderResponseShapeWithNative',
+      'runServerToolOrchestration',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
     forbidden: [
       "import './handlers/stop-message-auto.js';",

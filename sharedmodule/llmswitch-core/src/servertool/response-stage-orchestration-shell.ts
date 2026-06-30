@@ -5,7 +5,6 @@ import { recordStage } from '../conversion/hub/pipeline/stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../conversion/hub/pipeline/hub-stage-timing.js';
 import { runServerToolOrchestration } from './engine.js';
 import {
-  runServertoolResponseStageWithNative,
   planServertoolResponseStageGateWithNative,
   detectProviderResponseShapeWithNative,
   readFollowupClientInjectSourceWithNative
@@ -60,7 +59,6 @@ export async function runServertoolResponseStageOrchestrationShell(
       reason: 'response-stage orchestration marker'
     });
   }
-  const responseStage = runServertoolResponseStageWithNative(options.payload, options.requestId);
   const gatePlan = planServertoolResponseStageGateWithNative({
     payload: options.payload,
     adapterContext: options.adapterContext as Record<string, unknown>,
