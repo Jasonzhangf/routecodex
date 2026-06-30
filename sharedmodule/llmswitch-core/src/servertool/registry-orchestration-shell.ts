@@ -52,10 +52,6 @@ function projectCurrentRegistrySources(): {
   });
 }
 
-export function listRegisteredServerToolHandlerNames(): string[] {
-  return projectCurrentRegistrySources().registeredNames;
-}
-
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
   return projectAutoServerToolHookDescriptors({
     entries: projectCurrentRegistrySources().autoHandlers
@@ -64,8 +60,4 @@ export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
 
 export function isRegisteredServerToolName(name: string): boolean {
   return resolveServertoolRegisteredNameWithNative({ name });
-}
-
-export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHandlerRecord[] {
-  return projectCurrentRegistrySources().registeredRecords;
 }

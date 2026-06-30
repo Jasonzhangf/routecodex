@@ -741,8 +741,6 @@ let buildServertoolFollowupConfig: any;
 let buildServertoolPendingInjectionConfig: any;
 let normalizeServerToolRegistrationSpec: any;
 let listAutoServerToolHooks: any;
-let listRegisteredServerToolHandlerNames: any;
-let listRegisteredServerToolHandlerRecords: any;
 let buildAutoHookQueuesFromConfig: any;
 
 beforeAll(async () => {
@@ -756,8 +754,6 @@ beforeAll(async () => {
   buildAutoHookQueuesFromConfig = orchestrationBlocks.buildAutoHookQueuesFromConfig;
   const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
   listAutoServerToolHooks = registry.listAutoServerToolHooks;
-  listRegisteredServerToolHandlerNames = registry.listRegisteredServerToolHandlerNames;
-  listRegisteredServerToolHandlerRecords = registry.listRegisteredServerToolHandlerRecords;
 
 });
 
@@ -842,37 +838,16 @@ describe('servertool skeleton config', () => {
     });
   });
 
-  test('registry projection is builtin-only after dynamic ad-hoc retirement', () => {
-    expect(listRegisteredServerToolHandlerNames()).toEqual([
-      'stop_message_auto'
-    ]);
-    expect(
-      listRegisteredServerToolHandlerRecords().map((entry: any) => ({
-        name: entry.registration.name,
-        trigger: entry.registration.trigger
-      }))
-    ).toEqual([
-      { name: 'stop_message_auto', trigger: 'auto' }
-    ]);
-  });
+  test('registry shell does not expose test-only registered-name or record listing APIs', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile(
+        'sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts',
+        'utf8'
+      )
+    );
 
-  test('builtin-only registry records do not materialize ad-hoc records', async () => {
-    const records = listRegisteredServerToolHandlerRecords().map((entry: any) => ({
-      name: entry.registration.name,
-      trigger: entry.registration.trigger,
-      executionMode: entry.registration.executionMode,
-      stripAfterExecute: entry.registration.stripAfterExecute,
-      autoHook: entry.registration.autoHook
-    }));
-
-    expect(records).toEqual([
-      expect.objectContaining({
-        name: 'stop_message_auto',
-        trigger: 'auto',
-        executionMode: 'auto_hook',
-        stripAfterExecute: true
-      })
-    ]);
+    expect(source).not.toContain('export function listRegisteredServerToolHandlerNames(');
+    expect(source).not.toContain('export function listRegisteredServerToolHandlerRecords(');
   });
 
   test('auto hook queue order is consumed from the Rust auto-hook queue planner', () => {

@@ -434,6 +434,8 @@ const TARGETS = [
       'type ServerToolHandlerRegistrationSpec',
       'export const listAutoServerToolHandlers',
       'getServerToolHandlerViaNativePlan',
+      'export function listRegisteredServerToolHandlerNames(',
+      'export function listRegisteredServerToolHandlerRecords(',
     ],
     required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',

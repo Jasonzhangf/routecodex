@@ -3499,6 +3499,8 @@ function checkServertoolRegistryRustOwner() {
     'isRegisteredServerToolNameViaNativeConfig',
     'isServertoolRegisteredNameByConfig',
     'getServerToolHandlerViaNativePlan',
+    'export function listRegisteredServerToolHandlerNames(',
+    'export function listRegisteredServerToolHandlerRecords(',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
@@ -3565,6 +3567,8 @@ function checkServertoolRegistryRustOwner() {
     'ServerToolHandler,',
     'type ServerToolHandlerRegistrationSpec',
     'export const listAutoServerToolHandlers',
+    'export function listRegisteredServerToolHandlerNames(',
+    'export function listRegisteredServerToolHandlerRecords(',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
