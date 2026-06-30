@@ -112,7 +112,7 @@ export function readProviderProtocolFromAnyBoundMetadataCenter(
     : undefined;
 }
 
-export function readRequestTruthSessionIdFromBoundMetadataCenter(
+function readRequestTruthSessionIdFromBoundMetadataCenter(
   metadata: Record<string, unknown> | undefined
 ): string | undefined {
   if (!metadata) {

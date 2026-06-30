@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import { describe, expect, test } from '@jest/globals';
 
 import {
@@ -25,6 +26,17 @@ function bindRuntimeControlTarget(initialRuntimeControl: Record<string, unknown>
 }
 
 describe('servertool stop-gateway context', () => {
+  test('metadata carrier does not export bound request-truth session helper', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts',
+      'utf8'
+    );
+
+    expect(source).not.toContain('export function readRequestTruthSessionIdFromBoundMetadataCenter(');
+    expect(source).toContain('function readRequestTruthSessionIdFromBoundMetadataCenter(');
+    expect(source).toContain('export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(');
+  });
+
   test('uses native inspect and preserves the last finish_reason choice index', () => {
     const context = inspectStopGatewaySignal({
       choices: [

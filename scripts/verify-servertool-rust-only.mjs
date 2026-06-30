@@ -4705,6 +4705,7 @@ function checkStopGatewayMetadataCenterOnly() {
     'ensureRuntimeMetadata',
     'readRuntimeMetadata(',
     '__rt',
+    'export function readRequestTruthSessionIdFromBoundMetadataCenter(',
   ]) {
     if (stopGatewayContext.includes(marker)) {
       fail(
