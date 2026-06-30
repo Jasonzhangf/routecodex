@@ -12,20 +12,6 @@ import { materializeNativeToolCallExecutionOutcome } from './execution-handler-m
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
 import { planServertoolExecutionBranchWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
-function planExecutionBranchRuntimeAction(args: {
-  executableToolCalls: Array<{ id: string; name: string; executionMode: string }>;
-  executedToolCallsLen: number;
-}) {
-  return planServertoolExecutionBranchWithNative({
-    executableToolCalls: args.executableToolCalls.map((toolCall) => ({
-      id: toolCall.id,
-      name: toolCall.name,
-      executionMode: toolCall.executionMode
-    })),
-    executedToolCallsLen: args.executedToolCallsLen
-  });
-}
-
 export async function runServertoolExecutionStage(args: {
   options: ServerSideToolEngineOptions;
   baseObject: JsonObject;
@@ -46,8 +32,12 @@ export async function runServertoolExecutionStage(args: {
     excludeToolCallNames: args.excludeToolCallNames
   });
 
-  const preExecutionBranchPlan = planExecutionBranchRuntimeAction({
-    executableToolCalls: dispatchPlan.executableToolCalls,
+  const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({
+    executableToolCalls: dispatchPlan.executableToolCalls.map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      executionMode: toolCall.executionMode
+    })),
     executedToolCallsLen: 0
   });
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
@@ -66,8 +56,12 @@ export async function runServertoolExecutionStage(args: {
     baseForExecution: args.baseObject
   });
 
-  const postExecutionBranchPlan = planExecutionBranchRuntimeAction({
-    executableToolCalls: dispatchPlan.executableToolCalls,
+  const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({
+    executableToolCalls: dispatchPlan.executableToolCalls.map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      executionMode: toolCall.executionMode
+    })),
     executedToolCallsLen: executionState.executedToolCalls.length
   });
   if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {

@@ -101,12 +101,12 @@ describe('execution-stage-shell', () => {
 
     expect(source).toContain('prepareServertoolDispatchStage');
     expect(source).toContain('planServertoolExecutionBranchWithNative');
-    expect(source).toContain('function planExecutionBranchRuntimeAction(');
-    expect(source).toContain('const preExecutionBranchPlan = planExecutionBranchRuntimeAction({');
-    expect(source).toContain('const postExecutionBranchPlan = planExecutionBranchRuntimeAction({');
+    expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
+    expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
     expect(source).toContain('finalizeServertoolResponseStage');
+    expect(source).not.toContain('function planExecutionBranchRuntimeAction(');
     expect(source).not.toContain('const preExecutionBranchInput = {');
     expect(source).not.toContain('const postExecutionBranchInput = {');
     expect(source).not.toContain('filterOutExecutedToolCalls');

@@ -2804,9 +2804,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchJson'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'planServertoolExecutionBranchWithNative('],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'function planExecutionBranchRuntimeAction('],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchPlan = planExecutionBranchRuntimeAction({'],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchPlan = planExecutionBranchRuntimeAction({'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'projected_tool_call_index'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCallIndex'],
     ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'feature_id: hub.servertool_engine_preflight_contract'],
@@ -5215,9 +5214,8 @@ function checkServertoolRustOutcomeCloseout() {
     'export async function runServertoolExecutionStage(',
     'prepareServertoolDispatchStage',
     'planServertoolExecutionBranchWithNative',
-    'function planExecutionBranchRuntimeAction(',
-    'const preExecutionBranchPlan = planExecutionBranchRuntimeAction({',
-    'const postExecutionBranchPlan = planExecutionBranchRuntimeAction({',
+    'const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({',
+    'const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({',
     'runServertoolIoExecutionQueue',
     'materializeNativeToolCallExecutionOutcome',
     'finalizeServertoolResponseStage'
@@ -5236,6 +5234,9 @@ function checkServertoolRustOutcomeCloseout() {
     'isStopMessageAutoPreProjection',
     'filterOutExecutedToolCalls',
     'stripToolOutputs',
+    'function planExecutionBranchRuntimeAction(',
+    'const preExecutionBranchPlan = planExecutionBranchRuntimeAction({',
+    'const postExecutionBranchPlan = planExecutionBranchRuntimeAction({',
   ]) {
     if (executionStageShell.includes(marker)) {
       fail(
