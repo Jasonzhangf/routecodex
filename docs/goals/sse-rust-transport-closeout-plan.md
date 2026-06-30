@@ -163,10 +163,10 @@
 
 当前已确认的残留与错位 owner：
 
-- `src/modules/llmswitch/bridge/responses-stream-semantics.ts`
-  - `updateResponsesContractProbeFromSseChunkForHttp`
-  - `inspectResponsesTerminalStateFromSseChunkForHttp`
-  - `planResponsesStreamEndRepairForHttp`
+- `src/modules/llmswitch/bridge/responses-stream-semantics.ts` 已退役并物理删除。
+  - 旧 `updateResponsesContractProbeFromSseChunkForHttp`
+  - 旧 `inspectResponsesTerminalStateFromSseChunkForHttp`
+  - 旧 `planResponsesStreamEndRepairForHttp`
 - `src/modules/llmswitch/bridge/responses-sse-semantics.ts`
   - `projectResponsesSseFrameForClientForHttp`
   - `normalizeResponsesSseFrameForClientForHttp`
@@ -205,7 +205,7 @@
 | `handler-response-sse.ts` | stream write, flush, keepalive comment, abort/timeout wiring, metadata guard | terminal scan, probe update, continuation close decision, payload/frame semantic normalize | `chat process` / `resp_outbound` / Rust transport owner |
 | `responses-sse-bridge.ts` | 单一 facade / binding shell | 协议判定、frame repair、tool projection、JSON/SSE shape 语义 | Rust SSE owner |
 | `responses-sse-semantics.ts` | 迁移中短期 SSE 壳层 | apply_patch、required_action、tool projection、nested response normalize、summary/hint/stopless 等应用语义的长期 owner | `chat process` / `resp_outbound` / 应用 owner / Rust response projection owner |
-| `responses-stream-semantics.ts` | 迁移中短期 non-SSE wrapper | 长期保留 TS probe/terminal/repair 真源 | `chat process` / `resp_outbound` / Rust response semantics owner |
+| `responses-stream-semantics.ts` | 已退役并物理删除 | 恢复 TS probe/terminal/repair 真源 | `chat process` / `resp_outbound` / Rust response semantics owner |
 | `responses-response-bridge.ts` | response persistence facade, request-context persistence facade | 任何 SSE decode/encode/projection/probe/repair helper | 分拆到独立 SSE module / Rust owner |
 | `sharedmodule/.../src/sse/**` | 迁移前短期对照基线；迁移后只允许薄壳或删除 | SSE decode/encode 主实现继续常驻 TS | Rust SSE module |
 | Rust SSE owner | SSE parse/materialize/decode/encode/frame write helper 主实现 | lifecycle persistence / route policy / provider retry / terminal decision / tool projection | 保持 Rust 唯一真源 |

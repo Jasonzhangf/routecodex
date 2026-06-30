@@ -1,3 +1,8 @@
+# 2026-07-01: retired responses stream semantics spec cleanup
+- Red evidence：`tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts` 仍 import 已物理删除的 `src/modules/llmswitch/bridge/responses-stream-semantics.js`，focused Jest 先红为 module-not-found；这不是缺实现，而是旧 TS stream semantics owner 的陈旧正向测试残留。
+- Fix：物理删除 stale spec；`docs/goals/sse-rust-transport-closeout-plan.md` 把 `responses-stream-semantics.ts` 标记为已退役/已删除；active closeout doc 记录这刀，避免后续按旧计划复活 wrapper。
+- Gate truth：`server_responses_sse_surface_single_owner`、`server_responses_sse_business_module_contract`、`hub-pipeline-stage-residue-audit` 继续反向锁 `responses-stream-semantics` / `attachResponsesStreamSemanticsForHttp` 不得回归。
+
 # 2026-06-30: Responses direct JSON client model restore Rust owner slice
 - Red evidence：删除 `responses-response-bridge.js` 里的 `readResponsesRequestModelForHttp` / `ensureResponsesJsonToSseRequiredFieldsForHttp` 后，`responses-response-bridge.direct-json-protocol-guard.spec.ts` 先红，direct JSON client projection 少了 `model: gpt-5.4`。
 - Root cause：Rust `project_responses_client_payload_for_client` 只恢复 `{"response": ...}` event wrapper 的 client-visible model/reasoning，没有覆盖 direct response body `{ object: "response" }`，导致旧 JS 镜像保留了 TS 补字段 owner。
