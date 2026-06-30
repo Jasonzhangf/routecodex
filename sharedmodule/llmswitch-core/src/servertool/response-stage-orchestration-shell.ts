@@ -6,8 +6,7 @@ import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../conversion/
 import { runServerToolOrchestration } from './engine.js';
 import {
   planServertoolResponseStageGateWithNative,
-  detectProviderResponseShapeWithNative,
-  readFollowupClientInjectSourceWithNative
+  detectProviderResponseShapeWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   readRuntimeControlFromBoundMetadataCenter,

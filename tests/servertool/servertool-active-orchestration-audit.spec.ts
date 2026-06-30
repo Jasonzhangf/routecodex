@@ -186,6 +186,7 @@ const TARGETS = [
     forbidden: [
       'runServertoolResponseStageWithNative',
       'const responseStage =',
+      'readFollowupClientInjectSourceWithNative',
     ],
     required: [
       'planServertoolResponseStageGateWithNative',

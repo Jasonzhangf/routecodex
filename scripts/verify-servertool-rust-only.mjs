@@ -5141,6 +5141,7 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'runServertoolResponseStageWithNative',
     'const responseStage =',
+    'readFollowupClientInjectSourceWithNative',
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
