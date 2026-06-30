@@ -236,7 +236,7 @@ export async function writeUnifiedSnapshot(input) {
     const snapshotsEnabled = isSnapshotsEnabled();
     if (!snapshotsEnabled && !input.forceLocalDiskWriteWhenDisabled)
         return;
-    if (!shouldCaptureSnapshotStage(input.stage))
+    if (!input.forceLocalDiskWriteWhenDisabled && !shouldCaptureSnapshotStage(input.stage))
         return;
     const groupRequestId = normalizeRequestId(input.groupRequestId || input.requestId);
     const folder = mapEndpointToFolder(input.entryEndpoint);

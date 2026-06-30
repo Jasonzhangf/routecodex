@@ -106,6 +106,7 @@ import {
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
+import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-gate.js';
 import {
   resolveVirtualRouterInput,
   getModuleDependencies,
@@ -1856,6 +1857,7 @@ export class RouteCodexHttpServer {
           : undefined;
       },
       onSnapshotBefore: (_payload, ctx) => {
+        allowSnapshotLocalDiskWrite(input.requestId, metadataForHub?.clientRequestId as string | undefined);
         this.logStage('router-direct.send.start', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -1916,6 +1918,8 @@ export class RouteCodexHttpServer {
         await captureRouterDirectFailureSnapshots({
           requestId: input.requestId,
           error,
+          payload: ctx.payload,
+          observedFields: ctx.observedFields,
           entryEndpoint: input.entryEndpoint,
           entryPort: routerDirectEntryPort,
           providerKey: ctx.providerKey,

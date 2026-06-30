@@ -142,7 +142,7 @@ export async function writeProviderSnapshot(options) {
         schedule429ProviderSnapshotPurge(purgeInput);
         return;
     }
-    if (!shouldCaptureSnapshotStage(stage)) {
+    if (!options.forceLocalDiskWriteWhenDisabled && !shouldCaptureSnapshotStage(stage)) {
         return;
     }
     const snapshot = buildProviderSnapshotPersistInput(options);

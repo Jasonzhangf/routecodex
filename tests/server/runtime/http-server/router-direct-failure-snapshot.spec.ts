@@ -21,6 +21,14 @@ describe('router-direct failure snapshots', () => {
         code: 'HTTP_520',
         statusCode: 520,
       }),
+      payload: {
+        model: 'gpt-5.4-mini',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+        reasoning: { effort: 'high', summary: 'auto' },
+        tools: [{ type: 'function', name: 'exec_command' }],
+        stream: true,
+      },
+      observedFields: [{ field: 'model', value: 'gpt-5.4-mini' }],
       entryEndpoint,
       entryPort: 4444,
       providerKey,
@@ -42,6 +50,23 @@ describe('router-direct failure snapshots', () => {
           name: 'Error',
           message: 'HTTP 520: upstream provider error',
         }),
+        providerRequestShape: expect.objectContaining({
+          model: 'gpt-5.4-mini',
+          stream: true,
+          hasMetadata: false,
+          reasoning: expect.objectContaining({
+            effort: 'high',
+            summary: 'auto',
+          }),
+          input: expect.objectContaining({
+            count: 1,
+            estimatedTextChars: 2,
+          }),
+          tools: expect.objectContaining({
+            count: 1,
+          }),
+        }),
+        observedFields: [{ field: 'model', value: 'gpt-5.4-mini' }],
       },
     }));
   });

@@ -62,10 +62,12 @@ describe('snapshot writer release gating', () => {
     const previousSnapshotFlag = runtimeFlags.snapshotsEnabled;
     const previousSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
     const previousCompatSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
+    const previousStages = process.env.ROUTECODEX_SNAPSHOT_STAGES;
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-snapshot-force-local-'));
 
     process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
     process.env.RCC_SNAPSHOT_DIR = tempDir;
+    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'client-request';
     setRuntimeFlag('snapshotsEnabled', false);
     __resetProviderSnapshotErrorBufferForTests();
     __resetSnapshotLocalDiskGateForTests();
@@ -119,6 +121,11 @@ describe('snapshot writer release gating', () => {
         delete process.env.RCC_SNAPSHOT_DIR;
       } else {
         process.env.RCC_SNAPSHOT_DIR = previousCompatSnapshotDir;
+      }
+      if (previousStages === undefined) {
+        delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+      } else {
+        process.env.ROUTECODEX_SNAPSHOT_STAGES = previousStages;
       }
       await fs.rm(tempDir, { recursive: true, force: true });
     }

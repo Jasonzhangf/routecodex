@@ -390,6 +390,7 @@ function recordPayloadAudit(
   payload: Record<string, unknown>,
   ctx: RouterDirectAuditContext,
 ): Record<string, unknown> {
+  ctx.payload = payload;
   for (const field of OBSERVABLE_FIELDS) {
     if (field in payload) {
       ctx.observedFields.push({ field, value: payload[field] });
