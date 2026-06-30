@@ -1,3 +1,8 @@
+# 2026-07-01: Chat SSE error payload Rust owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 Chat `type: 'internal_error'` / `code: 'generation_error'` marker 后先红，证明 Chat SSE error payload 仍由 TS 合成。
+- Fix：新增 Rust/NAPI `buildChatSseErrorPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildErrorEvent()` 只封装 SSE event envelope，error payload 由 native 生成。
+- Verification：Rust `chat_sse_error_payload` 2/2 PASS；native build PASS；focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic` 18/18 PASS；native export-list subtest PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；真实 chat replay `done=true error=false malformedWire=0 eventCount=5 chatChunkCount=4 doneCount=1 finishReason=tool_calls`。
+
 # 2026-07-01: Chat SSE event envelope Rust owner
 - Red evidence：`verify:sse-architecture-boundary` 新增 Chat `TimeUtils` import、`timestamp: TimeUtils.now()`、固定 `sequenceNumber: 0` marker 后先红，证明 Chat SSE event envelope 的 timestamp / sequence 仍由 TS 生成。
 - Fix：新增 Rust/NAPI `buildChatSseEventEnvelopeJson` 与 TS wrapper；`event-generators/chat.ts` 只调用 native envelope 并回写 `sequenceCounter`，`chat-sequencer.ts` 不再本地覆盖 sequence。

@@ -63,6 +63,28 @@ pub fn build_chat_sse_event_envelope_json(input_json: String) -> Result<String, 
     .map_err(|error| format!("Failed to serialize Chat SSE event envelope JSON: {}", error))
 }
 
+pub fn build_chat_sse_error_payload_json(input_json: String) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| format!("Failed to parse Chat SSE error payload JSON: {}", error))?;
+    let Some(input) = input.as_object() else {
+        return Err("Chat SSE error payload expected object".to_string());
+    };
+    let message = input
+        .get("message")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Chat SSE error payload missing message".to_string())?;
+
+    serde_json::to_string(&serde_json::json!({
+        "error": {
+            "message": message,
+            "type": "internal_error",
+            "code": "generation_error"
+        }
+    }))
+    .map_err(|error| format!("Failed to serialize Chat SSE error payload JSON: {}", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +143,35 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("missing request_id"));
+    }
+
+    #[test]
+    fn builds_chat_sse_error_payload() {
+        let output = build_chat_sse_error_payload_json(
+            json!({
+                "message": "Invalid ChatCompletionResponse: missing choices"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(
+            parsed,
+            json!({
+                "error": {
+                    "message": "Invalid ChatCompletionResponse: missing choices",
+                    "type": "internal_error",
+                    "code": "generation_error"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_chat_sse_error_payload_missing_message() {
+        let err = build_chat_sse_error_payload_json(json!({}).to_string()).unwrap_err();
+
+        assert!(err.contains("missing message"));
     }
 }

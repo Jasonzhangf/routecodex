@@ -4,7 +4,10 @@
  */
 
 import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall, ChatUsage } from '../../types/index.js';
-import { buildChatSseEventEnvelopeWithNative } from '../../../native/router-hotpath/native-chat-sse-event-payload.js';
+import {
+  buildChatSseErrorPayloadWithNative,
+  buildChatSseEventEnvelopeWithNative
+} from '../../../native/router-hotpath/native-chat-sse-event-payload.js';
 
 // 生成器配置
 export interface ChatEventGeneratorConfig {
@@ -383,13 +386,7 @@ export function buildErrorEvent(
     event: 'error',
     type: 'error',
     timestamp: envelope.timestamp,
-    data: JSON.stringify({
-      error: {
-        message: error.message,
-        type: 'internal_error',
-        code: 'generation_error'
-      }
-    }),
+    data: JSON.stringify(buildChatSseErrorPayloadWithNative(error.message)),
     sequenceNumber: envelope.sequenceNumber,
     protocol: envelope.protocol,
     direction: envelope.direction

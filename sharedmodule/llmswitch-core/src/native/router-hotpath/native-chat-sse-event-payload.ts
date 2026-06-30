@@ -14,6 +14,17 @@ export interface ChatSseEventEnvelopeNative {
   direction: 'json_to_sse';
 }
 
+function parseNativeEventPayload(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseNativeChatEventEnvelope(raw: string): ChatSseEventEnvelopeNative | null {
   try {
     const parsed = JSON.parse(raw);
@@ -75,6 +86,42 @@ export function buildChatSseEventEnvelopeWithNative(input: {
     const parsed = parseNativeChatEventEnvelope(raw);
     if (!parsed) {
       return fail('invalid Chat SSE event envelope result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
+export function buildChatSseErrorPayloadWithNative(message: string): Record<string, unknown> {
+  const capability = 'buildChatSseErrorPayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({ message });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Chat SSE error payload result');
+    }
+    const parsed = parseNativeEventPayload(raw);
+    if (!parsed) {
+      return fail('invalid Chat SSE error payload result');
     }
     return parsed;
   } catch (error) {

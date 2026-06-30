@@ -191,6 +191,8 @@ for (const forbidden of [
   "import { TimeUtils } from '../../shared/utils.js';",
   'timestamp: TimeUtils.now()',
   'sequenceNumber: 0',
+  "type: 'internal_error'",
+  "code: 'generation_error'",
   'id: context.responseId ?? context.requestId',
   'created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0)',
   'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return undefined;\n  }',
