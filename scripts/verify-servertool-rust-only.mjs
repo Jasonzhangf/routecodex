@@ -3330,8 +3330,7 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const attemptPlan = planAutoHookRuntimeAttempt({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalQueueName = queueOrder[queueOrder.length - 1]?.queueName;');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalQueue = queue.queueName === finalQueueName;');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'function planAutoHookCallerFinalization(');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationPlan = planAutoHookCallerFinalization({');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationPlan = planAutoHookCallerFinalizationWithNative({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, "mode: 'tool_flow'");
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'finalChatResponse: queueResult.chatResponse');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'execution: queueResult.execution');
@@ -3339,6 +3338,8 @@ function checkAutoHookExecutionRustOwner() {
     'errorAttemptInput',
     'runtimeAttemptInput',
     'callerFinalizationInput',
+    'function planAutoHookCallerFinalization(',
+    'const finalizationPlan = planAutoHookCallerFinalization({',
     'const toolFlowResult: ServerSideToolEngineResult = {',
     'return toolFlowResult;',
     'auto_hook_queue_contract',

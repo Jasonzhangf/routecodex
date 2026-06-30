@@ -52,13 +52,6 @@ function planAutoHookRuntimeAttempt(args: {
   });
 }
 
-function planAutoHookCallerFinalization(args: {
-  resultPresent: boolean;
-  finalQueue: boolean;
-}) {
-  return planAutoHookCallerFinalizationWithNative(args);
-}
-
 export async function runAutoHookExecutionQueue(args: {
   queueName: ServerToolAutoHookTraceEvent['queue'];
   hooks: AutoHookExecutionItem[];
@@ -155,7 +148,7 @@ export async function runServertoolAutoHookCaller(args: {
       contextBase: args.contextBase
     });
     const finalQueue = queue.queueName === finalQueueName;
-    const finalizationPlan = planAutoHookCallerFinalization({
+    const finalizationPlan = planAutoHookCallerFinalizationWithNative({
       resultPresent: Boolean(queueResult),
       finalQueue
     });
