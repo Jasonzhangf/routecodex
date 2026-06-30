@@ -34,7 +34,8 @@ describe('servertool orchestration policy block', () => {
       'sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts',
       'utf8'
     );
-    expect(source).toContain('function resolveServerToolTimeoutMsFromEnv(');
+    expect(source).not.toContain('function resolveServerToolTimeoutMsFromEnv(');
+    expect(source).toContain('export function resolveServerToolTimeoutMs()');
     expect(source).toContain('return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });');
     expect(source).toContain('export function containsSyntheticRouteCodexControlText(');
     expect(source).not.toContain('const timeoutPolicyInput = {');

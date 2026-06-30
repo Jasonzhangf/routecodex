@@ -99,9 +99,9 @@ const TARGETS = [
       'normalizeClientInjectTextWithNative',
       'compactFollowupErrorReasonWithNative',
       'resolveAdapterContextProviderKeyWithNative',
+      'function resolveServerToolTimeoutMsFromEnv(',
     ],
     required: [
-      'function resolveServerToolTimeoutMsFromEnv(',
       'parseServertoolTimeoutMsWithNative({ raw: raw || undefined })',
       'export function resolveServerToolTimeoutMs()',
       'export function containsSyntheticRouteCodexControlText(',

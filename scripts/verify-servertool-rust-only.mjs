@@ -2524,7 +2524,6 @@ function checkOrchestrationPolicyRustOwner() {
   }
   for (const needle of [
     'parseServertoolTimeoutMsWithNative',
-    'function resolveServerToolTimeoutMsFromEnv(',
     'return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });',
     'containsSyntheticRouteCodexControlTextWithNative',
   ]) {
@@ -2536,6 +2535,7 @@ function checkOrchestrationPolicyRustOwner() {
     );
   }
   for (const keyword of [
+    'function resolveServerToolTimeoutMsFromEnv(',
     'SERVERTOOL_TIMEOUT_ERROR_FEATURE_ID',
     'Number.isFinite',
     'Math.floor',

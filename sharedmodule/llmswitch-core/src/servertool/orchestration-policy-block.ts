@@ -4,17 +4,13 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 // feature_id: hub.servertool_orchestration_policy
-function resolveServerToolTimeoutMsFromEnv(keys: string[]): number {
-  const raw = keys.map((key) => process.env[key]).find((value) => Boolean(value));
-  return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });
-}
-
 export function resolveServerToolTimeoutMs(): number {
-  return resolveServerToolTimeoutMsFromEnv([
+  const raw = [
     'ROUTECODEX_SERVERTOOL_TIMEOUT_MS',
     'RCC_SERVERTOOL_TIMEOUT_MS',
     'LLMSWITCH_SERVERTOOL_TIMEOUT_MS'
-  ]);
+  ].map((key) => process.env[key]).find((value) => Boolean(value));
+  return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });
 }
 
 export function containsSyntheticRouteCodexControlText(value: unknown): boolean {
