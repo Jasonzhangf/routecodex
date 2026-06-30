@@ -5140,8 +5140,7 @@ function checkServertoolRustOutcomeCloseout() {
     'export function runServertoolEntryPreflight(',
     'planServertoolEntryPreflightWithNative',
     'createServerToolClientDisconnectedError',
-    "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.options.chatResponse } as const;",
-    'result: passthroughResult'
+    "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }"
   ]) {
     if (!entryPreflightShell.includes(marker)) {
       fail(

@@ -12,7 +12,6 @@ export function runServertoolEntryPreflight(args: {
 }):
   | { action: 'continue'; baseObject: JsonObject }
   | { action: 'return_result'; result: ServerSideToolEngineResult } {
-  const passthroughResult = { mode: 'passthrough', finalChatResponse: args.options.chatResponse } as const;
   const entryPreflightPlan = planServertoolEntryPreflightWithNative({
     hasBaseObject: Boolean(args.base),
     adapterClientDisconnected: isAdapterClientDisconnected(args.options.adapterContext)
@@ -20,7 +19,7 @@ export function runServertoolEntryPreflight(args: {
   if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {
     return {
       action: 'return_result',
-      result: passthroughResult
+      result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }
     };
   }
   if (entryPreflightPlan.action === 'throw_client_disconnected') {

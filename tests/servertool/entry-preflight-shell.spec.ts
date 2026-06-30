@@ -46,6 +46,7 @@ describe('entry-preflight-shell', () => {
     expect(source).toContain('planServertoolEntryPreflightWithNative');
     expect(source).toContain('createServerToolClientDisconnectedError');
     expect(source).toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
+    expect(source).not.toContain('const passthroughResult =');
   });
 
   test('returns passthrough result when native preflight says non-object chat', () => {

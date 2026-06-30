@@ -157,8 +157,7 @@ const TARGETS = [
     required: [
       'planServertoolEntryPreflightWithNative',
       'createServerToolClientDisconnectedError',
-      "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.options.chatResponse } as const;",
-      'result: passthroughResult',
+      "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }",
     ],
   },
   {
