@@ -32,7 +32,8 @@ describe('servertool stop-gateway context', () => {
 
     expect(source).not.toContain('export function readRequestTruthSessionIdFromBoundMetadataCenter(');
     expect(source).toContain('function readRequestTruthSessionIdFromBoundMetadataCenter(');
-    expect(source).toContain('export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(');
+    expect(source).not.toContain('export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(');
+    expect(source).toContain('function readRequestTruthSessionIdFromAnyBoundMetadataCenter(');
     expect(source).not.toContain('export function readRequestTruthFromAnyBoundMetadataCenter(');
     expect(source).not.toContain('export function readProviderObservationFromAnyBoundMetadataCenter(');
     expect(source).toContain('function readRequestTruthFromAnyBoundMetadataCenter(');

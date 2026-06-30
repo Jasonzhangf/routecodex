@@ -9,7 +9,7 @@ import {
   buildStoplessAutoCliProjectionFromEngineWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  readRequestTruthSessionIdFromAnyBoundMetadataCenter,
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter,
   readRuntimeControlFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
 import {
@@ -85,8 +85,15 @@ export async function runServertoolEnginePostflight(args: {
 
   if (runtimeAction.action === 'build_stop_message_cli_projection') {
     const adapterRecord = options.adapterContext as unknown as Record<string, unknown>;
-    const sessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(adapterRecord);
     const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterRecord);
+    const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(adapterRecord);
+    const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
+    const requestTruth = metadataCenterSnapshot?.requestTruth as Record<string, unknown> | undefined;
+    const rawSessionId = requestTruth?.sessionId;
+    const sessionId =
+      typeof rawSessionId === 'string' && rawSessionId.trim()
+        ? rawSessionId.trim()
+        : undefined;
     const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
       metadataCenterSnapshot: sessionId || runtimeControl
         ? {

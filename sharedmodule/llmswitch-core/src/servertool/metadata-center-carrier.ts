@@ -126,7 +126,7 @@ function readRequestTruthSessionIdFromBoundMetadataCenter(
   return typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : undefined;
 }
 
-export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(
+function readRequestTruthSessionIdFromAnyBoundMetadataCenter(
   target: Record<string, unknown> | undefined
 ): string | undefined {
   const direct = readRequestTruthSessionIdFromBoundMetadataCenter(target);

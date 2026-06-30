@@ -24,7 +24,7 @@ import {
 import { runEnginePreflight } from './engine-preflight-shell.js';
 import {
   readProviderProtocolFromAnyBoundMetadataCenter,
-  readRequestTruthSessionIdFromAnyBoundMetadataCenter,
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter,
   readRuntimeControlFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
 import {
@@ -154,9 +154,16 @@ export async function runServerToolOrchestrationShell(
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
-  const requestTruthSessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(
+  const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
+  const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
+  const requestTruth = metadataCenterSnapshot?.requestTruth as Record<string, unknown> | undefined;
+  const rawSessionId = requestTruth?.sessionId;
+  const requestTruthSessionId =
+    typeof rawSessionId === 'string' && rawSessionId.trim()
+      ? rawSessionId.trim()
+      : undefined;
   const stoplessExecutionPlan = planStoplessExecutionWithNative({
     flowId,
     execution:
