@@ -2919,6 +2919,12 @@ function checkServertoolExecutionDispatchRustOwner() {
     readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
     "nativeRecord({ op: 'append_tool_output'"
   );
+  assertMissing(
+    'servertool-orchestration-blocks-native-array-failfast',
+    `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
+    readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
+    '.filter((entry): entry is JsonObject'
+  );
 }
 
 // ── Check 13: followup mainline bridge is Rust-owned ──────────

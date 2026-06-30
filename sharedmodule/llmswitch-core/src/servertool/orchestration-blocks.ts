@@ -31,7 +31,12 @@ function nativeArray(input: Record<string, unknown>): JsonObject[] {
   if (!Array.isArray(output)) {
     throw new Error('[servertool] orchestration mutation returned invalid array');
   }
-  return output.filter((entry): entry is JsonObject => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)));
+  return output.map((entry, index): JsonObject => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`[servertool] orchestration mutation returned invalid array entry at index ${index}`);
+    }
+    return entry as JsonObject;
+  });
 }
 
 export function buildAutoHookQueuesFromConfig<THook extends {
