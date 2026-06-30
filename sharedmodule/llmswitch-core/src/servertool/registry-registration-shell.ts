@@ -9,10 +9,9 @@ import {
 export const getServerToolHandlerViaNativePlan = (
   name: string
 ): ServerToolHandlerEntry | undefined => {
-  const registryLookupInput = {
+  const actionPlan = planServertoolRegistryLookupFromSkeleton({
     name: typeof name === 'string' ? name : ''
-  };
-  const actionPlan = planServertoolRegistryLookupFromSkeleton(registryLookupInput);
+  });
   if (actionPlan.action === 'return_builtin') {
     if (!actionPlan.canonicalName) {
       throw new Error('[servertool] native registry lookup returned builtin without canonicalName');

@@ -3521,9 +3521,7 @@ function checkServertoolRegistryRustOwner() {
     }
   }
   for (const needle of [
-    'const registryLookupInput = {',
-    'const actionPlan = planServertoolRegistryLookupFromSkeleton(registryLookupInput);',
-    'planServertoolRegistryLookupFromSkeleton(',
+    'planServertoolRegistryLookupFromSkeleton({',
   ]) {
     assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
   }
@@ -3533,10 +3531,8 @@ function checkServertoolRegistryRustOwner() {
     assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
   }
   for (const needle of [
-    'const autoHookDescriptorInput = {',
-    'planServertoolRegistryAutoHookDescriptorsWithNative(autoHookDescriptorInput)',
-    'const registrySourceProjectionInput = {',
-    'const projection = planServertoolRegistrySourceProjectionWithNative(registrySourceProjectionInput);',
+    'planServertoolRegistryAutoHookDescriptorsWithNative({',
+    'planServertoolRegistrySourceProjectionWithNative({',
     'planServertoolRegistryAutoHookDescriptorsWithNative',
     'planServertoolRegistrySourceProjectionWithNative',
     'projectAutoServerToolHookDescriptors',

@@ -24,15 +24,14 @@ type RegistrySourceProjectionResult = {
 export function projectAutoServerToolHookDescriptors(args: {
   entries: ServerToolHandlerEntry[];
 }): ServerToolAutoHookDescriptor[] {
-  const autoHookDescriptorInput = {
+  return planServertoolRegistryAutoHookDescriptorsWithNative({
     hooks: args.entries.map((entry) => ({
       id: entry.name,
       phase: entry.autoHook?.phase,
       priority: entry.autoHook?.priority,
       order: entry.autoHook?.order
     }))
-  };
-  return planServertoolRegistryAutoHookDescriptorsWithNative(autoHookDescriptorInput).map((descriptor) => {
+  }).map((descriptor) => {
     const entry = args.entries[descriptor.sourceIndex];
     if (!entry) {
       throw new Error(
@@ -59,15 +58,14 @@ export function projectRegistrySources(args: {
     registration: entry.registration,
     handler: undefined
   }));
-  const registrySourceProjectionInput = {
+  const projection = planServertoolRegistrySourceProjectionWithNative({
     builtinNames: args.builtinNames,
     builtinAutoHandlerNames: args.builtinAutoHandlerEntries.map((entry) => entry.name),
     builtinRecords: builtinRecords.map((entry) => ({
       name: entry.registration.name,
       trigger: entry.registration.trigger
     }))
-  };
-  const projection = planServertoolRegistrySourceProjectionWithNative(registrySourceProjectionInput);
+  });
   return {
     registeredNames: projection.registeredNames,
     autoHandlers: projection.autoHandlerRefs.map((ref) => {

@@ -120,10 +120,10 @@ describe('registry-projection-shell', () => {
     );
 
     expect(source).toContain('sourceIndex');
-    expect(source).toContain('const autoHookDescriptorInput = {');
-    expect(source).toContain('planServertoolRegistryAutoHookDescriptorsWithNative(autoHookDescriptorInput)');
-    expect(source).toContain('const registrySourceProjectionInput = {');
-    expect(source).toContain('const projection = planServertoolRegistrySourceProjectionWithNative(registrySourceProjectionInput);');
+    expect(source).toContain('planServertoolRegistryAutoHookDescriptorsWithNative({');
+    expect(source).toContain('planServertoolRegistrySourceProjectionWithNative({');
+    expect(source).not.toContain('const autoHookDescriptorInput = {');
+    expect(source).not.toContain('const registrySourceProjectionInput = {');
     expect(source).not.toContain('function canonicalName(');
     expect(source).not.toContain('.trim().toLowerCase()');
     expect(source).not.toContain('native registry source projection mismatch');
