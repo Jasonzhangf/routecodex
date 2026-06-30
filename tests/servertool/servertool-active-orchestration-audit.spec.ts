@@ -38,6 +38,10 @@ const TARGETS = [
       "if (planHandlerMaterializationAction(planned, options) === 'handler_plan')",
       'structuredClone(args.base)',
     ],
+    required: [
+      'const outcomePlanInput = buildServertoolOutcomePlanInput({',
+      'const outcomePlan = planServertoolOutcomeWithNative(outcomePlanInput);',
+    ],
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts',

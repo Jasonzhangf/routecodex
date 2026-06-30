@@ -164,6 +164,8 @@ describe('execution-handler-materialization-shell', () => {
 
     expect(source).toContain('adapterContext: args.options.adapterContext');
     expect(source).toContain('baseForExecution: args.baseForExecution');
+    expect(source).toContain('const outcomePlanInput = buildServertoolOutcomePlanInput({');
+    expect(source).toContain('const outcomePlan = planServertoolOutcomeWithNative(outcomePlanInput);');
     expect(source).toContain('finalChatResponse: args.baseForExecution');
     expect(source).not.toContain('structuredClone(args.base)');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId ===');
