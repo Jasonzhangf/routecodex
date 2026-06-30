@@ -1547,7 +1547,7 @@ export class RouteCodexHttpServer {
         // Rust VR planner for a default_pool plan and re-inject it as the next
         // allowedProviders target list. Host MUST NOT synthesize fallback
         // targets locally.
-        const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(retryState.lastError ?? error);
+        const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(error);
         const primaryExhaustedRoute = primaryExhaustedContext?.route;
         const primaryExhaustedTiers = primaryExhaustedRoute && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
           ? extractRoutingTiersForRoutingGroupRoute(
@@ -1583,7 +1583,7 @@ export class RouteCodexHttpServer {
           });
           return await this.executeRouterDirectPipelineForPort(portConfig, input, retryState, directAttempt);
         }
-        throw retryState.lastError ?? error;
+        throw error;
       }
       this.logStage('router-direct.route_failed', input.requestId, {
         error: error instanceof Error ? error.message : String(error),

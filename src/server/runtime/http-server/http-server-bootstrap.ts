@@ -726,23 +726,34 @@ export function extractRoutingTiersForRoutingGroupRoute(
   if (!routing) {
     return [];
   }
-  const routeEntry = routing[normalizedRouteName];
-  if (!routeEntry) {
-    return [];
-  }
-  const pools = Array.isArray(routeEntry) ? routeEntry : [routeEntry];
-  return pools
+  const buildTiers = (
+    routeEntry: unknown,
+    routeKey: string,
+    options?: { forceBackup?: boolean }
+  ): RoutingPolicyGroupRouteTier[] => {
+    if (!routeEntry) {
+      return [];
+    }
+    const pools = Array.isArray(routeEntry) ? routeEntry : [routeEntry];
+    return pools
     .filter((pool): pool is Record<string, unknown> => Boolean(pool) && typeof pool === 'object' && !Array.isArray(pool))
     .map((entry, index) => ({
       id:
         typeof entry.id === 'string' && entry.id.trim()
           ? entry.id.trim()
-          : `${normalizedRouteName}:${index}`,
+          : `${routeKey}:${index}`,
       targets: collectRoutingTierTargets(entry),
       priority: typeof entry.priority === 'number' && Number.isFinite(entry.priority)
         ? entry.priority
         : 0,
-      backup: entry.backup === true ? true : undefined,
+      backup: options?.forceBackup === true || entry.backup === true ? true : undefined,
     }))
     .sort((left, right) => right.priority - left.priority);
+  };
+  const routeTiers = buildTiers(routing[normalizedRouteName], normalizedRouteName);
+  if (normalizedRouteName === 'default') {
+    return routeTiers;
+  }
+  const defaultRouteTiers = buildTiers(routing.default, 'default', { forceBackup: true });
+  return [...routeTiers, ...defaultRouteTiers].sort((left, right) => right.priority - left.priority);
 }

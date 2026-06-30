@@ -836,7 +836,7 @@ export class HubRequestExecutor implements RequestExecutor {
             // Rust VR planner for a default_pool plan and re-inject it as the
             // next allowedProviders target list. Host MUST NOT synthesize
             // fallback targets locally.
-            const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(lastError ?? pipelineError);
+            const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(pipelineError);
             const primaryExhaustedRoute = primaryExhaustedContext?.route;
             const primaryExhaustedTiers = primaryExhaustedRoute && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
               ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, primaryExhaustedRoute) ?? []
@@ -866,7 +866,7 @@ export class HubRequestExecutor implements RequestExecutor {
               allowPrimaryExhaustedReplayBeyondAttemptBudget = true;
               continue;
             }
-            throw lastError ?? pipelineError;
+            throw pipelineError;
           }
           throw pipelineError;
         }

@@ -39,10 +39,10 @@ describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => 
     };
 
     expect(extractProviderKeysForRoutingGroup(userConfig as any, 'gateway_priority_5520').sort()).toEqual([
+      'demochat',
       'llmgate',
       'mimo',
       'mini27',
-      'demochat',
     ]);
   });
 
@@ -119,7 +119,7 @@ describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => 
     expect(extractProviderKeysForRoutingGroup({ virtualrouter: { routingPolicyGroups: {} } } as any, 'missing')).toEqual([]);
   });
 
-  test('extracts exact route tiers for primary_exhausted planner without flattening forwarders', () => {
+  test('extracts exact route tiers plus global default route for primary_exhausted planner without flattening forwarders', () => {
     const userConfig = {
       virtualrouter: {
         routingPolicyGroups: {
@@ -161,6 +161,56 @@ describe('http-server bootstrap routingPolicyGroup allowlist extraction', () => 
       },
       {
         id: 'coding-backup',
+        priority: 100,
+        backup: true,
+        targets: ['fwd.minimax.MiniMax-M3'],
+      },
+      {
+        id: 'default-primary',
+        priority: 50,
+        backup: true,
+        targets: ['mimo.mimo-v2.5'],
+      },
+    ]);
+  });
+
+  test('marks routing.default as the global backup pool when the selected route has no local backup tier', () => {
+    const userConfig = {
+      virtualrouter: {
+        routingPolicyGroups: {
+          gateway_glm_4444: {
+            routing: {
+              tools: [
+                {
+                  id: 'gateway-glm-4444-tools',
+                  priority: 200,
+                  mode: 'priority',
+                  targets: ['fwd.gpt.gpt-5.3-codex-spark'],
+                },
+              ],
+              default: [
+                {
+                  id: 'gateway-glm-4444-default',
+                  priority: 100,
+                  mode: 'priority',
+                  targets: ['fwd.minimax.MiniMax-M3'],
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    expect(extractRoutingTiersForRoutingGroupRoute(userConfig as any, 'gateway_glm_4444', 'tools')).toEqual([
+      {
+        id: 'gateway-glm-4444-tools',
+        priority: 200,
+        backup: undefined,
+        targets: ['fwd.gpt.gpt-5.3-codex-spark'],
+      },
+      {
+        id: 'gateway-glm-4444-default',
         priority: 100,
         backup: true,
         targets: ['fwd.minimax.MiniMax-M3'],
