@@ -8,12 +8,13 @@ export function planServertoolExecutionBranchRuntimeAction(args: {
   }>;
   executedToolCallsLen: number;
 }) {
+  const executableToolCallInputs = args.executableToolCalls.map((toolCall) => ({
+    id: toolCall.id,
+    name: toolCall.name,
+    executionMode: toolCall.executionMode
+  }));
   return planServertoolExecutionBranchWithNative({
-    executableToolCalls: args.executableToolCalls.map((toolCall) => ({
-      id: toolCall.id,
-      name: toolCall.name,
-      executionMode: toolCall.executionMode
-    })),
+    executableToolCalls: executableToolCallInputs,
     executedToolCallsLen: args.executedToolCallsLen
   });
 }

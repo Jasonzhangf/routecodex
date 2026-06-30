@@ -11,7 +11,8 @@ describe('execution-branch-runtime-shell', () => {
     );
 
     expect(source).toContain('planServertoolExecutionBranchWithNative');
-    expect(source).toContain('executableToolCalls.map');
+    expect(source).toContain('const executableToolCallInputs = args.executableToolCalls.map');
+    expect(source).toContain('executableToolCalls: executableToolCallInputs');
   });
 
   test('projects cli execution branch and outcome branch with native planner semantics', () => {

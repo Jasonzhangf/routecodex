@@ -83,7 +83,9 @@ const TARGETS = [
     forbidden: [],
     required: [
       'planServertoolExecutionBranchWithNative',
+      'const executableToolCallInputs = args.executableToolCalls.map(',
       'executableToolCalls.map(',
+      'executableToolCalls: executableToolCallInputs',
     ],
   },
   {

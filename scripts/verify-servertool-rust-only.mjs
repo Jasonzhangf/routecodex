@@ -2776,6 +2776,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'planServertoolExecutionBranchRuntimeAction('],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_BRANCH_RUNTIME_SHELL, readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL), 'planServertoolExecutionBranchWithNative('],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_BRANCH_RUNTIME_SHELL, readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL), 'const executableToolCallInputs = args.executableToolCalls.map'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_BRANCH_RUNTIME_SHELL, readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL), 'executableToolCalls: executableToolCallInputs'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'projected_tool_call_index'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCallIndex'],
     ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'feature_id: hub.servertool_engine_preflight_contract'],
