@@ -170,9 +170,26 @@ for (const forbidden of [
   'enableRecovery: true',
   'if (config.enableRecovery) {',
   'yield buildErrorEvent(error as Error, context, config);',
+  'buildErrorEvent',
+  'planResponsesSseErrorRecoveryWithNative',
+  'shouldEmitResponseError',
+  'responseError = error instanceof Error',
 ]) {
   if (responsesSequencer.includes(forbidden)) {
     failures.push(`Responses sequencer must not locally canonicalize SSE payload semantics: ${forbidden}`);
+  }
+}
+
+const responsesEventPayloadWrapper = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts');
+for (const forbidden of [
+  'buildResponsesSseErrorPayloadWithNative',
+  'planResponsesSseErrorRecoveryWithNative',
+  'parseNativeRecoveryPlan',
+  'buildResponsesSseErrorPayloadJson',
+  'planResponsesSseErrorRecoveryJson',
+]) {
+  if (responsesEventPayloadWrapper.includes(forbidden)) {
+    failures.push(`Responses SSE native wrapper must not expose error synthesis/recovery helper: ${forbidden}`);
   }
 }
 

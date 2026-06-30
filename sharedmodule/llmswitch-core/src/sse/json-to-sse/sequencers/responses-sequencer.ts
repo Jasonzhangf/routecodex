@@ -27,16 +27,12 @@ import {
   buildReasoningSummaryEvents,
   buildReasoningDeltas,
   buildResponseCompletedEvent,
-  buildErrorEvent,
   DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG,
   createDefaultResponsesContext
 } from '../event-generators/responses.js';
 import type { ResponsesEventGeneratorContext, ResponsesEventGeneratorConfig } from '../event-generators/responses.js';
 import { normalizeResponsesOutputItems } from '../../shared/responses-output-normalizer.js';
-import {
-  canonicalizeResponsesSseEventPayloadWithNative,
-  planResponsesSseErrorRecoveryWithNative
-} from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
+import { canonicalizeResponsesSseEventPayloadWithNative } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 // 排列器配置
 export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig {
@@ -238,15 +234,6 @@ async function* sequenceOutputItem(
   }
 }
 
-function shouldEmitResponseError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-  const plan = planResponsesSseErrorRecoveryWithNative({
-    scope: 'response',
-    message
-  });
-  return plan.action === 'emit_response_error';
-}
-
 /**
  * 主编排器：将Responses响应转换为有序的SSE事件流
  */
@@ -255,49 +242,40 @@ async function* sequenceResponseCore(
   context: ResponsesEventGeneratorContext,
   config: ResponsesSequencerConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
 ): AsyncGenerator<ResponsesSseEvent> {
-  try {
-    // 1. 验证响应格式
-    validateResponse(response, config);
+  // 1. 验证响应格式
+  validateResponse(response, config);
 
-    // 2. 发送response.start事件
-    yield* buildResponseStartEvents(response, context, config);
+  // 2. 发送response.start事件
+  yield* buildResponseStartEvents(response, context, config);
 
-    const submittedOutputs = Array.isArray(config.submittedToolOutputs)
-      ? config.submittedToolOutputs
-      : [];
+  const submittedOutputs = Array.isArray(config.submittedToolOutputs)
+    ? config.submittedToolOutputs
+    : [];
 
-    for (let i = 0; i < submittedOutputs.length; i++) {
-      context.outputIndexCounter = i;
-      yield* sequenceFunctionCallOutputItem(submittedOutputs[i], context, config);
-    }
-
-    const normalizedOutput = normalizeResponsesOutputItems(response.output);
-    const outputOffset = submittedOutputs.length;
-
-    // 3. 序列化所有输出项
-    for (let outputIndex = 0; outputIndex < normalizedOutput.length; outputIndex++) {
-      const item = normalizedOutput[outputIndex];
-      context.outputIndexCounter = outputOffset + outputIndex;
-
-      yield* sequenceOutputItem(item, context, config);
-
-      // 输出项间添加小延迟（如果启用）
-      if (config.enableDelay && config.chunkDelayMs > 0 && outputIndex < normalizedOutput.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs * 2));
-      }
-    }
-
-    // 4. 发送终止事件；工具调用已通过标准 output_item/function_call_arguments 事件表达。
-    yield buildResponseCompletedEvent(response, context, config);
-    yield buildResponseDoneEvent(response, context, config);
-
-  } catch (error) {
-    if (!shouldEmitResponseError(error)) {
-      throw error;
-    }
-    const responseError = error instanceof Error ? error : new Error(String(error ?? 'unknown'));
-    yield buildErrorEvent(responseError, context, config);
+  for (let i = 0; i < submittedOutputs.length; i++) {
+    context.outputIndexCounter = i;
+    yield* sequenceFunctionCallOutputItem(submittedOutputs[i], context, config);
   }
+
+  const normalizedOutput = normalizeResponsesOutputItems(response.output);
+  const outputOffset = submittedOutputs.length;
+
+  // 3. 序列化所有输出项
+  for (let outputIndex = 0; outputIndex < normalizedOutput.length; outputIndex++) {
+    const item = normalizedOutput[outputIndex];
+    context.outputIndexCounter = outputOffset + outputIndex;
+
+    yield* sequenceOutputItem(item, context, config);
+
+    // 输出项间添加小延迟（如果启用）
+    if (config.enableDelay && config.chunkDelayMs > 0 && outputIndex < normalizedOutput.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs * 2));
+    }
+  }
+
+  // 4. 发送终止事件；工具调用已通过标准 output_item/function_call_arguments 事件表达。
+  yield buildResponseCompletedEvent(response, context, config);
+  yield buildResponseDoneEvent(response, context, config);
 }
 
 export async function* sequenceResponse(

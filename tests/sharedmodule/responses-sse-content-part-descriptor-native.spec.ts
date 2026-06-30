@@ -37,7 +37,7 @@ describe('responses SSE content part descriptor native owner', () => {
 
     expect(descriptor).toEqual({
       type: 'output_text',
-      text: '',
+      text: 'final text',
       annotations: [{ type: 'file_citation' }],
       logprobs: [{ token: 'x' }]
     });
@@ -90,7 +90,7 @@ describe('responses SSE content part descriptor native owner', () => {
 
     expect(added?.data?.part).toEqual({
       type: 'output_text',
-      text: '',
+      text: 'hello world',
       annotations: [{ type: 'file_citation' }],
       logprobs: [{ token: 'hello' }]
     });

@@ -16,7 +16,6 @@ import {
   buildResponsesSseTextChunksWithNative,
   buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative,
   buildResponsesSseFunctionCallArgumentsDonePayloadWithNative,
-  buildResponsesSseErrorPayloadWithNative,
   buildResponsesSseContentPartEventPayloadWithNative,
   buildResponsesSseOutputTextDeltaPayloadWithNative,
   buildResponsesSseOutputTextDonePayloadWithNative,
@@ -25,7 +24,7 @@ import {
   buildResponsesSseReasoningLifecyclePayloadWithNative,
   buildResponsesSseReasoningSummaryPayloadWithNative,
   buildResponsesSseResponseEventPayloadWithNative,
-  normalizeResponsesSseReasoningSummaryWithNative,
+  normalizeResponsesSseReasoningSummaryWithNative
 } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 // 生成器配置
@@ -640,26 +639,6 @@ export function buildResponseDoneEvent(
       response,
       response.status
     ),
-    sequenceNumber: baseEvent.sequenceNumber
-  };
-}
-
-/**
- * 构建error事件
- */
-export function buildErrorEvent(
-  error: Error,
-  context: ResponsesEventGeneratorContext,
-  config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
-): ResponsesSseEvent {
-  const baseEvent = nextResponsesEventEnvelope(context, config);
-
-  return {
-    type: 'response.error',
-    timestamp: baseEvent.timestamp,
-    protocol: baseEvent.protocol,
-    direction: baseEvent.direction,
-    data: buildResponsesSseErrorPayloadWithNative(error.message),
     sequenceNumber: baseEvent.sequenceNumber
   };
 }

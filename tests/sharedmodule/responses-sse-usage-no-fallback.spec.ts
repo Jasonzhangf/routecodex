@@ -1,7 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { ResponsesJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.js';
-import { planResponsesSseErrorRecoveryWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import type { ResponsesResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
@@ -13,18 +12,6 @@ async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
 }
 
 describe('responses SSE usage no-fallback boundary', () => {
-  it('plans response-level error projection through the native owner', () => {
-    expect(planResponsesSseErrorRecoveryWithNative({
-      scope: 'response',
-      message: 'Invalid Responses usage.input_tokens'
-    })).toEqual({ action: 'emit_response_error' });
-
-    expect(planResponsesSseErrorRecoveryWithNative({
-      scope: 'output_item',
-      message: 'Unknown output item type'
-    })).toEqual({ action: 'throw' });
-  });
-
   it('omits missing usage instead of synthesizing zero-token usage', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
@@ -46,7 +33,7 @@ describe('responses SSE usage no-fallback boundary', () => {
     expect(text).not.toContain('"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}');
   });
 
-  it('fails invalid usage instead of silently converting it to zero tokens', async () => {
+  it('fails invalid usage instead of synthesizing a response.error event', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
       id: 'resp_invalid_usage',
@@ -65,15 +52,10 @@ describe('responses SSE usage no-fallback boundary', () => {
     const stream = await converter.convertResponseToJsonToSse(response, {
       requestId: 'req_responses_invalid_usage'
     });
-    const text = await collectText(stream);
-
-    expect(text).toContain('event: response.error');
-    expect(text).toContain('Invalid Responses usage.input_tokens');
-    expect(text).not.toContain('event: response.completed');
-    expect(text).not.toContain('event: response.done');
+    await expect(collectText(stream)).rejects.toThrow('Invalid Responses usage.input_tokens');
   });
 
-  it('rejects legacy prompt_tokens aliases instead of normalizing them', async () => {
+  it('rejects legacy prompt_tokens aliases instead of synthesizing a response.error event', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
       id: 'resp_legacy_usage_alias',
@@ -92,15 +74,10 @@ describe('responses SSE usage no-fallback boundary', () => {
     const stream = await converter.convertResponseToJsonToSse(response, {
       requestId: 'req_responses_legacy_usage_alias'
     });
-    const text = await collectText(stream);
-
-    expect(text).toContain('event: response.error');
-    expect(text).toContain('Invalid Responses usage: missing token fields');
-    expect(text).not.toContain('event: response.completed');
-    expect(text).not.toContain('event: response.done');
+    await expect(collectText(stream)).rejects.toThrow('Invalid Responses usage: missing token fields');
   });
 
-  it('fails missing created_at instead of synthesizing the current time', async () => {
+  it('fails missing created_at instead of synthesizing a response.error event', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
       id: 'resp_missing_created_at',
@@ -113,15 +90,10 @@ describe('responses SSE usage no-fallback boundary', () => {
     const stream = await converter.convertResponseToJsonToSse(response, {
       requestId: 'req_responses_missing_created_at'
     });
-    const text = await collectText(stream);
-
-    expect(text).toContain('event: response.error');
-    expect(text).toContain('Invalid Responses response: missing created_at');
-    expect(text).not.toContain('event: response.completed');
-    expect(text).not.toContain('event: response.done');
+    await expect(collectText(stream)).rejects.toThrow('Invalid Responses response: missing created_at');
   });
 
-  it('fails missing status instead of synthesizing completed terminal status', async () => {
+  it('fails missing status instead of synthesizing a response.error event', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
       id: 'resp_missing_status',
@@ -134,15 +106,10 @@ describe('responses SSE usage no-fallback boundary', () => {
     const stream = await converter.convertResponseToJsonToSse(response, {
       requestId: 'req_responses_missing_status'
     });
-    const text = await collectText(stream);
-
-    expect(text).toContain('event: response.error');
-    expect(text).toContain('Invalid Responses response: missing status');
-    expect(text).not.toContain('event: response.completed');
-    expect(text).not.toContain('event: response.done');
+    await expect(collectText(stream)).rejects.toThrow('Invalid Responses response: missing status');
   });
 
-  it('does not recover an invalid output item and continue to completed', async () => {
+  it('does not recover an invalid output item by synthesizing a response.error event', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
       id: 'resp_invalid_output_item',
@@ -156,11 +123,6 @@ describe('responses SSE usage no-fallback boundary', () => {
     const stream = await converter.convertResponseToJsonToSse(response, {
       requestId: 'req_responses_invalid_output_item'
     });
-    const text = await collectText(stream);
-
-    expect(text).toContain('event: response.error');
-    expect(text).toContain('Unknown output item type: unknown_item');
-    expect(text).not.toContain('event: response.completed');
-    expect(text).not.toContain('event: response.done');
+    await expect(collectText(stream)).rejects.toThrow('Unknown output item type: unknown_item');
   });
 });

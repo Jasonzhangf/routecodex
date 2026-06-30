@@ -174,15 +174,6 @@ function readConversationIdForUsageLog(metadata: Record<string, unknown>): strin
   return readRuntimeRequestTruthIdentifiers(metadata).conversationId;
 }
 
-function readEntryPortFromRequestTruth(metadata: Record<string, unknown>): number | undefined {
-  const portScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
-  if (typeof portScope !== 'string') {
-    return undefined;
-  }
-  const parsed = Number.parseInt(portScope, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 import {
   initializeHttpServer,
   restartRuntimeFromDisk,
@@ -1839,7 +1830,7 @@ export class RouteCodexHttpServer {
     let capturedUsage: Record<string, unknown> | undefined;
     let directOutcome: RouterDirectOutcome;
     let directRetryRequested = false;
-    const routerDirectEntryPort = readEntryPortFromRequestTruth(metadataForHub);
+    const routerDirectEntryPort = portConfig.port;
     try {
       directOutcome = await executeRouterDirectPipeline({
       portConfig,

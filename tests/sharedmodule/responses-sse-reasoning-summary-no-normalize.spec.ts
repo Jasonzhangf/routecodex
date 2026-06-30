@@ -190,7 +190,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       content_index: 0,
       part: {
         type: 'output_text',
-        text: '',
+        text: 'hello',
         annotations: [{ type: 'citation' }],
         logprobs: []
       }
@@ -290,8 +290,8 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
     expect(payloadText).toContain('> keep quoted detail');
   });
 
-  it('fails missing reasoning summary text instead of silently skipping the summary entry', async () => {
-    const events = await collectEvents({
+  it('fails missing reasoning summary text instead of synthesizing a response.error event', async () => {
+    await expect(collectEvents({
       id: 'resp_reasoning_summary_missing_text',
       object: 'response',
       created_at: 1710000000,
@@ -304,12 +304,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
         content: []
       }],
       usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
-    });
-
-    expect(events.some((event) => event.type === 'response.error')).toBe(true);
-    expect(JSON.stringify(events)).toContain('Responses reasoning summary entry missing text');
-    expect(events.some((event) => event.type === 'response.completed')).toBe(false);
-    expect(events.some((event) => event.type === 'response.done')).toBe(false);
+    })).rejects.toThrow('Responses reasoning summary entry missing text');
   });
 
   it('builds reasoning summary payloads through the native owner', () => {
@@ -384,8 +379,8 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
     });
   });
 
-  it('fails missing reasoning_text text instead of silently skipping the content item', async () => {
-    const events = await collectEvents({
+  it('fails missing reasoning_text text instead of synthesizing a response.error event', async () => {
+    await expect(collectEvents({
       id: 'resp_reasoning_missing_text',
       object: 'response',
       created_at: 1710000000,
@@ -398,12 +393,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
         content: [{ type: 'reasoning_text' }]
       }],
       usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
-    });
-
-    expect(events.some((event) => event.type === 'response.error')).toBe(true);
-    expect(JSON.stringify(events)).toContain('Responses reasoning delta payload missing value');
-    expect(events.some((event) => event.type === 'response.completed')).toBe(false);
-    expect(events.some((event) => event.type === 'response.done')).toBe(false);
+    })).rejects.toThrow('Responses reasoning delta payload missing value');
   });
 
   it('builds reasoning delta payloads through the native owner directly', () => {
