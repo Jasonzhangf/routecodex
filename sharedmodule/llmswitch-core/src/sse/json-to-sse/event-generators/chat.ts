@@ -4,7 +4,7 @@
  */
 
 import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall, ChatUsage } from '../../types/index.js';
-import { TimeUtils } from '../../shared/utils.js';
+import { buildChatSseEventEnvelopeWithNative } from '../../../native/router-hotpath/native-chat-sse-event-payload.js';
 
 // 生成器配置
 export interface ChatEventGeneratorConfig {
@@ -12,6 +12,7 @@ export interface ChatEventGeneratorConfig {
   chunkDelayMs: number;
   enableIdGeneration: boolean;
   enableTimestampGeneration: boolean;
+  includeSequenceNumbers?: boolean;
 }
 
 // 事件生成上下文
@@ -20,6 +21,7 @@ export interface ChatEventGeneratorContext {
   requestId: string;
   responseId?: string;
   created?: number;
+  sequenceCounter: number;
   choiceIndex: number;
   toolCallIndexCounter: number;
   contentIndexCounter: Map<string, number>;
@@ -84,6 +86,7 @@ export function createDefaultContext(
     requestId,
     ...(typeof responseId === 'string' && responseId.trim() ? { responseId: responseId.trim() } : {}),
     ...(typeof created === 'number' && Number.isFinite(created) ? { created: Math.floor(created) } : {}),
+    sequenceCounter: 0,
     choiceIndex: 0,
     toolCallIndexCounter: 0,
     contentIndexCounter: new Map()
@@ -116,6 +119,26 @@ function createBaseChunk(
   };
 }
 
+function nextChatEventEnvelope(
+  context: ChatEventGeneratorContext,
+  config: ChatEventGeneratorConfig
+): {
+  requestId: string;
+  timestamp: number;
+  sequenceNumber: number;
+  protocol: 'chat';
+  direction: 'json_to_sse';
+} {
+  const envelope = buildChatSseEventEnvelopeWithNative({
+    requestId: context.requestId,
+    currentSequence: context.sequenceCounter,
+    enableTimestampGeneration: config.enableTimestampGeneration,
+    enableSequenceNumbers: config.includeSequenceNumbers !== false
+  });
+  context.sequenceCounter = envelope.nextSequenceCounter;
+  return envelope;
+}
+
 /**
  * 构建role delta事件
  */
@@ -135,15 +158,16 @@ export function buildRoleDelta(
       finish_reason: null
     }]
   };
+  const envelope = nextChatEventEnvelope(context, config);
 
   return [{
     event: 'chat_chunk',
     type: 'chat_chunk',
-    timestamp: TimeUtils.now(),
+    timestamp: envelope.timestamp,
     data: JSON.stringify(chunk),
-    sequenceNumber: 0,
-    protocol: 'chat' as const,
-    direction: 'json_to_sse' as const
+    sequenceNumber: envelope.sequenceNumber,
+    protocol: envelope.protocol,
+    direction: envelope.direction
   }];
 }
 
@@ -166,15 +190,16 @@ export function* buildReasoningDeltas(
       finish_reason: null
     }]
   };
+  const envelope = nextChatEventEnvelope(context, config);
 
   yield {
     event: 'chat_chunk',
     type: 'chat_chunk',
-    timestamp: TimeUtils.now(),
+    timestamp: envelope.timestamp,
     data: JSON.stringify(chunk),
-    sequenceNumber: 0,
-    protocol: 'chat' as const,
-    direction: 'json_to_sse' as const
+    sequenceNumber: envelope.sequenceNumber,
+    protocol: envelope.protocol,
+    direction: envelope.direction
   };
 }
 
@@ -197,15 +222,16 @@ export function* buildContentDeltas(
       finish_reason: null
     }]
   };
+  const envelope = nextChatEventEnvelope(context, config);
 
   yield {
     event: 'chat_chunk',
     type: 'chat_chunk',
-    timestamp: TimeUtils.now(),
+    timestamp: envelope.timestamp,
     data: JSON.stringify(chunk),
-    sequenceNumber: 0,
-    protocol: 'chat' as const,
-    direction: 'json_to_sse' as const
+    sequenceNumber: envelope.sequenceNumber,
+    protocol: envelope.protocol,
+    direction: envelope.direction
   };
 }
 
@@ -239,15 +265,16 @@ export function buildToolCallStart(
       finish_reason: null
     }]
   };
+  const envelope = nextChatEventEnvelope(context, config);
 
   return {
     event: 'chat_chunk',
     type: 'chat_chunk',
-    timestamp: TimeUtils.now(),
+    timestamp: envelope.timestamp,
     data: JSON.stringify(chunk),
-    sequenceNumber: 0,
-    protocol: 'chat' as const,
-    direction: 'json_to_sse' as const
+    sequenceNumber: envelope.sequenceNumber,
+    protocol: envelope.protocol,
+    direction: envelope.direction
   };
 }
 
@@ -276,15 +303,16 @@ export function* buildToolCallArgsDeltas(
       finish_reason: null
     }]
   };
+  const envelope = nextChatEventEnvelope(context, config);
 
   yield {
     event: 'chat_chunk',
     type: 'chat_chunk',
-    timestamp: TimeUtils.now(),
+    timestamp: envelope.timestamp,
     data: JSON.stringify(chunk),
-    sequenceNumber: 0,
-    protocol: 'chat' as const,
-    direction: 'json_to_sse' as const
+    sequenceNumber: envelope.sequenceNumber,
+    protocol: envelope.protocol,
+    direction: envelope.direction
   };
 }
 
@@ -310,15 +338,16 @@ export function buildFinishEvent(
     }],
     ...(normalizedUsage ? { usage: normalizedUsage } : {})
   };
+  const envelope = nextChatEventEnvelope(context, config);
 
   return {
     event: 'chat_chunk',
     type: 'chat_chunk',
-    timestamp: TimeUtils.now(),
+    timestamp: envelope.timestamp,
     data: JSON.stringify(chunk),
-    sequenceNumber: 0,
-    protocol: 'chat' as const,
-    direction: 'json_to_sse' as const
+    sequenceNumber: envelope.sequenceNumber,
+    protocol: envelope.protocol,
+    direction: envelope.direction
   };
 }
 
@@ -329,14 +358,15 @@ export function buildDoneEvent(
   context: ChatEventGeneratorContext,
   config: ChatEventGeneratorConfig = DEFAULT_CHAT_EVENT_GENERATOR_CONFIG
 ): ChatSseEvent {
+  const envelope = nextChatEventEnvelope(context, config);
   return {
     event: 'chat.done',
     type: 'chat.done',
-    timestamp: TimeUtils.now(),
+    timestamp: envelope.timestamp,
     data: '[DONE]',
-    sequenceNumber: 0,
-    protocol: 'chat' as const,
-    direction: 'json_to_sse' as const
+    sequenceNumber: envelope.sequenceNumber,
+    protocol: envelope.protocol,
+    direction: envelope.direction
   };
 }
 
@@ -348,10 +378,11 @@ export function buildErrorEvent(
   context: ChatEventGeneratorContext,
   config: ChatEventGeneratorConfig = DEFAULT_CHAT_EVENT_GENERATOR_CONFIG
 ): ChatSseEvent {
+  const envelope = nextChatEventEnvelope(context, config);
   return {
     event: 'error',
     type: 'error',
-    timestamp: TimeUtils.now(),
+    timestamp: envelope.timestamp,
     data: JSON.stringify({
       error: {
         message: error.message,
@@ -359,8 +390,8 @@ export function buildErrorEvent(
         code: 'generation_error'
       }
     }),
-    sequenceNumber: 0,
-    protocol: 'chat' as const,
-    direction: 'json_to_sse' as const
+    sequenceNumber: envelope.sequenceNumber,
+    protocol: envelope.protocol,
+    direction: envelope.direction
   };
 }

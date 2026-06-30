@@ -14,6 +14,7 @@ mod anthropic_response_helper;
 mod chat_governed_filter_payload;
 mod chat_node_result_semantics;
 mod chat_process_media_semantics;
+mod chat_sse_event_payload;
 mod chat_servertool_orchestration;
 mod chat_web_search_tool_schema;
 mod compat_field_mapping;
@@ -2141,6 +2142,12 @@ pub fn build_responses_sse_error_payload_json(message_json: String) -> NapiResul
 #[napi(js_name = "buildResponsesSseEventEnvelopeJson")]
 pub fn build_responses_sse_event_envelope_json(input_json: String) -> NapiResult<String> {
     responses_sse_event_payload::build_responses_sse_event_envelope_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildChatSseEventEnvelopeJson")]
+pub fn build_chat_sse_event_envelope_json(input_json: String) -> NapiResult<String> {
+    chat_sse_event_payload::build_chat_sse_event_envelope_json(input_json)
         .map_err(napi::Error::from_reason)
 }
 

@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Chat SSE event envelope Rust owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for Chat SSE local envelope synthesis (`TimeUtils` import, `timestamp: TimeUtils.now()`, and fixed `sequenceNumber: 0`). The gate failed on the existing TS owner before the fix.
+- Fix: added Rust/NAPI owner `buildChatSseEventEnvelopeJson` and TS wrapper `buildChatSseEventEnvelopeWithNative`. `chat.ts` now calls native for event timestamp/sequence/protocol/direction and updates `sequenceCounter`; `chat-sequencer.ts` no longer overwrites event sequence numbers locally.
+- Positive / reverse tests: Rust covers sequence advancement, sequence-disabled behavior, and missing request id fail-fast; focused Jest covers chat usage no-fallback, chat usage roundtrip, and no request-to-SSE synthetic response surface; native export-list covers the new NAPI symbol.
+- Verification: Rust focused `chat_sse_event_envelope` PASS 3/3; native hotpath build PASS; focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic` PASS 18/18; native export-list subtest PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real chat replay: `openai-chat/ports/10000/req_1782778465399_hrxbpl3tz/provider-response_1.json` SSE->JSON->SSE succeeded with `done=true`, `error=false`, `malformedWire=0`, `eventCount=5`, `chatChunkCount=4`, `doneCount=1`, `finishReason=tool_calls`.
+
 ### 2026-07-01 Responses SSE event envelope Rust owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers for local Responses SSE envelope synthesis (`TimeUtils` import, `getNextSequenceNumber()`, and `createBaseEvent()`). The gate failed on the existing TS owner before the fix.

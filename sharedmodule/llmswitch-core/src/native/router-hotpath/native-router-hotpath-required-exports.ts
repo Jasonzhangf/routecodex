@@ -181,6 +181,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildResponsesSseReasoningSummaryPayloadJson",
   "buildResponsesSseReasoningDeltaPayloadJson",
   "buildResponsesSseEventEnvelopeJson",
+  "buildChatSseEventEnvelopeJson",
   "planResponsesSseErrorRecoveryJson",
   "normalizeMessageReasoningToolsJson",
   "normalizeOpenaiMessageJson",

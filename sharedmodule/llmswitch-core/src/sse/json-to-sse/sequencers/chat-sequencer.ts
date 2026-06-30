@@ -100,11 +100,7 @@ async function* withSequencing(
   config: ChatSequencerConfig,
   startSequence: number = 0
 ): AsyncGenerator<ChatSseEvent> {
-  let sequenceNumber = startSequence;
-
   for await (const event of events) {
-    if (config.includeSequenceNumbers) (event as any).sequenceNumber = sequenceNumber++;
-
     yield event;
 
     if (config.enableDelay && config.chunkDelayMs > 0) {
