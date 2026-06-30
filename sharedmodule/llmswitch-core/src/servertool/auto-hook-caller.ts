@@ -4,7 +4,6 @@ import type {
   ServerToolHandlerContext,
   ServerToolHandlerResult
 } from './types.js';
-import { buildAutoHookQueuesFromConfig } from './orchestration-blocks.js';
 import { listAutoServerToolHooks } from './registry-orchestration-shell.js';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
 import {
@@ -12,6 +11,10 @@ import {
   planAutoHookRuntimeAttemptWithNative,
   runStoplessBuiltinHandlerForRuntimeWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  planServertoolAutoHookQueuesWithNative,
+  planServertoolSkeletonDerivedConfigWithNative
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { materializeServertoolPlannedResult } from './execution-handler-materialization-shell.js';
 import type { ServerToolExecutionDescriptor } from './registry-types.js';
 
@@ -19,8 +22,50 @@ type AutoHookExecutionItem = {
   id: string;
   phase: string;
   priority: number;
+  order: number;
   execution: ServerToolExecutionDescriptor;
 };
+
+function buildAutoHookQueuesFromNativePlan(args: {
+  hooks: AutoHookExecutionItem[];
+  includeAutoHookIds: Set<string> | null;
+  excludeAutoHookIds: Set<string> | null;
+}): {
+  optionalQueue: AutoHookExecutionItem[];
+  mandatoryQueue: AutoHookExecutionItem[];
+} {
+  const queueConfig = planServertoolSkeletonDerivedConfigWithNative().autoHookQueueConfig as {
+    optionalPrimaryOrder: string[];
+    mandatoryOrder: string[];
+  };
+  const nativePlan = planServertoolAutoHookQueuesWithNative({
+    hooks: args.hooks.map((hook, sourceIndex) => ({
+      id: hook.id,
+      phase: hook.phase,
+      priority: hook.priority,
+      order: hook.order,
+      sourceIndex
+    })),
+    ...(args.includeAutoHookIds ? { includeAutoHookIds: [...args.includeAutoHookIds] } : {}),
+    ...(args.excludeAutoHookIds ? { excludeAutoHookIds: [...args.excludeAutoHookIds] } : {}),
+    optionalPrimaryHookOrder: queueConfig.optionalPrimaryOrder,
+    mandatoryHookOrder: queueConfig.mandatoryOrder
+  });
+  const mapQueue = (entries: Array<{ sourceIndex: number }>): AutoHookExecutionItem[] =>
+    entries.map((entry) => {
+      const hook = args.hooks[entry.sourceIndex];
+      if (!hook) {
+        throw new Error(
+          `[servertool] native auto-hook queue returned invalid sourceIndex: ${entry.sourceIndex}`
+        );
+      }
+      return hook;
+    });
+  return {
+    optionalQueue: mapQueue(nativePlan.optionalQueue),
+    mandatoryQueue: mapQueue(nativePlan.mandatoryQueue)
+  };
+}
 
 async function runAutoHookExecutionQueue(args: {
   queueName: ServerToolAutoHookTraceEvent['queue'];
@@ -98,7 +143,7 @@ export async function runServertoolAutoHookCaller(args: {
   excludeAutoHookIds: Set<string> | null;
 }): Promise<ServerSideToolEngineResult | null> {
   const autoHookExecutionList = listAutoServerToolHooks();
-  const { optionalQueue, mandatoryQueue } = buildAutoHookQueuesFromConfig({
+  const { optionalQueue, mandatoryQueue } = buildAutoHookQueuesFromNativePlan({
     hooks: autoHookExecutionList,
     includeAutoHookIds: args.includeAutoHookIds,
     excludeAutoHookIds: args.excludeAutoHookIds

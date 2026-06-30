@@ -733,7 +733,6 @@ let buildServertoolFollowupConfig: any;
 let buildServertoolPendingInjectionConfig: any;
 let normalizeServerToolRegistrationSpec: any;
 let listAutoServerToolHooks: any;
-let buildAutoHookQueuesFromConfig: any;
 
 beforeAll(async () => {
   const nativeServertoolOrchestration = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js');
@@ -742,8 +741,6 @@ beforeAll(async () => {
   buildServertoolPendingInjectionConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().pendingInjectionConfig;
   normalizeServerToolRegistrationSpec = (name: string, options: Record<string, unknown>) =>
     nativeServertoolOrchestration.normalizeServertoolRegistrationSpecWithNative({ name, options });
-  const orchestrationBlocks = await import('../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js');
-  buildAutoHookQueuesFromConfig = orchestrationBlocks.buildAutoHookQueuesFromConfig;
   const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
   listAutoServerToolHooks = registry.listAutoServerToolHooks;
 
@@ -842,29 +839,24 @@ describe('servertool skeleton config', () => {
     expect(source).not.toContain('export function listRegisteredServerToolHandlerRecords(');
   });
 
-  test('auto hook queue order is consumed from the Rust auto-hook queue planner', () => {
-    const queues = buildAutoHookQueuesFromConfig({
-      hooks: [
-        { id: 'Vision-Auto', phase: 'default', priority: 20, order: 0 },
-        { id: 'stop_message_auto', phase: 'default', priority: 40, order: 0 }
-      ],
-      includeAutoHookIds: null,
-      excludeAutoHookIds: null
-    });
+  test('auto hook queue order is consumed inside caller from the Rust auto-hook queue planner', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8')
+    );
 
-    expect(queues.optionalQueue.map((hook: any) => hook.id)).toEqual([
-      'stop_message_auto',
-      'Vision-Auto'
-    ]);
+    expect(source).toContain('planServertoolAutoHookQueuesWithNative({');
+    expect(source).toContain('sourceIndex');
+    expect(source).toContain('args.hooks[entry.sourceIndex]');
     expect(planServertoolHookScheduleWithNative).not.toHaveBeenCalled();
   });
 
-  test('auto hook queue shell does not own hook id normalization', async () => {
+  test('auto hook queue shell does not expose a reusable TS queue builder', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile('sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts', 'utf8')
     );
 
-    expect(source).toContain('sourceIndex');
+    expect(source).not.toContain('buildAutoHookQueuesFromConfig');
+    expect(source).not.toContain('planServertoolAutoHookQueuesWithNative');
     expect(source).not.toContain('.filter((hook): hook is');
     expect(source).not.toContain('.filter(Boolean)');
     expect(source).not.toContain('function normalizeServerToolCallName(');

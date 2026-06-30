@@ -5523,6 +5523,9 @@ function checkServertoolAutoHookCallerThinShell() {
   const autoHookCallerShell = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
   const orchestrationBlocks = readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`);
   for (const marker of [
+    'buildAutoHookQueuesFromConfig',
+    'planServertoolAutoHookQueuesWithNative',
+    'sourceIndex',
     'function scheduleAutoHookQueueWithNative',
     'planServertoolHookScheduleWithNative',
     "effectKind: `auto_hook:${normalizeServerToolCallName(hook.id)}:${requiredness}`",
@@ -5537,13 +5540,14 @@ function checkServertoolAutoHookCallerThinShell() {
     }
   }
   for (const marker of [
+    'planServertoolAutoHookQueuesWithNative({',
     'sourceIndex',
     'args.hooks[entry.sourceIndex]',
   ]) {
-    if (!orchestrationBlocks.includes(marker)) {
+    if (!autoHookCallerShell.includes(marker)) {
       fail(
         'servertool-auto-hook-queue-single-rust-plan',
-        `orchestration-blocks.ts must map Rust-planned auto-hook queues by sourceIndex marker ${marker}`
+        `auto-hook-caller.ts must consume Rust-planned auto-hook queues by sourceIndex marker ${marker}`
       );
     }
   }

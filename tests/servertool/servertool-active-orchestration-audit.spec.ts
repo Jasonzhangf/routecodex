@@ -80,6 +80,9 @@ const TARGETS = [
       'export function stripToolOutputs(',
       'export function patchToolCallArgumentsById(',
       'export function filterOutExecutedToolCalls(',
+      'export function buildAutoHookQueuesFromConfig(',
+      'planServertoolAutoHookQueuesWithNative',
+      'sourceIndex',
       'function replaceJsonObjectInPlaceInternal(',
       'function nativeArray(',
       'function nativeRecord(',
@@ -150,6 +153,8 @@ const TARGETS = [
     ],
     required: [
       'const attemptPlan = planAutoHookRuntimeAttemptWithNative({',
+      'planServertoolAutoHookQueuesWithNative({',
+      'args.hooks[entry.sourceIndex]',
       'const finalQueueName = queueOrder[queueOrder.length - 1]?.queueName;',
       'const finalQueue = queue.queueName === finalQueueName;',
       'const finalizationPlan = planAutoHookCallerFinalizationWithNative({',
