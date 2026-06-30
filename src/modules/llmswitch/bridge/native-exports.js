@@ -491,6 +491,30 @@ export function projectResponsesSseFrameForClientNative(args) {
     ]);
     return assertNativeObject('projectResponsesSseFrameForClientJson', parsed);
 }
+export function projectSseErrorEventPayloadNative(args) {
+    const parsed = invokeRouterHotpathJsonCapability('projectSseErrorEventPayloadJson', [
+        {
+            requestId: args.requestId,
+            status: Number.isFinite(args.status) ? Math.floor(args.status) : args.status,
+            message: args.message,
+            code: args.code,
+            error: args.error,
+        }
+    ]);
+    const row = assertNativeObject('projectSseErrorEventPayloadJson', parsed);
+    const error = row.error;
+    if (row.type !== 'error'
+        || typeof row.status !== 'number'
+        || !error
+        || typeof error !== 'object'
+        || Array.isArray(error)
+        || typeof error.message !== 'string'
+        || typeof error.code !== 'string'
+        || typeof error.request_id !== 'string') {
+        throw new Error('[llmswitch-bridge] projectSseErrorEventPayloadJson returned invalid payload');
+    }
+    return row;
+}
 export function describeHubPipelineContractsNative() {
     const fn = getHubVrNodeContracts().describeHubPipelineContractsWithNative;
     if (typeof fn !== 'function') {

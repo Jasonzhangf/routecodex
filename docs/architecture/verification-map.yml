@@ -10,7 +10,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
     contract:
-      - tests/sharedmodule/servertool-pending-session.spec.ts
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - tests/red-tests/hub_pipeline_reasoning_tool_parser_shell_deleted.test.ts
     integration:
@@ -22,47 +21,6 @@ verification:
     notes:
       - "If provider/client protocol shape changes, add targeted followup entry smoke."
       - "Zero-consumer TS reasoning tool parser shell must stay deleted; native extraction remains available through text-markup native wrappers."
-
-  - feature_id: hub.servertool_pending_session
-    change_risk: high
-    unit:
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/pending-session.ts
-      - sharedmodule/llmswitch-core/src/servertool/pending-injection-block.ts
-    contract:
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    integration:
-      - tests/sharedmodule/servertool-pending-session.spec.ts
-      - tests/servertool/pending-session.spec.ts
-      - tests/servertool/pending-injection-block.spec.ts
-    smoke:
-      - npm run verify:servertool-rust-only
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "servertool-core owns pending-session and pending-injection persist planning; TS may only execute explicit runtime-workdir file IO from native plans and must not infer session identity from env/top-level fallback."
-
-  - feature_id: hub.servertool_pre_command_hooks
-    change_risk: medium
-    unit:
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts
-    contract:
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    integration:
-      - tests/servertool/pre-command-hooks.spec.ts
-    smoke:
-      - npm run verify:servertool-rust-only
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "servertool-core owns pre-command hook config/rule normalization, regex matching, attempt skip/execute planning, and completion trace planning; TS may only read config/env/cache and execute jq/shell/runtime script IO from native plans."
 
   - feature_id: hub.servertool_engine_selection
     change_risk: medium
@@ -824,6 +782,31 @@ verification:
       - "ProviderForwarder load/select/status truth stays in Rust Virtual Router; TS may only bridge config/native diagnostics."
       - "Startup cooldown truth must give each real target one selected hit and must not be consumed by availability scans."
 
+  - feature_id: vr.online_diagnostics
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts
+    contract:
+      - tests/sharedmodule/virtual-router-online-diagnostics.spec.ts
+      - tests/server/runtime/http-server/virtual-router-diagnostics.spec.ts
+      - tests/cli/port-command.spec.ts
+    integration:
+      - src/server/runtime/http-server/routes.ts
+      - src/cli/commands/port.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:vr-no-ts-runtime
+      - npm run verify:vr-forwarder-runtime
+    build:
+      - npm run build:base
+    notes:
+      - "Status and dry-run diagnostics must come from Rust VR; HTTP/CLI are projection shells only."
+      - "Dry-run verification must prove route selection is non-mutating for load-balancer and runtime state."
+      - "Provider-unavailable diagnostics must include structured candidate/blocker/default-pool explanation instead of only a top-level error message."
+
   - feature_id: hub.metadata_boundary
     change_risk: high
     unit:
@@ -1437,6 +1420,40 @@ verification:
       - "M0 closes only the governance/doc shell. Do not claim src/debug is the sole runtime owner until the per-module migration slices M1-M9 are implemented and verified."
       - "Verification must prove the diagnostics taxonomy boundary: error diag artifacts move under debug, runtime diagnostics remain under their original runtime owner, and usage inline diag moves only with the logger surface."
 
+  - feature_id: debug.internal_error_numbering
+    change_risk: high
+    unit:
+      - src/debug/internal-error/index.ts
+      - src/debug/internal-error/registry.ts
+      - src/debug/internal-error/envelope.ts
+      - src/debug/internal-error/external-link.ts
+      - src/debug/internal-error/projection.ts
+      - src/debug/internal-error/guards.ts
+      - src/debug/diag/error-artifact.ts
+    contract:
+      - docs/goals/internal-error-numbering-debug-system-plan.md
+      - docs/architecture/wiki/internal-error-numbering-mainline-source.md
+      - docs/architecture/mainline-manifests/internal-error-numbering.mainline.yml
+    integration:
+      - tests/debug/internal-error-numbering.registry.spec.ts
+      - tests/debug/internal-error-numbering.envelope.spec.ts
+      - tests/debug/internal-error-numbering.external-boundary.spec.ts
+      - tests/debug/internal-error-numbering.leak-gate.spec.ts
+      - tests/architecture/internal-error-numbering-mainline.spec.ts
+    smoke:
+      - npm run verify:internal-error-numbering
+      - npm run verify:debug-unified-surface
+      - npm run verify:error-pipeline-contract
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:architecture-mainline-node-id-consistency
+    build:
+      - npm run build:base
+    notes:
+      - "Validation must prove registry ownership, code ranges, external-link-only provider/upstream errors, and no leakage into provider wire or default client response payloads."
+      - "Focused tests must include positive and reverse coverage for request `500-1xx`, response `500-2xx`, other `500-3xx`, duplicate code, wrong lane/range, and external error wrapping rejection."
+
   - feature_id: responses.direct_tool_shape_contract
     change_risk: high
     unit:
@@ -1863,6 +1880,7 @@ verification:
       - "SSE transport, frame normalization, terminal/incomplete repair decisions, force-SSE JSON bridge, and direct-passthrough metadata guard are all locked behind the dedicated SSE bridge surface."
       - "Locked business-module rule: any drift of terminal-state parse, probe synthesis, or stream-end repair back into `handler-response-sse.ts` must fail static gate and red-test before runtime."
       - "Validation must prove SSE code is transport-only and cannot patch continuation history, request restore data, response save data, required_action semantics, or stopless/servertool governance."
+      - "Validation must prove direct chat tool stream reprojection and relay Responses SSE reprojection helpers stay deleted from TS bridge/export surfaces."
   - feature_id: server.responses_response_handler_bridge_surface
     change_risk: high
     unit:
@@ -1886,6 +1904,7 @@ verification:
       - "responses-continuation-store contract must also lock replay-safe persistence: internal stopless/servertool CLI projection artifacts and protocol-illegal pending fields must not survive record/replay."
       - "responses-continuation-store contract must also prove completed stopless tool pairs are collapsed to the latest guidance only during resume/restore/materialize, so old stopless `function_call/function_call_output` history cannot poison later turns."
       - "Validation must prove response lifecycle bridge does not mutate saved continuation truth after response Chat Process save; all content-changing governance must happen before save."
+      - "Validation must prove response lifecycle bridge does not own chat usage normalization or client-close/failure conversation cleanup policy."
 
   - feature_id: cli.command_surface
     change_risk: medium
@@ -2095,6 +2114,7 @@ verification:
       - tests/server/utils/http-error-mapper-public-leak.spec.ts
       - tests/server/utils/http-error-mapper-tool-validation.spec.ts
       - tests/server/utils/http-error-mapper-timeout.spec.ts
+      - tests/server/utils/http-error-mapper-native-projection.spec.ts
       - tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts
       - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
       - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
@@ -2104,6 +2124,7 @@ verification:
       - npm run verify:function-map-compile-gate
       - pnpm exec jest tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
       - pnpm exec jest tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
+      - pnpm exec jest tests/server/utils/http-error-mapper-native-projection.spec.ts
       - pnpm exec jest tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
     build:
       - npm run build:base

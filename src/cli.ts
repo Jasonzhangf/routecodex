@@ -278,6 +278,7 @@ registerBasicCommands(program, {
   port: {
     defaultPort: DEFAULT_CONFIG.PORT,
     createSpinner,
+    fetch,
     findListeningPids,
     killPidBestEffort,
     sleep,

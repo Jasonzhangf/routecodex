@@ -14,9 +14,17 @@ type Spinner = {
   text: string;
 };
 
+type PortCommandOptions = {
+  kill?: boolean;
+  json?: boolean;
+  requestJson?: string;
+  metadataJson?: string;
+};
+
 export type PortCommandContext = {
   defaultPort: number;
   createSpinner: (text: string) => Promise<Spinner>;
+  fetch: typeof fetch;
   findListeningPids: (port: number) => number[];
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   sleep: (ms: number) => Promise<void>;
@@ -40,6 +48,28 @@ function parseConfigPort(userConfig: unknown): number {
   return typeof port === 'number' && Number.isFinite(port) ? port : NaN;
 }
 
+function stringifyJson(value: unknown, pretty: boolean): string {
+  return JSON.stringify(value, null, pretty ? 2 : 0);
+}
+
+async function loadPortDiagnosticsJson(ctx: PortCommandContext, port: number, path: string, body?: unknown): Promise<unknown> {
+  const response = await ctx.fetch(`http://127.0.0.1:${port}${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      raw: text
+    };
+  }
+}
+
 export function createPortCommand(program: Command, ctx: PortCommandContext): void {
   program
     .command('port')
@@ -47,9 +77,13 @@ export function createPortCommand(program: Command, ctx: PortCommandContext): vo
     .argument('<sub>', 'Subcommand: doctor')
     .argument('[port]', `Port number (e.g., ${ctx.defaultPort})`)
     .option('--kill', 'Stop managed RouteCodex server on the port (only stops known managed servers via pid file, refuses to kill unknown listeners)')
-    .action(async (sub: string, portArg: string | undefined, opts: { kill?: boolean }) => {
-      if ((sub || '').toLowerCase() !== 'doctor') {
-        ctx.error(chalk.red('Unknown subcommand. Use: rcc port doctor [port] [--kill]'));
+    .option('--json', 'Output JSON for diagnostics subcommands')
+    .option('--request-json <json>', 'Request JSON for diagnostics dry-run')
+    .option('--metadata-json <json>', 'Metadata JSON for diagnostics dry-run')
+    .action(async (sub: string, portArg: string | undefined, opts: PortCommandOptions) => {
+      const normalizedSub = String(sub || '').toLowerCase();
+      if (normalizedSub !== 'doctor' && normalizedSub !== 'status' && normalizedSub !== 'dry-run') {
+        ctx.error(chalk.red('Unknown subcommand. Use: rcc port doctor [port] [--kill] | rcc port status [port] [--json] | rcc port dry-run [port] --request-json <json> [--metadata-json <json>]'));
         ctx.exit(2);
       }
 
@@ -71,6 +105,47 @@ export function createPortCommand(program: Command, ctx: PortCommandContext): vo
           ctx.exit(1);
         }
 
+        if (normalizedSub === 'status') {
+          spinner.stop();
+          const diagnostics = await loadPortDiagnosticsJson(ctx, port, '/_routecodex/diagnostics/virtual-router/status');
+          ctx.log(stringifyJson(diagnostics, !opts?.json));
+          return;
+        }
+        if (normalizedSub === 'dry-run') {
+          const requestJson = typeof opts.requestJson === 'string'
+            ? opts.requestJson
+            : '';
+          const metadataJson = typeof opts.metadataJson === 'string'
+            ? opts.metadataJson
+            : '';
+          if (!requestJson.trim()) {
+            spinner.fail('Missing --request-json for dry-run');
+            ctx.exit(1);
+          }
+          let request: unknown;
+          let metadata: unknown;
+          try {
+            request = JSON.parse(requestJson);
+          } catch (error) {
+            spinner.fail('Invalid --request-json');
+            ctx.error(error instanceof Error ? error.message : String(error));
+            ctx.exit(1);
+          }
+          try {
+            metadata = metadataJson.trim() ? JSON.parse(metadataJson) : {};
+          } catch (error) {
+            spinner.fail('Invalid --metadata-json');
+            ctx.error(error instanceof Error ? error.message : String(error));
+            ctx.exit(1);
+          }
+          spinner.stop();
+          const diagnostics = await loadPortDiagnosticsJson(ctx, port, '/_routecodex/diagnostics/virtual-router/dry-run', {
+            request,
+            metadata
+          });
+          ctx.log(stringifyJson(diagnostics, !opts?.json));
+          return;
+        }
         // findListeningPids 返回的是 managed pids（已通过 pid file + command 验证）
         const pids = ctx.findListeningPids(port);
         spinner.stop();

@@ -8,7 +8,6 @@ import {
   allowSnapshotLocalDiskWrite
 } from '../../../../src/utils/snapshot-local-disk-gate.js';
 import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
-import { runWithPortRequestContext } from '../../../../src/server/runtime/http-server/port-log-context.js';
 
 const writeSnapshotViaHooksMock = jest.fn(async () => undefined);
 
@@ -54,6 +53,16 @@ describe('provider snapshot writer local mirror', () => {
     const { __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
     const requestId = 'req_provider_snapshot_local_mirror';
     const providerKey = 'ali-coding-plan.key1.glm-5';
+    const metadata = { routingPolicyGroup: 'gateway_priority_5555' };
+    MetadataCenter.attach(metadata).writeRequestTruth(
+      'portScope',
+      '5555',
+      {
+        module: 'tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts',
+        symbol: 'materializes provider-response locally from MetadataCenter portScope',
+        stage: 'test'
+      }
+    );
 
     allowSnapshotLocalDiskWrite(requestId);
 
@@ -63,7 +72,7 @@ describe('provider snapshot writer local mirror', () => {
       clientRequestId: requestId,
       entryEndpoint: '/v1/responses',
       providerKey,
-      metadata: { portScope: 5555, routingPolicyGroup: 'gateway_priority_5555' },
+      metadata,
       data: {
         mode: 'sse',
         captureSse: true,
@@ -114,6 +123,27 @@ describe('provider snapshot writer local mirror', () => {
     const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
     const requestId = 'req_provider_snapshot_metadata_sanitize';
     const providerKey = 'minimax.key1.MiniMax-M3';
+    const metadata = {
+      __raw_request_body: { tools: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+      responsesRequestContext: {
+        context: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+        payload: { tools: [{ type: 'namespace', name: 'multi_agent_v1' }] }
+      },
+      responsesContext: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+      contextSnapshot: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
+      __rt: { sessionDir: '/tmp/rcc-internal-session' },
+      metadata: { __rt: { nested: true }, snapshot: { debug: true } },
+      portContext: { logNamespace: 'server-5555' }
+    };
+    MetadataCenter.attach(metadata).writeRequestTruth(
+      'portScope',
+      '5555',
+      {
+        module: 'tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts',
+        symbol: 'does not write request metadata or internal carriers into provider snapshots',
+        stage: 'test'
+      }
+    );
 
     allowSnapshotLocalDiskWrite(requestId);
 
@@ -123,19 +153,7 @@ describe('provider snapshot writer local mirror', () => {
       clientRequestId: requestId,
       entryEndpoint: '/v1/responses',
       providerKey,
-      metadata: {
-        matchedPort: 5555,
-        __raw_request_body: { tools: [{ type: 'namespace', name: 'multi_agent_v1' }] },
-        responsesRequestContext: {
-          context: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
-          payload: { tools: [{ type: 'namespace', name: 'multi_agent_v1' }] }
-        },
-        responsesContext: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
-        contextSnapshot: { toolsRaw: [{ type: 'namespace', name: 'multi_agent_v1' }] },
-        __rt: { sessionDir: '/tmp/rcc-internal-session' },
-        metadata: { __rt: { nested: true }, snapshot: { debug: true } },
-        portContext: { logNamespace: 'server-5555' }
-      },
+      metadata,
       data: { model: 'minimax-m3-free', messages: [{ role: 'user', content: 'ok' }] }
     });
     await __flushProviderSnapshotQueueForTests();
@@ -251,15 +269,15 @@ describe('provider snapshot writer local mirror', () => {
     }));
   });
 
-  it('reads provider snapshot entryPort from current port request context before metadata', async () => {
+  it('rejects provider snapshot entryPort from current port request context without MetadataCenter truth', async () => {
     const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
     const requestId = 'req_provider_snapshot_current_port_context';
     const providerKey = 'glm-router.key1';
 
-    await runWithPortRequestContext({ localPort: 5520, matchedPort: 5520 }, async () => {
-      allowSnapshotLocalDiskWrite(requestId);
+    allowSnapshotLocalDiskWrite(requestId);
 
-      await writeProviderSnapshot({
+    await expect(
+      writeProviderSnapshot({
         phase: 'provider-response',
         requestId,
         clientRequestId: requestId,
@@ -267,8 +285,8 @@ describe('provider snapshot writer local mirror', () => {
         providerKey,
         metadata: {},
         data: { mode: 'sse', transport: 'upstream-stream' }
-      });
-    });
+      })
+    ).rejects.toThrow('entryPort required for stage=provider-response');
     await __flushProviderSnapshotQueueForTests();
 
     const filePath = path.join(
@@ -279,13 +297,43 @@ describe('provider snapshot writer local mirror', () => {
       requestId,
       'provider-response.json'
     );
-    const raw = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(raw) as { meta?: Record<string, unknown> };
-
-    expect(parsed.meta?.entryPort).toBe(5520);
-    expect(parsed.meta?.matchedPort).toBe(5520);
-    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
+    await expect(fs.readFile(filePath, 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(writeSnapshotViaHooksMock).not.toHaveBeenCalledWith(expect.objectContaining({
       entryPort: 5520
     }));
+  });
+
+  it('rejects client snapshots when MetadataCenter has no request_truth.portScope', async () => {
+    const { writeClientSnapshot } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
+    const requestId = 'req_client_snapshot_missing_metadata_center_port';
+
+    allowSnapshotLocalDiskWrite(requestId);
+
+    await expect(
+      writeClientSnapshot({
+        entryEndpoint: '/v1/responses',
+        requestId,
+        headers: { 'content-type': 'application/json' },
+        body: { input: 'missing port truth' },
+        metadata: {}
+      })
+    ).rejects.toThrow('entryPort required for stage=client-request');
+
+    await expect(fs.readFile(
+      path.join(tempDir, 'openai-responses', 'ports', '5520', requestId, 'client-request.json'),
+      'utf-8'
+    )).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps provider snapshot entryPort resolution free of current request context fallback', async () => {
+    const source = await fs.readFile(
+      path.join(process.cwd(), 'src/debug/snapshot/provider-writer.ts'),
+      'utf-8'
+    );
+
+    expect(source).not.toContain('getCurrentPortRequestContext');
+    expect(source).not.toContain('metadata.matchedPort');
+    expect(source).not.toContain('metadata.routecodexLocalPort');
+    expect(source).not.toContain('metadata.portScope');
   });
 });

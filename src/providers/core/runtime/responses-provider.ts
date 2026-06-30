@@ -45,7 +45,7 @@ import {
   buildResponsesSseProviderError,
   inspectResponsesSseBlockForProviderRateLimit,
   isResponsesSseAdvisoryRateLimitsBlock,
-  isResponsesSseTerminalBlock
+  isResponsesSseCompletedBlock
 } from './responses-sse-error-guard.js';
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
@@ -224,7 +224,7 @@ async function prepareDirectResponsesSsePassthroughStream(
   const bufferedFrames: Buffer[] = [];
   let pending = '';
   let sawSemanticFrame = false;
-  let sawTerminalFrame = false;
+  let sawCompletedFrame = false;
   let lastSemanticActivityAt = Date.now();
 
   while (true) {
@@ -259,8 +259,8 @@ async function prepareDirectResponsesSsePassthroughStream(
       if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
         continue;
       }
-      if (isResponsesSseTerminalBlock(part)) {
-        sawTerminalFrame = true;
+      if (isResponsesSseCompletedBlock(part)) {
+        sawCompletedFrame = true;
       }
       bufferedFrames.push(Buffer.from(`${part}\n\n`));
       sawSemanticFrame = true;
@@ -270,7 +270,7 @@ async function prepareDirectResponsesSsePassthroughStream(
   if (pending) {
     bufferedFrames.push(Buffer.from(pending));
   }
-  if (!sawTerminalFrame) {
+  if (!sawCompletedFrame) {
     throw buildResponsesSseIncompleteError();
   }
 

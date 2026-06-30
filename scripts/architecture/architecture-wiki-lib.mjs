@@ -85,6 +85,23 @@ export const MANUAL_WIKI_PAGES = [
     ],
   },
   {
+    path: `${WIKI_ROOT}/internal-error-numbering-mainline-source.md`,
+    title: '# Internal Error Numbering Mainline Source',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Purpose',
+      '## Main Rule',
+      '## Numbering Contract',
+      '## Internal Error Numbering Mainline',
+      '## Node Contract',
+      '## Extension Checklist',
+      '## Review Checklist',
+      'IntErrNum01SourceObserved',
+      'IntErrNum07ClientBoundaryPreserved',
+      'ExternalErrorLink',
+    ],
+  },
+  {
     path: `${WIKI_ROOT}/metadata-boundary-map.md`,
     title: '# Metadata Boundary Map',
     minMermaidBlocks: 2,

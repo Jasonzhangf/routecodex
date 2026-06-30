@@ -39,21 +39,6 @@ const mockDeriveFinishReasonNative = (body: unknown): string | undefined => {
   return undefined;
 };
 
-const mockResolveRelayResponsesClientSseStreamForHttp = async (args: {
-  body?: Record<string, unknown>;
-  sseStream?: unknown;
-  requestId?: string;
-}) => {
-  if (!args.body) {
-    return args.sseStream;
-  }
-  const response = args.body;
-  return Readable.from([
-    `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-    `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-  ]);
-};
-
 const mockCreateChatJsonToSseConverterForHttp = async () => ({
   convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
     const response = payload && typeof payload === 'object'
@@ -80,36 +65,11 @@ const mockCreateChatJsonToSseConverterForHttp = async () => ({
   }
 });
 
-const mockReprojectDirectChatToolCallStreamForHttp = async (args: {
-  body: Record<string, unknown>;
-  requestId?: string;
-}) => {
-  const requestId = typeof args.requestId === 'string' ? args.requestId : 'req_test_chat_sse';
-  return Readable.from([
-    `data: ${JSON.stringify({
-      id: args.body.id ?? requestId,
-      object: 'chat.completion.chunk',
-      created: 1,
-      model: args.body.model ?? 'test-model',
-      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
-    })}\n\n`,
-    `data: ${JSON.stringify({
-      id: args.body.id ?? requestId,
-      object: 'chat.completion.chunk',
-      created: 1,
-      model: args.body.model ?? 'test-model',
-      choices: Array.isArray(args.body.choices) ? args.body.choices : []
-    })}\n\n`,
-    'data: [DONE]\n\n'
-  ]);
-};
-
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder,
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   createChatJsonToSseConverterForHttp: mockCreateChatJsonToSseConverterForHttp,
-  reprojectDirectChatToolCallStreamForHttp: mockReprojectDirectChatToolCallStreamForHttp,
   sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
   createResponsesJsonToSseConverter: async () => ({
     convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
@@ -132,7 +92,6 @@ const mockBridgeModule = () => ({
   deriveFinishReasonNative: mockDeriveFinishReasonNative,
   updateResponsesContractProbeFromSseChunkNative: () => ({}),
   buildResponsesTerminalSseFramesFromProbeNative: () => [],
-  resolveRelayResponsesClientSseStreamForHttp: mockResolveRelayResponsesClientSseStreamForHttp,
   requireCoreDist: () => ({
     normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload,
     buildResponsesPayloadFromChatWithNative: () => ({
@@ -288,7 +247,12 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
     );
 
     mockConvertProviderResponse.mockResolvedValue({
-      sseStream: relaySse,
+      sseStream: Readable.from([
+        'event: response.completed\n',
+        'data: {"type":"response.completed","response":{"id":"resp_relay_bridge_1","status":"completed","output_text":"relay body"}}\n\n',
+        'event: response.done\n',
+        'data: {"type":"response.done","response":{"id":"resp_relay_bridge_1","status":"completed","output_text":"relay body"}}\n\n',
+      ]),
       body: {
         id: 'resp_relay_bridge_1',
         object: 'response',
@@ -429,7 +393,12 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
     );
 
     mockConvertProviderResponse.mockResolvedValue({
-      sseStream: anthropicRawSse,
+      sseStream: Readable.from([
+        'event: response.completed\n',
+        'data: {"type":"response.completed","response":{"id":"resp_from_anthropic_stream_1","status":"completed","output_text":"ok"}}\n\n',
+        'event: response.done\n',
+        'data: {"type":"response.done","response":{"id":"resp_from_anthropic_stream_1","status":"completed","output_text":"ok"}}\n\n',
+      ]),
       body: {
         id: 'resp_from_anthropic_stream_1',
         object: 'response',
@@ -497,7 +466,12 @@ describe('provider-response-converter prebuilt SSE passthrough gate', () => {
     );
 
     mockConvertProviderResponse.mockResolvedValue({
-      sseStream: anthropicRawSse,
+      sseStream: Readable.from([
+        'event: response.completed\n',
+        'data: {"type":"response.completed","response":{"id":"resp_stream_only_bridge_1","status":"completed","output_text":"stream-only relay body"}}\n\n',
+        'event: response.done\n',
+        'data: {"type":"response.done","response":{"id":"resp_stream_only_bridge_1","status":"completed","output_text":"stream-only relay body"}}\n\n',
+      ]),
       body: {
         id: 'resp_stream_only_bridge_1',
         object: 'response',

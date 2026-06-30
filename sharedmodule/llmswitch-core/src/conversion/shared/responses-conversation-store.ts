@@ -631,6 +631,9 @@ class ResponsesConversationStore {
     this.prune();
     const requestedPortScopeKey = readPortScopeKey(options);
     let entry = this.responseIndex.get(responseId);
+    if (!entry) {
+      entry = this.recoverResponseIndexEntry(responseId, requestedPortScopeKey, options);
+    }
     if (
       entry
       && (
@@ -688,6 +691,40 @@ class ResponsesConversationStore {
       payload: resumed.payload,
       meta: ensureMetaProviderKey(resumed.meta, entry)
     };
+  }
+
+  private recoverResponseIndexEntry(
+    responseId: string,
+    requestedPortScopeKey: string | undefined,
+    options: ResumeOptions | undefined
+  ): ConversationEntry | undefined {
+    let matched: ConversationEntry | undefined;
+    for (const entry of this.requestMap.values()) {
+      if (
+        entry.lastResponseId !== responseId
+        || !entryMatchesPortScope(entry, requestedPortScopeKey)
+        || !entryMatchesIsolation(entry, options)
+      ) {
+        continue;
+      }
+      if (matched && matched !== entry) {
+        throw new ProviderProtocolError('Responses conversation response_id index is ambiguous', {
+          code: 'MALFORMED_REQUEST',
+          protocol: 'openai-responses',
+          providerType: 'responses',
+          details: {
+            context: 'responses-conversation-store.resumeConversation',
+            reason: 'ambiguous_response_id_index',
+            responseId
+          }
+        });
+      }
+      matched = entry;
+    }
+    if (matched) {
+      this.responseIndex.set(responseId, matched);
+    }
+    return matched;
   }
 
   lookupContinuationByResponseId(

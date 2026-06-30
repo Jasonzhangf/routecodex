@@ -25,6 +25,54 @@ describe('logRequestError diagnostics', () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=EPIPE'));
   });
 
+  it('prints internalCode when present on the error object', () => {
+    const err: any = new Error('internal debug error');
+    err.internalCode = '500-300';
+
+    logRequestError('/v1/responses', 'req_internal_code', err);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('internalCode=500-300'));
+  });
+
+  it('prints internalCode when nested under internalError', () => {
+    const err: any = new Error('internal debug error');
+    err.internalError = { internalCode: '500-210' };
+
+    logRequestError('/v1/responses', 'req_internal_error_object', err);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('internalCode=500-210'));
+  });
+
+  it('prints internalCode for RouteCodex-owned virtual-router retry route failures', () => {
+    const err: any = new Error(
+      'Rust HubPipeline explicit provider retry VR route failed: VIRTUAL_ROUTER_ERROR:PROVIDER_NOT_AVAILABLE:No available providers after applying routing instructions'
+    );
+    err.code = 'hub_pipeline_virtual_router_retry_route_failed';
+
+    logRequestError('/v1/responses', 'req_vr_retry_route_failed', err);
+
+    const rendered = errorSpy.mock.calls.map((call) => String(call[0] ?? '')).join('\n');
+    expect(rendered).toContain('code=hub_pipeline_virtual_router_retry_route_failed');
+    expect(rendered).toContain('internalCode=500-130');
+  });
+
+  it('prints external transport source and reason for final ECONNRESET failures', () => {
+    const err: any = new Error('{"error":{"code":"ECONNRESET","message":"fetch failed","status":502}}');
+    err.statusCode = 502;
+    err.code = 'ECONNRESET';
+    err.upstreamCode = 'ECONNRESET';
+
+    logRequestError('/v1/responses', 'req_final_econnreset', err);
+
+    const rendered = errorSpy.mock.calls.map((call) => String(call[0] ?? '')).join('\n');
+    expect(rendered).toContain('status=502');
+    expect(rendered).toContain('code=ECONNRESET');
+    expect(rendered).toContain('upstreamCode=ECONNRESET');
+    expect(rendered).toContain('source=external_transport');
+    expect(rendered).toContain('reason="fetch failed"');
+    expect(rendered).not.toContain('internalCode=');
+  });
+
   it('parses status/code/upstreamCode from raw error snippet text', () => {
     const err: any = new Error('upstream failed');
     err.rawErrorSnippet =
@@ -35,6 +83,31 @@ describe('logRequestError diagnostics', () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('status=429'));
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('code=SSE_TO_JSON_ERROR'));
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=EPIPE'));
+  });
+
+  it('does not parse request ids or dates as status codes', () => {
+    const err: any = new Error(
+      'request openai-responses-router-gpt-5.5-20260629T212248675-423575-3858 failed: Upstream provider error'
+    );
+
+    logRequestError('/v1/responses', 'req_fake_status_294', err);
+
+    const rendered = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(rendered).toContain('Upstream provider error');
+    expect(rendered).not.toContain('status=294');
+    expect(rendered).not.toMatch(/\bstatus=\d{3}\b/);
+  });
+
+  it('parses explicit status text without accepting arbitrary three-digit tokens', () => {
+    const err: any = new Error(
+      'request openai-responses-router-gpt-5.5-20260629T212248675-423575-3858 failed: status=504 code=HTTP_504'
+    );
+
+    logRequestError('/v1/responses', 'req_explicit_status_504', err);
+
+    const rendered = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(rendered).toContain('status=504');
+    expect(rendered).not.toContain('status=294');
   });
 
   it('does not let code-only rawErrorSnippet override richer error message', () => {

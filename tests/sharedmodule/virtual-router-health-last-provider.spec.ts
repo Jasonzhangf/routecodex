@@ -44,12 +44,12 @@ function buildConfig(targets: string[]): any {
 function routeOnce(engine: VirtualRouterEngine, requestId: string): string {
   return engine.route(
     { messages: [{ role: 'user', content: 'hello' }] } as any,
-    { requestId } as any
+    { requestId, metadataCenterSnapshot: {} } as any
   ).target.providerKey;
 }
 
 describe('virtual router native last-provider guard', () => {
-  it('does not cooldown the last remaining available provider', () => {
+  it('does not cooldown the last remaining available provider for recoverable failures', () => {
     const engine = new VirtualRouterEngine();
     engine.initialize(buildConfig(['provider.a']));
 
@@ -58,17 +58,30 @@ describe('virtual router native last-provider guard', () => {
       reason: 'upstream_error',
       fatal: false,
       statusCode: 502,
-      affectsHealth: true
+      affectsHealth: false
     });
 
     expect(routeOnce(engine, 'req-last-provider-nonfatal')).toBe('provider.a');
+    const state = engine.getStatus().health.find((entry: any) =>
+      entry.providerKey === 'provider.a' || entry.providerKey === 'provider.1'
+    );
+    expect(state?.failureCount).toBe(0);
+    expect(state?.state).toBe('healthy');
   });
 
   it('does not trip the last remaining available provider even on fatal events', () => {
     const engine = new VirtualRouterEngine();
     engine.initialize(buildConfig(['provider.a', 'provider.b']));
 
-    engine.markProviderCooldown('provider.b', 60_000);
+    for (let index = 0; index < 3; index += 1) {
+      engine.handleProviderFailure({
+        providerKey: 'provider.b',
+        reason: `client_error_${index + 1}`,
+        fatal: true,
+        statusCode: 400,
+        affectsHealth: true
+      });
+    }
     engine.handleProviderFailure({
       providerKey: 'provider.a',
       reason: 'client_error',

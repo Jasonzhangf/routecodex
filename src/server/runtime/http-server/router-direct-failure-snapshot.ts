@@ -5,6 +5,7 @@ type RouterDirectSnapshotArgs = {
   entryEndpoint: string;
   providerKey: string;
   providerId?: string;
+  entryPort?: number;
   metadata?: Record<string, unknown>;
 };
 
@@ -44,6 +45,7 @@ export async function captureRouterDirectProviderRequestSnapshot(
     requestId: args.requestId,
     data: args.payload,
     entryEndpoint: args.entryEndpoint,
+    entryPort: args.entryPort,
     providerKey: args.providerKey,
     providerId: args.providerId,
     metadata: args.metadata,
@@ -59,6 +61,7 @@ export async function captureRouterDirectProviderResponseSnapshot(
     requestId: args.requestId,
     data: args.response,
     entryEndpoint: args.entryEndpoint,
+    entryPort: args.entryPort,
     providerKey: args.providerKey,
     providerId: args.providerId,
     metadata: args.metadata,
@@ -75,6 +78,7 @@ export async function captureRouterDirectFailureSnapshots(
       requestId: args.requestId,
       data: args.payload,
       entryEndpoint: args.entryEndpoint,
+      entryPort: args.entryPort,
       providerKey: args.providerKey,
       providerId: args.providerId,
       metadata: args.metadata,
@@ -88,6 +92,7 @@ export async function captureRouterDirectFailureSnapshots(
       error: serializeError(args.error),
     },
     entryEndpoint: args.entryEndpoint,
+    entryPort: args.entryPort,
     providerKey: args.providerKey,
     providerId: args.providerId,
     metadata: args.metadata,

@@ -8,7 +8,6 @@ import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js
 import { resolveClientAbortSignalFromCarrier } from './request-executor-client-abort-block.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
-import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 
 const ATTEMPT_STATE_RUNTIME_CONTROL_WRITER = {
   module: 'src/server/runtime/http-server/executor/request-executor-attempt-state.ts',
@@ -31,6 +30,8 @@ export function prepareRequestExecutorAttemptState(args: {
   excludedProviderKeys: Set<string>;
   inboundClientHeaders: Record<string, string> | undefined;
   clientRequestId: string;
+  sessionId?: string;
+  conversationId?: string;
   forcedRouteHint?: string;
   throwIfClientAbortSignalAborted: (abortSignal: AbortSignal | undefined) => void;
 }): PreparedRequestExecutorAttemptState {
@@ -93,6 +94,8 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
   pipelineResult: HubPipelineResult;
   clientHeadersForAttempt: Record<string, string> | undefined;
   clientRequestId: string;
+  sessionId?: string;
+  conversationId?: string;
 }): {
   mergedMetadata: Record<string, unknown>;
   mergedClientHeaders: Record<string, string> | undefined;
@@ -124,21 +127,38 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
       mergedMetadata.clientRequestId = requestTruth.clientRequestId;
     }
   }
-  delete mergedMetadata.sessionId;
-  delete mergedMetadata.session_id;
-  delete mergedMetadata.conversationId;
-  delete mergedMetadata.conversation_id;
-  const requestTruth = readRuntimeRequestTruthIdentifiers(mergedMetadata);
+  const sessionId =
+    typeof args.sessionId === 'string' && args.sessionId.trim()
+      ? args.sessionId.trim()
+      : undefined;
+  const conversationId =
+    typeof args.conversationId === 'string' && args.conversationId.trim()
+      ? args.conversationId.trim()
+      : undefined;
+  if (sessionId) {
+    mergedMetadata.sessionId = sessionId;
+    mergedMetadata.session_id = sessionId;
+  } else {
+    delete mergedMetadata.sessionId;
+    delete mergedMetadata.session_id;
+  }
+  if (conversationId) {
+    mergedMetadata.conversationId = conversationId;
+    mergedMetadata.conversation_id = conversationId;
+  } else {
+    delete mergedMetadata.conversationId;
+    delete mergedMetadata.conversation_id;
+  }
   registerRequestLogContext(args.requestId, {
     logSessionColorKey: mergedMetadata.logSessionColorKey,
     clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,
     client_tmux_session_id: mergedMetadata.client_tmux_session_id,
     tmuxSessionId: mergedMetadata.tmuxSessionId,
     tmux_session_id: mergedMetadata.tmux_session_id,
-    sessionId: requestTruth.sessionId,
-    session_id: requestTruth.sessionId,
-    conversationId: requestTruth.conversationId,
-    conversation_id: requestTruth.conversationId
+    sessionId,
+    session_id: sessionId,
+    conversationId,
+    conversation_id: conversationId
   });
   const mergedClientHeaders =
     cloneClientHeaders(mergedMetadata?.clientHeaders) || args.clientHeadersForAttempt;

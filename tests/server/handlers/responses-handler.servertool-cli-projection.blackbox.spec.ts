@@ -130,7 +130,7 @@ describe('servertool CLI projection blackbox', () => {
     expect((result.chat as any).choices[0].finish_reason).toBe('stop');
     expect((result.chat as any).choices[0].message.tool_calls).toBeUndefined();
     expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
-    expect(String((result.chat as any).choices[0].message.content ?? '')).toBe('done。下一步：无\n完成，准备收尾。');
+    expect(String((result.chat as any).choices[0].message.content ?? '')).toBe('完成，准备收尾。');
   });
 
   it('projects non-terminal reasoningStop tool calls to client exec_command', async () => {
@@ -337,7 +337,8 @@ describe('servertool CLI projection blackbox', () => {
     expect(command).not.toContain('继续执行');
     expect(command).not.toContain('schemaFeedback');
     expect(command).not.toContain('stopreason');
-    expect(command).toContain("--request-id 'req_stop_cli_lifecycle'");
+    expect(command).not.toContain('--request-id');
+    expect(command).not.toContain('--session-id');
     for (const forbidden of [
       'stopless',
       'servertool',
@@ -526,13 +527,13 @@ describe('servertool CLI projection blackbox', () => {
     const toolCall = (result.chat as any).choices[0].message.tool_calls[0];
     const command = JSON.parse(toolCall.function.arguments).cmd;
     const input = extractCommandInput(command);
-    expect(input.triggerHint).toBe('stop_schema_missing');
+    expect(input.triggerHint).toBe('no_schema');
     expect(input.schemaFeedback).toBeUndefined();
     expect(command).not.toContain('schemaFeedback');
     expect(command).not.toContain('stopreason');
   });
 
-  it('blackbox stops projecting new exec_command after third consecutive no_schema', async () => {
+  it('blackbox keeps projecting valid continue schema instead of treating it as consecutive no_schema', async () => {
     isolateSessionDir('third-no-schema-terminal');
     const result = await runServerToolOrchestration({
       chat: {
@@ -578,17 +579,16 @@ describe('servertool CLI projection blackbox', () => {
 
     expect(result.executed).toBe(true);
     const payload = result.chat as any;
-    expect(JSON.stringify(payload)).not.toContain('routecodex hook run reasoningStop');
-    expect(payload.required_action).toBeUndefined();
-    expect(payload.choices?.[0]?.message?.tool_calls).toBeUndefined();
-    expect(payload.choices?.[0]?.finish_reason).toBe('stop');
-    const visibleText = String(payload.choices?.[0]?.message?.content ?? '');
-    expect(visibleText).toContain('还是没补 schema，但已经完成日志排查。');
-    expect(visibleText).toContain('不要再投 CLI，应直接回传当前总结');
-    expect(visibleText).not.toContain('stopless budget exhausted');
-    expect(visibleText).not.toContain('<rcc_stop_schema>');
-    expect(visibleText).not.toContain('reasoningStop');
-    expect(visibleText).not.toContain('next_step');
+    expect(JSON.stringify(payload)).toContain('routecodex hook run reasoningStop');
+    const toolCall = payload.choices?.[0]?.message?.tool_calls?.[0];
+    expect(toolCall?.function?.name).toBe('exec_command');
+    const command = JSON.parse(toolCall.function.arguments).cmd;
+    expect(extractCommandInput(command)).toMatchObject({
+      flowId: 'stop_message_flow',
+      repeatCount: 3,
+      maxRepeats: 3,
+      triggerHint: 'non_terminal_schema'
+    });
   });
 
   it('returns terminal allow-stop result without re-projecting exec_command', async () => {
@@ -640,7 +640,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(JSON.stringify(payload)).not.toContain('routecodex servertool run stop_message_auto');
     expect(payload.required_action).toBeUndefined();
     const message = payload.choices?.[0]?.message;
-    expect(String(message?.content)).toBe('已完成 allow-stop live 验证\n已完成在线验证。');
+    expect(String(message?.content)).toBe('已完成在线验证。');
     expect(String(message?.content)).not.toContain('"stopreason"');
     expect(String(message?.content)).not.toContain('<rcc_stop_schema>');
     expect(String(message?.content)).not.toContain('</rcc_stop_schema>');
@@ -653,7 +653,7 @@ describe('servertool CLI projection blackbox', () => {
     }) as Record<string, any>;
     expect(Array.isArray(responsesPayload.output)).toBe(true);
     expect(responsesPayload.output.some((item: any) => item?.type === 'reasoning')).toBe(false);
-    expect(String(responsesPayload.output_text)).toBe('已完成 allow-stop live 验证\n已完成在线验证。');
+    expect(String(responsesPayload.output_text)).toBe('已完成在线验证。');
     expect(JSON.stringify(responsesPayload)).not.toContain('stopreason');
     expect(JSON.stringify(responsesPayload)).not.toContain('needs_user_input');
     expect(JSON.stringify(responsesPayload)).not.toContain('has_evidence');
@@ -702,7 +702,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(result.executed).toBe(true);
     const payload = result.chat as any;
     expect(payload.choices?.[0]?.finish_reason).toBe('stop');
-    expect(String(payload.choices?.[0]?.message?.content)).toBe('done。下一步：无\n已完成。');
+    expect(String(payload.choices?.[0]?.message?.content)).toBe('已完成。');
     expect(payload.choices?.[0]?.message?.reasoning).toBeUndefined();
     expect(payload.choices?.[0]?.message?.reasoning_text).toBeUndefined();
 
@@ -714,7 +714,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(JSON.stringify(responsesPayload)).not.toContain('reasoning_summary');
     expect(JSON.stringify(responsesPayload)).not.toContain('<rcc_stop_schema>');
     expect(JSON.stringify(responsesPayload)).not.toContain('stopreason');
-    expect(String(responsesPayload.output_text)).toBe('done。下一步：无\n已完成。');
+    expect(String(responsesPayload.output_text)).toBe('已完成。');
   });
 
   it('does not let malformed legacy CLI history suppress current stopless re-projection', async () => {

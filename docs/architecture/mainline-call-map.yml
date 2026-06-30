@@ -331,7 +331,7 @@ chains:
       - step_id: rct-06
         from_node: ChatProcRespContinuation06ResponseGoverned
         to_node: ChatProcRespContinuation07CanonicalSaved
-        caller_symbol: persistResponsesConversationLifecycleAtChatProcessExitWithinCore
+        caller_symbol: convertProviderResponse
         caller_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
         callee_symbol: recordResponsesResponse
         callee_file: sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts
@@ -370,6 +370,79 @@ chains:
         semantic_output: "debug toolkit with diag/snapshot/logger/harness replay surfaces unified under src/debug"
         status: anchored
         note: "The unified debug entry builds the canonical toolkit facade and routes all migrated debug sub-surfaces through the single debug owner module."
+
+  - chain_id: internal_error_numbering.mainline
+    summary: "RouteCodex-owned internal debug errors are assigned stable `500-1xx/2xx/3xx` codes, projected only to debug artifacts, linked to external errors without wrapping them, and guarded from default client/provider payload leakage."
+    entry_contract:
+      node: IntErrNum01SourceObserved
+      owner_doc: docs/architecture/wiki/internal-error-numbering-mainline-source.md
+    edges:
+      - step_id: ien-01
+        from_node: IntErrNum01SourceObserved
+        to_node: IntErrNum02ModuleBlockResolved
+        caller_symbol: observeInternalDebugErrorSource
+        caller_file: src/debug/internal-error/envelope.ts
+        callee_symbol: resolveInternalDebugErrorModuleBlock
+        callee_file: src/debug/internal-error/registry.ts
+        owner_feature_id: debug.internal_error_numbering
+        semantic_input: "RouteCodex-owned internal failure origin plus requested internal debug code"
+        semantic_output: "registry-owned module block for the internal debug code"
+        status: anchored
+      - step_id: ien-02
+        from_node: IntErrNum02ModuleBlockResolved
+        to_node: IntErrNum03SubcodeAssigned
+        caller_symbol: resolveInternalDebugErrorModuleBlock
+        caller_file: src/debug/internal-error/registry.ts
+        callee_symbol: assignInternalDebugErrorSubcode
+        callee_file: src/debug/internal-error/registry.ts
+        owner_feature_id: debug.internal_error_numbering
+        semantic_input: "module block plus internal debug code"
+        semantic_output: "validated registry entry with lane, node, owner feature, and subcode semantics"
+        status: anchored
+      - step_id: ien-03
+        from_node: IntErrNum03SubcodeAssigned
+        to_node: IntErrNum04EnvelopeBuilt
+        caller_symbol: assignInternalDebugErrorSubcode
+        caller_file: src/debug/internal-error/registry.ts
+        callee_symbol: buildInternalDebugErrorEnvelope
+        callee_file: src/debug/internal-error/envelope.ts
+        owner_feature_id: debug.internal_error_numbering
+        semantic_input: "validated registry entry plus internal failure context"
+        semantic_output: "InternalDebugErrorEnvelope side-channel object"
+        status: anchored
+      - step_id: ien-04
+        from_node: IntErrNum04EnvelopeBuilt
+        to_node: IntErrNum05DebugArtifactProjected
+        caller_symbol: buildInternalDebugErrorEnvelope
+        caller_file: src/debug/internal-error/envelope.ts
+        callee_symbol: projectInternalDebugErrorToDebugArtifact
+        callee_file: src/debug/internal-error/projection.ts
+        owner_feature_id: debug.internal_error_numbering
+        semantic_input: "InternalDebugErrorEnvelope"
+        semantic_output: "debug artifact projection carrying internalError side-channel"
+        status: anchored
+      - step_id: ien-05
+        from_node: IntErrNum05DebugArtifactProjected
+        to_node: IntErrNum06ExternalLinked
+        caller_symbol: projectInternalDebugErrorToDebugArtifact
+        caller_file: src/debug/internal-error/projection.ts
+        callee_symbol: linkExternalError
+        callee_file: src/debug/internal-error/external-link.ts
+        owner_feature_id: debug.internal_error_numbering
+        semantic_input: "optional provider/upstream/client/transport external error relation"
+        semantic_output: "ExternalErrorLink correlation without converting external identity into internal code"
+        status: anchored
+      - step_id: ien-06
+        from_node: IntErrNum06ExternalLinked
+        to_node: IntErrNum07ClientBoundaryPreserved
+        caller_symbol: linkExternalError
+        caller_file: src/debug/internal-error/external-link.ts
+        callee_symbol: preserveInternalErrorClientBoundary
+        callee_file: src/debug/internal-error/guards.ts
+        owner_feature_id: debug.internal_error_numbering
+        semantic_input: "internal debug artifact projection and optional external link"
+        semantic_output: "proof boundary that default client/provider payloads must not carry InternalDebugErrorEnvelope"
+        status: anchored
 
   - chain_id: error.mainline
     summary: "Provider/runtime/direct failures enter unified ErrorErr chain; provider availability/cooldown truth stays provider/server-scoped and must not be rewritten into session-storm truth before client projection."
@@ -473,6 +546,46 @@ chains:
         semantic_output: "executor-visible mayProject=false until route pool and default pool are both empty"
         status: partial
         note: "TS is a consumer only on this edge. It may not infer global no-provider from forwarder empty or ordinary route exhaustion while a default-pool last provider remains."
+
+  - chain_id: vr.online_diagnostics.mainline
+    summary: "Virtual Router online diagnostics: HTTP/CLI thin shells call Rust VR status/dry-run contracts; Rust alone expands routes, forwarders, default-floor state, and unavailable-provider explanations."
+    entry_contract:
+      node: VrDiag01StatusSnapshot
+      owner_doc: docs/goals/virtual-router-online-diagnostics-plan.md
+    edges:
+      - step_id: vrd-01
+        from_node: VrDiag01StatusSnapshot
+        to_node: VrDiag02DryRunInput
+        caller_symbol: get_status
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+        callee_symbol: diagnose_route
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+        owner_feature_id: vr.online_diagnostics
+        semantic_input: "current Rust VR routing, health, forwarder, and request metadata snapshot"
+        semantic_output: "read-only diagnostic input and route-state snapshot without host-side recomputation"
+        status: anchored
+      - step_id: vrd-02
+        from_node: VrDiag02DryRunInput
+        to_node: VrDiag03DryRunDecision
+        caller_symbol: diagnose_route
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+        callee_symbol: route
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+        owner_feature_id: vr.online_diagnostics
+        semantic_input: "diagnostic request sample plus metadataCenterSnapshot"
+        semantic_output: "selected route/provider or structured provider-unavailable explanation from Rust VR truth"
+        status: anchored
+      - step_id: vrd-03
+        from_node: VrDiag03DryRunDecision
+        to_node: ServerRespOutbound05ClientFrame
+        caller_symbol: diagnoseRoute
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts
+        callee_symbol: registerHttpRoutes
+        callee_file: src/server/runtime/http-server/routes.ts
+        owner_feature_id: vr.online_diagnostics
+        semantic_input: "Rust-produced diagnostic JSON"
+        semantic_output: "HTTP/CLI projected diagnostic JSON; no TS route/health/default-floor recomputation"
+        status: anchored
 
   - chain_id: runtime.lifecycle.mainline
     summary: "Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
@@ -759,7 +872,7 @@ chains:
       - step_id: mtc-05
         from_node: MetaReq05ProviderObservationProjected
         to_node: MetaResp06ResponseObserved
-        caller_symbol: persistResponsesConversationLifecycleAtChatProcessExitWithinCore
+        caller_symbol: convertProviderResponse
         caller_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
         callee_symbol: readMetadataCenterRequestTruth
         callee_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
@@ -783,8 +896,8 @@ chains:
       - step_id: mtc-07
         from_node: MetaResp07BridgeMetadataBound
         to_node: MetaResp07ServertoolContextProjected
-        caller_symbol: runProviderResponseRustHubPipeline
-        caller_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+        caller_symbol: runServertoolResponseStageOrchestrationShell
+        caller_file: sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts
         callee_symbol: readRuntimeControlFromBoundMetadataCenter
         callee_file: sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts
         owner_feature_id: hub.metadata_center_mainline

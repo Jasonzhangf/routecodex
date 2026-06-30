@@ -46,7 +46,7 @@ async function main() {
   const restores = [setEnv('HOME', home), setEnv('RCC_HOME', path.join(home, '.rcc')), setEnv('ROUTECODEX_SESSION_DIR', sessionDir), setEnv('ROUTECODEX_SNAPSHOT', '0'), setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'), setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', '15000'), setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', '3')];
   const servers = [];
   try {
-    const traffic = await import('../../dist/server/runtime/http-server/provider-traffic-governor.js'); traffic.resetSharedProviderTrafficGovernorForTests?.();
+    await import('../../dist/modules/traffic-governor/index.js');
     const { RouteCodexHttpServer } = await import('../../dist/server/runtime/http-server/index.js');
     const { handleResponses } = await import('../../dist/server/handlers/responses-handler.js');
     let primaryHits = 0; let backupHits = 0;
@@ -60,7 +60,7 @@ async function main() {
     const app = express(); app.use(express.json({ limit: '2mb' }));
     app.post('/v1/responses', (req, res) => handleResponses(req, res, { executePipeline: (input) => routeCodex.executePortAwarePipeline(5555, input), errorHandling: routeCodex.errorHandling }));
     const harness = await listen(http.createServer(app)); servers.push(harness.server);
-    const res = await fetch(`${harness.baseUrl}/v1/responses`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'gpt-5.3-codex', input: [{ role: 'user', content: [{ type: 'input_text', text: 'direct failover blackbox' }] }], stream: false }) });
+    const res = await fetch(`${harness.baseUrl}/v1/responses`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'gpt-5.3-codex', metadata: { runtime_control: { preselectedRoute: { target: { providerKey: 'primary.gpt-5.3-codex', providerType: 'responses', outboundProfile: 'openai-responses', runtimeKey: 'primary.gpt-5.3-codex', modelId: 'gpt-5.3-codex' }, decision: { routeName: 'thinking', pool: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex'], reasoning: 'thinking:user-input' }, diagnostics: {} } } }, input: [{ role: 'user', content: [{ type: 'input_text', text: 'direct failover blackbox' }] }], stream: false }) });
     const text = await res.text();
     assert.equal(res.status, 200, text);
     assert.match(text, /ok-from-direct-backup/);

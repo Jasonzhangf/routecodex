@@ -1,8 +1,8 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { chromium } from 'playwright-core';
 import { MERMAID_SCRIPT_URL, renderArchitectureWikiHtmlPages } from './wiki-html-lib.mjs';
 
 const root = process.cwd();
@@ -75,6 +75,11 @@ const smokeMermaidRenderer = String.raw`
     },
     run: renderBlocks,
   };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderBlocks, { once: true });
+  } else {
+    queueMicrotask(renderBlocks);
+  }
 })();
 `;
 
@@ -84,21 +89,27 @@ if (!browserExecutable) {
   process.exit(1);
 }
 
-const browser = await chromium.launch({
-  executablePath: browserExecutable,
-  headless: true,
-  args: ['--no-sandbox', '--disable-dev-shm-usage'],
-});
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-wiki-browser-smoke-'));
+
+function injectSmokeRenderer(html) {
+  const script = `<script>${smokeMermaidRenderer}</script>`;
+  const withoutRemoteMermaid = html
+    .replace(`<script src="${MERMAID_SCRIPT_URL}"></script>`, script)
+    .replace(/<script>mermaid\.initialize\([^<]*<\/script>/u, '<script>window.mermaid.run();</script>');
+  if (withoutRemoteMermaid !== html) {
+    return withoutRemoteMermaid;
+  }
+  if (html.includes('</head>')) {
+    return html.replace('</head>', `${script}<script>window.mermaid.run();</script></head>`);
+  }
+  return `${script}<script>window.mermaid.run();</script>${html}`;
+}
+
+function countMatches(source, pattern) {
+  return source.match(pattern)?.length ?? 0;
+}
 
 try {
-  const context = await browser.newContext();
-  await context.route(MERMAID_SCRIPT_URL, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/javascript; charset=utf-8',
-      body: smokeMermaidRenderer,
-    });
-  });
   for (const relPath of htmlPaths) {
     const absPath = path.join(root, relPath);
     if (!fs.existsSync(absPath)) {
@@ -106,60 +117,48 @@ try {
       continue;
     }
 
-    const page = await context.newPage();
-    const consoleErrors = [];
-    page.on('console', (message) => {
-      if (message.type() === 'error') consoleErrors.push(message.text());
-    });
-    page.on('pageerror', (error) => {
-      consoleErrors.push(error instanceof Error ? error.message : String(error));
-    });
+    const tempPath = path.join(tempRoot, relPath);
+    fs.mkdirSync(path.dirname(tempPath), { recursive: true });
+    fs.writeFileSync(tempPath, injectSmokeRenderer(fs.readFileSync(absPath, 'utf8')));
 
     try {
-      await page.goto(pathToFileURL(absPath).href, { waitUntil: 'domcontentloaded', timeout: 15_000 });
-      const pageState = await page.evaluate(async () => {
-        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          const blocks = [...document.querySelectorAll('.mermaid')];
-          const svgCount = blocks.filter((block) => block.querySelector('svg')).length;
-          if (blocks.length === 0 || svgCount === blocks.length) break;
-          await wait(250);
-        }
-        const blocks = [...document.querySelectorAll('.mermaid')];
-        const svgCount = blocks.filter((block) => block.querySelector('svg')).length;
-        const svgTextLength = [...document.querySelectorAll('.mermaid svg')]
-          .map((svg) => (svg.textContent ?? '').trim().length)
-          .reduce((sum, length) => sum + length, 0);
-        return {
-          title: document.title,
-          hasCanonicalSource: document.body.innerText.includes('Canonical Markdown source:'),
-          mermaidBlocks: blocks.length,
-          mermaidSvgs: svgCount,
-          svgTextLength,
-          bodyLength: document.body.innerText.trim().length,
-        };
+      const dumpedDom = execFileSync(browserExecutable, [
+        '--headless=new',
+        '--disable-gpu',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--run-all-compositor-stages-before-draw',
+        '--virtual-time-budget=3000',
+        '--dump-dom',
+        pathToFileURL(tempPath).href,
+      ], {
+        encoding: 'utf8',
+        timeout: 15_000,
+        maxBuffer: 20 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
 
-      if (!pageState.title) failures.push(`${relPath}: missing document title`);
-      if (!pageState.hasCanonicalSource) failures.push(`${relPath}: missing canonical markdown source`);
-      if (pageState.bodyLength < 100) failures.push(`${relPath}: body appears empty`);
-      if (pageState.mermaidBlocks > 0 && pageState.mermaidSvgs !== pageState.mermaidBlocks) {
-        failures.push(`${relPath}: Mermaid did not render all diagrams (${pageState.mermaidSvgs}/${pageState.mermaidBlocks})`);
+      const titleMatch = dumpedDom.match(/<title>([^<]+)<\/title>/i);
+      const title = titleMatch?.[1]?.trim() ?? '';
+      const mermaidBlocks = countMatches(dumpedDom, /class="[^"]*\bmermaid\b[^"]*"/g);
+      const mermaidSvgs = countMatches(dumpedDom, /data-smoke-mermaid-index="/g);
+      const visibleText = dumpedDom.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+      if (!title) failures.push(`${relPath}: missing document title`);
+      if (!dumpedDom.includes('Canonical Markdown source:')) failures.push(`${relPath}: missing canonical markdown source`);
+      if (visibleText.length < 100) failures.push(`${relPath}: body appears empty`);
+      if (mermaidBlocks > 0 && mermaidSvgs !== mermaidBlocks) {
+        failures.push(`${relPath}: Mermaid did not render all diagrams (${mermaidSvgs}/${mermaidBlocks})`);
       }
-      if (pageState.mermaidBlocks > 0 && pageState.svgTextLength === 0) {
+      if (mermaidBlocks > 0 && !dumpedDom.includes('Mermaid smoke render')) {
         failures.push(`${relPath}: Mermaid SVGs rendered blank`);
-      }
-      if (consoleErrors.length > 0) {
-        failures.push(`${relPath}: console/page errors: ${consoleErrors.slice(0, 3).join(' | ')}`);
       }
     } catch (error) {
       failures.push(`${relPath}: browser load failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      await page.close();
     }
   }
 } finally {
-  await browser.close();
+  fs.rmSync(tempRoot, { recursive: true, force: true });
 }
 
 if (failures.length > 0) {

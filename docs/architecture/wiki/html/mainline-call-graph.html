@@ -311,7 +311,7 @@
         <tr><td>rct-03</td><td><code>ChatProcReqContinuation03CanonicalRestored -&gt; ChatProcReqContinuation04HookRestored</code></td><td>anchored</td><td><code>buildCapturedRelayResumeRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshot</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-04</td><td><code>ChatProcReqContinuation04HookRestored -&gt; ChatProcReqContinuation05Governed</code></td><td>anchored</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-05</td><td><code>ChatProcReqContinuation05Governed -&gt; ChatProcRespContinuation06ResponseGoverned</code></td><td>partial</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; projectResponsesClientPayloadForClientNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
-        <tr><td>rct-06</td><td><code>ChatProcRespContinuation06ResponseGoverned -&gt; ChatProcRespContinuation07CanonicalSaved</code></td><td>anchored</td><td><code>persistResponsesConversationLifecycleAtChatProcessExitWithinCore -&gt; recordResponsesResponse</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-06</td><td><code>ChatProcRespContinuation06ResponseGoverned -&gt; ChatProcRespContinuation07CanonicalSaved</code></td><td>anchored</td><td><code>convertProviderResponse -&gt; recordResponsesResponse</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-07</td><td><code>ChatProcRespContinuation07CanonicalSaved -&gt; ChatProcRespContinuation08Released</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; releaseMetadataCenterForHttpResponse</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         </tbody>
         </table>
@@ -332,6 +332,45 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>dbg-01</td><td><code>DebugObs01SurfaceRequested -&gt; DebugObs07ReplayedOrInspected</code></td><td>anchored</td><td><code>createDebugToolkit -&gt; createDebugToolkit</code></td><td></td><td><code>debug.unified_surface</code>&lt;br/&gt;debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy</td></tr>
+        </tbody>
+        </table>
+        <h2>internal_error_numbering.mainline</h2>
+        <p>RouteCodex-owned internal debug errors are assigned stable <code>500-1xx/2xx/3xx</code> codes, projected only to debug artifacts, linked to external errors without wrapping them, and guarded from default client/provider payload leakage.</p>
+        <p>Entry contract: <code>IntErrNum01SourceObserved</code> via <code>docs/architecture/wiki/internal-error-numbering-mainline-source.md</code></p>
+        <pre class="mermaid">flowchart LR
+          IntErrNum07ClientBoundaryPreserved[&quot;IntErrNum07ClientBoundaryPreserved&quot;]
+          IntErrNum06ExternalLinked[&quot;IntErrNum06ExternalLinked&quot;]
+          IntErrNum05DebugArtifactProjected[&quot;IntErrNum05DebugArtifactProjected&quot;]
+          IntErrNum04EnvelopeBuilt[&quot;IntErrNum04EnvelopeBuilt&quot;]
+          IntErrNum03SubcodeAssigned[&quot;IntErrNum03SubcodeAssigned&quot;]
+          IntErrNum02ModuleBlockResolved[&quot;IntErrNum02ModuleBlockResolved&quot;]
+          IntErrNum01SourceObserved[&quot;IntErrNum01SourceObserved&quot;]
+          IntErrNum01SourceObserved --&gt;|ien-01| IntErrNum02ModuleBlockResolved
+          IntErrNum02ModuleBlockResolved --&gt;|ien-02| IntErrNum03SubcodeAssigned
+          IntErrNum03SubcodeAssigned --&gt;|ien-03| IntErrNum04EnvelopeBuilt
+          IntErrNum04EnvelopeBuilt --&gt;|ien-04| IntErrNum05DebugArtifactProjected
+          IntErrNum05DebugArtifactProjected --&gt;|ien-05| IntErrNum06ExternalLinked
+          IntErrNum06ExternalLinked --&gt;|ien-06| IntErrNum07ClientBoundaryPreserved
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class IntErrNum01SourceObserved anchored;
+          class IntErrNum02ModuleBlockResolved anchored;
+          class IntErrNum03SubcodeAssigned anchored;
+          class IntErrNum04EnvelopeBuilt anchored;
+          class IntErrNum05DebugArtifactProjected anchored;
+          class IntErrNum06ExternalLinked anchored;
+          class IntErrNum07ClientBoundaryPreserved anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>ien-01</td><td><code>IntErrNum01SourceObserved -&gt; IntErrNum02ModuleBlockResolved</code></td><td>anchored</td><td><code>observeInternalDebugErrorSource -&gt; resolveInternalDebugErrorModuleBlock</code></td><td></td><td><code>debug.internal_error_numbering</code>&lt;br/&gt;Internal debug error numbering registry and envelope construction for RouteCodex-owned <code>500-1xx/2xx/3xx</code> side-channel errors, with external errors linked but never wrapped</td></tr>
+        <tr><td>ien-02</td><td><code>IntErrNum02ModuleBlockResolved -&gt; IntErrNum03SubcodeAssigned</code></td><td>anchored</td><td><code>resolveInternalDebugErrorModuleBlock -&gt; assignInternalDebugErrorSubcode</code></td><td></td><td><code>debug.internal_error_numbering</code>&lt;br/&gt;Internal debug error numbering registry and envelope construction for RouteCodex-owned <code>500-1xx/2xx/3xx</code> side-channel errors, with external errors linked but never wrapped</td></tr>
+        <tr><td>ien-03</td><td><code>IntErrNum03SubcodeAssigned -&gt; IntErrNum04EnvelopeBuilt</code></td><td>anchored</td><td><code>assignInternalDebugErrorSubcode -&gt; buildInternalDebugErrorEnvelope</code></td><td></td><td><code>debug.internal_error_numbering</code>&lt;br/&gt;Internal debug error numbering registry and envelope construction for RouteCodex-owned <code>500-1xx/2xx/3xx</code> side-channel errors, with external errors linked but never wrapped</td></tr>
+        <tr><td>ien-04</td><td><code>IntErrNum04EnvelopeBuilt -&gt; IntErrNum05DebugArtifactProjected</code></td><td>anchored</td><td><code>buildInternalDebugErrorEnvelope -&gt; projectInternalDebugErrorToDebugArtifact</code></td><td></td><td><code>debug.internal_error_numbering</code>&lt;br/&gt;Internal debug error numbering registry and envelope construction for RouteCodex-owned <code>500-1xx/2xx/3xx</code> side-channel errors, with external errors linked but never wrapped</td></tr>
+        <tr><td>ien-05</td><td><code>IntErrNum05DebugArtifactProjected -&gt; IntErrNum06ExternalLinked</code></td><td>anchored</td><td><code>projectInternalDebugErrorToDebugArtifact -&gt; linkExternalError</code></td><td></td><td><code>debug.internal_error_numbering</code>&lt;br/&gt;Internal debug error numbering registry and envelope construction for RouteCodex-owned <code>500-1xx/2xx/3xx</code> side-channel errors, with external errors linked but never wrapped</td></tr>
+        <tr><td>ien-06</td><td><code>IntErrNum06ExternalLinked -&gt; IntErrNum07ClientBoundaryPreserved</code></td><td>anchored</td><td><code>linkExternalError -&gt; preserveInternalErrorClientBoundary</code></td><td></td><td><code>debug.internal_error_numbering</code>&lt;br/&gt;Internal debug error numbering registry and envelope construction for RouteCodex-owned <code>500-1xx/2xx/3xx</code> side-channel errors, with external errors linked but never wrapped</td></tr>
         </tbody>
         </table>
         <h2>error.mainline</h2>
@@ -394,6 +433,33 @@
         <tr><td>vra-02</td><td><code>VrAvail02PoolFiltered -&gt; VrAvail03DefaultFloorEvaluated</code></td><td>anchored</td><td><code>build_provider_not_available_error -&gt; evaluate_singleton_route_pool_exhaustion</code></td><td></td><td><code>vr.route_availability_floor</code>&lt;br/&gt;route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td></tr>
         <tr><td>vra-03</td><td><code>VrAvail03DefaultFloorEvaluated -&gt; VrAvail04PrimaryExhaustedPlanned</code></td><td>anchored</td><td><code>resolvePrimaryExhaustedPlan -&gt; planPrimaryExhaustedToDefaultPoolNative</code></td><td></td><td><code>virtual_router.primary_exhausted_to_default_pool</code>&lt;br/&gt;primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td></tr>
         <tr><td>vra-04</td><td><code>VrAvail04PrimaryExhaustedPlanned -&gt; ErrorErr05ExecutionDecision</code></td><td>partial</td><td><code>executeRouterDirectPipelineForPort -&gt; resolveDefaultTierAvailableForErrorErr05</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
+        </tbody>
+        </table>
+        <h2>vr.online_diagnostics.mainline</h2>
+        <p>Virtual Router online diagnostics: HTTP/CLI thin shells call Rust VR status/dry-run contracts; Rust alone expands routes, forwarders, default-floor state, and unavailable-provider explanations.</p>
+        <p>Entry contract: <code>VrDiag01StatusSnapshot</code> via <code>docs/goals/virtual-router-online-diagnostics-plan.md</code></p>
+        <pre class="mermaid">flowchart LR
+          ServerRespOutbound05ClientFrame[&quot;ServerRespOutbound05ClientFrame&quot;]
+          VrDiag03DryRunDecision[&quot;VrDiag03DryRunDecision&quot;]
+          VrDiag02DryRunInput[&quot;VrDiag02DryRunInput&quot;]
+          VrDiag01StatusSnapshot[&quot;VrDiag01StatusSnapshot&quot;]
+          VrDiag01StatusSnapshot --&gt;|vrd-01| VrDiag02DryRunInput
+          VrDiag02DryRunInput --&gt;|vrd-02| VrDiag03DryRunDecision
+          VrDiag03DryRunDecision --&gt;|vrd-03| ServerRespOutbound05ClientFrame
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class VrDiag01StatusSnapshot anchored;
+          class VrDiag02DryRunInput anchored;
+          class VrDiag03DryRunDecision anchored;
+          class ServerRespOutbound05ClientFrame anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>vrd-01</td><td><code>VrDiag01StatusSnapshot -&gt; VrDiag02DryRunInput</code></td><td>anchored</td><td><code>get_status -&gt; diagnose_route</code></td><td></td><td><code>vr.online_diagnostics</code>&lt;br/&gt;Virtual Router online status and dry-run route diagnostics stay Rust-owned</td></tr>
+        <tr><td>vrd-02</td><td><code>VrDiag02DryRunInput -&gt; VrDiag03DryRunDecision</code></td><td>anchored</td><td><code>diagnose_route -&gt; route</code></td><td></td><td><code>vr.online_diagnostics</code>&lt;br/&gt;Virtual Router online status and dry-run route diagnostics stay Rust-owned</td></tr>
+        <tr><td>vrd-03</td><td><code>VrDiag03DryRunDecision -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>diagnoseRoute -&gt; registerHttpRoutes</code></td><td></td><td><code>vr.online_diagnostics</code>&lt;br/&gt;Virtual Router online status and dry-run route diagnostics stay Rust-owned</td></tr>
         </tbody>
         </table>
         <h2>runtime.lifecycle.mainline</h2>
@@ -535,9 +601,9 @@
         <tr><td>mtc-02-result</td><td><code>MetaReq02TruthMaterialized -&gt; MetaReq03ContinuationAttached</code></td><td>anchored</td><td><code>attachResponsesRequestContextToResultForHttp -&gt; writeContinuationContext</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         <tr><td>mtc-03</td><td><code>MetaReq03ContinuationAttached -&gt; MetaReq04RuntimeControlBound</code></td><td>anchored</td><td><code>finalizeRequestExecutorAttemptMetadata -&gt; finalizeRequestExecutorAttemptMetadata</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         <tr><td>mtc-04</td><td><code>MetaReq04RuntimeControlBound -&gt; MetaReq05ProviderObservationProjected</code></td><td>anchored</td><td><code>resolveRequestExecutorPipelineAttempt -&gt; resolveRequestExecutorPipelineAttempt</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
-        <tr><td>mtc-05</td><td><code>MetaReq05ProviderObservationProjected -&gt; MetaResp06ResponseObserved</code></td><td>anchored</td><td><code>persistResponsesConversationLifecycleAtChatProcessExitWithinCore -&gt; readMetadataCenterRequestTruth</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-05</td><td><code>MetaReq05ProviderObservationProjected -&gt; MetaResp06ResponseObserved</code></td><td>anchored</td><td><code>convertProviderResponse -&gt; readMetadataCenterRequestTruth</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07BridgeMetadataBound</code></td><td>anchored</td><td><code>buildBridgeAdapterContext -&gt; readRuntimeServerToolProjection</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
-        <tr><td>mtc-07</td><td><code>MetaResp07BridgeMetadataBound -&gt; MetaResp07ServertoolContextProjected</code></td><td>anchored</td><td><code>runProviderResponseRustHubPipeline -&gt; readRuntimeControlFromBoundMetadataCenter</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-07</td><td><code>MetaResp07BridgeMetadataBound -&gt; MetaResp07ServertoolContextProjected</code></td><td>anchored</td><td><code>runServertoolResponseStageOrchestrationShell -&gt; readRuntimeControlFromBoundMetadataCenter</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         <tr><td>mtc-08</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         </tbody>
         </table>

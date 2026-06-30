@@ -26,6 +26,7 @@ describe('router-direct failure snapshots', () => {
       requestId,
       payload,
       entryEndpoint,
+      entryPort: 4444,
       providerKey,
       providerId,
       metadata: { sessionId: 'router-direct-failure-snapshot' },
@@ -39,6 +40,7 @@ describe('router-direct failure snapshots', () => {
         statusCode: 520,
       }),
       entryEndpoint,
+      entryPort: 4444,
       providerKey,
       providerId,
       metadata: { sessionId: 'router-direct-failure-snapshot' },
@@ -51,6 +53,7 @@ describe('router-direct failure snapshots', () => {
       requestId,
       data: payload,
       entryEndpoint,
+      entryPort: 4444,
       providerKey,
       providerId,
     }));
@@ -58,6 +61,7 @@ describe('router-direct failure snapshots', () => {
       phase: 'provider-response',
       requestId,
       entryEndpoint,
+      entryPort: 4444,
       providerKey,
       providerId,
       forceLocalDiskWriteWhenDisabled: true,
@@ -78,6 +82,7 @@ describe('router-direct failure snapshots', () => {
       payload: { model: 'deepseek-v4-flash' },
       error: new Error('HTTP 400: upstream provider error'),
       entryEndpoint: '/v1/chat/completions',
+      entryPort: 4444,
       providerKey: 'XL-deepseek.key1.deepseek-v4-flash',
       providerId: 'XL-deepseek',
       requestCaptured: false,
@@ -86,10 +91,12 @@ describe('router-direct failure snapshots', () => {
     expect(writeProviderSnapshotMock).toHaveBeenCalledTimes(2);
     expect(writeProviderSnapshotMock.mock.calls[0]?.[0]).toMatchObject({
       phase: 'provider-request',
+      entryPort: 4444,
       forceLocalDiskWriteWhenDisabled: true,
     });
     expect(writeProviderSnapshotMock.mock.calls[1]?.[0]).toMatchObject({
       phase: 'provider-response',
+      entryPort: 4444,
       forceLocalDiskWriteWhenDisabled: true,
     });
   });

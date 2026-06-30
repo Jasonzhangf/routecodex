@@ -39,7 +39,12 @@ const HTTP_RESPONSE_METADATA_RELEASE_WRITER = {
 };
 function bindInternalStateCarrier(target, center) {
     Reflect.set(target, METADATA_CENTER_SYMBOL, center);
-    target.__metadataCenter = center.snapshot();
+    Object.defineProperty(target, '__metadataCenter', {
+        configurable: true,
+        enumerable: false,
+        value: center.snapshot(),
+        writable: true,
+    });
 }
 function transitionSlotStatus(args) {
     if (METADATA_CENTER_STATUS_ORDER[args.previous.status] >= METADATA_CENTER_STATUS_ORDER[args.status]) {

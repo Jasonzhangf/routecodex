@@ -1,6 +1,61 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { beforeAll, describe, expect, it } from '@jest/globals';
+import { beforeAll, describe, expect, it, jest } from '@jest/globals';
+
+const mockBridgeModule = {
+  loadRoutingInstructionStateSync: jest.fn(() => null),
+  saveRoutingInstructionStateAsync: jest.fn(async () => undefined),
+  saveRoutingInstructionStateSync: jest.fn(() => undefined),
+  extractSessionIdentifiersFromMetadata: jest.fn(() => ({})),
+  extractContinuationContextSessionIdentifiersFromMetadata: jest.fn(() => ({})),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
+  captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
+  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
+  syncReasoningStopModeFromRequest: jest.fn(() => 'off'),
+  sanitizeFollowupText: jest.fn(async (raw: unknown) => (typeof raw === 'string' ? raw : '')),
+  createSnapshotRecorder: jest.fn(async () => ({ record: () => undefined })),
+  convertProviderResponse: jest.fn(async () => ({ body: { ok: true } })),
+  writeSnapshotViaHooks: jest.fn(async () => undefined),
+  preloadCriticalBridgeRuntimeModules: jest.fn(async () => ({ loaded: [] })),
+  resumeResponsesConversation: jest.fn(async () => ({ payload: {}, meta: {} })),
+  resumeLatestResponsesContinuationByScope: jest.fn(async () => null),
+  createResponsesSseToJsonConverter: jest.fn(async () => ({ convertSseToJson: async () => ({}) })),
+  resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
+  reprojectDirectChatToolCallStreamForHttp: jest.fn(async () => undefined),
+  reportProviderErrorToRouterPolicy: jest.fn(async (event: unknown) => event),
+  reportProviderSuccessToRouterPolicy: jest.fn(async (event: unknown) => event),
+  bootstrapVirtualRouterConfig: jest.fn(),
+  getHubPipelineCtor: jest.fn(),
+  getHubPipelineCtorForImpl: jest.fn(),
+  resolveBaseDir: jest.fn(),
+  mapChatToolsToBridgeJson: jest.fn(async () => []),
+  buildAnthropicResponseFromChatJson: jest.fn(async () => ({})),
+  injectMcpToolsForChatJson: jest.fn(async () => []),
+  injectMcpToolsForResponsesJson: jest.fn(async () => []),
+  deriveFinishReasonNative: jest.fn(() => undefined),
+  importCoreDist: jest.fn(async () => ({}))
+};
+
+const mockNativeExportsModule = {
+  getRouterHotpathJsonBindingSync: jest.fn(() => undefined),
+  resolveProviderResponseRequestSemanticsNative: jest.fn(() => undefined),
+  resolveEntryProtocolFromEndpointNative: jest.fn(() => 'openai-responses'),
+  evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => undefined),
+  planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => undefined),
+  normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => (Array.isArray(value) ? value : [])),
+  mergeObservedRoutePoolChainNative: jest.fn((current: unknown, explicit: unknown) => {
+    const currentList = Array.isArray(current) ? current : [];
+    const explicitList = Array.isArray(explicit) ? explicit : [];
+    return currentList.length > 0 ? currentList : explicitList;
+  }),
+  resolveProviderRetryExecutionPolicyNative: jest.fn(() => undefined),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined)
+};
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => mockBridgeModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.ts', () => mockBridgeModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => mockNativeExportsModule);
 
 const ROOT = process.cwd();
 const REQUEST_EXECUTOR_PATH = path.join(ROOT, 'src/server/runtime/http-server/request-executor.ts');
@@ -72,13 +127,23 @@ describe('request-executor metadata center contract', () => {
   it('captures Responses request context from Chat Process snapshot instead of handler-owned capture', () => {
     const metadata: Record<string, unknown> = {
       routecodexRoutingPolicyGroup: 'gateway_priority_5555',
-      entryPort: 5555,
+      portScope: '5555',
       contextSnapshot: {
         input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
         toolsRaw: [{ type: 'function', name: 'exec_command' }]
       }
     };
     const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth(
+      'portScope',
+      '4444',
+      {
+        module: 'test',
+        symbol: 'captures Responses request context from Chat Process snapshot instead of handler-owned capture',
+        stage: 'test'
+      },
+      'test conflicting port scope'
+    );
     center.writeRequestTruth(
       'requestId',
       'req_chatprocess_capture_1',
@@ -145,7 +210,7 @@ describe('request-executor metadata center contract', () => {
   it('captures Responses request context from original request payload when no debug context snapshot exists', () => {
     const metadata: Record<string, unknown> = {
       routecodexRoutingPolicyGroup: 'gateway_priority_5555',
-      entryPort: 5555
+      portScope: '5555'
     };
     const center = MetadataCenter.attach(metadata);
     center.writeRequestTruth(
@@ -193,9 +258,72 @@ describe('request-executor metadata center contract', () => {
         toolsRaw: tools
       },
       sessionId: 'sess_payload_capture_1',
+      matchedPort: 5555,
       providerKey: 'provider.key.model',
       entryKind: 'responses',
+      routingPolicyGroup: 'gateway_priority_5555'
+    });
+  });
+
+  it('reads matchedPort from raw metadata port fields instead of MetadataCenter request truth', () => {
+    const metadata: Record<string, unknown> = {
+      entryPort: 5555,
       matchedPort: 5555,
+      routecodexLocalPort: 5555,
+      localPort: 5555,
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555'
+    };
+    const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth(
+      'requestId',
+      'req_no_port_scope_capture_1',
+      {
+        module: 'test',
+        symbol: 'ignores flat metadata port fields when requestTruth.portScope is absent',
+        stage: 'test'
+      },
+      'test request id'
+    );
+    center.writeRequestTruth(
+      'portScope',
+      '4444',
+      {
+        module: 'test',
+        symbol: 'reads matchedPort from raw metadata port fields instead of MetadataCenter request truth',
+        stage: 'test'
+      },
+      'test conflicting port scope'
+    );
+    center.writeRequestTruth(
+      'sessionId',
+      'sess_no_port_scope_capture_1',
+      {
+        module: 'test',
+        symbol: 'reads matchedPort from raw metadata port fields instead of MetadataCenter request truth',
+        stage: 'test'
+      },
+      'test session id'
+    );
+
+    const args = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry({
+      input: {
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_no_port_scope_capture_1',
+        body: {
+          model: 'gpt-5.5',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
+        }
+      },
+      metadata,
+      providerKey: 'provider.key.model'
+    });
+
+    expect(args).toMatchObject({
+      requestId: 'req_no_port_scope_capture_1',
+      sessionId: 'sess_no_port_scope_capture_1',
+      matchedPort: 5555,
+      providerKey: 'provider.key.model',
+      entryKind: 'responses',
       routingPolicyGroup: 'gateway_priority_5555'
     });
   });

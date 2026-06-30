@@ -1,0 +1,65 @@
+lifecycle_id: internal_error_numbering.mainline
+summary: RouteCodex-owned internal debug errors are assigned stable
+  `500-1xx/2xx/3xx` codes, projected only to debug artifacts, linked to external
+  errors without wrapping them, and guarded from default client/provider payload
+  leakage.
+owner_feature_id: debug.internal_error_numbering
+entrypoint:
+  node_id: IntErrNum01SourceObserved
+  wiki_page: docs/architecture/wiki/internal-error-numbering-mainline-source.md
+  call_map_chain_id: internal_error_numbering.mainline
+node_ids:
+  - IntErrNum01SourceObserved
+  - IntErrNum02ModuleBlockResolved
+  - IntErrNum03SubcodeAssigned
+  - IntErrNum04EnvelopeBuilt
+  - IntErrNum05DebugArtifactProjected
+  - IntErrNum06ExternalLinked
+  - IntErrNum07ClientBoundaryPreserved
+edges:
+  - step_id: ien-01
+    from_node: IntErrNum01SourceObserved
+    to_node: IntErrNum02ModuleBlockResolved
+    status: anchored
+    owner_feature_id: debug.internal_error_numbering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: ien-02
+    from_node: IntErrNum02ModuleBlockResolved
+    to_node: IntErrNum03SubcodeAssigned
+    status: anchored
+    owner_feature_id: debug.internal_error_numbering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: ien-03
+    from_node: IntErrNum03SubcodeAssigned
+    to_node: IntErrNum04EnvelopeBuilt
+    status: anchored
+    owner_feature_id: debug.internal_error_numbering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: ien-04
+    from_node: IntErrNum04EnvelopeBuilt
+    to_node: IntErrNum05DebugArtifactProjected
+    status: anchored
+    owner_feature_id: debug.internal_error_numbering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: ien-05
+    from_node: IntErrNum05DebugArtifactProjected
+    to_node: IntErrNum06ExternalLinked
+    status: anchored
+    owner_feature_id: debug.internal_error_numbering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: ien-06
+    from_node: IntErrNum06ExternalLinked
+    to_node: IntErrNum07ClientBoundaryPreserved
+    status: anchored
+    owner_feature_id: debug.internal_error_numbering
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

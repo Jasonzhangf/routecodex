@@ -20,7 +20,18 @@ describe('server responses SSE business module contract', () => {
     expect(sseTransport).toContain('export function shouldDropClientSseFrameForHttp(');
 
     for (const forbiddenLocalDefinition of [
+      'async function streamResponsesJsonAsSse(',
+      'async function streamChatCompletionsJsonAsSse(',
+      'async function dispatchResponsesJsonAsSse(',
       'function inspectResponsesTerminalStateFromSseChunk(',
+      'function hasResponsesTerminalSseMarker(',
+      'sawTerminalEvent',
+      'terminalScanBuffer',
+      'function buildStructuredSseErrorPayloadForHttp(',
+      'function extractStructuredSseErrorPayload(',
+      'function sendStructuredSseError(',
+      'structured_error_passthrough',
+      'function buildTransportLocalSseErrorPayload(',
       'function buildResponsesTerminalSseFramesFromProbe(',
       'function planResponsesStreamEndRepair(',
       'function shouldRequireResponsesTerminalEvent(',
@@ -66,11 +77,24 @@ describe('server responses SSE business module contract', () => {
     expect(responseLifecycleBridge).not.toContain(
       'finishReason: resolveResponsesClientPayloadFinishReasonForHttp(normalizedPayload)'
     );
+    expect(responseLifecycleBridge).not.toContain('buildResponsesSseErrorPayloadForHttp');
+    expect(responseLifecycleBridge).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
+    expect(responseLifecycleBridge).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
     expect(handler).not.toContain('preparedResponsesJsonSseDispatch?.finishReason');
     expect(handler).not.toContain('bridgePlan.finishReason');
     expect(handler).not.toContain('sseCloseoutFinishReason');
     expect(handler).not.toContain('args.logResponseCompleted({');
     expect(handler).not.toContain('releaseMetadataCenterForHttpResponse(');
+    expect(handler).not.toContain('buildResponsesSseErrorPayloadForHttp');
+    expect(handler).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
+    expect(handler).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
+    expect(bridge).not.toContain('createResponsesJsonToSseConverterForHttp');
+    expect(bridge).not.toContain('createChatJsonToSseConverterForHttp');
+    expect(bridge).not.toContain('buildResponsesPayloadFromChatForHttp');
+    expect(bridge).not.toContain('prepareResponsesJsonBodyForSseBridgeForHttp');
+    expect(bridge).not.toContain('buildResponsesSseErrorPayloadForHttp');
+    expect(bridge).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
+    expect(bridge).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
   });
 
   it('locks SSE owner docs and gate wiring to the dedicated business module', () => {

@@ -33,6 +33,7 @@ export function registerBasicCommands(
     port: {
       defaultPort: number;
       createSpinner: (text: string) => Promise<Spinner>;
+      fetch: typeof fetch;
       findListeningPids: (port: number) => number[];
       killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
       sleep: (ms: number) => Promise<void>;

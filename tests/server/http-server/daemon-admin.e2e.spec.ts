@@ -285,6 +285,10 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(stats.body).toHaveProperty('session');
       expect(stats.body).toHaveProperty('historical');
       expect(stats.body).toHaveProperty('totals');
+      expect(stats.body).toHaveProperty('tokenStats');
+      expect(stats.body.tokenStats).toHaveProperty('alltime');
+      expect(stats.body.tokenStats).toHaveProperty('daily');
+      expect(stats.body.tokenStats).toHaveProperty('providers');
 
       const creds = await getJson(baseUrl, '/daemon/credentials', cookie);
       expect(creds.status).toBe(200);

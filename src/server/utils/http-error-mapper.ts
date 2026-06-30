@@ -1,3 +1,5 @@
+import { projectSseErrorEventPayloadNative } from '../../modules/llmswitch/bridge.js';
+
 export interface HttpErrorPayload {
   status: number;
   body: {
@@ -70,6 +72,12 @@ export function isEarlyProjectionBlockedError(error: unknown): boolean {
       && (error as { code?: unknown }).code === 'EARLY_PROJECTION_BLOCKED');
 }
 export type ErrorErr06ClientProjected = HttpErrorPayload;
+
+export type SseErrorEventPayload = {
+  type: 'error';
+  status: number;
+  error: HttpErrorPayload['body']['error'];
+};
 
 const CLIENT_DISCONNECT_PUBLIC_CODE = 'CLIENT_DISCONNECTED';
 
@@ -414,6 +422,22 @@ export function project_error_err_06_client_from_error_err_05_execution_decision
   return mapErrorToHttp(decision);
 }
 
+export function projectSseErrorEventPayload(args: {
+  requestId: string;
+  status: number;
+  message: string;
+  code: string;
+  error?: Record<string, unknown>;
+}): SseErrorEventPayload {
+  return projectSseErrorEventPayloadNative({
+    requestId: args.requestId,
+    status: args.status,
+    message: args.message,
+    code: args.code,
+    error: args.error,
+  }) as SseErrorEventPayload;
+}
+
 
 export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): string {
   let projected: HttpErrorPayload;
@@ -721,4 +745,4 @@ function normalizeErrorPayload(err: unknown): RawErrorPayload {
   return { message: String(err ?? 'Unknown error') };
 }
 
-export default { mapErrorToHttp };
+export default { mapErrorToHttp, projectSseErrorEventPayload };

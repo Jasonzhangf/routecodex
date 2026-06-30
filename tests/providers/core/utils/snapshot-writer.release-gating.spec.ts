@@ -79,6 +79,7 @@ describe('snapshot writer release gating', () => {
         requestId,
         clientRequestId: requestId,
         entryEndpoint: '/v1/responses',
+        entryPort: 5555,
         providerKey: 'mimo.key1.mimo-v2.5-pro',
         data: { input: [{ role: 'user', content: 'hello' }] },
         forceLocalDiskWriteWhenDisabled: true
@@ -88,6 +89,7 @@ describe('snapshot writer release gating', () => {
         requestId,
         clientRequestId: requestId,
         entryEndpoint: '/v1/responses',
+        entryPort: 5555,
         providerKey: 'mimo.key1.mimo-v2.5-pro',
         data: { status: 'completed', output_text: '' },
         forceLocalDiskWriteWhenDisabled: true
@@ -96,14 +98,16 @@ describe('snapshot writer release gating', () => {
       const requestPath = path.join(
         tempDir,
         'openai-responses',
-        'mimo.key1.mimo-v2.5-pro',
+        'ports',
+        '5555',
         requestId,
         'provider-request.json'
       );
       const responsePath = path.join(
         tempDir,
         'openai-responses',
-        'mimo.key1.mimo-v2.5-pro',
+        'ports',
+        '5555',
         requestId,
         'provider-response.json'
       );

@@ -18,6 +18,7 @@ import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.j
 import type { ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import type { ServerStatusV2 } from './types.js';
 import { installPortLogConsoleRouter } from './port-log-context.js';
+import { getTokenStatsSnapshot } from './executor/token-stats-store.js';
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
@@ -76,13 +77,17 @@ export async function initializeHttpServer(server: any): Promise<void> {
         return key ? store.loadSync(key) : null;
       },
       getManagerDaemon: () => server.managerDaemon,
-      getHubPipeline: () => server.hubPipeline,
+      getHubPipeline: (routingPolicyGroup?: string) =>
+        typeof server.resolveHubPipelineForRoutingPolicyGroup === 'function'
+          ? server.resolveHubPipelineForRoutingPolicyGroup(routingPolicyGroup)
+          : server.hubPipeline,
       getVirtualRouterArtifacts: () => server.currentRouterArtifacts,
       getUserConfig: () => server.userConfig,
       getStatsSnapshot: () => ({
         session: server.stats.snapshot(Math.round(process.uptime() * 1000)),
         historical: server.stats.snapshotHistorical(),
-        periods: server.stats.snapshotHistoricalPeriods()
+        periods: server.stats.snapshotHistoricalPeriods(),
+        tokenStats: getTokenStatsSnapshot()
       }),
       getPortRegistry: () => server.getPortRegistry(),
       getPortConfigs: () => server.getPortConfigs(),

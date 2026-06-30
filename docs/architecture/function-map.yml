@@ -26,7 +26,6 @@ owners:
       - src/providers
       - src/server
     required_tests:
-      - tests/sharedmodule/servertool-pending-session.spec.ts
       - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - tests/red-tests/hub_pipeline_reasoning_tool_parser_shell_deleted.test.ts
@@ -36,101 +35,6 @@ owners:
     notes:
       - "Rust owns orchestration semantics; TS only bridge/reentry/IO."
       - "Zero-consumer TS reasoning tool parser shell must stay physically deleted; native reasoning tool extraction is exposed through the text-markup native wrapper owner."
-
-  - feature_id: hub.servertool_pending_session
-    status: active
-    summary: "servertool pending-session store and pending injection persist planning"
-    owner_kind: rust_ssot
-    owner_scope: "servertool pending-session store and pending injection persist planning"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs
-    canonical_types:
-      - PendingServerToolInjectionPlan
-      - PendingInjectionPersistPlan
-      - PendingInjectionPersistErrorPlan
-      - PendingSessionLoadPlan
-    canonical_builders:
-      - resolve_pending_file_name
-      - resolve_pending_max_age_ms
-      - plan_pending_session_save
-      - plan_pending_session_load
-      - plan_pending_injection_persist
-      - plan_pending_injection_persist_error
-    allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/pending-session.ts
-      - sharedmodule/llmswitch-core/src/servertool/pending-injection-block.ts
-      - tests/sharedmodule/servertool-pending-session.spec.ts
-      - tests/servertool/pending-session.spec.ts
-      - tests/servertool/pending-injection-block.spec.ts
-      - docs
-    forbidden_paths:
-      - src/providers
-      - src/server/runtime/http-server/executor
-      - sharedmodule/llmswitch-core/src/servertool/handlers
-    required_tests:
-      - tests/sharedmodule/servertool-pending-session.spec.ts
-      - tests/servertool/pending-session.spec.ts
-      - tests/servertool/pending-injection-block.spec.ts
-    required_gates:
-      - npm run verify:servertool-rust-only
-      - npm run verify:function-map-compile-gate
-    migration_target: rust
-    notes:
-      - "servertool-core owns pending file-name sanitization, max-age parsing/defaulting, save/load payload coercion, stale/malformed/drop decisions, pending injection session dedupe, persist record planning, and persistence error envelope construction."
-      - "TS pending-session may only consume explicit runtime workdir/sessionDir input and execute file IO using native plans; do not recover session identity from env/top-level fallback."
-      - "TS pending-injection-block may only call native persist/error planners and execute save IO."
-      - "Do not restore local max-age parsing, segment sanitization, payload coercion, stale/malformed drop policy, aliasSessionIds dedupe, pending injection payload construction, or `SERVERTOOL_PENDING_INJECTION_FAILED` envelope assembly in TS."
-
-  - feature_id: hub.servertool_pre_command_hooks
-    status: active
-    summary: "servertool pre-command hook config and rule normalization"
-    owner_kind: rust_ssot
-    owner_scope: "servertool pre-command hook config and runtime-rule normalization"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
-    canonical_types:
-      - PreCommandHooksConfigPlanInput
-      - PreCommandHooksConfigPlan
-      - PreCommandHookRulePlan
-      - PreCommandRegexPlan
-      - RuntimePreCommandRulePlanInput
-      - PreCommandHookAttemptInput
-      - PreCommandHookAttemptPlan
-      - PreCommandHookCompletionInput
-      - PreCommandHookCompletionPlan
-    canonical_builders:
-      - plan_pre_command_hooks_config
-      - plan_runtime_pre_command_rule
-      - plan_pre_command_hook_attempt
-      - plan_pre_command_hook_completion
-    allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts
-      - tests/servertool/pre-command-hooks.spec.ts
-      - docs
-    forbidden_paths:
-      - src/providers
-      - src/server/runtime/http-server/executor
-      - sharedmodule/llmswitch-core/src/servertool/handlers
-    required_tests:
-      - tests/servertool/pre-command-hooks.spec.ts
-    required_gates:
-      - npm run verify:servertool-rust-only
-      - npm run verify:function-map-compile-gate
-    migration_target: rust
-    notes:
-      - "servertool-core owns pre-command config enable/disable, hook rule normalization, hook id sanitization, tool-set default/dedupe/normalize, regex source/flags planning and matching, timeout clamp/default, priority parsing, runtime pre-command rule planning, hook attempt skip/execute planning, and completion trace planning."
-      - "TS pre-command-hooks may only read config/env/cache and execute explicit jq/shell/runtime script IO from native plans."
-      - "Do not restore local normalize/sanitize/timeout/priority/tool-set policy, regex materialization/matching, hook miss/match/error trace construction, or attempt/completion branching in TS."
 
   - feature_id: hub.servertool_engine_selection
     status: active
@@ -472,11 +376,11 @@ owners:
     canonical_types:
       - ServertoolDispatchSpecMismatchErrorInput
       - ServertoolInvalidMixedClientToolsOutcomeErrorInput
-      - ServertoolMissingFollowupContractErrorInput
+      - ServertoolMissingExecutionContractErrorInput
     canonical_builders:
       - plan_servertool_dispatch_spec_mismatch_error
       - plan_servertool_invalid_mixed_client_tools_outcome_error
-      - plan_servertool_missing_followup_contract_error
+      - plan_servertool_missing_execution_contract_error
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
@@ -496,7 +400,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Rust owns dispatch mismatch and missing followup error planning."
+      - "Rust owns dispatch mismatch and missing execution-contract error planning."
 
   - feature_id: hub.servertool_execution_handler_contract
     status: active
@@ -1480,6 +1384,51 @@ owners:
       - "Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets."
       - "HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy."
 
+  - feature_id: vr.online_diagnostics
+    status: active
+    summary: "Virtual Router online status and dry-run route diagnostics stay Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped Rust owner for Virtual Router online route/tier/forwarder/default-pool status plus dry-run decision and provider-unavailable explanation"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+    canonical_types:
+      - VrDiag01StatusSnapshot
+      - VrDiag02DryRunInput
+      - VrDiag03DryRunDecision
+      - VrDiag04ErrorExplain
+    canonical_builders:
+      - route_pool_status_snapshot
+      - build_dry_run_decision
+      - parse_virtual_router_error_for_diagnostics
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - src/server/runtime/http-server/routes.ts
+      - src/cli/commands/port.ts
+      - tests/sharedmodule
+      - tests/cli
+      - docs
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - src/client
+      - sharedmodule/llmswitch-core/src/router
+    required_tests:
+      - tests/sharedmodule/virtual-router-online-diagnostics.spec.ts
+      - tests/server/runtime/http-server/virtual-router-diagnostics.spec.ts
+      - tests/cli/port-command.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:vr-no-ts-runtime
+      - npm run verify:vr-forwarder-runtime
+    migration_target: rust
+    notes:
+      - "Rust VR must produce route/tier/forwarder/default-pool status, dry-run decisions, and provider-unavailable blocker explanations."
+      - "TS HTTP/CLI may only call native diagnostics and project the returned JSON; it must not recalculate route queues, forwarder expansion, default floor, health/cooldown, or candidate blockers."
+      - "Dry-run must be non-mutating: no load-balancer pointer movement, no health/routing-state/sticky/cooldown/provider stats writes, and no persistence."
+
   - feature_id: hub.metadata_boundary
     status: active
     summary: "internal metadata carrier isolation from normal request, provider wire, and client response payloads"
@@ -2402,6 +2351,67 @@ owners:
       - "This feature is the M0 governance shell only; runtime implementation still remains distributed until M1-M9 land. Do not treat this registration as runtime closeout."
       - "diag is not synonymous with runtime diagnostics: error diag artifacts move under src/debug/diag, while VR/Hub/provider runtime diagnostics stay with their existing runtime owners."
       - "usage inline `diag=` rendering belongs to the logger submodule migration only; do not use debug consolidation to rewrite timing semantics or runtime decision fields."
+
+  - feature_id: debug.internal_error_numbering
+    status: active
+    summary: "Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped"
+    owner_kind: ts_runtime_owner
+    owner_scope: "Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped"
+    owner_module: src/debug/internal-error
+    canonical_types:
+      - InternalDebugErrorCode
+      - InternalErrorCodeRegistryEntry
+      - InternalDebugErrorEnvelope
+      - ExternalErrorLink
+    canonical_builders:
+      - createInternalDebugErrorRegistry
+      - resolveInternalDebugErrorCode
+      - buildInternalDebugErrorEnvelope
+      - projectInternalDebugErrorToDebugArtifact
+      - linkExternalError
+    allowed_paths:
+      - src/debug/internal-error
+      - src/debug/diag/error-artifact.ts
+      - src/debug/index.ts
+      - scripts/architecture/verify-internal-error-numbering.mjs
+      - tests/debug/internal-error-numbering.registry.spec.ts
+      - tests/debug/internal-error-numbering.envelope.spec.ts
+      - tests/debug/internal-error-numbering.external-boundary.spec.ts
+      - tests/debug/internal-error-numbering.leak-gate.spec.ts
+      - tests/architecture/internal-error-numbering-mainline.spec.ts
+      - docs/architecture/wiki/internal-error-numbering-mainline-source.md
+      - docs/architecture/mainline-manifests/internal-error-numbering.mainline.yml
+      - docs/architecture/manifests/internal_error_numbering.mainline.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/goals/internal-error-numbering-debug-system-plan.md
+    forbidden_paths:
+      - src/providers
+      - src/server/utils/http-error-mapper.ts
+      - src/server/handlers
+      - sharedmodule/llmswitch-core
+    forbidden_mentions_allowlist:
+      - ExternalErrorLink
+    required_tests:
+      - tests/debug/internal-error-numbering.registry.spec.ts
+      - tests/debug/internal-error-numbering.envelope.spec.ts
+      - tests/debug/internal-error-numbering.external-boundary.spec.ts
+      - tests/debug/internal-error-numbering.leak-gate.spec.ts
+      - tests/architecture/internal-error-numbering-mainline.spec.ts
+    required_gates:
+      - npm run verify:internal-error-numbering
+      - npm run verify:debug-unified-surface
+      - npm run verify:error-pipeline-contract
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:architecture-mainline-node-id-consistency
+    migration_target: ts
+    notes:
+      - "Internal `500-*` codes are debug side-channel truth only; they do not replace ErrorErr01-06 policy or ErrorErr06 client projection."
+      - "Request internal codes are `500-1xx`, response internal codes are `500-2xx`, and other RouteCodex internal modules are `500-3xx`."
+      - "External/provider/upstream/client errors are linked through ExternalErrorLink and must not be wrapped as InternalDebugErrorEnvelope."
 
   - feature_id: responses.direct_tool_shape_contract
     status: active
@@ -3355,7 +3365,7 @@ owners:
 
   - feature_id: server.responses_sse_bridge_surface
     status: active
-    summary: "/v1/responses SSE path is an opaque SSE/body handoff facade only: frame write, keepalive, timeout, closeout, and JSON->SSE framing only"
+    summary: "/v1/responses SSE path is an opaque SSE/body handoff facade only: frame write, keepalive, timeout, and closeout only"
     owner_kind: ts_bridge
     owner_scope: "/v1/responses SSE path is an independent transport-only SSE surface: writes frames, manages stream transport, and performs no schema/tool/metadata/terminal business semantics"
     owner_module: src/modules/llmswitch/bridge/responses-sse-bridge.ts
@@ -3363,13 +3373,8 @@ owners:
       - ServerRespOutbound05ClientFrame
     canonical_builders:
       - buildClientSseKeepaliveFrameForHttp
-      - buildResponsesMissingSseBridgeErrorPayloadForHttp
-      - buildResponsesPayloadFromChatForHttp
       - buildResponsesRequestLogContextForHttp
-      - buildResponsesSseErrorPayloadForHttp
-      - buildResponsesStructuredSseErrorPayloadForHttp
       - importResponsesHandlerCoreDist
-      - normalizeChatUsagePayloadForHttp
       - requireResponsesHandlerCoreDist
       - shouldDropClientSseFrameForHttp
     allowed_paths:
@@ -3410,6 +3415,7 @@ owners:
       - "Server handler must not keep local force-SSE JSON bridge payload normalization, sanitize, finish_reason derivation, protocol-hint parsing, or `__sse_responses` dispatch-entry detection; those stay behind the dedicated SSE owner or disappear with TS semantic deletion."
       - "SSE and response bridge surfaces must not alter continuation history or response truth between continuation save and next restore; they may only frame already-finalized client semantic payloads."
       - "If JSON/SSE projection is wrong, fix the Rust response projection owner before server frame writing; do not patch frames in `handler-response-sse.ts` or `responses-sse-bridge.ts`."
+      - "Force-SSE JSON/chat body fallback is physically deleted from handler and SSE bridge; server frame writing must consume a Rust/Hub-produced `sseStream` or fail fast with the missing-stream error path."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
     summary: "/v1/responses response bridge is an opaque continuation/conversation facade only; continuation save truth lives in core Chat Process closeout"
@@ -3420,10 +3426,6 @@ owners:
       - ResponsesResponseLifecycleBridgeFacade
     canonical_builders:
       - rebindResponsesConversationRequestIdForHttp
-      - resolveResponsesConversationClearReasonForHttp
-      - shouldClearResponsesConversationOnClientCloseForHttp
-      - shouldClearResponsesConversationOnFailureForHttp
-      - clearResponsesConversationRequestIdsForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-response-bridge.ts
       - src/server/handlers/handler-response-sse.ts
@@ -3452,6 +3454,7 @@ owners:
       - "Responses continuation/restore/materialize must collapse completed stopless `function_call + function_call_output` pairs into one user-guidance message and keep only the latest guidance; historical stopless tool pairs must never survive into later turns."
       - "Response lifecycle bridge may not clean, convert, or repair saved continuation history after response Chat Process save; any content-changing response governance must complete before save."
       - "Response lifecycle bridge may pass opaque continuation/conversation-store IO and release signals only; control state belongs in MetadataCenter and data-plane truth belongs in canonical response/request store records."
+      - "2026-06-30: removed response bridge-owned chat usage normalization, client-close/failure conversation cleanup policy, relay SSE reprojection helper, and direct chat tool stream reprojection helper; these must not return as TS semantic owners."
   - feature_id: cli.command_surface
     status: active
     summary: "CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics"
@@ -3787,14 +3790,18 @@ owners:
     canonical_builders:
       - project_error_err_06_client_from_error_err_05_execution_decision
       - mapErrorToHttp
+      - projectSseErrorEventPayload
     allowed_paths:
       - src/server/utils/http-error-mapper.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
       - src/server/handlers/handler-utils.ts
       - src/error-handling/route-error-hub.ts
       - tests/server/utils/http-error-mapper-malformed-request.spec.ts
       - tests/server/utils/http-error-mapper-public-leak.spec.ts
       - tests/server/utils/http-error-mapper-tool-validation.spec.ts
       - tests/server/utils/http-error-mapper-timeout.spec.ts
+      - tests/server/utils/http-error-mapper-native-projection.spec.ts
       - tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts
       - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
       - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
@@ -3809,6 +3816,7 @@ owners:
       - tests/server/utils/http-error-mapper-malformed-request.spec.ts
       - tests/server/utils/http-error-mapper-public-leak.spec.ts
       - tests/server/utils/http-error-mapper-timeout.spec.ts
+      - tests/server/utils/http-error-mapper-native-projection.spec.ts
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
     required_gates:
       - npm run verify:error-pipeline-contract

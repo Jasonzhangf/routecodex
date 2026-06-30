@@ -23,6 +23,7 @@ import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-
 import { readRuntimeControlProjection } from '../runtime/http-server/metadata-center/request-truth-readers.js';
 export { sendPipelineResponse } from './handler-response-utils.js';
 import { assertClientResponseHasNoInternalCarriers as assertClientErrorBodyHasNoInternalCarriers } from './handler-response-utils.js';
+import { resolveInternalDebugErrorLogFields } from '../../debug/internal-error/index.js';
 
 const CLIENT_HEADER_DENYLIST = new Set([
   'host',
@@ -40,7 +41,7 @@ const CLIENT_HEADER_DENYLIST = new Set([
   'te'
 ]);
 
-type RequestLogMeta = Record<string, unknown> | undefined;
+type RequestLogMeta = Record<string, unknown> | null | undefined;
 
 const HANDLER_RUNTIME_CONTROL_WRITER = {
   module: 'src/server/handlers/handler-utils.ts',
@@ -87,6 +88,20 @@ function shouldLogHttpErrorMeta(): boolean {
   );
 }
 
+function shouldEmitHttpErrorMeta(args: {
+  rawMeta: RequestLogMeta;
+  fields: { statusCode?: number; errorCode?: string; upstreamCode?: string };
+  publicSummary: string;
+}): boolean {
+  if (!args.rawMeta || !shouldLogHttpErrorMeta()) {
+    return false;
+  }
+  return !(
+    args.fields.statusCode === 429
+    && args.publicSummary === 'Rate limited by upstream provider'
+  );
+}
+
 function parseStatusCodeCandidate(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -116,7 +131,10 @@ function parseFieldFromText(summary: string): {
   errorCode?: string;
   upstreamCode?: string;
 } {
-  const statusMatch = summary.match(/\b(?:HTTP\s+)?(\d{3})\b/i);
+  const statusMatch =
+    summary.match(/\bHTTP\s+(\d{3})\b/i)
+    ?? summary.match(/\bstatus(?:Code)?[=:]\s*(\d{3})\b/i)
+    ?? summary.match(/"(?:status|statusCode)"\s*:\s*(\d{3})\b/i);
   const statusCode = statusMatch
     ? Number.parseInt(statusMatch[1], 10)
     : undefined;
@@ -136,7 +154,10 @@ function parseFieldFromText(summary: string): {
 function extractErrorLogFields(error: unknown, summary: string): {
   statusCode?: number;
   errorCode?: string;
+  internalCode?: string;
   upstreamCode?: string;
+  externalSource?: 'external_transport';
+  reason?: string;
 } {
   if (!error || typeof error !== 'object') {
     return parseFieldFromText(summary);
@@ -158,6 +179,10 @@ function extractErrorLogFields(error: unknown, summary: string): {
     responseData?.error && typeof responseData.error === 'object' && !Array.isArray(responseData.error)
       ? (responseData.error as Record<string, unknown>)
       : undefined;
+  const internalError =
+    bag.internalError && typeof bag.internalError === 'object' && !Array.isArray(bag.internalError)
+      ? (bag.internalError as Record<string, unknown>)
+      : undefined;
 
   const statusCode =
     parseStatusCodeCandidate(bag.statusCode)
@@ -174,6 +199,11 @@ function extractErrorLogFields(error: unknown, summary: string): {
     ?? (typeof bag.errorCode === 'number' ? String(bag.errorCode) : undefined)
     ?? (typeof details?.code === 'number' ? String(details.code) : undefined)
     ?? (typeof responseError?.code === 'number' ? String(responseError.code) : undefined);
+  const internalCode =
+    readTrimmedString(bag.internalCode)
+    ?? readTrimmedString(internalError?.internalCode)
+    ?? (typeof bag.internalCode === 'number' ? String(bag.internalCode) : undefined)
+    ?? (typeof internalError?.internalCode === 'number' ? String(internalError.internalCode) : undefined);
   const upstreamCode =
     readTrimmedString(bag.upstreamCode)
     ?? readTrimmedString(details?.upstreamCode)
@@ -187,13 +217,76 @@ function extractErrorLogFields(error: unknown, summary: string): {
     ?? (typeof responseError?.upstream_code === 'number' ? String(responseError.upstream_code) : undefined);
 
   const fromText = parseFieldFromText(summary);
+  const resolvedErrorCode = errorCode ?? fromText.errorCode;
+  const resolvedUpstreamCode = upstreamCode ?? fromText.upstreamCode;
+  const externalSource = resolveExternalErrorSource({
+    errorCode: resolvedErrorCode,
+    upstreamCode: resolvedUpstreamCode,
+  });
+  const reason = externalSource === 'external_transport'
+    ? resolveExternalTransportReason(error, summary)
+    : undefined;
   return {
     ...(typeof statusCode === 'number'
       ? { statusCode }
       : (typeof fromText.statusCode === 'number' ? { statusCode: fromText.statusCode } : {})),
-    ...(errorCode ? { errorCode } : (fromText.errorCode ? { errorCode: fromText.errorCode } : {})),
-    ...(upstreamCode ? { upstreamCode } : (fromText.upstreamCode ? { upstreamCode: fromText.upstreamCode } : {}))
+    ...(resolvedErrorCode ? { errorCode: resolvedErrorCode } : {}),
+    ...(internalCode ? { internalCode } : {}),
+    ...(resolvedUpstreamCode ? { upstreamCode: resolvedUpstreamCode } : {}),
+    ...(externalSource ? { externalSource } : {}),
+    ...(reason ? { reason } : {})
   };
+}
+
+function resolveExternalErrorSource(args: {
+  errorCode?: string;
+  upstreamCode?: string;
+}): 'external_transport' | undefined {
+  const codes = [args.errorCode, args.upstreamCode]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim().toUpperCase());
+  if (codes.some((code) => [
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'EPIPE',
+    'UND_ERR_SOCKET',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UPSTREAM_STREAM_TERMINATED',
+  ].includes(code))) {
+    return 'external_transport';
+  }
+  return undefined;
+}
+
+function resolveExternalTransportReason(error: unknown, summary: string): string | undefined {
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    const message = readTrimmedString(record.message);
+    if (message) {
+      const parsedMessage = parseJsonErrorMessage(message);
+      return parsedMessage ?? message;
+    }
+  }
+  const summaryMessage =
+    summary.match(/"message"\s*:\s*"([^"]+)"/i)?.[1]
+    ?? summary.match(/\bmessage[=:]\s*([A-Za-z0-9_. -]+)/i)?.[1];
+  return summaryMessage?.trim() || undefined;
+}
+
+function parseJsonErrorMessage(value: string): string | undefined {
+  if (!(value.startsWith('{') && value.endsWith('}'))) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const errorNode = parsed.error && typeof parsed.error === 'object' && !Array.isArray(parsed.error)
+      ? parsed.error as Record<string, unknown>
+      : undefined;
+    return readTrimmedString(errorNode?.message);
+  } catch {
+    return undefined;
+  }
 }
 
 function buildPublicRawErrorMeta(args: {
@@ -308,11 +401,19 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
       ? formatted.text
       : summaryFromRaw;
   const publicSummary = resolvePrimaryErrorLogSummary(error, summary);
-  const fields = extractErrorLogFields(error, summary);
+  const extractedFields = extractErrorLogFields(error, summary);
+  const internalLogFields = resolveInternalDebugErrorLogFields({ error, summary });
+  const fields = {
+    ...extractedFields,
+    ...internalLogFields,
+  };
   const fieldSuffix = [
     typeof fields.statusCode === 'number' ? `status=${fields.statusCode}` : undefined,
     fields.errorCode ? `code=${fields.errorCode}` : undefined,
-    fields.upstreamCode ? `upstreamCode=${fields.upstreamCode}` : undefined
+    fields.internalCode ? `internalCode=${fields.internalCode}` : undefined,
+    fields.upstreamCode ? `upstreamCode=${fields.upstreamCode}` : undefined,
+    fields.externalSource ? `source=${fields.externalSource}` : undefined,
+    fields.reason ? `reason=${JSON.stringify(fields.reason)}` : undefined,
   ]
     .filter((item): item is string => Boolean(item))
     .join(' ');
@@ -320,7 +421,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const timingSuffix = formatRequestTimingSummary(resolvedId, { terminal: true });
   const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${publicSummary}${fieldSuffix ? ` (${fieldSuffix})` : ''}${timingSuffix}`;
   console.error(colorizeRequestLog(line, resolvedId, undefined, { isError: true }) || line);
-  if (rawMeta && shouldLogHttpErrorMeta()) {
+  if (rawMeta && shouldEmitHttpErrorMeta({ rawMeta, fields, publicSummary })) {
     const publicRawMeta = buildPublicRawErrorMeta({
       rawMeta,
       fields,

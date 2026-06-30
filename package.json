@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.3299",
+  "version": "0.90.3339",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -86,6 +86,7 @@
     "verify:provider-failure-ban-blackbox": "node scripts/tests/provider-failure-ban-blackbox.mjs",
     "verify:errorsamples": "node scripts/verify-codex-error-samples.mjs",
     "verify:debug-unified-surface": "node scripts/verify-debug-unified-surface.mjs",
+    "verify:internal-error-numbering": "node scripts/architecture/verify-internal-error-numbering.mjs",
     "verify:finalize-empty-sanitize-errorsample": "node sharedmodule/llmswitch-core/scripts/tests/coverage-finalize-empty-sanitize-errorsample.mjs",
     "verify:architecture": "node scripts/architecture/verify-architecture-templates.mjs",
     "verify:architecture-fallback-denylist": "node scripts/architecture/verify-architecture-fallback-denylist.mjs",
@@ -278,7 +279,6 @@
     "open": "^9.1.0",
     "openai": "^5.23.0",
     "ora": "^9.0.0",
-    "playwright-core": "^1.49.0",
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",

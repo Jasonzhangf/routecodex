@@ -140,6 +140,16 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     'responses handler stream intent'
   );
   center.writeRuntimeControl(
+    'providerProtocol',
+    'openai-responses',
+    {
+      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+      symbol: 'buildResponsesPipelineMetadataForHttp',
+      stage: 'MetaReq04RuntimeControlBound'
+    },
+    'responses handler provider protocol'
+  );
+  center.writeRuntimeControl(
     'clientAbort',
     readClientAbortSignalForHttp(args.clientConnectionState)?.aborted === true,
     {

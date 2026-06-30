@@ -321,6 +321,7 @@ async function createHarnessServer({ userConfig, RouteCodexHttpServer, handleRes
 
 async function postResponses(baseUrl, options = {}) {
   const port = typeof options.port === 'number' ? options.port : undefined;
+  const preselectedRoute = options.preselectedRoute;
   const headers = { 'content-type': 'application/json' };
   if (port) headers['x-rcc-test-port'] = String(port);
   const res = await fetch(`${baseUrl}/v1/responses`, {
@@ -328,6 +329,13 @@ async function postResponses(baseUrl, options = {}) {
     headers,
     body: JSON.stringify({
       model: 'gpt-5.3-codex',
+      ...(preselectedRoute ? {
+        metadata: {
+          runtime_control: {
+            preselectedRoute
+          }
+        }
+      } : {}),
       input: [
         {
           role: 'user',
@@ -444,8 +452,7 @@ async function withScenarioRuntime(options, fn) {
       setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', String(responsesTimeoutMs)),
       setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', String(maxProviderAttempts))
     );
-    const providerTraffic = await import('../../dist/server/runtime/http-server/provider-traffic-governor.js');
-    providerTraffic.resetSharedProviderTrafficGovernorForTests?.();
+    await import('../../dist/modules/traffic-governor/index.js');
     const { RouteCodexHttpServer } = await import('../../dist/server/runtime/http-server/index.js');
     const { handleResponses } = await import('../../dist/server/handlers/responses-handler.js');
     const { __requestExecutorTestables } = await import('../../dist/server/runtime/http-server/request-executor.js');
@@ -484,6 +491,21 @@ async function run503Scenario() {
   return withScenarioRuntime({ maxProviderAttempts: 3, responsesTimeoutMs: 15000 }, async (ctx) => {
     let primaryHits = 0;
     let backupHits = 0;
+    const preselectedRoute = {
+      target: {
+        providerKey: 'primary.gpt-5.3-codex',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'primary.gpt-5.3-codex',
+        modelId: 'gpt-5.3-codex'
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex'],
+        reasoning: 'thinking:user-input'
+      },
+      diagnostics: {}
+    };
 
     const primaryUpstream = ctx.trackServer(
       await createMockUpstream({
@@ -513,25 +535,25 @@ async function run503Scenario() {
       })
     );
 
-    const first = await postResponses(firstServer.httpHarness.baseUrl);
+    const first = await postResponses(firstServer.httpHarness.baseUrl, { preselectedRoute });
     assert.equal(first.status, 200);
     assert.match(first.body, /ok-from-backup-503/);
     assert.equal(primaryHits, 1);
     assert.equal(backupHits, 1);
 
-    const second = await postResponses(firstServer.httpHarness.baseUrl);
+    const second = await postResponses(firstServer.httpHarness.baseUrl, { preselectedRoute });
     assert.equal(second.status, 200);
     assert.match(second.body, /ok-from-backup-503/);
     assert.equal(primaryHits, 2);
     assert.equal(backupHits, 2);
 
-    const thirdBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl);
+    const thirdBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl, { preselectedRoute });
     assert.equal(thirdBeforeRestart.status, 200);
     assert.match(thirdBeforeRestart.body, /ok-from-backup-503/);
     assert.equal(primaryHits, 3);
     assert.equal(backupHits, 3);
 
-    const fourthBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl);
+    const fourthBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl, { preselectedRoute });
     assert.equal(fourthBeforeRestart.status, 200);
     assert.match(fourthBeforeRestart.body, /ok-from-backup-503/);
     assert.equal(primaryHits, 3, 'fourth request should bypass runtime-cooled primary');
@@ -577,7 +599,7 @@ async function run503Scenario() {
       })
     );
 
-    const third = await postResponses(secondServer.httpHarness.baseUrl);
+    const third = await postResponses(secondServer.httpHarness.baseUrl, { preselectedRoute });
     assert.equal(third.status, 200);
     assert.match(third.body, /ok-from-backup-503/);
     assert.equal(primaryHits - beforeRestartPrimaryHits, 1);
@@ -603,6 +625,21 @@ async function run502Scenario() {
   return withScenarioRuntime({ maxProviderAttempts: 6, responsesTimeoutMs: 40000 }, async (ctx) => {
     let primaryHits = 0;
     let backupHits = 0;
+    const preselectedRoute = {
+      target: {
+        providerKey: 'primary.gpt-5.3-codex',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'primary.gpt-5.3-codex',
+        modelId: 'gpt-5.3-codex'
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex'],
+        reasoning: 'thinking:user-input'
+      },
+      diagnostics: {}
+    };
 
     const primaryUpstream = ctx.trackServer(
       await createMockUpstream({
@@ -632,7 +669,7 @@ async function run502Scenario() {
       })
     );
 
-    const first = await postResponses(server.httpHarness.baseUrl);
+    const first = await postResponses(server.httpHarness.baseUrl, { preselectedRoute });
     assert.equal(first.status, 200, 'first request should recover after 3 internal 502 failures');
     assert.match(first.body, /ok-from-backup-502/);
     assert.equal(primaryHits, 3, 'first request should hit primary three times before threshold cooldown trips');
@@ -644,7 +681,7 @@ async function run502Scenario() {
       : undefined;
     assert.ok(primaryStateAfterFirst, '502 scenario should mark primary in health state after threshold cooldown');
 
-    const second = await postResponses(server.httpHarness.baseUrl);
+    const second = await postResponses(server.httpHarness.baseUrl, { preselectedRoute });
     assert.equal(second.status, 200, 'second request should skip cooled-down primary and go straight to backup');
     assert.match(second.body, /ok-from-backup-502/);
     assert.equal(primaryHits, 3, 'second request must not hit primary again after 3 consecutive 502 failures');
@@ -669,6 +706,21 @@ async function runAuthQuotaScenario({ label, status, code, marker }) {
   return withScenarioRuntime({ maxProviderAttempts: 3, responsesTimeoutMs: 15000 }, async (ctx) => {
     let primaryHits = 0;
     let backupHits = 0;
+    const preselectedRoute = {
+      target: {
+        providerKey: 'primary.gpt-5.3-codex',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'primary.gpt-5.3-codex',
+        modelId: 'gpt-5.3-codex'
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex'],
+        reasoning: 'thinking:user-input'
+      },
+      diagnostics: {}
+    };
 
     const primaryUpstream = ctx.trackServer(
       await createMockUpstream({
@@ -703,7 +755,7 @@ async function runAuthQuotaScenario({ label, status, code, marker }) {
       })
     );
 
-    const first = await postResponses(server.httpHarness.baseUrl);
+    const first = await postResponses(server.httpHarness.baseUrl, { preselectedRoute });
     assert.equal(
       first.status,
       200,
@@ -760,32 +812,63 @@ async function runPortIsolationScenario() {
       handleResponses: ctx.handleResponses
     }));
 
-    const aFirst = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
+    const preselectedRouteA = {
+      target: {
+        providerKey: 'primarya.gpt-5.3-codex',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'primarya.gpt-5.3-codex',
+        modelId: 'gpt-5.3-codex'
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: ['primarya.gpt-5.3-codex', 'backupa.gpt-5.3-codex'],
+        reasoning: 'thinking:user-input'
+      },
+      diagnostics: {}
+    };
+    const preselectedRouteB = {
+      target: {
+        providerKey: 'primaryb.gpt-5.3-codex',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'primaryb.gpt-5.3-codex',
+        modelId: 'gpt-5.3-codex'
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: ['primaryb.gpt-5.3-codex', 'backupb.gpt-5.3-codex'],
+        reasoning: 'thinking:user-input'
+      },
+      diagnostics: {}
+    };
+
+    const aFirst = await postResponses(server.httpHarness.baseUrl, { port: 5555, preselectedRoute: preselectedRouteA });
     assert.equal(aFirst.status, 200, 'port 5555 should recover within group A');
     assert.match(aFirst.body, /ok-from-backup-a/);
     assert.deepEqual(hits, { primarya: 1, backupa: 1, primaryb: 0, backupb: 0 }, 'port 5555 must not see group B pool');
 
-    const aSecond = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
+    const aSecond = await postResponses(server.httpHarness.baseUrl, { port: 5555, preselectedRoute: preselectedRouteA });
     assert.equal(aSecond.status, 200, 'second 503 in group A should still probe primarya before backup');
     assert.match(aSecond.body, /ok-from-backup-a/);
     assert.deepEqual(hits, { primarya: 2, backupa: 2, primaryb: 0, backupb: 0 }, 'group A should accumulate runtime-only failures locally');
 
-    const aThird = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
+    const aThird = await postResponses(server.httpHarness.baseUrl, { port: 5555, preselectedRoute: preselectedRouteA });
     assert.equal(aThird.status, 200, 'third 503 in group A should still recover within the same request');
     assert.match(aThird.body, /ok-from-backup-a/);
     assert.deepEqual(hits, { primarya: 3, backupa: 3, primaryb: 0, backupb: 0 }, 'third group A request should trip runtime cooldown after the request');
 
-    const bFirst = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
+    const bFirst = await postResponses(server.httpHarness.baseUrl, { port: 6666, preselectedRoute: preselectedRouteB });
     assert.equal(bFirst.status, 200, 'port 6666 should route within group B');
     assert.match(bFirst.body, /ok-from-primary-b/);
     assert.deepEqual(hits, { primarya: 3, backupa: 3, primaryb: 1, backupb: 0 }, 'group A runtime cooldown must not affect group B');
 
-    const aFourth = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
+    const aFourth = await postResponses(server.httpHarness.baseUrl, { port: 5555, preselectedRoute: preselectedRouteA });
     assert.equal(aFourth.status, 200, 'fourth group A request should skip runtime-cooled primarya');
     assert.match(aFourth.body, /ok-from-backup-a/);
     assert.deepEqual(hits, { primarya: 3, backupa: 4, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after local runtime cooldown');
 
-    const bSecond = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
+    const bSecond = await postResponses(server.httpHarness.baseUrl, { port: 6666, preselectedRoute: preselectedRouteB });
     assert.equal(bSecond.status, 200, 'group B should remain unaffected after group A cooldown is active');
     assert.match(bSecond.body, /ok-from-primary-b/);
     assert.deepEqual(hits, { primarya: 3, backupa: 4, primaryb: 2, backupb: 0 }, 'group B must remain isolated after group A cooldown');

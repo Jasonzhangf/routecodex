@@ -12,7 +12,6 @@ import {
 import { extractUsageFromResult } from './usage-aggregator.js';
 import { extractStatusCodeFromError } from './utils.js';
 import { resolveSessionLogColorKey } from '../../../../utils/session-log-color.js';
-import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 
 export type HubStageTopEntry = {
@@ -59,6 +58,7 @@ export function buildProviderExecutionSuccessResult(args: {
   routingPoolId?: string;
   finishReason?: string;
   entryPort?: number;
+  projectPath?: string;
   stoplessMode?: 'on' | 'off' | 'endless';
   stoplessArmed?: boolean;
   aggregatedUsage?: Record<string, unknown>;
@@ -70,13 +70,21 @@ export function buildProviderExecutionSuccessResult(args: {
   providerRequestId: string;
   inputRequestId: string;
   mergedMetadata: Record<string, unknown>;
-  readString: (value: unknown) => string | undefined;
+  sessionId?: string;
+  conversationId?: string;
   readHubStageTop: (metadata: Record<string, unknown> | undefined) => HubStageTopEntry[] | undefined;
   readHubDecodeBreakdown: (hubStageTop: HubStageTopEntry[] | undefined) => HubDecodeBreakdown;
 }): PipelineExecutionResult {
   const metadataHubStageTop = args.readHubStageTop(args.mergedMetadata);
   const hubDecodeBreakdown = args.readHubDecodeBreakdown(metadataHubStageTop);
-  const requestTruth = readRuntimeRequestTruthIdentifiers(args.mergedMetadata);
+  const sessionId =
+    typeof args.sessionId === 'string' && args.sessionId.trim()
+      ? args.sessionId.trim()
+      : undefined;
+  const conversationId =
+    typeof args.conversationId === 'string' && args.conversationId.trim()
+      ? args.conversationId.trim()
+      : undefined;
   const decodeStats =
     args.converted.body && typeof args.converted.body === 'object' && !Array.isArray(args.converted.body)
       ? (args.converted.body as Record<string, any>).__rccDecodeStats
@@ -133,15 +141,11 @@ export function buildProviderExecutionSuccessResult(args: {
       tmux_session_id: args.mergedMetadata.tmux_session_id,
       rccSessionClientTmuxSessionId: args.mergedMetadata.rccSessionClientTmuxSessionId,
       rcc_session_client_tmux_session_id: args.mergedMetadata.rcc_session_client_tmux_session_id,
-      sessionId: requestTruth.sessionId,
-      session_id: requestTruth.sessionId,
-      conversationId: requestTruth.conversationId,
-      conversation_id: requestTruth.conversationId,
-      projectPath:
-        args.readString(args.mergedMetadata.clientWorkdir)
-        ?? args.readString(args.mergedMetadata.client_workdir)
-        ?? args.readString(args.mergedMetadata.workdir)
-        ?? args.readString(args.mergedMetadata.cwd),
+      sessionId,
+      session_id: sessionId,
+      conversationId,
+      conversation_id: conversationId,
+      projectPath: args.projectPath,
       firstContentAtMs: rccFirstContentAtMs,
       lastContentAtMs: rccLastContentAtMs,
       providerRequestId: args.providerRequestId,

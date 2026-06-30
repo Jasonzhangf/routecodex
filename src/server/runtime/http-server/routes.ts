@@ -9,6 +9,7 @@ import { resolveReportedRouteErrorHttpResponse } from '../../handlers/handler-ut
 import { isLocalRequest, registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import type { ServerConfigV2 } from './types.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
+import type { TokenStatsSnapshot } from './executor/token-stats-store.js';
 import { buildInfo } from '../../../build-info.js';
 import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger.js';
 import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context.js';
@@ -25,7 +26,7 @@ function logRoutesNonBlockingError(stage: string, error: unknown, details?: Reco
   }
 }
 
-function readVirtualRouterRuntimeStatus(hubPipeline: unknown): unknown | null {
+function readVirtualRouterRuntime(hubPipeline: unknown): Record<string, unknown> | null {
   if (!hubPipeline || typeof hubPipeline !== 'object') {
     return null;
   }
@@ -37,11 +38,35 @@ function readVirtualRouterRuntimeStatus(hubPipeline: unknown): unknown | null {
   if (!virtualRouter || typeof virtualRouter !== 'object') {
     return null;
   }
-  const getStatus = (virtualRouter as { getStatus?: () => unknown }).getStatus;
+  return virtualRouter as Record<string, unknown>;
+}
+
+function readVirtualRouterRuntimeStatus(hubPipeline: unknown): unknown | null {
+  const virtualRouter = readVirtualRouterRuntime(hubPipeline);
+  if (!virtualRouter) {
+    return null;
+  }
+  const getStatus = virtualRouter.getStatus;
   if (typeof getStatus !== 'function') {
     return null;
   }
   return getStatus.call(virtualRouter);
+}
+
+function readVirtualRouterRuntimeDryRun(
+  hubPipeline: unknown,
+  request: Record<string, unknown>,
+  metadata: Record<string, unknown>
+): unknown | null {
+  const virtualRouter = readVirtualRouterRuntime(hubPipeline);
+  if (!virtualRouter) {
+    return null;
+  }
+  const diagnoseRoute = virtualRouter.diagnoseRoute;
+  if (typeof diagnoseRoute !== 'function') {
+    return null;
+  }
+  return diagnoseRoute.call(virtualRouter, request, metadata);
 }
 
 interface RouteOptions {
@@ -64,6 +89,7 @@ interface RouteOptions {
     session: StatsSnapshot;
     historical: HistoricalStatsSnapshot;
     periods?: HistoricalPeriodsSnapshot;
+    tokenStats: TokenStatsSnapshot;
   };
   restartRuntimeFromDisk?: () => Promise<{
     reloadedAt: number;
@@ -81,14 +107,22 @@ interface RouteOptions {
 }
 
 function resolvePortScopedHubPipeline(req: Request, options: RouteOptions): unknown | null {
+  return resolvePortScopedHubPipelineContext(req, options).hubPipeline;
+}
+
+function resolvePortScopedHubPipelineContext(req: Request, options: RouteOptions): {
+  hubPipeline: unknown | null;
+  localPort?: number;
+  routingPolicyGroup?: string;
+} {
   const getHubPipeline = typeof options.getHubPipeline === 'function' ? options.getHubPipeline : undefined;
   if (!getHubPipeline) {
-    return null;
+    return { hubPipeline: null };
   }
   const localPort = typeof req.socket?.localPort === 'number' ? req.socket.localPort : undefined;
   const getPortConfigs = typeof options.getPortConfigs === 'function' ? options.getPortConfigs : undefined;
   if (!getPortConfigs || typeof localPort !== 'number') {
-    return getHubPipeline();
+    return { hubPipeline: getHubPipeline(), localPort };
   }
   const portConfigs = getPortConfigs();
   const matchedPort = Array.isArray(portConfigs)
@@ -105,7 +139,11 @@ function resolvePortScopedHubPipeline(req: Request, options: RouteOptions): unkn
     && typeof (matchedPort as Record<string, unknown>).routingPolicyGroup === 'string'
       ? String((matchedPort as Record<string, unknown>).routingPolicyGroup).trim()
       : '';
-  return routingPolicyGroup ? getHubPipeline(routingPolicyGroup) : getHubPipeline();
+  return {
+    hubPipeline: routingPolicyGroup ? getHubPipeline(routingPolicyGroup) : getHubPipeline(),
+    localPort,
+    routingPolicyGroup: routingPolicyGroup || undefined
+  };
 }
 
 type ModelListItem = {
@@ -452,16 +490,81 @@ export function registerHttpRoutes(options: RouteOptions): void {
       return;
     }
     try {
-      const hubPipeline = resolvePortScopedHubPipeline(req, options);
+      const { hubPipeline, localPort, routingPolicyGroup } = resolvePortScopedHubPipelineContext(req, options);
       const virtualRouter = readVirtualRouterRuntimeStatus(hubPipeline);
       res.status(200).json({
         ok: true,
         serverId: typeof options.getServerId === 'function' ? options.getServerId() : `${config.server.host}:${config.server.port}`,
+        localPort,
+        routingPolicyGroup,
         virtualRouter
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'virtual_router_diagnostics_failed' } });
+    }
+  });
+
+  app.get('/_routecodex/diagnostics/virtual-router/status', (req: Request, res: Response) => {
+    if (!isLocalRequest(req)) {
+      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+      return;
+    }
+    try {
+      const { hubPipeline, localPort, routingPolicyGroup } = resolvePortScopedHubPipelineContext(req, options);
+      const virtualRouter = readVirtualRouterRuntimeStatus(hubPipeline);
+      res.status(200).json({
+        ok: true,
+        serverId: typeof options.getServerId === 'function' ? options.getServerId() : `${config.server.host}:${config.server.port}`,
+        localPort,
+        routingPolicyGroup,
+        virtualRouter
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'virtual_router_diagnostics_failed' } });
+    }
+  });
+
+  app.post('/_routecodex/diagnostics/virtual-router/dry-run', (req: Request, res: Response) => {
+    if (!isLocalRequest(req)) {
+      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+      return;
+    }
+    try {
+      const body = isRecord(req.body) ? req.body as Record<string, unknown> : null;
+      const request = body && isRecord(body.request) ? body.request as Record<string, unknown> : null;
+      const metadata = body && isRecord(body.metadata) ? body.metadata as Record<string, unknown> : null;
+      if (!request || !metadata) {
+        res.status(400).json({
+          error: {
+            message: 'request and metadata are required',
+            code: 'bad_request'
+          }
+        });
+        return;
+      }
+      const { hubPipeline, localPort, routingPolicyGroup } = resolvePortScopedHubPipelineContext(req, options);
+      const diagnostics = readVirtualRouterRuntimeDryRun(hubPipeline, request, metadata);
+      if (!diagnostics) {
+        res.status(500).json({
+          error: {
+            message: 'VirtualRouter.diagnoseRoute is not available',
+            code: 'virtual_router_dry_run_unavailable'
+          }
+        });
+        return;
+      }
+      res.status(200).json({
+        ok: true,
+        serverId: typeof options.getServerId === 'function' ? options.getServerId() : `${config.server.host}:${config.server.port}`,
+        localPort,
+        routingPolicyGroup,
+        diagnostics
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'virtual_router_dry_run_failed' } });
     }
   });
 
@@ -583,16 +686,26 @@ export function registerHttpRoutes(options: RouteOptions): void {
         : null),
     getConfigPath: () => (typeof config?.configPath === 'string' && config.configPath.trim() ? config.configPath : null),
     getExpectedApiKey: () => config?.server?.apikey,
-    getStatsSnapshot: () => {
-      const now = Date.now();
-      return typeof options.getStatsSnapshot === 'function'
-        ? options.getStatsSnapshot()
-        : {
+      getStatsSnapshot: () => {
+        const now = Date.now();
+        return typeof options.getStatsSnapshot === 'function'
+          ? options.getStatsSnapshot()
+          : {
           session: { generatedAt: now, uptimeMs: 0, totals: [] },
           historical: { generatedAt: now, snapshotCount: 0, sampleCount: 0, totals: [] },
-          periods: { generatedAt: now, daily: [], weekly: [], monthly: [] }
+          periods: { generatedAt: now, daily: [], weekly: [], monthly: [] },
+          tokenStats: {
+            alltime: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cacheReadTokens: 0 },
+            daily: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cacheReadTokens: 0 },
+            dailyDate: [
+              new Date(now).getFullYear(),
+              String(new Date(now).getMonth() + 1).padStart(2, '0'),
+              String(new Date(now).getDate()).padStart(2, '0')
+            ].join('-'),
+            providers: []
+          }
         };
-    },
+      },
     restartRuntimeFromDisk: options.restartRuntimeFromDisk,
     getPortRegistry: typeof options.getPortRegistry === 'function' ? options.getPortRegistry as any : undefined,
     getPortConfigs: typeof options.getPortConfigs === 'function' ? options.getPortConfigs as any : undefined,

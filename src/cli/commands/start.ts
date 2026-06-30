@@ -131,7 +131,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
     .option('--snap-off', 'Disable snapshot capture')
     .option('--verbose-errors', 'Print verbose error stacks in console output')
     .option('--quiet-errors', 'Silence detailed error stacks')
-    .option('--restart', 'Restart if an instance is already running (default: on)', true)
+    .option('--restart', 'Restart if an instance is already running')
     .option('--no-restart', 'Do not restart when an instance is already running')
     .option('--exclusive', 'Always take over the port (kill existing listeners)')
     .action(async (options: StartCommandOptions) => {
@@ -331,9 +331,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
         };
 
-        // Ensure port state aligns with requested behavior.
-        // Default behavior is takeover/restart; pass --no-restart for legacy non-disruptive mode.
-        const shouldRestart = options.restart !== false || options.exclusive === true;
+        // Plain start is non-disruptive; only explicit restart/exclusive may stop an existing server.
+        const shouldRestart = options.restart === true || options.exclusive === true;
         const grouped = hasMultiPortConfig
           ? resolvedPortGroup
           : (ctx.isDevPackage

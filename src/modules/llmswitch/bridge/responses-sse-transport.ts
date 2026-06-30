@@ -1,4 +1,4 @@
-import { createResponsesJsonToSseConverter } from './runtime-integrations.js';
+import { updateResponsesContractProbeFromSseChunkNative } from './native-exports.js';
 
 export function buildClientSseKeepaliveFrameForHttp(_entryEndpoint?: string): string {
   return ': keepalive\n\n';
@@ -11,6 +11,9 @@ export function shouldDropClientSseFrameForHttp(frame: string, entryEndpoint?: s
   );
 }
 
-export async function createResponsesJsonToSseConverterForHttp() {
-  return await createResponsesJsonToSseConverter();
+export function updateResponsesContractProbeFromSseChunkForHttp(
+  chunk: unknown,
+  probe: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  return updateResponsesContractProbeFromSseChunkNative(chunk, probe);
 }

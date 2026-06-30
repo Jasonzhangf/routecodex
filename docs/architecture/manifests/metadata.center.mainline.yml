@@ -64,12 +64,19 @@ edges:
     split_binding_id: null
   - step_id: mtc-06
     from_node: MetaResp06ResponseObserved
-    to_node: MetaResp07ServertoolContextProjected
+    to_node: MetaResp07BridgeMetadataBound
     status: anchored
     owner_feature_id: hub.metadata_center_mainline
     binding_pending: null
     split_binding_id: null
   - step_id: mtc-07
+    from_node: MetaResp07BridgeMetadataBound
+    to_node: MetaResp07ServertoolContextProjected
+    status: anchored
+    owner_feature_id: hub.metadata_center_mainline
+    binding_pending: null
+    split_binding_id: null
+  - step_id: mtc-08
     from_node: MetaResp07ServertoolContextProjected
     to_node: MetaResp08CloseoutReleased
     status: anchored

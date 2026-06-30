@@ -23,6 +23,19 @@ jest.unstable_mockModule('../../src/modules/llmswitch/bridge.js', () => ({
   writeSnapshotViaHooks: writeSnapshotViaHooksMock
 }));
 
+function bindPortScope(metadata: Record<string, unknown>, port: number, symbol: string): Record<string, unknown> {
+  MetadataCenter.attach(metadata).writeRequestTruth(
+    'portScope',
+    String(port),
+    {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol,
+      stage: 'test'
+    }
+  );
+  return metadata;
+}
+
 describe('snapshot default raw + port contract', () => {
   const originalSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
   const originalCompatSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
@@ -68,10 +81,9 @@ describe('snapshot default raw + port contract', () => {
       headers: { 'content-type': 'application/json' },
       body: { input: 'parsed-body-should-not-be-primary-raw' },
       rawBodyText: '{"input":"true-raw-body"}',
-      metadata: {
-        matchedPort: 5555,
+      metadata: bindPortScope({
         stream: false
-      }
+      }, 5555, 'stores client-request raw body text under ports')
     });
 
     const filePath = path.join(
@@ -92,7 +104,7 @@ describe('snapshot default raw + port contract', () => {
       groupRequestId: requestId,
       entryPort: 5555,
       runtimeMetadata: expect.objectContaining({
-        matchedPort: 5555,
+        portScope: '5555',
         stream: false
       })
     }));
@@ -121,10 +133,9 @@ describe('snapshot default raw + port contract', () => {
             description: 'd'.repeat(256)
           }))
         },
-        metadata: {
-          matchedPort: 5555,
+        metadata: bindPortScope({
           stream: true
-        }
+        }, 5555, 'does not collapse oversized client-request payloads')
       });
 
       const filePath = path.join(
@@ -218,9 +229,7 @@ describe('snapshot default raw + port contract', () => {
       headers: { 'content-type': 'application/json' },
       data: { status: 503, code: 'HTTP_503' },
       url: 'https://example.invalid/v1/responses',
-      metadata: {
-        routecodexLocalPort: 5555
-      }
+      metadata: bindPortScope({}, 5555, 'stores provider-error snapshots under ports')
     });
     await __flushProviderSnapshotQueueForTests();
 
@@ -243,7 +252,7 @@ describe('snapshot default raw + port contract', () => {
       providerKey: 'mock.provider',
       entryPort: 5555,
       runtimeMetadata: expect.objectContaining({
-        routecodexLocalPort: 5555
+        portScope: '5555'
       })
     }));
   });
@@ -252,10 +261,14 @@ describe('snapshot default raw + port contract', () => {
     const requestId = 'req_client_request_truth_projection';
     allowSnapshotLocalDiskWrite(requestId);
     const metadata: Record<string, unknown> = {
-      matchedPort: 5555,
       stream: false
     };
     const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth('portScope', '5555', {
+      module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
+      symbol: 'metadata_center_projection_test',
+      stage: 'test'
+    });
     center.writeRequestTruth('sessionId', 'sess-proj-1', {
       module: 'tests/debug/snapshot-default-raw-port-contract.spec.ts',
       symbol: 'metadata_center_projection_test',

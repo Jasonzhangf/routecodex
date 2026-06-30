@@ -259,6 +259,16 @@ export function logProviderRetrySwitchCompact(args: {
   const now = Date.now();
   const providerLabel = args.providerKey || 'unknown-provider';
   const compactReason = truncateReason(args.reason, 96);
+  const externalErrorSource = resolveProviderSwitchExternalErrorSource({
+    errorCode: args.errorCode,
+    upstreamCode: args.upstreamCode,
+  });
+  const shouldPrintReason =
+    Boolean(compactReason)
+    && (
+      !hasMeaningfulStructuredReason(args)
+      || externalErrorSource === 'external_transport'
+    );
   const hasStructuredErrorIdentity =
     typeof args.statusCode === 'number'
     || Boolean(args.errorCode)
@@ -312,12 +322,46 @@ export function logProviderRetrySwitchCompact(args: {
     ...(args.errorCode ? [`code=${args.errorCode}`] : []),
     ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
     ...(typeof args.upstreamStatus === 'number' ? [`upstreamStatus=${args.upstreamStatus}`] : []),
+    ...(externalErrorSource ? [`source=${externalErrorSource}`] : []),
     ...(typeof args.runtimeScopeExcludedCount === 'number' && args.runtimeScopeExcludedCount > 0
       ? [`runtimeScopeExcluded=${args.runtimeScopeExcludedCount}`]
       : []),
-    ...(!hasStructuredErrorIdentity && compactReason ? [`reason=${JSON.stringify(compactReason)}`] : [])
+    ...(shouldPrintReason ? [`reason=${JSON.stringify(compactReason)}`] : [])
   ];
   console.warn(`${retryTag} ${details.join(' ')}`);
+}
+
+function hasMeaningfulStructuredReason(args: {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  upstreamStatus?: number;
+}): boolean {
+  return typeof args.statusCode === 'number'
+    || Boolean(args.errorCode)
+    || Boolean(args.upstreamCode)
+    || typeof args.upstreamStatus === 'number';
+}
+
+function resolveProviderSwitchExternalErrorSource(args: {
+  errorCode?: string;
+  upstreamCode?: string;
+}): 'external_transport' | undefined {
+  const codes = [args.errorCode, args.upstreamCode]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim().toUpperCase());
+  if (codes.some((code) => [
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'EPIPE',
+    'UND_ERR_SOCKET',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UPSTREAM_STREAM_TERMINATED',
+  ].includes(code))) {
+    return 'external_transport';
+  }
+  return undefined;
 }
 
 

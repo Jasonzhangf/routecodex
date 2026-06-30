@@ -228,6 +228,7 @@ function buildSnapshotRuntimeMetadata(
   }
   const projected: Record<string, unknown> = { ...metadata };
   const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
+  const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
   const continuation = MetadataCenter.read(metadata)?.readContinuationContext();
   const runtimeControl = readRuntimeControlProjection(metadata);
 
@@ -236,6 +237,9 @@ function buildSnapshotRuntimeMetadata(
   }
   if (requestTruth.conversationId) {
     projected.conversationId = requestTruth.conversationId;
+  }
+  if (typeof requestTruthPortScope === 'string' && requestTruthPortScope.trim()) {
+    projected.portScope = requestTruthPortScope.trim();
   }
   if (typeof continuation?.continuationOwner === 'string' && continuation.continuationOwner.trim()) {
     projected.continuationOwner = continuation.continuationOwner.trim();

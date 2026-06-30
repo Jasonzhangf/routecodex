@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { redactSensitiveData } from '../../utils/sensitive-redaction.js';
+import type { InternalDebugErrorEnvelope } from '../internal-error/envelope.js';
+import type { ExternalErrorLink } from '../internal-error/external-link.js';
 
 export interface DebugErrorDiagArtifactRecord {
   endpoint: string;
@@ -12,6 +14,8 @@ export interface DebugErrorDiagArtifactRecord {
   status?: number;
   details?: unknown;
   stack?: string;
+  internalError?: InternalDebugErrorEnvelope;
+  externalError?: ExternalErrorLink;
   timestamp: string;
 }
 
@@ -47,6 +51,8 @@ export function buildDebugErrorDiagArtifactRecord(input: {
   requestId: string;
   requestBody: unknown;
   error: unknown;
+  internalError?: InternalDebugErrorEnvelope;
+  externalError?: ExternalErrorLink;
   timestamp?: string;
 }): DebugErrorDiagArtifactRecord {
   const errorShape = toErrorShape(input.error);
@@ -60,6 +66,8 @@ export function buildDebugErrorDiagArtifactRecord(input: {
     status: errorShape.status,
     details: redactSensitiveData(errorShape.details),
     stack: errorShape.stack,
+    ...(input.internalError ? { internalError: redactSensitiveData(input.internalError) as InternalDebugErrorEnvelope } : {}),
+    ...(input.externalError ? { externalError: redactSensitiveData(input.externalError) as ExternalErrorLink } : {}),
     timestamp: input.timestamp ?? new Date().toISOString(),
   };
 }
@@ -69,6 +77,8 @@ export async function writeDebugErrorDiagArtifactInternal(input: {
   requestId: string;
   requestBody: unknown;
   error: unknown;
+  internalError?: InternalDebugErrorEnvelope;
+  externalError?: ExternalErrorLink;
   rootDir?: string;
 }): Promise<string> {
   const rootDir = resolveDiagRoot(input.rootDir);

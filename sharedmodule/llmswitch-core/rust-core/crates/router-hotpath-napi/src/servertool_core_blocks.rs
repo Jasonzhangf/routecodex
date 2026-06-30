@@ -1849,10 +1849,8 @@ mod tests {
         let cli = plan_stopless_orchestration_action_json(
             &json!({
                 "flowId": "stop_message_flow",
-                "execution": {
-                    "flowId": "stop_message_flow",
-                    "context": { "requestTruth": { "sessionId": "sess-cli" } }
-                }
+                "execution": { "flowId": "stop_message_flow" },
+                "requestTruthSessionId": "sess-cli"
             })
             .to_string(),
         )
@@ -1868,10 +1866,10 @@ mod tests {
                 "execution": {
                     "flowId": "stop_message_flow",
                     "context": {
-                        "stopMessageTerminalFinal": true,
-                        "requestTruth": { "sessionId": "sess-term" }
+                        "stopMessageTerminalFinal": true
                     }
-                }
+                },
+                "requestTruthSessionId": "sess-term"
             })
             .to_string(),
         )

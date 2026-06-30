@@ -3,7 +3,6 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot, ProviderStatsView } from '../stats-manager.js';
-import { getTokenStatsSnapshot } from '../executor/token-stats-store.js';
 
 type TokenTotals = {
   requestCount: number;
@@ -50,6 +49,19 @@ export function registerStatsRoutes(app: Application, options: DaemonAdminRouteO
         session: StatsSnapshot;
         historical: HistoricalStatsSnapshot;
         periods?: HistoricalPeriodsSnapshot;
+        tokenStats: {
+          alltime: { promptTokens: number; completionTokens: number; totalTokens: number; cacheReadTokens: number };
+          daily: { promptTokens: number; completionTokens: number; totalTokens: number; cacheReadTokens: number };
+          dailyDate: string;
+          providers: Array<{
+            providerKey: string;
+            model: string;
+            promptTokens: number;
+            completionTokens: number;
+            totalTokens: number;
+            cacheReadTokens: number;
+          }>;
+        };
       };
 
       const sessionTotals = sumTotals(snapshot.session?.totals);
@@ -66,7 +78,7 @@ export function registerStatsRoutes(app: Application, options: DaemonAdminRouteO
           session: sessionTotals,
           historical: historicalTotals
         },
-        tokenStats: getTokenStatsSnapshot()
+        tokenStats: snapshot.tokenStats
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

@@ -30,7 +30,7 @@ async function loadRequestStateModule() {
 }
 
 describe('request-executor-request-state', () => {
-  it('registers request log context from metadata center request truth instead of flat metadata fields', async () => {
+  it('registers request log context from initial metadata request fields', async () => {
     jest.resetModules();
     mockRegisterRequestLogContext.mockReset();
     mockWriteInboundClientSnapshot.mockReset();
@@ -43,24 +43,6 @@ describe('request-executor-request-state', () => {
       conversationId: 'flat-conversation-should-not-win'
     };
     const center = MetadataCenter.attach(metadata);
-    center.writeRequestTruth(
-      'sessionId',
-      'truth-session',
-      {
-        module: 'tests/server/runtime/http-server/executor/request-executor-request-state.spec.ts',
-        symbol: 'registers request log context from metadata center request truth instead of flat metadata fields',
-        stage: 'test'
-      }
-    );
-    center.writeRequestTruth(
-      'conversationId',
-      'truth-conversation',
-      {
-        module: 'tests/server/runtime/http-server/executor/request-executor-request-state.spec.ts',
-        symbol: 'registers request log context from metadata center request truth instead of flat metadata fields',
-        stage: 'test'
-      }
-    );
     mockBuildRequestMetadata.mockReturnValue(metadata);
 
     const { initializeRequestExecutorRequestState } = await loadRequestStateModule();
@@ -77,22 +59,45 @@ describe('request-executor-request-state', () => {
     });
 
     expect(mockRegisterRequestLogContext).toHaveBeenCalledWith('req-request-state-truth', expect.objectContaining({
-      sessionId: 'truth-session',
-      session_id: 'truth-session',
-      conversationId: 'truth-conversation',
-      conversation_id: 'truth-conversation'
+      sessionId: 'flat-session-should-not-win',
+      session_id: 'flat-session-should-not-win',
+      conversationId: 'flat-conversation-should-not-win',
+      conversation_id: 'flat-conversation-should-not-win'
     }));
   });
 
-  it('does not synthesize request log session context from flat metadata when request truth is absent', async () => {
+  it('returns projectPath from initial metadata raw workdir fields', async () => {
     jest.resetModules();
     mockRegisterRequestLogContext.mockReset();
     mockWriteInboundClientSnapshot.mockReset();
 
     mockBuildRequestMetadata.mockReturnValue({
-      sessionId: 'flat-session-only',
-      conversationId: 'flat-conversation-only'
+      clientWorkdir: '/tmp/raw-project-workdir',
+      client_workdir: '/tmp/raw-project-workdir'
     });
+
+    const { initializeRequestExecutorRequestState } = await loadRequestStateModule();
+    const result = await initializeRequestExecutorRequestState({
+      input: {
+        requestId: 'req-request-state-project',
+        entryEndpoint: '/v1/responses',
+        body: { input: [] },
+        headers: {},
+        metadata: {}
+      } as any,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(result.projectPath).toBe('/tmp/raw-project-workdir');
+  });
+
+  it('does not synthesize request log session context when initial metadata omits it', async () => {
+    jest.resetModules();
+    mockRegisterRequestLogContext.mockReset();
+    mockWriteInboundClientSnapshot.mockReset();
+
+    mockBuildRequestMetadata.mockReturnValue({});
 
     const { initializeRequestExecutorRequestState } = await loadRequestStateModule();
     await initializeRequestExecutorRequestState({

@@ -170,10 +170,14 @@ client-visible error
 
 ## 标准执行顺序
 1. 读本文件（项目入口 + 护栏）。
-2. 读 `docs/agent-routing/00-entry-routing.md` 选路。
-3. 如属 debug / 生命周期 / 架构问题，先进入 `.agents/skills/rcc-dev-skills/SKILL.md`，再按其路由表选引用文件。
-4. 打开对应路由文档与相关 skill 文档执行。
-5. 执行后用证据回报：变更、验证、剩余缺口、下一步。
+2. 读 `docs/agent-routing/05-foundation-contract.md`，先锁完成合同与证据门槛。
+3. 读 `docs/agent-routing/00-entry-routing.md` 选路。
+4. 如属 debug / 生命周期 / 架构问题，先进入 `.agents/skills/rcc-dev-skills/SKILL.md`，再按其路由表选引用文件。
+5. 打开对应路由文档与相关 skill 文档执行。
+6. 任何会改实现的任务，先查 `function map` / `mainline call map` / `verification map` / `mainline source` / `wiki`，锁唯一 owner 与边界，再动手。
+7. 验证结束后做 architecture review，检查是否正确但架构错误、是否 fallback、是否临时绕路、是否补丁式修复。
+8. 执行后先检查相关 skills 是否已经覆盖这次用到的流程和经验；缺少则按项目 skill 规则沉淀，再回报。
+9. 执行后用证据回报：变更、验证、剩余缺口、下一步。
 
 ## 维护原则
 - 本文件保持短小：只保留入口、护栏、路径。

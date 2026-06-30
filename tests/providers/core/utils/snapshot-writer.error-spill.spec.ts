@@ -50,6 +50,7 @@ describe('snapshot writer error spill in release mode', () => {
         clientRequestId: 'req_err_spill',
         providerKey: 'glm.2-173.kimi-k2.5',
         entryEndpoint: '/v1/responses',
+        entryPort: 5555,
         data: { step: 'request' }
       });
 
@@ -61,6 +62,7 @@ describe('snapshot writer error spill in release mode', () => {
         clientRequestId: 'req_err_spill',
         providerKey: 'glm.2-173.kimi-k2.5',
         entryEndpoint: '/v1/responses',
+        entryPort: 5555,
         data: { step: 'response' }
       });
 
@@ -72,6 +74,7 @@ describe('snapshot writer error spill in release mode', () => {
         clientRequestId: 'req_err_spill',
         providerKey: 'glm.2-173.kimi-k2.5',
         entryEndpoint: '/v1/responses',
+        entryPort: 5555,
         data: { step: 'error', message: 'boom' }
       });
 
@@ -124,6 +127,7 @@ describe('snapshot writer error spill in release mode', () => {
         clientRequestId: 'req_default_err_spill',
         providerKey: 'glm.2-173.kimi-k2.5',
         entryEndpoint: '/v1/responses',
+        entryPort: 5555,
         data: { step: 'error', message: 'boom-default' }
       });
 

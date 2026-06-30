@@ -13,11 +13,19 @@ import {
   normalizeCodeKey
 } from './request-executor-error-shared.js';
 import type {
+  ReportRequestExecutorProviderErrorArgs,
   RequestExecutorProviderErrorClassification,
   RequestExecutorProviderErrorReportPlan,
   RequestExecutorProviderErrorStage,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
+import { emitProviderErrorAndWait } from '../../../../providers/core/utils/provider-error-reporter.js';
+import {
+  resolveProviderFailureOutcome
+} from '../../../../providers/core/runtime/provider-failure-policy.js';
+import {
+  cloneErrorForReporting
+} from './request-executor-error-report.js';
 
 export function resolveRequestExecutorProviderErrorReportPlan(args: {
   error: unknown;
@@ -72,3 +80,65 @@ export {
   isHostRequestExecutorErrorStage,
   isRequestExecutorProviderErrorStage
 };
+
+export async function reportRequestExecutorProviderError(
+  args: ReportRequestExecutorProviderErrorArgs
+): Promise<void> {
+  const reportPlan = resolveRequestExecutorProviderErrorReportPlan({
+    error: args.error,
+    retryError: args.retryError,
+    stage: args.stageHint ?? 'provider.send'
+  });
+  const reportOutcome = resolveProviderFailureOutcome({
+    error: args.error,
+    stage: reportPlan.stageHint,
+    statusCode: reportPlan.statusCode,
+    errorCode: reportPlan.errorCode,
+    upstreamCode: reportPlan.upstreamCode,
+    reason: args.retryError.reason
+  });
+  const rtHints = args.metadata?.__rt && typeof args.metadata.__rt === 'object' && !Array.isArray(args.metadata.__rt)
+    ? (args.metadata.__rt as Record<string, unknown>)
+    : undefined;
+  const sessionDir = typeof rtHints?.sessionDir === 'string' && rtHints.sessionDir.trim()
+    ? rtHints.sessionDir.trim()
+    : undefined;
+  const rccUserDir = typeof rtHints?.rccUserDir === 'string' && rtHints.rccUserDir.trim()
+    ? rtHints.rccUserDir.trim()
+    : undefined;
+  await emitProviderErrorAndWait({
+    error: cloneErrorForReporting(args.error),
+    stage: reportPlan.stageHint,
+    runtime: {
+      requestId: args.requestId,
+      providerKey: args.providerKey,
+      providerId: args.providerId,
+      providerType: args.providerType,
+      providerFamily: args.providerFamily,
+      providerProtocol: args.providerProtocol,
+      routeName: args.routeName,
+      pipelineId: args.providerKey,
+      target: args.target,
+      runtimeKey: args.runtimeKey,
+      ...(sessionDir ? { sessionDir } : {}),
+      ...(rccUserDir ? { rccUserDir } : {})
+    },
+    dependencies: args.dependencies,
+    statusCode: reportPlan.statusCode,
+    recoverable: reportOutcome.recoverable,
+    affectsHealth: reportOutcome.affectsHealth,
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys
+      ? Array.from(args.excludedProviderKeys)
+      : undefined,
+    details: {
+      source: reportPlan.stageHint,
+      ...(reportOutcome.classification ? { errorClassification: reportOutcome.classification } : {}),
+      ...(reportPlan.errorCode ? { errorCode: reportPlan.errorCode } : {}),
+      ...(reportPlan.upstreamCode ? { upstreamCode: reportPlan.upstreamCode } : {}),
+      reason: args.retryError.reason,
+      attempt: args.attempt,
+      ...(args.extraDetails ?? {})
+    }
+  });
+}

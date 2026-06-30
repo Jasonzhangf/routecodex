@@ -64,6 +64,9 @@ const checks = [
       'export async function prepareResponsesJsonBodyForSseBridgeForHttp(',
       'export function normalizeResponsesJsonBodyForHttp(',
       'function ensureResponsesJsonToSseRequiredFieldsForHttp(',
+      'export function buildResponsesSseErrorPayloadForHttp(',
+      'export function buildResponsesStructuredSseErrorPayloadForHttp(',
+      'export function buildResponsesMissingSseBridgeErrorPayloadForHttp(',
       "record.object === 'chat.completion'",
       'isToolCallContinuationResponseNative(',
       'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
@@ -85,7 +88,6 @@ const checks = [
   },
   {
     file: 'src/modules/llmswitch/bridge/responses-sse-transport.ts',
-    allowedImport: './runtime-integrations.js',
     forbiddenLocalTokens: [
       'export async function projectResponsesSseFrameForClientForHttp(',
       'export async function normalizeResponsesSseFrameForClientForHttp(',
@@ -104,6 +106,10 @@ const checks = [
     file: 'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
     allowedImport: './responses-sse-transport.js',
     forbiddenLocalTokens: [
+      'createResponsesJsonToSseConverterForHttp',
+      'createChatJsonToSseConverterForHttp',
+      'buildResponsesPayloadFromChatForHttp',
+      'prepareResponsesJsonBodyForSseBridgeForHttp',
       'normalizeClientVisibleResponsesSseFrameForHttp(',
       'response.required_action',
       'projectResponsesSseFrameForClientNative(',
@@ -166,6 +172,9 @@ const checks = [
       'function maybeAttachClientSseSnapshotStream(',
       'function writeSseDiagnosticSnapshot(',
       'function logSseClientCloseDiagnosis(',
+      'function hasResponsesTerminalSseMarker(',
+      'sawTerminalEvent',
+      'terminalScanBuffer',
       'const hasResponsesToolCallContinuationProbe =',
       'const hasResponsesRequiredActionContinuationProbe =',
       "'SSE stream missing from pipeline result'",
@@ -203,6 +212,14 @@ const checks = [
       'args.logResponseCompleted({',
       'releaseMetadataCenterForHttpResponse(',
       'deriveFinishReason(',
+      'function hasResponsesTerminalSseMarker(',
+      'sawTerminalEvent',
+      'terminalScanBuffer',
+      'function buildStructuredSseErrorPayloadForHttp(',
+      'function extractStructuredSseErrorPayload(',
+      'function sendStructuredSseError(',
+      'structured_error_passthrough',
+      'function buildTransportLocalSseErrorPayload(',
       'result.usageLogInfo?.finishReason',
       'bridgePlan.finishReason',
       'sseCloseoutFinishReason',
@@ -220,7 +237,7 @@ function escapeRegExp(value) {
 for (const check of checks) {
   const abs = path.join(root, check.file);
   const source = fs.readFileSync(abs, 'utf8');
-  if (!source.includes(check.allowedImport)) {
+  if (check.allowedImport && !source.includes(check.allowedImport)) {
     failures.push(`${check.file}: missing required single-surface import ${check.allowedImport}`);
   }
   for (const requiredImport of check.requiredImports ?? []) {

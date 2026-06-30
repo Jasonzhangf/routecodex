@@ -35,8 +35,6 @@ fn build_stopless_exec_command(
     repeat_count: u32,
     max_repeats: u32,
     public_trigger_hint: Option<&str>,
-    session_id: Option<&str>,
-    request_id: Option<&str>,
 ) -> String {
     let trigger = cli_contract::normalize_stopless_trigger_hint_for_metadata(public_trigger_hint);
     let input_json = serde_json::json!({
@@ -51,12 +49,6 @@ fn build_stopless_exec_command(
         "routecodex hook run reasoningStop --input-json '{}'",
         quoted
     );
-    if let Some(sid) = session_id {
-        cmd.push_str(&format!(" --session-id '{}'", sid.replace('\'', "'\\''")));
-    }
-    if let Some(rid) = request_id {
-        cmd.push_str(&format!(" --request-id '{}'", rid.replace('\'', "'\\''")));
-    }
     cmd.push_str(&format!(" --repeat-count '{}'", repeat_count));
     cmd.push_str(&format!(" --max-repeats '{}'", max_repeats));
     cmd
@@ -148,10 +140,19 @@ pub fn plan_stopless_execution_json(input_json: String) -> NapiResult<String> {
         napi::Error::from_reason(format!("deserialize StoplessExecutionPlanInput: {e}"))
     })?;
     let execution = build_stopless_execution_value(&input);
+    let stopless_control = input
+        .runtime_control
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|runtime| runtime.get("stopless"))
+        .filter(|value| value.is_object() && !value.is_array())
+        .cloned();
     let orchestration_plan = stopless_orchestration_contract::plan_stopless_orchestration_action(
         StoplessOrchestrationPlanInput {
             flow_id: input.flow_id.clone(),
             execution: execution.clone(),
+            request_truth_session_id: input.request_truth_session_id.clone(),
+            stopless_control,
         },
     );
     serde_json::to_string(&serde_json::json!({
@@ -176,67 +177,6 @@ fn build_stopless_execution_value(input: &StoplessExecutionPlanInput) -> Value {
         execution.insert("flowId".to_string(), Value::String(flow_id.to_string()));
     }
 
-    let mut context = execution
-        .get("context")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_else(Map::new);
-    if let Some(session_id) = input
-        .request_truth_session_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        if read_trimmed_string(context.get("sessionId")).is_none() {
-            context.insert(
-                "sessionId".to_string(),
-                Value::String(session_id.to_string()),
-            );
-        }
-        let mut request_truth = context
-            .get("requestTruth")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_else(Map::new);
-        request_truth.insert(
-            "sessionId".to_string(),
-            Value::String(session_id.to_string()),
-        );
-        context.insert("requestTruth".to_string(), Value::Object(request_truth));
-    }
-
-    let existing_stopless = context
-        .get("stopless")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_else(Map::new);
-    let mut stopless = existing_stopless;
-    let runtime_stopless_control = input
-        .runtime_control
-        .as_ref()
-        .and_then(Value::as_object)
-        .and_then(|runtime| runtime.get("stopless"))
-        .and_then(Value::as_object);
-    if let Some(control) = runtime_stopless_control {
-        for (key, value) in control {
-            stopless.insert(key.clone(), value.clone());
-        }
-    }
-    if let Some(flow_id) = input
-        .flow_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        stopless
-            .entry("flowId".to_string())
-            .or_insert_with(|| Value::String(flow_id.to_string()));
-    }
-    if !stopless.is_empty() {
-        context.insert("stopless".to_string(), Value::Object(stopless));
-    }
-
-    execution.insert("context".to_string(), Value::Object(context));
     Value::Object(execution)
 }
 
@@ -398,8 +338,6 @@ pub fn build_stopless_auto_cli_projection_json(input_json: String) -> NapiResult
             ctx.repeat_count,
             ctx.max_repeats,
             ctx.public_trigger_hint.as_deref(),
-            ctx.session_id.as_deref(),
-            ctx.request_id.as_deref(),
         );
         if let Some(obj) = stamped.as_object_mut() {
             obj.insert("execCommand".to_string(), Value::String(cmd));
@@ -913,6 +851,43 @@ mod tests {
         assert!(!output["clientCallId"].as_str().unwrap_or("").is_empty());
         assert!(output.get("chatResponse").is_some());
         assert!(output.get("projectionContext").is_some());
+        let command = output["command"].as_str().expect("command");
+        assert!(command.contains("routecodex hook run reasoningStop"));
+        assert!(!command.contains("--session-id"));
+        assert!(!command.contains("--request-id"));
+    }
+
+    #[test]
+    fn stopless_execution_plan_does_not_copy_control_into_execution_context() {
+        let result = plan_stopless_execution_json(
+            json!({
+                "flowId": "stop_message_flow",
+                "execution": {
+                    "flowId": "stop_message_flow",
+                    "context": { "assistantStopText": "done" }
+                },
+                "requestTruthSessionId": "sess-no-copy",
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 1,
+                        "maxRepeats": 3,
+                        "active": true
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("stopless execution plan");
+        let output: Value = serde_json::from_str(&result).expect("json parse");
+        assert_eq!(output["orchestrationPlan"]["action"], "cli_projection");
+        let context = output["execution"]["context"]
+            .as_object()
+            .expect("execution context");
+        assert_eq!(context.get("assistantStopText"), Some(&json!("done")));
+        assert!(context.get("sessionId").is_none());
+        assert!(context.get("requestTruth").is_none());
+        assert!(!context.contains_key("stopless"));
     }
 
     #[test]

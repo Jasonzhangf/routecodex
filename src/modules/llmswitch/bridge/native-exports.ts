@@ -209,6 +209,7 @@ type NativeRouterHotpathJsonBinding = {
     metadataJson: string,
     stateJson: string
   ) => string;
+  projectSseErrorEventPayloadJson?: (inputJson: string) => string;
   evaluateSingletonRoutePoolExhaustionJson?: (
     inputJson: string
   ) => string;
@@ -849,6 +850,47 @@ export function projectResponsesSseFrameForClientNative(args: {
       applyPatchCallIds: string[];
       emittedApplyPatchDoneCallIds: string[];
     };
+  };
+}
+
+export function projectSseErrorEventPayloadNative(args: {
+  requestId: string;
+  status: number;
+  message: string;
+  code: string;
+  error?: Record<string, unknown>;
+}): {
+  type: 'error';
+  status: number;
+  error: Record<string, unknown>;
+} {
+  const parsed = invokeRouterHotpathJsonCapability('projectSseErrorEventPayloadJson', [
+    {
+      requestId: args.requestId,
+      status: Number.isFinite(args.status) ? Math.floor(args.status) : args.status,
+      message: args.message,
+      code: args.code,
+      error: args.error,
+    }
+  ]);
+  const row = assertNativeObject('projectSseErrorEventPayloadJson', parsed);
+  const error = row.error;
+  if (
+    row.type !== 'error'
+    || typeof row.status !== 'number'
+    || !error
+    || typeof error !== 'object'
+    || Array.isArray(error)
+    || typeof (error as Record<string, unknown>).message !== 'string'
+    || typeof (error as Record<string, unknown>).code !== 'string'
+    || typeof (error as Record<string, unknown>).request_id !== 'string'
+  ) {
+    throw new Error('[llmswitch-bridge] projectSseErrorEventPayloadJson returned invalid payload');
+  }
+  return row as {
+    type: 'error';
+    status: number;
+    error: Record<string, unknown>;
   };
 }
 

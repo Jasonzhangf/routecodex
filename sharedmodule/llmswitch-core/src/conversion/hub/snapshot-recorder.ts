@@ -5,6 +5,12 @@ import { normalizeSnapshotStagePayloadWithNative } from '../../native/router-hot
 
 // feature_id: snapshot.stage_contract
 
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+type MetadataCenterLike = {
+  readRequestTruth?: () => Record<string, unknown> | undefined;
+};
+
 interface SnapshotStageRecorderOptions {
   context: AdapterContext;
   endpoint: string;
@@ -59,19 +65,21 @@ function resolveEntryProtocol(endpoint: string): string {
 }
 
 function resolveEntryPort(context: AdapterContext): number | undefined {
-  const record = context as unknown as Record<string, unknown>;
-  const candidates = [
-    record.entryPort,
-    record.matchedPort,
-    (record.portContext as Record<string, unknown> | undefined)?.matchedPort,
-    (record.portContext as Record<string, unknown> | undefined)?.localPort,
-    (record.metadata as Record<string, unknown> | undefined)?.matchedPort
-  ];
-  for (const value of candidates) {
-    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
-    if (Number.isFinite(numeric) && numeric > 0) {
-      return Math.floor(numeric);
-    }
+  const target = context as unknown as Record<string, unknown>;
+  const directCenter = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  const metadata = target.metadata && typeof target.metadata === 'object' && !Array.isArray(target.metadata)
+    ? target.metadata as Record<string, unknown>
+    : undefined;
+  const nestedCenter = metadata
+    ? (Reflect.get(metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined)
+    : undefined;
+  const center = directCenter && typeof directCenter.readRequestTruth === 'function'
+    ? directCenter
+    : nestedCenter;
+  const portScope = center?.readRequestTruth?.()?.portScope;
+  if (typeof portScope === 'string') {
+    const parsed = Number.parseInt(portScope, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   }
   return undefined;
 }

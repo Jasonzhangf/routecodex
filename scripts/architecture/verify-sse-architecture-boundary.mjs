@@ -120,6 +120,16 @@ for (const forbidden of [
   }
 }
 
+const responsesJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts');
+for (const forbidden of [
+  'responsesRequest: {} as any',
+  'outputItemStates: new Map()',
+]) {
+  if (responsesJsonToSseConverter.includes(forbidden)) {
+    failures.push(`Responses JSON->SSE converter must not keep dead context state: ${forbidden}`);
+  }
+}
+
 const chatEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts');
 for (const forbidden of [
   'id: context.responseId ?? context.requestId',
@@ -273,7 +283,6 @@ for (const forbidden of [
   }
 }
 
-const responsesJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts');
 for (const forbidden of [
   'convertRequestToJsonToSse(',
   'processRequestToSseWithFunctions',

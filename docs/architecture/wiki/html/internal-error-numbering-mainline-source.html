@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Internal Error Numbering Mainline Source</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>Internal Error Numbering Mainline Source</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/internal-error-numbering-mainline-source.md</code></p>
+      </header>
+      <article>
+        <h1>Internal Error Numbering Mainline Source</h1>
+        <h2>Purpose</h2>
+        <p>This page is the review surface for <code>debug.internal_error_numbering</code>.</p>
+        <p>It locks RouteCodex-owned internal debug error numbering:</p>
+        <ul>
+          <li>internal request errors use <code>500-1xx</code>,</li>
+          <li>internal response errors use <code>500-2xx</code>,</li>
+          <li>other RouteCodex internal errors use <code>500-3xx</code>,</li>
+          <li>external/provider/upstream/client errors stay external and may only be linked.</li>
+        </ul>
+        <p>Canonical sources:</p>
+        <ul>
+          <li><code>docs/goals/internal-error-numbering-debug-system-plan.md</code></li>
+          <li><code>docs/architecture/function-map.yml</code> -&gt; <code>feature_id: debug.internal_error_numbering</code></li>
+          <li><code>docs/architecture/verification-map.yml</code> -&gt; <code>feature_id: debug.internal_error_numbering</code></li>
+          <li><code>docs/architecture/mainline-call-map.yml</code> -&gt; <code>chain_id: internal_error_numbering.mainline</code></li>
+          <li><code>docs/architecture/mainline-manifests/internal-error-numbering.mainline.yml</code></li>
+        </ul>
+        <h2>Main Rule</h2>
+        <p>Internal <code>500-*</code> codes are debug side-channel identity only. They do not replace <code>ErrorErr01-06</code>, do not decide retry/reroute/fail, and do not change <code>ErrorErr06ClientProjected</code>.</p>
+        <p>External errors are linked, not wrapped. Provider <code>401/403/429/5xx</code>, upstream SSE/JSON errors, and client disconnect must not become <code>InternalDebugErrorEnvelope</code>.</p>
+        <p>Rule token: external errors are linked, not wrapped.</p>
+        <h2>Numbering Contract</h2>
+        <table>
+        <thead><tr><th>range</th><th>lane</th><th>meaning</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>500-100</code> to <code>500-199</code></td><td>request</td><td>RouteCodex-owned request pipeline internal failures</td></tr>
+        <tr><td><code>500-200</code> to <code>500-299</code></td><td>response</td><td>RouteCodex-owned response pipeline internal failures</td></tr>
+        <tr><td><code>500-300</code> to <code>500-399</code></td><td>other</td><td>debug, metadata, runtime lifecycle, config, servertool, or gate internal failures</td></tr>
+        </tbody>
+        </table>
+        <h2>Internal Error Numbering Mainline</h2>
+        <pre class="mermaid">flowchart LR
+          IntErrNum01SourceObserved[&quot;IntErrNum01SourceObserved&lt;br/&gt;internal failure source observed&quot;]
+          IntErrNum02ModuleBlockResolved[&quot;IntErrNum02ModuleBlockResolved&lt;br/&gt;module block resolved from registry&quot;]
+          IntErrNum03SubcodeAssigned[&quot;IntErrNum03SubcodeAssigned&lt;br/&gt;subcode assigned and validated&quot;]
+          IntErrNum04EnvelopeBuilt[&quot;IntErrNum04EnvelopeBuilt&lt;br/&gt;InternalDebugErrorEnvelope built&quot;]
+          IntErrNum05DebugArtifactProjected[&quot;IntErrNum05DebugArtifactProjected&lt;br/&gt;debug artifact projection&quot;]
+          IntErrNum06ExternalLinked[&quot;IntErrNum06ExternalLinked&lt;br/&gt;external error linked only&quot;]
+          IntErrNum07ClientBoundaryPreserved[&quot;IntErrNum07ClientBoundaryPreserved&lt;br/&gt;client/provider payload boundary preserved&quot;]
+
+          IntErrNum01SourceObserved --&gt;|ien-01| IntErrNum02ModuleBlockResolved
+          IntErrNum02ModuleBlockResolved --&gt;|ien-02| IntErrNum03SubcodeAssigned
+          IntErrNum03SubcodeAssigned --&gt;|ien-03| IntErrNum04EnvelopeBuilt
+          IntErrNum04EnvelopeBuilt --&gt;|ien-04| IntErrNum05DebugArtifactProjected
+          IntErrNum05DebugArtifactProjected --&gt;|ien-05| IntErrNum06ExternalLinked
+          IntErrNum06ExternalLinked --&gt;|ien-06| IntErrNum07ClientBoundaryPreserved</pre>
+        <h2>Node Contract</h2>
+        <table>
+        <thead><tr><th>node</th><th>input</th><th>output</th><th>owner</th><th>boundary</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>IntErrNum01SourceObserved</code></td><td>RouteCodex-owned failure origin plus requested code</td><td>observed internal source</td><td><code>src/debug/internal-error/envelope.ts</code></td><td>must not classify external provider status as internal</td></tr>
+        <tr><td><code>IntErrNum02ModuleBlockResolved</code></td><td>internal code</td><td>registry module block</td><td><code>src/debug/internal-error/registry.ts</code></td><td>no message/path inference</td></tr>
+        <tr><td><code>IntErrNum03SubcodeAssigned</code></td><td>module block plus code</td><td>validated registry entry</td><td><code>src/debug/internal-error/registry.ts</code></td><td>duplicate or retired code fails</td></tr>
+        <tr><td><code>IntErrNum04EnvelopeBuilt</code></td><td>registry entry plus context</td><td><code>InternalDebugErrorEnvelope</code></td><td><code>src/debug/internal-error/envelope.ts</code></td><td>side-channel only</td></tr>
+        <tr><td><code>IntErrNum05DebugArtifactProjected</code></td><td>envelope</td><td>debug artifact projection</td><td><code>src/debug/internal-error/projection.ts</code></td><td>no retry/reroute/fallback effect</td></tr>
+        <tr><td><code>IntErrNum06ExternalLinked</code></td><td>optional external relation</td><td><code>ExternalErrorLink</code></td><td><code>src/debug/internal-error/external-link.ts</code></td><td>external identity remains external</td></tr>
+        <tr><td><code>IntErrNum07ClientBoundaryPreserved</code></td><td>internal artifact projection</td><td>payload boundary proof</td><td><code>src/debug/internal-error/guards.ts</code></td><td>no provider wire or default client body leak</td></tr>
+        </tbody>
+        </table>
+        <h2>Extension Checklist</h2>
+        <p>Adding a new internal error code requires:</p>
+        <ul>
+          <li>registry entry in <code>src/debug/internal-error/registry.ts</code>,</li>
+          <li>node ID from topology/mainline artifacts,</li>
+          <li>owner feature that exists in <code>docs/architecture/function-map.yml</code>,</li>
+          <li>focused positive test for envelope construction,</li>
+          <li>reverse test for invalid range/duplicate/wrong external policy,</li>
+          <li>leak test if the related path touches provider wire or client response,</li>
+          <li><code>npm run verify:internal-error-numbering</code> PASS.</li>
+        </ul>
+        <h2>Review Checklist</h2>
+        <ul>
+          <li>Does the code belong to <code>500-1xx</code>, <code>500-2xx</code>, or <code>500-3xx</code> by topology position?</li>
+          <li>Is the owner feature queryable in function-map and verification-map?</li>
+          <li>Is external provider/upstream/client identity linked rather than wrapped?</li>
+          <li>Is <code>ErrorErr01-06</code> still policy truth?</li>
+          <li>Does default client response payload avoid <code>internalCode</code>?</li>
+          <li>Does provider wire payload avoid <code>internalCode</code>?</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

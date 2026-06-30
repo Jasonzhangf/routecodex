@@ -105,8 +105,8 @@ try {
   }
   record('step1.exec_command_present', true, { callId: exec.callId });
   const cmd = exec.cmd;
-  record('step1.cmd_has_session_id', /--session-id '[^']+'/.test(cmd), { sample: cmd.slice(0, 220) });
-  record('step1.cmd_has_request_id', /--request-id '[^']+'/.test(cmd));
+  record('step1.cmd_no_session_id_flag', !/--session-id '[^']+'/.test(cmd), { sample: cmd.slice(0, 220) });
+  record('step1.cmd_no_request_id_flag', !/--request-id '[^']+'/.test(cmd));
   record('step1.cmd_no_continuation_prompt', !cmd.includes('continuationPrompt') && !cmd.includes('继续做下一步'));
   record('step1.cmd_starts_with_session_dir', cmd.startsWith("ROUTECODEX_SESSION_DIR='"));
 

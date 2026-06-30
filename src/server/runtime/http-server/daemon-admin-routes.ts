@@ -11,6 +11,7 @@ import { registerPortsRoutes } from './daemon-admin/ports-handler.js';
 import type { PortConfig } from './port-config-types.js';
 import type { PortRegistry } from './port-registry.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
+import type { TokenStatsSnapshot } from './executor/token-stats-store.js';
 import { isDaemonSessionAuthenticated } from './daemon-admin/auth-session.js';
 import { resolveEnvSecretReference } from './middleware.js';
 
@@ -64,6 +65,7 @@ export interface DaemonAdminRouteOptions {
     session: StatsSnapshot;
     historical: HistoricalStatsSnapshot;
     periods?: HistoricalPeriodsSnapshot;
+    tokenStats: TokenStatsSnapshot;
   };
   /**
    * Lazily resolve PortRegistry 实例；多端口模式时可用。

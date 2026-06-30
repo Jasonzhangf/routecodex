@@ -102,6 +102,7 @@ export type MetadataCenterRuntimeControl = {
   routeHint?: string;
   routeName?: string;
   routeId?: string;
+  routecodexRoutingPolicyGroup?: string;
   providerProtocol?: string;
   preCommandState?: Record<string, unknown>;
   retryProviderKey?: string;

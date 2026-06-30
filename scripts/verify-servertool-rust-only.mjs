@@ -5200,6 +5200,7 @@ function checkServertoolRustOutcomeCloseout() {
     'runServertoolResponseStageWithNative',
     'const responseStage =',
     'readFollowupClientInjectSourceWithNative',
+    'providerProtocol: ProviderProtocol;',
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(

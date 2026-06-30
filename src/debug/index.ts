@@ -61,3 +61,4 @@ export * from './logger/index.js';
 export * from './snapshot/index.js';
 export * from './hooks/index.js';
 export * from './policy/index.js';
+export * from './internal-error/index.js';

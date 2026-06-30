@@ -96,6 +96,7 @@ describe('responses-request-bridge metadata center projection', () => {
       responsesResume: resumeMeta
     });
     expect(center?.readRuntimeControl()).toMatchObject({
+      providerProtocol: 'openai-responses',
       streamIntent: 'stream',
       clientAbort: false
     });
@@ -105,6 +106,7 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(metadata.clientAbortSignal).toBeUndefined();
     expect(center?.readRequestTruth()).toEqual({});
     expect(readRuntimeControlProjection(metadata)).toMatchObject({
+      providerProtocol: 'openai-responses',
       streamIntent: 'stream',
       clientAbort: false
     });
@@ -171,6 +173,7 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('providerKey');
     expect(readRuntimeControlProjection(metadata).routeHint).toBeUndefined();
     expect(readRuntimeControlProjection(metadata).retryProviderKey).toBeUndefined();
+    expect(readRuntimeControlProjection(metadata).providerProtocol).toBe('openai-responses');
     expect(center?.readRequestTruth()).toEqual({});
   });
 
@@ -213,5 +216,6 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(center?.readRequestTruth()).toEqual({});
     expect(readRuntimeControlProjection(metadata).routeHint).toBeUndefined();
     expect(readRuntimeControlProjection(metadata).retryProviderKey).toBeUndefined();
+    expect(readRuntimeControlProjection(metadata).providerProtocol).toBe('openai-responses');
   });
 });

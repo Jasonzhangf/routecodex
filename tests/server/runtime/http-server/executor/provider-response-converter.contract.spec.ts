@@ -31,7 +31,7 @@ describe('provider-response-converter contract', () => {
     expect(source).not.toContain('containsBroadKillCommand');
     expect(source).not.toContain('importCoreDist');
     expect(source).not.toContain('NativeRespSemanticsModule');
-    expect(source).toContain('resolveRelayResponsesClientSseStreamForHttp');
-    expect(source).toContain('reprojectDirectChatToolCallStreamForHttp');
+    expect(source).not.toContain('resolveRelayResponsesClientSseStreamForHttp');
+    expect(source).not.toContain('reprojectDirectChatToolCallStreamForHttp');
   });
 });

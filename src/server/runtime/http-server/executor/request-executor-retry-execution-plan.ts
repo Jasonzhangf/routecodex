@@ -187,6 +187,56 @@ export async function resolveProviderRetryExecutionPlan(args: {
   });
   const maySwitchToAlternativeProvider = hasAlternativeCandidate && exclusionPlan.excludedCurrentProvider;
   if (!hasAlternativeCandidate) {
+    if (
+      args.isStreamingRequest === true
+      && retryActionPlan.shouldRetry
+      && !hostContractFailure
+      && args.providerKey
+    ) {
+      args.excludedProviderKeys.add(args.providerKey);
+      const streamingGate = resolveProviderRetryExecutionPlanExhaustionGate({
+        routePool: args.routePool,
+        excludedProviderKeys: args.excludedProviderKeys,
+        defaultPoolAvailable: args.defaultTierAvailable === true,
+      });
+      const retrySwitchPlan = {
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'exclude_and_reroute',
+        runtimeScopeExcluded: [],
+        runtimeScopeExcludedCount: 0
+      } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
+      return {
+        shouldRetry: true,
+        excludedCurrentProvider: true,
+        retrySwitchPlan,
+        retryExecutionPolicyReason: nativeExecutionPolicy.reason,
+        routePoolRemainingAfterExclusion: streamingGate.routePoolRemainingAfterExclusion,
+        defaultPoolAvailable: streamingGate.defaultPoolAvailable,
+        policyExhausted: streamingGate.policyExhausted,
+        mayProject: streamingGate.mayProject,
+      };
+    }
+    if (gate.defaultPoolAvailable && !gate.mayProject) {
+      if (args.providerKey) {
+        args.excludedProviderKeys.add(args.providerKey);
+      }
+      const retrySwitchPlan = {
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'exclude_and_reroute',
+        runtimeScopeExcluded: [],
+        runtimeScopeExcludedCount: 0
+      } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
+      return {
+        shouldRetry: true,
+        excludedCurrentProvider: Boolean(args.providerKey),
+        retrySwitchPlan,
+        retryExecutionPolicyReason: nativeExecutionPolicy.reason,
+        routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+        defaultPoolAvailable: gate.defaultPoolAvailable,
+        policyExhausted: gate.policyExhausted,
+        mayProject: gate.mayProject,
+      };
+    }
     return {
       shouldRetry: false,
       excludedCurrentProvider: false,

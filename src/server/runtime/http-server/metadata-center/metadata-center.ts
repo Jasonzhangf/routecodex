@@ -265,6 +265,7 @@ export class MetadataCenter {
       routeHint: this.state.runtimeControl.routeHint?.value as string | undefined,
       routeName: this.state.runtimeControl.routeName?.value as string | undefined,
       routeId: this.state.runtimeControl.routeId?.value as string | undefined,
+      routecodexRoutingPolicyGroup: this.state.runtimeControl.routecodexRoutingPolicyGroup?.value as string | undefined,
       providerProtocol: this.state.runtimeControl.providerProtocol?.value as string | undefined,
       preCommandState: this.state.runtimeControl.preCommandState?.value as Record<string, unknown> | undefined,
       retryProviderKey: this.state.runtimeControl.retryProviderKey?.value as string | undefined,

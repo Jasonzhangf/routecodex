@@ -1849,6 +1849,114 @@ describe("sendPipelineResponse responses store integration", () => {
     }
   });
 
+  it("repairs missing response id secondary index from retained request entry before submit_tool_outputs resume", async () => {
+    const store =
+      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+    const requestId = "openai-responses-router-index-repair";
+    const responseId = "resp_index_repair_1";
+    const callId = "call_index_repair_1";
+    const storeObject = store.responsesConversationStore as unknown as {
+      responseIndex?: Map<string, unknown>;
+    };
+
+    try {
+      store.captureResponsesRequestContext({
+        requestId,
+        payload: {
+          model: "gpt-5.5",
+          store: true,
+          input: [
+            {
+              role: "user",
+              content: [{ type: "input_text", text: "repair response index" }],
+            },
+          ],
+          tools: [{ type: "function", name: "exec_command" }],
+        },
+        context: {
+          input: [
+            {
+              role: "user",
+              content: [{ type: "input_text", text: "repair response index" }],
+            },
+          ],
+          toolsRaw: [{ type: "function", name: "exec_command" }],
+        },
+        sessionId: "index-repair-session",
+        conversationId: "index-repair-session",
+        entryKind: "responses",
+        continuationOwner: "relay",
+        matchedPort: 5555,
+      });
+      store.recordResponsesResponse({
+        requestId,
+        response: {
+          id: responseId,
+          object: "response",
+          status: "requires_action",
+          output: [
+            {
+              type: "function_call",
+              id: `fc_${callId}`,
+              call_id: callId,
+              name: "exec_command",
+              arguments: "{\"cmd\":\"pwd\"}",
+            },
+          ],
+          required_action: {
+            type: "submit_tool_outputs",
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: callId,
+                  type: "function",
+                  function: {
+                    name: "exec_command",
+                    arguments: "{\"cmd\":\"pwd\"}",
+                  },
+                },
+              ],
+            },
+          },
+        },
+        sessionId: "index-repair-session",
+        conversationId: "index-repair-session",
+        entryKind: "responses",
+        continuationOwner: "relay",
+        matchedPort: 5555,
+        allowScopeContinuation: true,
+      });
+      store.finalizeResponsesConversationRequestRetention(requestId, {
+        keepForSubmitToolOutputs: true,
+      });
+      storeObject.responseIndex?.delete(responseId);
+
+      const resumed = store.resumeResponsesConversation(
+        responseId,
+        {
+          response_id: responseId,
+          tool_outputs: [{ tool_call_id: callId, output: "ok" }],
+        },
+        { entryKind: "responses", matchedPort: 5555 },
+      );
+
+      expect(resumed.payload.previous_response_id).toBe(responseId);
+      expect(resumed.payload.input).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "function_call_output",
+            call_id: callId,
+            output: "ok",
+          }),
+        ]),
+      );
+      expect(store.responsesConversationStore.getDebugStats().responseIndexSize).toBe(0);
+    } finally {
+      store.clearResponsesConversationByRequestId(requestId);
+      store.clearResponsesConversationByRequestId(responseId);
+    }
+  });
+
   it("RED: /v1/responses string input must be captured into store so submit_tool_outputs keeps terminal user history", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");

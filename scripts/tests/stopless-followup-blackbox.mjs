@@ -401,8 +401,8 @@ async function main() {
       command.includes('routecodex hook run reasoningStop'),
       `expected reasoningStop CLI projection, args=${command}`
     );
-    assert.match(command, /--session-id '[^']+'/u, `expected request-truth session id in command, args=${command}`);
-    assert.match(command, /--request-id '[^']+'/u, `expected request-truth request id in command, args=${command}`);
+    assert.ok(!/--session-id '[^']+'/u.test(command), `session id must stay out of client-visible command, args=${command}`);
+    assert.ok(!/--request-id '[^']+'/u.test(command), `request id must stay out of client-visible command, args=${command}`);
     assert.ok(
       !String(command).includes('continuationPrompt') && !String(command).includes('stopreason'),
       `expected status-only CLI input without leaked guidance, args=${command}`
@@ -412,8 +412,16 @@ async function main() {
     assert.equal(upstreamHits[0]?.providerFromAuth, 'crs1', `initial request should use first round-robin provider, hits=${JSON.stringify(upstreamHits)}`);
 
     const cliOutput1 = runCliCommand(command);
-    assert.equal(cliOutput1.sessionId, sessionId, `expected CLI sessionId to round-trip, stdout=${JSON.stringify(cliOutput1)}`);
-    assert.equal(cliOutput1.requestId, body.request_id || body.id || execTool.callId, `expected CLI requestId to round-trip, stdout=${JSON.stringify(cliOutput1)}`);
+    assert.equal(
+      cliOutput1.sessionId,
+      undefined,
+      `CLI stdout must not carry internal sessionId, stdout=${JSON.stringify(cliOutput1)}`
+    );
+    assert.equal(
+      cliOutput1.requestId,
+      undefined,
+      `CLI stdout must not carry internal requestId, stdout=${JSON.stringify(cliOutput1)}`
+    );
 
     const submit1 = await fetch(`${harnessServer.baseUrl}/v1/responses/${encodeURIComponent(body.id)}/submit_tool_outputs`, {
       method: 'POST',

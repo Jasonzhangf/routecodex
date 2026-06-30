@@ -10,6 +10,18 @@
 ## 覆盖范围
 适用于：servertool stopless 自动续轮、stop followup 重建、CLI projection 迁移、tmux 注入边界。
 
+## 前置查询（必须）
+
+servertool / stopless / followup / schema gate 改动前，先查：
+
+1. `docs/agent-routing/05-foundation-contract.md`
+2. `docs/architecture/function-map.yml`
+3. `docs/architecture/mainline-call-map.yml`
+4. `docs/architecture/verification-map.yml`
+5. 对应 `mainline source` 与 `wiki` review surface
+
+如果 1-2 次查询内找不到唯一 owner / 唯一主线边，先补 map/contract，再动实现。
+
 ## 当前迁移方向（2026-06-15）
 1. 新 servertool 改造方向以 `docs/design/servertool-cli-projection-migration.md` 为准。
 2. 被迁移的 servertool 一律投影成客户端可见的 `exec_command` CLI 调用，不再走私有 server-side followup/reenter。

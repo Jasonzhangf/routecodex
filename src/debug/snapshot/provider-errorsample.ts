@@ -42,6 +42,7 @@ export async function writeProviderRetrySnapshot(options: {
   url?: string;
   clientRequestId?: string;
   entryEndpoint?: string;
+  entryPort?: number;
   providerKey?: string;
   providerId?: string;
 }): Promise<void> {
@@ -50,6 +51,7 @@ export async function writeProviderRetrySnapshot(options: {
       entryEndpoint: options.entryEndpoint,
       requestId: options.requestId,
       clientRequestId: options.clientRequestId,
+      entryPort: options.entryPort,
       providerKey: options.providerKey,
       providerId: options.providerId
     };
@@ -83,6 +85,7 @@ export async function writeProviderRetrySnapshot(options: {
     groupRequestId,
     providerKey: providerToken || undefined,
     entryEndpoint: options.entryEndpoint,
+    entryPort: options.entryPort,
     data: payload,
     rawPayload: payload,
     verbosity: 'verbose'

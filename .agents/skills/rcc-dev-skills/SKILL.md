@@ -14,10 +14,22 @@ description: RouteCodex 调试与架构路由入口
 
 ## 先读
 1. 项目 `AGENTS.md`
-2. `docs/agent-routing/00-entry-routing.md`
-3. `references/24-node-contract-debug-method.md`
+2. `docs/agent-routing/05-foundation-contract.md`
+3. `docs/agent-routing/00-entry-routing.md`
 4. `docs/agent-routing/40-task-memory-routing.md`
-5. 本 skill 路由表对应的小文件
+5. `references/24-node-contract-debug-method.md`
+6. 本 skill 路由表对应的小文件
+
+## 先查（硬性）
+
+任何会改实现的任务，先执行且不能跳过：
+
+1. 定位 feature_id（有时来自问题描述关键词）
+2. 在 `docs/architecture/function-map.yml` 查 `feature_id` 的 owner、allowed / forbidden paths。
+3. 在 `docs/architecture/mainline-call-map.yml` 查 `feature_id`、`caller`、`callee`。
+4. 在 `docs/architecture/verification-map.yml` 查必跑验证栈。
+5. 在 `docs/architecture/wiki/mainline-call-graph.md`（或功能 wiki）核对节点闭环。
+6. 若相关 skill 已覆盖现成流程/经验，优先复用；如果没有，任务结束时必须回查并沉淀到对应 skill。
 
 ## Debug 首选顺序（强制）
 1. 先查 `function map / owner registry / verification map`
@@ -29,6 +41,22 @@ description: RouteCodex 调试与架构路由入口
 4. 最后才查实现并改代码
 - 合同没锁清楚时，禁止直接 grep 后改实现。
 - 1-2 次查询内找不到唯一 owner 或唯一主线边，先补 map/contract。
+- 数据/控制分流先验：如果数据字段能从原始请求/响应负载直接拿到，就不要从 `MetadataCenter`、上下文 carrier、日志投影、matchedPort/localPort 之类中间语义里再取一遍；`MetadataCenter` 只用于控制语义，不能当数据面第二真源。
+- 反模式：同一字段多次派生、多处 fallback、先从 payload 再从 metadata 回读、用上下文零散字段拼接原始数据。
+
+### Virtual Router 在线诊查优先
+
+- 遇到路由命中错误、端口路由组错配、longcontext 优先级、provider 切换/兜底、`PROVIDER_NOT_AVAILABLE`、default floor 或 route pool availability 问题时，优先建议并执行 live VR diagnostics。
+- 先查 `/_routecodex/diagnostics/virtual-router/status` 或 `routecodex port status <port> --json`，确认 `localPort`、`routingPolicyGroup`、route prefix、pool、forwarder、availableTargets。
+- 再用 `/_routecodex/diagnostics/virtual-router/dry-run` 或 `routecodex port dry-run <port> ... --json` 重放最小样本；短样本和 longcontext 大样本分开验证。
+- 禁止只凭日志、短请求或 config 片段判断 VR 问题；线上能查时，必须用在线 status + dry-run 作为第一证据。
+- default pool 最后目标不可被排空；不要用排除 default singleton 制造 `PROVIDER_NOT_AVAILABLE`，应解释为 default floor 保护。
+
+## 修改前 / 验证后 必做
+
+- 修改前：必须同时看 `function map` 和 `mainline source`，确认模块边界、允许路径、禁止路径、主线 caller/callee。
+- 验证后：必须做 architecture review，判断结果是否正确、架构是否正确、是否用了 fallback / 临时绕路 / 补丁式修复、是否存在“结果对了但架构错了”。
+- 验证通过不等于闭环完成；架构 review 不过，仍视为未完成。
 
 ## 路由表
 
@@ -82,6 +110,7 @@ description: RouteCodex 调试与架构路由入口
 - 若 `mainline-call-map` 仍是 `binding pending`，只能宣称“目标/骨架已锁定”，不能宣称 runtime 已 Rust-only 落地。
 - 发现 inbound/outbound 里混入逻辑时，先查真源 owner 是否应上移到 Chat Process；尤其 continuation save/restore 只能在 Chat Process 响应出口/请求入口。修复后必须物理删除错误 helper / 重复实现，禁止在 outbound/inbound/handler 留第二套语义补丁。
 - SSE / transport 日志只可作为证据，不可作为语义 owner；当日志类测试与更高层 regression 重叠时，优先删重复断言，不要在 handler/outbound 里再补一套“日志即真相”的测试语义。
+- architecture review 发现 fallback、补丁式修复、临时绕路、错层实现时，必须回到唯一 owner 修正，而不是把结果正确误记为完成。
 
 ### 2. 再做三问
 1. 失败在哪一段？

@@ -43,6 +43,15 @@ chains:
     note: >
       Debug unified surface is still an M0/M1 governance shell; one pending
       edge is intentionally budgeted until deeper runtime/module splits land.
+  - chain_id: internal_error_numbering.mainline
+    expected_total_edges: 6
+    min_anchored_edges: 6
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Internal error numbering is a debug-only side-channel owner. Its registry,
+      envelope, external linking, debug projection, and client-boundary guard
+      must stay fully anchored and must not become ErrorErr policy truth.
   - chain_id: error.mainline
     expected_total_edges: 4
     min_anchored_edges: 3
@@ -75,3 +84,12 @@ chains:
     note: >
       Virtual Router route-availability floor chain keeps one TS consumer edge
       while the ErrorErr05 execution-decision consumer remains split.
+  - chain_id: vr.online_diagnostics.mainline
+    expected_total_edges: 3
+    min_anchored_edges: 3
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router online diagnostics is fully anchored: HTTP/CLI shells
+      project Rust-produced status and dry-run diagnostics without route
+      recomputation.

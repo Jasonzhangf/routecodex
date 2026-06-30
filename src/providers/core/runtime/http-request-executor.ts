@@ -87,25 +87,11 @@ function readProviderSnapshotEntryPort(context: ProviderContext): number | undef
       return undefined;
     }
     const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
-    if (typeof requestTruthPortScope === 'string') {
-      const parsed = Number.parseInt(requestTruthPortScope, 10);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        return Math.floor(parsed);
-      }
+    if (typeof requestTruthPortScope !== 'string') {
+      return undefined;
     }
-    for (const value of [
-      metadata.entryPort,
-      metadata.matchedPort,
-      metadata.routecodexLocalPort,
-      metadata.localPort,
-      metadata.portScope
-    ]) {
-      const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
-      if (Number.isFinite(numeric) && numeric > 0) {
-        return Math.floor(numeric);
-      }
-    }
-    return undefined;
+    const parsed = Number.parseInt(requestTruthPortScope, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
   };
   const runtimeMetadataRecord =
     context.runtimeMetadata?.metadata && typeof context.runtimeMetadata.metadata === 'object' && !Array.isArray(context.runtimeMetadata.metadata)

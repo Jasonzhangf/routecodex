@@ -1,6 +1,7 @@
 // feature_id: hub.response_responses_client_projection
 // canonical_builders: project_responses_client_payload_for_client, project_responses_client_body_for_client, project_responses_sse_frame_for_client
 
+use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -1175,6 +1176,52 @@ pub(crate) fn project_responses_client_body_for_client(
     project_responses_client_payload_for_client(responses_payload, tools_raw, &Value::Null)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProjectSseErrorEventPayloadInput {
+    request_id: String,
+    status: i64,
+    message: String,
+    code: String,
+    #[serde(default)]
+    error: Option<Map<String, Value>>,
+}
+
+fn trim_required_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+pub(crate) fn project_sse_error_event_payload(
+    input: &ProjectSseErrorEventPayloadInput,
+) -> Value {
+    let request_id = match input
+        .error
+        .as_ref()
+        .and_then(|error| error.get("request_id"))
+        .and_then(Value::as_str)
+        .and_then(trim_required_string)
+    {
+        Some(value) => value,
+        None => input.request_id.trim().to_string(),
+    };
+
+    let mut error = input.error.clone().unwrap_or_default();
+    error.insert("message".to_string(), Value::String(input.message.trim().to_string()));
+    error.insert("code".to_string(), Value::String(input.code.trim().to_string()));
+    error.insert("request_id".to_string(), Value::String(request_id));
+
+    serde_json::json!({
+        "type": "error",
+        "status": input.status,
+        "error": error,
+    })
+}
+
 #[derive(Default)]
 struct ResponsesClientSseProjectionState {
     pending_apply_patch_argument_deltas: HashMap<String, String>,
@@ -1915,4 +1962,65 @@ pub(crate) fn project_responses_sse_frame_for_client(
         "frame": if emit { output_frame } else { String::new() },
         "state": state.to_value(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{project_sse_error_event_payload, ProjectSseErrorEventPayloadInput};
+    use serde_json::{json, Map, Value};
+
+    #[test]
+    fn project_sse_error_event_payload_uses_request_id_when_nested_request_id_is_missing() {
+        let input = ProjectSseErrorEventPayloadInput {
+            request_id: " req_local ".to_string(),
+            status: 504,
+            message: " timeout ".to_string(),
+            code: " HTTP_SSE_TIMEOUT ".to_string(),
+            error: None,
+        };
+
+        let output = project_sse_error_event_payload(&input);
+
+        assert_eq!(
+            output,
+            json!({
+                "type": "error",
+                "status": 504,
+                "error": {
+                    "message": "timeout",
+                    "code": "HTTP_SSE_TIMEOUT",
+                    "request_id": "req_local",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn project_sse_error_event_payload_preserves_explicit_nested_request_id() {
+        let mut error = Map::new();
+        error.insert("request_id".to_string(), Value::String(" req_upstream ".to_string()));
+        error.insert("provider_key".to_string(), Value::String("tab.default.gpt-5.1".to_string()));
+        let input = ProjectSseErrorEventPayloadInput {
+            request_id: "req_local".to_string(),
+            status: 500,
+            message: "stream failed".to_string(),
+            code: "sse_stream_error".to_string(),
+            error: Some(error),
+        };
+
+        let output = project_sse_error_event_payload(&input);
+        let error = output
+            .as_object()
+            .and_then(|row| row.get("error"))
+            .and_then(Value::as_object)
+            .expect("error object");
+
+        assert_eq!(error.get("request_id"), Some(&Value::String("req_upstream".to_string())));
+        assert_eq!(
+            error.get("provider_key"),
+            Some(&Value::String("tab.default.gpt-5.1".to_string()))
+        );
+        assert_eq!(error.get("message"), Some(&Value::String("stream failed".to_string())));
+        assert_eq!(error.get("code"), Some(&Value::String("sse_stream_error".to_string())));
+    }
 }

@@ -140,7 +140,7 @@ provider/runtime/send/convert/direct error
    - `attempt`
    - `recoverable`
    - `provider`
-   - 带 `category/scopeKey`；真实等待固定由 error action queue 执行 `1s -> 2s -> 3s -> repeat`
+   - 带 `category/scopeKey`；真实等待固定由 error action queue 执行 `1s -> 3s -> 5s -> repeat`
 
 ### 各层改造后职责
 
@@ -163,7 +163,7 @@ provider/runtime/send/convert/direct error
 补充边界：只有在当前合法候选集合已经耗尽时，才允许 direct return。若仍有 route-pool / VR 明确允许的 secondary pool 候选，则必须继续走统一策略，不得直接 client-visible。
 
 ### Rule 2: 可恢复错误
-- 必须先进入统一错误动作队列做 blocking wait，等待序列固定 `1s -> 2s -> 3s -> repeat`
+- 必须先进入统一错误动作队列做 blocking wait，等待序列固定 `1s -> 3s -> 5s -> repeat`
 - 等待后按 Router policy / executor decision 执行：容量类错误显式 reroute 到未排除候选；普通 recoverable transport/5xx 可 same-provider retry 一次，重复后 reroute
 - 如果没有未排除候选，必须 fail-fast 返回最后一个 provider error
 - 禁止同请求内等待 provider 冷却、无限重打同 provider，或恢复 env/exponential/Retry-After 分散 backoff
@@ -190,7 +190,7 @@ reporter 只能透传，不得 fallback 成另一套语义。
 ### Rule 6: backoff 动作唯一队列
 - 统一 owner：`src/server/runtime/http-server/executor/request-executor-error-action-queue.ts`
 - category 固定：`global_error` / `session_storm` / `provider_recoverable` / `provider_transport` / `servertool_followup`
-- delay 固定：`1s -> 2s -> 3s` 循环
+- delay 固定：`1s -> 3s -> 5s` 循环
 - 等待固定：blocking wait + category/scope gate
 - hooks 固定：`record` / `wait_start` / `wait_end`
 - 禁止：`softWaitTimeoutMs`、本地 waiter queue、jitter、Retry-After、指数退避、env backoff 常量

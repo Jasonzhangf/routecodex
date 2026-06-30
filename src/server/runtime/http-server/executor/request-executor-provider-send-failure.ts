@@ -10,6 +10,10 @@ import {
   resolveRequestExecutorProviderFailurePlan
 } from './request-executor-provider-failure-plan.js';
 import {
+  recordProviderTransportBackoff,
+  resolveProviderTransportBackoffScopeKey
+} from './request-executor-error-action-queue.js';
+import {
   extractStatusCodeFromError,
 } from './request-retry-helpers.js';
 import { isPromptTooLongError } from './retry-engine.js';
@@ -43,6 +47,9 @@ type RequestExecutorProviderSendFailureArgs = {
   routePoolForAttempt?: string[];
   defaultTierAvailable?: boolean;
   excludedProviderKeys: Set<string>;
+  portScope?: string;
+  providerTransportBackoffKey?: string;
+  consumeProviderTransportBackoffMs?: () => number;
   recordAttempt: (args: { error: boolean }) => void;
   logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => void;
   logProviderRetrySwitch: (args: {
@@ -357,6 +364,22 @@ export async function processProviderSendFailure(
     retryTelemetryPlan: providerFailurePlan.retryTelemetryPlan,
     logStage: args.logStage,
     logProviderRetrySwitch: args.logProviderRetrySwitch
+  });
+
+  const providerTransportBackoffScopeKey = resolveProviderTransportBackoffScopeKey({
+    providerTransportBackoffKey: args.providerTransportBackoffKey,
+    portScope: args.portScope,
+    metadata: args.metadata,
+    providerKey: args.providerKey
+  });
+  const transportBackoffDelayMs = recordProviderTransportBackoff({
+    providerTransportBackoffKey: providerTransportBackoffScopeKey
+  });
+  args.logStage('provider.transport_backoff.recorded', args.requestId, {
+    providerKey: args.providerKey,
+    scopeKey: providerTransportBackoffScopeKey,
+    delayMs: transportBackoffDelayMs,
+    attempt: args.attempt
   });
 
   return {

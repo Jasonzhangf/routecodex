@@ -185,21 +185,28 @@ function buildResponsesRequestContextFromOriginalPayload(
   };
 }
 
-function readMatchedPort(metadata: Record<string, unknown>): number | undefined {
+function readResponsesConversationMatchedPort(metadata: Record<string, unknown>): number | undefined {
   const candidates = [
+    metadata.portScope,
     metadata.matchedPort,
-    metadata.entryPort,
     metadata.routecodexLocalPort,
-    metadata.localPort
+    metadata.localPort,
+    metadata.entryPort,
+    metadata.routecodexPort
   ];
   for (const candidate of candidates) {
+    if (typeof candidate === 'string') {
+      const parsed = Number(candidate.trim());
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed);
+      }
+      continue;
+    }
     if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
       return Math.floor(candidate);
     }
   }
-  const centerPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
-  const parsed = typeof centerPortScope === 'string' ? Number(centerPortScope.trim()) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+  return undefined;
 }
 
 export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntry(args: {
@@ -228,6 +235,7 @@ export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntr
     return null;
   }
   const requestTruth = readRuntimeRequestTruthIdentifiers(args.metadata);
+  const matchedPort = readResponsesConversationMatchedPort(args.metadata);
   const routingPolicyGroup =
     readString(args.metadata.routecodexRoutingPolicyGroup)
     ?? readString(args.metadata.routingPolicyGroup);
@@ -238,7 +246,7 @@ export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntr
     ...requestTruth,
     ...(args.providerKey ? { providerKey: args.providerKey } : {}),
     entryKind: 'responses',
-    ...(readMatchedPort(args.metadata) !== undefined ? { matchedPort: readMatchedPort(args.metadata) } : {}),
+    ...(matchedPort !== undefined ? { matchedPort } : {}),
     ...(routingPolicyGroup ? { routingPolicyGroup } : {})
   };
 }
@@ -291,6 +299,9 @@ import {
   resetErrorActionBackoffByScopePrefix,
   resetErrorActionQueueStateForTests,
   recordErrorActionBackoff,
+  peekErrorActionBackoffWaitMs,
+  resolveProviderTransportBackoffScopeKey,
+  waitProviderTransportBackoffWithGate,
 } from './executor/request-executor-error-action-queue.js';
 import {
   detectAssistantSanitizationPlaceholder,
@@ -470,56 +481,17 @@ function readEntryServerId(metadataRecord: Record<string, unknown> | undefined):
 
 function readEntryPort(metadataRecord: Record<string, unknown> | undefined): number | undefined {
   if (!metadataRecord) return undefined;
-  const metadataCenter = MetadataCenter.read(metadataRecord);
-  const requestTruthPortScope = metadataCenter?.readRequestTruth().portScope;
-  if (typeof requestTruthPortScope === 'string') {
-    const parsed = Number.parseInt(requestTruthPortScope, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
+  const directPortScope =
+    typeof metadataRecord.portScope === 'string' && metadataRecord.portScope.trim()
+      ? metadataRecord.portScope.trim()
+      : typeof metadataRecord.entryPort === 'number' && Number.isFinite(metadataRecord.entryPort)
+        ? String(Math.floor(metadataRecord.entryPort))
+        : undefined;
+  if (typeof directPortScope !== 'string') {
+    return undefined;
   }
-  const runtimeControl =
-    metadataRecord.__rt && typeof metadataRecord.__rt === 'object' && !Array.isArray(metadataRecord.__rt)
-      ? metadataRecord.__rt as Record<string, unknown>
-      : undefined;
-  const requestTruth =
-    metadataRecord.__requestTruth && typeof metadataRecord.__requestTruth === 'object' && !Array.isArray(metadataRecord.__requestTruth)
-      ? metadataRecord.__requestTruth as Record<string, unknown>
-      : undefined;
-  const portContext =
-    metadataRecord.portContext && typeof metadataRecord.portContext === 'object' && !Array.isArray(metadataRecord.portContext)
-      ? metadataRecord.portContext as Record<string, unknown>
-      : undefined;
-  const candidates = [
-    metadataRecord.entryPort,
-    metadataRecord.matchedPort,
-    metadataRecord.routecodexLocalPort,
-    metadataRecord.localPort,
-    metadataRecord.portScope,
-    requestTruth?.portScope,
-    runtimeControl?.entryPort,
-    runtimeControl?.matchedPort,
-    runtimeControl?.routecodexLocalPort,
-    runtimeControl?.localPort,
-    runtimeControl?.portScope,
-    portContext?.matchedPort,
-    portContext?.localPort,
-    portContext?.port,
-    portContext?.entryPort,
-    portContext?.portScope
-  ];
-  for (const value of candidates) {
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      return Math.floor(value);
-    }
-    if (typeof value === 'string') {
-      const parsed = Number.parseInt(value, 10);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        return parsed;
-      }
-    }
-  }
-  return undefined;
+  const parsed = Number.parseInt(directPortScope, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
 export class HubRequestExecutor implements RequestExecutor {
@@ -776,7 +748,10 @@ export class HubRequestExecutor implements RequestExecutor {
         initialMetadata,
         inboundClientHeaders,
         providerRequestId,
-        clientRequestId
+        clientRequestId,
+        projectPath,
+        sessionId,
+        conversationId
       } = await initializeRequestExecutorRequestState({
         input,
         logStage,
@@ -818,6 +793,8 @@ export class HubRequestExecutor implements RequestExecutor {
           excludedProviderKeys,
           inboundClientHeaders,
           clientRequestId,
+          sessionId,
+          conversationId,
           forcedRouteHint,
           throwIfClientAbortSignalAborted
         });
@@ -989,6 +966,7 @@ export class HubRequestExecutor implements RequestExecutor {
             routePoolForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
+            portScope,
             recordAttempt,
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
@@ -1039,17 +1017,16 @@ export class HubRequestExecutor implements RequestExecutor {
             requestId: input.requestId,
             attempt
           });
-          const requestTruth = readRuntimeRequestTruthIdentifiers(mergedMetadata);
           registerRequestLogContext(providerContext.requestId, {
             logSessionColorKey: mergedMetadata.logSessionColorKey,
             clientTmuxSessionId: mergedMetadata.clientTmuxSessionId,
             client_tmux_session_id: mergedMetadata.client_tmux_session_id,
             tmuxSessionId: mergedMetadata.tmuxSessionId,
             tmux_session_id: mergedMetadata.tmux_session_id,
-            sessionId: requestTruth.sessionId,
-            session_id: requestTruth.sessionId,
-            conversationId: requestTruth.conversationId,
-            conversation_id: requestTruth.conversationId
+            sessionId,
+            session_id: sessionId,
+            conversationId,
+            conversation_id: conversationId
           });
           providerProtocol = providerContext.providerProtocol;
           providerModel = providerContext.providerModel;
@@ -1122,6 +1099,7 @@ export class HubRequestExecutor implements RequestExecutor {
             routePoolForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
+            portScope,
             recordAttempt,
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
@@ -1190,6 +1168,34 @@ export class HubRequestExecutor implements RequestExecutor {
         let providerFailurePhase: 'provider_send' | 'provider_response_processing' = 'provider_send';
         try {
           throwIfClientAbortSignalAborted(clientAbortSignal);
+          const providerTransportBackoffScopeKey = resolveProviderTransportBackoffScopeKey({
+            portScope,
+            providerKey: target.providerKey
+          });
+          const providerTransportBackoffWaitMs = peekErrorActionBackoffWaitMs({
+            category: 'global_error',
+            scopeKey: providerTransportBackoffScopeKey
+          });
+          if (providerTransportBackoffWaitMs > 0) {
+            logStage('server.global_error_backoff_wait', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              waitMs: providerTransportBackoffWaitMs,
+              attempt
+            });
+            await waitProviderTransportBackoffWithGate({
+              providerTransportBackoffKey: providerTransportBackoffScopeKey,
+              ms: providerTransportBackoffWaitMs,
+              signal: clientAbortSignal,
+              logNonBlockingError: logRequestExecutorNonBlockingError
+            });
+            logStage('server.global_error_backoff_wait.completed', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              waitMs: providerTransportBackoffWaitMs,
+              attempt
+            });
+          }
           if (bypassTrafficGovernor) {
             logStage('provider.traffic.acquire.bypassed', input.requestId, {
               providerKey: target.providerKey,
@@ -1478,10 +1484,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 entryPort: entryPortForSnapshot,
                 metadata: {
                   ...(mergedMetadata ?? {}),
-                  ...(snapshotArgs.metadata ?? {}),
-                  ...(typeof entryPortForSnapshot === 'number'
-                    ? { entryPort: entryPortForSnapshot, matchedPort: entryPortForSnapshot }
-                    : {})
+                  ...(snapshotArgs.metadata ?? {})
                 }
               });
             }
@@ -1505,6 +1508,7 @@ export class HubRequestExecutor implements RequestExecutor {
             routeName: pipelineResult.routingDecision?.routeName,
             routingPoolId: readString(routingDecisionRecord?.poolId),
             finishReason,
+            projectPath,
             stoplessMode: stoplessLogState.mode,
             stoplessArmed: stoplessLogState.armed,
             aggregatedUsage: aggregatedUsage as Record<string, unknown> | undefined,
@@ -1516,7 +1520,8 @@ export class HubRequestExecutor implements RequestExecutor {
             providerRequestId,
             inputRequestId: input.requestId,
             mergedMetadata,
-            readString,
+            sessionId,
+            conversationId,
             readHubStageTop,
             readHubDecodeBreakdown
           });
@@ -1542,6 +1547,7 @@ export class HubRequestExecutor implements RequestExecutor {
             logicalRequestChainKey,
             routePoolForAttempt,
             excludedProviderKeys,
+            portScope,
             recordAttempt,
             logStage: (stage, requestId, details) => logStage(stage, requestId, details),
             logProviderRetrySwitch: (switchArgs) => this.logProviderRetrySwitch(switchArgs),
@@ -1566,10 +1572,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 entryPort: entryPortForSnapshot,
                 metadata: {
                   ...(metadataForAttempt ?? {}),
-                  ...(snapshotArgs.metadata ?? {}),
-                  ...(typeof entryPortForSnapshot === 'number'
-                    ? { entryPort: entryPortForSnapshot, matchedPort: entryPortForSnapshot }
-                    : {})
+                  ...(snapshotArgs.metadata ?? {})
                 }
               });
             },

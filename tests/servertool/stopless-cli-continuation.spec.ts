@@ -260,7 +260,8 @@ describe('stopless CLI continuation', () => {
     expect(result.executed).toBe(true);
     const command = extractExecCommand(result.chat);
     expect(command).toContain('routecodex hook run reasoningStop');
-    expect(command).toContain(`--session-id '${adapterContext.sessionId}'`);
+    expect(command).not.toContain('--session-id');
+    expect(command).not.toContain('--request-id');
     expect((result.chat as any).choices?.[0]?.message?.content).toBe('');
     expect((result.chat as any).choices?.[0]?.message?.reasoning_text).toContain('need more evidence');
     expect(command).not.toContain('schemaGuidance');
@@ -268,8 +269,8 @@ describe('stopless CLI continuation', () => {
     expect(cliStdout.routeHint).toBe('thinking');
     expect(cliStdout.repeatCount).toBe(1);
     expect(cliStdout.maxRepeats).toBe(3);
-    expect(cliStdout.sessionId).toBe(adapterContext.sessionId);
-    expect(cliStdout.requestId).toBe(adapterContext.requestId);
+    expect(cliStdout.sessionId).toBeUndefined();
+    expect(cliStdout.requestId).toBeUndefined();
     expect(cliStdout.schemaGuidance).toBeUndefined();
     expect(cliStdout.modelGuidance).toBeUndefined();
   });
@@ -564,7 +565,7 @@ describe('stopless CLI continuation', () => {
     const commandA1 = maybeExtractExecCommand(firstA.chat);
     expect(commandA1).toContain('routecodex hook run reasoningStop');
     const stdoutA1 = await runStoplessCliStdout(commandA1!);
-    expect(stdoutA1.sessionId).toBe(sessionA);
+    expect(stdoutA1.sessionId).toBeUndefined();
     expect(stdoutA1.repeatCount).toBe(1);
 
     const requestA2 = `req-stopless-e2e-a-2-${Date.now()}`;
@@ -595,9 +596,10 @@ describe('stopless CLI continuation', () => {
       repeatCount: 2,
       maxRepeats: 3
     });
-    expect(commandA2).toContain(`--session-id '${sessionA}'`);
+    expect(commandA2).not.toContain('--session-id');
+    expect(commandA2).not.toContain('--request-id');
     const stdoutA2 = await runStoplessCliStdout(commandA2!);
-    expect(stdoutA2.sessionId).toBe(sessionA);
+    expect(stdoutA2.sessionId).toBeUndefined();
     expect(stdoutA2.repeatCount).toBe(2);
 
     const requestA3 = `req-stopless-e2e-a-3-${Date.now()}`;
@@ -651,7 +653,7 @@ describe('stopless CLI continuation', () => {
     const commandB1 = maybeExtractExecCommand(firstB.chat);
     expect(commandB1).toContain('routecodex hook run reasoningStop');
     const stdoutB1 = await runStoplessCliStdout(commandB1!);
-    expect(stdoutB1.sessionId).toBe(sessionB);
+    expect(stdoutB1.sessionId).toBeUndefined();
     expect(stdoutB1.repeatCount).toBe(1);
   });
 

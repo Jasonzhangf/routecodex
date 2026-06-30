@@ -16,7 +16,6 @@ import {
   logSnapshotNonBlockingError,
 } from './provider-utils.js';
 import { MetadataCenter } from '../../server/runtime/http-server/metadata-center/metadata-center.js';
-import { getCurrentPortRequestContext } from '../../server/runtime/http-server/port-log-context.js';
 import {
   enqueueSnapshotPersist,
   __flushProviderSnapshotQueueForTests as flushProviderSnapshotQueueForTests,
@@ -92,6 +91,21 @@ function isErrorPhase(phase: string): boolean {
   return String(phase || '').trim().toLowerCase().includes('error');
 }
 
+function readEntryPortFromMetadataCenter(
+  metadata?: Record<string, unknown>
+): number | undefined {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+  const metadataCenter = MetadataCenter.read(metadata);
+  const requestTruthPortScope = metadataCenter?.readRequestTruth().portScope;
+  if (typeof requestTruthPortScope !== 'string') {
+    return undefined;
+  }
+  const parsed = Number.parseInt(requestTruthPortScope, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function resolveProviderSnapshotEntryPort(
   entryPort?: number,
   metadata?: Record<string, unknown>
@@ -99,41 +113,22 @@ function resolveProviderSnapshotEntryPort(
   if (typeof entryPort === 'number' && Number.isFinite(entryPort) && entryPort > 0) {
     return Math.floor(entryPort);
   }
-  const portContext = getCurrentPortRequestContext();
-  const currentPort =
-    typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort) && portContext.matchedPort > 0
-      ? Math.floor(portContext.matchedPort)
-      : typeof portContext?.localPort === 'number' && Number.isFinite(portContext.localPort) && portContext.localPort > 0
-        ? Math.floor(portContext.localPort)
-        : undefined;
-  if (typeof currentPort === 'number') {
-    return currentPort;
+  return readEntryPortFromMetadataCenter(metadata);
+}
+
+function requireProviderSnapshotEntryPort(
+  stage: string,
+  entryPort?: number,
+  metadata?: Record<string, unknown>
+): number | undefined {
+  const resolved = resolveProviderSnapshotEntryPort(entryPort, metadata);
+  if (typeof resolved === 'number') {
+    return resolved;
   }
-  if (!metadata || typeof metadata !== 'object') {
-    return undefined;
+  if (String(stage || '').trim().toLowerCase().startsWith('provider-') || String(stage || '').trim().toLowerCase().startsWith('client-')) {
+    throw new Error(`[snapshot-writer] entryPort required for stage=${stage}`);
   }
-  const metadataCenter = MetadataCenter.read(metadata);
-  const requestTruthPortScope = metadataCenter?.readRequestTruth().portScope;
-  if (typeof requestTruthPortScope === 'string') {
-    const parsed = Number.parseInt(requestTruthPortScope, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-  const candidates = [
-    metadata.entryPort,
-    metadata.matchedPort,
-    metadata.localPort,
-    metadata.routecodexLocalPort,
-    metadata.portScope
-  ];
-  for (const value of candidates) {
-    const numeric = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
-    if (Number.isFinite(numeric) && numeric > 0) {
-      return Math.floor(numeric);
-    }
-  }
-  return undefined;
+  return resolved;
 }
 
 function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions): ProviderSnapshotPersistInput {
@@ -142,7 +137,7 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
   const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
-  const entryPort = resolveProviderSnapshotEntryPort(options.entryPort, options.metadata);
+  const entryPort = requireProviderSnapshotEntryPort(stage, options.entryPort, options.metadata);
   const payload = coerceSnapshotPayloadForWrite(stage, buildSnapshotPayload({
     stage,
     data: options.data,
@@ -223,12 +218,15 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput, forc
 
 export async function writeProviderSnapshot(options: ProviderSnapshotWriteOptions): Promise<void> {
   const stage = String(options.phase || '').trim();
+  const entryPortForSnapshot = requireProviderSnapshotEntryPort(stage, options.entryPort, options.metadata);
   if (shouldSuppressSnapshotFor429(stage, options.data)) {
     const purgeInput = {
       entryEndpoint: options.entryEndpoint,
       requestId: options.requestId,
       clientRequestId: options.clientRequestId,
-      entryPort: resolveProviderSnapshotEntryPort(options.entryPort, options.metadata)
+      entryPort: entryPortForSnapshot,
+      providerKey: options.providerKey,
+      providerId: options.providerId
     };
     await purge429ProviderSnapshotArtifacts(purgeInput);
     schedule429ProviderSnapshotPurge(purgeInput);
@@ -238,12 +236,6 @@ export async function writeProviderSnapshot(options: ProviderSnapshotWriteOption
     return;
   }
   const snapshot = buildProviderSnapshotPersistInput(options);
-
-  // Fail-fast: provider-* stage without entryPort must not enter the queue.
-  if (String(snapshot.stage || '').trim().toLowerCase().startsWith('provider-') && snapshot.entryPort === undefined) {
-    logSnapshotNonBlockingError(`writeProviderSnapshot:${snapshot.stage}`, new Error("entryPort missing"));
-    return;
-  }
 
   if (!runtimeFlags.snapshotsEnabled) {
     if (options.forceLocalDiskWriteWhenDisabled) {
@@ -303,7 +295,7 @@ export async function writeClientSnapshot(options: {
       options.metadata && typeof options.metadata === 'object'
         ? options.metadata
         : undefined;
-    const entryPort = resolveProviderSnapshotEntryPort(undefined, metadataSnapshot);
+    const entryPort = requireProviderSnapshotEntryPort('client-request', undefined, metadataSnapshot);
     const snapshotPayload =
       typeof options.rawBodyText === 'string'
         ? options.rawBodyText
@@ -352,6 +344,7 @@ export async function writeClientSnapshot(options: {
     });
   } catch (error) {
     logSnapshotNonBlockingError('writeClientSnapshot', error);
+    throw error;
   }
 }
 

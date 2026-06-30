@@ -45,6 +45,7 @@ const failures = [];
 
 const expectedChains = [
   'request.mainline', 'response.mainline', 'error.mainline',
+  'internal_error_numbering.mainline',
   'runtime.lifecycle.mainline',
   'stopless.session.mainline', 'metadata.center.mainline',
 ];

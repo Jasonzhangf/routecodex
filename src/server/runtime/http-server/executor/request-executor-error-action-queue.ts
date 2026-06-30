@@ -33,7 +33,7 @@ type ErrorActionQueueState = {
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 type ErrorActionQueueHook = (event: ErrorActionQueueEvent) => void;
 
-const ERROR_ACTION_DELAY_SEQUENCE_MS = [1_000, 2_000, 3_000] as const;
+const ERROR_ACTION_DELAY_SEQUENCE_MS = [1_000, 3_000, 5_000] as const;
 const ERROR_ACTION_STATE_TTL_MS = 10 * 60_000;
 const ERROR_ACTION_MAX_WAITERS = 64;
 
@@ -74,6 +74,77 @@ function normalizeScopeKey(scopeKey: string): string {
 
 function buildQueueKey(category: ErrorActionCategory, scopeKey: string): string {
   return `${category}|${normalizeScopeKey(scopeKey)}`;
+}
+
+function readBackoffPortScope(metadata?: Record<string, unknown>): string {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return 'unknown-port';
+  }
+  const candidates = [
+    metadata.routecodexRoutingPolicyGroup,
+    metadata.routecodexPort,
+    metadata.routecodexLocalPort,
+    metadata.routecodexPortMode
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return String(Math.floor(candidate));
+    }
+  }
+  return 'unknown-port';
+}
+
+export function resolveProviderTransportBackoffScopeKey(args: {
+  providerTransportBackoffKey?: string;
+  portScope?: string;
+  metadata?: Record<string, unknown>;
+  providerKey?: string;
+}): string {
+  if (typeof args.providerTransportBackoffKey === 'string' && args.providerTransportBackoffKey.trim()) {
+    return args.providerTransportBackoffKey.trim();
+  }
+  const portScope =
+    typeof args.portScope === 'string' && args.portScope.trim()
+      ? args.portScope.trim()
+      : readBackoffPortScope(args.metadata);
+  const providerKey =
+    typeof args.providerKey === 'string' && args.providerKey.trim()
+      ? args.providerKey.trim()
+      : 'unknown-provider';
+  return `${normalizeScopeKey(portScope)}|${normalizeScopeKey(providerKey)}|transport`;
+}
+
+export function recordProviderTransportBackoff(args: {
+  providerKey?: string;
+  portScope?: string;
+  metadata?: Record<string, unknown>;
+  providerTransportBackoffKey?: string;
+}): number {
+  return recordErrorActionBackoff({
+    category: 'global_error',
+    scopeKey: resolveProviderTransportBackoffScopeKey(args)
+  });
+}
+
+export async function waitProviderTransportBackoffWithGate(args: {
+  providerKey?: string;
+  portScope?: string;
+  metadata?: Record<string, unknown>;
+  providerTransportBackoffKey?: string;
+  ms?: number;
+  signal?: AbortSignal;
+  logNonBlockingError?: LogNonBlockingError;
+}): Promise<number> {
+  return waitErrorActionBackoffWithGate({
+    category: 'global_error',
+    scopeKey: resolveProviderTransportBackoffScopeKey(args),
+    ms: args.ms,
+    signal: args.signal,
+    logNonBlockingError: args.logNonBlockingError
+  });
 }
 
 function emitHook(event: ErrorActionQueueEvent): void {

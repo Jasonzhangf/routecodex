@@ -2216,8 +2216,8 @@ describe('HubRequestExecutor failover', () => {
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
+            providerType: 'gemini',
+            outboundProfile: 'gemini-chat',
             runtimeKey: providerKey
           },
           routingDecision: { routeName: 'default', pool: [firstProviderKey, secondProviderKey] },
@@ -2859,6 +2859,130 @@ describe('HubRequestExecutor failover', () => {
       const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
       expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
       expect(secondCallMetadata.__routecodexPreselectedRoute).toBeUndefined();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('records transport backoff and waits before the same priority provider is hit again', async () => {
+    jest.useFakeTimers();
+    const providerA = 'tab.key1.gpt-5.4';
+    const providerB = 'tab.key2.gpt-5.4';
+    const retryable429 = Object.assign(new Error('HTTP 429: quota exhausted'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+    let providerAAttempt = 0;
+    const providerAProcess = jest.fn(async () => {
+      providerAAttempt += 1;
+      if (providerAAttempt === 1) {
+        throw retryable429;
+      }
+      return {
+        status: 200,
+        data: { id: 'ok_after_backoff' }
+      };
+    });
+    const providerBProcess = jest.fn(async () => ({
+      status: 200,
+      data: { id: 'backup_after_switch' }
+    }));
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, buildHandle(providerA, providerAProcess)],
+      [providerB, buildHandle(providerB, providerBProcess)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : []
+        );
+        const providerKey = excluded.has(providerA) ? providerB : providerA;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'gemini',
+            outboundProfile: 'gemini-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: {
+            routeName: 'thinking',
+            pool: [providerA, providerB]
+          },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage,
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: {
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'ok_after_backoff'
+            }
+          }
+        ]
+      }
+    });
+
+    try {
+      const firstResult = await executor.execute({
+        requestId: 'req-backoff-first',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      expect(firstResult).toEqual(expect.objectContaining({ status: 200 }));
+      expect(providerAProcess).toHaveBeenCalledTimes(1);
+      expect(providerBProcess).toHaveBeenCalledTimes(1);
+      expect(logStage.mock.calls.some((call) => call[0] === 'provider.transport_backoff.recorded')).toBe(true);
+
+      const secondPending = executor.execute({
+        requestId: 'req-backoff-second',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      expect(providerAProcess).toHaveBeenCalledTimes(1);
+      expect(logStage.mock.calls.some((call) => call[0] === 'server.global_error_backoff_wait')).toBe(true);
+
+      await jest.advanceTimersByTimeAsync(1_000);
+      await expect(secondPending).resolves.toEqual(expect.objectContaining({ status: 200 }));
+      expect(providerAProcess).toHaveBeenCalledTimes(2);
+      expect(providerBProcess).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }

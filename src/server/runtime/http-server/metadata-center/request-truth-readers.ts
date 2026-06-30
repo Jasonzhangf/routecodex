@@ -245,6 +245,7 @@ export function readRuntimeControlProjection(
   const routeHint = readTrimmedString(runtimeControl?.routeHint);
   const routeName = readTrimmedString(runtimeControl?.routeName);
   const routeId = readTrimmedString(runtimeControl?.routeId);
+  const routecodexRoutingPolicyGroup = readTrimmedString(runtimeControl?.routecodexRoutingPolicyGroup);
   const providerProtocol = readTrimmedString(runtimeControl?.providerProtocol);
   const retryProviderKey = readTrimmedString(runtimeControl?.retryProviderKey);
   const preselectedRoute = asFlatRecord(runtimeControl?.preselectedRoute);
@@ -258,6 +259,7 @@ export function readRuntimeControlProjection(
     ...(routeHint ? { routeHint } : {}),
     ...(routeName ? { routeName } : {}),
     ...(routeId ? { routeId } : {}),
+    ...(routecodexRoutingPolicyGroup ? { routecodexRoutingPolicyGroup } : {}),
     ...(providerProtocol ? { providerProtocol } : {}),
     ...(retryProviderKey ? { retryProviderKey } : {}),
     ...(preselectedRoute ? { preselectedRoute } : {}),

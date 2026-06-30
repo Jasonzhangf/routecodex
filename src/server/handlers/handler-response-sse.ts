@@ -21,18 +21,12 @@ import { logPipelineStage } from '../utils/stage-logger.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
+import { projectSseErrorEventPayload } from '../utils/http-error-mapper.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildClientSseKeepaliveFrameForHttp,
-  buildResponsesMissingSseBridgeErrorPayloadForHttp,
-  buildResponsesSseErrorPayloadForHttp,
-  buildResponsesStructuredSseErrorPayloadForHttp,
-  createResponsesJsonToSseConverterForHttp,
+  updateResponsesContractProbeFromSseChunkForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
-import {
-  createChatJsonToSseConverterForHttp,
-  buildResponsesPayloadFromChatForHttp,
-} from '../../modules/llmswitch/bridge/responses-response-bridge.js';
 
 type FlushableResponse = Response & {
   flushHeaders?: () => void;
@@ -44,7 +38,6 @@ type SendSsePipelineResponseArgs = {
   result: PipelineExecutionResult;
   requestLabel: string;
   status: number;
-  body: unknown;
   forceSSE: boolean;
   expectsStream: boolean;
   entryEndpoint?: string;
@@ -56,19 +49,13 @@ type SendSsePipelineResponseArgs = {
   logResponseCompleted: (details?: Record<string, unknown>) => void;
 };
 
-type ResponsesJsonSseDispatchArgs = {
-  res: Response;
-  requestLabel: string;
-  result: PipelineExecutionResult;
-  status: number;
-  entryEndpoint?: string;
-  responsesRequestContext?: DispatchOptions['responsesRequestContext'];
-  logResponseCompleted: (details?: Record<string, unknown>) => void;
-};
-
 const SHOULD_LOG_HTTP_EVENTS = process.env.ROUTECODEX_HTTP_LOG_DISABLE !== '1'
   && process.env.RCC_HTTP_LOG_DISABLE !== '1';
 const DEFAULT_SSE_TOTAL_TIMEOUT_MS = 300_000;
+
+function isResponsesSseEndpoint(entryEndpoint: string | undefined): boolean {
+  return entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs';
+}
 
 function readErrorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') {
@@ -144,6 +131,14 @@ function createSseClientResponseClosedError(): Error & { code: string; name: str
   });
 }
 
+function buildMissingSseBridgeErrorPayloadForHttp(requestLabel: string, status = 502): Record<string, unknown> {
+  return projectSseErrorEventPayload({
+    requestId: requestLabel,
+    status,
+    message: 'SSE stream missing from pipeline result',
+    code: 'sse_bridge_error',
+  });
+}
 
 function sendSseBridgeError(
   res: Response,
@@ -152,7 +147,7 @@ function sendSseBridgeError(
   metadata?: Record<string, unknown>,
   releaseReason = 'sse_bridge_error_closeout'
 ): void {
-  const payload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, status);
+  const payload = buildMissingSseBridgeErrorPayloadForHttp(requestLabel, status);
   if (!res.headersSent) {
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -175,322 +170,19 @@ function sendSseBridgeError(
   });
 }
 
-function extractStructuredSseErrorPayload(
-  body: unknown,
-  requestLabel: string,
-  status: number
-): Record<string, unknown> | null {
-  return buildResponsesStructuredSseErrorPayloadForHttp({
-    body,
-    requestLabel,
-    status,
-  });
-}
-
-function sendStructuredSseError(
-  res: Response,
-  requestLabel: string,
-  payload: Record<string, unknown>,
-  metadata?: Record<string, unknown>,
-  releaseReason = 'sse_structured_error_closeout'
-): void {
-  res.status(200);
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  try {
-    res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-  } catch (error) {
-    logResponseNonBlockingError(`sendStructuredSseError:write:${requestLabel}`, error);
-  }
-  try {
-    res.end();
-  } catch (error) {
-    logResponseNonBlockingError(`sendStructuredSseError:end:${requestLabel}`, error);
-  }
-  finalizeSseTransportCloseout({
-    metadata,
-    releaseReason,
-  });
-}
-
-async function streamResponsesJsonAsSse(
-  args: ResponsesJsonSseDispatchArgs & { responsesPayload: Record<string, unknown> }
-): Promise<boolean> {
-  const flushable = args.res as FlushableResponse;
-  let cleanupLogged = false;
-  let streamEnded = false;
-  args.res.status(args.status);
-  args.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  args.res.setHeader('Cache-Control', 'no-cache, no-transform');
-  args.res.setHeader('Connection', 'keep-alive');
-  if (typeof flushable.flushHeaders === 'function') {
-    flushable.flushHeaders();
-  } else if (typeof flushable.flush === 'function') {
-    flushable.flush();
-  }
-  try {
-    const converter = await createResponsesJsonToSseConverterForHttp();
-    const sse = await converter.convertResponseToJsonToSse(args.responsesPayload, {
-      requestId: args.requestLabel
-    });
-    const stream = toNodeReadable(sse);
-    if (!stream) {
-      sendSseBridgeError(
-        args.res,
-        args.requestLabel,
-        502,
-        args.result.metadata as Record<string, unknown> | undefined,
-        'json_to_sse_bridge_missing_stream_closeout'
-      );
-      return true;
-    }
-    const cleanup = (trigger: 'close' | 'finish') => {
-      if (cleanupLogged) {
-        return;
-      }
-      cleanupLogged = true;
-      const responseClosedBeforeStreamEnd = !streamEnded;
-      try {
-        stream.unpipe(args.res);
-      } catch (error) {
-        logResponseNonBlockingError(`response.sse.json_bridge.unpipe:${args.requestLabel}`, error);
-      }
-      if (responseClosedBeforeStreamEnd) {
-        recordSseTransportClientClose(args.requestLabel, {
-          finishReason: undefined,
-          terminal: false,
-          closeBeforeStreamEnd: true,
-        });
-        try {
-          stream.destroy(createSseClientResponseClosedError());
-        } catch (error) {
-          logResponseNonBlockingError(`response.sse.json_bridge.destroy:${args.requestLabel}`, error);
-        }
-      }
-      finalizeSseTransportCloseout({
-        metadata: args.result.metadata as Record<string, unknown> | undefined,
-        releaseReason: `json_to_sse_${trigger}_closeout`,
-        logResponseCompleted: args.logResponseCompleted,
-        completedDetails: {
-          status: args.status,
-          mode: 'sse',
-        },
-      });
-    };
-    stream.on('end', () => {
-      streamEnded = true;
-      if (!args.res.writableEnded && !args.res.destroyed) {
-        args.res.end();
-      }
-      cleanup('finish');
-    });
-    stream.on('error', (error: Error) => {
-      logResponseNonBlockingError(`response.sse.json_bridge.stream:${args.requestLabel}`, error);
-      if (!args.res.writableEnded && !args.res.destroyed) {
-        sendSseBridgeError(
-          args.res,
-          args.requestLabel,
-          502,
-          args.result.metadata as Record<string, unknown> | undefined,
-          'json_to_sse_stream_error_closeout'
-        );
-      }
-    });
-    args.res.on('close', () => cleanup('close'));
-    args.res.on('finish', () => cleanup('finish'));
-    stream.pipe(args.res, { end: false });
-  } catch (error) {
-    logResponseNonBlockingError(`response.sse.json_bridge:${args.requestLabel}`, error);
-    if (!args.res.writableEnded && !args.res.destroyed) {
-      sendSseBridgeError(
-        args.res,
-        args.requestLabel,
-        502,
-        args.result.metadata as Record<string, unknown> | undefined,
-        'json_to_sse_bridge_error_closeout'
-      );
-    }
-  }
-  return true;
-}
-
-async function streamChatCompletionsJsonAsSse(
-  args: ResponsesJsonSseDispatchArgs
-): Promise<boolean> {
-  if (
-    args.entryEndpoint !== '/v1/chat/completions'
-    || !args.result.body
-    || typeof args.result.body !== 'object'
-    || Array.isArray(args.result.body)
-  ) {
-    return false;
-  }
-  const record = args.result.body as Record<string, unknown>;
-  if (record.object !== 'chat.completion') {
-    return false;
-  }
-  const flushable = args.res as FlushableResponse;
-  let cleanupLogged = false;
-  let streamEnded = false;
-  args.res.status(args.status);
-  args.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  args.res.setHeader('Cache-Control', 'no-cache, no-transform');
-  args.res.setHeader('Connection', 'keep-alive');
-  if (typeof flushable.flushHeaders === 'function') {
-    flushable.flushHeaders();
-  } else if (typeof flushable.flush === 'function') {
-    flushable.flush();
-  }
-  try {
-    const converter = await createChatJsonToSseConverterForHttp();
-    const sse = await converter.convertResponseToJsonToSse(args.result.body, {
-      requestId: args.requestLabel,
-    });
-    const stream = toNodeReadable(sse);
-    if (!stream) {
-      sendSseBridgeError(
-        args.res,
-        args.requestLabel,
-        502,
-        args.result.metadata as Record<string, unknown> | undefined,
-        'json_to_sse_bridge_missing_stream_closeout'
-      );
-      return true;
-    }
-    const cleanup = (trigger: 'close' | 'finish') => {
-      if (cleanupLogged) {
-        return;
-      }
-      cleanupLogged = true;
-      const responseClosedBeforeStreamEnd = !streamEnded;
-      try {
-        stream.unpipe(args.res);
-      } catch (error) {
-        logResponseNonBlockingError(`response.sse.chat_json_bridge.unpipe:${args.requestLabel}`, error);
-      }
-      if (responseClosedBeforeStreamEnd) {
-        recordSseTransportClientClose(args.requestLabel, {
-          finishReason: undefined,
-          terminal: false,
-          closeBeforeStreamEnd: true,
-        });
-        try {
-          stream.destroy(createSseClientResponseClosedError());
-        } catch (error) {
-          logResponseNonBlockingError(`response.sse.chat_json_bridge.destroy:${args.requestLabel}`, error);
-        }
-      }
-      finalizeSseTransportCloseout({
-        metadata: args.result.metadata as Record<string, unknown> | undefined,
-        releaseReason: `json_to_sse_${trigger}_closeout`,
-        logResponseCompleted: args.logResponseCompleted,
-        completedDetails: {
-          status: args.status,
-          mode: 'sse',
-        },
-      });
-    };
-    stream.on('end', () => {
-      streamEnded = true;
-      if (!args.res.writableEnded && !args.res.destroyed) {
-        args.res.end();
-      }
-      cleanup('finish');
-    });
-    stream.on('error', (error: Error) => {
-      logResponseNonBlockingError(`response.sse.chat_json_bridge.stream:${args.requestLabel}`, error);
-      if (!args.res.writableEnded && !args.res.destroyed) {
-        sendSseBridgeError(
-          args.res,
-          args.requestLabel,
-          502,
-          args.result.metadata as Record<string, unknown> | undefined,
-          'json_to_sse_stream_error_closeout'
-        );
-      }
-    });
-    args.res.on('close', () => cleanup('close'));
-    args.res.on('finish', () => cleanup('finish'));
-    stream.pipe(args.res, { end: false });
-    return true;
-  } catch (error) {
-    logResponseNonBlockingError(`response.sse.chat_json_bridge:${args.requestLabel}`, error);
-    if (!args.res.writableEnded && !args.res.destroyed) {
-      sendSseBridgeError(
-        args.res,
-        args.requestLabel,
-        502,
-        args.result.metadata as Record<string, unknown> | undefined,
-        'json_to_sse_bridge_error_closeout'
-      );
-    }
-    return true;
-  }
-}
-
-async function dispatchResponsesJsonAsSse(args: ResponsesJsonSseDispatchArgs): Promise<boolean> {
-  const body = args.result.body;
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return false;
-  }
-  const record = body as Record<string, unknown>;
-  const responsesPayload =
-    record.object === 'response'
-      ? record
-      : (
-        args.entryEndpoint === '/v1/responses'
-        && record.object === 'chat.completion'
-          ? await buildResponsesPayloadFromChatForHttp(body, {
-            requestId: args.requestLabel,
-          }) as Record<string, unknown>
-          : undefined
-      );
-  if (!responsesPayload) {
-    return false;
-  }
-  return streamResponsesJsonAsSse({
-    ...args,
-    responsesPayload,
-  });
-}
-
 export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs): Promise<boolean | Error> {
-  const { res, result, requestLabel, status, body, forceSSE, expectsStream, entryEndpoint } = args;
+  const { res, result, requestLabel, status, forceSSE, expectsStream, entryEndpoint } = args;
   if (forceSSE && result.sseStream === undefined) {
-    if (await streamChatCompletionsJsonAsSse({
-      res,
-      requestLabel,
-      result,
-      status,
-      entryEndpoint,
-      responsesRequestContext: args.responsesRequestContext,
-      logResponseCompleted: args.logResponseCompleted
-    })) {
-      return true;
-    }
-    const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
-    if (await dispatchResponsesJsonAsSse({
-      res,
-      requestLabel,
-      result,
-      status,
-      entryEndpoint,
-      responsesRequestContext: args.responsesRequestContext,
-      logResponseCompleted: args.logResponseCompleted
-    })) {
-      return true;
-    }
+    const missingSsePayload = buildMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
     logPipelineStage('response.sse.missing', requestLabel, { status });
-    const structuredErrorPayload = extractStructuredSseErrorPayload(body, requestLabel, status);
     finalizeSseTransportCloseout({
       releaseReason: 'force_sse_missing_stream_observed',
       logResponseCompleted: args.logResponseCompleted,
       completedDetails: {
         status: 200,
         mode: 'sse',
-        reason: structuredErrorPayload ? 'structured_error_passthrough' : 'missing_stream',
-        bridgeStatus: structuredErrorPayload ? status : 502
+        reason: 'missing_stream',
+        bridgeStatus: 502
       },
     });
     if (shouldCaptureClientResponseSnapshotStage('client-response.error')) {
@@ -503,21 +195,11 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         data: {
           mode: 'sse',
           status: 200,
-          payload: structuredErrorPayload ?? missingSsePayload
+          payload: missingSsePayload
         }
       }).catch((error) => {
         logResponseNonBlockingError(`writeServerSnapshot:sse_missing:${requestLabel}`, error);
       });
-    }
-    if (structuredErrorPayload) {
-      sendStructuredSseError(
-        res,
-        requestLabel,
-        structuredErrorPayload,
-        result.metadata as Record<string, unknown> | undefined,
-        'force_sse_structured_error_closeout'
-      );
-      return true;
     }
     sendSseBridgeError(
       res,
@@ -548,7 +230,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       ? resultMetadata.clientConnectionState as { disconnected?: unknown }
       : undefined;
   if (!stream) {
-    const missingSsePayload = buildResponsesMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
+    const missingSsePayload = buildMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
     logPipelineStage('response.sse.missing', requestLabel, {});
     finalizeSseTransportCloseout({
       metadata: resultMetadata,
@@ -630,7 +312,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       status,
       trigger: 'close',
       streamEnded: false,
-      sawTerminalEvent: false,
       finishReason: undefined,
       closeBeforeStreamEnd: true,
       detectedBeforeStreamStart: true
@@ -734,7 +415,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   let ended = false;
   let cleanupLogged = false;
   let streamEnded = false;
-  let sawTerminalEvent = false;
+  let sawResponsesTerminalEvent = false;
+  let responsesContractProbe: Record<string, unknown> = {};
+  let responsesSseBlockCarry = '';
   let totalTimer: NodeJS.Timeout | null = null;
   let keepaliveTimer: NodeJS.Timeout | null = null;
 
@@ -823,7 +506,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     abortSourceStreamForClientClose();
     logResponsesSseTransportTrace('client_close.transport_only', requestLabel, {
       closeBeforeStreamEnd,
-      sawTerminalEvent,
       detectedBeforeStreamStart: !streamEnded
     });
   };
@@ -843,7 +525,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     if (ended) {
       return;
     }
-    ended = true;
     clearTimers();
     detachOutboundStream();
     logPipelineStage(logLabel, requestLabel, { code, message });
@@ -852,13 +533,14 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       message,
       streamEnded,
     });
-    const payload = buildResponsesSseErrorPayloadForHttp({
-      requestLabel,
+    const payload = projectSseErrorEventPayload({
+      requestId: requestLabel,
       status: statusCode,
       message,
       code,
     });
     writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.error.write_error_event');
+    ended = true;
     try {
       res.end();
     } catch (error) {
@@ -866,6 +548,39 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
     clientSseSnapshotRecorder?.flush();
     destroySourceStream(Object.assign(new Error(message), { code }));
+  };
+
+  const updateResponsesTerminalProbeFromTransportText = (text: string, flushRemainder = false) => {
+    if (!isResponsesSseEndpoint(entryEndpoint) || sawResponsesTerminalEvent) {
+      return;
+    }
+    const joined = `${responsesSseBlockCarry}${text}`;
+    const lastBlockEnd = joined.lastIndexOf('\n\n');
+    if (lastBlockEnd < 0) {
+      responsesSseBlockCarry = joined.slice(-4096);
+      if (!flushRemainder) {
+        return;
+      }
+    }
+    const completeText = lastBlockEnd >= 0
+      ? joined.slice(0, lastBlockEnd + 2)
+      : joined;
+    responsesSseBlockCarry = lastBlockEnd >= 0
+      ? joined.slice(lastBlockEnd + 2).slice(-4096)
+      : '';
+    if (!completeText.trim()) {
+      return;
+    }
+    responsesContractProbe = updateResponsesContractProbeFromSseChunkForHttp(
+      completeText,
+      responsesContractProbe
+    );
+    if (
+      responsesContractProbe.__seen_response_completed === true
+      || responsesContractProbe.__seen_response_done === true
+    ) {
+      sawResponsesTerminalEvent = true;
+    }
   };
 
   if (typeof totalTimeoutMs === 'number' && Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0) {
@@ -899,12 +614,11 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
     clearTimers();
     detachOutboundStream();
-    const closeBeforeStreamEnd = trigger === 'close' && !streamEnded && !sawTerminalEvent;
+    const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
     const details = {
       status,
       trigger,
       streamEnded,
-      sawTerminalEvent,
     };
     finalizeSseTransportCloseout({
       metadata: resultMetadata,
@@ -949,9 +663,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       : chunk instanceof Uint8Array ? Buffer.from(chunk).toString('utf8')
       : '';
     if (!text) return;
-    if (text.includes('event: response.completed') || text.includes('event: response.done')) {
-      sawTerminalEvent = true;
-    }
+    updateResponsesTerminalProbeFromTransportText(text);
     writeClientSseFrame(text, 'response.sse.stream.write_frame', { recordSnapshot: false });
   });
 
@@ -968,8 +680,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     detachOutboundStream();
     recordSseTransportClientClose(requestLabel, {
       finishReason: undefined,
-      terminal: sawTerminalEvent,
-      closeBeforeStreamEnd: !streamEnded && !sawTerminalEvent
+      closeBeforeStreamEnd: !streamEnded
     });
     logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
     writeSseDiagnosticSnapshot(
@@ -996,8 +707,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       },
     });
     try {
-      const payload = buildResponsesSseErrorPayloadForHttp({
-        requestLabel,
+      const payload = projectSseErrorEventPayload({
+        requestId: requestLabel,
         status: 500,
         message: error.message,
         code: readErrorCode(error) ?? 'sse_stream_error',
@@ -1020,8 +731,17 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     clearTimers();
     recordSseTransportStreamEnd(requestLabel, {
       finishReason: undefined,
-      terminal: false
     });
+    updateResponsesTerminalProbeFromTransportText('', true);
+    if (isResponsesSseEndpoint(entryEndpoint) && !sawResponsesTerminalEvent) {
+      endWithSseError(
+        'upstream_stream_incomplete',
+        'SSE stream ended before response.completed',
+        502,
+        'response.sse.stream.incomplete'
+      );
+      return;
+    }
     ended = true;
     if (!res.writableEnded && !res.destroyed) {
       try {
@@ -1037,12 +757,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     if (!ended && !streamEnded) {
       recordSseTransportClientClose(requestLabel, {
         finishReason: undefined,
-        terminal: sawTerminalEvent,
-        closeBeforeStreamEnd: !sawTerminalEvent
+        closeBeforeStreamEnd: true
       });
-      if (!sawTerminalEvent) {
-        abortSourceStreamForClientClose();
-      }
+      abortSourceStreamForClientClose();
       void cleanup('close');
     }
   });

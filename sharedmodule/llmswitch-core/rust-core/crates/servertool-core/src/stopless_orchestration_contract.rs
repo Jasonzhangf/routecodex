@@ -7,6 +7,10 @@ use serde_json::Value;
 pub struct StoplessOrchestrationPlanInput {
     pub flow_id: Option<String>,
     pub execution: Value,
+    #[serde(default)]
+    pub request_truth_session_id: Option<String>,
+    #[serde(default)]
+    pub stopless_control: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -55,14 +59,14 @@ pub fn plan_stopless_orchestration_action(
             reason: "stop_message_terminal_final".to_string(),
         };
     }
-    if !has_stopless_session_truth(&input.execution) {
+    if !has_stopless_session_truth(input.request_truth_session_id.as_deref()) {
         return StoplessOrchestrationPlan {
             action: StoplessOrchestrationAction::TerminalFinal,
             is_stop_message_flow: true,
             reason: "stop_message_missing_session_truth".to_string(),
         };
     }
-    if is_stop_message_budget_exhausted(&input.execution) {
+    if is_stop_message_budget_exhausted(input.stopless_control.as_ref()) {
         return StoplessOrchestrationPlan {
             action: StoplessOrchestrationAction::TerminalFinal,
             is_stop_message_flow: true,
@@ -85,56 +89,36 @@ fn is_stop_message_terminal_final(execution: &Value) -> bool {
         == Some(true)
 }
 
-fn has_stopless_session_truth(execution: &Value) -> bool {
-    let Some(context) = execution.get("context").and_then(Value::as_object) else {
-        return false;
-    };
-    read_trimmed_string(context.get("sessionId"))
-        .or_else(|| {
-            context
-                .get("requestTruth")
-                .and_then(Value::as_object)
-                .and_then(|truth| read_trimmed_string(truth.get("sessionId")))
-        })
+fn has_stopless_session_truth(request_truth_session_id: Option<&str>) -> bool {
+    request_truth_session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .is_some()
 }
 
-fn is_stop_message_budget_exhausted(execution: &Value) -> bool {
-    let Some(context) = execution.get("context").and_then(Value::as_object) else {
+fn is_stop_message_budget_exhausted(stopless_control: Option<&Value>) -> bool {
+    let Some(stopless) = stopless_control.and_then(Value::as_object) else {
         return false;
     };
-    let stopless = context.get("stopless").and_then(Value::as_object);
-    let loop_state = context
-        .get("serverToolLoopState")
-        .and_then(Value::as_object);
     let repeat_count = stopless
-        .and_then(|row| row.get("repeatCount"))
+        .get("repeatCount")
         .and_then(Value::as_u64)
         .or_else(|| {
-            loop_state
-                .and_then(|row| row.get("repeatCount"))
+            stopless
+                .get("repeat_count")
                 .and_then(Value::as_u64)
         })
         .unwrap_or(0);
     let max_repeats = stopless
-        .and_then(|row| row.get("maxRepeats"))
+        .get("maxRepeats")
         .and_then(Value::as_u64)
         .or_else(|| {
-            loop_state
-                .and_then(|row| row.get("maxRepeats"))
+            stopless
+                .get("max_repeats")
                 .and_then(Value::as_u64)
         })
         .unwrap_or(0);
     max_repeats > 0 && repeat_count >= max_repeats
-}
-
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let trimmed = value?.as_str()?.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
 }
 
 #[cfg(test)]
@@ -147,6 +131,8 @@ mod tests {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("stop_message_flow".to_string()),
             execution: json!({ "flowId": "stop_message_flow", "context": {} }),
+            request_truth_session_id: None,
+            stopless_control: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_missing_session_truth");
@@ -156,10 +142,9 @@ mod tests {
     fn stop_message_flow_uses_cli_projection_with_session_truth() {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("stop_message_flow".to_string()),
-            execution: json!({
-                "flowId": "stop_message_flow",
-                "context": { "requestTruth": { "sessionId": "sess-default" } }
-            }),
+            execution: json!({ "flowId": "stop_message_flow" }),
+            request_truth_session_id: Some("sess-default".to_string()),
+            stopless_control: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert_eq!(plan.reason, "stop_message_cli_projection");
@@ -172,10 +157,11 @@ mod tests {
             execution: json!({
                 "flowId": "stop_message_flow",
                 "context": {
-                    "stopMessageTerminalFinal": true,
-                    "requestTruth": { "sessionId": "sess-terminal" }
+                    "stopMessageTerminalFinal": true
                 }
             }),
+            request_truth_session_id: Some("sess-terminal".to_string()),
+            stopless_control: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_terminal_final");
@@ -185,17 +171,13 @@ mod tests {
     fn stop_message_budget_exhausted_forces_terminal_final() {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("stop_message_flow".to_string()),
-            execution: json!({
+            execution: json!({ "flowId": "stop_message_flow" }),
+            request_truth_session_id: Some("sess-budget".to_string()),
+            stopless_control: Some(json!({
                 "flowId": "stop_message_flow",
-                "context": {
-                    "requestTruth": { "sessionId": "sess-budget" },
-                    "serverToolLoopState": {
-                        "flowId": "stop_message_flow",
-                        "repeatCount": 3,
-                        "maxRepeats": 3
-                    }
-                }
-            }),
+                "repeatCount": 3,
+                "maxRepeats": 3
+            })),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_budget_exhausted");
@@ -205,17 +187,13 @@ mod tests {
     fn stop_message_budget_exhausted_prefers_stopless_runtime_control_without_loop_state() {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("stop_message_flow".to_string()),
-            execution: json!({
+            execution: json!({ "flowId": "stop_message_flow" }),
+            request_truth_session_id: Some("sess-budget-stopless".to_string()),
+            stopless_control: Some(json!({
                 "flowId": "stop_message_flow",
-                "context": {
-                    "requestTruth": { "sessionId": "sess-budget-stopless" },
-                    "stopless": {
-                        "flowId": "stop_message_flow",
-                        "repeatCount": 3,
-                        "maxRepeats": 3
-                    }
-                }
-            }),
+                "repeatCount": 3,
+                "maxRepeats": 3
+            })),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::TerminalFinal);
         assert_eq!(plan.reason, "stop_message_budget_exhausted");
@@ -225,22 +203,13 @@ mod tests {
     fn stop_message_budget_exhausted_prefers_canonical_stopless_budget_over_legacy_loop_budget() {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("stop_message_flow".to_string()),
-            execution: json!({
+            execution: json!({ "flowId": "stop_message_flow" }),
+            request_truth_session_id: Some("sess-budget-canonical".to_string()),
+            stopless_control: Some(json!({
                 "flowId": "stop_message_flow",
-                "context": {
-                    "requestTruth": { "sessionId": "sess-budget-canonical" },
-                    "stopless": {
-                        "flowId": "stop_message_flow",
-                        "repeatCount": 2,
-                        "maxRepeats": 3
-                    },
-                    "serverToolLoopState": {
-                        "flowId": "stop_message_flow",
-                        "repeatCount": 9,
-                        "maxRepeats": 9
-                    }
-                }
-            }),
+                "repeatCount": 2,
+                "maxRepeats": 3
+            })),
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert_eq!(plan.reason, "stop_message_cli_projection");
@@ -251,6 +220,8 @@ mod tests {
         let plan = plan_stopless_orchestration_action(StoplessOrchestrationPlanInput {
             flow_id: Some("vision_flow".to_string()),
             execution: json!({ "flowId": "vision_flow" }),
+            request_truth_session_id: None,
+            stopless_control: None,
         });
         assert_eq!(plan.action, StoplessOrchestrationAction::CliProjection);
         assert!(!plan.is_stop_message_flow);

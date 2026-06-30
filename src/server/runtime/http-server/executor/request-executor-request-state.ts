@@ -1,7 +1,6 @@
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import { registerRequestLogContext } from '../../../utils/request-log-color.js';
 import { buildRequestMetadata, cloneClientHeaders, resolveClientRequestId } from '../executor-metadata.js';
-import { readRuntimeRequestTruthIdentifiers } from '../metadata-center/request-truth-readers.js';
 import { writeInboundClientSnapshot } from './request-executor-core-utils.js';
 
 export type RequestExecutorInitialRequestState = {
@@ -9,7 +8,25 @@ export type RequestExecutorInitialRequestState = {
   inboundClientHeaders: Record<string, string> | undefined;
   providerRequestId: string;
   clientRequestId: string;
+  projectPath?: string;
+  sessionId?: string;
+  conversationId?: string;
 };
+
+function resolveProjectPathFromMetadata(metadata: Record<string, unknown>): string | undefined {
+  const candidates = [
+    metadata.clientWorkdir,
+    metadata.client_workdir,
+    metadata.workdir,
+    metadata.cwd
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
 
 export async function initializeRequestExecutorRequestState(args: {
   input: PipelineExecutionInput;
@@ -20,22 +37,30 @@ export async function initializeRequestExecutorRequestState(args: {
   const initialMetadata = buildRequestMetadata(args.input);
   await args.onRequestStart?.({ requestId: args.input.requestId, metadata: initialMetadata });
 
-  const requestTruth = readRuntimeRequestTruthIdentifiers(initialMetadata);
+  const sessionId =
+    typeof initialMetadata.sessionId === 'string' && initialMetadata.sessionId.trim()
+      ? initialMetadata.sessionId.trim()
+      : undefined;
+  const conversationId =
+    typeof initialMetadata.conversationId === 'string' && initialMetadata.conversationId.trim()
+      ? initialMetadata.conversationId.trim()
+      : undefined;
   registerRequestLogContext(args.input.requestId, {
     logSessionColorKey: initialMetadata.logSessionColorKey,
     clientTmuxSessionId: initialMetadata.clientTmuxSessionId,
     client_tmux_session_id: initialMetadata.client_tmux_session_id,
     tmuxSessionId: initialMetadata.tmuxSessionId,
     tmux_session_id: initialMetadata.tmux_session_id,
-    sessionId: requestTruth.sessionId,
-    session_id: requestTruth.sessionId,
-    conversationId: requestTruth.conversationId,
-    conversation_id: requestTruth.conversationId
+    sessionId,
+    session_id: sessionId,
+    conversationId,
+    conversation_id: conversationId
   });
 
   const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
   const providerRequestId = args.input.requestId;
   const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
+  const projectPath = resolveProjectPathFromMetadata(initialMetadata);
 
   args.logStage('request.received', providerRequestId, {
     endpoint: args.input.entryEndpoint,
@@ -53,6 +78,9 @@ export async function initializeRequestExecutorRequestState(args: {
     initialMetadata,
     inboundClientHeaders,
     providerRequestId,
-    clientRequestId
+    clientRequestId,
+    projectPath,
+    sessionId,
+    conversationId
   };
 }

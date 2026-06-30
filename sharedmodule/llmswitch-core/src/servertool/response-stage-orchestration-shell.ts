@@ -10,8 +10,8 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { readRuntimeControlFromBoundMetadataCenter } from './metadata-center-carrier.js';
 
-type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 type ChatCompletionLike = JsonObject;
+type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 
 export interface ServertoolResponseStageShellOptions {
   payload: ChatCompletionLike;

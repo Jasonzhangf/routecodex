@@ -142,6 +142,7 @@
         <tr><td><code>virtual_router.primary_exhausted_to_default_pool</code></td><td>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run build:base</code></td></tr>
         <tr><td><code>vr.route_availability_floor</code></td><td>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-ci</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:vr-route-availability-default-floor</code></td></tr>
         <tr><td><code>vr.provider_forwarder_runtime</code></td><td>ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></td><td><code>npm run verify:vr-forwarder-runtime</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>vr.online_diagnostics</code></td><td>Virtual Router online status and dry-run route diagnostics stay Rust-owned</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:vr-forwarder-runtime</code></td></tr>
         </tbody>
         </table>
         <h2>vr.route_selection</h2>
@@ -428,6 +429,60 @@
           <li>Config routes may name <code>fwd.*</code>, but host/executor must receive only resolved real provider keys.</li>
           <li>Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets.</li>
           <li>HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy.</li>
+        </ul>
+        <h2>vr.online_diagnostics</h2>
+        <p>Summary: Virtual Router online status and dry-run route diagnostics stay Rust-owned</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs</code> Owner scope: file-scoped Rust owner for Virtual Router online route/tier/forwarder/default-pool status plus dry-run decision and provider-unavailable explanation</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>VrDiag01StatusSnapshot</code></li>
+          <li><code>VrDiag02DryRunInput</code></li>
+          <li><code>VrDiag03DryRunDecision</code></li>
+          <li><code>VrDiag04ErrorExplain</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>route_pool_status_snapshot</code></li>
+          <li><code>build_dry_run_decision</code></li>
+          <li><code>parse_virtual_router_error_for_diagnostics</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath</code></li>
+          <li><code>src/server/runtime/http-server/routes.ts</code></li>
+          <li><code>src/cli/commands/port.ts</code></li>
+          <li><code>tests/sharedmodule</code></li>
+          <li><code>tests/cli</code></li>
+          <li><code>docs</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+          <li><code>src/providers/core/runtime</code></li>
+          <li><code>src/client</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/sharedmodule/virtual-router-online-diagnostics.spec.ts</code></li>
+          <li><code>tests/server/runtime/http-server/virtual-router-diagnostics.spec.ts</code></li>
+          <li><code>tests/cli/port-command.spec.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+          <li><code>npm run verify:architecture-mainline-call-map</code></li>
+          <li><code>npm run verify:vr-no-ts-runtime</code></li>
+          <li><code>npm run verify:vr-forwarder-runtime</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust VR must produce route/tier/forwarder/default-pool status, dry-run decisions, and provider-unavailable blocker explanations.</li>
+          <li>TS HTTP/CLI may only call native diagnostics and project the returned JSON; it must not recalculate route queues, forwarder expansion, default floor, health/cooldown, or candidate blockers.</li>
+          <li>Dry-run must be non-mutating: no load-balancer pointer movement, no health/routing-state/sticky/cooldown/provider stats writes, and no persistence.</li>
         </ul>
       </article>
     </section>

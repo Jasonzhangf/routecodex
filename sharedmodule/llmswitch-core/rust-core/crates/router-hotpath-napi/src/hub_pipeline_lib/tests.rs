@@ -1288,7 +1288,17 @@ fn anthropic_end_turn_stopless_effect_uses_chatprocess_payload() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-anthropic-stopless-chatprocess" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 0,
+                        "maxRepeats": 3,
+                        "active": true
+                    }
+                }
+            }),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1296,28 +1306,26 @@ fn anthropic_end_turn_stopless_effect_uses_chatprocess_payload() {
         })
         .unwrap();
 
-    let effect = output
-        .effect_plan
-        .effects
-        .iter()
-        .find(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-                && effect.payload["reason"] == json!("stop_eligible_followup")
-        })
-        .unwrap();
-    assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
     assert_eq!(
-        effect.payload["stopGateway"]["reason"],
-        json!("finish_reason_stop")
+        payload["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["name"],
+        json!("exec_command")
     );
-    assert_eq!(
-        effect.payload["payload"]["choices"][0]["finish_reason"],
-        json!("stop")
-    );
-    assert_eq!(
-        effect.payload["payload"]["choices"][0]["message"]["content"],
-        json!("Jason，继续。先核 coder2 工具。")
-    );
+    let args = payload["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+        ["arguments"]
+        .as_str()
+        .expect("exec args");
+    assert!(args.contains("routecodex hook run reasoningStop"));
+    assert!(args.contains("triggerHint"));
+    assert!(output.effect_plan.effects.iter().any(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() == json!("stoplessMetadataCenterWrite")
+    }));
+    assert!(!output.effect_plan.effects.iter().any(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
+            && effect.payload["action"] == json!("requireResponseHookRuntime")
+    }));
 }
 
 #[test]
@@ -1343,7 +1351,17 @@ fn anthropic_empty_end_turn_stopless_effect_uses_chatprocess_payload() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-anthropic-empty-stopless-chatprocess" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 0,
+                        "maxRepeats": 3,
+                        "active": true
+                    }
+                }
+            }),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1351,28 +1369,18 @@ fn anthropic_empty_end_turn_stopless_effect_uses_chatprocess_payload() {
         })
         .unwrap();
 
-    let effect = output
-        .effect_plan
-        .effects
-        .iter()
-        .find(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-                && effect.payload["reason"] == json!("stop_eligible_followup")
-        })
-        .unwrap();
-    assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
-    assert_eq!(
-        effect.payload["stopGateway"]["reason"],
-        json!("finish_reason_stop")
-    );
-    assert_eq!(
-        effect.payload["payload"]["choices"][0]["finish_reason"],
-        json!("stop")
-    );
-    assert_eq!(
-        effect.payload["payload"]["choices"][0]["message"]["content"],
-        json!("")
-    );
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    let args = payload["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+        ["arguments"]
+        .as_str()
+        .expect("exec args");
+    assert!(args.contains("routecodex hook run reasoningStop"));
+    assert!(args.contains("triggerHint"));
+    assert!(output.effect_plan.effects.iter().any(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() == json!("stoplessMetadataCenterWrite")
+    }));
 }
 
 #[test]
@@ -1404,7 +1412,17 @@ fn anthropic_wrapped_empty_end_turn_stopless_effect_uses_body_data() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-anthropic-wrapped-empty-stopless-chatprocess" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 0,
+                        "maxRepeats": 3,
+                        "active": true
+                    }
+                }
+            }),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1412,23 +1430,18 @@ fn anthropic_wrapped_empty_end_turn_stopless_effect_uses_body_data() {
         })
         .unwrap();
 
-    let effect = output
-        .effect_plan
-        .effects
-        .iter()
-        .find(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-                && effect.payload["reason"] == json!("stop_eligible_followup")
-        })
-        .unwrap();
-    assert_eq!(
-        effect.payload["stopGateway"]["reason"],
-        json!("finish_reason_stop")
-    );
-    assert_eq!(
-        effect.payload["payload"]["choices"][0]["message"]["content"],
-        json!("")
-    );
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    let args = payload["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+        ["arguments"]
+        .as_str()
+        .expect("exec args");
+    assert!(args.contains("routecodex hook run reasoningStop"));
+    assert!(args.contains("triggerHint"));
+    assert!(output.effect_plan.effects.iter().any(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() == json!("stoplessMetadataCenterWrite")
+    }));
 }
 
 #[test]

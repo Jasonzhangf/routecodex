@@ -799,9 +799,9 @@ export function isProviderFailureHealthNeutral(args: {
     return true;
   }
   if (args.classification === 'recoverable') {
-    // Unified policy: all recoverable failures are health-affecting so they can
-    // enter the same VR cooldown/quarantine pipeline (3 strikes + ladder cooldown).
-    return false;
+    // Recoverable failures must reroute or block the current request chain,
+    // but they must not poison VR health across later requests.
+    return true;
   }
   if (errorCode === 'CLIENT_TOOL_ARGS_INVALID') {
     return true;

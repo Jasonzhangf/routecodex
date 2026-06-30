@@ -1,6 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { PassThrough, Readable } from 'node:stream';
 import { runtimeFlags, setRuntimeFlag } from '../../src/runtime/runtime-flags.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const writeProviderSnapshot = jest.fn(async () => {});
 const attachProviderSseSnapshotStream = jest.fn((stream: NodeJS.ReadableStream) => stream);
@@ -13,6 +14,26 @@ jest.unstable_mockModule('../../src/providers/core/utils/snapshot-writer.js', ()
 }));
 
 let HttpRequestExecutor: typeof import('../../src/providers/core/runtime/http-request-executor.ts').HttpRequestExecutor;
+
+function withPortScope<T extends Record<string, unknown>>(context: T, port = 4444): T {
+  const metadata = {};
+  MetadataCenter.attach(metadata).writeRequestTruth(
+    'portScope',
+    String(port),
+    {
+      module: 'tests/provider/http-request-executor-sse-snapshot.spec.ts',
+      symbol: 'withPortScope',
+      stage: 'test'
+    }
+  );
+  return {
+    ...context,
+    runtimeMetadata: {
+      ...((context.runtimeMetadata as Record<string, unknown> | undefined) ?? {}),
+      metadata
+    }
+  };
+}
 
 function createExecutor() {
   const httpClient = {
@@ -185,13 +206,13 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
 
     await executor.execute(
       {} as any,
-      {
+      withPortScope({
         requestId: 'req_sse_capture_on',
         startTime: Date.now(),
         profile: {} as any,
         providerKey: 'ali-coding-plan.key1.glm-5',
         providerId: 'ali-coding-plan'
-      } as any
+      } as any)
     );
 
     const providerResponseCall = writeProviderSnapshot.mock.calls
@@ -202,6 +223,7 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
     expect(providerResponseCall).toMatchObject({
       phase: 'provider-response',
       requestId: 'req_sse_capture_on',
+      entryPort: 4444,
       data: expect.objectContaining({
         mode: 'sse',
         captureSse: true,
@@ -217,13 +239,13 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
 
     await executor.execute(
       {} as any,
-      {
+      withPortScope({
         requestId: 'req_sse_capture_off',
         startTime: Date.now(),
         profile: {} as any,
         providerKey: 'tabglm.key1.glm-5.1',
         providerId: 'tabglm'
-      } as any
+      } as any)
     );
 
     const providerResponseCall = writeProviderSnapshot.mock.calls
@@ -234,6 +256,7 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
     expect(providerResponseCall).toMatchObject({
       phase: 'provider-response',
       requestId: 'req_sse_capture_off',
+      entryPort: 4444,
       data: expect.objectContaining({
         mode: 'sse',
         captureSse: false,
@@ -249,13 +272,13 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
 
     await executor.execute(
       {} as any,
-      {
+      withPortScope({
         requestId: 'req_sse_prepared_transport',
         startTime: Date.now(),
         profile: {} as any,
         providerKey: 'ali-coding-plan.key1.glm-5',
         providerId: 'ali-coding-plan'
-      } as any
+      } as any)
     );
 
     const providerResponseCall = writeProviderSnapshot.mock.calls
@@ -266,6 +289,7 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
     expect(providerResponseCall).toMatchObject({
       phase: 'provider-response',
       requestId: 'req_sse_prepared_transport',
+      entryPort: 4444,
       data: expect.objectContaining({
         mode: 'sse',
         captureSse: true,
@@ -281,13 +305,13 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
 
     const result = await executor.execute(
       {} as any,
-      {
+      withPortScope({
         requestId: 'req_prepared_json_labelled_sse',
         startTime: Date.now(),
         profile: {} as any,
         providerKey: 'tokenrelay.key1.deepseek-v4-pro',
         providerId: 'tokenrelay'
-      } as any
+      } as any)
     );
 
     expect(wrapUpstreamSseResponse).not.toHaveBeenCalled();
@@ -300,13 +324,13 @@ describe('HttpRequestExecutor SSE snapshot finalization', () => {
 
     await expect(executor.execute(
       {} as any,
-      {
+      withPortScope({
         requestId: 'req_prepared_sse_error_frame',
         startTime: Date.now(),
         profile: {} as any,
         providerKey: 'tokenrelay.key1.deepseek-v4-pro',
         providerId: 'tokenrelay'
-      } as any
+      } as any)
     )).rejects.toMatchObject({
       code: 'MALFORMED_RESPONSE',
       upstreamCode: 'server_error',

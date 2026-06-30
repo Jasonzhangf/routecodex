@@ -565,6 +565,9 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       }
     );
   }
+  if (sessionIdentifiers.sessionId) {
+    metadata.sessionId = sessionIdentifiers.sessionId;
+  }
   if (sessionIdentifiers.conversationId && !currentRequestTruth.conversationId) {
     center.writeRequestTruth(
       'conversationId',
@@ -575,6 +578,9 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         stage: 'ServerReqInbound01ClientRaw'
       }
     );
+  }
+  if (sessionIdentifiers.conversationId) {
+    metadata.conversationId = sessionIdentifiers.conversationId;
   }
   const responsesResumeSource =
     (bodyMeta.responsesResume && typeof bodyMeta.responsesResume === 'object' && !Array.isArray(bodyMeta.responsesResume)

@@ -5,8 +5,6 @@ import { asRecord } from '../provider-utils.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
-  resolveRelayResponsesClientSseStreamForHttp,
-  reprojectDirectChatToolCallStreamForHttp,
 } from '../../../../modules/llmswitch/bridge.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
@@ -492,36 +490,6 @@ export async function convertProviderResponseIfNeeded(
       elapsedMs: Date.now() - bridgeStartMs
     });
     if (converted.sseStream) {
-      const directChatToolCallStreamNeedsReprojection = (
-        needsChatConversion
-        && options.wantsStream
-        && options.response.continuationOwner === 'direct'
-        && converted.body
-        && typeof converted.body === 'object'
-        && !Array.isArray(converted.body)
-        && deriveFinishReason(converted.body) === 'tool_calls'
-      );
-      if (directChatToolCallStreamNeedsReprojection) {
-        const reprojectedChatSseStream = await reprojectDirectChatToolCallStreamForHttp({
-          body: converted.body as Record<string, unknown>,
-          requestId: options.requestId,
-        });
-        return attachTimingBreakdown({
-          ...options.response,
-          body: converted.body,
-          sseStream: reprojectedChatSseStream,
-        });
-      }
-      const projectedRelayResponsesSseStream = await resolveRelayResponsesClientSseStreamForHttp({
-        entryEndpoint: options.entryEndpoint || entry,
-        continuationOwner: options.response.continuationOwner,
-        sseStream: converted.sseStream,
-        body:
-          converted.body && typeof converted.body === 'object' && !Array.isArray(converted.body)
-            ? converted.body as Record<string, unknown>
-            : undefined,
-        requestId: options.requestId,
-      });
       const usage = converted.body
         ? extractUsageFromResult(
           { body: converted.body },
@@ -540,7 +508,7 @@ export async function convertProviderResponseIfNeeded(
       return attachTimingBreakdown({
         ...options.response,
         body: converted.body,
-        sseStream: projectedRelayResponsesSseStream,
+        sseStream: converted.sseStream,
         usageLogInfo: {
           ...(options.response.usageLogInfo ?? {}),
           requestStartedAtMs: options.response.usageLogInfo?.requestStartedAtMs ?? Date.now(),

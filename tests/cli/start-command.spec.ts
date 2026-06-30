@@ -161,7 +161,7 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {},
@@ -281,7 +281,7 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {},
@@ -403,7 +403,7 @@ routingPolicyGroup = "gateway_coding_10000"
           return true;
         },
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {},
@@ -593,7 +593,7 @@ routingPolicyGroup = "gateway_coding_10000"
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.json'], { from: 'node' });
     expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_ENABLE).toBeUndefined();
     expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBeUndefined();
   });
@@ -612,7 +612,7 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {},
@@ -714,7 +714,7 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {},
@@ -819,7 +819,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(spawnCalls[0].unrefCalled).toBe(true);
   });
 
-  it('forces restart by default', async () => {
+  it('does not restart by default', async () => {
     const program = new Command();
     const portChecks: Array<{ restart?: boolean }> = [];
 
@@ -839,7 +839,12 @@ routingPolicyGroup = "gateway_coding_10000"
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
       } as any,
-      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
       homedir: () => '/home/test',
       tmpdir: () => '/tmp',
       sleep: async () => {},
@@ -860,9 +865,9 @@ routingPolicyGroup = "gateway_coding_10000"
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
-    expect(portChecks[0]?.restart).toBe(true);
+    expect(portChecks[0]?.restart).toBe(false);
   });
 
   it('uses restart flow when --restart is provided', async () => {
@@ -880,12 +885,17 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
       } as any,
-      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
       homedir: () => '/home/test',
       tmpdir: () => '/tmp',
       sleep: async () => {},
@@ -906,7 +916,7 @@ routingPolicyGroup = "gateway_coding_10000"
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'start', '--restart'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml', '--restart'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
     expect(portChecks[0]?.restart).toBe(true);
   });
@@ -926,12 +936,17 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
       } as any,
-      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
       homedir: () => '/home/test',
       tmpdir: () => '/tmp',
       sleep: async () => {},
@@ -952,7 +967,7 @@ routingPolicyGroup = "gateway_coding_10000"
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'start', '--no-restart'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml', '--no-restart'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
     expect(portChecks[0]?.restart).toBe(false);
   });

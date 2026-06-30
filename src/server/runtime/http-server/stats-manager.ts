@@ -239,11 +239,11 @@ async function rotateStatsLogIfNeeded(logPath: string, maxBytes: number, maxBack
   }
 }
 
-function toUtcDayKey(ts: number): string {
+function toLocalDayKey(ts: number): string {
   const date = new Date(ts);
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
@@ -874,7 +874,7 @@ export class StatsManager {
       return;
     }
     const delta = sumSnapshotTotals(totals);
-    const day = toUtcDayKey(generatedAt);
+    const day = toLocalDayKey(generatedAt);
     const week = toUtcIsoWeekKey(generatedAt);
     const month = toUtcMonthKey(generatedAt);
     upsertPeriodBucket(this.dailyPeriods, day, delta);

@@ -19,6 +19,7 @@ Feature scope: `vr.* / virtual_router.*`
 | `virtual_router.primary_exhausted_to_default_pool` | primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run build:base` |
 | `vr.route_availability_floor` | route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-ci`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:vr-route-availability-default-floor` |
 | `vr.provider_forwarder_runtime` | ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run verify:vr-forwarder-runtime`<br/>`npm run verify:function-map-compile-gate` |
+| `vr.online_diagnostics` | Virtual Router online status and dry-run route diagnostics stay Rust-owned | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:vr-no-ts-runtime`<br/>`npm run verify:vr-forwarder-runtime` |
 
 ## vr.route_selection
 
@@ -292,3 +293,55 @@ Notes:
 - Config routes may name `fwd.*`, but host/executor must receive only resolved real provider keys.
 - Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets.
 - HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy.
+
+## vr.online_diagnostics
+
+Summary: Virtual Router online status and dry-run route diagnostics stay Rust-owned
+
+Owner kind: `rust_ssot`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs`
+Owner scope: file-scoped Rust owner for Virtual Router online route/tier/forwarder/default-pool status plus dry-run decision and provider-unavailable explanation
+
+Canonical types:
+- `VrDiag01StatusSnapshot`
+- `VrDiag02DryRunInput`
+- `VrDiag03DryRunDecision`
+- `VrDiag04ErrorExplain`
+
+Canonical builders:
+- `route_pool_status_snapshot`
+- `build_dry_run_decision`
+- `parse_virtual_router_error_for_diagnostics`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath`
+- `src/server/runtime/http-server/routes.ts`
+- `src/cli/commands/port.ts`
+- `tests/sharedmodule`
+- `tests/cli`
+- `docs`
+
+Forbidden paths:
+- `src/server/runtime/http-server/executor`
+- `src/providers/core/runtime`
+- `src/client`
+- `sharedmodule/llmswitch-core/src/router`
+
+Required tests:
+- `tests/sharedmodule/virtual-router-online-diagnostics.spec.ts`
+- `tests/server/runtime/http-server/virtual-router-diagnostics.spec.ts`
+- `tests/cli/port-command.spec.ts`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs`
+
+Required gates:
+- `npm run verify:function-map-compile-gate`
+- `npm run verify:architecture-mainline-call-map`
+- `npm run verify:vr-no-ts-runtime`
+- `npm run verify:vr-forwarder-runtime`
+
+Notes:
+- Rust VR must produce route/tier/forwarder/default-pool status, dry-run decisions, and provider-unavailable blocker explanations.
+- TS HTTP/CLI may only call native diagnostics and project the returned JSON; it must not recalculate route queues, forwarder expansion, default floor, health/cooldown, or candidate blockers.
+- Dry-run must be non-mutating: no load-balancer pointer movement, no health/routing-state/sticky/cooldown/provider stats writes, and no persistence.

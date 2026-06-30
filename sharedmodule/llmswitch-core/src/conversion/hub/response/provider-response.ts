@@ -11,6 +11,7 @@ import {
   type ProviderResponseRuntimeEffectPlan,
 } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { logHubStageTiming } from '../pipeline/hub-stage-timing.js';
+import { ensureRuntimeMetadata } from '../../runtime-metadata.js';
 import {
   recordResponsesResponse,
   finalizeResponsesConversationRequestRetention,
@@ -114,6 +115,7 @@ function writeRustStopGatewayContextToMetadataCenter(args: {
     writer: args.writer,
     reason: args.reason
   });
+  ensureRuntimeMetadata(args.metadata).stopGatewayContext = args.stopGatewayContext as JsonObject;
 }
 
 function readProviderProtocolWithinCore(args: {
@@ -145,11 +147,188 @@ interface ProviderResponseConversionResult {
   format?: string;
 }
 
+function runProviderResponseRustHubPipeline(nativeOptions: Parameters<typeof executeHubPipelineWithNative>[0]) {
+  const nativeResponsePlan = executeHubPipelineWithNative(nativeOptions);
+  if (!nativeResponsePlan.success) {
+    const code = nativeResponsePlan.error?.code ?? 'hub_pipeline_response_native_failed';
+    const message = nativeResponsePlan.error?.message ?? 'Rust HubPipeline response path failed';
+    throw new Error(`Rust HubPipeline response path failed: ${code}: ${message}`);
+  }
+  if (!nativeResponsePlan.payload || typeof nativeResponsePlan.payload !== 'object') {
+    throw new Error('Rust HubPipeline response path returned no payload');
+  }
+  return nativeResponsePlan;
+}
+
+function executeProviderResponseNativeOutboundEffects(args: {
+  context: AdapterContext;
+  nativeResponsePlan: ReturnType<typeof executeHubPipelineWithNative>;
+}): {
+  rawPayload: JsonObject;
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
+} {
+  const rawPayload = args.nativeResponsePlan.payload as JsonObject;
+  const effects = args.nativeResponsePlan.effectPlan.effects;
+  const normalizedEffects = Array.isArray(effects)
+    ? normalizeProviderResponseEffectPlanWithNative({ effects })
+    : { servertoolRuntimeActions: [], streamPipe: null, runtimeStateWrite: null, stoplessMetadataCenterWrite: null };
+  const runtimeEffects = normalizedEffects as ProviderResponseRuntimeEffectPlan;
+  (args.context as Record<string, unknown>).__nativeResponsePlan = {
+    payload: rawPayload,
+    effectPlan: { effects: Array.isArray(effects) ? effects : [] },
+    runtimeEffects,
+    diagnostics: args.nativeResponsePlan.diagnostics
+  };
+  return { rawPayload, runtimeEffects };
+}
+
+async function executeProviderResponseNativeServertoolEffects(args: {
+  payload: JsonObject;
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
+  context: AdapterContext;
+  requestId: string;
+  entryEndpoint: string;
+  providerProtocol: ProviderProtocol;
+  stageRecorder?: StageRecorder;
+}): Promise<{ payload: JsonObject; stage: 'HubRespChatProcess03Governed' | 'unchanged' }> {
+  const servertoolRuntimeActions = Array.isArray(args.runtimeEffects.servertoolRuntimeActions)
+    ? args.runtimeEffects.servertoolRuntimeActions
+    : [];
+  const actionPlan = planProviderResponseServertoolRuntimeActionsWithNative({
+    servertoolRuntimeActions
+  });
+  if (actionPlan.error) {
+    throw new Error(actionPlan.error.message);
+  }
+
+  let payload: JsonObject = args.payload;
+  let stage: 'HubRespChatProcess03Governed' | 'unchanged' = 'unchanged';
+  if (actionPlan.executionPlans.length > 0) {
+    for (const executionPlan of actionPlan.executionPlans) {
+      const stopGateway = isRecord(executionPlan.stopGateway) ? executionPlan.stopGateway : undefined;
+      if (stopGateway) {
+        writeRustStopGatewayContextToMetadataCenter({
+          metadata: args.context as unknown as Record<string, unknown>,
+          stopGatewayContext: stopGateway,
+          writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
+          reason: 'rust stop gateway control signal'
+        });
+      }
+      const allowFollowup = executionPlan.allowFollowup === true;
+      const orchestration = await runServertoolResponseStageOrchestrationShell({
+        payload: executionPlan.payload as JsonObject,
+        adapterContext: args.context,
+        requestId: args.requestId,
+        entryEndpoint: args.entryEndpoint,
+        providerProtocol: args.providerProtocol,
+        ...(allowFollowup ? { allowFollowup: true } : {}),
+        stageRecorder: args.stageRecorder
+      });
+      if (orchestration.executed) {
+        payload = orchestration.payload;
+        stage = 'HubRespChatProcess03Governed';
+      }
+    }
+    if (stage === 'HubRespChatProcess03Governed' && actionPlan.executionPlans.some((plan) => plan.projectionStage === 'HubRespChatProcess03Governed')) {
+      payload = projectPostServertoolHubRespOutbound04ClientSemanticWithNative({
+        payload,
+        entryEndpoint: args.entryEndpoint,
+        requestId: args.requestId,
+        responseSemantics: args.context as unknown as Record<string, unknown>
+      }) as JsonObject;
+      stage = 'HubRespChatProcess03Governed';
+    }
+  }
+
+  return { payload, stage };
+}
+
+function executeProviderResponseNativeRuntimeStateEffect(args: {
+  context: AdapterContext;
+  entryEndpoint: string;
+  requestId: string;
+  response: JsonObject;
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
+}): void {
+  if (args.runtimeEffects.stoplessMetadataCenterWrite) {
+    const runtimeControlProjected = projectNativeMetadataWritePlanToRuntimeControl(args.runtimeEffects.stoplessMetadataCenterWrite);
+    if (Object.keys(runtimeControlProjected).length > 0) {
+      applyNativeRuntimeControlWritePlan({
+        metadata: args.context as unknown as Record<string, unknown>,
+        runtimeControl: runtimeControlProjected,
+        writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
+        reason: 'rust response chatprocess runtime control'
+      });
+    }
+  }
+
+  const runtimeStateWrite = isRecord(args.runtimeEffects.runtimeStateWrite) ? args.runtimeEffects.runtimeStateWrite : null;
+  const usage = isRecord(runtimeStateWrite?.usage) ? runtimeStateWrite.usage : null;
+  if (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs') {
+    const requestTruth = readMetadataCenterRequestTruth(args.context as unknown as Record<string, unknown>);
+    const rc = readMetadataCenterRuntimeControl(args.context as unknown as Record<string, unknown>);
+    const matchedPort = typeof requestTruth.matchedPort === 'number' && Number.isFinite(requestTruth.matchedPort) ? Math.floor(requestTruth.matchedPort) : undefined;
+    const routingPolicyGroup = readString(requestTruth.routingPolicyGroup);
+    const sessionId = readString(requestTruth.sessionId);
+    const conversationId = readString(requestTruth.conversationId);
+    if (sessionId || conversationId) {
+      recordResponsesResponse({
+        requestId: args.requestId,
+        response: args.response,
+        ...(sessionId ? { sessionId } : {}),
+        ...(conversationId ? { conversationId } : {}),
+        ...(usage && typeof usage.providerKey === 'string' ? { providerKey: usage.providerKey } : {}),
+        entryKind: 'responses',
+        continuationOwner: 'relay',
+        ...(matchedPort !== undefined ? { matchedPort } : {}),
+        ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
+        allowScopeContinuation: true,
+        ...(typeof rc.routeHint === 'string' && rc.routeHint.trim() ? { routeHint: rc.routeHint.trim() } : {}),
+      });
+      finalizeResponsesConversationRequestRetention(
+        args.requestId,
+        { keepForSubmitToolOutputs: runtimeStateWrite?.keepForSubmitToolOutputs === true }
+      );
+    }
+  }
+  if (usage) {
+    saveChatProcessSessionActualUsage({
+      context: args.context,
+      usage
+    });
+  }
+}
+
 async function materializeProviderResponseSsePayload(
   payload: unknown
 ): Promise<Record<string, unknown>> {
   const stream = extractProviderResponseSseStream(payload);
-  const streamBodyText = stream ? await readProviderResponseSseStreamText(stream) : undefined;
+  let streamBodyText: string | undefined;
+  if (stream) {
+    try {
+      streamBodyText = await readProviderResponseSseStreamText(stream);
+    } catch (error) {
+      const source = error as Record<string, unknown> | undefined;
+      const descriptor = buildProviderSseStreamReadErrorDescriptorWithNative({
+        message: error instanceof Error ? error.message : String(error ?? 'unknown'),
+        ...(typeof source?.code === 'string' ? { code: source.code } : {}),
+        ...(typeof source?.upstreamCode === 'string' ? { upstreamCode: source.upstreamCode } : {})
+      });
+      const wrapped = new Error(descriptor.message) as Error & {
+        code?: string;
+        upstreamCode?: string;
+        statusCode?: number;
+        retryable?: boolean;
+        requestExecutorProviderErrorStage?: string;
+      };
+      wrapped.code = descriptor.code;
+      wrapped.upstreamCode = descriptor.upstreamCode;
+      wrapped.statusCode = descriptor.statusCode;
+      wrapped.retryable = descriptor.retryable;
+      wrapped.requestExecutorProviderErrorStage = descriptor.requestExecutorProviderErrorStage;
+      throw wrapped;
+    }
+  }
   return materializeProviderResponseSsePayloadWithNative({
     payload,
     ...(streamBodyText !== undefined ? { streamBodyText } : {})
@@ -178,36 +357,10 @@ function extractProviderResponseSseStream(payload: unknown): Readable | undefine
 
 async function readProviderResponseSseStreamText(stream: Readable): Promise<string> {
   const chunks: Buffer[] = [];
-  try {
-    for await (const chunk of stream as AsyncIterable<Buffer | string | Uint8Array>) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk));
-    }
-  } catch (error) {
-    throw buildProviderSseStreamReadError(error);
+  for await (const chunk of stream as AsyncIterable<Buffer | string | Uint8Array>) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString('utf8');
-}
-
-function buildProviderSseStreamReadError(error: unknown): Error {
-  const source = error as Record<string, unknown> | undefined;
-  const descriptor = buildProviderSseStreamReadErrorDescriptorWithNative({
-    message: error instanceof Error ? error.message : String(error ?? 'unknown'),
-    ...(typeof source?.code === 'string' ? { code: source.code } : {}),
-    ...(typeof source?.upstreamCode === 'string' ? { upstreamCode: source.upstreamCode } : {})
-  });
-  const wrapped = new Error(descriptor.message) as Error & {
-    code?: string;
-    upstreamCode?: string;
-    statusCode?: number;
-    retryable?: boolean;
-    requestExecutorProviderErrorStage?: string;
-  };
-  wrapped.code = descriptor.code;
-  wrapped.upstreamCode = descriptor.upstreamCode;
-  wrapped.statusCode = descriptor.statusCode;
-  wrapped.retryable = descriptor.retryable;
-  wrapped.requestExecutorProviderErrorStage = descriptor.requestExecutorProviderErrorStage;
-  return wrapped;
 }
 
 export async function convertProviderResponse(
@@ -223,7 +376,7 @@ export async function convertProviderResponse(
 
   // Step 2: Run Rust HubPipeline response path (normalize, govern, outbound)
   const metadataCenterSnapshot = readMetadataCenterSnapshotForRust(options.context);
-  const nativeResponsePlan = executeHubPipelineWithNative({
+  const nativeOptions: Parameters<typeof executeHubPipelineWithNative>[0] = {
     config: {},
     request: {
       requestId,
@@ -243,128 +396,42 @@ export async function convertProviderResponse(
       direction: 'response',
       stage: 'outbound'
     }
-  });
-  if (!nativeResponsePlan.success) {
-    const code = nativeResponsePlan.error?.code ?? 'hub_pipeline_response_native_failed';
-    const message = nativeResponsePlan.error?.message ?? 'Rust HubPipeline response path failed';
-    throw new Error(`Rust HubPipeline response path failed: ${code}: ${message}`);
-  }
-  if (!nativeResponsePlan.payload || typeof nativeResponsePlan.payload !== 'object') {
-    throw new Error('Rust HubPipeline response path returned no payload');
-  }
+  };
+  const nativeResponsePlan = runProviderResponseRustHubPipeline(nativeOptions);
 
   // Step 3: Plan orchestration v2 — SSE materialize, usage, servertool plan, stream pipe, metadata write
-  const rawPayload = nativeResponsePlan.payload as JsonObject;
-  const effects = nativeResponsePlan.effectPlan.effects;
-  const normalizedEffects = Array.isArray(effects)
-    ? normalizeProviderResponseEffectPlanWithNative({ effects })
-    : { servertoolRuntimeActions: [], streamPipe: null, runtimeStateWrite: null, stoplessMetadataCenterWrite: null };
-  const runtimeEffects = normalizedEffects as ProviderResponseRuntimeEffectPlan;
-  (options.context as Record<string, unknown>).__nativeResponsePlan = {
-    payload: rawPayload,
-    effectPlan: { effects: Array.isArray(effects) ? effects : [] },
-    runtimeEffects,
-    diagnostics: nativeResponsePlan.diagnostics
-  };
-  const servertoolRuntimeActions = Array.isArray(runtimeEffects.servertoolRuntimeActions)
-    ? runtimeEffects.servertoolRuntimeActions
-    : [];
-  const runtimeControl = readMetadataCenterRuntimeControl(options.context as unknown as Record<string, unknown>);
+  const outboundEffect = executeProviderResponseNativeOutboundEffects({
+    context: options.context,
+    nativeResponsePlan,
+  });
 
   // Step 4: Apply servertool runtime actions via existing TS IO shell.
-  let hubRespOutbound04ClientSemantic: JsonObject = rawPayload;
-  const actionPlan = planProviderResponseServertoolRuntimeActionsWithNative({
-    servertoolRuntimeActions
+  const respProcessEffect = await executeProviderResponseNativeServertoolEffects({
+    payload: outboundEffect.rawPayload,
+    runtimeEffects: outboundEffect.runtimeEffects,
+    context: options.context,
+    requestId,
+    entryEndpoint: options.entryEndpoint,
+    providerProtocol,
+    stageRecorder: options.stageRecorder
   });
-  if (actionPlan.error) {
-    throw new Error(actionPlan.error.message);
-  }
-  if (actionPlan.executionPlans.length > 0) {
-    for (const executionPlan of actionPlan.executionPlans) {
-      const stopGateway = isRecord(executionPlan.stopGateway) ? executionPlan.stopGateway : undefined;
-      if (stopGateway) {
-        writeRustStopGatewayContextToMetadataCenter({
-          metadata: options.context as unknown as Record<string, unknown>,
-          stopGatewayContext: stopGateway,
-          writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
-          reason: 'rust stop gateway control signal'
-        });
-      }
-      const allowFollowup = executionPlan.allowFollowup === true;
-      const orchestration = await runServertoolResponseStageOrchestrationShell({
-        payload: executionPlan.payload as JsonObject,
-        adapterContext: options.context,
-        requestId,
-        entryEndpoint: options.entryEndpoint,
-        providerProtocol,
-        ...(allowFollowup ? { allowFollowup: true } : {}),
-        stageRecorder: options.stageRecorder
-      });
-      if (orchestration.executed) {
-        hubRespOutbound04ClientSemantic = orchestration.payload;
-      }
-    }
-    // Re-project if servertool effects changed the payload
-    if (actionPlan.executionPlans.some((plan) => plan.projectionStage === 'HubRespChatProcess03Governed')) {
-      hubRespOutbound04ClientSemantic = projectPostServertoolHubRespOutbound04ClientSemanticWithNative({
-        payload: hubRespOutbound04ClientSemantic,
-        entryEndpoint: options.entryEndpoint,
-        requestId,
-        responseSemantics: options.context as unknown as Record<string, unknown>
-      }) as JsonObject;
-    }
-  }
+  let hubRespOutbound04ClientSemantic: JsonObject;
+  hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'
+    ? respProcessEffect.payload
+    : outboundEffect.rawPayload;
 
   // Step 5: Apply metadata write plan
-  if (runtimeEffects.stoplessMetadataCenterWrite) {
-    const runtimeControlProjected = projectNativeMetadataWritePlanToRuntimeControl(runtimeEffects.stoplessMetadataCenterWrite);
-    if (Object.keys(runtimeControlProjected).length > 0) {
-      applyNativeRuntimeControlWritePlan({
-        metadata: options.context as unknown as Record<string, unknown>,
-        runtimeControl: runtimeControlProjected,
-        writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Govemed' },
-        reason: 'rust response chatprocess runtime control'
-      });
-    }
-  }
-
-  // Step 6: Persist responses continuation lifecycle & session usage at chat-process exit
-  const runtimeStateWrite = isRecord(runtimeEffects.runtimeStateWrite) ? runtimeEffects.runtimeStateWrite : null;
-  const usage = isRecord(runtimeStateWrite?.usage) ? runtimeStateWrite.usage : null;
-  if (options.entryEndpoint === '/v1/responses' || options.entryEndpoint === '/v1/responses.submit_tool_outputs') {
-    const requestTruth = readMetadataCenterRequestTruth(options.context as unknown as Record<string, unknown>);
-    const rc = readMetadataCenterRuntimeControl(options.context as unknown as Record<string, unknown>);
-    const matchedPort = typeof requestTruth.matchedPort === 'number' && Number.isFinite(requestTruth.matchedPort) ? Math.floor(requestTruth.matchedPort) : undefined;
-    const routingPolicyGroup = readString(requestTruth.routingPolicyGroup);
-    recordResponsesResponse({
-      requestId,
-      response: hubRespOutbound04ClientSemantic,
-      ...(readString(requestTruth.sessionId) ? { sessionId: readString(requestTruth.sessionId) } : {}),
-      ...(readString(requestTruth.conversationId) ? { conversationId: readString(requestTruth.conversationId) } : {}),
-      ...(usage && typeof usage.providerKey === 'string' ? { providerKey: usage.providerKey } : {}),
-      entryKind: 'responses',
-      continuationOwner: 'relay',
-      ...(matchedPort !== undefined ? { matchedPort } : {}),
-      ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
-      allowScopeContinuation: true,
-      ...(typeof rc.routeHint === 'string' && rc.routeHint.trim() ? { routeHint: rc.routeHint.trim() } : {}),
-    });
-    finalizeResponsesConversationRequestRetention(
-      requestId,
-      { keepForSubmitToolOutputs: runtimeStateWrite?.keepForSubmitToolOutputs === true }
-    );
-  }
-  // Persist session usage for tmux/session scope
-  if (usage) {
-    saveChatProcessSessionActualUsage({
-      context: options.context,
-      usage
-    });
-  }
+  executeProviderResponseNativeRuntimeStateEffect({
+    context: options.context,
+    entryEndpoint: options.entryEndpoint,
+    requestId,
+    response: hubRespOutbound04ClientSemantic,
+    runtimeEffects: outboundEffect.runtimeEffects,
+  });
 
   // Step 7: Stream or body-only response
-  const streamPipe = isRecord(runtimeEffects.streamPipe)
-    ? { codec: runtimeEffects.streamPipe.codec as SseProtocol, requestId: runtimeEffects.streamPipe.requestId as string }
+  const streamPipe = isRecord(outboundEffect.runtimeEffects.streamPipe)
+    ? { codec: outboundEffect.runtimeEffects.streamPipe.codec as SseProtocol, requestId: outboundEffect.runtimeEffects.streamPipe.requestId as string }
     : null;
   if (!streamPipe) {
     recordStage(options.stageRecorder, 'chat_process.resp.stage9.client_remap', hubRespOutbound04ClientSemantic);
@@ -375,6 +442,13 @@ export async function convertProviderResponse(
     });
     return { body: hubRespOutbound04ClientSemantic };
   }
+  const streamClientSemantic =
+    respProcessEffect.stage === 'HubRespChatProcess03Governed'
+      ? hubRespOutbound04ClientSemantic
+      : isRecord(outboundEffect.runtimeEffects.streamPipe?.payload)
+        ? outboundEffect.runtimeEffects.streamPipe.payload as JsonObject
+        : hubRespOutbound04ClientSemantic;
+  hubRespOutbound04ClientSemantic = streamClientSemantic;
   const codec = defaultSseCodecRegistry.get(streamPipe.codec);
   logHubStageTiming(requestId, 'resp_outbound.stage2_codec_stream', 'start', { clientProtocol: streamPipe.codec });
   const stream = await codec.convertJsonToSse(hubRespOutbound04ClientSemantic, { requestId: streamPipe.requestId });

@@ -156,6 +156,15 @@ Focused tests to use as slice gates:
 - Verification: focused Jest `responses-sse-reasoning-summary-no-normalize + responses-sse-metadata-boundary` PASS 2/2; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
 - Replay: real 4444 Responses sample replay succeeded with `reasoning_items=1`, `has_completed=true`, `has_done=true`, `has_error=false`, and canonical usage preserved.
 
+### 2026-06-30 Responses JSON->SSE dead context state removed
+
+- Red evidence: `responses-json-to-sse-converter.ts` created `ResponsesJsonToSseContext` with `responsesRequest: {} as any` and `outputItemStates: new Map()`, while source search showed no runtime consumer for either field.
+- Fix: removed both fields from `ResponsesJsonToSseContext` and from `createResponseContext`; the converter context now only carries actually consumed response encode state.
+- Positive tests: `responses-json-to-sse-context-no-dead-state.spec.ts` proves a completed response still projects `response.completed`.
+- Reverse tests/gates: the same test and `verify:sse-architecture-boundary` forbid `responsesRequest: {} as any` and `outputItemStates: new Map()` from returning.
+- Verification: focused Jest `responses-json-to-sse-context-no-dead-state + responses-json-to-sse-usage` PASS 4/4; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Replay: real 4444 Responses sample replay succeeded with `reasoning_items=1`, `has_completed=true`, `has_done=true`, `has_error=false`, and canonical usage preserved.
+
 ### 2026-06-30 Chat JSON->SSE usage alias fallback removed
 
 - Red evidence: `chat.ts::normalizeChatUsage` accepted Responses-style `input_tokens` / `output_tokens`, camelCase `promptTokens` / `completionTokens` / `inputTokens` / `outputTokens` / `totalTokens`, and computed missing `total_tokens`, making the TS chat SSE generator a second usage-normalization owner.

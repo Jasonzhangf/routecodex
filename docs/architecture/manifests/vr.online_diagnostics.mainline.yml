@@ -1,0 +1,40 @@
+lifecycle_id: vr.online_diagnostics.mainline
+summary: "Virtual Router online diagnostics: HTTP/CLI thin shells call Rust VR
+  status/dry-run contracts; Rust alone expands routes, forwarders, default-floor
+  state, and unavailable-provider explanations."
+owner_feature_id: vr.online_diagnostics
+entrypoint:
+  node_id: VrDiag01StatusSnapshot
+  wiki_page: null
+  call_map_chain_id: vr.online_diagnostics.mainline
+node_ids:
+  - ServerRespOutbound05ClientFrame
+  - VrDiag01StatusSnapshot
+  - VrDiag02DryRunInput
+  - VrDiag03DryRunDecision
+edges:
+  - step_id: vrd-01
+    from_node: VrDiag01StatusSnapshot
+    to_node: VrDiag02DryRunInput
+    status: anchored
+    owner_feature_id: vr.online_diagnostics
+    binding_pending: null
+    split_binding_id: null
+  - step_id: vrd-02
+    from_node: VrDiag02DryRunInput
+    to_node: VrDiag03DryRunDecision
+    status: anchored
+    owner_feature_id: vr.online_diagnostics
+    binding_pending: null
+    split_binding_id: null
+  - step_id: vrd-03
+    from_node: VrDiag03DryRunDecision
+    to_node: ServerRespOutbound05ClientFrame
+    status: anchored
+    owner_feature_id: vr.online_diagnostics
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

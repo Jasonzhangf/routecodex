@@ -1,0 +1,33 @@
+lifecycle_id: vr.route_availability.mainline
+summary: Virtual Router ordinary-route filtering, default-pool availability floor, and primary_exhausted planning remain Rust-owned; TS may only consume the floor/plan output and must not locally re-decide terminal no-provider.
+owner_feature_id: vr.provider_forwarder_runtime
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+entrypoint:
+  node_id: VrAvail01RouteCandidates
+  wiki_page: docs/architecture/wiki/virtual-router-route-availability-mainline-source.md
+  call_map_chain_id: vr.route_availability.mainline
+node_ids:
+  - ErrorErr05ExecutionDecision
+  - VrAvail01RouteCandidates
+  - VrAvail02PoolFiltered
+  - VrAvail03DefaultFloorEvaluated
+  - VrAvail04PrimaryExhaustedPlanned
+step_ids:
+  - vra-01
+  - vra-02
+  - vra-03
+  - vra-04
+edge_status_counts:
+  anchored: 3
+  partial: 1
+  binding_pending: 0
+  total: 4
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: vr.route_availability.mainline
+  min_function_feature: vr.provider_forwarder_runtime
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

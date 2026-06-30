@@ -137,8 +137,6 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>hub.servertool_followup</code></td><td>servertool followup orchestration and governed response truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:servertool-rust-only</code></td></tr>
-        <tr><td><code>hub.servertool_pending_session</code></td><td>servertool pending-session store and pending injection persist planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
-        <tr><td><code>hub.servertool_pre_command_hooks</code></td><td>servertool pre-command hook config and rule normalization</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_engine_selection</code></td><td>servertool primary auto-hook first pass and rerun selection planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_cli_projection</code></td><td>servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run build:base</code>&lt;br/&gt;<code>npm run verify:architecture-ci</code></td></tr>
         <tr><td><code>hub.servertool_stopless_cli_continuation</code></td><td>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src</code></td><td><code>npm run verify:stopless-invalid-schema-blackbox</code>&lt;br/&gt;<code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
@@ -153,7 +151,7 @@
         <tr><td><code>hub.servertool_execution_loop_runtime_action_contract</code></td><td>servertool execution loop runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_outcome_runtime_action_contract</code></td><td>servertool execution outcome runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_state_contract</code></td><td>servertool execution loop state creation and append planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
-        <tr><td><code>hub.servertool_registry_contract</code></td><td>servertool registry registration, lookup, auto-hook descriptor, and projection planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_registry_contract</code></td><td>servertool registry lookup, auto-hook descriptor, and projection planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_response_stage_runtime_action_contract</code></td><td>servertool response-stage runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_server_side_tool_entry_contract</code></td><td>servertool entry preflight action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_stopless_cli_projection_context</code></td><td>stopless CLI projection context planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
@@ -190,7 +188,6 @@
         </ul>
         <p>Required tests:</p>
         <ul>
-          <li><code>tests/sharedmodule/servertool-pending-session.spec.ts</code></li>
           <li><code>tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts</code></li>
           <li><code>tests/sharedmodule/apply-patch-chat-process-contract.spec.ts</code></li>
           <li><code>tests/red-tests/hub_pipeline_reasoning_tool_parser_shell_deleted.test.ts</code></li>
@@ -203,113 +200,6 @@
         <ul>
           <li>Rust owns orchestration semantics; TS only bridge/reentry/IO.</li>
           <li>Zero-consumer TS reasoning tool parser shell must stay physically deleted; native reasoning tool extraction is exposed through the text-markup native wrapper owner.</li>
-        </ul>
-        <h2>hub.servertool_pending_session</h2>
-        <p>Summary: servertool pending-session store and pending injection persist planning</p>
-        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs</code> Owner scope: servertool pending-session store and pending injection persist planning</p>
-        <p>Canonical types:</p>
-        <ul>
-          <li><code>PendingServerToolInjectionPlan</code></li>
-          <li><code>PendingInjectionPersistPlan</code></li>
-          <li><code>PendingInjectionPersistErrorPlan</code></li>
-          <li><code>PendingSessionLoadPlan</code></li>
-        </ul>
-        <p>Canonical builders:</p>
-        <ul>
-          <li><code>resolve_pending_file_name</code></li>
-          <li><code>resolve_pending_max_age_ms</code></li>
-          <li><code>plan_pending_session_save</code></li>
-          <li><code>plan_pending_session_load</code></li>
-          <li><code>plan_pending_injection_persist</code></li>
-          <li><code>plan_pending_injection_persist_error</code></li>
-        </ul>
-        <p>Allowed paths:</p>
-        <ul>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/pending-session.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/pending-injection-block.ts</code></li>
-          <li><code>tests/sharedmodule/servertool-pending-session.spec.ts</code></li>
-          <li><code>tests/servertool/pending-session.spec.ts</code></li>
-          <li><code>tests/servertool/pending-injection-block.spec.ts</code></li>
-          <li><code>docs</code></li>
-        </ul>
-        <p>Forbidden paths:</p>
-        <ul>
-          <li><code>src/providers</code></li>
-          <li><code>src/server/runtime/http-server/executor</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/handlers</code></li>
-        </ul>
-        <p>Required tests:</p>
-        <ul>
-          <li><code>tests/sharedmodule/servertool-pending-session.spec.ts</code></li>
-          <li><code>tests/servertool/pending-session.spec.ts</code></li>
-          <li><code>tests/servertool/pending-injection-block.spec.ts</code></li>
-        </ul>
-        <p>Required gates:</p>
-        <ul>
-          <li><code>npm run verify:servertool-rust-only</code></li>
-          <li><code>npm run verify:function-map-compile-gate</code></li>
-        </ul>
-        <p>Notes:</p>
-        <ul>
-          <li>servertool-core owns pending file-name sanitization, max-age parsing/defaulting, save/load payload coercion, stale/malformed/drop decisions, pending injection session dedupe, persist record planning, and persistence error envelope construction.</li>
-          <li>TS pending-session may only consume explicit runtime workdir/sessionDir input and execute file IO using native plans; do not recover session identity from env/top-level fallback.</li>
-          <li>TS pending-injection-block may only call native persist/error planners and execute save IO.</li>
-          <li>Do not restore local max-age parsing, segment sanitization, payload coercion, stale/malformed drop policy, aliasSessionIds dedupe, pending injection payload construction, or <code>SERVERTOOL_PENDING_INJECTION_FAILED</code> envelope assembly in TS.</li>
-        </ul>
-        <h2>hub.servertool_pre_command_hooks</h2>
-        <p>Summary: servertool pre-command hook config and rule normalization</p>
-        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs</code> Owner scope: servertool pre-command hook config and runtime-rule normalization</p>
-        <p>Canonical types:</p>
-        <ul>
-          <li><code>PreCommandHooksConfigPlanInput</code></li>
-          <li><code>PreCommandHooksConfigPlan</code></li>
-          <li><code>PreCommandHookRulePlan</code></li>
-          <li><code>PreCommandRegexPlan</code></li>
-          <li><code>RuntimePreCommandRulePlanInput</code></li>
-        </ul>
-        <p>Canonical builders:</p>
-        <ul>
-          <li><code>plan_pre_command_hooks_config</code></li>
-          <li><code>plan_runtime_pre_command_rule</code></li>
-        </ul>
-        <p>Allowed paths:</p>
-        <ul>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts</code></li>
-          <li><code>tests/servertool/pre-command-hooks.spec.ts</code></li>
-          <li><code>docs</code></li>
-        </ul>
-        <p>Forbidden paths:</p>
-        <ul>
-          <li><code>src/providers</code></li>
-          <li><code>src/server/runtime/http-server/executor</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/handlers</code></li>
-        </ul>
-        <p>Required tests:</p>
-        <ul>
-          <li><code>tests/servertool/pre-command-hooks.spec.ts</code></li>
-        </ul>
-        <p>Required gates:</p>
-        <ul>
-          <li><code>npm run verify:servertool-rust-only</code></li>
-          <li><code>npm run verify:function-map-compile-gate</code></li>
-        </ul>
-        <p>Notes:</p>
-        <ul>
-          <li>servertool-core owns pre-command config enable/disable, hook rule normalization, hook id sanitization, tool-set default/dedupe/normalize, regex source/flags planning, timeout clamp/default, priority parsing, and runtime pre-command rule planning.</li>
-          <li>TS pre-command-hooks may only read config/env/cache, materialize Rust regex plans, parse current tool args, and run jq/shell/runtime script IO.</li>
-          <li>Do not restore local normalize/sanitize/timeout/priority/tool-set policy in TS.</li>
         </ul>
         <h2>hub.servertool_engine_selection</h2>
         <p>Summary: servertool primary auto-hook first pass and rerun selection planning</p>
@@ -499,6 +389,7 @@
           <li>Model side must stay unaware of stopless identity. Stopless identity comes from write-once <code>request_truth.sessionId/requestId</code>; stopless control and progression come from Rust-produced <code>MetadataCenter.runtime_control.stopless</code> plus current request tool_output. <code>sessionDir</code>/persisted writeback and <code>requestTruth.runtimeControl</code> are forbidden.</li>
           <li>ReqChatProcess is the standard write origin for stopless runtime control: Rust request governance emits <code>metadata.runtime_control.stopless</code>, and the TS request-stage shell may only commit that Rust plan into the bound MetadataCenter with fail-fast binding checks.</li>
           <li>Stopless execution/control composition and orchestration planning are owned by the Rust Chat Process engine; TS may only expose unavoidable external IO/native-call shells and must not build stopless context/requestTruth/session truth or reenter for stopless CLI flows.</li>
+          <li>The builtin TS catalog may only call the Rust materialized bridge <code>runStoplessBuiltinHandlerForRuntimeJson</code>; it must not interpret stopless runtime actions or construct finalize/error handler semantics locally.</li>
           <li>Do not restore tmux/conversation/inject scope fallback, file persistence, or server-side stopless followup/reenter.</li>
           <li><code>responsesRequestContext.sessionId/conversationId</code> is continuation-only context for <code>/v1/responses</code>; it must never be promoted into request session truth, stopless activation input, stop-message session scope, or routing state key material.</li>
         </ul>
@@ -720,13 +611,13 @@
         <ul>
           <li><code>ServertoolDispatchSpecMismatchErrorInput</code></li>
           <li><code>ServertoolInvalidMixedClientToolsOutcomeErrorInput</code></li>
-          <li><code>ServertoolMissingFollowupContractErrorInput</code></li>
+          <li><code>ServertoolMissingExecutionContractErrorInput</code></li>
         </ul>
         <p>Canonical builders:</p>
         <ul>
           <li><code>plan_servertool_dispatch_spec_mismatch_error</code></li>
           <li><code>plan_servertool_invalid_mixed_client_tools_outcome_error</code></li>
-          <li><code>plan_servertool_missing_followup_contract_error</code></li>
+          <li><code>plan_servertool_missing_execution_contract_error</code></li>
         </ul>
         <p>Allowed paths:</p>
         <ul>
@@ -755,7 +646,7 @@
         </ul>
         <p>Notes:</p>
         <ul>
-          <li>Rust owns dispatch mismatch and missing followup error planning.</li>
+          <li>Rust owns dispatch mismatch and missing execution-contract error planning.</li>
         </ul>
         <h2>hub.servertool_execution_handler_contract</h2>
         <p>Summary: servertool handler contract, materialization, and runtime action planning</p>
@@ -968,22 +859,23 @@
           <li>Rust owns execution state create/append semantics.</li>
         </ul>
         <h2>hub.servertool_registry_contract</h2>
-        <p>Summary: servertool registry registration, lookup, auto-hook descriptor, and projection planning</p>
-        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs</code> Owner scope: servertool registry registration, lookup, auto-hook descriptor, and projection planning</p>
+        <p>Summary: servertool registry lookup, auto-hook descriptor, and projection planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs</code> Owner scope: servertool registry lookup, auto-hook descriptor, and projection planning</p>
         <p>Canonical types:</p>
         <ul>
-          <li><code>ServertoolRegistryRegistrationActionInput</code></li>
           <li><code>ServertoolRegistryLookupActionInput</code></li>
           <li><code>ServertoolRegistryAutoHookDescriptorInput</code></li>
           <li><code>ServertoolRegistryProjectionInput</code></li>
           <li><code>ServertoolRegistryProjectionPlan</code></li>
+          <li><code>ServertoolRegistrySourceProjectionInput</code></li>
+          <li><code>ServertoolRegistrySourceProjectionPlan</code></li>
         </ul>
         <p>Canonical builders:</p>
         <ul>
-          <li><code>plan_servertool_registry_registration_action</code></li>
           <li><code>plan_servertool_registry_lookup_action</code></li>
           <li><code>plan_servertool_registry_auto_hook_descriptors</code></li>
           <li><code>plan_servertool_registry_projection</code></li>
+          <li><code>plan_servertool_registry_source_projection</code></li>
         </ul>
         <p>Allowed paths:</p>
         <ul>
@@ -991,7 +883,12 @@
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/registry-impl.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts</code></li>
+          <li><code>tests/servertool/registry-registration-shell.spec.ts</code></li>
+          <li><code>tests/servertool/registry-projection-shell.spec.ts</code></li>
           <li><code>tests/servertool/server-side-tools.auto-hook-config.spec.ts</code></li>
         </ul>
         <p>Forbidden paths:</p>
@@ -1001,6 +898,8 @@
         </ul>
         <p>Required tests:</p>
         <ul>
+          <li><code>tests/servertool/registry-registration-shell.spec.ts</code></li>
+          <li><code>tests/servertool/registry-projection-shell.spec.ts</code></li>
           <li><code>tests/servertool/server-side-tools.auto-hook-config.spec.ts</code></li>
           <li><code>tests/servertool/servertool-active-orchestration-audit.spec.ts</code></li>
         </ul>
@@ -1011,7 +910,7 @@
         </ul>
         <p>Notes:</p>
         <ul>
-          <li>Rust owns registry registration, lookup, ordering, and projection planning.</li>
+          <li>Rust owns registry lookup, ordering, and projection planning.</li>
         </ul>
         <h2>hub.servertool_response_stage_runtime_action_contract</h2>
         <p>Summary: servertool response-stage runtime action planning</p>
@@ -1203,7 +1102,6 @@
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/stop-message-loop-payload-block.ts</code></li>
           <li><code>docs</code></li>
         </ul>
         <p>Forbidden paths:</p>
@@ -1215,7 +1113,6 @@
         <p>Required tests:</p>
         <ul>
           <li><code>tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts</code></li>
-          <li><code>tests/servertool/loop-state-block.spec.ts</code></li>
           <li><code>tests/servertool/stopless-cli-continuation.spec.ts</code></li>
         </ul>
         <p>Required gates:</p>
@@ -1226,7 +1123,7 @@
         <p>Notes:</p>
         <ul>
           <li>Loop warning text and repeat-count policy stay Rust-owned in followup-core.</li>
-          <li>TS may only build the native seed payload and pass the native warning injector as callback glue.</li>
+          <li>Deleted TS loop-state/scope/loop-warning shells must not be restored; Rust/followup-core and Chat Process native bridge own this path.</li>
           <li><code>appendStopMessageLoopWarning</code> must not return as a TS semantic owner/export.</li>
         </ul>
         <h2>hub.servertool_rust_only_closeout</h2>
@@ -1330,7 +1227,7 @@
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts</code></li>
           <li><code>tests/servertool/followup-runtime-provider-pin.spec.ts</code></li>
           <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>

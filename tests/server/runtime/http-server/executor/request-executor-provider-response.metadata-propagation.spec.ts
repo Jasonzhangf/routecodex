@@ -16,6 +16,7 @@ describe('buildProviderExecutionSuccessResult metadata propagation', () => {
       routeName: 'test-route',
       routingPoolId: 'test-pool',
       finishReason: 'stop',
+      projectPath: '/tmp/request-path',
       aggregatedUsage: undefined,
       cumulativeExternalLatencyMs: 1,
       cumulativeTrafficWaitMs: 0,
@@ -32,7 +33,6 @@ describe('buildProviderExecutionSuccessResult metadata propagation', () => {
           reasoning: { effort: 'high' }
         }
       },
-      readString: (value: unknown) => typeof value === 'string' ? value : undefined,
       readHubStageTop: () => undefined,
       readHubDecodeBreakdown: () => ({ sseDecodeMs: 0, codecDecodeMs: 0 })
     });
@@ -41,6 +41,7 @@ describe('buildProviderExecutionSuccessResult metadata propagation', () => {
       clientModelId: 'gpt-5.3-codex',
       originalModelId: 'gpt-5.3-codex'
     });
+    expect(result.usageLogInfo?.projectPath).toBe('/tmp/request-path');
     expect((result.metadata as any)?.__raw_request_body).toMatchObject({
       model: 'gpt-5.3-codex',
       reasoning: { effort: 'high' }

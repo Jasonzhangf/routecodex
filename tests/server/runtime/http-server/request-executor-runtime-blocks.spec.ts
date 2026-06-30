@@ -67,6 +67,39 @@ describe('request-executor-runtime-blocks', () => {
     }
   });
 
+  test('prints external transport source and compact reason for ECONNRESET provider switches', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      logProviderRetrySwitchCompact({
+        requestId: 'openai-chat-unknown-unknown-20260629T224935417-424214-4497',
+        attempt: 1,
+        maxAttempts: 6,
+        nextAttempt: 2,
+        providerKey: 'orangeai.key1.glm-5.2',
+        reason: 'fetch failed',
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'exclude_and_reroute',
+        retryExecutionPolicyReason: 'existing_exclusion',
+        stage: 'provider.send',
+        statusCode: 502,
+        errorCode: 'ECONNRESET',
+        upstreamCode: 'ECONNRESET',
+        providerSwitchLogState: new Map(),
+        throttleMs: 5000
+      });
+
+      const line = warnSpy.mock.calls.map((call) => String(call[0] ?? '')).find((value) => value.includes('[provider-switch]'));
+      expect(line).toContain('status=502');
+      expect(line).toContain('code=ECONNRESET');
+      expect(line).toContain('upstreamCode=ECONNRESET');
+      expect(line).toContain('source=external_transport');
+      expect(line).toContain('reason="fetch failed"');
+      expect(line).not.toContain('internalCode=');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test('does not bypass provider response conversion for chat.completion business-error bodies', () => {
     expect(shouldBypassProviderResponseConversion({
       status: 200,

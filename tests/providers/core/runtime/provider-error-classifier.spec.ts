@@ -25,7 +25,7 @@ describe('Provider error classifier - 429 handling', () => {
     expect(classification.isRateLimit).toBe(true);
     expect(classification.classification).toBe('recoverable');
     expect(classification.recoverable).toBe(true);
-    expect(classification.affectsHealth).toBe(true);
+    expect(classification.affectsHealth).toBe(false);
   });
 });
 
@@ -48,7 +48,7 @@ describe('Provider error classifier - internal conversion errors', () => {
 
     expect(classification.recoverable).toBe(true);
     expect(classification.classification).toBe('recoverable');
-    expect(classification.affectsHealth).toBe(true);
+    expect(classification.affectsHealth).toBe(false);
     expect(classification.isRateLimit).toBe(false);
   });
 

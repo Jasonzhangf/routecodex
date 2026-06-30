@@ -33,13 +33,13 @@ describe('request-executor-global-error-backoff', () => {
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
   });
 
-  test('cycles 1s to 2s to 3s for consecutive same-scope errors and resets on success', () => {
+  test('cycles 1s to 3s to 5s for consecutive same-scope errors and resets on success', () => {
     expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(2000);
     expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(5000);
     expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(2000);
     expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(5000);
 
     resetErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA });
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(0);
@@ -52,8 +52,8 @@ describe('request-executor-global-error-backoff', () => {
     jest.advanceTimersByTime(1000);
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(0);
 
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(2000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(2000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
+    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
   });
 
   test('resets consecutive scoped errors after provider-scope success', () => {

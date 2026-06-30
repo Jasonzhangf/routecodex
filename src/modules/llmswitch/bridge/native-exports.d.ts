@@ -98,6 +98,17 @@ export declare function projectResponsesSseFrameForClientNative(args: {
         emittedApplyPatchDoneCallIds: string[];
     };
 };
+export declare function projectSseErrorEventPayloadNative(args: {
+    requestId: string;
+    status: number;
+    message: string;
+    code: string;
+    error?: Record<string, unknown>;
+}): {
+    type: 'error';
+    status: number;
+    error: Record<string, unknown>;
+};
 export declare function describeHubPipelineContractsNative(): AnyRecord;
 export declare function describeVirtualRouterContractsNative(): AnyRecord;
 export declare function describeMetaCarrierContractsNative(): AnyRecord;

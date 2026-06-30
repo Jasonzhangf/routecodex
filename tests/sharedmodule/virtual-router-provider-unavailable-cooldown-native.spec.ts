@@ -8,6 +8,27 @@ function buildRouteMetadata(requestId: string): any {
   };
 }
 
+function tripProviderThroughRecoverableError(engine: VirtualRouterEngine, providerKey: string): void {
+  for (let index = 1; index <= 3; index += 1) {
+    engine.handleProviderError({
+      code: 'HTTP_500',
+      message: `upstream internal error #${index}`,
+      stage: 'provider.send',
+      status: 500,
+      runtime: {
+        requestId: `req-recoverable-${providerKey}-${index}`,
+        routeName: 'default',
+        providerKey,
+        runtimeKey: providerKey
+      },
+      timestamp: Date.now(),
+      details: {
+        errorClassification: 'recoverable'
+      }
+    } as any);
+  }
+}
+
 function buildConfig(providerKeys = ['deepseek.key1.deepseek-v4-pro']): any {
   const providers = Object.fromEntries(
     providerKeys.map((providerKey, index) => [
@@ -50,7 +71,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
     const providerKey = 'deepseek.key1.deepseek-v4-pro';
     const engine = new VirtualRouterEngine();
     engine.initialize(buildConfig([providerKey]));
-    engine.markProviderCooldown(providerKey, 1500);
+    tripProviderThroughRecoverableError(engine, providerKey);
 
     const result = engine.route(
       {
@@ -68,12 +89,12 @@ describe('virtual router native provider unavailable cooldown details', () => {
     const providerB = 'deepseek.key2.deepseek-v4-pro';
     const engine = new VirtualRouterEngine();
     engine.initialize(buildConfig([providerA, providerB]));
-    engine.markProviderCooldown(providerA, 1500);
-    engine.markProviderCooldown(providerB, 2500);
+    tripProviderThroughRecoverableError(engine, providerA);
+    tripProviderThroughRecoverableError(engine, providerB);
 
     const status = engine.getStatus();
-    const healthA = status.health.find((entry: any) => entry.providerKey === providerA.replace('.key1.', '.1.'));
-    const healthB = status.health.find((entry: any) => entry.providerKey === providerB.replace('.key2.', '.2.'));
+    const healthA = status.health.find((entry: any) => entry.providerKey === providerA || entry.providerKey === providerA.replace('.key1.', '.1.'));
+    const healthB = status.health.find((entry: any) => entry.providerKey === providerB || entry.providerKey === providerB.replace('.key2.', '.2.'));
     expect(healthA?.state).toBe('tripped');
     expect(healthB?.state).toBe('tripped');
 
@@ -133,7 +154,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
     expect(result.decision.routeName).toBe('default');
   });
 
-  it('keeps the last default-pool provider selectable even after 3 recoverable provider errors trigger ~30m cooldown truth', () => {
+  it('keeps the last default-pool provider selectable after recoverable provider errors without cooling it down', () => {
     const providerKey = 'recoverable.key1.gpt-test';
     const engine = new VirtualRouterEngine();
     engine.initialize({
@@ -183,7 +204,8 @@ describe('virtual router native provider unavailable cooldown details', () => {
         details: {
           errorClassification: 'recoverable',
           routePoolSize: 1
-        }
+        },
+        affectsHealth: false
       } as any);
     }
 
@@ -191,7 +213,8 @@ describe('virtual router native provider unavailable cooldown details', () => {
     const healthEntry = status.health?.find((entry: any) =>
       entry.providerKey === providerKey || entry.providerKey === providerKey.replace('.key1.', '.1.')
     );
-    expect(healthEntry?.state).toBe('tripped');
+    expect(healthEntry?.state).toBe('healthy');
+    expect(healthEntry?.failureCount).toBe(0);
 
     const result = engine.route(
       {
@@ -204,7 +227,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
     expect(result.decision.routeName).toBe('default');
   });
 
-  it('switches to the alternative provider after 3 recoverable errors instead of emptying the pool', () => {
+  it('keeps selecting the priority provider after recoverable errors instead of demoting it', () => {
     const providerA = 'recoverable.key1.gpt-test';
     const providerB = 'recoverable.key2.gpt-test';
     const engine = new VirtualRouterEngine();
@@ -226,7 +249,8 @@ describe('virtual router native provider unavailable cooldown details', () => {
         details: {
           errorClassification: 'recoverable',
           routePoolSize: 2
-        }
+        },
+        affectsHealth: false
       } as any);
     }
 
@@ -237,7 +261,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
       buildRouteMetadata('req-recoverable-alt-failure')
     );
 
-    expect(result.target.providerKey).toBe(providerB);
+    expect(result.target.providerKey).toBe(providerA);
     expect(result.decision.routeName).toBe('default');
   });
 });

@@ -57,6 +57,7 @@ describe('provider snapshot writer queue', () => {
       clientRequestId: 'req_queue_1',
       providerKey: 'qwen.1.qwen3.6-plus',
       entryEndpoint: '/v1/responses',
+      entryPort: 5555,
       data: { seq: 1 }
     });
     await writeProviderSnapshot({
@@ -65,6 +66,7 @@ describe('provider snapshot writer queue', () => {
       clientRequestId: 'req_queue_2',
       providerKey: 'qwen.1.qwen3.6-plus',
       entryEndpoint: '/v1/responses',
+      entryPort: 5555,
       data: { seq: 2 }
     });
     await writeProviderSnapshot({
@@ -73,6 +75,7 @@ describe('provider snapshot writer queue', () => {
       clientRequestId: 'req_queue_3',
       providerKey: 'qwen.1.qwen3.6-plus',
       entryEndpoint: '/v1/responses',
+      entryPort: 5555,
       data: { seq: 3 }
     });
     await writeProviderSnapshot({
@@ -81,6 +84,7 @@ describe('provider snapshot writer queue', () => {
       clientRequestId: 'req_queue_4',
       providerKey: 'qwen.1.qwen3.6-plus',
       entryEndpoint: '/v1/responses',
+      entryPort: 5555,
       data: { seq: 4 }
     });
 
@@ -113,6 +117,7 @@ describe('provider snapshot writer queue', () => {
       clientRequestId: 'req_queue_summary_1',
       providerKey: 'crs.key2.gpt-5.3-codex',
       entryEndpoint: '/v1/responses',
+      entryPort: 5555,
       data: {
         model: 'gpt-5.3-codex',
         previous_response_id: 'resp_prev_turn',
@@ -184,6 +189,7 @@ describe('provider snapshot writer queue', () => {
       clientRequestId: 'req_queue_full_response_1',
       providerKey: 'crs.key2.gpt-5.3-codex',
       entryEndpoint: '/v1/responses',
+      entryPort: 5555,
       data: {
         mode: 'sse',
         raw: 'z'.repeat(20000),

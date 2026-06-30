@@ -277,7 +277,6 @@ export class ResponsesJsonToSseConverterRefactored {
     return {
       requestId: options.requestId,
       model: response.model,
-      responsesRequest: {} as any,
       responsesResponse: response,
       options,
       startTime: Date.now(),
@@ -286,8 +285,7 @@ export class ResponsesJsonToSseConverterRefactored {
       contentIndexCounter: new Map(),
       isStreaming: true,
       currentResponse: response,
-      eventStats,
-      outputItemStates: new Map()
+      eventStats
     };
   }
 

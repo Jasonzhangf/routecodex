@@ -46,7 +46,6 @@ Canonical sources:
 - generic routing/runtime state snapshots (`session:*`, `conversation:*`, `tmux:*`)
 - `session-bindings.json`
 - `provider-health.json`
-- `servertool-pending/*`
 
 This means `sessionId` / `tmuxSessionId` / `conversationId` are not the same key, but the directory itself is already a shared runtime workdir. When reading or writing stopless/session data, prefer explicit metadata scope + explicit owner path. Do not infer ownership from the directory name alone.
 
@@ -83,14 +82,14 @@ Stop-message / stopless control clarification:
 | --- | --- | --- | --- | --- |
 | Responses / protocol-independent continuation | responses continuation store + owner restore path | cross-request / cross-tool-turn / protocol restore | yes, required | continuation 恢复权必须显式保存，不能只靠 scope 命中 |
 | stopless `stop_message_auto` loop state | stopless runtime metadata + current request `tool_outputs` | current request + next tool roundtrip | no | 不是 protocol-independent continuation，不应升级成 persisted session truth |
-| servertool pending injection | `hub.servertool_pending_session` | cross-request followup bridge | pending review | 目前仍是文件态，但是否属于“必须持久化 continuation”需继续按 owner 收口审计 |
+| retired servertool pending injection | retired | none | no | `pending-session` / `pending-injection` / `servertool-pending/*` 已物理退役；stopless 只保留 request truth session identity |
 | tmux / client bindings | `SessionClientRegistry` | client/tmux attachment lifecycle | yes, but separate namespace | 这是 client binding，不是 request session 或 continuation |
 | runtime lifecycle pid/stop-intent/instance registry | runtime lifecycle owners | cross-process runtime control | yes | 这是 runtime control plane，不是业务 continuation |
 | provider health / cooldown | provider runtime health owners | cross-request runtime heuristics | yes, if policy requires restart survival | 属于 runtime policy，不是 session 身份 |
 
-As of 2026-06-17, two implementation contracts are now explicit:
+As of 2026-06-30, the implementation contracts are now explicit:
 
-- `sharedmodule/llmswitch-core/src/servertool/pending-session.ts` no longer reads `ROUTECODEX_SESSION_DIR` or top-level fallback fields. Caller must pass explicit `sessionDir` from runtime metadata.
+- `sharedmodule/llmswitch-core/src/servertool/pending-session.ts` and `pending-injection-block.ts` are physically retired; they must not be restored as stopless/session truth.
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.{ts,js}` now passes an explicit "no override" sentinel when caller does not provide `sessionDir`, and `router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs` no longer reads `ROUTECODEX_SESSION_DIR` as a storage override. Persistent routing-state owner now accepts only explicit override input or canonical `~/.rcc` roots.
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs` now reads runtime path overrides only from `metadata.__rt.*`; top-level `metadata.sessionDir/rccUserDir` no longer count as legal fallback.
 
@@ -198,7 +197,7 @@ Current explicit gates and tests already referenced by owner map:
 | `meta-gap-03` | Continuation isolation | 文档已要求 `entryKind + continuationOwner + scope` 三重隔离，但 wiki 层此前没有把 direct/relay 恢复权显式画出 | 容易误把 `sessionId` 当恢复权真源 |
 | `meta-gap-04` | Chat-process handoff | `responsesResume / responsesContext / responseFormat / anthropicToolNameMap` 仍在代码和旧类型声明中出现 | 需要继续审计哪些是过渡字段，哪些应继续收缩到 `semantics.*` |
 | `meta-gap-05` | Snapshot/replay boundary | 计划文档已要求 snapshot metadata 不回流 live path，但 wiki 之前没有把 replay 例外单独标红 | 容易把 debug root metadata 当 runtime metadata 复用 |
-| `meta-gap-06` | Session dir overloading | `ROUTECODEX_SESSION_DIR` 仍同时承载 routing state、bindings、health、pending files | stopless/pending-session 已收口到 metadata-only caller contract，但 runtime workdir root 仍混放多类状态，长期仍建议物理拆分 |
+| `meta-gap-06` | Session dir overloading | `ROUTECODEX_SESSION_DIR` 仍同时承载 routing state、bindings、health 等 runtime 文件 | stopless/pending-session 已退役为 request metadata truth，不再通过 workdir pending files 恢复；长期仍建议继续拆分其它 runtime 状态 |
 
 ## Review Checklist
 

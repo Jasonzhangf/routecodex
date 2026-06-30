@@ -71,7 +71,6 @@ export interface ResponsesSseEvent extends BaseSseEvent {
 export interface ResponsesJsonToSseContext {
   requestId: string;
   model: string;
-  responsesRequest: ResponsesRequest;
   options: ResponsesJsonToSseOptions;
   startTime: number;
   sequenceCounter: number;
@@ -81,7 +80,6 @@ export interface ResponsesJsonToSseContext {
   currentResponse: Partial<ResponsesResponse>;
   responsesResponse?: ResponsesResponse;
   eventStats: ResponsesEventStats;
-  outputItemStates: Map<string, OutputItemProcessingState>;
 }
 
 export interface SseToResponsesJsonContext {

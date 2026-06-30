@@ -57,12 +57,14 @@ function buildTopLevelEvent(
   classification: 'recoverable' | 'unrecoverable',
   options?: { status?: number; code?: string }
 ): any {
+  const affectsHealth = classification === 'unrecoverable';
   return {
     code: options?.code ?? (classification === 'unrecoverable' ? 'INVALID_API_KEY' : 'HTTP_502'),
     message: classification === 'unrecoverable' ? 'invalid auth' : 'provider error',
     stage: 'provider.send',
     status: options?.status ?? (classification === 'unrecoverable' ? 401 : 502),
     errorClassification: classification,
+    affectsHealth,
     runtime: {
       requestId: 'req-top-level-native',
       routeName: 'thinking',
@@ -89,7 +91,8 @@ describe('virtual router native top-level error event consumption', () => {
     engine.handleProviderError(buildTopLevelEvent(providerKey, 'recoverable'));
 
     const state = readHealthState(engine, providerKey);
-    expect(state.failureCount).toBe(1);
+    expect(state.failureCount).toBe(0);
+    expect(state.state).toBe('healthy');
   });
 
   test('unrecoverable top-level errors still require strike threshold before cooldown', () => {

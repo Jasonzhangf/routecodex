@@ -67,6 +67,7 @@ describe('provider snapshot 429 suppression', () => {
         clientRequestId: requestId,
         providerKey,
         entryEndpoint: '/v1/responses',
+        entryPort: 5555,
         data: {
           statusCode: 429,
           code: 'HTTP_429',
@@ -109,6 +110,7 @@ describe('provider snapshot 429 suppression', () => {
         clientRequestId: 'req_429_retry',
         providerKey: 'qwen.1.qwen3.6-plus',
         entryEndpoint: '/v1/responses',
+        entryPort: 5555,
         data: {
           error: {
             status: 429,

@@ -72,6 +72,29 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
     });
   });
 
+  it('rejects direct passthrough upstream SSE that ends with response.incomplete', async () => {
+    const provider = createProvider();
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: response.created\n'
+          + 'data: {"type":"response.created","response":{"id":"resp_incomplete","status":"in_progress"}}\n\n',
+        'event: response.incomplete\n'
+          + 'data: {"type":"response.incomplete","response":{"id":"resp_incomplete","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}\n\n',
+      ]),
+    };
+
+    await expect(provider.processIncomingDirect({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true,
+    })).rejects.toMatchObject({
+      code: 'UPSTREAM_STREAM_INCOMPLETE',
+      statusCode: 502,
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.responses',
+    });
+  });
+
   it('returns replayable stream when direct passthrough upstream SSE reaches response.completed', async () => {
     const provider = createProvider();
     provider.httpClient = {

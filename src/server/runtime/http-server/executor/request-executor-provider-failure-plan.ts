@@ -11,19 +11,15 @@ import {
   buildProviderRetryTelemetryPlan
 } from './request-executor-retry-telemetry.js';
 import {
-  cloneErrorForReporting
-} from './request-executor-error-report.js';
-import {
   resolveProviderFailureClassification,
-  resolveProviderFailureOutcome
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
+  reportRequestExecutorProviderError,
   resolveRequestExecutorProviderErrorReportPlan
 } from './request-executor-provider-failure.js';
 import {
   resolveProviderRetryExecutionPlan
 } from './request-executor-retry-execution-plan.js';
-import { emitProviderErrorAndWait } from '../../../../providers/core/utils/provider-error-reporter.js';
 
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
@@ -130,62 +126,28 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });
-  const reportErrorCode = reportPlan.errorCode;
-  const reportUpstreamCode = reportPlan.upstreamCode;
-  const reportStatusCode = reportPlan.statusCode;
   const reportStage = reportPlan.stageHint;
-  const reportOutcome = resolveProviderFailureOutcome({
-    error: args.error,
-    stage: reportStage,
-    statusCode: reportStatusCode,
-    errorCode: reportErrorCode,
-    upstreamCode: reportUpstreamCode,
-    reason: args.retryError.reason
-  });
   try {
-    const rtHints = args.metadata?.__rt && typeof args.metadata.__rt === 'object' && !Array.isArray(args.metadata.__rt)
-      ? (args.metadata.__rt as Record<string, unknown>)
-      : undefined;
-    const sessionDir = typeof rtHints?.sessionDir === 'string' && rtHints.sessionDir.trim()
-      ? rtHints.sessionDir.trim()
-      : undefined;
-    const rccUserDir = typeof rtHints?.rccUserDir === 'string' && rtHints.rccUserDir.trim()
-      ? rtHints.rccUserDir.trim()
-      : undefined;
-    await emitProviderErrorAndWait({
-      error: cloneErrorForReporting(args.error),
-      stage: reportStage,
-      runtime: {
-        requestId: args.requestId,
-        providerKey: args.providerKey,
-        providerId: args.providerId,
-        providerType: args.providerType,
-        providerFamily: args.providerFamily,
-        providerProtocol: args.providerProtocol,
-        routeName: args.routeName,
-        pipelineId: args.providerKey,
-        target: args.target,
-        runtimeKey: args.runtimeKey,
-        ...(sessionDir ? { sessionDir } : {}),
-        ...(rccUserDir ? { rccUserDir } : {})
-      },
+    await reportRequestExecutorProviderError({
+      error: args.error,
+      retryError: args.retryError,
+      requestId: args.requestId,
+      providerKey: args.providerKey,
+      providerId: args.providerId,
+      providerType: args.providerType,
+      providerFamily: args.providerFamily,
+      providerProtocol: args.providerProtocol,
+      routeName: args.routeName,
+      runtimeKey: args.runtimeKey,
+      target: args.target,
       dependencies: args.dependencies,
-      statusCode: reportStatusCode,
-      recoverable: reportOutcome.recoverable,
-      affectsHealth: reportOutcome.affectsHealth,
+      attempt: args.attempt,
+      logStage: args.logStage,
+      stageHint: reportStage,
+      metadata: args.metadata,
       routePool: args.routePool,
-      excludedProviderKeys: args.excludedProviderKeys
-        ? Array.from(args.excludedProviderKeys)
-        : undefined,
-      details: {
-        source: reportStage,
-        ...(reportOutcome.classification ? { errorClassification: reportOutcome.classification } : {}),
-        ...(reportErrorCode ? { errorCode: reportErrorCode } : {}),
-        ...(reportUpstreamCode ? { upstreamCode: reportUpstreamCode } : {}),
-        reason: args.retryError.reason,
-        attempt: args.attempt,
-        ...(args.extraDetails ?? {})
-      }
+      excludedProviderKeys: args.excludedProviderKeys,
+      extraDetails: args.extraDetails
     });
   } catch (reportError) {
     args.logNonBlockingError('request_executor.provider_error_report.failed', reportError, {
