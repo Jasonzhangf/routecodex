@@ -13,14 +13,16 @@ export function resolveServerToolTimeoutMs(): number {
   const raw = process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS ||
     process.env.RCC_SERVERTOOL_TIMEOUT_MS ||
     process.env.LLMSWITCH_SERVERTOOL_TIMEOUT_MS;
-  return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });
+  const timeoutPolicyInput = { raw: raw || undefined };
+  return parseServertoolTimeoutMsWithNative(timeoutPolicyInput);
 }
 
 export function resolveServerToolFollowupTimeoutMs(): number {
   const raw = process.env.ROUTECODEX_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
     process.env.RCC_SERVERTOOL_FOLLOWUP_TIMEOUT_MS ||
     process.env.LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS;
-  return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });
+  const followupTimeoutPolicyInput = { raw: raw || undefined };
+  return parseServertoolTimeoutMsWithNative(followupTimeoutPolicyInput);
 }
 
 export function readClientInjectOnly(metadata: JsonObject): boolean {

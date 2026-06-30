@@ -2511,6 +2511,10 @@ function checkOrchestrationPolicyRustOwner() {
   }
   for (const needle of [
     'parseServertoolTimeoutMsWithNative',
+    'const timeoutPolicyInput = { raw: raw || undefined };',
+    'return parseServertoolTimeoutMsWithNative(timeoutPolicyInput);',
+    'const followupTimeoutPolicyInput = { raw: raw || undefined };',
+    'return parseServertoolTimeoutMsWithNative(followupTimeoutPolicyInput);',
     'readClientInjectOnlyWithNative',
     'normalizeClientInjectTextWithNative',
     'compactFollowupErrorReasonWithNative',

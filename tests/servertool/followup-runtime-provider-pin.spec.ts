@@ -1,4 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
+import fs from 'node:fs';
 
 import {
   compactFollowupErrorReason,
@@ -50,6 +51,17 @@ describe('servertool sticky provider pin', () => {
         }
       }
     }
+  });
+
+  test('keeps timeout native parse inputs as thin local carriers', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts',
+      'utf8'
+    );
+    expect(source).toContain('const timeoutPolicyInput = { raw: raw || undefined };');
+    expect(source).toContain('return parseServertoolTimeoutMsWithNative(timeoutPolicyInput);');
+    expect(source).toContain('const followupTimeoutPolicyInput = { raw: raw || undefined };');
+    expect(source).toContain('return parseServertoolTimeoutMsWithNative(followupTimeoutPolicyInput);');
   });
 
   test('normalizes client inject policy through native contract', () => {
