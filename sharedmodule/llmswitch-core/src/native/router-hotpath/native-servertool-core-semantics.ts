@@ -199,6 +199,15 @@ export interface NativeServertoolExecutionSummary {
   context?: unknown;
 }
 
+export interface StoplessExecutionPlanOutput {
+  execution: Record<string, unknown>;
+  orchestrationPlan: {
+    action: string;
+    isStopMessageFlow: boolean;
+    reason: string;
+  };
+}
+
 export interface NativeServertoolExecutedToolCall {
   id: string;
   name: string;
@@ -264,6 +273,13 @@ export interface ServertoolExecutionLoopRuntimeActionPlan {
     | 'apply_materialized_result'
     | 'apply_handler_error_tool_output'
     | 'continue_without_effect';
+}
+
+function parseNativeJson(capability: string, raw: unknown): unknown {
+  if (typeof raw !== 'string') {
+    throw new Error(`native ${capability} returned non-string: ${typeof raw}`);
+  }
+  return JSON.parse(raw) as unknown;
 }
 
 export interface ServertoolExecutionLoopEffectPlan {
@@ -517,6 +533,46 @@ export interface ServertoolHookSpec {
   outputNode: string;
   effectKind: string;
   enabled?: boolean;
+}
+
+export function planStoplessExecutionWithNative(input: {
+  flowId?: string;
+  execution: Record<string, unknown>;
+  requestTruthSessionId?: string;
+  runtimeControl?: Record<string, unknown> | null;
+}): StoplessExecutionPlanOutput {
+  const capability = 'planStoplessExecutionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`native ${capability} is required`);
+  }
+  const raw = fn(JSON.stringify({
+    flowId: input.flowId ?? null,
+    execution: input.execution,
+    requestTruthSessionId: input.requestTruthSessionId ?? null,
+    runtimeControl: input.runtimeControl ?? null
+  }));
+  const parsed = parseNativeJson(capability, raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`native ${capability} returned invalid stopless execution plan`);
+  }
+  const record = parsed as Record<string, unknown>;
+  const execution = record.execution;
+  const orchestrationPlan = record.orchestrationPlan;
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
+    throw new Error(`native ${capability} returned invalid stopless execution payload`);
+  }
+  if (
+    !orchestrationPlan ||
+    typeof orchestrationPlan !== 'object' ||
+    Array.isArray(orchestrationPlan)
+  ) {
+    throw new Error(`native ${capability} returned invalid stopless orchestration plan`);
+  }
+  return {
+    execution: execution as Record<string, unknown>,
+    orchestrationPlan: orchestrationPlan as StoplessExecutionPlanOutput['orchestrationPlan']
+  };
 }
 
 export interface ServertoolHookSchedulerInput {

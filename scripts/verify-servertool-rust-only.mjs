@@ -4222,12 +4222,15 @@ function checkStoplessOrchestrationActionRustOwner() {
     ['stopless-orchestration-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_execution_json'],
     ['stopless-orchestration-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_execution_json'],
     ['stopless-orchestration-action-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessExecutionJson'],
-    ['stopless-orchestration-action-thin-shell', TS_ENGINE_ORCHESTRATION_SHELL, servertoolEngine, "readNativeFunction('planStoplessExecutionJson')"],
+    ['stopless-orchestration-action-thin-shell', TS_ENGINE_ORCHESTRATION_SHELL, servertoolEngine, 'planStoplessExecutionWithNative({'],
+    ['stopless-orchestration-action-thin-shell', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'export function planStoplessExecutionWithNative'],
   ]) {
     assertContains(check, file, content, needle);
   }
 
   for (const keyword of [
+    'planStoplessExecutionWithNativeLocal',
+    "readNativeFunction('planStoplessExecutionJson')",
     'planStoplessOrchestrationActionWithNative',
     "readNativeFunction('planStoplessOrchestrationActionJson')",
     'requestTruth: { sessionId: requestTruthSessionId }',

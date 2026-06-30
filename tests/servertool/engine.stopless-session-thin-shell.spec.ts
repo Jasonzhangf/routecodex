@@ -48,7 +48,7 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain("if (stoplessPlan.action === 'terminal_final')");
     expect(source).not.toContain("if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow)");
     expect(source).not.toContain('!stoplessPlan.isStopMessageFlow &&');
-    expect(source).toContain('planStoplessExecutionWithNativeLocal');
+    expect(source).toContain('planStoplessExecutionWithNative({');
   });
 
   test('runServerToolOrchestration routes synthetic/direct preflight through native planning', () => {

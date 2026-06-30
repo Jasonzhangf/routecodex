@@ -22,7 +22,6 @@ import {
   recordServertoolEngineMatchSkipped
 } from './engine-observation-shell.js';
 import { runEnginePreflight } from './engine-preflight-shell.js';
-import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 import {
   readProviderProtocolFromAnyBoundMetadataCenter,
   readRequestTruthSessionIdFromAnyBoundMetadataCenter,
@@ -30,53 +29,9 @@ import {
 } from './metadata-center-carrier.js';
 import {
   planServertoolEngineRuntimeActionWithNative,
-  planServertoolEngineSkipWithNative
+  planServertoolEngineSkipWithNative,
+  planStoplessExecutionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-
-function planStoplessExecutionWithNativeLocal(input: {
-  flowId?: string;
-  execution: Record<string, unknown>;
-  requestTruthSessionId?: string;
-  runtimeControl?: Record<string, unknown> | null;
-}): {
-  execution: Record<string, unknown>;
-  orchestrationPlan: { action: string; isStopMessageFlow: boolean; reason: string };
-} {
-  const fn = readNativeFunction('planStoplessExecutionJson');
-  if (!fn) {
-    throw new Error('planStoplessExecutionJson native unavailable');
-  }
-  const raw = fn(JSON.stringify({
-    flowId: input.flowId ?? null,
-    execution: input.execution,
-    requestTruthSessionId: input.requestTruthSessionId ?? null,
-    runtimeControl: input.runtimeControl ?? null
-  }));
-  if (typeof raw !== 'string') {
-    throw new Error(`planStoplessExecutionJson native returned non-string: ${typeof raw}`);
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('invalid stopless execution plan object');
-    }
-    const execution = (parsed as Record<string, unknown>).execution;
-    const orchestrationPlan = (parsed as Record<string, unknown>).orchestrationPlan;
-    if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
-      throw new Error('invalid stopless execution payload');
-    }
-    if (!orchestrationPlan || typeof orchestrationPlan !== 'object' || Array.isArray(orchestrationPlan)) {
-      throw new Error('invalid stopless orchestration plan');
-    }
-    return {
-      execution: execution as Record<string, unknown>,
-      orchestrationPlan: orchestrationPlan as { action: string; isStopMessageFlow: boolean; reason: string }
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`planStoplessExecutionJson native parse failed: ${message}`);
-  }
-}
 
 export interface ServerToolOrchestrationOptions {
   chat: JsonObject;
@@ -219,16 +174,18 @@ export async function runServerToolOrchestrationShell(
   const requestTruthSessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
-  const stoplessExecutionPlan = planStoplessExecutionWithNativeLocal({
-        flowId,
-        execution: engineResult.execution && typeof engineResult.execution === 'object'
-          ? engineResult.execution as unknown as Record<string, unknown>
-          : {},
-        requestTruthSessionId,
-        runtimeControl: runtimeControl && typeof runtimeControl === 'object'
-          ? runtimeControl as Record<string, unknown>
-          : null
-      });
+  const stoplessExecutionPlan = planStoplessExecutionWithNative({
+    flowId,
+    execution:
+      engineResult.execution && typeof engineResult.execution === 'object'
+        ? (engineResult.execution as unknown as Record<string, unknown>)
+        : {},
+    requestTruthSessionId,
+    runtimeControl:
+      runtimeControl && typeof runtimeControl === 'object'
+        ? (runtimeControl as Record<string, unknown>)
+        : null
+  });
   const stoplessExecution = stoplessExecutionPlan.execution;
   const stoplessPlan = stoplessExecutionPlan.orchestrationPlan;
   const hasServertoolCliProjectionContext = stoplessExecution.flowId === 'servertool_cli_projection';

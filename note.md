@@ -1,3 +1,8 @@
+# 2026-06-30: stopless execution plan TS local parse shell removed
+- 本 slice 将 `engine-orchestration-shell.ts` 里的本地 `planStoplessExecutionWithNativeLocal` / direct `readNativeFunction('planStoplessExecutionJson')` / `JSON.parse(raw)` 解析壳移到 `native-servertool-core-semantics.ts::planStoplessExecutionWithNative` typed wrapper；engine orchestration 现在只调用 wrapper 并把 Rust 计划交给 postflight。
+- 防复活：`verify-servertool-rust-only` 和 focused Jest 改为要求 `planStoplessExecutionWithNative({`，并禁止旧 local wrapper / direct NAPI 调用复活。
+- 验证：sharedmodule TS PASS；root TS PASS；focused Jest `engine.stopless-session-thin-shell + engine-observation-shell + servertool-active-orchestration-audit` 49 passed；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；scoped `git diff --check` PASS。
+
 # 2026-06-30: servertool execution followup contract retired
 - 本 slice 已把 servertool execution outcome 的旧 followup/pending-injection contract 收口为 execution contract：`ServerToolExecution` 只保留 `flowId`，`plan_servertool_outcome_json` / `build_servertool_outcome_plan_input_json` 不再输出 `followupStrategy`、`resolvedFollowup`、`pendingSessionId`、`aliasSessionIds`、`pendingInjectionMessageKinds`、`hasLastExecutionFollowup`、`pendingInjectionMessagesResolved` 等旧字段。
 - `execution-handler-materialization-shell.ts` 只把 outcome mode、execution existence、flowId 交给 Rust runtime action planner；mixed client tools/pending injection 仍 fail-fast，不再生成 followup/pending injection plan。
