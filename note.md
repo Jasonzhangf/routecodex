@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE reasoning delta missing value must fail in Rust
+- Red evidence: `tests/sharedmodule/responses-sse-reasoning-summary-no-normalize.spec.ts` showed missing `reasoning_text.text` still emitted `response.error` from native owner, while the old expectation for TS text-delta wording was stale.
+- Fix: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs` now rejects missing reasoning delta `value` with `Responses reasoning delta payload missing value`; TS `event-generators/responses.ts` no longer skips `if (!content.text) continue;`.
+- Verification: focused Jest PASS 13/13; `npm run verify:sse-architecture-boundary` PASS; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; root `tsc --noEmit --pretty false` PASS; `npm run verify:responses-sse-business-module` PASS; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; source replay confirmed invalid path emits `response.error` and no `response.completed` / `response.done`.
+
 # 2026-07-01: Responses SSE response status fallback removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 `response.status ?? 'requires_action'` / `response.status ?? 'completed'` 禁止 marker 后先红；focused `responses-sse-usage-no-fallback` 也先红，证明缺失 `status` 会被合成 `in_progress/completed` 并成功输出 terminal frames。
 - Fix：`responses-sequencer.ts::validateResponse()` 对缺失/空白 `response.status` 直接 fail-fast 抛 `Invalid Responses response: missing status`；`event-generators/responses.ts` 的 required_action/completed/done payload 全部只传 provider response 的显式 `status`，删除 TS 默认值。

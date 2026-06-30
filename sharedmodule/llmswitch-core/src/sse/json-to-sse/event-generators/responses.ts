@@ -379,7 +379,6 @@ export function* buildReasoningDeltas(
   let contentIndex = 0;
   for (const content of contents) {
     if (content.type === 'reasoning_text') {
-      if (!content.text) continue;
       const baseEvent = nextResponsesEventEnvelope(context, config);
       const payload = buildResponsesSseReasoningDeltaPayloadWithNative(
         'text',

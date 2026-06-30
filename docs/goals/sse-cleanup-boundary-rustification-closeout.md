@@ -98,6 +98,14 @@ Focused tests to use as slice gates:
 - Verification: focused Jest `responses-sse-usage-no-fallback` PASS 7/7; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
 - Replay evidence: source replay `validCompleted=true`, `validDone=true`, `missingStatusError=true`, `missingStatusMessage=true`, `missingStatusCompleted=false`, `missingStatusDone=false`.
 
+### 2026-07-01 Responses SSE reasoning delta missing value fail-fast slice
+
+- Red evidence: `tests/sharedmodule/responses-sse-reasoning-summary-no-normalize.spec.ts` failed because missing `reasoning_text.text` still expected the old TS message; the actual emitted error came from the native owner and the invalid path had previously been silently skipped in TS.
+- Fix: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs` now rejects missing reasoning delta `value` with `Responses reasoning delta payload missing value`; `sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts` no longer skips missing `content.text`.
+- Positive / reverse tests: `tests/sharedmodule/responses-sse-reasoning-summary-no-normalize.spec.ts` now locks both the valid reasoning delta path and the reverse missing-text fail-fast path.
+- Verification: focused Jest `responses-sse-reasoning-summary-no-normalize` PASS 13/13; `npm run verify:sse-architecture-boundary` PASS; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `npx tsc -p tsconfig.json --noEmit --pretty false` PASS; `npm run verify:responses-sse-business-module` PASS; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: source replay showed valid reasoning text emits `response.reasoning_text.delta` and `response.completed`, while missing reasoning text emits `response.error` and no `response.completed` / `response.done`.
+
 ### 2026-07-01 Gemini SSE candidate parts empty-success fallback removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `return [];` for `gemini-sequencer.ts` and failed before the fix. Focused Jest also failed because a candidate with a role but missing `content.parts` resolved successfully into only a `gemini.done` event.

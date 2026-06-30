@@ -358,6 +358,7 @@ for (const relPath of providerNeutralProjectionFiles) {
     'const fallback = { input_tokens: 0, output_tokens: 0, total_tokens: 0 }',
     "response.status ?? 'requires_action'",
     "response.status ?? 'completed'",
+    'if (!content.text) continue;',
     "args = '{}'",
     'return String(raw)',
     "outputItemState.arguments = '{}'",

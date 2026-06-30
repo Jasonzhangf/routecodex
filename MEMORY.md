@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE reasoning delta missing value fails in Rust
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs` is the owner for Responses reasoning delta payload validation; missing `value` must fail fast with `Responses reasoning delta payload missing value`.
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts` must not silently skip `if (!content.text) continue;` for reasoning text content.
+- Verification for this slice included focused Jest `responses-sse-reasoning-summary-no-normalize`, `npm run verify:sse-architecture-boundary`, sharedmodule/root TypeScript checks, `npm run verify:responses-sse-business-module`, `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`, `npm run build:base`, and source replay proving invalid reasoning text emits `response.error` with no completed/done.
+
 # 2026-07-01: Responses SSE terminal status must come from response.status
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts` must not synthesize terminal status with `response.status ?? 'completed'` or required-action status with `response.status ?? 'requires_action'`.
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts::validateResponse()` now fails missing/blank `response.status` with `Invalid Responses response: missing status`, preventing silent `in_progress/completed` terminal frames.

@@ -29,7 +29,9 @@ pub fn build_responses_sse_event_envelope_json(input_json: String) -> Result<Str
         .and_then(Value::as_i64)
         .ok_or_else(|| "Responses SSE event envelope missing current_sequence".to_string())?;
     if current_sequence < 0 {
-        return Err("Responses SSE event envelope current_sequence must be non-negative".to_string());
+        return Err(
+            "Responses SSE event envelope current_sequence must be non-negative".to_string(),
+        );
     }
     let enable_timestamp_generation = input
         .get("enable_timestamp_generation")
@@ -750,7 +752,10 @@ pub fn serialize_responses_sse_event_to_wire(event: Value) -> Result<String, Str
         "event: {}\ndata: {}\n",
         event_type_owned,
         serde_json::to_string(&Value::Object(data)).map_err(|error| {
-            format!("Failed to serialize Responses SSE event payload JSON: {}", error)
+            format!(
+                "Failed to serialize Responses SSE event payload JSON: {}",
+                error
+            )
         })?
     );
     if let Some(timestamp) = event.get("timestamp") {
@@ -804,7 +809,10 @@ pub fn deserialize_responses_sse_event_from_wire(wire_data: &str) -> Result<Valu
         } else if let Some(value) = line.strip_prefix("data:") {
             let data_str = value.trim();
             let parsed: Value = serde_json::from_str(data_str).map_err(|error| {
-                format!("Invalid Responses SSE data payload: {}; {}", data_str, error)
+                format!(
+                    "Invalid Responses SSE data payload: {}; {}",
+                    data_str, error
+                )
             })?;
             event_data = Some(parsed);
         } else if let Some(value) = line.strip_prefix("id:") {
@@ -828,12 +836,8 @@ pub fn deserialize_responses_sse_event_from_wire(wire_data: &str) -> Result<Valu
 pub fn deserialize_responses_sse_event_from_wire_json(
     wire_data_json: String,
 ) -> Result<String, String> {
-    let wire_data: Value = serde_json::from_str(&wire_data_json).map_err(|error| {
-        format!(
-            "Failed to parse Responses SSE wire data JSON: {}",
-            error
-        )
-    })?;
+    let wire_data: Value = serde_json::from_str(&wire_data_json)
+        .map_err(|error| format!("Failed to parse Responses SSE wire data JSON: {}", error))?;
     let Some(wire_data) = wire_data.as_str() else {
         return Err("Responses SSE wire data must be a string".to_string());
     };
@@ -860,12 +864,8 @@ pub fn validate_responses_sse_wire_format(wire_data: &str) -> Result<bool, Strin
 }
 
 pub fn validate_responses_sse_wire_format_json(wire_data_json: String) -> Result<String, String> {
-    let wire_data: Value = serde_json::from_str(&wire_data_json).map_err(|error| {
-        format!(
-            "Failed to parse Responses SSE wire data JSON: {}",
-            error
-        )
-    })?;
+    let wire_data: Value = serde_json::from_str(&wire_data_json)
+        .map_err(|error| format!("Failed to parse Responses SSE wire data JSON: {}", error))?;
     let Some(wire_data) = wire_data.as_str() else {
         return Err("Responses SSE wire data must be a string".to_string());
     };
@@ -1457,11 +1457,8 @@ pub fn build_responses_sse_reasoning_lifecycle_payload_json(
         .get("item_id")
         .and_then(Value::as_str)
         .ok_or_else(|| "Responses reasoning lifecycle payload missing item_id".to_string())?;
-    let output = build_responses_sse_reasoning_lifecycle_payload(
-        lifecycle,
-        item_id,
-        source.get("summary"),
-    )?;
+    let output =
+        build_responses_sse_reasoning_lifecycle_payload(lifecycle, item_id, source.get("summary"))?;
     serde_json::to_string(&output).map_err(|error| {
         format!(
             "Failed to serialize Responses reasoning lifecycle payload JSON: {}",
@@ -1537,7 +1534,7 @@ pub fn build_responses_sse_reasoning_delta_payload_json(
     let value = source
         .get("value")
         .cloned()
-        .unwrap_or_else(|| Value::String(String::new()));
+        .ok_or_else(|| "Responses reasoning delta payload missing value".to_string())?;
     let output = build_responses_sse_reasoning_delta_payload(
         lifecycle,
         output_index,
@@ -1841,7 +1838,9 @@ mod tests {
 
         assert!(output.get("metadata").is_none());
         assert!(!output.to_string().contains("must-not-leak"));
-        assert!(!output.to_string().contains("__shadowCompareForcedProviderKey"));
+        assert!(!output
+            .to_string()
+            .contains("__shadowCompareForcedProviderKey"));
     }
 
     #[test]
@@ -2466,5 +2465,21 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Responses reasoning delta payload item_id is required"));
+    }
+
+    #[test]
+    fn rejects_responses_sse_reasoning_delta_payload_missing_value() {
+        let err = build_responses_sse_reasoning_delta_payload_json(
+            json!({
+                "output_index": 1,
+                "item_id": "rs_1",
+                "content_index": 0
+            })
+            .to_string(),
+            Some("text".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Responses reasoning delta payload missing value"));
     }
 }

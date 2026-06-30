@@ -362,6 +362,28 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
     });
   });
 
+  it('fails missing reasoning_text text instead of silently skipping the content item', async () => {
+    const events = await collectEvents({
+      id: 'resp_reasoning_missing_text',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'rs_missing_text',
+        type: 'reasoning',
+        summary: [],
+        content: [{ type: 'reasoning_text' }]
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    });
+
+    expect(events.some((event) => event.type === 'response.error')).toBe(true);
+    expect(JSON.stringify(events)).toContain('Responses reasoning delta payload missing value');
+    expect(events.some((event) => event.type === 'response.completed')).toBe(false);
+    expect(events.some((event) => event.type === 'response.done')).toBe(false);
+  });
+
   it('builds reasoning delta payloads through the native owner directly', () => {
     expect(buildResponsesSseReasoningDeltaPayloadWithNative(
       'text',
