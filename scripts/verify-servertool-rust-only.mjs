@@ -5093,6 +5093,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'function normalizeFilterTokenSet(',
     '.trim().toLowerCase()',
+    '.filter((hook): hook is',
+    '.filter(Boolean)',
   ]) {
     if (entryContextShell.includes(marker)) {
       fail(

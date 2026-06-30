@@ -83,6 +83,8 @@ const TARGETS = [
       'function replaceJsonObjectInPlaceInternal(',
       'function nativeArray(',
       'function nativeRecord(',
+      '.filter((hook): hook is',
+      '.filter(Boolean)',
     ],
   },
   {

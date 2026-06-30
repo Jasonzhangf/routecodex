@@ -78,6 +78,10 @@ const runServertoolOrchestrationMutationWithNative = jest.fn((input: any) => {
   }
   return input?.base ?? {};
 });
+const planServertoolAutoHookQueuesWithNative = jest.fn((input: any) => ({
+  optionalQueue: [...input.hooks].sort((a, b) => a.priority - b.priority),
+  mandatoryQueue: []
+}));
 
 function mockToolSpec(name: unknown): any | null {
   const key = String(name ?? '').trim().toLowerCase();
@@ -354,10 +358,7 @@ jest.unstable_mockModule(
     visionBuildAnalysisPayloadWithNative: jest.fn(() => 'null'),
     visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
     visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
-    planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => ({
-      optionalQueue: [...input.hooks].sort((a, b) => a.priority - b.priority),
-      mandatoryQueue: []
-    })),
+    planServertoolAutoHookQueuesWithNative,
     runServertoolOrchestrationMutationWithNative
   })
 );
@@ -582,10 +583,7 @@ jest.unstable_mockModule(
     visionBuildAnalysisPayloadWithNative: jest.fn(() => 'null'),
     visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
     visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
-    planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => ({
-      optionalQueue: [...input.hooks].sort((a, b) => a.priority - b.priority),
-      mandatoryQueue: []
-    })),
+    planServertoolAutoHookQueuesWithNative,
     runServertoolOrchestrationMutationWithNative
   })
 );
@@ -873,6 +871,8 @@ describe('servertool skeleton config', () => {
     );
 
     expect(source).toContain('sourceIndex');
+    expect(source).not.toContain('.filter((hook): hook is');
+    expect(source).not.toContain('.filter(Boolean)');
     expect(source).not.toContain('function normalizeServerToolCallName(');
     expect(source).not.toContain('.trim().toLowerCase()');
   });

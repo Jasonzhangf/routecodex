@@ -35,9 +35,15 @@ export function buildAutoHookQueuesFromConfig<THook extends {
     mandatoryHookOrder: queueConfig.mandatoryOrder
   });
   const mapQueue = (entries: Array<{ sourceIndex: number }>): THook[] =>
-    entries
-      .map((entry) => args.hooks[entry.sourceIndex])
-      .filter((hook): hook is THook => Boolean(hook));
+    entries.map((entry) => {
+      const hook = args.hooks[entry.sourceIndex];
+      if (!hook) {
+        throw new Error(
+          `[servertool] native auto-hook queue returned invalid sourceIndex: ${entry.sourceIndex}`
+        );
+      }
+      return hook;
+    });
   return {
     optionalQueue: mapQueue(nativePlan.optionalQueue),
     mandatoryQueue: mapQueue(nativePlan.mandatoryQueue)
