@@ -173,6 +173,7 @@ const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts`,
 ];
 const DELETED_BACKEND_ROUTE_POLICY_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`,
@@ -4528,24 +4529,6 @@ function checkStoplessNoContextDataPlane() {
       );
     }
   }
-  const builtinCatalog = readRequired(`${SERVERTOOL_TS_DIR}/builtin-handler-catalog.ts`);
-  for (const marker of [
-    'readMetadataCenterSnapshot',
-    'buildMetadataCenterRustSnapshot',
-    'readBoundMetadataCenter',
-    'ctx.adapterContext',
-    'adapterContext: {}',
-    'readNativeFunction',
-    "readNativeFunction('runStoplessBuiltinHandlerForRuntimeJson')",
-    'JSON.parse(raw)',
-  ]) {
-    if (builtinCatalog.includes(marker)) {
-      fail(
-        'stopless-no-context-data-plane',
-        `builtin-handler-catalog.ts must not read adapterContext/MetadataCenter or parse native runtime payloads for stopless runtime marker ${marker}`
-      );
-    }
-  }
   const entryContextShell = readRequired(`${SERVERTOOL_TS_DIR}/entry-context-shell.ts`);
   for (const marker of [
     "from '../conversion/runtime-metadata.js'",
@@ -5311,7 +5294,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-handler-builtin-runtime-thin-shell',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    '__executeBuiltinHandlerForRuntime(args.builtinName, args.ctx)'
+    'runStoplessBuiltinHandlerForRuntimeWithNative({'
   );
   assertContains(
     'servertool-execution-handler-contract-rust-owner',
@@ -5615,7 +5598,8 @@ function checkServertoolResponseStageGateThinShell() {
 function checkServertoolEngineStoplessSessionThinShell() {
   const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
   const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
-  const builtinHandlerCatalogSource = readRequired(`${SERVERTOOL_TS_DIR}/builtin-handler-catalog.ts`);
+  const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
+  const registryOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`);
   const rustProjectionContextSource = readRequired(
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
   );
@@ -5739,10 +5723,10 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'function runBuiltinHandlerForRuntimeNapi(',
     'function runBuiltinHandler(',
   ]) {
-    if (builtinHandlerCatalogSource.includes(marker)) {
+    if (executionMaterializationShell.includes(marker) || registryOrchestrationShell.includes(marker)) {
       fail(
         'servertool-builtin-handler-stopless-no-ts-action-owner',
-        `builtin-handler-catalog.ts must not retain stopless runtime action semantic marker ${marker}`
+        `servertool TS runtime shells must not retain builtin handler action semantic marker ${marker}`
       );
     }
   }
@@ -5752,10 +5736,10 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'getServertoolToolSpec',
     'listServertoolToolSpecs',
   ]) {
-    if (builtinHandlerCatalogSource.includes(marker)) {
+    if (executionMaterializationShell.includes(marker) || registryOrchestrationShell.includes(marker)) {
       fail(
         'servertool-builtin-handler-catalog-rust-plan',
-        `builtin-handler-catalog.ts must not retain TS builtin catalog semantic marker ${marker}`
+        `servertool TS runtime shells must not retain builtin catalog semantic marker ${marker}`
       );
     }
   }
@@ -5764,10 +5748,10 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'resolveServertoolBuiltinHandlerEntryWithNative(',
     'planServertoolBuiltinAutoHandlerEntriesWithNative(',
   ]) {
-    if (!builtinHandlerCatalogSource.includes(marker)) {
+    if (!executionMaterializationShell.includes(marker) && !registryOrchestrationShell.includes(marker)) {
       fail(
         'servertool-builtin-handler-stopless-thin-shell',
-        `builtin-handler-catalog.ts must keep Rust stopless runtime thin-shell marker ${marker}`
+        `servertool TS runtime shells must keep direct native builtin thin-shell marker ${marker}`
       );
     }
   }

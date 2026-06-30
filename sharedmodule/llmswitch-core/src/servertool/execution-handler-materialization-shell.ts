@@ -4,13 +4,13 @@ import {
   planServertoolExecutionOutcomeRuntimeActionWithNative,
   planServertoolHandlerContractErrorWithNative,
   planServertoolHandlerRuntimeActionForPlannedWithNative,
+  runStoplessBuiltinHandlerForRuntimeWithNative,
   type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   buildServertoolOutcomePlanInputWithNative,
   planServertoolOutcomeWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { __executeBuiltinHandlerForRuntime } from './builtin-handler-catalog.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 import type {
   ServerSideToolEngineOptions,
@@ -105,5 +105,10 @@ export async function executeBuiltinServerToolHandler(args: {
   builtinName: string;
   ctx: ServerToolHandlerContext;
 }): Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null> {
-  return __executeBuiltinHandlerForRuntime(args.builtinName, args.ctx);
+  return runStoplessBuiltinHandlerForRuntimeWithNative({
+    name: args.builtinName,
+    base: args.ctx.base,
+    requestId: args.ctx.requestId,
+    runtimeMetadata: args.ctx.runtimeMetadata ?? null
+  }) as ServerToolHandlerResult | null;
 }

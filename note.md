@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE null candidate fail-fast removed empty-object coercion
+- Red evidence：`verify:sse-architecture-boundary` 新增 `candidates[candidateIndex] || {}` 禁止 marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明 `null` candidate 会被静默改写成空对象再走 role 检查。
+- Fix：`gemini-sequencer.ts` 新增 `getCandidateAtIndex()`；`null` / `undefined` candidate 直接 fail-fast 抛 `Invalid Gemini candidate at index <n>`，不再先转成 `{}`。
+- Verification：focused Jest `gemini-sse-no-role-fallback` 6/6 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`build:base` PASS；source replay `eventCount=2 dataEvents=1 doneEvents=1 nullCandidateFailed=true`。真实 Gemini provider-response 样本缺口仍在。
+
 # 2026-07-01: Gemini SSE candidate parts empty-success fallback removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 `return [];` 禁止 marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明候选有 role 但缺 `content.parts` 时会被当空 parts 继续输出 `gemini.done`。
 - Fix：`gemini-sequencer.ts::getCandidateParts()` 对缺失/非数组 parts 直接 fail-fast 抛 `Invalid Gemini candidate: missing parts`；合法 parts 原样遍历，不再合成空候选。

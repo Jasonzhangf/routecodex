@@ -79,6 +79,17 @@ describe('gemini SSE no-fallback boundary', () => {
     await expect(collectEvents(stream)).rejects.toThrow('Invalid Gemini response: missing candidates');
   });
 
+  it('throws when a candidate is null instead of coercing it into an empty object', async () => {
+    const response: GeminiResponse = {
+      candidates: [null as never]
+    };
+
+    const sequencer = createGeminiSequencer();
+    const stream = sequencer.sequenceResponse(response);
+
+    await expect(collectEvents(stream)).rejects.toThrow('Invalid Gemini candidate at index 0');
+  });
+
   it('throws when candidate parts are missing instead of emitting only a done event', async () => {
     const response: GeminiResponse = {
       candidates: [

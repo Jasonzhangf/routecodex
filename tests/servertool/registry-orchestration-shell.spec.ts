@@ -6,17 +6,11 @@ const planServertoolRegistryLookupFromSkeletonWithNativeMock = jest.fn();
 const planServertoolRegistryAutoHookDescriptorsWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.js',
-  () => ({
-    getBuiltinHandlerEntry: getBuiltinHandlerEntryMock,
-    listBuiltinAutoHandlerEntries: listBuiltinAutoHandlerEntriesMock,
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
+    planServertoolBuiltinAutoHandlerEntriesWithNative: listBuiltinAutoHandlerEntriesMock,
     planServertoolRegistryLookupFromSkeletonWithNative: planServertoolRegistryLookupFromSkeletonWithNativeMock,
+    resolveServertoolBuiltinHandlerEntryWithNative: getBuiltinHandlerEntryMock,
     resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
   })
 );
@@ -39,7 +33,7 @@ const {
 describe('registry-orchestration-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    listBuiltinAutoHandlerEntriesMock.mockReturnValue([]);
+    listBuiltinAutoHandlerEntriesMock.mockReturnValue({ entries: [] });
   });
 
   test('returns builtin entry and ignores retired ad-hoc lookup plans', () => {
@@ -67,7 +61,7 @@ describe('registry-orchestration-shell', () => {
       execution,
       autoHook: { phase: 'post', priority: 9, order: 1 },
     } as any;
-    listBuiltinAutoHandlerEntriesMock.mockReturnValue([entry]);
+    listBuiltinAutoHandlerEntriesMock.mockReturnValue({ entries: [entry] });
     planServertoolRegistryAutoHookDescriptorsWithNativeMock.mockReturnValue([
       { id: 'alpha', phase: 'post', priority: 9, order: 1, sourceIndex: 0 },
     ]);
@@ -88,7 +82,7 @@ describe('registry-orchestration-shell', () => {
   });
 
   test('rejects missing auto-hook descriptor indexes without rematching names in TS', () => {
-    listBuiltinAutoHandlerEntriesMock.mockReturnValue([]);
+    listBuiltinAutoHandlerEntriesMock.mockReturnValue({ entries: [] });
     planServertoolRegistryAutoHookDescriptorsWithNativeMock.mockReturnValue([
       { id: 'wrong', phase: 'post', priority: 9, order: 1, sourceIndex: 1 },
     ]);

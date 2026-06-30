@@ -1,9 +1,7 @@
 import {
-  getBuiltinHandlerEntry,
-  listBuiltinAutoHandlerEntries
-} from './builtin-handler-catalog.js';
-import {
+  planServertoolBuiltinAutoHandlerEntriesWithNative,
   planServertoolRegistryLookupFromSkeletonWithNative,
+  resolveServertoolBuiltinHandlerEntryWithNative,
   resolveServertoolRegisteredNameWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
@@ -29,13 +27,16 @@ export const getServerToolHandler = (
     if (!actionPlan.canonicalName) {
       throw new Error('[servertool] native registry lookup returned builtin without canonicalName');
     }
-    return getBuiltinHandlerEntry(actionPlan.canonicalName);
+    const entry = resolveServertoolBuiltinHandlerEntryWithNative({
+      name: actionPlan.canonicalName
+    });
+    return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
   }
   return undefined;
 };
 
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
-  const entries = listBuiltinAutoHandlerEntries();
+  const entries = planServertoolBuiltinAutoHandlerEntriesWithNative().entries as unknown as ServerToolHandlerEntry[];
   return planServertoolRegistryAutoHookDescriptorsWithNative({
     hooks: entries.map((entry) => ({
       id: entry.name,

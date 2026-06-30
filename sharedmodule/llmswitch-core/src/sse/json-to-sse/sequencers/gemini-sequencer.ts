@@ -45,6 +45,13 @@ function getCandidateRole(candidate: GeminiCandidate): string {
   throw new Error('Invalid Gemini candidate: missing role');
 }
 
+function getCandidateAtIndex(candidate: GeminiCandidate | null | undefined, index: number): GeminiCandidate {
+  if (candidate && typeof candidate === 'object') {
+    return candidate;
+  }
+  throw new Error(`Invalid Gemini candidate at index ${index}`);
+}
+
 function getCandidateParts(candidate: GeminiCandidate): GeminiContentPart[] {
   const parts = candidate?.content?.parts;
   if (Array.isArray(parts)) {
@@ -68,7 +75,7 @@ export function createGeminiSequencer(config?: Partial<GeminiSequencerConfig>) {
       }
       const candidates = response.candidates;
       for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
-        const candidate = candidates[candidateIndex] || {};
+        const candidate = getCandidateAtIndex(candidates[candidateIndex], candidateIndex);
         const role = getCandidateRole(candidate);
         const parts = getCandidateParts(candidate);
         for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {

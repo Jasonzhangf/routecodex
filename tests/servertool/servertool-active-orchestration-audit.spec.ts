@@ -9,6 +9,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts',
   'sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts',
   'sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts',
   'sharedmodule/llmswitch-core/src/servertool/pre-command-runtime-state-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/pending-session.ts',
@@ -463,66 +464,4 @@ describe('servertool active orchestration audit', () => {
       }
     });
   }
-});
-
-// ── stop-message-auto native-catalog audit ───────────────────────────────────
-
-describe('stop-message-auto native-catalog audit', () => {
-  test('builtin-handler-catalog delegates stop-message-auto execution to Rust-owned native runtime', () => {
-    const source = fs.readFileSync(repoPath('sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts'), 'utf8');
-
-    expect(source).toContain('runStoplessBuiltinHandlerForRuntimeWithNative');
-    expect(source).not.toContain('function runBuiltinHandlerForRuntimeNapi(');
-    expect(source).not.toContain('function runBuiltinHandler(');
-    expect(source).toContain('resolveServertoolBuiltinHandlerEntryWithNative');
-
-    const forbidden = [
-      'runStoplessAutoHandlerRuntimeJson',
-      'readNativeFunction',
-      'JSON.parse(raw)',
-      'runtime.action',
-      "runtime.action === 'return_null'",
-      "runtime.action === 'throw_error'",
-      "runtime.action !== 'return_handler_result'",
-      "case 'stop_message_auto'",
-      "name === 'stop_message_auto'",
-      "plan.action === 'return_none'",
-      "plan.action !== 'return_entry'",
-      '.map((name) => getBuiltinHandlerEntry(name))',
-      '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry?.autoHook))',
-      '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry))',
-      'readPersistedStopMessageSnapshotFromCandidateKeys',
-      'readPersistedStopMessageStageModeFromCandidateKeys',
-      'readPersistedStopMessageTombstoneFromCandidateKeys',
-      'isDefaultStopMessageExhausted',
-      'isStopMessageClearedTombstone',
-      'function hasResponsesSubmitToolOutputsResume',
-      'function isStopMessageDisabledByPort',
-      'function isPlanModeActiveFromCapturedRequest',
-      'toolOutputsDetailed.length',
-      'routecodexPortStopMessageEnabled',
-      'collaboration mode: plan',
-      'function resolveStopMessageDefaultEnabledLive',
-      'function resolveStopMessageDefaultTextLive',
-      'function resolveStopMessageDefaultMaxRepeatsLive',
-      'const gateMaxRepeats',
-      'const resolvedMaxRepeats',
-      'const schemaBudgetMaxRepeats',
-      'const nextMaxRepeats',
-      'const nextUsed',
-      'Math.max(0, Math.floor(persistedSnap.maxRepeats))',
-      'Math.max(0, Math.floor(persistedSnap.used))',
-      'Math.max(0, Math.floor(runtimeSnap.maxRepeats))',
-      'Math.max(0, Math.floor(runtimeSnap.used))',
-      "String(persistedSnap.text ?? '')",
-      "String(runtimeSnap.text ?? '')",
-      'const STOP_MESSAGE_EXECUTION_APPEND',
-      'resolveStopMessageSnapshot(loadRoutingInstructionStateSync',
-      'normalizeStopMessageStageMode(state?.stopMessageStageMode',
-      'stopMessageSource ===',
-    ];
-    const hits = forbidden.filter((marker) => source.includes(marker));
-    expect(hits).toEqual([]);
-    expect(source).toContain('planServertoolBuiltinAutoHandlerEntriesWithNative');
-  });
 });

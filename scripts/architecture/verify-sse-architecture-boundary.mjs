@@ -314,6 +314,7 @@ for (const forbidden of [
   'sequenceNumber: 0',
   'timestamp: Date.now()',
   'Array.isArray(response.candidates) ? response.candidates : []',
+  'candidates[candidateIndex] || {}',
   'return [];',
 ]) {
   if (geminiSequencer.includes(forbidden)) {
