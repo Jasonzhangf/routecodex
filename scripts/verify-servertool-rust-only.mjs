@@ -4975,11 +4975,22 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     'export function isClientExecCliProjectionToolCall(',
+    'export const collectAdditionalClientToolCalls',
     'return isServertoolClientExecCliProjectionToolCallWithNative({',
     'executionMode: toolCall.executionMode',
+  ]) {
+    if (cliProjectionRuntimeShell.includes(marker)) {
+      fail(
+        'servertool-cli-projection-helper-deleted',
+        `cli-projection-runtime-shell.ts must not revive deleted helper marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
     'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
     'parseServertoolCliProjectionToolArgumentsWithNative({',
     'input: projectionInput',
+    'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
     'const projectionShellInput = {',
     'const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;',
   ]) {
@@ -4987,17 +4998,6 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-cli-projection-thin-shell-guard',
         `cli-projection-runtime-shell.ts must keep CLI projection impl guard marker ${marker}`
-      );
-    }
-  }
-  for (const marker of [
-    'collectAdditionalClientToolCalls',
-    'isClientExecCliProjectionToolCall'
-  ]) {
-    if (!cliProjectionRuntimeShell.includes(marker)) {
-      fail(
-        'servertool-cli-projection-thin-shell-guard',
-        `cli-projection-runtime-shell.ts must keep CLI projection runtime marker ${marker}`
       );
     }
   }
@@ -5226,13 +5226,6 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
-  if (!cliProjectionRuntimeShell.includes('export const collectAdditionalClientToolCalls =')) {
-    fail(
-      'servertool-cli-projection-thin-shell-guard',
-      'cli-projection-runtime-shell.ts must keep thin-shell owner marker export const collectAdditionalClientToolCalls ='
-    );
-  }
-
   const executionShell = existsSync(TS_EXECUTION_SHELL) ? readRequired(TS_EXECUTION_SHELL) : '';
   const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
   const rustExecutionHandlerContract = readRequired(RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT);

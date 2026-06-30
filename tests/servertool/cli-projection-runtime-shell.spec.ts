@@ -4,7 +4,6 @@ const buildClientExecCliProjectionOutputWithNative = jest.fn();
 const buildClientVisibleProjectionShellWithNative = jest.fn();
 const buildServertoolCliProjectionExecutionContextWithNative = jest.fn();
 const parseServertoolCliProjectionToolArgumentsWithNative = jest.fn();
-const isServertoolClientExecCliProjectionToolCallWithNative = jest.fn();
 const collectServertoolAdditionalClientToolCallsWithNative = jest.fn();
 
 jest.unstable_mockModule(
@@ -20,15 +19,12 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
-    collectServertoolAdditionalClientToolCallsWithNative,
-    isServertoolClientExecCliProjectionToolCallWithNative
+    collectServertoolAdditionalClientToolCallsWithNative
   })
 );
 
 const {
-  buildServertoolCliProjectionBranchResult,
-  collectAdditionalClientToolCalls,
-  isClientExecCliProjectionToolCall
+  buildServertoolCliProjectionBranchResult
 } = await import('../../sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.js');
 
 describe('cli-projection-runtime-shell', () => {
@@ -46,9 +42,6 @@ describe('cli-projection-runtime-shell', () => {
       flowId: 'servertool_cli_projection'
     });
     parseServertoolCliProjectionToolArgumentsWithNative.mockReturnValue({});
-    isServertoolClientExecCliProjectionToolCallWithNative.mockImplementation((input: any) => ({
-      executionMode: input?.executionMode
-    }?.executionMode === 'client_exec_cli_projection'));
     collectServertoolAdditionalClientToolCallsWithNative.mockReturnValue([
       { id: 'call_other', type: 'function', function: { name: 'exec_command', arguments: '{}' } }
     ]);
@@ -119,26 +112,6 @@ describe('cli-projection-runtime-shell', () => {
     ).toThrow('[servertool] native execution-branch projected missing tool call index: 3');
   });
 
-  test('keeps cli projection execution-mode check in native helper', () => {
-    expect(
-      isClientExecCliProjectionToolCall({
-        id: 'call_1',
-        name: 'tool',
-        arguments: '{}',
-        executionMode: 'client_exec_cli_projection'
-      } as any)
-    ).toBe(true);
-    expect(isServertoolClientExecCliProjectionToolCallWithNative).toHaveBeenCalledWith({
-      executionMode: 'client_exec_cli_projection'
-    });
-  });
-
-  test('collects additional client tool calls through native helper', () => {
-    expect(collectAdditionalClientToolCalls({ choices: [] } as any, 'call_projected')).toEqual([
-      { id: 'call_other', type: 'function', function: { name: 'exec_command', arguments: '{}' } }
-    ]);
-  });
-
   test('cli projection shell does not own tool argument parsing', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile('sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts', 'utf8')
@@ -148,8 +121,11 @@ describe('cli-projection-runtime-shell', () => {
     expect(source).not.toContain('JSON.parse(value)');
     expect(source).toContain('const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({');
     expect(source).toContain('input: projectionInput');
+    expect(source).toContain('const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({');
     expect(source).toContain('const projectionShellInput = {');
     expect(source).toContain('const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;');
     expect(source).toContain('parseServertoolCliProjectionToolArgumentsWithNative(');
+    expect(source).not.toContain('export function isClientExecCliProjectionToolCall(');
+    expect(source).not.toContain('export const collectAdditionalClientToolCalls');
   });
 });

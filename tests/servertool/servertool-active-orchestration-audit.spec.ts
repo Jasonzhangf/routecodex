@@ -298,12 +298,15 @@ const TARGETS = [
     forbidden: [
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
       '.find(isClientExecCliProjectionToolCall)',
+      'export function isClientExecCliProjectionToolCall(',
+      'export const collectAdditionalClientToolCalls',
       'function parseToolArguments(',
       'JSON.parse(value)',
     ],
     required: [
       'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
       'input: projectionInput',
+      'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
       'const projectionShellInput = {',
       'const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;',
     ],

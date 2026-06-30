@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
+import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
@@ -12,8 +12,7 @@ import {
   parseServertoolCliProjectionToolArgumentsWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  collectServertoolAdditionalClientToolCallsWithNative,
-  isServertoolClientExecCliProjectionToolCallWithNative
+  collectServertoolAdditionalClientToolCallsWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export function buildServertoolCliProjectionBranchResult(args: {
@@ -31,7 +30,10 @@ export function buildServertoolCliProjectionBranchResult(args: {
       `[servertool] native execution-branch projected missing tool call index: ${String(args.projectedToolCallIndex ?? '')}`
     );
   }
-  const additionalToolCalls = collectAdditionalClientToolCalls(args.base, cliProjectedToolCall.id);
+  const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({
+    base: args.base,
+    projectedToolCallId: cliProjectedToolCall.id
+  });
   const toolName = cliProjectedToolCall.name;
   const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({
     arguments: cliProjectedToolCall.arguments
@@ -66,16 +68,3 @@ export function buildServertoolCliProjectionBranchResult(args: {
     }
   };
 }
-
-export function isClientExecCliProjectionToolCall(toolCall: ToolCall & { executionMode?: string }): boolean {
-  return isServertoolClientExecCliProjectionToolCallWithNative({
-    executionMode: toolCall.executionMode
-  });
-}
-
-export const collectAdditionalClientToolCalls = (base: JsonObject, projectedToolCallId: string): JsonValue[] => {
-  return collectServertoolAdditionalClientToolCallsWithNative({
-    base,
-    projectedToolCallId
-  }) as JsonValue[];
-};
