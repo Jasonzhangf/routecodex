@@ -5037,6 +5037,8 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEngineSkipWithNative({',
     'recordServertoolEngineMatchSkipped({',
     'recordServertoolEngineMatchHit({',
+    'const postflightEngineResult = {',
+    'engineResult: postflightEngineResult,',
     'runServertoolEnginePostflight({',
   ]) {
     if (!engineOrchestrationShell.includes(marker)) {
