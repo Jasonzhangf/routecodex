@@ -74,6 +74,36 @@ function createServerToolEngineRunner(args: {
     );
 }
 
+function planStoplessEngineRuntime(args: {
+  flowId: string;
+  engineResult: ServerToolEngineResult;
+  requestTruthSessionId: string | undefined;
+  runtimeControl: unknown;
+}) {
+  const stoplessExecutionPlan = planStoplessExecutionWithNative({
+    flowId: args.flowId,
+    execution:
+      args.engineResult.execution && typeof args.engineResult.execution === 'object'
+        ? (args.engineResult.execution as unknown as Record<string, unknown>)
+        : {},
+    requestTruthSessionId: args.requestTruthSessionId,
+    runtimeControl:
+      args.runtimeControl && typeof args.runtimeControl === 'object'
+        ? (args.runtimeControl as Record<string, unknown>)
+        : null
+  });
+  const stoplessExecution = stoplessExecutionPlan.execution;
+  const stoplessPlan = stoplessExecutionPlan.orchestrationPlan;
+  return {
+    stoplessExecution,
+    runtimeAction: planServertoolEngineRuntimeActionWithNative({
+      isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
+      hasServertoolCliProjectionContext: stoplessExecution.flowId === 'servertool_cli_projection',
+      stoplessAction: stoplessPlan.action
+    })
+  };
+}
+
 export async function runServerToolOrchestrationShell(
   options: ServerToolOrchestrationOptions
 ): Promise<ServerToolOrchestrationResult> {
@@ -170,26 +200,11 @@ export async function runServerToolOrchestrationShell(
   const requestTruthSessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
-  const stoplessExecutionInput = {
+  const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({
     flowId,
-    execution:
-      engineResult.execution && typeof engineResult.execution === 'object'
-        ? (engineResult.execution as unknown as Record<string, unknown>)
-        : {},
+    engineResult,
     requestTruthSessionId,
-    runtimeControl:
-      runtimeControl && typeof runtimeControl === 'object'
-        ? (runtimeControl as Record<string, unknown>)
-        : null
-  };
-  const stoplessExecutionPlan = planStoplessExecutionWithNative(stoplessExecutionInput);
-  const stoplessExecution = stoplessExecutionPlan.execution;
-  const stoplessPlan = stoplessExecutionPlan.orchestrationPlan;
-  const hasServertoolCliProjectionContext = stoplessExecution.flowId === 'servertool_cli_projection';
-  const runtimeAction = planServertoolEngineRuntimeActionWithNative({
-    isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
-    hasServertoolCliProjectionContext,
-    stoplessAction: stoplessPlan.action
+    runtimeControl
   });
   if (stopSignal.observed) {
     logStopEntry('trigger', 'non_stop_flow', {

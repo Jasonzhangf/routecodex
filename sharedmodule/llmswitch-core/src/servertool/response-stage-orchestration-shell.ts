@@ -15,7 +15,7 @@ type ChatCompletionLike = JsonObject;
 function planServertoolResponseStageGate(args: {
   payload: ChatCompletionLike;
   adapterContext: Record<string, unknown>;
-  runtimeControl: JsonObject;
+  runtimeControl: Record<string, unknown>;
   allowFollowup: boolean;
 }) {
   return planServertoolResponseStageGateWithNative({

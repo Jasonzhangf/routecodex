@@ -379,6 +379,20 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
+    forbidden: [
+      'const stoplessExecutionInput = {',
+      'const hasServertoolCliProjectionContext =',
+      'planStoplessExecutionWithNative(stoplessExecutionInput)',
+    ],
+    required: [
+      'function planStoplessEngineRuntime(',
+      'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
+      'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
+      'engineResult: postflightEngineResult,',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
     forbidden: [
       'providerInvoker?:',
