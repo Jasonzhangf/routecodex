@@ -359,6 +359,8 @@ for (const relPath of providerNeutralProjectionFiles) {
     "response.status ?? 'requires_action'",
     "response.status ?? 'completed'",
     'if (!content.text) continue;',
+    'normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []',
+    'if (!text) continue;',
     "args = '{}'",
     'return String(raw)',
     "outputItemState.arguments = '{}'",

@@ -231,30 +231,46 @@ fn normalize_strict_responses_usage(usage_raw: &Value) -> Result<Value, String> 
 }
 
 fn normalize_responses_sse_reasoning_summary(summary_raw: &Value) -> Result<Value, String> {
-    let Some(summary) = summary_raw.as_array() else {
+    if summary_raw.is_null() {
         return Ok(Value::Array(Vec::new()));
+    }
+    let Some(summary) = summary_raw.as_array() else {
+        return Err("Responses reasoning summary must be an array".to_string());
     };
 
     let mut normalized: Vec<Value> = Vec::new();
-    for entry in summary {
+    for (index, entry) in summary.iter().enumerate() {
         if let Some(text) = entry.as_str() {
-            if !text.is_empty() {
-                normalized.push(serde_json::json!({
-                    "type": "summary_text",
-                    "text": text
-                }));
+            if text.is_empty() {
+                return Err(format!(
+                    "Responses reasoning summary entry missing text at index {}",
+                    index
+                ));
             }
+            normalized.push(serde_json::json!({
+                "type": "summary_text",
+                "text": text
+            }));
             continue;
         }
 
         let Some(row) = entry.as_object() else {
-            continue;
+            return Err(format!(
+                "Responses reasoning summary entry must be an object or string at index {}",
+                index
+            ));
         };
         let Some(text) = row.get("text").and_then(Value::as_str) else {
-            continue;
+            return Err(format!(
+                "Responses reasoning summary entry missing text at index {}",
+                index
+            ));
         };
         if text.is_empty() {
-            continue;
+            return Err(format!(
+                "Responses reasoning summary entry missing text at index {}",
+                index
+            ));
         }
         normalized.push(serde_json::json!({
             "type": "summary_text",
@@ -1994,9 +2010,7 @@ mod tests {
             "- inspect `file.ts`",
             { "text": "> keep quoted detail" },
             { "type": "summary_text", "text": "  spaced summary  " },
-            { "type": "other", "text": "still kept" },
-            "",
-            null
+            { "type": "other", "text": "still kept" }
         ]))
         .unwrap();
 
@@ -2009,6 +2023,23 @@ mod tests {
                 { "type": "summary_text", "text": "still kept" }
             ])
         );
+    }
+
+    #[test]
+    fn rejects_responses_sse_reasoning_summary_entry_missing_text() {
+        let err = normalize_responses_sse_reasoning_summary(&json!([
+            { "type": "summary_text" }
+        ]))
+        .unwrap_err();
+
+        assert!(err.contains("Responses reasoning summary entry missing text at index 0"));
+    }
+
+    #[test]
+    fn rejects_responses_sse_reasoning_summary_empty_text_entry() {
+        let err = normalize_responses_sse_reasoning_summary(&json!([""])).unwrap_err();
+
+        assert!(err.contains("Responses reasoning summary entry missing text at index 0"));
     }
 
     #[test]

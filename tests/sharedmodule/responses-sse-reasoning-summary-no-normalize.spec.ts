@@ -290,6 +290,28 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
     expect(payloadText).toContain('> keep quoted detail');
   });
 
+  it('fails missing reasoning summary text instead of silently skipping the summary entry', async () => {
+    const events = await collectEvents({
+      id: 'resp_reasoning_summary_missing_text',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'rs_missing_summary_text',
+        type: 'reasoning',
+        summary: [{ type: 'summary_text' }],
+        content: []
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    });
+
+    expect(events.some((event) => event.type === 'response.error')).toBe(true);
+    expect(JSON.stringify(events)).toContain('Responses reasoning summary entry missing text');
+    expect(events.some((event) => event.type === 'response.completed')).toBe(false);
+    expect(events.some((event) => event.type === 'response.done')).toBe(false);
+  });
+
   it('builds reasoning summary payloads through the native owner', () => {
     expect(buildResponsesSseReasoningSummaryPayloadWithNative(
       'part_added',

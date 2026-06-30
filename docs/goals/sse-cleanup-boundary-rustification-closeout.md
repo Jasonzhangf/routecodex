@@ -98,6 +98,14 @@ Focused tests to use as slice gates:
 - Verification: focused Jest `responses-sse-usage-no-fallback` PASS 7/7; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
 - Replay evidence: source replay `validCompleted=true`, `validDone=true`, `missingStatusError=true`, `missingStatusMessage=true`, `missingStatusCompleted=false`, `missingStatusDone=false`.
 
+### 2026-07-01 Responses SSE reasoning summary missing text fail-fast slice
+
+- Red evidence: `buildReasoningSummaryEvents()` still had `normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []` and `if (!text) continue;`; Rust `normalize_responses_sse_reasoning_summary()` skipped malformed entries, so missing summary text could silently disappear and still emit terminal events.
+- Fix: Rust summary normalization now allows null summary as empty but rejects non-array summaries, invalid entry shapes, missing text, and empty text. TS wrapper returns an array directly, and the Responses generator no longer owns summary fallback or silent skip semantics.
+- Positive / reverse tests: Rust covers verbatim valid summary entries plus missing/empty text fail-fast. Focused Jest covers valid summary projection and missing summary text error projection with no completed/done.
+- Verification: Rust focused `responses_sse_reasoning_summary` PASS 6/6; native hotpath build PASS; focused Jest `responses-sse-reasoning-summary-no-normalize` PASS 14/14; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: source replay showed valid summary emits `response.reasoning_summary_text.delta` and `response.completed`, while missing summary text emits `response.error` and no `response.completed` / `response.done`.
+
 ### 2026-07-01 Responses SSE reasoning delta missing value fail-fast slice
 
 - Red evidence: `tests/sharedmodule/responses-sse-reasoning-summary-no-normalize.spec.ts` failed because missing `reasoning_text.text` still expected the old TS message; the actual emitted error came from the native owner and the invalid path had previously been silently skipped in TS.

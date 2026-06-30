@@ -417,7 +417,7 @@ export function buildResponsesSseContentPartEventPayloadWithNative(
 
 export function normalizeResponsesSseReasoningSummaryWithNative(
   summary: unknown
-): Array<{ type: 'summary_text'; text: string }> | undefined {
+): Array<{ type: 'summary_text'; text: string }> {
   const capability = 'normalizeResponsesSseReasoningSummaryJson';
   const fail = (reason?: string) => failNative<Array<{ type: 'summary_text'; text: string }>>(capability, reason);
   if (isNativeDisabledByEnv()) {
@@ -429,7 +429,7 @@ export function normalizeResponsesSseReasoningSummaryWithNative(
   }
   let summaryJson: string;
   try {
-    summaryJson = JSON.stringify(summary);
+    summaryJson = JSON.stringify(summary ?? null);
   } catch {
     return fail('json stringify failed');
   }
@@ -446,7 +446,7 @@ export function normalizeResponsesSseReasoningSummaryWithNative(
     if (!parsed) {
       return fail('invalid Responses reasoning summary result');
     }
-    return parsed.length ? parsed : undefined;
+    return parsed;
   } catch (error) {
     const nativeErrorMessage = extractNativeErrorMessage(error);
     throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));

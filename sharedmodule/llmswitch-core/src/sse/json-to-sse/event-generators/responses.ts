@@ -445,10 +445,9 @@ export function* buildReasoningSummaryEvents(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
-  const summaries = normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? [];
+  const summaries = normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary);
   for (let summaryIndex = 0; summaryIndex < summaries.length; summaryIndex++) {
-    const text = summaries[summaryIndex]?.text;
-    if (!text) continue;
+    const text = summaries[summaryIndex].text;
 
     const partAddedBase = nextResponsesEventEnvelope(context, config);
     const partAdded = buildResponsesSseReasoningSummaryPayloadWithNative(

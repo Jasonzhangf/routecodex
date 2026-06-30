@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE reasoning summary entry missing text fails in Rust
+- Red evidence: `buildReasoningSummaryEvents()` still used `normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []` and `if (!text) continue;`, while Rust `normalize_responses_sse_reasoning_summary()` skipped invalid summary entries. Focused Jest red showed missing summary text previously completed without `response.error`.
+- Fix: Rust summary normalizer now treats null summary as empty but rejects non-array summary, invalid entries, missing text, and empty text. TS native wrapper returns an array, and `responses.ts` no longer has summary `?? []` or text-skip fallback.
+- Verification: Rust `responses_sse_reasoning_summary` PASS 6/6; native build PASS; focused Jest `responses-sse-reasoning-summary-no-normalize` PASS 14/14; `verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `verify:responses-sse-business-module` PASS; `build:base` PASS; source replay confirmed missing summary text emits `response.error` and no completed/done.
+
 # 2026-07-01: Responses SSE reasoning delta missing value must fail in Rust
 - Red evidence: `tests/sharedmodule/responses-sse-reasoning-summary-no-normalize.spec.ts` showed missing `reasoning_text.text` still emitted `response.error` from native owner, while the old expectation for TS text-delta wording was stale.
 - Fix: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs` now rejects missing reasoning delta `value` with `Responses reasoning delta payload missing value`; TS `event-generators/responses.ts` no longer skips `if (!content.text) continue;`.
