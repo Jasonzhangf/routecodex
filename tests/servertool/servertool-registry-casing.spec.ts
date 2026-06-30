@@ -2,14 +2,7 @@ import { describe, expect, jest, test } from '@jest/globals';
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js',
-  () => ({
-    normalizeServerToolRegistrationSpec: jest.fn((name: string, options?: { trigger?: string }) => ({
-      name,
-      trigger: options?.trigger ?? 'tool_call',
-      executionMode: 'guarded',
-      stripAfterExecute: true
-    }))
-  })
+  () => ({})
 );
 
 jest.unstable_mockModule(

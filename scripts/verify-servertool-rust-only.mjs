@@ -3035,6 +3035,11 @@ function checkServertoolSkeletonConfigRustOwner() {
     'export function getServertoolToolSpec(',
     'export function listServertoolToolSpecs(',
     'export function planServertoolBuiltinHandlerEntry(',
+    'export function normalizeServerToolRegistrationSpec(',
+    'export function buildServertoolPendingInjectionConfig(',
+    'export function buildServertoolResponseHookGateConfig(',
+    'export function buildServertoolFollowupConfig(',
+    'export function buildServertoolStateConfig(',
     'getDerivedConfig().toolSpecList',
   ]) {
     if (skeletonConfigShell.includes(keyword)) {
@@ -3046,7 +3051,6 @@ function checkServertoolSkeletonConfigRustOwner() {
   }
   for (const needle of [
     'planServertoolSkeletonDerivedConfigWithNative',
-    'normalizeServertoolRegistrationSpecWithNative',
   ]) {
     assertContains(
       'servertool-skeleton-config-ts-thin-shell',

@@ -747,10 +747,12 @@ let buildAutoHookQueuesFromConfig: any;
 
 beforeAll(async () => {
   const skeletonConfig = await import('../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js');
+  const nativeServertoolOrchestration = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js');
   buildServertoolAutoHookQueueConfig = skeletonConfig.buildServertoolAutoHookQueueConfig;
-  buildServertoolFollowupConfig = skeletonConfig.buildServertoolFollowupConfig;
-  buildServertoolPendingInjectionConfig = skeletonConfig.buildServertoolPendingInjectionConfig;
-  normalizeServerToolRegistrationSpec = skeletonConfig.normalizeServerToolRegistrationSpec;
+  buildServertoolFollowupConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().followupConfig;
+  buildServertoolPendingInjectionConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().pendingInjectionConfig;
+  normalizeServerToolRegistrationSpec = (name: string, options: Record<string, unknown>) =>
+    nativeServertoolOrchestration.normalizeServertoolRegistrationSpecWithNative({ name, options });
   const orchestrationBlocks = await import('../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js');
   buildAutoHookQueuesFromConfig = orchestrationBlocks.buildAutoHookQueuesFromConfig;
   const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');

@@ -99,6 +99,11 @@ const TARGETS = [
       'export function planServertoolBuiltinHandlerNames(',
       'export function planServertoolBuiltinAutoHandlerEntries(',
       'export function planServertoolBuiltinHandlerRecordEntries(',
+      'export function normalizeServerToolRegistrationSpec(',
+      'export function buildServertoolPendingInjectionConfig(',
+      'export function buildServertoolResponseHookGateConfig(',
+      'export function buildServertoolFollowupConfig(',
+      'export function buildServertoolStateConfig(',
       'getDerivedConfig().toolSpecList',
     ],
     required: [
