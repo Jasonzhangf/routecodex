@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Anthropic SSE tool_use input fallback removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `block.input ?? {}` and `JSON.stringify(input ?? {})` in `anthropic-sequencer.ts` and failed before the fix. Focused Jest also failed because a missing `tool_use.input` resolved successfully and emitted an `input_json_delta` with `{}`.
+- Fix: `anthropic-sequencer.ts` now requires `tool_use.input` to be present and non-null; missing input fails fast with `Invalid Anthropic tool_use block: missing input`. Valid input is serialized directly without synthesizing an empty object.
+- Positive / reverse tests: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` now covers valid Anthropic event flow plus missing `tool_use.input` fail-fast; existing reverse tests still cover missing id, role, tool id, invalid content block, missing content, text, redacted data, and stop_reason.
+- Verification: focused Jest `anthropic-sse-required-fields-no-fallback` PASS 10/10; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
+- Replay evidence: source replay `eventCount=6`, `hasInputJsonDelta=true`, `missingInputFailed=true`, `missingInputMessage="Invalid Anthropic tool_use block: missing input"`.
+- Real sample gap: current Anthropic sample directories still contain 429 provider-error snapshots only, not a successful provider-response SSE/JSON replay sample.
+
 ### 2026-07-01 Anthropic SSE timestamp synthesis removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `timestamp: Date.now()` for `anthropic-sequencer.ts` and failed before the fix. Focused Jest also failed because valid Anthropic events carried an own `timestamp` property.

@@ -75,6 +75,22 @@ describe('anthropic SSE required fields no-fallback boundary', () => {
     ))).rejects.toThrow('Invalid Anthropic tool_use block: missing id');
   });
 
+  it('throws when tool_use input is missing instead of synthesizing an empty object', async () => {
+    const sequencer = createAnthropicSequencer();
+
+    await expect(collectEvents(sequencer.sequenceResponse(
+      baseResponse({
+        content: [{
+          type: 'tool_use',
+          id: 'toolu_required_input',
+          name: 'exec_command',
+          input: undefined as unknown as Record<string, unknown>
+        }]
+      }),
+      'req_anthropic_missing_tool_input'
+    ))).rejects.toThrow('Invalid Anthropic tool_use block: missing input');
+  });
+
   it('throws when a content block is null instead of silently skipping it', async () => {
     const sequencer = createAnthropicSequencer();
 

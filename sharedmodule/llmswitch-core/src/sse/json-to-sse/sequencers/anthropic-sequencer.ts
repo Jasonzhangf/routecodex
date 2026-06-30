@@ -47,7 +47,7 @@ function normalizeToolInput(input: unknown): string {
   if (typeof input === 'string') {
     return input;
   }
-  return JSON.stringify(input ?? {});
+  return JSON.stringify(input);
 }
 
 export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConfig>) {
@@ -147,11 +147,14 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
           if (!block.id || !block.id.trim()) {
             throw new Error('Invalid Anthropic tool_use block: missing id');
           }
+          if (block.input === undefined || block.input === null) {
+            throw new Error('Invalid Anthropic tool_use block: missing input');
+          }
           yield createEvent('content_block_start', {
             index,
             content_block: { type: 'tool_use', id: block.id, name: block.name, input: block.input }
           });
-          const payload = normalizeToolInput(block.input ?? {});
+          const payload = normalizeToolInput(block.input);
           if (payload) {
             yield createEvent('content_block_delta', {
               index,

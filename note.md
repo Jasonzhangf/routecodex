@@ -1,3 +1,8 @@
+# 2026-07-01: Anthropic SSE tool_use input fallback removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 `block.input ?? {}` / `JSON.stringify(input ?? {})` marker 后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明缺失 `tool_use.input` 会被合成为 `{}` 并继续输出 `input_json_delta`。
+- Fix：`anthropic-sequencer.ts` 对缺失/null `tool_use.input` 直接 fail-fast 抛 `Invalid Anthropic tool_use block: missing input`；合法 input 原样 `JSON.stringify(input)` 或保留 string，不再用空对象兜底。
+- Verification：focused Jest `anthropic-sse-required-fields-no-fallback` 10/10 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`build:base` PASS；source replay `eventCount=6 hasInputJsonDelta=true missingInputFailed=true`。真实 Anthropic 成功样本缺口仍在：当前只找到 429 provider-error 快照。
+
 # 2026-07-01: Anthropic SSE content array fallback removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 `response.content || []` marker 后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明缺失 content 会被当空数组继续成功输出 message_start/delta/stop。
 - Fix：`anthropic-sequencer.ts` 对缺失或非数组 `response.content` 直接 fail-fast 抛 `Invalid Anthropic response: missing content`；合法 content array 原样遍历，不再兜底为空数组。
