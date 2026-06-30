@@ -46,6 +46,10 @@ Out of scope:
 - `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts`
 - `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts`
+
+已物理删除并由 gate 锁定的旧壳：
+- `sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts`
 - `sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts`
 
 当前更偏 thin shell / carrier 的面，优先级较低：
@@ -88,8 +92,8 @@ Out of scope:
 - 目标：把顶层 engine / response stage orchestration 收缩为 thin coordinator。
 - Rust 负责 stopless / followup / projection / runtime action 的语义判定；TS 只做输入组织、调用和结果透传。
 
-### Phase 4: 收 `skeleton-config.ts` 与 CLI projection 调用壳
-- 目标：`cli-projection-runtime-shell.ts` 已物理删除；继续只保留 CLI projection 的 execution-stage native 调用壳与 skeleton config 的 native 读取壳。
+### Phase 4: 收 CLI projection 调用壳
+- 目标：`cli-projection-runtime-shell.ts` / `skeleton-config.ts` 已物理删除；继续压缩 execution-stage 的 CLI projection native 调用壳。
 - 所有 flow/policy/registry/registration/lookup 的语义继续由 Rust 产出。
 
 ### Phase 5: 收尾 registry / policy / carrier 类壳
@@ -132,7 +136,7 @@ Out of scope:
 2. 先补红测与 gate，锁定不能再复活的旧语义 marker。
 3. 优先收 `execution-handler-materialization-shell.ts`，再收 `execution-stage-shell.ts` / `auto-hook-caller.ts`。
 4. 收顶层 `engine-orchestration-shell.ts` / `response-stage-orchestration-shell.ts`。
-5. 收 `skeleton-config.ts` 与 execution-stage 中剩余 CLI projection 调用壳。
+5. 收 execution-stage 中剩余 CLI projection 调用壳。
 6. 收 registry / policy / carrier 薄壳。
 7. 对确认已无消费者的 TS 文件执行物理删除。
 8. 每个通过的 slice 独立提交，并同步 note / MEMORY / skills。
