@@ -5275,8 +5275,7 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'function planServertoolResponseStageGate(',
-    'const gatePlan = planServertoolResponseStageGate({',
+    'const gatePlan = planServertoolResponseStageGateWithNative({',
     'detectProviderResponseShapeWithNative',
     'const orchestration = await runServerToolOrchestration(',
     'runServerToolOrchestration',
@@ -5306,6 +5305,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const keyword of [
     'responseStageGateInput',
     'orchestrationInput',
+    'function planServertoolResponseStageGate(',
+    'const gatePlan = planServertoolResponseStageGate({',
   ]) {
     if (responseStageOrchestrationShell.includes(keyword)) {
       fail(

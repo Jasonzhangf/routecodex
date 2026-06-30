@@ -12,20 +12,6 @@ import { readRuntimeControlFromBoundMetadataCenter } from './metadata-center-car
 
 type ChatCompletionLike = JsonObject;
 
-function planServertoolResponseStageGate(args: {
-  payload: ChatCompletionLike;
-  adapterContext: Record<string, unknown>;
-  runtimeControl: Record<string, unknown>;
-  allowFollowup: boolean;
-}) {
-  return planServertoolResponseStageGateWithNative({
-    payload: args.payload,
-    adapterContext: args.adapterContext,
-    runtimeControl: args.runtimeControl,
-    allowFollowup: args.allowFollowup
-  });
-}
-
 export interface ServertoolResponseStageShellOptions {
   payload: ChatCompletionLike;
   adapterContext: AdapterContext;
@@ -54,7 +40,7 @@ export async function runServertoolResponseStageOrchestrationShell(
   if (!providerProtocol) {
     throw new Error('Servertool response stage orchestration requires metadata center runtime_control.providerProtocol');
   }
-  const gatePlan = planServertoolResponseStageGate({
+  const gatePlan = planServertoolResponseStageGateWithNative({
     payload: options.payload,
     adapterContext: options.adapterContext as Record<string, unknown>,
     runtimeControl,

@@ -237,10 +237,11 @@ const TARGETS = [
       'writeRuntimeControlToBoundMetadataCenter(',
       'servertoolResponseOrchestration',
       'providerProtocol: ProviderProtocol;',
-    ],
-    required: [
       'function planServertoolResponseStageGate(',
       'const gatePlan = planServertoolResponseStageGate({',
+    ],
+    required: [
+      'const gatePlan = planServertoolResponseStageGateWithNative({',
       'detectProviderResponseShapeWithNative',
       'const orchestration = await runServerToolOrchestration(',
       'runServerToolOrchestration',
