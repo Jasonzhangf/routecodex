@@ -269,6 +269,25 @@ for (const forbidden of [
   }
 }
 
+const anthropicEventSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/anthropic-event-serializer.ts');
+for (const forbidden of [
+  ": 'message')",
+  "event.type ||\n    (typeof (payload as Record<string, unknown>)?.type === 'string'",
+]) {
+  if (anthropicEventSerializer.includes(forbidden)) {
+    failures.push(`Anthropic SSE serializer must not synthesize fallback event types: ${forbidden}`);
+  }
+}
+
+const geminiEventSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts');
+for (const forbidden of [
+  "event.event ?? event.type ?? 'gemini.data'",
+]) {
+  if (geminiEventSerializer.includes(forbidden)) {
+    failures.push(`Gemini SSE serializer must not synthesize fallback event types: ${forbidden}`);
+  }
+}
+
 const providerNeutralProjectionFiles = [
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts',

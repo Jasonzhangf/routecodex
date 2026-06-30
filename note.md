@@ -1,3 +1,8 @@
+# 2026-07-01: Anthropic/Gemini SSE serializer event fallback removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 Anthropic `: 'message')` / payload type fallback marker 与 Gemini `event.event ?? event.type ?? 'gemini.data'` marker 后先红；新增 focused spec 也先红，证明 serializer 会在缺少 event/type 时默认合成事件名。
+- Fix：`anthropic-event-serializer.ts` / `gemini-event-serializer.ts` 删除默认事件名 fallback；现在只接受显式 `event` 或 `type`，缺失/空值直接 fail-fast。TS serializer 保留纯 wire framing，不再从 payload 或默认常量推断 event type。
+- Verification：focused Jest `anthropic-gemini-sse-serializer-no-fallback` 4/4 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；sharedmodule/root `tsc --noEmit` PASS；`build:base` PASS；`git diff --check` PASS；source serializer replay `anthropicHasEvent=true geminiHasEvent=true anthropicFailed=true geminiFailed=true fallbackLeak=false`。同协议真实样本缺口：当前 `~/.rcc/codex-samples` / `/Volumes/extension/.rcc/codex-samples` 只找到 OpenAI chat 样本，未找到 Anthropic/Gemini provider-response 样本。
+
 # 2026-07-01: Chat SSE finish/usage payload Rust owner
 - Red evidence：`verify:sse-architecture-boundary` 新增 `function normalizeChatUsage(`、`const normalizedUsage = normalizeChatUsage(usage);`、finish chunk `delta: {}` / `finish_reason: finishReason` marker 后先红，证明 Chat finish/usage chunk payload 仍由 TS 合成。
 - Fix：新增 Rust/NAPI `buildChatSseFinishPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildFinishEvent()` 只取 base context、调用 native payload、封装 native envelope；物理删除 TS `normalizeChatUsage()` / `readNonNegativeInteger()` 和本地 finish chunk object 组装。

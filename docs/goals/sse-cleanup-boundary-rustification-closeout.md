@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Anthropic/Gemini SSE serializer event fallback removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for Anthropic serializer default event synthesis (`: 'message')` and payload-derived type fallback) and Gemini serializer default event synthesis (`event.event ?? event.type ?? 'gemini.data'`). The gate failed on the existing TS fallback. Focused Jest also failed before the fix because missing event/type did not throw.
+- Fix: `serializeAnthropicEventToSSE()` and `serializeGeminiEventToSSE()` now only frame explicit `event` / `type` values. Missing or blank event type fails fast; serializers no longer infer event type from payload or default protocol constants.
+- Positive / reverse tests: `tests/sharedmodule/anthropic-gemini-sse-serializer-no-fallback.spec.ts` covers explicit Anthropic/Gemini event serialization and reverse missing-event fail-fast for both protocols.
+- Verification: focused Jest `anthropic-gemini-sse-serializer-no-fallback` PASS 4/4; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: source serializer replay succeeded with `anthropicHasEvent=true`, `geminiHasEvent=true`, `anthropicFailed=true`, `geminiFailed=true`, `fallbackLeak=false`.
+- Real sample gap: current `~/.rcc/codex-samples` and `/Volumes/extension/.rcc/codex-samples` contain OpenAI chat samples but no Anthropic/Gemini provider-response sample for same-protocol replay.
+
 ### 2026-07-01 Chat SSE finish/usage payload Rust owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers for local Chat finish/usage payload synthesis (`function normalizeChatUsage(`, `const normalizedUsage = normalizeChatUsage(usage);`, and the finish chunk `delta: {}` / `finish_reason: finishReason` shape). The gate failed on the existing TS owner before the fix.
