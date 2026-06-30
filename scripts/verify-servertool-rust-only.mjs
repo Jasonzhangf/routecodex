@@ -5180,7 +5180,6 @@ function checkServertoolRustOutcomeCloseout() {
   const runServerSideToolEngineShell = readRequired(TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL);
   for (const marker of [
     'export async function orchestrateServertoolEngine(',
-    "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
     'runServertoolEntryPreflight',
     'extractToolCallsFromResponseStage',
     'resolveServertoolEntryContext',
@@ -5191,6 +5190,16 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-run-server-side-tool-engine-shell-owner',
         `run-server-side-tool-engine-shell.ts must keep engine orchestration owner marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
+  ]) {
+    if (runServerSideToolEngineShell.includes(marker)) {
+      fail(
+        'servertool-run-server-side-tool-engine-shell-no-local-carrier',
+        `run-server-side-tool-engine-shell.ts must not restore local carrier marker ${marker}`
       );
     }
   }

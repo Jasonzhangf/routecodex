@@ -184,7 +184,9 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts',
-    forbidden: [],
+    forbidden: [
+      "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;"
+    ],
     required: [
       'orchestrateServertoolEngine',
       'runServertoolEntryPreflight',
