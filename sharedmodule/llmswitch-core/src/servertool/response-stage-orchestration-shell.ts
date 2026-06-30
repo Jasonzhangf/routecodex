@@ -58,12 +58,13 @@ export async function runServertoolResponseStageOrchestrationShell(
       reason: 'response-stage orchestration marker'
     });
   }
-  const gatePlan = planServertoolResponseStageGateWithNative({
+  const responseStageGateInput = {
     payload: options.payload,
     adapterContext: options.adapterContext as Record<string, unknown>,
     runtimeControl,
     allowFollowup: options.allowFollowup === true
-  });
+  };
+  const gatePlan = planServertoolResponseStageGateWithNative(responseStageGateInput);
 
   if (gatePlan.nextAction === 'bypass') {
     recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
@@ -84,14 +85,15 @@ export async function runServertoolResponseStageOrchestrationShell(
 
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
   const orchestrationStart = Date.now();
-  const orchestration = await runServerToolOrchestration({
+  const orchestrationInput = {
     chat: options.payload as JsonObject,
     adapterContext: options.adapterContext,
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
     providerProtocol,
     stageRecorder: options.stageRecorder
-  });
+  };
+  const orchestration = await runServerToolOrchestration(orchestrationInput);
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'completed', {
     elapsedMs: Date.now() - orchestrationStart,
     executed: orchestration.executed,

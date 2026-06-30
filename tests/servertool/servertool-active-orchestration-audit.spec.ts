@@ -216,7 +216,11 @@ const TARGETS = [
     ],
     required: [
       'planServertoolResponseStageGateWithNative',
+      'const responseStageGateInput = {',
+      'const gatePlan = planServertoolResponseStageGateWithNative(responseStageGateInput);',
       'detectProviderResponseShapeWithNative',
+      'const orchestrationInput = {',
+      'const orchestration = await runServerToolOrchestration(orchestrationInput);',
       'runServerToolOrchestration',
     ],
   },
