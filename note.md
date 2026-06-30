@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE candidates empty-success fallback removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 `Array.isArray(response.candidates) ? response.candidates : []` 禁止 marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明缺失 `response.candidates` 会被当空数组继续输出 `gemini.done`。
+- Fix：`gemini-sequencer.ts` 要求 `response.candidates` 必须是数组；缺失/非数组直接 fail-fast 抛 `Invalid Gemini response: missing candidates`，合法 candidates 原样遍历并输出 data/done。
+- Verification：focused Jest `gemini-sse-no-role-fallback` 4/4 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`build:base` PASS；source replay `eventCount=2 dataEvents=1 doneEvents=1 missingCandidatesFailed=true`。真实 Gemini provider-response 样本缺口仍在。
+
 # 2026-07-01: Anthropic SSE tool_result id missing fails fast
 - Red evidence：`verify:sse-architecture-boundary` 新增必须存在 `Invalid Anthropic tool_result block: missing tool_use_id` 的门禁后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明缺失 `tool_result.tool_use_id` 会被写成 `undefined` 并继续输出事件。
 - Fix：`anthropic-sequencer.ts` 对缺失/空白 `tool_result.tool_use_id` 直接 fail-fast；合法 `tool_result` 原样输出，不再把 undefined id 投影进 SSE content block。

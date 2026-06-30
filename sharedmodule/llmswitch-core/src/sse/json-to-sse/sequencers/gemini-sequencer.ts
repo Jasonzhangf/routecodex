@@ -63,7 +63,10 @@ export function createGeminiSequencer(config?: Partial<GeminiSequencerConfig>) {
 
   return {
     async *sequenceResponse(response: GeminiResponse): AsyncGenerator<GeminiSseEvent> {
-      const candidates = Array.isArray(response.candidates) ? response.candidates : [];
+      if (!Array.isArray(response.candidates)) {
+        throw new Error('Invalid Gemini response: missing candidates');
+      }
+      const candidates = response.candidates;
       for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
         const candidate = candidates[candidateIndex] || {};
         const role = getCandidateRole(candidate);

@@ -313,6 +313,7 @@ for (const forbidden of [
   'parts.filter((part): part is GeminiContentPart => Boolean(part))',
   'sequenceNumber: 0',
   'timestamp: Date.now()',
+  'Array.isArray(response.candidates) ? response.candidates : []',
 ]) {
   if (geminiSequencer.includes(forbidden)) {
     failures.push(`Gemini SSE sequencer must not synthesize fallback event truth: ${forbidden}`);

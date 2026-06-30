@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Gemini SSE candidates empty-success fallback removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `Array.isArray(response.candidates) ? response.candidates : []` and failed before the fix. Focused Jest also failed because missing `response.candidates` resolved successfully into a `gemini.done` event with `candidates: []`.
+- Fix: `gemini-sequencer.ts` now requires `response.candidates` to be an array before sequencing. Missing or non-array candidates fail fast with `Invalid Gemini response: missing candidates`; valid candidates are preserved unchanged.
+- Positive / reverse tests: `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` now covers valid Gemini data/done output plus missing candidates fail-fast; existing reverse tests still cover missing role and null content part fail-fast.
+- Verification: focused Jest `gemini-sse-no-role-fallback` PASS 4/4; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
+- Replay evidence: source replay `eventCount=2`, `dataEvents=1`, `doneEvents=1`, `missingCandidatesFailed=true`, `missingCandidatesMessage="Invalid Gemini response: missing candidates"`.
+- Real sample gap: no Gemini provider-response samples were found under the current sample stores, so this slice uses source replay as the available substitute.
+
 ### 2026-07-01 Anthropic SSE tool_result id fail-fast slice
 
 - Red evidence: `verify:sse-architecture-boundary` added a required marker for `Invalid Anthropic tool_result block: missing tool_use_id` and failed before the fix. Focused Jest also failed because missing `tool_result.tool_use_id` resolved successfully and emitted a content block with `tool_use_id: undefined`.
