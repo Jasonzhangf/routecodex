@@ -493,7 +493,11 @@ export class ChatSseToJsonConverter {
 
       for (const parsed of parsedEntries) {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          continue;
+          throw ErrorUtils.createError(
+            'Invalid chat_chunk payload',
+            CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
+            { parsed }
+          );
         }
         const chunk = parsed as ChatCompletionChunk;
 

@@ -55,4 +55,18 @@ describe('SSE parser no-recovery boundary', () => {
       code: 'GEMINI_SSE_TO_JSON_FAILED'
     });
   });
+
+  it('fails Gemini data frames with missing part instead of silently dropping them', async () => {
+    const converter = new GeminiSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([
+      'event: gemini.data\n',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"output","data":{"kind":"part","candidateIndex":0,"partIndex":0,"role":"model"}}\n\n',
+      'event: gemini.done\n',
+      'data: {"type":"gemini.done","protocol":"gemini-chat","direction":"output","data":{"kind":"done","candidates":[{"index":0,"finishReason":"STOP"}]}}\n\n'
+    ]), {
+      requestId: 'req_gemini_missing_part_no_swallow',
+      model: 'gemini-test'
+    })).rejects.toThrow('Invalid Gemini data event: missing part');
+  });
 });

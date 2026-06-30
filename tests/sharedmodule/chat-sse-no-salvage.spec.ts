@@ -169,6 +169,26 @@ describe('chat SSE no-salvage boundary', () => {
     });
   });
 
+  it('fails non-object chat chunks after a valid response instead of silently skipping them', async () => {
+    const sseText = [
+      'event: chat_chunk',
+      'data: {"id":"chatcmpl_scalar_tail","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"logprobs":null,"finish_reason":"stop"}]}',
+      '',
+      'event: chat_chunk',
+      'data: []',
+      '',
+      'event: chat.done',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_scalar_tail_no_swallow',
+      model: 'gpt-4o-mini'
+    })).rejects.toThrow('Invalid chat_chunk payload');
+  });
+
   it('still fails when the first chunk has empty id and no established response context', async () => {
     const sseText = [
       'event: chat_chunk',

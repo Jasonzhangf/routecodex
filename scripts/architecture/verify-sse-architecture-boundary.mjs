@@ -319,6 +319,7 @@ for (const forbidden of [
   'timestamp: Date.now()',
   'Array.isArray(response.candidates) ? response.candidates : []',
   'candidates[candidateIndex] || {}',
+  'if (!part) return;',
   "if (!part || typeof part !== 'object') {\n    return [part];\n  }",
   'return [];',
 ]) {
@@ -411,6 +412,7 @@ for (const forbidden of [
   "message: choice.message || { role: 'assistant', content: '' }",
   'const normalizedUsage = normalizeChatUsage(chunk.usage);',
   'const directUsage = normalizeChatUsage(_context.currentResponse.usage);',
+  "if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {\n          continue;\n        }",
 ]) {
   if (chatSseToJsonConverter.includes(forbidden)) {
     failures.push(`Chat SSE decode must not synthesize missing response truth: ${forbidden}`);

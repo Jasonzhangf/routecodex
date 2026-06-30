@@ -1,3 +1,8 @@
+# 2026-07-01: SSE decode must fail malformed semantic chunks, not skip them
+- Gemini SSE decode must not `return` past `gemini.data` frames with missing `part`; malformed data frames fail fast with `Invalid Gemini data event: missing part`.
+- Chat SSE decode may allow proven inert tail chunks after response truth is established, but non-object `chat_chunk` payloads are malformed and must fail fast with `Invalid chat_chunk payload`; never use `continue` to silently skip malformed semantic chunks.
+- Gates: `tests/sharedmodule/sse-parser-no-recovery.spec.ts`, `tests/sharedmodule/chat-sse-no-salvage.spec.ts`, and `npm run verify:sse-architecture-boundary` lock these boundaries.
+
 # 2026-07-01: Responses SSE function_call arguments must not be skipped by TS
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts` must not gate function-call argument emission with `if (item.arguments)`.
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts` must not use `if (!functionCall.arguments) return;`; malformed function_call arguments must enter the native text chunk/payload path and fail fast there.

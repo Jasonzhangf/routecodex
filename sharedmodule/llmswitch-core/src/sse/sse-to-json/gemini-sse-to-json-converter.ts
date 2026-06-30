@@ -90,7 +90,9 @@ export class GeminiSseToJsonConverter {
     const payload = event.data as { candidateIndex?: number; role?: string; part?: GeminiContentPart };
     const candidateIndex = typeof payload?.candidateIndex === 'number' ? payload.candidateIndex : 0;
     const part = payload?.part;
-    if (!part) return;
+    if (!part) {
+      throw new Error('Invalid Gemini data event: missing part');
+    }
     const role = typeof payload?.role === 'string' ? payload.role : 'model';
     if (!accumulator.has(candidateIndex)) {
       accumulator.set(candidateIndex, { role, parts: [] });

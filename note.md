@@ -1,3 +1,8 @@
+# 2026-07-01: SSE decode malformed chunk silent swallow removed
+- Red evidence: focused `sse-parser-no-recovery` first failed because a `gemini.data` frame missing `data.part` resolved successfully as `candidates: []`; focused `chat-sse-no-salvage` first failed because a non-object `chat_chunk` after a valid response was skipped and the response still completed.
+- Fix: `gemini-sse-to-json-converter.ts` now fail-fasts on missing Gemini data `part`; `chat-sse-to-json-converter.ts` now fail-fasts on non-object `chat_chunk` payloads instead of `continue`-skipping them. `verify:sse-architecture-boundary` locks both old swallow markers.
+- Verification: focused Jest PASS 14/14; `verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `verify:responses-sse-business-module` PASS; `build:base` PASS; `git diff --check` PASS. Gemini real provider-response samples are unavailable in current `~/.rcc/codex-samples`, so source replay/focused tests are the replay substitute.
+
 # 2026-07-01: Responses SSE output_text missing text fails in Rust
 - Red evidence: focused `responses-sse-output-item-descriptor-native` failed because `{ type: "output_text" }` still completed without `response.error`; source replay showed Rust content-part descriptor and message normalizer synthesized `text: ""`.
 - Fix: removed TS text truthiness gates (`if (!text) return`, `&& !!content.text`, `if (!chunk) continue`) and removed Rust empty-text synthesis in Responses message/content-part payload owners. Missing `output_text.text` now emits `response.error` and stops before `output_text.done/completed/done`.

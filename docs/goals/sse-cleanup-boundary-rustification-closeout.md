@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 SSE decode malformed chunk silent-swallow removal slice
+
+- Red evidence: focused Jest `sse-parser-no-recovery` first failed because a `gemini.data` frame missing `data.part` was silently dropped and materialized as `candidates: []`. Focused Jest `chat-sse-no-salvage` first failed because a non-object `chat_chunk` after a valid response was skipped and the response still completed successfully.
+- Fix: `gemini-sse-to-json-converter.ts` now fail-fasts on missing Gemini data `part` with `Invalid Gemini data event: missing part`; `chat-sse-to-json-converter.ts` now fail-fasts on non-object `chat_chunk` payloads with `Invalid chat_chunk payload`. `verify:sse-architecture-boundary` now forbids the old `if (!part) return;` and non-object `continue` swallow markers.
+- Positive / reverse tests: existing positive chat inert-tail test still proves valid provider tail noise remains accepted after response truth is established; new reverse tests prove malformed Gemini/Chat semantic chunks do not silently complete.
+- Verification: focused Jest `sse-parser-no-recovery` + `chat-sse-no-salvage` PASS 14/14; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: focused source replay covers valid chat tail success plus invalid chat/Gemini failure. Real Gemini provider-response samples were not found under the current `~/.rcc/codex-samples`, so this slice uses source replay as the available substitute.
+
 ### 2026-07-01 Responses SSE output_text missing text fail-fast slice
 
 - Red evidence: focused Jest `responses-sse-output-item-descriptor-native` first failed because a message content part `{ "type": "output_text" }` still completed without `response.error`; source replay showed the Rust content/message owners synthesized `text: ""`.
