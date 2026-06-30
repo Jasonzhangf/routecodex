@@ -121,8 +121,7 @@ export class ResponsesJsonToSseConverterRefactored {
       const sequencer = createResponsesSequencer({
         chunkSize: context.options.chunkSize || this.config.defaultChunkSize,
         chunkDelayMs: context.options.delayMs || this.config.defaultDelayMs,
-        enableDelay: !!context.options.delayMs,
-        enableValidation: this.config.enableEventValidation
+        enableDelay: !!context.options.delayMs
       });
 
       // 4. 生成事件序列并写入流

@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { ResponsesJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.js';
+import { createDefaultResponsesContext } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.js';
+import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
 import type { ResponsesResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
@@ -9,6 +11,14 @@ async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
     chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8'));
   }
   return chunks.join('');
+}
+
+async function collectEvents(stream: AsyncIterable<unknown>): Promise<unknown[]> {
+  const events: unknown[] = [];
+  for await (const event of stream) {
+    events.push(event);
+  }
+  return events;
 }
 
 describe('responses SSE usage no-fallback boundary', () => {
@@ -124,5 +134,31 @@ describe('responses SSE usage no-fallback boundary', () => {
       requestId: 'req_responses_invalid_output_item'
     });
     await expect(collectText(stream)).rejects.toThrow('Unknown output item type: unknown_item');
+  });
+
+  it('does not allow validation-disable config to bypass invalid output item fail-fast', async () => {
+    const response = {
+      id: 'resp_validation_disable_invalid_output_item',
+      object: 'response',
+      created_at: 1781149537,
+      status: 'completed',
+      model: 'gpt-5.5',
+      output: [{ id: 'weird_1', type: 'unknown_item' }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    } as unknown as ResponsesResponse;
+
+    await expect(collectEvents(sequenceResponse(
+      response,
+      createDefaultResponsesContext('req_validation_disable_invalid_output_item', response.model),
+      {
+        enableTimestampGeneration: false,
+        chunkSize: 256,
+        chunkDelayMs: 0,
+        enableDelay: false,
+        enableValidation: false,
+        maxOutputItems: 10,
+        maxContentParts: 10
+      } as any
+    ))).rejects.toThrow('Unknown output item type: unknown_item');
   });
 });

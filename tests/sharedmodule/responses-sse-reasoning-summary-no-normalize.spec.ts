@@ -21,7 +21,6 @@ async function collectEvents(response: any, overrides: Record<string, unknown> =
     enableTimestampGeneration: false,
     chunkSize: 0,
     chunkDelayMs: 0,
-    enableValidation: true,
     enableRecovery: false,
     enableDelay: false,
     maxOutputItems: 10,

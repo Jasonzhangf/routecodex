@@ -160,6 +160,9 @@ for (const forbidden of [
 
 const responsesSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts');
 for (const forbidden of [
+  'enableValidation: boolean',
+  'if (!config.enableValidation) return',
+  'if (config.enableValidation) {',
   'function normalizeResponseOutput(',
   'suppressReasoningFromContent: hasExplicitReasoning',
   'function canonicalizeResponsesEventPayload(',

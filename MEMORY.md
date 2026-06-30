@@ -1,3 +1,8 @@
+# 2026-07-01: Responses JSON->SSE validation cannot be disabled
+- `responses-sequencer.ts` must not expose an `enableValidation` / validation-disable switch. Responses JSON->SSE encode projection must always fail fast for missing response fields, unknown output item types, and content-part limit violations.
+- Red evidence: before the fix, `sequenceResponse(..., { enableValidation:false })` silently skipped an unknown output item and still emitted `response.completed` / `response.done`.
+- Gate: `verify:sse-architecture-boundary` forbids the old validation-disable markers in the Responses sequencer. Verification passed for focused Responses SSE Jest 37/37, SSE architecture/business gates, sharedmodule/root TypeScript checks, and `git diff --check`. `build:base` is currently blocked by an unrelated servertool wiki sync drift, and no live replay was run for this slice.
+
 # 2026-07-01: Responses JSON->SSE encode errors must fail fast
 - `responses-sequencer.ts` must not catch serializer/conversion failures and synthesize `event: response.error`; `buildErrorEvent`, `planResponsesSseErrorRecoveryWithNative`, `buildResponsesSseErrorPayloadWithNative`, and their Rust/NAPI exports must stay removed for Responses JSON->SSE encode.
 - Invalid usage, missing `created_at` / `status`, invalid output item, missing output text/function arguments, and malformed reasoning summary/text now reject the conversion stream instead of producing `response.error` without terminal frames.

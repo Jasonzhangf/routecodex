@@ -14,7 +14,6 @@ async function collectEvents(response: any): Promise<any[]> {
     enableTimestampGeneration: false,
     chunkSize: 256,
     chunkDelayMs: 0,
-    enableValidation: true,
     enableRecovery: false,
     enableDelay: false,
     maxOutputItems: 10,

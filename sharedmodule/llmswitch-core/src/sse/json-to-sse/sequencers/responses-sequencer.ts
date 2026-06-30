@@ -36,7 +36,6 @@ import { canonicalizeResponsesSseEventPayloadWithNative } from '../../../native/
 
 // 排列器配置
 export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig {
-  enableValidation: boolean;
   enableDelay: boolean;
   maxOutputItems: number;
   maxContentParts: number;
@@ -46,7 +45,6 @@ export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig 
 // 默认配置
 export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesSequencerConfig = {
   ...DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG,
-  enableValidation: true,
   enableDelay: false,
   maxOutputItems: 50,
   maxContentParts: 100,
@@ -57,8 +55,6 @@ export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesSequencerConfig = {
  * 验证响应格式
  */
 function validateResponse(response: ResponsesResponse, config: ResponsesSequencerConfig): void {
-  if (!config.enableValidation) return;
-
   if (!response.id || !response.model) {
     throw new Error('Invalid response: missing required fields');
   }
@@ -106,10 +102,7 @@ async function* sequenceMessageItem(
   // 2. 发送content_part事件序列
   for (let contentIndex = 0; contentIndex < item.content.length; contentIndex++) {
     if (contentIndex >= config.maxContentParts) {
-      if (config.enableValidation) {
-        throw new Error(`Too many content parts: ${contentIndex} >= ${config.maxContentParts}`);
-      }
-      break;
+      throw new Error(`Too many content parts: ${contentIndex} >= ${config.maxContentParts}`);
     }
 
     const content = item.content[contentIndex];
@@ -228,9 +221,7 @@ async function* sequenceOutputItem(
       break;
 
     default:
-      if (config.enableValidation) {
-        throw new Error(`Unknown output item type: ${(item as any).type}`);
-      }
+      throw new Error(`Unknown output item type: ${(item as any).type}`);
   }
 }
 
