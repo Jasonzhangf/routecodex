@@ -8,6 +8,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/registry-impl.ts',
   'sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts',
   'sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts',
   'sharedmodule/llmswitch-core/src/servertool/pre-command-runtime-state-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/pending-session.ts',
@@ -413,20 +414,6 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts',
-    forbidden: [
-      'function canonicalName(',
-      '.trim().toLowerCase()',
-      'native registry source projection mismatch',
-      'planServertoolRegistrySourceProjectionWithNative',
-      'projectRegistrySources',
-    ],
-    required: [
-      'planServertoolRegistryAutoHookDescriptorsWithNative',
-      'projectAutoServerToolHookDescriptors',
-    ],
-  },
-  {
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts',
     forbidden: [
       'isRegisteredServerToolNameViaNativeConfig',
@@ -440,9 +427,12 @@ const TARGETS = [
       'projectRegistrySources',
       'listBuiltinHandlerNames',
       'listBuiltinHandlerRecordEntries',
+      "from './registry-projection-shell.js'",
+      'projectAutoServerToolHookDescriptors',
     ],
     required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
+      'planServertoolRegistryAutoHookDescriptorsWithNative({',
       'resolveServertoolRegisteredNameWithNative',
       'return resolveServertoolRegisteredNameWithNative({ name });',
     ],

@@ -732,10 +732,8 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
 - `sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts`
-- `sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts`
 - `tests/servertool/registry-orchestration-shell.spec.ts`
-- `tests/servertool/registry-projection-shell.spec.ts`
 - `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
 
 Forbidden paths:
@@ -744,7 +742,6 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/registry-orchestration-shell.spec.ts`
-- `tests/servertool/registry-projection-shell.spec.ts`
 - `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 

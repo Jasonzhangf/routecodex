@@ -7,8 +7,8 @@ import {
   resolveServertoolRegisteredNameWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  projectAutoServerToolHookDescriptors
-} from './registry-projection-shell.js';
+  planServertoolRegistryAutoHookDescriptorsWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import type {
   ServerToolAutoHookDescriptor,
   ServerToolHandlerEntry
@@ -35,8 +35,29 @@ export const getServerToolHandler = (
 };
 
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
-  return projectAutoServerToolHookDescriptors({
-    entries: listBuiltinAutoHandlerEntries()
+  const entries = listBuiltinAutoHandlerEntries();
+  return planServertoolRegistryAutoHookDescriptorsWithNative({
+    hooks: entries.map((entry) => ({
+      id: entry.name,
+      phase: entry.autoHook?.phase,
+      priority: entry.autoHook?.priority,
+      order: entry.autoHook?.order
+    }))
+  }).map((descriptor) => {
+    const entry = entries[descriptor.sourceIndex];
+    if (!entry) {
+      throw new Error(
+        `[servertool] native registry auto-hook descriptor missing entry for sourceIndex: ${descriptor.sourceIndex}`
+      );
+    }
+    return {
+      id: descriptor.id,
+      phase: descriptor.phase,
+      priority: descriptor.priority,
+      order: descriptor.order,
+      registration: entry.registration,
+      execution: entry.execution
+    };
   });
 };
 

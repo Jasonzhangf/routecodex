@@ -111,7 +111,6 @@ const TS_ENGINE_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-orchestration
 const TS_ENGINE_OBSERVATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
-const TS_REGISTRY_PROJECTION_SHELL = `${SERVERTOOL_TS_DIR}/registry-projection-shell.ts`;
 const TS_REGISTRY_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`;
 const TS_REGISTRY_TYPES = `${SERVERTOOL_TS_DIR}/registry-types.ts`;
 const TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL = `${SERVERTOOL_TS_DIR}/run-server-side-tool-engine-shell.ts`;
@@ -173,6 +172,7 @@ const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts`,
 ];
 const DELETED_BACKEND_ROUTE_POLICY_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`,
@@ -3389,7 +3389,6 @@ function checkServertoolRegistryRustOwner() {
       `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import registry-orchestration-shell.ts directly`
     );
   }
-  const registryProjectionShell = readRequired(TS_REGISTRY_PROJECTION_SHELL);
   const registryOrchestrationShell = readRequired(TS_REGISTRY_ORCHESTRATION_SHELL);
   const registryTypes = readRequired(TS_REGISTRY_TYPES);
 
@@ -3524,15 +3523,9 @@ function checkServertoolRegistryRustOwner() {
   }
   for (const needle of [
     'planServertoolRegistryLookupFromSkeletonWithNative({',
+    'planServertoolRegistryAutoHookDescriptorsWithNative({',
   ]) {
     assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
-  }
-  for (const needle of [
-    'planServertoolRegistryAutoHookDescriptorsWithNative({',
-    'planServertoolRegistryAutoHookDescriptorsWithNative',
-    'projectAutoServerToolHookDescriptors',
-  ]) {
-    assertContains('servertool-registry-projection-shell', TS_REGISTRY_PROJECTION_SHELL, registryProjectionShell, needle);
   }
   for (const needle of [
     'resolveServertoolRegisteredNameWithNative',
@@ -3564,6 +3557,8 @@ function checkServertoolRegistryRustOwner() {
     'projectRegistrySources',
     'listBuiltinHandlerNames',
     'listBuiltinHandlerRecordEntries',
+    "from './registry-projection-shell.js'",
+    'projectAutoServerToolHookDescriptors',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
@@ -3572,37 +3567,15 @@ function checkServertoolRegistryRustOwner() {
       );
     }
   }
-  for (const marker of [
-    'function canonicalName(',
-    '.trim().toLowerCase()',
-    'native registry source projection mismatch',
-    'adHocNames',
-    'adHocAutoHandlerEntries',
-    'adHocHandlerRecords',
-    'adHocRecords',
-    'adHocAutoHandlerNames',
-    "source: 'adhoc'",
-    'planServertoolRegistrySourceProjectionWithNative',
-    'projectRegistrySources',
-  ]) {
-    if (registryProjectionShell.includes(marker)) {
-      fail(
-        'servertool-registry-projection-no-adhoc-source',
-        `registry-projection-shell.ts must not retain retired ad-hoc registry source marker ${marker}`
-      );
-    }
-  }
   pass(
     'servertool-registry-orchestration-no-ts-source-merge',
-    'registry-orchestration-shell.ts consumes native builtin auto-hook entries without TS registry source projection'
+    'registry-orchestration-shell.ts consumes native builtin auto-hook entries without TS registry projection shell'
   );
   for (const keyword of [
     'planServertoolRegistryRegistrationActionWithNative',
     'planServertoolRegistryLookupActionWithNative',
-    'planServertoolRegistryAutoHookDescriptorsWithNative',
     'planServertoolRegistryProjectionWithNative',
     'native registry auto handler order missing entry',
-    'native registry auto-hook descriptor missing entry',
     'native registry record projection mismatch',
     'if (builtinEntry) {',
     'return getAdHocHandlerEntry(canonicalName);',
