@@ -139,16 +139,17 @@ export class GeminiSseToJsonConverter {
   ): GeminiResponse {
     const candidates: GeminiCandidate[] = [];
     const candidateMeta: Record<number, { finishReason?: string; safetyRatings?: unknown[] }> = {};
-    if (Array.isArray(donePayload?.candidates)) {
-      for (const [doneIndex, entry] of donePayload.candidates.entries()) {
-        if (!entry || typeof entry.index !== 'number') {
-          throw new Error(`Invalid Gemini done event: invalid candidate at index ${doneIndex}`);
-        }
-        candidateMeta[entry.index] = {
-          finishReason: entry.finishReason,
-          safetyRatings: entry.safetyRatings
-        };
+    if (!Array.isArray(donePayload?.candidates)) {
+      throw new Error('Invalid Gemini done event: missing candidates');
+    }
+    for (const [doneIndex, entry] of donePayload.candidates.entries()) {
+      if (!entry || typeof entry.index !== 'number') {
+        throw new Error(`Invalid Gemini done event: invalid candidate at index ${doneIndex}`);
       }
+      candidateMeta[entry.index] = {
+        finishReason: entry.finishReason,
+        safetyRatings: entry.safetyRatings
+      };
     }
     const indices = Array.from(accumulator.keys()).sort((a, b) => a - b);
     for (const index of indices) {

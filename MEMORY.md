@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE done candidates are required
+- `gemini-sse-to-json-converter.ts` must not treat missing `gemini.done.candidates` as an optional metadata absence; that materializes a partial response with undefined finish metadata.
+- Missing or non-array done candidates now fail fast with `Invalid Gemini done event: missing candidates`; valid explicit candidates replay remains unchanged.
+- Verification: focused `sse-parser-no-recovery` Jest, SSE architecture gate, sharedmodule/root TypeScript checks, `verify:responses-sse-business-module`, `git diff --check`, and source replay passed. No real Gemini provider-response sample was found in current sample stores.
+
 # 2026-07-01: Gemini SSE data role must not default to model
 - `gemini-sse-to-json-converter.ts` must not synthesize `role='model'` when a `gemini.data` frame omits role metadata.
 - Missing or blank role now fails fast with `Invalid Gemini data event: missing role`; valid explicit role replay remains unchanged.

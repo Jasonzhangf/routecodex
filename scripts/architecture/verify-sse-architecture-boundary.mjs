@@ -335,6 +335,7 @@ for (const forbidden of [
   'if (!entry || typeof entry.index !== \'number\') continue;',
   'typeof payload?.candidateIndex === \'number\' ? payload.candidateIndex : 0',
   'typeof payload?.role === \'string\' ? payload.role : \'model\'',
+  'if (Array.isArray(donePayload?.candidates))',
 ]) {
   if (geminiSseToJsonConverter.includes(forbidden)) {
     failures.push(`Gemini SSE decode must not pass malformed data parts through: ${forbidden}`);

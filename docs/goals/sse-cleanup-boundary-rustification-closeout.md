@@ -90,6 +90,13 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Gemini SSE done candidates required slice
+
+- Red evidence: focused `tests/sharedmodule/sse-parser-no-recovery.spec.ts` first failed because a `gemini.done` frame missing `candidates` still materialized a partial successful response with `finishReason=undefined`.
+- Fix: `sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts` now fail-fasts on missing or non-array done-frame `candidates` with `Invalid Gemini done event: missing candidates`; `verify:sse-architecture-boundary` forbids the old optional candidates branch.
+- Positive / reverse tests: valid Gemini data/done replay with explicit candidates still materializes `text=hello` and `finishReason=STOP`; missing done candidates replay fails fast.
+- Verification: focused `sse-parser-no-recovery` Jest PASS 9/9; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `npx tsc -p tsconfig.json --noEmit --pretty false` PASS; `git diff --check` PASS; source replay valid/missing done candidates PASS. No real Gemini provider-response sample was found in current sample stores.
+
 ### 2026-07-01 Gemini SSE role default removal slice
 
 - Red evidence: focused `tests/sharedmodule/sse-parser-no-recovery.spec.ts` first failed because a `gemini.data` frame missing `role` was defaulted to `model` and materialized as a successful response.

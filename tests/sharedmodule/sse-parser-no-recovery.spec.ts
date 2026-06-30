@@ -125,4 +125,18 @@ describe('SSE parser no-recovery boundary', () => {
       model: 'gemini-test'
     })).rejects.toThrow('Invalid Gemini data event: missing role');
   });
+
+  it('fails Gemini done frames with missing candidates instead of materializing partial metadata', async () => {
+    const converter = new GeminiSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([
+      'event: gemini.data\n',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"output","candidateIndex":0,"partIndex":0,"role":"model","part":{"text":"hello"}}\n\n',
+      'event: gemini.done\n',
+      'data: {"type":"gemini.done","protocol":"gemini-chat","direction":"output","usageMetadata":{"totalTokenCount":1}}\n\n'
+    ]), {
+      requestId: 'req_gemini_missing_done_candidates_no_partial_metadata',
+      model: 'gemini-test'
+    })).rejects.toThrow('Invalid Gemini done event: missing candidates');
+  });
 });
