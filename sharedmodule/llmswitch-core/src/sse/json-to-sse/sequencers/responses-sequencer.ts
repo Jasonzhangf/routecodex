@@ -115,6 +115,26 @@ async function* withDelay(
   }
 }
 
+function canonicalizeResponsesEventPayload(event: ResponsesSseEvent): ResponsesSseEvent {
+  if (!event.data || typeof event.data !== 'object' || Array.isArray(event.data)) {
+    throw new Error(`Responses event payload must be an object before serialization: ${event.type}`);
+  }
+  const data = event.data as Record<string, unknown>;
+  if (typeof data.type === 'string' && data.type !== event.type) {
+    throw new Error(`Responses event payload type mismatch: event=${event.type} payload=${data.type}`);
+  }
+  return {
+    ...event,
+    data: {
+      type: event.type,
+      ...data,
+      ...(event.sequenceNumber !== undefined && !Object.prototype.hasOwnProperty.call(data, 'sequence_number')
+        ? { sequence_number: event.sequenceNumber }
+        : {})
+    }
+  };
+}
+
 /**
  * 序列化消息输出项
  */
@@ -270,7 +290,7 @@ async function* sequenceOutputItem(
 /**
  * 主编排器：将Responses响应转换为有序的SSE事件流
  */
-export async function* sequenceResponse(
+async function* sequenceResponseCore(
   response: ResponsesResponse,
   context: ResponsesEventGeneratorContext,
   config: ResponsesSequencerConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
@@ -314,6 +334,16 @@ export async function* sequenceResponse(
   } catch (error) {
     // 发送错误事件
     yield buildErrorEvent(error as Error, context, config);
+  }
+}
+
+export async function* sequenceResponse(
+  response: ResponsesResponse,
+  context: ResponsesEventGeneratorContext,
+  config: ResponsesSequencerConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
+): AsyncGenerator<ResponsesSseEvent> {
+  for await (const event of sequenceResponseCore(response, context, config)) {
+    yield canonicalizeResponsesEventPayload(event);
   }
 }
 

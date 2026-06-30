@@ -6,6 +6,34 @@
 // feature_id: sse.responses_encode_projection
 import type { ResponsesSseEvent } from '../../types/responses-types.js';
 
+const SUPPORTED_RESPONSES_EVENT_TYPES = new Set<string>([
+  'response.created',
+  'response.in_progress',
+  'response.reasoning_text.delta',
+  'response.reasoning_text.done',
+  'response.reasoning_signature.delta',
+  'response.reasoning_image.delta',
+  'response.reasoning_summary_part.added',
+  'response.reasoning_summary_part.done',
+  'response.reasoning_summary_text.delta',
+  'response.reasoning_summary_text.done',
+  'response.content_part.added',
+  'response.content_part.done',
+  'response.output_item.added',
+  'response.output_item.done',
+  'response.output_text.delta',
+  'response.output_text.done',
+  'response.function_call_arguments.delta',
+  'response.function_call_arguments.done',
+  'response.required_action',
+  'response.completed',
+  'response.done',
+  'response.error',
+  'response.cancelled',
+  'response.failed',
+  'response.incomplete'
+]);
+
 /**
  * Responses协议SSE事件序列化器
  * 负责将内部事件对象转换为客户端协议SSE格式
@@ -15,47 +43,10 @@ export class ResponsesEventSerializer {
    * 将Responses事件序列化为SSE wire格式
    */
   serializeToWire(event: ResponsesSseEvent): string {
-    switch (event.type) {
-      case 'response.created':
-        return this.serializeResponseCreated(event);
-      case 'response.in_progress':
-        return this.serializeResponseInProgress(event);
-      case 'response.reasoning_text.delta':
-        return this.serializeReasoningTextDelta(event);
-      case 'response.reasoning_text.done':
-        return this.serializeReasoningTextDone(event);
-      case 'response.content_part.added':
-        return this.serializeContentPartAdded(event);
-      case 'response.content_part.done':
-        return this.serializeContentPartDone(event);
-      case 'response.output_item.added':
-        return this.serializeOutputItemAdded(event);
-      case 'response.output_item.done':
-        return this.serializeOutputItemDone(event);
-      case 'response.output_text.delta':
-        return this.serializeOutputTextDelta(event);
-      case 'response.output_text.done':
-        return this.serializeOutputTextDone(event);
-      case 'response.function_call_arguments.delta':
-        return this.serializeFunctionCallArgumentsDelta(event);
-      case 'response.function_call_arguments.done':
-        return this.serializeFunctionCallArgumentsDone(event);
-      case 'response.required_action':
-        return this.serializeRequiredAction(event);
-      case 'response.completed':
-        return this.serializeResponseCompleted(event);
-      case 'response.done':
-        return this.serializeResponseDone(event);
-      case 'response.error':
-        return this.serializeResponseError(event);
-      case 'response.cancelled':
-        return this.serializeResponseCancelled(event);
-      default:
-        if (typeof (event as any).type === 'string' && (event as any).type.startsWith('response.')) {
-          return this.buildSSEEvent((event as any).type, event.data, event.timestamp, event.sequenceNumber);
-        }
-        throw new Error(`Unsupported ResponsesSseEvent type: ${(event as any).type}`);
+    if (!SUPPORTED_RESPONSES_EVENT_TYPES.has((event as any).type)) {
+      throw new Error(`Unsupported ResponsesSseEvent type: ${(event as any).type}`);
     }
+    return this.buildSSEEvent(event.type, event.data, event.timestamp);
   }
 
   /**
@@ -124,134 +115,14 @@ export class ResponsesEventSerializer {
   }
 
   /**
-   * 序列化response.created事件
-   * 格式: event: response.created\ndata: {"response": {...}}\n\n
-   */
-  private serializeResponseCreated(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.created', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.in_progress事件
-   */
-  private serializeResponseInProgress(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.in_progress', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.reasoning_text.delta事件
-   */
-  private serializeReasoningTextDelta(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.reasoning_text.delta', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.reasoning_text.done事件
-   */
-  private serializeReasoningTextDone(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.reasoning_text.done', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.content_part.added事件
-   */
-  private serializeContentPartAdded(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.content_part.added', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.content_part.done事件
-   */
-  private serializeContentPartDone(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.content_part.done', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.output_item.added事件
-   */
-  private serializeOutputItemAdded(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.output_item.added', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.output_item.done事件
-   */
-  private serializeOutputItemDone(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.output_item.done', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.output_text.delta事件
-   */
-  private serializeOutputTextDelta(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.output_text.delta', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.output_text.done事件
-   */
-  private serializeOutputTextDone(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.output_text.done', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.function_call_arguments.delta事件
-   */
-  private serializeFunctionCallArgumentsDelta(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.function_call_arguments.delta', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.function_call_arguments.done事件
-   */
-  private serializeFunctionCallArgumentsDone(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.function_call_arguments.done', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.required_action事件
-   */
-  private serializeRequiredAction(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.required_action', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.completed事件
-   */
-  private serializeResponseCompleted(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.completed', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.done事件
-   */
-  private serializeResponseDone(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.done', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.error事件
-   */
-  private serializeResponseError(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.error', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
-   * 序列化response.cancelled事件
-   */
-  private serializeResponseCancelled(event: ResponsesSseEvent): string {
-    return this.buildSSEEvent('response.cancelled', event.data, event.timestamp, event.sequenceNumber);
-  }
-
-  /**
    * 构建标准SSE事件格式
    */
-  private buildSSEEvent(eventType: string, data: any, timestamp?: number, sequenceNumber?: number): string {
+  private buildSSEEvent(eventType: string, data: any, timestamp?: number): string {
     if (data === '[DONE]') {
       throw new Error('Responses SSE must terminate with response.done, not [DONE]');
     }
     let wireEvent = `event: ${eventType}\n`;
-    const finalData = this.buildEventPayload(eventType, data, sequenceNumber);
+    const finalData = this.readCanonicalEventPayload(eventType, data);
     wireEvent += `data: ${JSON.stringify(finalData)}\n`;
 
     if (timestamp) {
@@ -262,28 +133,15 @@ export class ResponsesEventSerializer {
     return wireEvent;
   }
 
-  private buildEventPayload(eventType: string, data: any, sequenceNumber?: number): Record<string, unknown> {
-    let payload: Record<string, unknown>;
-
-    if (data === null || data === undefined) {
-      payload = { type: eventType };
-    } else if (typeof data === 'object') {
-      const existing = data as Record<string, unknown>;
-      payload = {
-        ...(existing || {})
-      };
-      if (!Object.prototype.hasOwnProperty.call(payload, 'type')) {
-        payload.type = eventType;
-      }
-    } else {
-      payload = { type: eventType, value: data };
+  private readCanonicalEventPayload(eventType: string, data: any): Record<string, unknown> {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error(`Responses SSE payload must be an object for ${eventType}`);
     }
-
-    if (sequenceNumber !== undefined && !Object.prototype.hasOwnProperty.call(payload, 'sequence_number')) {
-      payload.sequence_number = sequenceNumber;
+    const payload = data as Record<string, unknown>;
+    if (payload.type !== eventType) {
+      throw new Error(`Responses SSE payload missing canonical type for ${eventType}`);
     }
-
-    return payload;
+    return { ...payload };
   }
 
   /**

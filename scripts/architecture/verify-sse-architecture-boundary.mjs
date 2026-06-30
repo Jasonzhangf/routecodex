@@ -96,6 +96,11 @@ for (const forbidden of [
   'static createResponseDoneEvent(',
   'static createResponseErrorEvent(',
   'timestamp: timestamp ?? Date.now()',
+  ".type.startsWith('response.')",
+  'private buildEventPayload(',
+  'payload.type = eventType;',
+  'payload = { type: eventType, value: data };',
+  'payload.sequence_number = sequenceNumber;',
 ]) {
   if (responsesSerializer.includes(forbidden)) {
     failures.push(`Responses SSE serializer retains parse salvage marker: ${forbidden}`);
