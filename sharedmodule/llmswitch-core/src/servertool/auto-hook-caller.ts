@@ -51,10 +51,11 @@ export async function runAutoHookExecutionQueue(args: {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-      const attemptPlan = planAutoHookRuntimeAttemptWithNative({
+      const errorAttemptInput = {
         ...traceBase,
         message
-      });
+      };
+      const attemptPlan = planAutoHookRuntimeAttemptWithNative(errorAttemptInput);
       args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
       throw error;
     }
@@ -65,14 +66,15 @@ export async function runAutoHookExecutionQueue(args: {
       result = await materializeServertoolPlannedResult(planned as any, args.options);
     }
 
-    const attemptPlan = planAutoHookRuntimeAttemptWithNative({
+    const runtimeAttemptInput = {
       ...traceBase,
       hasPlannedResult: Boolean(planned),
       hasMaterializedResult: Boolean(result),
       ...(result?.execution && typeof result.execution.flowId === 'string'
         ? { materializedFlowId: result.execution.flowId }
         : {})
-    });
+    };
+    const attemptPlan = planAutoHookRuntimeAttemptWithNative(runtimeAttemptInput);
     args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
 
     if (attemptPlan.returnResult) {
@@ -121,10 +123,11 @@ export async function runServertoolAutoHookCaller(args: {
       contextBase: args.contextBase
     });
     const finalQueue = queue.queueName === finalQueueName;
-    const finalizationPlan = planAutoHookCallerFinalizationWithNative({
+    const callerFinalizationInput = {
       resultPresent: Boolean(queueResult),
       finalQueue
-    });
+    };
+    const finalizationPlan = planAutoHookCallerFinalizationWithNative(callerFinalizationInput);
     if (finalizationPlan.returnResult) {
       if (!queueResult) {
         throw new Error('[servertool] native auto-hook queue progress requested result but queue result was empty');
