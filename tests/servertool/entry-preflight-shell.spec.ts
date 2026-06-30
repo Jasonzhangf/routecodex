@@ -2,16 +2,24 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolEntryPreflightWithNativeMock = jest.fn();
 const isAdapterClientDisconnectedMock = jest.fn(() => false);
-const createServerToolClientDisconnectedErrorMock = jest.fn((input: any) => {
-  const err = new Error(`[servertool] client disconnected: ${String(input?.requestId ?? '')}`);
-  (err as Error & { code?: string }).code = 'SERVERTOOL_CLIENT_DISCONNECTED';
+const planServertoolClientDisconnectedErrorWithNativeMock = jest.fn((input: any) => ({
+  message: `[servertool] client disconnected: ${String(input?.requestId ?? '')}`,
+  code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+  category: 'client_disconnect',
+  status: 499,
+  details: input
+}));
+const createServertoolProviderProtocolErrorFromPlanMock = jest.fn((plan: any) => {
+  const err = new Error(String(plan?.message ?? 'servertool error'));
+  (err as Error & { code?: string }).code = String(plan?.code ?? 'SERVERTOOL_CLIENT_DISCONNECTED');
   return err;
 });
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock
+    planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
+    planServertoolClientDisconnectedErrorWithNative: planServertoolClientDisconnectedErrorWithNativeMock
   })
 );
 
@@ -19,7 +27,7 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js',
   () => ({
     isAdapterClientDisconnected: isAdapterClientDisconnectedMock,
-    createServerToolClientDisconnectedError: createServerToolClientDisconnectedErrorMock
+    createServertoolProviderProtocolErrorFromPlan: createServertoolProviderProtocolErrorFromPlanMock
   })
 );
 
@@ -44,7 +52,8 @@ describe('entry-preflight-shell', () => {
     );
 
     expect(source).toContain('planServertoolEntryPreflightWithNative');
-    expect(source).toContain('createServerToolClientDisconnectedError');
+    expect(source).toContain('planServertoolClientDisconnectedErrorWithNative');
+    expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
     expect(source).toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
     expect(source).not.toContain('const passthroughResult =');
   });

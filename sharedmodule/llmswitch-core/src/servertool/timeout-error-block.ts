@@ -6,7 +6,6 @@ import {
 } from '../conversion/provider-protocol-error.js';
 import {
   isAdapterClientDisconnectedWithNative,
-  planServertoolClientDisconnectedErrorWithNative,
   planServertoolTimeoutWatcherWithNative,
   type ServertoolErrorPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -35,20 +34,6 @@ export function withTimeout<T>(
       }
     });
   });
-}
-
-class ServerToolClientDisconnectedError extends Error {
-  code = 'SERVERTOOL_CLIENT_DISCONNECTED';
-}
-
-export function createServerToolClientDisconnectedError(options: {
-  requestId: string;
-  flowId?: string;
-}): Error {
-  const plan = planServertoolClientDisconnectedErrorWithNative(options);
-  const error = new ServerToolClientDisconnectedError(plan.message);
-  (error as unknown as { details?: Record<string, unknown> }).details = plan.details;
-  return error;
 }
 
 export function createServertoolProviderProtocolErrorFromPlan(

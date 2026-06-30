@@ -113,11 +113,11 @@ const TARGETS = [
     forbidden: [
       'export function createServerToolTimeoutError(',
       'export function createServertoolRequiredResponseHookEmptyError(',
+      'export function createServerToolClientDisconnectedError(',
     ],
     required: [
       'export function createServertoolProviderProtocolErrorFromPlan(',
       'planServertoolTimeoutWatcherWithNative',
-      'planServertoolClientDisconnectedErrorWithNative',
     ],
   },
   {
@@ -213,10 +213,13 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts',
-    forbidden: [],
+    forbidden: [
+      'createServerToolClientDisconnectedError',
+    ],
     required: [
       'planServertoolEntryPreflightWithNative',
-      'createServerToolClientDisconnectedError',
+      'planServertoolClientDisconnectedErrorWithNative',
+      'createServertoolProviderProtocolErrorFromPlan',
       "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }",
     ],
   },

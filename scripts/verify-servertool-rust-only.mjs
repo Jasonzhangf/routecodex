@@ -2553,6 +2553,7 @@ function checkOrchestrationPolicyRustOwner() {
     'export function createServertoolStateLoadFailedError(',
     'export function createServerToolTimeoutError(',
     'export function createServertoolRequiredResponseHookEmptyError(',
+    'export function createServerToolClientDisconnectedError(',
     'planClientDisconnectWatcherWithNative',
     'planStopMessageFetchFailedErrorWithNative',
     'planServertoolStateLoadFailedErrorWithNative',
@@ -2567,7 +2568,6 @@ function checkOrchestrationPolicyRustOwner() {
   for (const needle of [
     'planServertoolTimeoutWatcherWithNative',
     'isAdapterClientDisconnectedWithNative',
-    'planServertoolClientDisconnectedErrorWithNative',
     'createServertoolProviderProtocolErrorFromPlan',
   ]) {
     assertContains(
@@ -5066,7 +5066,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export function runServertoolEntryPreflight(',
     'planServertoolEntryPreflightWithNative',
-    'createServerToolClientDisconnectedError',
+    'planServertoolClientDisconnectedErrorWithNative',
+    'createServertoolProviderProtocolErrorFromPlan',
     "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }"
   ]) {
     if (!entryPreflightShell.includes(marker)) {

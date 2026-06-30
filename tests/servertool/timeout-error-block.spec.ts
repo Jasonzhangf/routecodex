@@ -1,12 +1,14 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
-  createServerToolClientDisconnectedError,
   createServertoolProviderProtocolErrorFromPlan,
   isAdapterClientDisconnected,
   withTimeout
 } from '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js';
-import { planServertoolTimeoutErrorWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  planServertoolClientDisconnectedErrorWithNative,
+  planServertoolTimeoutErrorWithNative
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
 
 describe('servertool timeout/error block native shell', () => {
   test('reads adapter disconnect state through native policy', () => {
@@ -23,10 +25,12 @@ describe('servertool timeout/error block native shell', () => {
   });
 
   test('plans client disconnect errors through native contract', () => {
-    const error = createServerToolClientDisconnectedError({
-      requestId: ' req-1 ',
-      flowId: ' flow-1 '
-    });
+    const error = createServertoolProviderProtocolErrorFromPlan(
+      planServertoolClientDisconnectedErrorWithNative({
+        requestId: ' req-1 ',
+        flowId: ' flow-1 '
+      })
+    );
 
     expect((error as any).code).toBe('SERVERTOOL_CLIENT_DISCONNECTED');
     expect(error.message).toBe('[servertool] client disconnected during followup flow=flow-1');
