@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
+const planServertoolRequiredResponseHookEmptyErrorWithNative = jest.fn();
 const runServertoolAutoHookCaller = jest.fn();
-const createServertoolRequiredResponseHookEmptyError = jest.fn();
+const createServertoolProviderProtocolErrorFromPlan = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolResponseStageRuntimeActionWithNative
+    planServertoolResponseStageRuntimeActionWithNative,
+    planServertoolRequiredResponseHookEmptyErrorWithNative
   })
 );
 
@@ -21,7 +23,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js',
   () => ({
-    createServertoolRequiredResponseHookEmptyError
+    createServertoolProviderProtocolErrorFromPlan
   })
 );
 
@@ -49,8 +51,15 @@ describe('response-stage-auto-hook-shell', () => {
       finalChatResponse: { ok: true },
       execution: { flowId: 'flow_1' }
     });
-    createServertoolRequiredResponseHookEmptyError.mockImplementation((input: any) => {
-      const err = new Error(`required hook empty: ${String(input?.responseHookName ?? 'unknown')}`);
+    planServertoolRequiredResponseHookEmptyErrorWithNative.mockImplementation((input: any) => ({
+      message: `required hook empty: ${String(input?.responseHookName ?? 'unknown')}`,
+      code: 'SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY',
+      category: 'upstream_protocol_error',
+      status: 502,
+      details: input
+    }));
+    createServertoolProviderProtocolErrorFromPlan.mockImplementation((plan: any) => {
+      const err = new Error(String(plan?.message ?? 'servertool error'));
       (err as Error & { code?: string }).code = 'SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY';
       return err;
     });

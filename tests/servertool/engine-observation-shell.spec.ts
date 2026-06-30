@@ -248,6 +248,8 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('createServertoolObservation({');
     expect(source).toContain('runEnginePreflight({');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
+    expect(source).toContain('planServertoolTimeoutErrorWithNative({');
+    expect(source).toContain('createServertoolProviderProtocolErrorFromPlan(');
     expect(source).toContain('recordServertoolEngineMatchSkipped({');
     expect(source).toContain('recordServertoolEngineMatchHit({');
     expect(source).toContain('const stoplessExecutionPlan = planStoplessExecutionWithNative({');
@@ -258,5 +260,6 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('effectiveServerToolTimeoutMs');
     expect(source).not.toContain('args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs');
     expect(source).not.toContain('function createServerToolEngineRunner(');
+    expect(source).not.toContain('createServerToolTimeoutError(');
   });
 });

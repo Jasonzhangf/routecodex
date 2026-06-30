@@ -4,7 +4,7 @@ import type { ServerSideToolEngineOptions } from './types.js';
 import { orchestrateServertoolEngine } from './run-server-side-tool-engine-shell.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import {
-  createServerToolTimeoutError,
+  createServertoolProviderProtocolErrorFromPlan,
   withTimeout
 } from './timeout-error-block.js';
 import {
@@ -30,6 +30,7 @@ import {
 import {
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineSkipWithNative,
+  planServertoolTimeoutErrorWithNative,
   planStoplessExecutionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
@@ -104,11 +105,13 @@ export async function runServerToolOrchestrationShell(
         }),
         serverToolTimeoutMs,
         () =>
-          createServerToolTimeoutError({
-            requestId: options.requestId,
-            phase: 'engine',
-            timeoutMs: serverToolTimeoutMs
-          })
+          createServertoolProviderProtocolErrorFromPlan(
+            planServertoolTimeoutErrorWithNative({
+              requestId: options.requestId,
+              phase: 'engine',
+              timeoutMs: serverToolTimeoutMs
+            })
+          )
       )
   });
   const engineSkipPlan = planServertoolEngineSkipWithNative({

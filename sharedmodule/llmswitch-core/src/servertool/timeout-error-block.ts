@@ -7,8 +7,6 @@ import {
 import {
   isAdapterClientDisconnectedWithNative,
   planServertoolClientDisconnectedErrorWithNative,
-  planServertoolRequiredResponseHookEmptyErrorWithNative,
-  planServertoolTimeoutErrorWithNative,
   planServertoolTimeoutWatcherWithNative,
   type ServertoolErrorPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -51,26 +49,6 @@ export function createServerToolClientDisconnectedError(options: {
   const error = new ServerToolClientDisconnectedError(plan.message);
   (error as unknown as { details?: Record<string, unknown> }).details = plan.details;
   return error;
-}
-
-export function createServerToolTimeoutError(options: {
-  requestId: string;
-  phase: 'engine' | 'followup';
-  timeoutMs: number;
-  flowId?: string;
-  attempt?: number;
-  maxAttempts?: number;
-}): ProviderProtocolError & { status?: number } {
-  return buildProviderProtocolError(planServertoolTimeoutErrorWithNative(options));
-}
-
-export function createServertoolRequiredResponseHookEmptyError(options: {
-  requestId: string;
-  responseHookName: string;
-}): ProviderProtocolError & { status?: number } {
-  return buildProviderProtocolError(
-    planServertoolRequiredResponseHookEmptyErrorWithNative(options)
-  );
 }
 
 export function createServertoolProviderProtocolErrorFromPlan(

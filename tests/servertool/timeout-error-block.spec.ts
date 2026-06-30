@@ -2,10 +2,11 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
   createServerToolClientDisconnectedError,
-  createServerToolTimeoutError,
+  createServertoolProviderProtocolErrorFromPlan,
   isAdapterClientDisconnected,
   withTimeout
 } from '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js';
+import { planServertoolTimeoutErrorWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
 
 describe('servertool timeout/error block native shell', () => {
   test('reads adapter disconnect state through native policy', () => {
@@ -33,14 +34,16 @@ describe('servertool timeout/error block native shell', () => {
   });
 
   test('plans timeout errors through native contract', () => {
-    const timeout = createServerToolTimeoutError({
-      requestId: 'req-2',
-      phase: 'followup',
-      timeoutMs: 1000.9,
-      flowId: 'web_search_flow',
-      attempt: 2.2,
-      maxAttempts: 3.8
-    });
+    const timeout = createServertoolProviderProtocolErrorFromPlan(
+      planServertoolTimeoutErrorWithNative({
+        requestId: 'req-2',
+        phase: 'followup',
+        timeoutMs: 1000.9,
+        flowId: 'web_search_flow',
+        attempt: 2.2,
+        maxAttempts: 3.8
+      })
+    );
     expect(timeout.status).toBe(504);
     expect(timeout.message).toBe('[servertool] followup timeout after 1000ms flow=web_search_flow');
     expect((timeout as any).details).toEqual({

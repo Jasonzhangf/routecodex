@@ -2551,6 +2551,8 @@ function checkOrchestrationPolicyRustOwner() {
     'export function isServerToolTimeoutError(',
     'export function createStopMessageFetchFailedError(',
     'export function createServertoolStateLoadFailedError(',
+    'export function createServerToolTimeoutError(',
+    'export function createServertoolRequiredResponseHookEmptyError(',
     'planClientDisconnectWatcherWithNative',
     'planStopMessageFetchFailedErrorWithNative',
     'planServertoolStateLoadFailedErrorWithNative',
@@ -2566,8 +2568,7 @@ function checkOrchestrationPolicyRustOwner() {
     'planServertoolTimeoutWatcherWithNative',
     'isAdapterClientDisconnectedWithNative',
     'planServertoolClientDisconnectedErrorWithNative',
-    'planServertoolTimeoutErrorWithNative',
-    'planServertoolRequiredResponseHookEmptyErrorWithNative',
+    'createServertoolProviderProtocolErrorFromPlan',
   ]) {
     assertContains(
       'servertool-timeout-error-ts-thin-shell',

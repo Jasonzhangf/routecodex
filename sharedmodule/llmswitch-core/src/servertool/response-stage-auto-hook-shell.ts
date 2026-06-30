@@ -3,9 +3,12 @@ import type {
   ServerSideToolEngineResult,
   ServerToolHandlerContext
 } from './types.js';
-import { planServertoolResponseStageRuntimeActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  planServertoolRequiredResponseHookEmptyErrorWithNative,
+  planServertoolResponseStageRuntimeActionWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
-import { createServertoolRequiredResponseHookEmptyError } from './timeout-error-block.js';
+import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
 export async function runServertoolResponseStageAutoHookPass(args: {
   options: ServerSideToolEngineOptions;
@@ -41,10 +44,12 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     responseHookRequired: args.responseStageGatePlan.responseHookRequired === true
   });
   if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
-    throw createServertoolRequiredResponseHookEmptyError({
-      requestId: args.options.requestId,
-      responseHookName: String(args.responseStageGatePlan.responseHookName ?? 'unknown')
-    });
+    throw createServertoolProviderProtocolErrorFromPlan(
+      planServertoolRequiredResponseHookEmptyErrorWithNative({
+        requestId: args.options.requestId,
+        responseHookName: String(args.responseStageGatePlan.responseHookName ?? 'unknown')
+      })
+    );
   }
   if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
     if (!autoHookResult) {

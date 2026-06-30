@@ -109,6 +109,18 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts',
+    forbidden: [
+      'export function createServerToolTimeoutError(',
+      'export function createServertoolRequiredResponseHookEmptyError(',
+    ],
+    required: [
+      'export function createServertoolProviderProtocolErrorFromPlan(',
+      'planServertoolTimeoutWatcherWithNative',
+      'planServertoolClientDisconnectedErrorWithNative',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts',
     forbidden: [
       "outcome: 'error'",
