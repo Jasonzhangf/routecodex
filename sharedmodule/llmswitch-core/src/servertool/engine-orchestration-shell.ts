@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions } from './types.js';
-import { runServerSideToolEngine } from './server-side-tools-impl.js';
+import { orchestrateServertoolEngine } from './run-server-side-tool-engine-shell.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import {
   createServerToolTimeoutError,
@@ -48,7 +48,7 @@ export interface ServerToolOrchestrationResult {
   flowId?: string;
 }
 
-type ServerToolEngineResult = Awaited<ReturnType<typeof runServerSideToolEngine>>;
+type ServerToolEngineResult = Awaited<ReturnType<typeof orchestrateServertoolEngine>>;
 
 export async function runServerToolOrchestrationShell(
   options: ServerToolOrchestrationOptions
@@ -98,7 +98,7 @@ export async function runServerToolOrchestrationShell(
   const engineResult = await runPrimaryServerToolEngineSelection({
     runEngine: (overrides: Partial<ServerSideToolEngineOptions>): Promise<ServerToolEngineResult> =>
       withTimeout(
-        runServerSideToolEngine({
+        orchestrateServertoolEngine({
           ...engineOptions,
           ...overrides
         }),

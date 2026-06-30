@@ -250,6 +250,7 @@ const TARGETS = [
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
     forbidden: [
+      "from './server-side-tools-impl.js'",
       'runServertoolResponseStageWithNative',
       'const responseStage =',
       'readFollowupClientInjectSourceWithNative',

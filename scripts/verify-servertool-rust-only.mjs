@@ -5104,6 +5104,7 @@ function checkServertoolRustOutcomeCloseout() {
     'function createServerToolEngineRunner(',
     'type ServerToolEngineRunner =',
     'export const runServerToolOrchestration = runServerToolOrchestrationShell;',
+    "from './server-side-tools-impl.js'",
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(
