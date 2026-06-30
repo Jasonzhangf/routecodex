@@ -1,3 +1,8 @@
+# 2026-06-30: stopless postflight projection direct native parse removed
+- 本 slice 将 `engine-postflight-shell.ts` 里的 direct `readNativeFunction('buildStoplessAutoCliProjectionFromEngineJson')` / `JSON.parse(raw)` 迁到 `native-servertool-core-semantics.ts::buildStoplessAutoCliProjectionFromEngineWithNative` typed wrapper；postflight 只构造必要 input 并消费 `chatResponse`。
+- 防复活：`verify-servertool-rust-only` 改为要求 postflight 使用 `buildStoplessAutoCliProjectionFromEngineWithNative({`，并禁止旧 direct NAPI 调用和 `JSON.parse(raw)` 复活。
+- 验证：sharedmodule TS PASS；focused Jest `engine.stopless-session-thin-shell + engine-observation-shell + servertool-active-orchestration-audit` 49 passed；`verify:servertool-rust-only` PASS。root TS 当前被无关 dirty `src/server/runtime/http-server/routes.ts` 缺 `tokenStats` 阻塞。
+
 # 2026-06-30: stopless execution plan TS local parse shell removed
 - 本 slice 将 `engine-orchestration-shell.ts` 里的本地 `planStoplessExecutionWithNativeLocal` / direct `readNativeFunction('planStoplessExecutionJson')` / `JSON.parse(raw)` 解析壳移到 `native-servertool-core-semantics.ts::planStoplessExecutionWithNative` typed wrapper；engine orchestration 现在只调用 wrapper 并把 Rust 计划交给 postflight。
 - 防复活：`verify-servertool-rust-only` 和 focused Jest 改为要求 `planStoplessExecutionWithNative({`，并禁止旧 local wrapper / direct NAPI 调用复活。

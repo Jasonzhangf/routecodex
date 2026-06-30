@@ -4,8 +4,10 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineResult
 } from './types.js';
-import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
-import { buildServertoolPostflightObservationSummaryWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  buildServertoolPostflightObservationSummaryWithNative,
+  buildStoplessAutoCliProjectionFromEngineWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   readRequestTruthSessionIdFromAnyBoundMetadataCenter,
   readRuntimeControlFromAnyBoundMetadataCenter
@@ -111,23 +113,16 @@ export async function runServertoolEnginePostflight(args: {
   }
 
   if (runtimeAction.action === 'build_stop_message_cli_projection') {
-    const fn = readNativeFunction('buildStoplessAutoCliProjectionFromEngineJson');
-    if (!fn) {
-      throw new Error('buildStoplessAutoCliProjectionFromEngineJson native unavailable');
-    }
     const metadataCenterSnapshot = buildStoplessProjectionMetadataCenterSnapshot(options.adapterContext);
-    const inputJson = JSON.stringify({
+    const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
       metadataCenterSnapshot: metadataCenterSnapshot ?? null,
       execution: engineResult.execution ?? null,
       metadataWritePlan: engineResult.metadataWritePlan ?? null,
       requestId: options.requestId ?? null
     });
-    const raw = fn(inputJson);
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    const projectionChatResponse = parsed.chatResponse as JsonObject;
     args.logProgress(5, totalSteps, 'completed (stop_message cli projection; no reenter)', { flowId });
     return {
-      chat: projectionChatResponse,
+      chat: projection.chatResponse,
       executed: true,
       flowId
     };

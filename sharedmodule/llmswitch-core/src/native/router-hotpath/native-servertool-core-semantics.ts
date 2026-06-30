@@ -208,6 +208,10 @@ export interface StoplessExecutionPlanOutput {
   };
 }
 
+export interface StoplessAutoCliProjectionFromEngineOutput {
+  chatResponse: JsonObject;
+}
+
 export interface NativeServertoolExecutedToolCall {
   id: string;
   name: string;
@@ -572,6 +576,35 @@ export function planStoplessExecutionWithNative(input: {
   return {
     execution: execution as Record<string, unknown>,
     orchestrationPlan: orchestrationPlan as StoplessExecutionPlanOutput['orchestrationPlan']
+  };
+}
+
+export function buildStoplessAutoCliProjectionFromEngineWithNative(input: {
+  metadataCenterSnapshot?: Record<string, unknown> | null;
+  execution?: unknown;
+  metadataWritePlan?: unknown;
+  requestId?: string | null;
+}): StoplessAutoCliProjectionFromEngineOutput {
+  const capability = 'buildStoplessAutoCliProjectionFromEngineJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`native ${capability} is required`);
+  }
+  const parsed = parseNativeJson(capability, fn(JSON.stringify({
+    metadataCenterSnapshot: input.metadataCenterSnapshot ?? null,
+    execution: input.execution ?? null,
+    metadataWritePlan: input.metadataWritePlan ?? null,
+    requestId: input.requestId ?? null
+  })));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`native ${capability} returned invalid projection output`);
+  }
+  const chatResponse = (parsed as Record<string, unknown>).chatResponse;
+  if (!chatResponse || typeof chatResponse !== 'object' || Array.isArray(chatResponse)) {
+    throw new Error(`native ${capability} returned invalid chatResponse`);
+  }
+  return {
+    chatResponse: chatResponse as JsonObject
   };
 }
 

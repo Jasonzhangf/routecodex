@@ -5557,7 +5557,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
   }
   for (const marker of [
     "if (runtimeAction.action === 'build_stop_message_cli_projection')",
-    "readNativeFunction('buildStoplessAutoCliProjectionFromEngineJson')",
+    'buildStoplessAutoCliProjectionFromEngineWithNative({',
   ]) {
     if (!postflightSource.includes(marker)) {
       fail(
@@ -5571,6 +5571,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'planStoplessCliProjectionContextWithNative(',
     'buildServertoolCliProjectionForAutoFlowShell({',
     'buildStoplessAutoCliProjectionJson',
+    "readNativeFunction('buildStoplessAutoCliProjectionFromEngineJson')",
+    'JSON.parse(raw)',
     'function readSessionAndRequestId(',
     'executionContext?.stopless',
     'executionContext?.assistantStopText',
