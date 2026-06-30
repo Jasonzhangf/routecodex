@@ -586,6 +586,71 @@ pub fn normalize_responses_sse_response_payload_json(
         .map_err(|error| format!("Failed to serialize Responses response JSON: {}", error))
 }
 
+pub fn build_responses_sse_response_event_payload(
+    response: Value,
+    status: Option<&str>,
+    lifecycle: &str,
+    required_action: Option<Value>,
+) -> Result<Value, String> {
+    let mut response_payload = normalize_responses_sse_response_payload(response, status)?;
+    if lifecycle == "start" {
+        let Some(row) = response_payload.as_object_mut() else {
+            return Err("Responses SSE response event payload expected object".to_string());
+        };
+        if row.contains_key("output") {
+            row.insert("output".to_string(), Value::Array(Vec::new()));
+        }
+    }
+
+    let mut payload = Map::new();
+    payload.insert("response".to_string(), response_payload);
+    if lifecycle == "required_action" {
+        let Some(action) = required_action else {
+            return Err("Responses SSE required_action payload missing required_action".to_string());
+        };
+        payload.insert("required_action".to_string(), action);
+    }
+    Ok(Value::Object(payload))
+}
+
+pub fn build_responses_sse_response_event_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> Result<String, String> {
+    let lifecycle = lifecycle_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Responses SSE response event payload lifecycle is required".to_string())?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses SSE response event payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(source) = payload.as_object() else {
+        return Err("Responses SSE response event payload expected object".to_string());
+    };
+    let response = source
+        .get("response")
+        .cloned()
+        .ok_or_else(|| "Responses SSE response event payload missing response".to_string())?;
+    let status = source
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let required_action = source.get("required_action").cloned();
+    let output =
+        build_responses_sse_response_event_payload(response, status, lifecycle, required_action)?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses SSE response event payload JSON: {}",
+            error
+        )
+    })
+}
+
 pub fn normalize_responses_sse_reasoning_summary_json(
     summary_json: String,
 ) -> Result<String, String> {
@@ -1087,6 +1152,71 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Invalid Responses response: missing created_at"));
+    }
+
+    #[test]
+    fn builds_responses_sse_start_response_event_payload_with_empty_output() {
+        let output = build_responses_sse_response_event_payload(
+            json!({
+                "id": "resp_start",
+                "object": "response",
+                "created_at": 1781149537,
+                "status": "completed",
+                "model": "gpt-test",
+                "output": [{ "id": "item_1", "type": "message" }],
+                "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+            }),
+            Some("in_progress"),
+            "start",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(output["response"]["status"], json!("in_progress"));
+        assert_eq!(output["response"]["output"], json!([]));
+    }
+
+    #[test]
+    fn builds_responses_sse_required_action_event_payload() {
+        let output = build_responses_sse_response_event_payload(
+            json!({
+                "id": "resp_required",
+                "object": "response",
+                "created_at": 1781149537,
+                "status": "requires_action",
+                "model": "gpt-test",
+                "output": [],
+                "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+            }),
+            Some("requires_action"),
+            "required_action",
+            Some(json!({ "type": "submit_tool_outputs", "submit_tool_outputs": { "tool_calls": [] } })),
+        )
+        .unwrap();
+
+        assert_eq!(output["response"]["status"], json!("requires_action"));
+        assert_eq!(output["required_action"]["type"], json!("submit_tool_outputs"));
+    }
+
+    #[test]
+    fn rejects_responses_sse_required_action_event_payload_missing_required_action() {
+        let err = build_responses_sse_response_event_payload(
+            json!({
+                "id": "resp_required",
+                "object": "response",
+                "created_at": 1781149537,
+                "status": "requires_action",
+                "model": "gpt-test",
+                "output": [],
+                "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+            }),
+            Some("requires_action"),
+            "required_action",
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Responses SSE required_action payload missing required_action"));
     }
 
     #[test]

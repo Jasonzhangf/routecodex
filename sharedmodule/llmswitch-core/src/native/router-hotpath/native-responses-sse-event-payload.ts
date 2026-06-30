@@ -90,6 +90,57 @@ export function normalizeResponsesSseResponsePayloadWithNative(
   }
 }
 
+export type ResponsesSseResponseEventPayloadLifecycle =
+  | 'start'
+  | 'completed'
+  | 'done'
+  | 'required_action';
+
+export function buildResponsesSseResponseEventPayloadWithNative(
+  lifecycle: ResponsesSseResponseEventPayloadLifecycle,
+  response: unknown,
+  status: string,
+  requiredAction?: unknown
+): Record<string, unknown> {
+  const capability = 'buildResponsesSseResponseEventPayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let payloadJson: string;
+  try {
+    payloadJson = JSON.stringify({
+      response,
+      status,
+      ...(requiredAction !== undefined ? { required_action: requiredAction } : {})
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, lifecycle);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE response event payload result');
+    }
+    const parsed = parseNativeEvent(raw);
+    if (!parsed) {
+      return fail('invalid Responses SSE response event payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
 export function normalizeResponsesSseReasoningSummaryWithNative(
   summary: unknown
 ): Array<{ type: 'summary_text'; text: string }> | undefined {

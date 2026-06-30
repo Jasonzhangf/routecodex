@@ -4,6 +4,7 @@ import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json
 import { normalizeResponsesSseReasoningSummaryWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseReasoningSummaryPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseReasoningDeltaPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseResponseEventPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 
 async function collectEvents(response: any): Promise<any[]> {
   const events: any[] = [];
@@ -29,6 +30,72 @@ async function collectEvents(response: any): Promise<any[]> {
 }
 
 describe('responses SSE reasoning summary no-normalize boundary', () => {
+  it('builds response start payloads through native owner with empty output', async () => {
+    const events = await collectEvents({
+      id: 'resp_start_payload_native',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'msg_1',
+        type: 'message',
+        status: 'completed',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'hello' }]
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    });
+
+    const created = events.find((event) => event.type === 'response.created');
+    const inProgress = events.find((event) => event.type === 'response.in_progress');
+
+    expect(created?.data?.response?.status).toBe('in_progress');
+    expect(created?.data?.response?.output).toEqual([]);
+    expect(inProgress?.data?.response?.status).toBe('in_progress');
+    expect(inProgress?.data?.response?.output).toEqual([]);
+  });
+
+  it('builds response event payloads through native owner directly', () => {
+    const start = buildResponsesSseResponseEventPayloadWithNative(
+      'start',
+      {
+        id: 'resp_direct_start',
+        object: 'response',
+        created_at: 1710000000,
+        status: 'completed',
+        model: 'gpt-test',
+        output: [{ id: 'msg_1', type: 'message' }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+      },
+      'in_progress'
+    );
+    const requiredAction = buildResponsesSseResponseEventPayloadWithNative(
+      'required_action',
+      {
+        id: 'resp_direct_required',
+        object: 'response',
+        created_at: 1710000000,
+        status: 'requires_action',
+        model: 'gpt-test',
+        output: [],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+      },
+      'requires_action',
+      { type: 'submit_tool_outputs', submit_tool_outputs: { tool_calls: [] } }
+    );
+
+    expect(start.response).toMatchObject({
+      id: 'resp_direct_start',
+      status: 'in_progress',
+      output: []
+    });
+    expect(requiredAction.required_action).toEqual({
+      type: 'submit_tool_outputs',
+      submit_tool_outputs: { tool_calls: [] }
+    });
+  });
+
   it('normalizes reasoning summary entries through the native owner verbatim', () => {
     const summary = normalizeResponsesSseReasoningSummaryWithNative([
       '- inspect `file.ts`',

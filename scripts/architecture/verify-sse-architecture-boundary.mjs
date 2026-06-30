@@ -113,6 +113,7 @@ for (const forbidden of [
   'function normalizeUsage(',
   'function normalizeReasoningSummaryEntries(',
   'function normalizeReasoningSummaryField(',
+  'basePayload.output = []',
   'const itemDescriptor: Record<string, unknown>',
   '...(outputItem as any)',
   'const partDescriptor: Record<string, unknown>',

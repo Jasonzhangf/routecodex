@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses SSE response event payload native owner slice
+
+- Red evidence: after adding `basePayload.output = []` as a forbidden marker, `npm run verify:sse-architecture-boundary` failed on `buildResponseStartEvents()`, proving response start payload mutation still lived in TS.
+- Fix: added Rust owner `buildResponsesSseResponseEventPayloadJson`; TS now calls `buildResponsesSseResponseEventPayloadWithNative()` for `response.created` / `response.in_progress` / `response.completed` / `response.done` / `response.required_action` data payloads and only wraps the SSE event envelope.
+- Positive / reverse tests: Rust covers start payload output clearing, required_action payload construction, and missing required_action fail-fast; Jest covers native wrapper output and sequenced `response.created` / `response.in_progress` projection.
+- Verification: Rust focused `response_event_payload` PASS 1/1 and `required_action_event_payload` PASS 2/2; native build PASS; focused Jest 34/34 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `createdOutputLength=0`, `inProgressOutputLength=0`, `completedOutputLength=2`, and `doneOutputLength=2`.
+
 ### 2026-06-30 Responses SSE reasoning delta payload native owner slice
 
 - Red evidence: after adding `delta: content.text`, `signature: content.signature`, and `image_url: content.image_url` as forbidden markers, `npm run verify:sse-architecture-boundary` failed on `buildReasoningDeltas()`, proving `response.reasoning_text.delta` / `response.reasoning_signature.delta` / `response.reasoning_image.delta` payloads were still synthesized in TS.

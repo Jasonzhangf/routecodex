@@ -22,8 +22,8 @@ import {
   buildResponsesSseOutputItemDescriptorWithNative,
   buildResponsesSseReasoningDeltaPayloadWithNative,
   buildResponsesSseReasoningSummaryPayloadWithNative,
+  buildResponsesSseResponseEventPayloadWithNative,
   normalizeResponsesSseReasoningSummaryWithNative,
-  normalizeResponsesSseResponsePayloadWithNative
 } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 const TEXT_CHUNK_BOUNDARY = /[\n\r\t，。、“”‘’！？,.\-:\u3000\s]/;
@@ -50,13 +50,6 @@ function chunkText(text: string, config: ResponsesEventGeneratorConfig): string[
     return [text];
   }
   return StringUtils.chunkString(text, size, cloneRegex(TEXT_CHUNK_BOUNDARY));
-}
-
-function buildResponsePayload(
-  response: ResponsesResponse,
-  status: string
-): Record<string, unknown> {
-  return normalizeResponsesSseResponsePayloadWithNative(response, status);
 }
 
 function normalizeReasoningSummaryFieldWithNative(
@@ -146,10 +139,7 @@ export function* buildResponseStartEvents(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
-  const basePayload = buildResponsePayload(response, 'in_progress');
-  if (Object.prototype.hasOwnProperty.call(basePayload, 'output')) {
-    basePayload.output = [];
-  }
+  const startPayload = buildResponsesSseResponseEventPayloadWithNative('start', response, 'in_progress');
   // 第一个事件：response.created
   const createdEvent = createBaseEvent(context, config);
   yield {
@@ -157,9 +147,7 @@ export function* buildResponseStartEvents(
     timestamp: createdEvent.timestamp,
     protocol: createdEvent.protocol,
     direction: createdEvent.direction,
-    data: {
-      response: basePayload
-    },
+    data: startPayload,
     sequenceNumber: createdEvent.sequenceNumber
   };
 
@@ -170,9 +158,7 @@ export function* buildResponseStartEvents(
     timestamp: inProgressEvent.timestamp,
     protocol: inProgressEvent.protocol,
     direction: inProgressEvent.direction,
-    data: {
-      response: basePayload
-    },
+    data: startPayload,
     sequenceNumber: inProgressEvent.sequenceNumber
   };
 }
@@ -649,10 +635,12 @@ export function buildRequiredActionEvent(
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      response: buildResponsePayload(response, response.status ?? 'requires_action'),
-      required_action: requiredAction
-    },
+    data: buildResponsesSseResponseEventPayloadWithNative(
+      'required_action',
+      response,
+      response.status ?? 'requires_action',
+      requiredAction
+    ),
     sequenceNumber: baseEvent.sequenceNumber
   };
 }
@@ -673,9 +661,11 @@ export function buildResponseCompletedEvent(
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      response: buildResponsePayload(response, response.status ?? 'completed')
-    },
+    data: buildResponsesSseResponseEventPayloadWithNative(
+      'completed',
+      response,
+      response.status ?? 'completed'
+    ),
     sequenceNumber: baseEvent.sequenceNumber
   };
 }
@@ -695,9 +685,11 @@ export function buildResponseDoneEvent(
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      response: buildResponsePayload(response, response.status ?? 'completed')
-    },
+    data: buildResponsesSseResponseEventPayloadWithNative(
+      'done',
+      response,
+      response.status ?? 'completed'
+    ),
     sequenceNumber: baseEvent.sequenceNumber
   };
 }

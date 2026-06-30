@@ -1933,6 +1933,18 @@ pub fn normalize_responses_sse_response_payload_json(
     .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildResponsesSseResponseEventPayloadJson")]
+pub fn build_responses_sse_response_event_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_response_event_payload_json(
+        payload_json,
+        lifecycle_json,
+    )
+    .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "normalizeResponsesSseReasoningSummaryJson")]
 pub fn normalize_responses_sse_reasoning_summary_json(summary_json: String) -> NapiResult<String> {
     responses_sse_event_payload::normalize_responses_sse_reasoning_summary_json(summary_json)
