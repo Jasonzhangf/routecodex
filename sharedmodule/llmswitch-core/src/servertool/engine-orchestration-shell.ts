@@ -14,10 +14,10 @@ import {
   runServertoolEnginePostflight
 } from './engine-postflight-shell.js';
 import {
-  createServertoolObservation,
   recordServertoolEngineMatchHit,
   recordServertoolEngineMatchSkipped
 } from './engine-observation-shell.js';
+import { createServertoolProgressLogger } from './progress-log-block.js';
 import { runEnginePreflight } from './engine-preflight-shell.js';
 import {
   readProviderProtocolFromAnyBoundMetadataCenter,
@@ -48,6 +48,32 @@ export interface ServerToolOrchestrationResult {
 }
 
 type ServerToolEngineResult = Awaited<ReturnType<typeof orchestrateServertoolEngine>>;
+type ServertoolProgressLogger = ReturnType<typeof createServertoolProgressLogger>;
+
+function createProgressObservation(args: {
+  requestId: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  adapterContext: AdapterContext;
+  stageRecorder?: StageRecorder;
+}): {
+  logStopEntry: ServertoolProgressLogger['logStopEntry'];
+  logProgress: ServertoolProgressLogger['logProgress'];
+  logAutoHookTrace: ServertoolProgressLogger['logAutoHookTrace'];
+  logStopCompare: ServertoolProgressLogger['logStopCompare'];
+} {
+  return createServertoolProgressLogger({
+    requestId: args.requestId,
+    entryEndpoint: args.entryEndpoint,
+    providerProtocol: args.providerProtocol,
+    adapterContext: args.adapterContext,
+    stageRecorder: args.stageRecorder,
+    blue: '\x1b[38;5;39m',
+    yellow: '\x1b[38;5;214m',
+    gold: '\x1b[38;5;220m',
+    reset: '\x1b[0m'
+  });
+}
 
 function resolveServerToolTimeoutMs(): number {
   const raw = [
@@ -71,7 +97,7 @@ export async function runServerToolOrchestrationShell(
     logProgress,
     logAutoHookTrace,
     logStopCompare
-  } = createServertoolObservation({
+  } = createProgressObservation({
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
     providerProtocol,

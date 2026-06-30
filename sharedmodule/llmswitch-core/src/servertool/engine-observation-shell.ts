@@ -1,48 +1,8 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
-import { createServertoolProgressLogger } from './progress-log-block.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import type { ServerToolExecution } from './types.js';
 import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
-
-type ServertoolProgressLogger = ReturnType<typeof createServertoolProgressLogger>;
-
-export function createServertoolObservation(args: {
-  requestId: string;
-  entryEndpoint: string;
-  providerProtocol: string;
-  adapterContext: AdapterContext;
-  stageRecorder?: StageRecorder;
-}): {
-  logStopEntry: ServertoolProgressLogger['logStopEntry'];
-  logProgress: ServertoolProgressLogger['logProgress'];
-  logAutoHookTrace: ServertoolProgressLogger['logAutoHookTrace'];
-  logStopCompare: ServertoolProgressLogger['logStopCompare'];
-} {
-  const BLUE = '\x1b[38;5;39m';
-  const YELLOW = '\x1b[38;5;214m';
-  const GOLD = '\x1b[38;5;220m';
-  const RESET = '\x1b[0m';
-  const providerProtocol =
-    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>);
-  if (!providerProtocol) {
-    throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol');
-  }
-  const logger = createServertoolProgressLogger({
-    requestId: args.requestId,
-    entryEndpoint: args.entryEndpoint,
-    providerProtocol,
-    adapterContext: args.adapterContext,
-    stageRecorder: args.stageRecorder,
-    blue: BLUE,
-    yellow: YELLOW,
-    gold: GOLD,
-    reset: RESET
-  });
-  return {
-    ...logger
-  };
-}
 
 export function recordServertoolEngineMatchSkipped(args: {
   requestId: string;

@@ -17,17 +17,6 @@ function bindProviderProtocol(adapterContext: Record<string, unknown>, providerP
   }
 }
 
-const createServertoolProgressLoggerMock = jest.fn(() => ({
-  logStopEntry: jest.fn(),
-  logProgress: jest.fn(),
-  logAutoHookTrace: jest.fn(),
-  logStopCompare: jest.fn()
-}));
-
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js', () => ({
-  createServertoolProgressLogger: createServertoolProgressLoggerMock
-}));
-
 describe('engine-observation-shell', () => {
   test('engine.ts delegates orchestration into engine-orchestration-shell', () => {
     const source = fs.readFileSync(
@@ -45,48 +34,28 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('planServertoolEngineRuntimeActionWithNative');
   });
 
-  test('engine-observation-shell owns progress logger and match logging fan-in', async () => {
+  test('engine-observation-shell owns match logging fan-in without progress facade', async () => {
     const source = fs.readFileSync(
       'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
+      'utf8'
+    );
+    const orchestrationSource = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
 
     expect(source).not.toContain('export function logServertoolNonBlocking(');
     expect(source).not.toContain('[servertool][non-blocking]');
-    expect(source).toContain('export function createServertoolObservation(');
-    expect(source).toContain('createServertoolProgressLogger({');
+    expect(source).not.toContain('export function createServertoolObservation(');
+    expect(source).not.toContain('createServertoolProgressLogger({');
     expect(source).toContain("args.stageRecorder?.record('servertool.match'");
     expect(source).toContain('appendServerToolProgressFileEvent({');
     expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/match-log-block.ts')).toBe(false);
-  });
-
-  test('createServertoolObservation prefers bound metadata center providerProtocol over explicit argument', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
-    const adapterContext: Record<string, unknown> = {};
-    bindProviderProtocol(adapterContext, 'anthropic-messages');
-
-    const observation = mod.createServertoolObservation({
-      requestId: 'req-obs-center-protocol',
-      entryEndpoint: '/v1/messages',
-      providerProtocol: 'openai-chat',
-      adapterContext: adapterContext as any
-    });
-
-    expect(createServertoolProgressLoggerMock).toHaveBeenCalledWith(expect.objectContaining({
-      providerProtocol: 'anthropic-messages'
-    }));
-    expect(observation.logProgress).toBeDefined();
-  });
-
-  test('createServertoolObservation fails fast when metadata center runtimeControl.providerProtocol is absent', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
-
-    expect(() => mod.createServertoolObservation({
-      requestId: 'req-obs-missing-protocol',
-      entryEndpoint: '/v1/messages',
-      providerProtocol: 'openai-chat',
-      adapterContext: {} as any
-    })).toThrow('Servertool observation requires metadata center runtime_control.providerProtocol');
+    expect(orchestrationSource).toContain('function createProgressObservation(');
+    expect(orchestrationSource).toContain('createServertoolProgressLogger({');
+    expect(orchestrationSource).toContain(
+      'Servertool engine orchestration requires metadata center runtime_control.providerProtocol'
+    );
   });
 
   test('match stage recorder failures are fail-fast', async () => {
@@ -245,7 +214,7 @@ describe('engine-observation-shell', () => {
     );
 
     expect(source).toContain('export async function runServerToolOrchestrationShell(');
-    expect(source).toContain('createServertoolObservation({');
+    expect(source).toContain('createProgressObservation({');
     expect(source).toContain('runEnginePreflight({');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
     expect(source).toContain('planServertoolTimeoutErrorWithNative({');

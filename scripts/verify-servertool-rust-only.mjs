@@ -4994,7 +4994,8 @@ function checkServertoolRustOutcomeCloseout() {
   const engineOrchestrationShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
   for (const marker of [
     'export async function runServerToolOrchestrationShell(',
-    'createServertoolObservation({',
+    'createProgressObservation({',
+    'createServertoolProgressLogger({',
     'runEnginePreflight({',
     'planServertoolEngineSkipWithNative({',
     'recordServertoolEngineMatchSkipped({',
@@ -5018,6 +5019,7 @@ function checkServertoolRustOutcomeCloseout() {
     'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
     'function createServerToolEngineRunner(',
     'type ServerToolEngineRunner =',
+    'createServertoolObservation({',
     'export const runServerToolOrchestration = runServerToolOrchestrationShell;',
     "from './server-side-tools-impl.js'",
   ]) {
@@ -5041,8 +5043,6 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'export function createServertoolObservation(',
-    'createServertoolProgressLogger({',
     "args.stageRecorder?.record('servertool.match'",
     'appendServerToolProgressFileEvent({',
     "throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol')",
@@ -5051,6 +5051,17 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-engine-observation-shell-owner',
         `engine-observation-shell.ts must keep engine observation owner marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'export function createServertoolObservation(',
+    'createServertoolProgressLogger({',
+  ]) {
+    if (engineObservationShell.includes(marker)) {
+      fail(
+        'servertool-engine-observation-no-progress-facade',
+        `engine-observation-shell.ts must not restore public progress observation facade marker ${marker}`
       );
     }
   }
