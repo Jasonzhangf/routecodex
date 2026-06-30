@@ -92,6 +92,8 @@ const TARGETS = [
       'if (optionalResult) {',
       'result.execution.flowId.trim()',
       'if (mandatoryResult) {',
+      'const toolFlowResult: ServerSideToolEngineResult = {',
+      'return toolFlowResult;',
     ],
     required: [
       'function planAutoHookRuntimeAttempt(',
@@ -101,8 +103,9 @@ const TARGETS = [
       'function planAutoHookCallerFinalization(',
       'const finalizationPlan = planAutoHookCallerFinalization({',
       'finalQueue',
-      'const toolFlowResult: ServerSideToolEngineResult = {',
-      'return toolFlowResult;',
+      "mode: 'tool_flow'",
+      'finalChatResponse: queueResult.chatResponse',
+      'execution: queueResult.execution',
     ],
   },
   {
