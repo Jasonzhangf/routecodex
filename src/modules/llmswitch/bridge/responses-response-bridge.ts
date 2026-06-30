@@ -152,7 +152,7 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
   if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
     return args.payload;
   }
-  const projectedPayload = projectResponsesClientPayloadForClientNative({
+  return projectResponsesClientPayloadForClientNative({
     payload: args.payload,
     toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
     metadata: args.metadata,
@@ -163,7 +163,6 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
         }
       : undefined,
   });
-  return stripClientVisibleMetadataDeep(projectedPayload);
 }
 
 export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
@@ -194,23 +193,4 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
     clientBody,
     sanitizedBody: stripInternalKeysDeep(clientBody),
   };
-}
-
-
-function stripClientVisibleMetadataDeep<T>(value: T): T {
-  if (!value || typeof value !== 'object') {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => stripClientVisibleMetadataDeep(item)) as T;
-  }
-  const record = value as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(record)) {
-    if (key === 'metadata') {
-      continue;
-    }
-    out[key] = stripClientVisibleMetadataDeep(entry);
-  }
-  return out as T;
 }

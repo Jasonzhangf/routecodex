@@ -83,6 +83,7 @@ const checks = [
       'function isResponsesRequiredActionFrame(',
       'function readDirectPassthroughSseEventNames(',
       'function hasNonResponsesDirectPassthroughEvent(',
+      'stripClientVisibleMetadataDeep',
     ],
     forbiddenTokens: [],
   },

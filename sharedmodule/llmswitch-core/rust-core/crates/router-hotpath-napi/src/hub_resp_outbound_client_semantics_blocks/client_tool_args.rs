@@ -762,6 +762,9 @@ fn sanitize_responses_client_payload_for_replay_safety_deep(value: &Value) -> Va
         Value::Object(record) => {
             let mut out = Map::new();
             for (key, child) in record {
+                if key == "metadata" {
+                    continue;
+                }
                 out.insert(
                     key.clone(),
                     sanitize_responses_client_payload_for_replay_safety_deep(child),
@@ -1222,9 +1225,7 @@ fn trim_required_string(value: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn project_sse_error_event_payload(
-    input: &ProjectSseErrorEventPayloadInput,
-) -> Value {
+pub(crate) fn project_sse_error_event_payload(input: &ProjectSseErrorEventPayloadInput) -> Value {
     let request_id = match input
         .error
         .as_ref()
@@ -1237,8 +1238,14 @@ pub(crate) fn project_sse_error_event_payload(
     };
 
     let mut error = input.error.clone().unwrap_or_default();
-    error.insert("message".to_string(), Value::String(input.message.trim().to_string()));
-    error.insert("code".to_string(), Value::String(input.code.trim().to_string()));
+    error.insert(
+        "message".to_string(),
+        Value::String(input.message.trim().to_string()),
+    );
+    error.insert(
+        "code".to_string(),
+        Value::String(input.code.trim().to_string()),
+    );
     error.insert("request_id".to_string(), Value::String(request_id));
 
     serde_json::json!({
@@ -2024,8 +2031,14 @@ mod tests {
     #[test]
     fn project_sse_error_event_payload_preserves_explicit_nested_request_id() {
         let mut error = Map::new();
-        error.insert("request_id".to_string(), Value::String(" req_upstream ".to_string()));
-        error.insert("provider_key".to_string(), Value::String("tab.default.gpt-5.1".to_string()));
+        error.insert(
+            "request_id".to_string(),
+            Value::String(" req_upstream ".to_string()),
+        );
+        error.insert(
+            "provider_key".to_string(),
+            Value::String("tab.default.gpt-5.1".to_string()),
+        );
         let input = ProjectSseErrorEventPayloadInput {
             request_id: "req_local".to_string(),
             status: 500,
@@ -2041,12 +2054,21 @@ mod tests {
             .and_then(Value::as_object)
             .expect("error object");
 
-        assert_eq!(error.get("request_id"), Some(&Value::String("req_upstream".to_string())));
+        assert_eq!(
+            error.get("request_id"),
+            Some(&Value::String("req_upstream".to_string()))
+        );
         assert_eq!(
             error.get("provider_key"),
             Some(&Value::String("tab.default.gpt-5.1".to_string()))
         );
-        assert_eq!(error.get("message"), Some(&Value::String("stream failed".to_string())));
-        assert_eq!(error.get("code"), Some(&Value::String("sse_stream_error".to_string())));
+        assert_eq!(
+            error.get("message"),
+            Some(&Value::String("stream failed".to_string()))
+        );
+        assert_eq!(
+            error.get("code"),
+            Some(&Value::String("sse_stream_error".to_string()))
+        );
     }
 }

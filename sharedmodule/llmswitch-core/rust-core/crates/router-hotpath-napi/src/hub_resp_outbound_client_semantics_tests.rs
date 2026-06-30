@@ -113,7 +113,8 @@ fn normalize_openai_chat_reasoning_outbound_projects_responses_payload_to_chat_c
 }
 
 #[test]
-fn normalize_openai_chat_reasoning_outbound_supplies_created_for_responses_payload_without_timestamp() {
+fn normalize_openai_chat_reasoning_outbound_supplies_created_for_responses_payload_without_timestamp(
+) {
     let payload = serde_json::json!({
         "id": "resp_no_created",
         "object": "response",
@@ -136,13 +137,16 @@ fn normalize_openai_chat_reasoning_outbound_supplies_created_for_responses_paylo
         Value::String("chat.completion".to_string())
     );
     assert!(
-        output["created"].as_i64().is_some_and(|created| created > 0),
+        output["created"]
+            .as_i64()
+            .is_some_and(|created| created > 0),
         "Rust openai-chat client projection must provide created for SSE codec"
     );
 }
 
 #[test]
-fn normalize_openai_chat_reasoning_outbound_supplies_created_for_chat_completion_without_timestamp() {
+fn normalize_openai_chat_reasoning_outbound_supplies_created_for_chat_completion_without_timestamp()
+{
     let payload = serde_json::json!({
         "id": "chatcmpl_no_created",
         "object": "chat.completion",
@@ -161,7 +165,9 @@ fn normalize_openai_chat_reasoning_outbound_supplies_created_for_chat_completion
         Value::String("chat.completion".to_string())
     );
     assert!(
-        output["created"].as_i64().is_some_and(|created| created > 0),
+        output["created"]
+            .as_i64()
+            .is_some_and(|created| created > 0),
         "Rust openai-chat client projection must provide created for chat SSE codec"
     );
 }
@@ -224,10 +230,7 @@ fn normalize_chat_usage_projects_chat_shape_from_responses_style_fields() {
     assert_eq!(output["prompt_tokens"], json!(12));
     assert_eq!(output["completion_tokens"], json!(5));
     assert_eq!(output["total_tokens"], json!(17));
-    assert_eq!(
-        output["prompt_tokens_details"]["cached_tokens"],
-        json!(3)
-    );
+    assert_eq!(output["prompt_tokens_details"]["cached_tokens"], json!(3));
 }
 
 #[test]
@@ -1293,6 +1296,44 @@ fn project_responses_client_payload_for_client_strips_replay_unsafe_reasoning_co
     assert!(!serialized.contains("\"status\":\"completed\""));
     assert!(!serialized.contains("\"status\":\"in_progress\""));
     assert!(serialized.contains("\"encrypted_content\":\"opaque\""));
+}
+
+#[test]
+fn project_responses_client_payload_for_client_strips_internal_metadata_fields() {
+    let payload = json!({
+        "id": "resp_client_metadata_strip",
+        "object": "response",
+        "status": "completed",
+        "metadata": {
+            "routeHint": "search",
+            "providerKey": "internal.provider"
+        },
+        "output": [{
+            "id": "msg_client_metadata_strip",
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "metadata": {
+                "routeHint": "tools"
+            },
+            "content": [{
+                "type": "output_text",
+                "text": "ok",
+                "metadata": {
+                    "debug": true
+                }
+            }]
+        }]
+    });
+
+    let output = project_responses_client_payload_for_client(&payload, &json!([]), &json!({}));
+    let serialized = serde_json::to_string(&output).expect("serialize output");
+
+    assert_eq!(output["id"], "resp_client_metadata_strip");
+    assert_eq!(output["output"][0]["content"][0]["text"], "ok");
+    assert!(!serialized.contains("\"metadata\""));
+    assert!(!serialized.contains("internal.provider"));
+    assert!(!serialized.contains("routeHint"));
 }
 
 #[test]
@@ -3397,10 +3438,7 @@ fn build_responses_payload_from_chat_core_supplies_created_at_for_existing_respo
     )
     .expect("responses payload");
 
-    assert_eq!(
-        output["object"],
-        Value::String("response".to_string())
-    );
+    assert_eq!(output["object"], Value::String("response".to_string()));
     assert!(
         output["created_at"]
             .as_i64()
