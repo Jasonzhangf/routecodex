@@ -5,6 +5,34 @@ import { join } from 'node:path';
 const root = process.cwd();
 
 describe('responses-response-bridge request-context resolution', () => {
+  it('requires requestContext.context.toolsRaw as the explicit client projection input', async () => {
+    const { normalizeResponsesClientPayloadForHttp } = await import(
+      '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'
+    );
+
+    await expect(
+      normalizeResponsesClientPayloadForHttp({
+        entryEndpoint: '/v1/responses',
+        metadata: {},
+        payload: {
+          id: 'resp_bridge_tools_raw_contract',
+          object: 'response',
+          status: 'completed',
+          output: [],
+        },
+        requestContext: {
+          payload: {
+            model: 'gpt-5.4',
+            tools: [{ type: 'function', function: { name: 'exec_command' } }],
+          },
+          context: {
+            clientToolsRaw: [{ type: 'function', function: { name: 'apply_patch' } }],
+          },
+        },
+      })
+    ).rejects.toThrow('Responses client projection requires requestContext.context.toolsRaw');
+  });
+
   it('does not keep request-context salvage helpers in the response bridge surface', () => {
     const responseBridge = readFileSync(
       join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'),
@@ -26,6 +54,9 @@ describe('responses-response-bridge request-context resolution', () => {
     }
 
     expect(responseBridge).not.toContain('buildClientSseKeepaliveFrameForHttp');
+    expect(responseBridge).not.toContain('contextClientToolsRaw');
+    expect(responseBridge).not.toContain('payloadTools');
+    expect(responseBridge).not.toContain('requestContext?.payload?.tools');
     expect(bridgeIndex).not.toContain('resolveResponsesRequestContextForHttp');
     expect(bridgeIndex).not.toContain('shouldDispatchResponsesSseToClientForHttp');
     expect(sseBridge).toContain('buildClientSseKeepaliveFrameForHttp');

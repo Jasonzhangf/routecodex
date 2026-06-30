@@ -406,6 +406,11 @@
 - 若 `/v1/responses` 客户端报 `stream closed before response.completed`，先对照 provider snapshot 与 client snapshot：upstream `provider-response_*.json` 已有 `event: response.completed` 时，不要补 synthetic terminal，应查 server SSE transport 是否把终态识别绑在单 chunk 文本上。
 - `handler-response-sse.ts` 的终态状态机必须跨 chunk 扫描 `event: response.completed/response.done/response.error` 与 `data.type` 终态；SSE chunk 边界不可作为协议语义边界。
 
+# 2026-07-01: Responses response bridge toolsRaw truth is explicit context only
+- `responses-response-bridge.ts::normalizeResponsesClientPayloadForHttp()` must not reconstruct client projection tools from `context.clientToolsRaw`, `payload.tools`, or `[]`.
+- The only legal response-bridge input for `/v1/responses` client projection is explicit `requestContext.context.toolsRaw`; if it is missing or malformed, fail fast with `Responses client projection requires requestContext.context.toolsRaw`.
+- Gate: `verify:responses-handler-single-bridge-surface` forbids `contextClientToolsRaw`, `payloadTools`, and `requestContext?.payload?.tools` in the response bridge.
+
 # 2026-06-30: servertool rustification audit snapshot
 - `docs/architecture/function-map.yml` 已把 servertool 主要语义 owner 挂到 Rust `servertool-core` / `router-hotpath-napi`，但 `docs/architecture/mainline-call-map.yml` 的 `servertool.hook_skeleton.mainline` 仍是 `binding pending`，说明 runtime 主线还没完全锚定。
 - 仍含明显 TS 语义的重点模块：`engine-orchestration-shell.ts`（stopless 本地 JSON parse）、`pending-session.ts`（文件 IO + JSON parse/write）、`pre-command-hooks.ts`（config IO + shell/jq/runtime 编排）、`response-stage-orchestration-shell.ts`（response-stage gate + runtime control 写回）、`execution-stage-shell.ts` / `execution-queue-shell.ts` / `execution-handler-materialization-shell.ts`（执行编排 glue）。

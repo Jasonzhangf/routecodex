@@ -75,21 +75,6 @@ export function requireResponsesHandlerCoreDist(specifier) {
 export async function importResponsesHandlerCoreDist(specifier) {
     return await importCoreDist(specifier);
 }
-function readResponsesClientToolsRawForHttp(requestContext) {
-    const contextToolsRaw = requestContext?.context?.toolsRaw;
-    if (Array.isArray(contextToolsRaw)) {
-        return contextToolsRaw;
-    }
-    const contextClientToolsRaw = requestContext?.context?.clientToolsRaw;
-    if (Array.isArray(contextClientToolsRaw)) {
-        return contextClientToolsRaw;
-    }
-    const payloadTools = requestContext?.payload?.tools;
-    if (Array.isArray(payloadTools)) {
-        return payloadTools;
-    }
-    return [];
-}
 export async function normalizeResponsesClientPayloadForHttp(args) {
     if (args.entryEndpoint !== '/v1/responses'
         && args.entryEndpoint !== '/v1/responses.submit_tool_outputs') {
@@ -98,9 +83,13 @@ export async function normalizeResponsesClientPayloadForHttp(args) {
     if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
         return args.payload;
     }
+    const toolsRaw = args.requestContext?.context?.toolsRaw;
+    if (!Array.isArray(toolsRaw)) {
+        throw new Error('Responses client projection requires requestContext.context.toolsRaw');
+    }
     const projectedPayload = projectResponsesClientPayloadForClientNative({
         payload: args.payload,
-        toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
+        toolsRaw,
         metadata: args.metadata,
         context: args.requestContext
             ? {

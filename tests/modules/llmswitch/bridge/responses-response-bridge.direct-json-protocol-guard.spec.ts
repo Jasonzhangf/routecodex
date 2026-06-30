@@ -43,7 +43,7 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
           model: 'gpt-5.4',
           tools: [],
         },
-        context: {},
+        context: { toolsRaw: [] },
       },
     });
 
@@ -111,7 +111,7 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
           model: 'gpt-5.4',
           tools: [],
         },
-        context: {},
+        context: { toolsRaw: [] },
       },
     });
 

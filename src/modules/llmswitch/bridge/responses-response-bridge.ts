@@ -107,29 +107,6 @@ export async function importResponsesHandlerCoreDist<TModule extends object>(
   return await importCoreDist<TModule>(specifier);
 }
 
-function readResponsesClientToolsRawForHttp(requestContext?: {
-  payload: AnyRecord;
-  context: AnyRecord;
-  sessionId?: string;
-  conversationId?: string;
-  matchedPort?: number;
-  routingPolicyGroup?: string;
-}): unknown[] {
-  const contextToolsRaw = requestContext?.context?.toolsRaw;
-  if (Array.isArray(contextToolsRaw)) {
-    return contextToolsRaw;
-  }
-  const contextClientToolsRaw = requestContext?.context?.clientToolsRaw;
-  if (Array.isArray(contextClientToolsRaw)) {
-    return contextClientToolsRaw;
-  }
-  const payloadTools = requestContext?.payload?.tools;
-  if (Array.isArray(payloadTools)) {
-    return payloadTools;
-  }
-  return [];
-}
-
 export async function normalizeResponsesClientPayloadForHttp(args: {
   payload: unknown;
   entryEndpoint?: string;
@@ -152,9 +129,13 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
   if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
     return args.payload;
   }
+  const toolsRaw = args.requestContext?.context?.toolsRaw;
+  if (!Array.isArray(toolsRaw)) {
+    throw new Error('Responses client projection requires requestContext.context.toolsRaw');
+  }
   return projectResponsesClientPayloadForClientNative({
     payload: args.payload,
-    toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
+    toolsRaw,
     metadata: args.metadata,
     context: args.requestContext
       ? {
