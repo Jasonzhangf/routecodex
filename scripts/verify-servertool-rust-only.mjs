@@ -3520,6 +3520,10 @@ function checkServertoolRegistryRustOwner() {
     assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
   }
   for (const needle of [
+    'const autoHookDescriptorInput = {',
+    'planServertoolRegistryAutoHookDescriptorsWithNative(autoHookDescriptorInput)',
+    'const registrySourceProjectionInput = {',
+    'const projection = planServertoolRegistrySourceProjectionWithNative(registrySourceProjectionInput);',
     'planServertoolRegistryAutoHookDescriptorsWithNative',
     'planServertoolRegistrySourceProjectionWithNative',
     'projectAutoServerToolHookDescriptors',
