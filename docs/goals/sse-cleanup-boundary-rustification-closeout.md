@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Provider response native effect plan fallback removal slice
+
+- Red evidence: mocked provider-response test covered Rust returning malformed `nativeResponsePlan.effectPlan.effects`; the old TS shell synthesized an empty runtime effect plan instead of exposing the contract error.
+- Fix: `provider-response.ts::executeProviderResponseNativeOutboundEffects()` now requires `effectPlan.effects` to be an array and fails fast with `Rust HubPipeline response path returned malformed effect plan`; `verify:sse-architecture-boundary` forbids the old empty-effect fallback markers.
+- Positive / reverse tests: valid mocked provider-response path still uses MetadataCenter `runtimeControl.providerProtocol` and records response scope; malformed effects fail before `normalizeProviderResponseEffectPlanWithNative()` is called.
+- Verification: focused Jest `provider-response.metadata-center-provider-protocol` PASS 2/2; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:hub-response-provider-sse-materialization` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `git diff --check` PASS; `npm run build:base` PASS.
+- Replay evidence: this slice targets a native-plan contract invariant rather than provider wire replay; live/real SSE replay remains required for full goal completion, but the malformed-plan reverse path is locked by focused mocked native-plan coverage and architecture gate.
+
 ### 2026-07-01 Gemini SSE done candidates required slice
 
 - Red evidence: focused `tests/sharedmodule/sse-parser-no-recovery.spec.ts` first failed because a `gemini.done` frame missing `candidates` still materialized a partial successful response with `finishReason=undefined`.

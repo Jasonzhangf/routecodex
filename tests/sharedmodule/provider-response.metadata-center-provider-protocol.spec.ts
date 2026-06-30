@@ -33,6 +33,7 @@ jest.unstable_mockModule(
       requestExecutorProviderErrorStage: 'provider_response_sse_read'
     })),
     materializeProviderResponseSsePayloadWithNative: materializeProviderResponseSsePayloadWithNativeMock,
+    normalizeChatUsageWithNative: jest.fn((payload: unknown) => payload),
     normalizeResponsesToolCallArgumentsForClientWithNative: jest.fn((payload: unknown) => payload),
     parseRespFormatEnvelopeWithNative: jest.fn((payload: unknown) => payload),
     projectPostServertoolHubRespOutbound04ClientSemanticWithNative: jest.fn(({ payload }: { payload: unknown }) => payload)
@@ -149,11 +150,13 @@ describe('provider response metadata center providerProtocol contract', () => {
     const context: Record<string, unknown> = {
       requestId: 'openai-responses-provider-20260628T184855563-416867-1902',
       entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-chat'
+      providerProtocol: 'openai-chat',
+      sessionId: 'provider-response-metadata-center-provider-protocol-session'
     };
     const center = MetadataCenter.attach(context);
     center.writeRequestTruth('requestId', 'openai-responses-router-20260628T184855563-416867-1902', TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('sessionId', context.sessionId, TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRuntimeControl(
       'providerProtocol',
       'anthropic-messages',
@@ -187,5 +190,52 @@ describe('provider response metadata center providerProtocol contract', () => {
       requestId: 'openai-responses-provider-20260628T184855563-416867-1902'
     }));
     expect(result.body?.choices?.[0]?.message?.content).toBe('center protocol wins');
+  });
+
+  it('fails fast when Rust returns a malformed provider response effect plan', async () => {
+    executeHubPipelineWithNativeMock.mockReturnValueOnce({
+      success: true,
+      payload: {
+        id: 'chatcmpl_provider_response_malformed_effect_plan',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      effectPlan: {
+        effects: null
+      },
+      diagnostics: []
+    });
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_malformed_effect_plan',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+    const center = MetadataCenter.attach(context);
+    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRuntimeControl('providerProtocol', 'openai-chat', TEST_METADATA_WRITER, 'test-provider-protocol');
+
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_provider_response_malformed_effect_plan',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false
+    })).rejects.toThrow('Rust HubPipeline response path returned malformed effect plan');
+    expect(normalizeProviderResponseEffectPlanWithNativeMock).not.toHaveBeenCalled();
   });
 });

@@ -304,6 +304,16 @@ if (!anthropicSequencer.includes('Invalid Anthropic tool_result block: missing t
   failures.push('Anthropic SSE sequencer must fail fast when tool_result.tool_use_id is missing');
 }
 
+const providerResponseShell = read('sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
+for (const forbidden of [
+  'effectPlan: { effects: Array.isArray(effects) ? effects : [] }',
+  'servertoolRuntimeActions: [], streamPipe: null, runtimeStateWrite: null, stoplessMetadataCenterWrite: null'
+]) {
+  if (providerResponseShell.includes(forbidden)) {
+    failures.push(`Provider response shell must not synthesize empty native effect plan truth: ${forbidden}`);
+  }
+}
+
 const geminiEventSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts');
 for (const forbidden of [
   "event.event ?? event.type ?? 'gemini.data'",

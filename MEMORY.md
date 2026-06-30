@@ -1,3 +1,8 @@
+# 2026-07-01: Provider response native effect plan must fail fast when malformed
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` must not synthesize empty `servertoolRuntimeActions` / `streamPipe` / `runtimeStateWrite` / `stoplessMetadataCenterWrite` when Rust returns a malformed `nativeResponsePlan.effectPlan.effects`.
+- Missing or non-array effects now fail fast with `Rust HubPipeline response path returned malformed effect plan`; the TS shell only normalizes a valid Rust-provided effects array.
+- Verification: focused mocked provider-response Jest, `verify:sse-architecture-boundary`, `verify:hub-response-provider-sse-materialization`, sharedmodule/root TypeScript checks, `verify:responses-sse-business-module`, `git diff --check`, and `build:base` passed.
+
 # 2026-07-01: Gemini SSE done candidates are required
 - `gemini-sse-to-json-converter.ts` must not treat missing `gemini.done.candidates` as an optional metadata absence; that materializes a partial response with undefined finish metadata.
 - Missing or non-array done candidates now fail fast with `Invalid Gemini done event: missing candidates`; valid explicit candidates replay remains unchanged.

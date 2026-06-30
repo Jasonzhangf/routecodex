@@ -169,13 +169,14 @@ function executeProviderResponseNativeOutboundEffects(args: {
 } {
   const rawPayload = args.nativeResponsePlan.payload as JsonObject;
   const effects = args.nativeResponsePlan.effectPlan.effects;
-  const normalizedEffects = Array.isArray(effects)
-    ? normalizeProviderResponseEffectPlanWithNative({ effects })
-    : { servertoolRuntimeActions: [], streamPipe: null, runtimeStateWrite: null, stoplessMetadataCenterWrite: null };
+  if (!Array.isArray(effects)) {
+    throw new Error('Rust HubPipeline response path returned malformed effect plan');
+  }
+  const normalizedEffects = normalizeProviderResponseEffectPlanWithNative({ effects });
   const runtimeEffects = normalizedEffects as ProviderResponseRuntimeEffectPlan;
   (args.context as Record<string, unknown>).__nativeResponsePlan = {
     payload: rawPayload,
-    effectPlan: { effects: Array.isArray(effects) ? effects : [] },
+    effectPlan: { effects },
     runtimeEffects,
     diagnostics: args.nativeResponsePlan.diagnostics
   };
