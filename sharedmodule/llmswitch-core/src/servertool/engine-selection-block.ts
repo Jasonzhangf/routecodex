@@ -5,8 +5,7 @@ import {
   planEngineSelectionStartWithNative,
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
-export const SERVERTOOL_ENGINE_SELECTION_FEATURE_ID = 'feature_id: hub.servertool_engine_selection';
-
+// feature_id: hub.servertool_engine_selection
 type ServerToolEngineRunner = (
   overrides: Partial<ServerSideToolEngineOptions>
 ) => Promise<ServerSideToolEngineResult>;

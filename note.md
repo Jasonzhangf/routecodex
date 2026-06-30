@@ -1,3 +1,10 @@
+# 2026-06-30: servertool dead feature-id exports removed from runtime shells
+
+- `engine-selection-block.ts`、`orchestration-policy-block.ts`、`timeout-error-block.ts` 中无 consumer 的 `SERVERTOOL_*_FEATURE_ID` 导出已删除，避免 function-map/source-anchor 文本继续以 runtime export 形式驻留在 TS 壳。
+- 为保持 architecture feature anchor gate，原导出改成最小源码注释锚点：`// feature_id: ...`；这样保留 map queryability，但不再向运行时暴露死常量。
+- `verify:servertool-rust-only` 已新增三类复活门禁，禁止这些 feature-id 导出回到 runtime TS shell。
+- 验证：sharedmodule TS PASS；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；`verify:architecture-mainline-call-map` PASS；`git diff --check` PASS。focused Jest 中 `timeout-error-block.spec.ts` / `followup-runtime-provider-pin.spec.ts` 当前因 native capability 未注入直接报 `native unavailable`，不构成本 slice 的功能回归证据。
+
 # 2026-06-30: servertool engine-selection helper inlined
 
 - `sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts` 已删除本地 `toEngineOverrides()` helper，直接内联 Rust 计划返回的 overrides 映射；TS 只保留必要的 queue 调度和 native plan 消费。

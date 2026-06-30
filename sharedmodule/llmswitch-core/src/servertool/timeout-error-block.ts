@@ -16,8 +16,7 @@ import {
   type ServertoolErrorPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
-export const SERVERTOOL_TIMEOUT_ERROR_FEATURE_ID = 'feature_id: hub.servertool_orchestration_policy';
-
+// feature_id: hub.servertool_orchestration_policy
 export function isAdapterClientDisconnected(adapterContext: AdapterContext): boolean {
   return isAdapterClientDisconnectedWithNative(adapterContext);
 }

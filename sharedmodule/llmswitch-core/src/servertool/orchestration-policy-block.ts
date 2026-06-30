@@ -8,8 +8,7 @@ import {
   resolveAdapterContextProviderKeyWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
-export const SERVERTOOL_ORCHESTRATION_POLICY_FEATURE_ID = 'feature_id: hub.servertool_orchestration_policy';
-
+// feature_id: hub.servertool_orchestration_policy
 export function resolveServerToolTimeoutMs(): number {
   const raw = process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS ||
     process.env.RCC_SERVERTOOL_TIMEOUT_MS ||

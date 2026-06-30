@@ -2465,6 +2465,7 @@ function checkOrchestrationPolicyRustOwner() {
     );
   }
   for (const keyword of [
+    'SERVERTOOL_ORCHESTRATION_POLICY_FEATURE_ID',
     'function parseTimeoutMs',
     'function parseBooleanLike',
     'FOLLOWUP_ERROR_REASON_MAX_LENGTH',
@@ -2524,6 +2525,7 @@ function checkOrchestrationPolicyRustOwner() {
     );
   }
   for (const keyword of [
+    'SERVERTOOL_TIMEOUT_ERROR_FEATURE_ID',
     'Number.isFinite',
     'Math.floor',
     'Math.max',
@@ -3767,6 +3769,7 @@ function checkEngineSelectionRustOwner() {
     );
   }
   for (const keyword of [
+    'SERVERTOOL_ENGINE_SELECTION_FEATURE_ID',
     'primaryAutoHookIds.length',
     'engineResult.mode',
     '!engineResult.execution',
