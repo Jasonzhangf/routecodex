@@ -1,3 +1,8 @@
+# 2026-07-01: Responses output message normalizer Rust owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 `normalizeResponseOutput()`、`baseId`、`extraReasoning`、`suppressReasoningFromContent`、synthetic `_reasoning` id 等 marker 后先红，证明 Responses message/reasoning split 仍由 TS owner 执行。
+- Fix：新增 Rust/NAPI `normalizeResponsesMessageItemJson`、`expandResponsesMessageItemJson`、`normalizeResponsesOutputItemsJson`；`responses-output-normalizer.ts` 只保留 native wrapper，`responses-sequencer.ts` 不再本地判断 explicit reasoning / suppress reasoning。
+- Verification：Rust `responses_message_item` 2/2 PASS、`responses_output_items` 1/1 PASS；native build PASS；focused Jest `responses-output-normalizer-no-fallback + responses-sse-reasoning-summary-no-normalize` 12/12 PASS；native export-list subtest PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；4444 real replay `completed=true done=true error=false missingType=0 missingSequence=0 malformedWire=0 eventCount=25`。
+
 # 2026-07-01: Responses SSE native payload wrapper collapse
 - Red evidence：`verify:sse-architecture-boundary` 新增 `data: { ...delta/payload/partAdded/textDone/partDone }` marker 后先红，证明 `responses.ts` 仍在 TS 侧对 native payload 做二次对象重包。
 - Fix：output text、function call arguments、reasoning deltas、reasoning summary events 全部改为 `data: nativePayload`，TS 只封装 SSE envelope，不再 clone / spread native-owned payload。

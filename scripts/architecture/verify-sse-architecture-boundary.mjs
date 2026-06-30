@@ -153,6 +153,8 @@ for (const forbidden of [
 
 const responsesSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts');
 for (const forbidden of [
+  'function normalizeResponseOutput(',
+  'suppressReasoningFromContent: hasExplicitReasoning',
   'function canonicalizeResponsesEventPayload(',
   'data: {\n      type: event.type,',
   'sequence_number: event.sequenceNumber',
@@ -160,6 +162,20 @@ for (const forbidden of [
 ]) {
   if (responsesSequencer.includes(forbidden)) {
     failures.push(`Responses sequencer must not locally canonicalize SSE payload semantics: ${forbidden}`);
+  }
+}
+
+const responsesOutputNormalizer = read('sharedmodule/llmswitch-core/src/sse/shared/responses-output-normalizer.ts');
+for (const forbidden of [
+  'normalizeMessageContentParts(',
+  'const baseId =',
+  'suppressReasoningFromContent',
+  'extraReasoning',
+  '`${baseId}_reasoning`',
+  "return reasoning ? [reasoning, message] : [message]",
+]) {
+  if (responsesOutputNormalizer.includes(forbidden)) {
+    failures.push(`Responses output normalizer must not own message/reasoning split semantics in TS: ${forbidden}`);
   }
 }
 

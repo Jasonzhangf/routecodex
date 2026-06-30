@@ -378,3 +378,271 @@ pub fn normalize_message_content_parts_json(
     let output = normalize_message_content_parts(&parts, Some(&collector_seed));
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
+
+fn read_string_array(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::String(text)) if !text.is_empty() => vec![text.clone()],
+        Some(Value::Array(entries)) => entries
+            .iter()
+            .filter_map(|entry| entry.as_str())
+            .filter(|entry| !entry.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn normalize_responses_message_item_value(
+    item: &Value,
+    options: Option<&Value>,
+) -> Result<Value, String> {
+    let Some(source) = item.as_object() else {
+        return Err("Invalid Responses message: expected object".to_string());
+    };
+    let base_id = source
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Invalid Responses message: missing id".to_string())?;
+
+    let options_obj = options.and_then(Value::as_object);
+    let suppress_reasoning = options_obj
+        .and_then(|option| option.get("suppressReasoningFromContent"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let content = source.get("content").unwrap_or(&Value::Null);
+    let normalized = normalize_message_content_parts(content, None);
+    let normalized_parts = normalized
+        .get("normalizedParts")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut reasoning_chunks = if suppress_reasoning {
+        Vec::new()
+    } else {
+        normalized
+            .get("reasoningChunks")
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter(|entry| !entry.is_empty())
+                    .map(ToString::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    reasoning_chunks.extend(read_string_array(
+        options_obj.and_then(|option| option.get("extraReasoning")),
+    ));
+
+    let mut message = source.clone();
+    message.insert("id".to_string(), Value::String(base_id.to_string()));
+    message.insert(
+        "content".to_string(),
+        if normalized_parts.is_empty() {
+            Value::Array(vec![json!({ "type": "output_text", "text": "" })])
+        } else {
+            Value::Array(normalized_parts)
+        },
+    );
+
+    let mut output = Map::new();
+    output.insert("message".to_string(), Value::Object(message));
+    if !reasoning_chunks.is_empty() {
+        output.insert(
+            "reasoning".to_string(),
+            json!({
+                "id": format!("{}_reasoning", base_id),
+                "type": "reasoning",
+                "summary": [],
+                "content": reasoning_chunks
+                    .into_iter()
+                    .map(|text| json!({ "type": "reasoning_text", "text": text }))
+                    .collect::<Vec<Value>>()
+            }),
+        );
+    }
+
+    Ok(Value::Object(output))
+}
+
+pub fn normalize_responses_message_item_json(
+    item_json: String,
+    options_json: Option<String>,
+) -> NapiResult<String> {
+    let item: Value = serde_json::from_str(&item_json)
+        .map_err(|error| napi::Error::from_reason(format!("Failed to parse Responses message item JSON: {}", error)))?;
+    let options = match options_json {
+        Some(raw) => Some(serde_json::from_str::<Value>(&raw).map_err(|error| {
+            napi::Error::from_reason(format!(
+                "Failed to parse Responses message normalization options JSON: {}",
+                error
+            ))
+        })?),
+        None => None,
+    };
+    let output = normalize_responses_message_item_value(&item, options.as_ref())
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+pub fn expand_responses_message_item_json(
+    item_json: String,
+    options_json: Option<String>,
+) -> NapiResult<String> {
+    let item: Value = serde_json::from_str(&item_json)
+        .map_err(|error| napi::Error::from_reason(format!("Failed to parse Responses message item JSON: {}", error)))?;
+    let options = match options_json {
+        Some(raw) => Some(serde_json::from_str::<Value>(&raw).map_err(|error| {
+            napi::Error::from_reason(format!(
+                "Failed to parse Responses message normalization options JSON: {}",
+                error
+            ))
+        })?),
+        None => None,
+    };
+    let normalized = normalize_responses_message_item_value(&item, options.as_ref())
+        .map_err(napi::Error::from_reason)?;
+    let source = normalized
+        .as_object()
+        .ok_or_else(|| napi::Error::from_reason("Invalid Responses message normalization result"))?;
+    let message = source
+        .get("message")
+        .cloned()
+        .ok_or_else(|| napi::Error::from_reason("Invalid Responses message normalization result: missing message"))?;
+    let output = if let Some(reasoning) = source.get("reasoning").cloned() {
+        Value::Array(vec![reasoning, message])
+    } else {
+        Value::Array(vec![message])
+    };
+    serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+pub fn normalize_responses_output_items_json(output_json: String) -> NapiResult<String> {
+    let output: Value = serde_json::from_str(&output_json)
+        .map_err(|error| napi::Error::from_reason(format!("Failed to parse Responses output JSON: {}", error)))?;
+    let Some(items) = output.as_array() else {
+        return serde_json::to_string(&Vec::<Value>::new())
+            .map_err(|error| napi::Error::from_reason(error.to_string()));
+    };
+
+    let has_explicit_reasoning = items.iter().any(|item| {
+        item.as_object()
+            .and_then(|source| source.get("type"))
+            .and_then(Value::as_str)
+            == Some("reasoning")
+    });
+    let message_options = json!({
+        "suppressReasoningFromContent": has_explicit_reasoning
+    });
+    let mut normalized_items: Vec<Value> = Vec::new();
+    for item in items {
+        let item_type = item
+            .as_object()
+            .and_then(|source| source.get("type"))
+            .and_then(Value::as_str);
+        if item_type == Some("message") {
+            let normalized = normalize_responses_message_item_value(item, Some(&message_options))
+                .map_err(napi::Error::from_reason)?;
+            let source = normalized.as_object().ok_or_else(|| {
+                napi::Error::from_reason("Invalid Responses message normalization result")
+            })?;
+            if let Some(reasoning) = source.get("reasoning").cloned() {
+                normalized_items.push(reasoning);
+            }
+            let message = source.get("message").cloned().ok_or_else(|| {
+                napi::Error::from_reason("Invalid Responses message normalization result: missing message")
+            })?;
+            normalized_items.push(message);
+        } else {
+            normalized_items.push(item.clone());
+        }
+    }
+
+    serde_json::to_string(&normalized_items)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_responses_message_item_with_reasoning() {
+        let item = json!({
+            "id": " msg_1 ",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+                { "type": "output_text", "text": "<think>think</think>answer" }
+            ]
+        });
+
+        let normalized = normalize_responses_message_item_value(&item, None).unwrap();
+
+        assert_eq!(normalized["message"]["id"], "msg_1");
+        assert_eq!(
+            normalized["message"]["content"],
+            json!([{ "type": "output_text", "text": "answer" }])
+        );
+        assert_eq!(normalized["reasoning"]["id"], "msg_1_reasoning");
+        assert_eq!(
+            normalized["reasoning"]["content"],
+            json!([{ "type": "reasoning_text", "text": "think" }])
+        );
+    }
+
+    #[test]
+    fn normalizes_responses_output_items_without_duplicate_reasoning() {
+        let output = json!([
+            {
+                "id": "rs_existing",
+                "type": "reasoning",
+                "summary": [],
+                "content": [{ "type": "reasoning_text", "text": "existing" }]
+            },
+            {
+                "id": "msg_1",
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [
+                    { "type": "reasoning_text", "text": "embedded" },
+                    { "type": "output_text", "text": "answer" }
+                ]
+            }
+        ]);
+        let raw = normalize_responses_output_items_json(output.to_string()).unwrap();
+        let normalized: Value = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(normalized.as_array().unwrap().len(), 2);
+        assert_eq!(normalized[0]["id"], "rs_existing");
+        assert_eq!(normalized[1]["id"], "msg_1");
+        assert_eq!(
+            normalized[1]["content"],
+            json!([
+                { "type": "reasoning_text", "text": "embedded" },
+                { "type": "output_text", "text": "answer" }
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_responses_message_item_missing_id() {
+        let item = json!({
+            "id": "   ",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "answer" }]
+        });
+
+        let err = normalize_responses_message_item_value(&item, None).unwrap_err();
+        assert!(err.contains("Invalid Responses message: missing id"));
+    }
+}

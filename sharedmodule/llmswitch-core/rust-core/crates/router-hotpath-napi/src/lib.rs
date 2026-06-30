@@ -1917,6 +1917,30 @@ pub fn normalizeChatMessageContentJson(content_json: String) -> NapiResult<Strin
     shared_chat_output_normalizer::normalize_chat_message_content_json(content_json)
 }
 
+#[napi(js_name = "normalizeResponsesMessageItemJson")]
+pub fn normalize_responses_message_item_json(
+    item_json: String,
+    options_json: Option<String>,
+) -> NapiResult<String> {
+    shared_output_content_normalizer::normalize_responses_message_item_json(
+        item_json,
+        options_json,
+    )
+}
+
+#[napi(js_name = "expandResponsesMessageItemJson")]
+pub fn expand_responses_message_item_json(
+    item_json: String,
+    options_json: Option<String>,
+) -> NapiResult<String> {
+    shared_output_content_normalizer::expand_responses_message_item_json(item_json, options_json)
+}
+
+#[napi(js_name = "normalizeResponsesOutputItemsJson")]
+pub fn normalize_responses_output_items_json(output_json: String) -> NapiResult<String> {
+    shared_output_content_normalizer::normalize_responses_output_items_json(output_json)
+}
+
 #[napi]
 pub fn normalizeChatResponseReasoningToolsJson(
     response_json: String,

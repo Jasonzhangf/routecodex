@@ -61,10 +61,13 @@ export {
   validateToolArgumentsWithNative
 } from './native-shared-conversion-semantics-toolcalls.js';
 export {
+  expandResponsesMessageItemWithNative,
   normalizeChatMessageContentWithNative,
   normalizeMessageContentPartsWithNative,
   normalizeOpenaiMessageWithNative,
-  normalizeOpenaiToolWithNative
+  normalizeOpenaiToolWithNative,
+  normalizeResponsesOutputItemsWithNative,
+  normalizeResponsesMessageItemWithNative
 } from './native-shared-conversion-semantics-openai.js';
 export {
   deriveToolCallKeyWithNative,

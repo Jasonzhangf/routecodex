@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses output message normalizer Rust owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added markers for `responses-sequencer.ts::normalizeResponseOutput()` and TS-side `responses-output-normalizer.ts` message/reasoning split logic (`baseId`, `extraReasoning`, `suppressReasoningFromContent`, synthetic `_reasoning` id). The gate failed on the existing TS owner.
+- Fix: added Rust/NAPI owners `normalizeResponsesMessageItemJson`, `expandResponsesMessageItemJson`, and `normalizeResponsesOutputItemsJson`. TS `responses-output-normalizer.ts` is now a native wrapper, and `responses-sequencer.ts` calls the output-array native owner instead of deciding explicit reasoning suppression locally.
+- Positive / reverse tests: Rust covers message normalization, output-array expansion without duplicate synthetic reasoning when explicit reasoning already exists, and missing message id fail-fast; Jest covers the TS wrapper fail-fast path and existing Responses SSE sequencing.
+- Verification: Rust focused `responses_message_item` PASS 2/2 and `responses_output_items` PASS 1/1; native build PASS; focused Jest `responses-output-normalizer-no-fallback + responses-sse-reasoning-summary-no-normalize` PASS 12/12; native export-list subtest PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `malformedWire=0`, `eventCount=25`.
+
 ### 2026-07-01 Responses SSE native payload wrapper collapse slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `data: { ...delta }`, `data: { ...payload }`, `data: { ...partAdded }`, `data: { ...textDone }`, and `data: { ...partDone }`; the gate failed on the remaining TS re-wrap paths.

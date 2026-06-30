@@ -32,7 +32,7 @@ import {
   createDefaultResponsesContext
 } from '../event-generators/responses.js';
 import type { ResponsesEventGeneratorContext, ResponsesEventGeneratorConfig } from '../event-generators/responses.js';
-import { expandResponsesMessageItem } from '../../shared/responses-output-normalizer.js';
+import { normalizeResponsesOutputItems } from '../../shared/responses-output-normalizer.js';
 import { canonicalizeResponsesSseEventPayloadWithNative } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 // 排列器配置
@@ -55,31 +55,6 @@ export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesSequencerConfig = {
   maxContentParts: 100,
   submittedToolOutputs: undefined
 };
-
-function normalizeResponseOutput(
-  output: ResponsesOutputItem[] | undefined,
-  requestId: string
-): ResponsesOutputItem[] {
-  if (!Array.isArray(output)) return [];
-  const hasExplicitReasoning = output.some(
-    (item) => item && typeof item === 'object' && (item as ResponsesOutputItem).type === 'reasoning'
-  );
-  const normalized: ResponsesOutputItem[] = [];
-  output.forEach((item, index) => {
-    if (item && typeof item === 'object' && (item as ResponsesOutputItem).type === 'message') {
-      normalized.push(
-        ...expandResponsesMessageItem(item as ResponsesMessageItem, {
-          requestId,
-          outputIndex: index,
-          suppressReasoningFromContent: hasExplicitReasoning
-        })
-      );
-    } else {
-      normalized.push(item);
-    }
-  });
-  return normalized;
-}
 
 /**
  * 验证响应格式
@@ -292,7 +267,7 @@ async function* sequenceResponseCore(
       yield* sequenceFunctionCallOutputItem(submittedOutputs[i], context, config);
     }
 
-    const normalizedOutput = normalizeResponseOutput(response.output, context.requestId);
+    const normalizedOutput = normalizeResponsesOutputItems(response.output);
     const outputOffset = submittedOutputs.length;
 
     // 3. 序列化所有输出项

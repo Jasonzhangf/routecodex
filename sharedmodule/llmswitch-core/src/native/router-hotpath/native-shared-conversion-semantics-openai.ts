@@ -46,6 +46,146 @@ export function normalizeMessageContentPartsWithNative(
       : [];
     return { normalizedParts, reasoningChunks };
   } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error ?? 'unknown'));
+  }
+}
+
+function parseRecordArray(raw: string): Array<Record<string, unknown>> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+    const rows: Array<Record<string, unknown>> = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      rows.push(entry as Record<string, unknown>);
+    }
+    return rows;
+  } catch {
+    return null;
+  }
+}
+
+function throwNativeReturnedError(raw: unknown): void {
+  if (raw instanceof Error) {
+    throw raw;
+  }
+  if (raw && typeof raw === 'object' && 'message' in raw) {
+    const message = (raw as { message?: unknown }).message;
+    if (typeof message === 'string' && message) {
+      throw new Error(message);
+    }
+  }
+}
+
+export function normalizeResponsesMessageItemWithNative(
+  item: unknown,
+  options: unknown
+): { message: Record<string, unknown>; reasoning?: Record<string, unknown> } {
+  const capability = 'normalizeResponsesMessageItemJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ message: Record<string, unknown>; reasoning?: Record<string, unknown> }>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const itemJson = safeStringify(item ?? null);
+  const optionsJson = safeStringify(options ?? {});
+  if (!itemJson || !optionsJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(itemJson, optionsJson);
+    throwNativeReturnedError(raw);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed || !parsed.message || typeof parsed.message !== 'object' || Array.isArray(parsed.message)) {
+      return fail('invalid payload');
+    }
+    const output: { message: Record<string, unknown>; reasoning?: Record<string, unknown> } = {
+      message: parsed.message as Record<string, unknown>
+    };
+    if (parsed.reasoning && typeof parsed.reasoning === 'object' && !Array.isArray(parsed.reasoning)) {
+      output.reasoning = parsed.reasoning as Record<string, unknown>;
+    }
+    return output;
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error ?? 'unknown'));
+  }
+}
+
+export function expandResponsesMessageItemWithNative(
+  item: unknown,
+  options: unknown
+): Array<Record<string, unknown>> {
+  const capability = 'expandResponsesMessageItemJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<Array<Record<string, unknown>>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const itemJson = safeStringify(item ?? null);
+  const optionsJson = safeStringify(options ?? {});
+  if (!itemJson || !optionsJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(itemJson, optionsJson);
+    throwNativeReturnedError(raw);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecordArray(raw);
+    if (!parsed) {
+      return fail('invalid payload');
+    }
+    return parsed;
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error ?? 'unknown'));
+  }
+}
+
+export function normalizeResponsesOutputItemsWithNative(
+  output: unknown
+): Array<Record<string, unknown>> {
+  const capability = 'normalizeResponsesOutputItemsJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<Array<Record<string, unknown>>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const outputJson = safeStringify(output ?? null);
+  if (!outputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(outputJson);
+    throwNativeReturnedError(raw);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecordArray(raw);
+    if (!parsed) {
+      return fail('invalid payload');
+    }
+    return parsed;
+  } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
