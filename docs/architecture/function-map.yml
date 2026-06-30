@@ -3604,7 +3604,6 @@ owners:
       - ResponsesJsonToSseOptions
     canonical_builders:
       - ResponsesJsonToSseConverter
-      - serialize_responses_sse_event_to_wire
     allowed_paths:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts
