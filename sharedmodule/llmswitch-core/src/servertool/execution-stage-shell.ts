@@ -12,6 +12,20 @@ import { materializeNativeToolCallExecutionOutcome } from './execution-handler-m
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
 import { planServertoolExecutionBranchWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
+function planExecutionBranchRuntimeAction(args: {
+  executableToolCalls: Array<{ id: string; name: string; executionMode: string }>;
+  executedToolCallsLen: number;
+}) {
+  return planServertoolExecutionBranchWithNative({
+    executableToolCalls: args.executableToolCalls.map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      executionMode: toolCall.executionMode
+    })),
+    executedToolCallsLen: args.executedToolCallsLen
+  });
+}
+
 export async function runServertoolExecutionStage(args: {
   options: ServerSideToolEngineOptions;
   baseObject: JsonObject;
@@ -33,17 +47,9 @@ export async function runServertoolExecutionStage(args: {
     excludeToolCallNames: args.excludeToolCallNames
   });
 
-  const preExecutionBranchInput = {
+  const preExecutionBranchPlan = planExecutionBranchRuntimeAction({
     executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: 0
-  };
-  const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({
-    executableToolCalls: preExecutionBranchInput.executableToolCalls.map((toolCall) => ({
-      id: toolCall.id,
-      name: toolCall.name,
-      executionMode: toolCall.executionMode
-    })),
-    executedToolCallsLen: preExecutionBranchInput.executedToolCallsLen
   });
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
     return buildServertoolCliProjectionBranchResult({
@@ -61,17 +67,9 @@ export async function runServertoolExecutionStage(args: {
     baseForExecution
   });
 
-  const postExecutionBranchInput = {
+  const postExecutionBranchPlan = planExecutionBranchRuntimeAction({
     executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: executionState.executedToolCalls.length
-  };
-  const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({
-    executableToolCalls: postExecutionBranchInput.executableToolCalls.map((toolCall) => ({
-      id: toolCall.id,
-      name: toolCall.name,
-      executionMode: toolCall.executionMode
-    })),
-    executedToolCallsLen: postExecutionBranchInput.executedToolCallsLen
   });
   if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {
     return materializeNativeToolCallExecutionOutcome({

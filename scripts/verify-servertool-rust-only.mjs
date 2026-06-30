@@ -2790,10 +2790,9 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchJson'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'planServertoolExecutionBranchWithNative('],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchInput = {'],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({'],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchInput = {'],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'function planExecutionBranchRuntimeAction('],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchPlan = planExecutionBranchRuntimeAction({'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchPlan = planExecutionBranchRuntimeAction({'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'projected_tool_call_index'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCallIndex'],
     ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'feature_id: hub.servertool_engine_preflight_contract'],
@@ -3318,17 +3317,18 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planAutoHookCallerFinalizationJson');
   assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookRuntimeAttemptWithNative');
   assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookCallerFinalizationWithNative');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const errorAttemptInput = {');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const attemptPlan = planAutoHookRuntimeAttemptWithNative(errorAttemptInput);');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const runtimeAttemptInput = {');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const attemptPlan = planAutoHookRuntimeAttemptWithNative(runtimeAttemptInput);');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'function planAutoHookRuntimeAttempt(');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const attemptPlan = planAutoHookRuntimeAttempt({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalQueueName = queueOrder[queueOrder.length - 1]?.queueName;');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalQueue = queue.queueName === finalQueueName;');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const callerFinalizationInput = {');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationPlan = planAutoHookCallerFinalizationWithNative(callerFinalizationInput);');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'function planAutoHookCallerFinalization(');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationPlan = planAutoHookCallerFinalization({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const toolFlowResult: ServerSideToolEngineResult = {');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'return toolFlowResult;');
   for (const keyword of [
+    'errorAttemptInput',
+    'runtimeAttemptInput',
+    'callerFinalizationInput',
     'auto_hook_queue_contract',
     'plan_auto_hook_queue_progress',
     'plan_auto_hook_execution_decision_json',
@@ -5187,10 +5187,9 @@ function checkServertoolRustOutcomeCloseout() {
     'export async function runServertoolExecutionStage(',
     'prepareServertoolDispatchStage',
     'planServertoolExecutionBranchWithNative',
-    'const preExecutionBranchInput = {',
-    'const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({',
-    'const postExecutionBranchInput = {',
-    'const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({',
+    'function planExecutionBranchRuntimeAction(',
+    'const preExecutionBranchPlan = planExecutionBranchRuntimeAction({',
+    'const postExecutionBranchPlan = planExecutionBranchRuntimeAction({',
     'runServertoolIoExecutionQueue',
     'materializeNativeToolCallExecutionOutcome',
     'finalizeServertoolResponseStage'
