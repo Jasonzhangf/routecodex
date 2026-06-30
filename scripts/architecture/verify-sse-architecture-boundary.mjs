@@ -118,6 +118,7 @@ for (const forbidden of [
   'const partDescriptor: Record<string, unknown>',
   '(content as any).annotations',
   '(content as any).logprobs',
+  'logprobs: []',
   "type: 'internal_error'",
   "code: 'generation_error'",
   'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',

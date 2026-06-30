@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { buildResponsesSseOutputItemDescriptorWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseOutputTextDeltaPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseOutputTextDonePayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
 
 async function collectEvents(response: any): Promise<any[]> {
@@ -72,6 +74,30 @@ describe('responses SSE output item descriptor native owner', () => {
     }, 'added')).toThrow('Responses output item descriptor missing type');
   });
 
+  it('builds output_text.done payloads through the native owner', () => {
+    const payload = buildResponsesSseOutputTextDonePayloadWithNative(3, 'msg_1', 1, 'final text');
+
+    expect(payload).toEqual({
+      output_index: 3,
+      item_id: 'msg_1',
+      content_index: 1,
+      text: 'final text',
+      logprobs: []
+    });
+  });
+
+  it('builds output_text.delta payloads through the native owner', () => {
+    const payload = buildResponsesSseOutputTextDeltaPayloadWithNative(3, 'msg_1', 1, 'delta text');
+
+    expect(payload).toEqual({
+      output_index: 3,
+      item_id: 'msg_1',
+      content_index: 1,
+      delta: 'delta text',
+      logprobs: []
+    });
+  });
+
   it('projects output_item added and done events without TS descriptor synthesis', async () => {
     const events = await collectEvents({
       id: 'resp_output_item_descriptor_native',
@@ -108,6 +134,52 @@ describe('responses SSE output item descriptor native owner', () => {
       name: 'search',
       call_id: 'call_1',
       arguments: '{"q":"rust"}'
+    });
+  });
+
+  it('projects output_text.done events through the native payload owner', async () => {
+    const events = await collectEvents({
+      id: 'resp_output_text_done_native',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'msg_1',
+        type: 'message',
+        status: 'completed',
+        role: 'assistant',
+        content: [{
+          type: 'output_text',
+          text: 'final text',
+          annotations: [{ type: 'file_citation' }],
+          logprobs: [{ token: 'x' }]
+        }]
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    });
+
+    const outputTextDone = events.find((event) => event.type === 'response.output_text.done');
+    const outputTextDelta = events.find((event) => event.type === 'response.output_text.delta');
+
+    expect(outputTextDelta?.data).toEqual({
+      type: 'response.output_text.delta',
+      sequence_number: outputTextDelta?.sequenceNumber,
+      output_index: 0,
+      item_id: 'msg_1',
+      content_index: 0,
+      delta: 'final text',
+      logprobs: []
+    });
+
+    expect(outputTextDone?.data).toEqual({
+      type: 'response.output_text.done',
+      sequence_number: outputTextDone?.sequenceNumber,
+      output_index: 0,
+      item_id: 'msg_1',
+      content_index: 0,
+      text: 'final text',
+      logprobs: []
     });
   });
 });

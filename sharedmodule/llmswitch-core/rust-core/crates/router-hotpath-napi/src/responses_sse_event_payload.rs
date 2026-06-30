@@ -363,6 +363,111 @@ pub fn build_responses_sse_content_part_descriptor(
     }
 }
 
+pub fn build_responses_sse_output_text_done_payload(
+    output_index: i64,
+    item_id: &str,
+    content_index: i64,
+    text: &str,
+) -> Result<Value, String> {
+    if item_id.trim().is_empty() {
+        return Err("Responses output text done payload item_id is required".to_string());
+    }
+    Ok(serde_json::json!({
+        "output_index": output_index,
+        "item_id": item_id,
+        "content_index": content_index,
+        "text": text,
+        "logprobs": []
+    }))
+}
+
+pub fn build_responses_sse_output_text_delta_payload(
+    output_index: i64,
+    item_id: &str,
+    content_index: i64,
+    delta: &str,
+) -> Result<Value, String> {
+    if item_id.trim().is_empty() {
+        return Err("Responses output text delta payload item_id is required".to_string());
+    }
+    Ok(serde_json::json!({
+        "output_index": output_index,
+        "item_id": item_id,
+        "content_index": content_index,
+        "delta": delta,
+        "logprobs": []
+    }))
+}
+
+fn read_responses_sse_output_text_payload_args(
+    payload_json: String,
+    label: &str,
+) -> Result<(i64, String, i64, String), String> {
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|error| format!("Failed to parse Responses {} payload JSON: {}", label, error))?;
+    let Some(source) = payload.as_object() else {
+        return Err(format!("Responses {} payload expected object", label));
+    };
+    let output_index = source
+        .get("output_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("Responses {} payload missing output_index", label))?;
+    let item_id = source
+        .get("item_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("Responses {} payload missing item_id", label))?
+        .to_string();
+    let content_index = source
+        .get("content_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("Responses {} payload missing content_index", label))?;
+    let text = source
+        .get("text")
+        .or_else(|| source.get("delta"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("Responses {} payload missing text", label))?
+        .to_string();
+    Ok((output_index, item_id, content_index, text))
+}
+
+pub fn build_responses_sse_output_text_delta_payload_json(
+    payload_json: String,
+) -> Result<String, String> {
+    let (output_index, item_id, content_index, delta) =
+        read_responses_sse_output_text_payload_args(payload_json, "output text delta")?;
+    let output = build_responses_sse_output_text_delta_payload(
+        output_index,
+        &item_id,
+        content_index,
+        &delta,
+    )?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses output text delta payload JSON: {}",
+            error
+        )
+    })
+}
+
+pub fn build_responses_sse_output_text_done_payload_json(
+    payload_json: String,
+) -> Result<String, String> {
+    let (output_index, item_id, content_index, text) =
+        read_responses_sse_output_text_payload_args(payload_json, "output text done")?;
+    let output = build_responses_sse_output_text_done_payload(
+        output_index,
+        &item_id,
+        content_index,
+        &text,
+    )?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses output text done payload JSON: {}",
+            error
+        )
+    })
+}
+
 fn event_type(input: &Map<String, Value>) -> Result<&str, String> {
     input
         .get("type")
@@ -839,5 +944,57 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Responses content part descriptor missing type"));
+    }
+
+    #[test]
+    fn builds_responses_sse_output_text_done_payload() {
+        let output = build_responses_sse_output_text_done_payload(
+            3,
+            "msg_1",
+            1,
+            "final text",
+        )
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "output_index": 3,
+                "item_id": "msg_1",
+                "content_index": 1,
+                "text": "final text",
+                "logprobs": []
+            })
+        );
+    }
+
+    #[test]
+    fn builds_responses_sse_output_text_delta_payload() {
+        let output = build_responses_sse_output_text_delta_payload(
+            3,
+            "msg_1",
+            1,
+            "delta text",
+        )
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "output_index": 3,
+                "item_id": "msg_1",
+                "content_index": 1,
+                "delta": "delta text",
+                "logprobs": []
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_responses_sse_output_text_done_payload_missing_item_id() {
+        let err = build_responses_sse_output_text_done_payload(3, "   ", 1, "final text")
+            .unwrap_err();
+
+        assert!(err.contains("Responses output text done payload item_id is required"));
     }
 }

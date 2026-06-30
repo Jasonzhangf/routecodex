@@ -1,3 +1,11 @@
+# 2026-06-30: Responses SSE output text payload native owner slice
+
+- Red evidence：新增 `verify-sse-architecture-boundary` marker `logprobs: []` 后，门禁先红，证明 `responses.ts` 仍在本地合成 `response.output_text.delta/done` payload。
+- Fix：新增 Rust `buildResponsesSseOutputTextDeltaPayloadJson` / `buildResponsesSseOutputTextDonePayloadJson`，TS generator 只调用 native wrapper 并封装 SSE event envelope。
+- 正向/反向测试：Rust 覆盖 delta/done payload 与 missing `item_id` fail-fast；Jest 覆盖 native wrapper 与 sequenced `response.output_text.delta/done` projection。
+- 验证：Rust focused `output_text_` 11/11 PASS；native build PASS；focused Jest 27/27 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`；该样本无 output_text events，output_text 行为由 focused Jest 覆盖。
+
 # 2026-06-30: Responses SSE output item descriptor native owner slice
 
 - Red evidence：新增 `verify-sse-architecture-boundary` marker 后，门禁先红，命中 `const itemDescriptor: Record<string, unknown>` 与 `...(outputItem as any)`，证明 `responses.ts` 仍在本地合成 output item descriptor。

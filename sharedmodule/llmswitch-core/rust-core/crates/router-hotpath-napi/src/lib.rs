@@ -1963,6 +1963,22 @@ pub fn build_responses_sse_content_part_descriptor_json(
     .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildResponsesSseOutputTextDonePayloadJson")]
+pub fn build_responses_sse_output_text_done_payload_json(
+    payload_json: String,
+) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_output_text_done_payload_json(payload_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildResponsesSseOutputTextDeltaPayloadJson")]
+pub fn build_responses_sse_output_text_delta_payload_json(
+    payload_json: String,
+) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_output_text_delta_payload_json(payload_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "buildResponsesSseErrorPayloadJson")]
 pub fn build_responses_sse_error_payload_json(message_json: String) -> NapiResult<String> {
     responses_sse_event_payload::build_responses_sse_error_payload_json(message_json)

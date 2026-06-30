@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses SSE output text payload native owner slice
+
+- Red evidence: after adding `logprobs: []` as a forbidden marker, `npm run verify:sse-architecture-boundary` failed on the Responses event generator, proving `response.output_text.delta/done` payloads still synthesized output text payload semantics in TS.
+- Fix: added Rust owners `buildResponsesSseOutputTextDeltaPayloadJson` and `buildResponsesSseOutputTextDonePayloadJson`; TS now calls native payload builders and only wraps the SSE event envelope.
+- Positive / reverse tests: Rust covers output text delta/done payload construction and missing `item_id` fail-fast; Jest covers native wrapper output and sequenced `response.output_text.delta/done` projection without TS `logprobs: []` synthesis.
+- Verification: Rust focused `output_text_` 11/11 PASS; native build PASS; focused Jest 27/27 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` replayed cleanly with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`; that sample has no `output_text` events, so output text payload behavior is covered by focused Jest.
+
 ### 2026-06-30 Responses SSE content part descriptor native owner slice
 
 - Red evidence: after adding forbidden markers, `npm run verify:sse-architecture-boundary` failed on `const partDescriptor: Record<string, unknown>`, `(content as any).annotations`, and `(content as any).logprobs`, proving `responses.ts` still owned content part descriptor materialization in TS.

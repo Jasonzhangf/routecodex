@@ -15,6 +15,8 @@ import { TimeUtils, StringUtils } from '../../shared/utils.js';
 import {
   buildResponsesSseErrorPayloadWithNative,
   buildResponsesSseContentPartDescriptorWithNative,
+  buildResponsesSseOutputTextDeltaPayloadWithNative,
+  buildResponsesSseOutputTextDonePayloadWithNative,
   buildResponsesSseOutputItemDescriptorWithNative,
   normalizeResponsesSseReasoningSummaryWithNative,
   normalizeResponsesSseResponsePayloadWithNative
@@ -242,17 +244,19 @@ export function* buildContentPartDeltas(
 
   for (const chunk of chunks) {
     const baseEvent = createBaseEvent(context, config);
+    const delta = buildResponsesSseOutputTextDeltaPayloadWithNative(
+      context.outputIndexCounter,
+      outputItemId,
+      contentIndex,
+      chunk
+    );
     yield {
       type: 'response.output_text.delta',
       timestamp: baseEvent.timestamp,
       protocol: baseEvent.protocol,
       direction: baseEvent.direction,
       data: {
-        output_index: context.outputIndexCounter,
-        item_id: outputItemId,
-        content_index: contentIndex,
-        delta: chunk,
-        logprobs: []
+        ...delta
       },
       sequenceNumber: baseEvent.sequenceNumber
     };
@@ -297,6 +301,12 @@ export function buildOutputTextDoneEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
+  const textDone = buildResponsesSseOutputTextDonePayloadWithNative(
+    context.outputIndexCounter,
+    outputItemId,
+    contentIndex,
+    fullText
+  );
 
   return {
     type: 'response.output_text.done',
@@ -304,11 +314,7 @@ export function buildOutputTextDoneEvent(
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
     data: {
-      output_index: context.outputIndexCounter,
-      item_id: outputItemId,
-      content_index: contentIndex,
-      text: fullText,
-      logprobs: []
+      ...textDone
     },
     sequenceNumber: baseEvent.sequenceNumber
   };
