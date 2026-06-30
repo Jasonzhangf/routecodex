@@ -37,12 +37,11 @@ export async function runServertoolExecutionStage(args: {
   excludeAutoHookIds: Set<string> | null;
   responseStageGatePlan: Record<string, unknown>;
 }): Promise<ServerSideToolEngineResult> {
-  const baseForExecution = args.baseObject;
   const { dispatchPlan } = prepareServertoolDispatchStage({
     options: args.options,
     toolCalls: args.toolCalls,
     baseObject: args.baseObject,
-    baseForExecution,
+    baseForExecution: args.baseObject,
     includeToolCallNames: args.includeToolCallNames,
     excludeToolCallNames: args.excludeToolCallNames
   });
@@ -64,7 +63,7 @@ export async function runServertoolExecutionStage(args: {
     dispatchPlan,
     options: args.options,
     contextBase: args.contextBase,
-    baseForExecution
+    baseForExecution: args.baseObject
   });
 
   const postExecutionBranchPlan = planExecutionBranchRuntimeAction({
@@ -73,7 +72,7 @@ export async function runServertoolExecutionStage(args: {
   });
   if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {
     return materializeNativeToolCallExecutionOutcome({
-      baseForExecution,
+      baseForExecution: args.baseObject,
       options: args.options,
       toolCalls: args.toolCalls,
       executionState

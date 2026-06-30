@@ -206,6 +206,7 @@ const TARGETS = [
     forbidden: [
       'structuredClone(args.baseObject)',
       'const baseForExecution = structuredClone',
+      'const baseForExecution = args.baseObject;',
       'isStopMessageAutoPreProjection',
       'filterOutExecutedToolCalls',
       'stripToolOutputs',

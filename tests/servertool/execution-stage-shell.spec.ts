@@ -112,6 +112,7 @@ describe('execution-stage-shell', () => {
     expect(source).not.toContain('filterOutExecutedToolCalls');
     expect(source).not.toContain('stripToolOutputs');
     expect(source).not.toContain('structuredClone(args.baseObject)');
+    expect(source).not.toContain('const baseForExecution = args.baseObject;');
     expect(source).not.toContain('isStopMessageAutoPreProjection');
   });
 

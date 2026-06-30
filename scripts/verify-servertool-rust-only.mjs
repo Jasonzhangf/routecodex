@@ -5233,6 +5233,7 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'structuredClone(args.baseObject)',
     'const baseForExecution = structuredClone',
+    'const baseForExecution = args.baseObject;',
     'isStopMessageAutoPreProjection',
     'filterOutExecutedToolCalls',
     'stripToolOutputs',
