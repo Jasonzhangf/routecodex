@@ -8,7 +8,7 @@ import {
   planServertoolResponseStageGateWithNative,
   detectProviderResponseShapeWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { readRuntimeControlFromBoundMetadataCenter } from './metadata-center-carrier.js';
+import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 type ChatCompletionLike = JsonObject;
 
@@ -32,7 +32,7 @@ export async function runServertoolResponseStageOrchestrationShell(
   options: ServertoolResponseStageShellOptions
 ): Promise<ServertoolResponseStageShellResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
   const providerProtocol =
     typeof runtimeControl?.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
       ? runtimeControl.providerProtocol.trim()

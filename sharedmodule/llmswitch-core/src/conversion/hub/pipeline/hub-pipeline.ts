@@ -14,7 +14,7 @@ import {
 } from "../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { isRecord } from "../../../shared/common-utils.js";
-import { readRuntimeControlFromBoundMetadataCenter } from "../../../servertool/metadata-center-carrier.js";
+import { readRuntimeControlFromAnyBoundMetadataCenter } from "../../../servertool/metadata-center-carrier.js";
 import type {
   HubPipelineConfig,
   HubPipelineRequest,
@@ -111,7 +111,7 @@ function readString(value: unknown): string | undefined {
 }
 
 function readProviderProtocol(metadata: Record<string, unknown>): HubPipelineProviderProtocol {
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(metadata);
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(metadata);
   const providerProtocol =
     readString(runtimeControl?.providerProtocol)
     ?? readString(metadata.providerProtocol);

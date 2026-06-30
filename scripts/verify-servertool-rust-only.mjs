@@ -4710,6 +4710,7 @@ function checkStopGatewayMetadataCenterOnly() {
     'ensureRuntimeMetadata',
     'readRuntimeMetadata(',
     '__rt',
+    'export function readRuntimeControlFromBoundMetadataCenter(',
     'export function readRequestTruthSessionIdFromBoundMetadataCenter(',
   ]) {
     if (stopGatewayContext.includes(marker)) {
@@ -5505,7 +5506,7 @@ function checkResponseStageMetadataCenterOnly() {
     }
   }
   for (const marker of [
-    'readRuntimeControlFromBoundMetadataCenter(',
+    'readRuntimeControlFromAnyBoundMetadataCenter(',
   ]) {
     if (!responseStageShell.includes(marker)) {
       fail(

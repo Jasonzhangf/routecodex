@@ -73,7 +73,7 @@ export function writeRuntimeControlToBoundMetadataCenter(args: {
   center.writeRuntimeControl(args.key, args.value, args.writer, args.reason);
 }
 
-export function readRuntimeControlFromBoundMetadataCenter(
+function readRuntimeControlFromBoundMetadataCenter(
   metadata: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
   if (!metadata) {

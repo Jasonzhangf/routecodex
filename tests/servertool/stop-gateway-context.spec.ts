@@ -38,6 +38,8 @@ describe('servertool stop-gateway context', () => {
     expect(source).not.toContain('export function readProviderObservationFromAnyBoundMetadataCenter(');
     expect(source).toContain('function readRequestTruthFromAnyBoundMetadataCenter(');
     expect(source).toContain('function readProviderObservationFromAnyBoundMetadataCenter(');
+    expect(source).not.toContain('export function readRuntimeControlFromBoundMetadataCenter(');
+    expect(source).toContain('function readRuntimeControlFromBoundMetadataCenter(');
   });
 
   test('metadata carrier does not export stop eligibility facade helpers', () => {

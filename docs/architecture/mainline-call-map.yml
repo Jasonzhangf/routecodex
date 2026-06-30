@@ -898,7 +898,7 @@ chains:
         to_node: MetaResp07ServertoolContextProjected
         caller_symbol: runServertoolResponseStageOrchestrationShell
         caller_file: sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts
-        callee_symbol: readRuntimeControlFromBoundMetadataCenter
+        callee_symbol: readRuntimeControlFromAnyBoundMetadataCenter
         callee_file: sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "bridge-bound metadata center"
