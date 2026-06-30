@@ -9,6 +9,7 @@ use crate::hub_resp_outbound_client_semantics_blocks::anthropic_response::build_
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
     normalize_responses_tool_call_arguments_for_client, project_responses_client_body_for_client,
     project_responses_client_payload_for_client, project_responses_sse_frame_for_client,
+    project_sse_error_event_payload, ProjectSseErrorEventPayloadInput,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::{
     resolve_client_facing_request_id_from_context, resolve_client_protocol_for_response_entry,
@@ -22,7 +23,9 @@ use crate::hub_resp_outbound_client_semantics_blocks::responses_payload::{
     build_responses_payload_from_chat_core, normalize_responses_function_name,
     project_post_servertool_hub_resp_outbound_04_client_semantic,
 };
-use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_responses_usage;
+use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::{
+    normalize_chat_usage, normalize_responses_usage,
+};
 use crate::hub_resp_outbound_client_semantics_blocks::tool_semantics::{
     normalize_alias_map, resolve_alias_map_from_resp_semantics, resolve_alias_map_from_sources,
     resolve_client_tools_raw, resolve_client_tools_raw_from_resp_semantics,
@@ -259,6 +262,14 @@ pub fn project_responses_client_body_for_client_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi(js_name = "projectSseErrorEventPayloadJson")]
+pub fn project_sse_error_event_payload_json(input_json: String) -> NapiResult<String> {
+    let input: ProjectSseErrorEventPayloadInput =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = project_sse_error_event_payload(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi]
 pub fn project_responses_client_payload_for_client_json(
     responses_payload_json: String,
@@ -313,6 +324,14 @@ pub fn normalize_responses_usage_json(usage_json: String) -> NapiResult<String> 
     let usage: Value =
         serde_json::from_str(&usage_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = normalize_responses_usage(&usage);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn normalize_chat_usage_json(usage_json: String) -> NapiResult<String> {
+    let usage: Value =
+        serde_json::from_str(&usage_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = normalize_chat_usage(&usage).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

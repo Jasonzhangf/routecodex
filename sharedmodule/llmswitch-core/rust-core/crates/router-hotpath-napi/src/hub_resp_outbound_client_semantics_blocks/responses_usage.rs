@@ -9,6 +9,137 @@ fn read_number_field(value: Option<&Value>) -> Option<f64> {
     }
 }
 
+fn read_non_negative_integer_field(
+    row: &Map<String, Value>,
+    keys: &[&str],
+    field_name: &str,
+) -> Result<Option<i64>, String> {
+    for key in keys {
+        let Some(value) = row.get(*key) else {
+            continue;
+        };
+        let parsed = match value {
+            Value::Number(number) => number.as_f64(),
+            Value::String(text) => {
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    trimmed.parse::<f64>().ok()
+                }
+            }
+            _ => None,
+        };
+        let Some(number) = parsed else {
+            return Err(format!("Invalid Chat usage.{}", field_name));
+        };
+        if !number.is_finite() || number < 0.0 {
+            return Err(format!("Invalid Chat usage.{}", field_name));
+        }
+        return Ok(Some(number.round() as i64));
+    }
+    Ok(None)
+}
+
+fn read_nested_non_negative_integer_field(
+    row: &Map<String, Value>,
+    parent_key: &str,
+    child_key: &str,
+    field_name: &str,
+) -> Result<Option<i64>, String> {
+    let Some(parent) = row.get(parent_key) else {
+        return Ok(None);
+    };
+    if parent.is_null() {
+        return Ok(None);
+    }
+    let Some(parent_row) = parent.as_object() else {
+        return Err(format!("Invalid Chat usage.{}", field_name));
+    };
+    read_non_negative_integer_field(parent_row, &[child_key], field_name)
+}
+
+pub(crate) fn normalize_chat_usage(usage_raw: &Value) -> Result<Value, String> {
+    if usage_raw.is_null() {
+        return Ok(Value::Null);
+    }
+    let Some(row) = usage_raw.as_object() else {
+        return Err("Invalid Chat usage: expected object".to_string());
+    };
+
+    let prompt_tokens = read_non_negative_integer_field(
+        row,
+        &["prompt_tokens", "input_tokens", "promptTokens", "inputTokens"],
+        "prompt_tokens",
+    )?;
+    let completion_tokens = read_non_negative_integer_field(
+        row,
+        &[
+            "completion_tokens",
+            "output_tokens",
+            "completionTokens",
+            "outputTokens",
+        ],
+        "completion_tokens",
+    )?;
+    let total_tokens = read_non_negative_integer_field(
+        row,
+        &["total_tokens", "totalTokens"],
+        "total_tokens",
+    )?
+    .or_else(|| {
+        let total = prompt_tokens.unwrap_or(0) + completion_tokens.unwrap_or(0);
+        if total > 0 {
+            Some(total)
+        } else {
+            None
+        }
+    });
+
+    let (Some(prompt_tokens), Some(completion_tokens), Some(total_tokens)) =
+        (prompt_tokens, completion_tokens, total_tokens)
+    else {
+        return Err("Invalid Chat usage: missing token fields".to_string());
+    };
+
+    let cached_tokens = read_non_negative_integer_field(
+        row,
+        &["prompt_cache_hit_tokens"],
+        "prompt_cache_hit_tokens",
+    )?
+    .or(read_nested_non_negative_integer_field(
+        row,
+        "input_tokens_details",
+        "cached_tokens",
+        "input_tokens_details.cached_tokens",
+    )?)
+    .or(read_nested_non_negative_integer_field(
+        row,
+        "prompt_tokens_details",
+        "cached_tokens",
+        "prompt_tokens_details.cached_tokens",
+    )?);
+
+    let mut out = Map::new();
+    out.insert("prompt_tokens".to_string(), Value::from(prompt_tokens));
+    out.insert(
+        "completion_tokens".to_string(),
+        Value::from(completion_tokens),
+    );
+    out.insert("total_tokens".to_string(), Value::from(total_tokens));
+
+    if let Some(cached_tokens) = cached_tokens.filter(|value| *value > 0) {
+        let mut details = Map::new();
+        details.insert("cached_tokens".to_string(), Value::from(cached_tokens));
+        out.insert(
+            "prompt_tokens_details".to_string(),
+            Value::Object(details),
+        );
+    }
+
+    Ok(Value::Object(out))
+}
+
 pub(crate) fn normalize_responses_usage(usage_raw: &Value) -> Value {
     let Some(usage_row) = usage_raw.as_object() else {
         return usage_raw.clone();

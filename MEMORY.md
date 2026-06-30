@@ -1,3 +1,8 @@
+# 2026-06-30: priority 场景网络错误处理结论
+- `priority` 只决定路由排序，不改变错误主链；临时网络错（`fetch failed` / `socket hang up` / `network timeout` / SSE decode）按 provider failure policy 走 `recoverable`，再由 ErrorErr05 决定是否 reroute。
+- 只要当前 route pool 还有剩余候选，或者 default pool 仍可用，`mayProject` 就应保持 false；当前请求链先排除/切换，不能直接投影成客户端错误。
+- 失败 provider 的排除主要是当前请求链内状态；后续新请求是否再命中，取决于 VR health/quota/default truth 是否恢复，而不是 priority 分支本身有特殊复活逻辑。
+
 # 2026-06-30: Responses SSE handler/bridge fallback surface removed
 - `/v1/responses` force-SSE 路径不得在 TS handler/bridge 中把 JSON/chat body 现场转换成 SSE；缺 Rust/Hub-produced `sseStream` 必须 fail-fast 走 missing-stream error path。
 - `responses-sse-bridge` / `responses-response-bridge` 不再是 SSE error payload builder owner；`buildResponsesSseErrorPayloadForHttp`、`buildResponsesStructuredSseErrorPayloadForHttp`、`buildResponsesMissingSseBridgeErrorPayloadForHttp` 已从 bridge surface / d.ts / function-map canonical builders 删除。
@@ -194,3 +199,8 @@
 - Verified: `sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts` no longer exposes static `createResponse*` / `createRequiredActionEvent` helpers that synthesize Responses SSE events with `timestamp ?? Date.now()`.
 - Gate: `verify:sse-architecture-boundary` now forbids those static factory markers and timestamp fallback in the serializer source; `responses-event-serializer-no-salvage.spec.ts` asserts the runtime static surface is absent.
 - Reusable lesson: when an SSE serializer owns only wire formatting, delete dead event-factory helpers instead of keeping “convenient” timestamp synthesis in TS; lock the deletion with a source gate plus a runtime-surface test.
+# 2026-06-30: chat SSE usage normalization is Rust-owned
+
+- Verified: `sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts` no longer owns local Chat usage normalization; it now calls Rust/NAPI `normalizeChatUsageJson` through `normalizeChatUsageWithNative`.
+- Verified boundary: `input_tokens_details` / `prompt_tokens_details` may be `null` in real provider SSE chunks and must be treated as absent details, not as schema errors. Non-null invalid nested shapes still fail-fast.
+- Reusable lesson: when Chat SSE decode and Responses/chat outbound already share a usage normalization family, move the remaining decode-side helper to Rust rather than keeping a second TS normalizer. Lock it with a source gate plus a positive native-owner regression.

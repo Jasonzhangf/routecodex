@@ -112,4 +112,28 @@ describe('chat SSE no-salvage boundary', () => {
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
+
+  it('normalizes chat usage through native owner instead of local TS helper semantics', async () => {
+    const sseText = [
+      'event: chat_chunk',
+      'data: {"id":"chatcmpl_usage_native","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","usage":{"input_tokens":12,"output_tokens":5,"prompt_cache_hit_tokens":3},"choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"logprobs":null,"finish_reason":"stop"}]}',
+      '',
+      'event: chat.done',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    const output = await converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_usage_native_owner',
+      model: 'gpt-4o-mini'
+    });
+
+    expect(output.usage).toEqual({
+      prompt_tokens: 12,
+      completion_tokens: 5,
+      total_tokens: 17,
+      prompt_tokens_details: { cached_tokens: 3 }
+    });
+  });
 });

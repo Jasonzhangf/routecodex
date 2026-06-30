@@ -111,3 +111,12 @@ Focused tests to use as slice gates:
 - Red evidence: `responses-event-serializer.ts` still exposed static `createResponse*` / `createRequiredActionEvent` helpers and used `timestamp ?? Date.now()` to synthesize SSE events in TS.
 - Fix: physically deleted the static factory block; kept the serializer as wire-format / parse-only owner; added source gate markers to `verify-sse-architecture-boundary.mjs` and a runtime-surface assertion in `tests/sharedmodule/responses-event-serializer-no-salvage.spec.ts`.
 - Verification: `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `tests/sharedmodule/responses-event-serializer-no-salvage.spec.ts` PASS; sharedmodule `tsc --noEmit` PASS; root `tsc --noEmit` PASS; `git diff --check` PASS.
+
+### 2026-06-30 chat SSE usage normalization moved to Rust owner
+
+- Red evidence: `chat-sse-to-json-converter.ts` still carried local `normalizeChatUsage` / `readNonNegativeInteger` helpers, so chat SSE decode retained a second TS usage-normalization owner.
+- Fix: added Rust `normalize_chat_usage` plus NAPI export `normalizeChatUsageJson`, TS wrapper `normalizeChatUsageWithNative`, and removed the local helper block from `chat-sse-to-json-converter.ts`; gate now forbids the old helper/call markers.
+- Positive tests: `chat-sse-no-salvage.spec.ts` now proves a chat chunk with Responses-style usage fields (`input_tokens` / `output_tokens` / `prompt_cache_hit_tokens`) is normalized through native owner into chat usage output.
+- Reverse tests: Rust `normalize_chat_usage_rejects_missing_token_fields` proves missing required token fields still fail-fast; real nested `details: null` is accepted as “no cached token details”, not silently rewritten.
+- Verification: Rust focused `normalize_chat_usage` PASS; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; `tests/sharedmodule/chat-sse-no-salvage.spec.ts` PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule `tsc --noEmit` PASS; `git diff --check` PASS.
+- Replay note: replaying `~/.rcc/codex-samples/openai-chat/ports/10000/req_1782778465399_hrxbpl3tz/provider-response_1.json` no longer fails on `usage.input_tokens_details.cached_tokens` null shape; the remaining replay blocker is a separate tail empty-chunk validator error (`Invalid chat completion chunk id`), which should be handled in the next slice rather than mixed into usage-owner closure.

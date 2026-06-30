@@ -26,6 +26,7 @@ import {
 import { normalizeMessageReasoningTools } from '../../conversion/shared/reasoning-tool-normalizer.js';
 import { normalizeChatMessageContent } from '../../conversion/shared/chat-output-normalizer.js';
 import { dispatchReasoning } from '../shared/reasoning-dispatcher.js';
+import { normalizeChatUsageWithNative } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 const hasExplicitToolWrapperProgress = (text: string): boolean => {
   if (!text) {
@@ -44,74 +45,18 @@ const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
 const DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS = 45_000;
 const DEFAULT_CONTENT_IDLE_TIMEOUT_MS = 300_000;
 
-function readNonNegativeInteger(value: unknown, fieldName: string): number | undefined {
-  if (typeof value === 'undefined') {
-    return undefined;
-  }
-  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
-    return Math.round(value);
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      return Math.round(parsed);
-    }
-  }
-  throw new Error(`Invalid Chat usage.${fieldName}`);
-}
-
-function normalizeChatUsage(usage: unknown): ChatUsage | undefined {
+function coerceNormalizedChatUsage(usage: unknown): ChatUsage | undefined {
   if (typeof usage === 'undefined' || usage === null) {
     return undefined;
   }
-  if (typeof usage !== 'object' || Array.isArray(usage)) {
-    throw new Error('Invalid Chat usage: expected object');
+  const normalized = normalizeChatUsageWithNative(usage);
+  if (typeof normalized === 'undefined' || normalized === null) {
+    return undefined;
   }
-  const record = usage as Record<string, unknown>;
-  const promptTokens = readNonNegativeInteger(
-    record.prompt_tokens ?? record.input_tokens ?? record.promptTokens ?? record.inputTokens,
-    'prompt_tokens'
-  );
-  const completionTokens = readNonNegativeInteger(
-    record.completion_tokens ?? record.output_tokens ?? record.completionTokens ?? record.outputTokens,
-    'completion_tokens'
-  );
-  const totalTokens = readNonNegativeInteger(
-    record.total_tokens ??
-      record.totalTokens ??
-      ((promptTokens ?? 0) + (completionTokens ?? 0) > 0
-        ? (promptTokens ?? 0) + (completionTokens ?? 0)
-        : undefined),
-    'total_tokens'
-  );
-  if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {
-    throw new Error('Invalid Chat usage: missing token fields');
+  if (typeof normalized !== 'object' || Array.isArray(normalized)) {
+    throw new Error('Invalid Chat usage: native normalization returned non-object');
   }
-
-  // 提取缓存命中 token（支持常见上游格式）：
-  //   - Responses: input_tokens_details.cached_tokens
-  //   - Chat/OpenAI: prompt_tokens_details.cached_tokens
-  //   - Some OpenAI-compatible providers: prompt_cache_hit_tokens（顶层）
-  let cachedTokens: number | undefined;
-  const detailsInput = (record as any).input_tokens_details as Record<string, unknown> | undefined;
-  const detailsPrompt = (record as any).prompt_tokens_details as Record<string, unknown> | undefined;
-  cachedTokens = readNonNegativeInteger(record.prompt_cache_hit_tokens, 'prompt_cache_hit_tokens');
-  if (cachedTokens === undefined && detailsInput) {
-    cachedTokens = readNonNegativeInteger((detailsInput as any).cached_tokens, 'input_tokens_details.cached_tokens');
-  }
-  if (cachedTokens === undefined && detailsPrompt) {
-    cachedTokens = readNonNegativeInteger((detailsPrompt as any).cached_tokens, 'prompt_tokens_details.cached_tokens');
-  }
-
-  const out: ChatUsage = {
-    prompt_tokens: promptTokens,
-    completion_tokens: completionTokens,
-    total_tokens: totalTokens
-  };
-  if (cachedTokens !== undefined && cachedTokens > 0) {
-    out.prompt_tokens_details = { cached_tokens: cachedTokens };
-  }
-  return out;
+  return normalized as ChatUsage;
 }
 
 /**
@@ -563,7 +508,7 @@ export class ChatSseToJsonConverter {
           context.currentResponse.model = chunk.model;
         }
 
-        const normalizedUsage = normalizeChatUsage(chunk.usage);
+        const normalizedUsage = coerceNormalizedChatUsage(chunk.usage);
         if (normalizedUsage) {
           context.currentResponse.usage = normalizedUsage;
           context.eventStats.totalTokens = normalizedUsage.total_tokens;
@@ -1205,7 +1150,7 @@ export class ChatSseToJsonConverter {
    * 构建使用量信息
    */
   private buildUsageInfo(_context: SseToChatJsonContext): ChatCompletionResponse['usage'] | null {
-    const directUsage = normalizeChatUsage(_context.currentResponse.usage);
+    const directUsage = coerceNormalizedChatUsage(_context.currentResponse.usage);
     return directUsage || null;
   }
 

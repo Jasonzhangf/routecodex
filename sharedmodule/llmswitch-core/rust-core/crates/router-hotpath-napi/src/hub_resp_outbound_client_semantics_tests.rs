@@ -212,6 +212,35 @@ fn normalize_responses_usage_projects_responses_only_fields_from_chat_shape() {
 }
 
 #[test]
+fn normalize_chat_usage_projects_chat_shape_from_responses_style_fields() {
+    let usage = json!({
+        "input_tokens": 12,
+        "output_tokens": 5,
+        "prompt_cache_hit_tokens": 3
+    });
+
+    let output = normalize_chat_usage(&usage).expect("normalized chat usage");
+
+    assert_eq!(output["prompt_tokens"], json!(12));
+    assert_eq!(output["completion_tokens"], json!(5));
+    assert_eq!(output["total_tokens"], json!(17));
+    assert_eq!(
+        output["prompt_tokens_details"]["cached_tokens"],
+        json!(3)
+    );
+}
+
+#[test]
+fn normalize_chat_usage_rejects_missing_token_fields() {
+    let usage = json!({
+        "prompt_tokens": 12
+    });
+
+    let error = normalize_chat_usage(&usage).expect_err("missing token fields must fail");
+    assert_eq!(error, "Invalid Chat usage: missing token fields");
+}
+
+#[test]
 fn build_responses_payload_from_chat_filters_executed_tool_outputs_from_required_action() {
     let payload = serde_json::json!({
         "id": "resp_partial",

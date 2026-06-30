@@ -344,10 +344,103 @@ export function projectResponsesSseFrameForClientWithNative(input: {
   }
 }
 
+export function projectSseErrorEventPayloadWithNative(input: {
+  requestId: string;
+  status: number;
+  message: string;
+  code: string;
+  error?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const capability = 'projectSseErrorEventPayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify({
+    requestId: input.requestId,
+    status: Number.isFinite(input.status) ? Math.floor(input.status) : input.status,
+    message: input.message,
+    code: input.code,
+    error: input.error
+  });
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    const error = parsed?.error;
+    if (
+      !parsed
+      || parsed.type !== 'error'
+      || typeof parsed.status !== 'number'
+      || !error
+      || typeof error !== 'object'
+      || Array.isArray(error)
+      || typeof (error as Record<string, unknown>).message !== 'string'
+      || typeof (error as Record<string, unknown>).code !== 'string'
+      || typeof (error as Record<string, unknown>).request_id !== 'string'
+    ) {
+      return fail('invalid payload');
+    }
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function normalizeResponsesUsageWithNative(
   usageRaw: unknown
 ): unknown {
   const capability = 'normalizeResponsesUsageJson';
+  const fail = (reason?: string) => failNative<unknown>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const usageJson = safeStringify(usageRaw ?? null);
+  if (!usageJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(usageJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return fail('invalid payload');
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function normalizeChatUsageWithNative(
+  usageRaw: unknown
+): unknown {
+  const capability = 'normalizeChatUsageJson';
   const fail = (reason?: string) => failNative<unknown>(capability, reason);
   if (isNativeDisabledByEnv()) {
     return fail('native disabled');

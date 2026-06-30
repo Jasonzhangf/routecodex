@@ -242,11 +242,15 @@ for (const relPath of providerNeutralProjectionFiles) {
 const chatSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts');
 for (const forbidden of [
   'function normalizeChatUsage(usage: unknown): ChatUsage | null',
+  'function normalizeChatUsage(usage: unknown): ChatUsage | undefined',
+  'function readNonNegativeInteger(',
   'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return null;\n  }',
   'if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {\n    return null;\n  }',
   "id: context.currentResponse.id || ''",
   'created: context.currentResponse.created || 0',
   "message: choice.message || { role: 'assistant', content: '' }",
+  'const normalizedUsage = normalizeChatUsage(chunk.usage);',
+  'const directUsage = normalizeChatUsage(_context.currentResponse.usage);',
 ]) {
   if (chatSseToJsonConverter.includes(forbidden)) {
     failures.push(`Chat SSE decode must not synthesize missing response truth: ${forbidden}`);
