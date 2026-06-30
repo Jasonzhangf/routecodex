@@ -98,8 +98,9 @@ const TARGETS = [
     required: [
       'planServertoolResponseStageGateWithNative',
       'runServertoolResponseStageAutoHookPass',
+      "const continueToExecution = {",
       'responseHookMatched !== true',
-      'continue_to_execution',
+      'return continueToExecution;',
     ],
   },
   {

@@ -29,12 +29,13 @@ export async function runServertoolResponseStagePrePass(args: {
       args.options.adapterContext as Record<string, unknown>
     )
   }) as Record<string, unknown>;
+  const continueToExecution = {
+    action: 'continue_to_execution' as const,
+    responseStageGatePlan
+  };
 
   if (responseStageGatePlan.responseHookMatched !== true) {
-    return {
-      action: 'continue_to_execution',
-      responseStageGatePlan
-    };
+    return continueToExecution;
   }
 
   const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
@@ -52,8 +53,5 @@ export async function runServertoolResponseStagePrePass(args: {
     };
   }
 
-  return {
-    action: 'continue_to_execution',
-    responseStageGatePlan
-  };
+  return continueToExecution;
 }
