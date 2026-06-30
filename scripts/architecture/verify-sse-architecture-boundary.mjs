@@ -109,9 +109,14 @@ for (const forbidden of [
   'prompt_tokens',
   'completion_tokens',
   'cache_read_input_tokens',
+  'function collapseWhitespace(',
+  'function stripReasoningLinePrefix(',
+  'function compactReasoningSummaryBody(',
+  'function normalizeReasoningSummaryText(',
+  '**Thinking**',
 ]) {
   if (responsesEventGenerator.includes(forbidden)) {
-    failures.push(`Responses SSE generator must not keep usage compatibility/fallback marker: ${forbidden}`);
+    failures.push(`Responses SSE generator must not keep usage/reasoning compatibility marker: ${forbidden}`);
   }
 }
 

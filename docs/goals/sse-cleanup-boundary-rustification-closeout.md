@@ -147,6 +147,15 @@ Focused tests to use as slice gates:
 - Verification: focused Jest `responses-json-to-sse-usage + responses-sse-usage-no-fallback` PASS 6/6; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
 - Replay: real 4444 sample `/Volumes/extension/.rcc/codex-samples/openai-responses/ports/4444/req_1782794773576_s7okhowx0/provider-response_1.json` first materializes through native `ResponsesSseToJsonConverter`, then re-encodes through `ResponsesJsonToSseConverterRefactored` with `has_completed=true`, `has_done=true`, `has_error=false`, usage preserved as canonical `{"input_tokens":64215,"input_tokens_details":{"cached_tokens":61056},"output_tokens":672,"output_tokens_details":{"reasoning_tokens":610},"total_tokens":64887}`.
 
+### 2026-06-30 Responses reasoning summary verbatim projection slice
+
+- Red evidence: `responses.ts` still normalized reasoning summary text by stripping markdown/list prefixes, compacting whitespace, removing code fences/backticks, and auto-injecting `**Thinking**`, which made the SSE generator a semantic repair owner.
+- Fix: `normalizeReasoningSummaryEntries` now only reads existing string entries or object `.text` fields and preserves text verbatim; the markdown-compaction helpers were deleted.
+- Positive tests: `responses-sse-reasoning-summary-no-normalize.spec.ts` proves raw `- inspect \`file.ts\`\n\n> keep quoted detail` survives both `response.output_item.done` and `response.reasoning_summary_text.done`.
+- Reverse tests/gates: `verify:sse-architecture-boundary` now forbids `collapseWhitespace`, `stripReasoningLinePrefix`, `compactReasoningSummaryBody`, `normalizeReasoningSummaryText`, and `**Thinking**` in the Responses generator.
+- Verification: focused Jest `responses-sse-reasoning-summary-no-normalize + responses-sse-metadata-boundary` PASS 2/2; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Replay: real 4444 Responses sample replay succeeded with `reasoning_items=1`, `has_completed=true`, `has_done=true`, `has_error=false`, and canonical usage preserved.
+
 ### 2026-06-30 Chat JSON->SSE usage alias fallback removed
 
 - Red evidence: `chat.ts::normalizeChatUsage` accepted Responses-style `input_tokens` / `output_tokens`, camelCase `promptTokens` / `completionTokens` / `inputTokens` / `outputTokens` / `totalTokens`, and computed missing `total_tokens`, making the TS chat SSE generator a second usage-normalization owner.

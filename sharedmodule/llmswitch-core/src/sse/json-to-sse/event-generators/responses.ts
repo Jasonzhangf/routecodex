@@ -45,97 +45,18 @@ function chunkText(text: string, config: ResponsesEventGeneratorConfig): string[
 
 function normalizeReasoningSummaryEntries(summary: ResponsesReasoningItem['summary'] | undefined): string[] {
   if (!Array.isArray(summary)) return [];
-  const rawEntries: string[] = [];
+  const entries: string[] = [];
   for (const entry of summary) {
     if (typeof entry === 'string') {
-      if (entry.length) rawEntries.push(entry);
+      if (entry.length) entries.push(entry);
       continue;
     }
     if (entry && typeof entry === 'object') {
       const text = typeof (entry as any).text === 'string' ? (entry as any).text : '';
-      if (text.length) rawEntries.push(text);
-    }
-  }
-  const entries: string[] = [];
-  for (let index = 0; index < rawEntries.length; index += 1) {
-    const normalized = normalizeReasoningSummaryText(rawEntries[index], index === 0);
-    if (normalized) {
-      entries.push(normalized);
+      if (text.length) entries.push(text);
     }
   }
   return entries;
-}
-
-function collapseWhitespace(raw: string): string {
-  return raw
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function stripReasoningLinePrefix(raw: string): string {
-  let line = raw.trimStart();
-  while (true) {
-    const before = line;
-    if (line.startsWith('>')) {
-      line = line.slice(1).trimStart();
-      continue;
-    }
-    if (line.startsWith('- ') || line.startsWith('* ') || line.startsWith('+ ')) {
-      line = line.slice(2).trimStart();
-      continue;
-    }
-    if (/^\d+[.)]\s+/.test(line)) {
-      line = line.replace(/^\d+[.)]\s+/, '').trimStart();
-      continue;
-    }
-    if (before === line) {
-      break;
-    }
-  }
-  return line.trim();
-}
-
-function compactReasoningSummaryBody(raw: string): string {
-  const chunks: string[] = [];
-  const normalizedNewline = raw.replace(/\r\n?/g, '\n');
-  for (const lineRaw of normalizedNewline.split('\n')) {
-    const line = lineRaw.trim();
-    if (!line) {
-      continue;
-    }
-    if (line.startsWith('```')) {
-      continue;
-    }
-    const noPrefix = stripReasoningLinePrefix(line);
-    if (!noPrefix) {
-      continue;
-    }
-    chunks.push(noPrefix.replace(/`/g, ''));
-  }
-  return collapseWhitespace(chunks.join(' '));
-}
-
-function normalizeReasoningSummaryText(text: string, ensureHeader: boolean): string {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return '';
-  }
-  const headerMatch = trimmed.match(/^\*\*([^*]+)\*\*/);
-  const hasHeader = Boolean(headerMatch);
-  const header = hasHeader ? `**${(headerMatch?.[1] || '').trim()}**` : '';
-  const bodyRaw = hasHeader ? trimmed.slice((headerMatch?.[0] || '').length) : trimmed;
-  const body = compactReasoningSummaryBody(bodyRaw);
-
-  if (header) {
-    return body ? `${header} ${body}`.trim() : header;
-  }
-  if (!body) {
-    return '';
-  }
-  if (ensureHeader) {
-    return `**Thinking** ${body}`;
-  }
-  return body;
 }
 
 function normalizeReasoningSummaryField(summary: ResponsesReasoningItem['summary'] | undefined): Array<{ type: 'summary_text'; text: string }> | undefined {
