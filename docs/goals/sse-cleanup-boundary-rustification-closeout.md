@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses SSE text chunk native owner slice
+
+- Red evidence: current gate markers checked previous HEAD and caught `const TEXT_CHUNK_BOUNDARY`, `function getChunkSize(`, `function chunkText(`, and `StringUtils.chunkString(`, proving Responses SSE text chunking still lived in TS.
+- Fix: added Rust owner `buildResponsesSseTextChunksJson`; TS now calls `buildResponsesSseTextChunksWithNative()` for output text deltas, function call argument deltas, and reasoning summary text deltas while only wrapping the SSE event envelope.
+- Positive / reverse tests: Rust covers chunking disabled as one chunk, boundary/size chunking, and missing text fail-fast; Jest covers native wrapper output and sequenced output text deltas using native chunks.
+- Verification: native build PASS; Rust focused `text_chunks` PASS 3/3; focused Jest PASS 31/31; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; `verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `functionDelta=16`, `outputTextDelta=0`, and `summaryDelta=0`.
+
 ### 2026-06-30 Responses SSE output/content wrapper payload native owner slice
 
 - Red evidence: after adding `output_index: context.outputIndexCounter,`, `item_id: outputItemId,`, and `content_index: contentIndex,` as forbidden markers, `npm run verify:sse-architecture-boundary` failed on `responses.ts`, proving `response.output_item.*` and `response.content_part.*` wrapper payloads still lived in TS.

@@ -11,8 +11,9 @@ import type {
   ResponsesReasoningItem,
   ResponsesContent
 } from '../../types/index.js';
-import { TimeUtils, StringUtils } from '../../shared/utils.js';
+import { TimeUtils } from '../../shared/utils.js';
 import {
+  buildResponsesSseTextChunksWithNative,
   buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative,
   buildResponsesSseFunctionCallArgumentsDonePayloadWithNative,
   buildResponsesSseErrorPayloadWithNative,
@@ -25,32 +26,6 @@ import {
   buildResponsesSseResponseEventPayloadWithNative,
   normalizeResponsesSseReasoningSummaryWithNative,
 } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
-
-const TEXT_CHUNK_BOUNDARY = /[\n\r\t，。、“”‘’！？,.\-:\u3000\s]/;
-
-function cloneRegex(source: RegExp): RegExp {
-  return new RegExp(source.source, source.flags);
-}
-
-function getChunkSize(config: ResponsesEventGeneratorConfig): number | null {
-  const size =
-    typeof config.chunkSize === 'number'
-      ? config.chunkSize
-      : DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG.chunkSize;
-  if (size !== undefined && size <= 0) {
-    return null;
-  }
-  return Math.max(1, size || 1);
-}
-
-function chunkText(text: string, config: ResponsesEventGeneratorConfig): string[] {
-  const size = getChunkSize(config);
-  if (size === null) {
-    // chunking explicitly disabled
-    return [text];
-  }
-  return StringUtils.chunkString(text, size, cloneRegex(TEXT_CHUNK_BOUNDARY));
-}
 
 function normalizeReasoningSummaryFieldWithNative(
   summary: ResponsesReasoningItem['summary'] | undefined
@@ -232,7 +207,7 @@ export function* buildContentPartDeltas(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
   if (!text) return;
-  const chunks = chunkText(text, config);
+  const chunks = buildResponsesSseTextChunksWithNative(text, config.chunkSize);
 
   for (const chunk of chunks) {
     const baseEvent = createBaseEvent(context, config);
@@ -332,7 +307,7 @@ export function* buildFunctionCallArgsDeltas(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
   if (!functionCall.arguments) return;
-  const chunks = chunkText(functionCall.arguments, config);
+  const chunks = buildResponsesSseTextChunksWithNative(functionCall.arguments, config.chunkSize);
 
   for (const chunk of chunks) {
     const baseEvent = createBaseEvent(context, config);
@@ -518,7 +493,7 @@ export function* buildReasoningSummaryEvents(
       sequenceNumber: partAddedBase.sequenceNumber
     };
 
-    const chunks = chunkText(text, config);
+    const chunks = buildResponsesSseTextChunksWithNative(text, config.chunkSize);
     for (const chunk of chunks) {
       if (!chunk) continue;
       const deltaBase = createBaseEvent(context, config);

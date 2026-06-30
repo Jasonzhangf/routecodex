@@ -1,3 +1,10 @@
+# 2026-06-30: Responses SSE text chunk native owner slice
+- `responses.ts` 的 `chunkText/getChunkSize/TEXT_CHUNK_BOUNDARY` 分块语义下沉到 Rust `buildResponsesSseTextChunksJson`，TS 只保留调用 native chunks 后封装 SSE envelope。
+- 红证据：当前门禁 marker 对上一提交 `responses.ts` 命中 `const TEXT_CHUNK_BOUNDARY` / `function getChunkSize(` / `function chunkText(` / `StringUtils.chunkString(`。
+- 覆盖路径：`response.output_text.delta`、`response.function_call_arguments.delta`、`response.reasoning_summary_text.delta` 都改为 `buildResponsesSseTextChunksWithNative()`。
+- 验证：native build PASS；Rust `text_chunks` 3/3 PASS；focused Jest 31/31 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE 成功，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`、`functionDelta=16`、`outputTextDelta=0`、`summaryDelta=0`。
+
 # 2026-06-30: Responses SSE output/content wrapper payload native owner slice
 - `responses.ts` 的 `response.output_item.added/done` 与 `response.content_part.added/done` 外层 wrapper payload 下沉到 Rust `buildResponsesSseOutputItemEventPayloadJson` / `buildResponsesSseContentPartEventPayloadJson`，TS 只保留 SSE envelope。
 - 红测：`verify:sse-architecture-boundary` 先红，命中 `output_index: context.outputIndexCounter,` / `item_id: outputItemId,`。

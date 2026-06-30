@@ -164,6 +164,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "canonicalizeResponsesSseEventPayloadJson",
   "normalizeResponsesSseResponsePayloadJson",
   "buildResponsesSseResponseEventPayloadJson",
+  "buildResponsesSseTextChunksJson",
   "normalizeResponsesSseReasoningSummaryJson",
   "buildResponsesSseOutputItemDescriptorJson",
   "buildResponsesSseContentPartDescriptorJson",

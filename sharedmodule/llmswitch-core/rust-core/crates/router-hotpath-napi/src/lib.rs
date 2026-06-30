@@ -1945,6 +1945,12 @@ pub fn build_responses_sse_response_event_payload_json(
     .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildResponsesSseTextChunksJson")]
+pub fn build_responses_sse_text_chunks_json(payload_json: String) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_text_chunks_json(payload_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "normalizeResponsesSseReasoningSummaryJson")]
 pub fn normalize_responses_sse_reasoning_summary_json(summary_json: String) -> NapiResult<String> {
     responses_sse_event_payload::normalize_responses_sse_reasoning_summary_json(summary_json)

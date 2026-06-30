@@ -1,5 +1,88 @@
 use serde_json::{Map, Value};
 
+fn is_responses_sse_text_chunk_boundary(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            ',' | '.'
+                | '!'
+                | '?'
+                | ';'
+                | ':'
+                | '-'
+                | '，'
+                | '。'
+                | '、'
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '！'
+                | '？'
+                | '\u{3000}'
+        )
+}
+
+pub fn build_responses_sse_text_chunks(
+    text: &str,
+    chunk_size: Option<i64>,
+) -> Result<Vec<String>, String> {
+    let size = chunk_size.unwrap_or(0);
+    if size <= 0 {
+        return Ok(vec![text.to_string()]);
+    }
+
+    let chunk_size = usize::try_from(size)
+        .map_err(|_| "Responses SSE text chunk size is invalid".to_string())?
+        .max(1);
+    let boundary_threshold = std::cmp::max(4, chunk_size / 2);
+    let mut chunks: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    let mut buf_len_utf16 = 0usize;
+
+    for ch in text.chars() {
+        buf.push(ch);
+        buf_len_utf16 += ch.len_utf16();
+        if buf_len_utf16 >= chunk_size
+            || (is_responses_sse_text_chunk_boundary(ch) && buf_len_utf16 >= boundary_threshold)
+        {
+            if !buf.is_empty() {
+                chunks.push(std::mem::take(&mut buf));
+                buf_len_utf16 = 0;
+            }
+        }
+    }
+
+    if !buf.is_empty() {
+        chunks.push(buf);
+    }
+    Ok(chunks)
+}
+
+pub fn build_responses_sse_text_chunks_json(payload_json: String) -> Result<String, String> {
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses SSE text chunk payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(source) = payload.as_object() else {
+        return Err("Responses SSE text chunk payload expected object".to_string());
+    };
+    let text = source
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Responses SSE text chunk payload missing text".to_string())?;
+    let chunk_size = source.get("chunk_size").and_then(Value::as_i64);
+    let chunks = build_responses_sse_text_chunks(text, chunk_size)?;
+    serde_json::to_string(&chunks).map_err(|error| {
+        format!(
+            "Failed to serialize Responses SSE text chunks JSON: {}",
+            error
+        )
+    })
+}
+
 fn read_required_created_at(source: &Map<String, Value>) -> Result<Value, String> {
     let Some(created_at) = source.get("created_at") else {
         return Err("Invalid Responses response: missing created_at".to_string());
@@ -158,7 +241,10 @@ fn build_responses_sse_output_item_added_descriptor(
         "reasoning" => {
             if let Some(summary) = source.get("summary") {
                 let normalized = normalize_responses_sse_reasoning_summary(summary)?;
-                if normalized.as_array().is_some_and(|entries| !entries.is_empty()) {
+                if normalized
+                    .as_array()
+                    .is_some_and(|entries| !entries.is_empty())
+                {
                     item.insert("summary".to_string(), normalized);
                 }
             }
@@ -178,7 +264,10 @@ fn build_responses_sse_output_item_done_descriptor(
     if source.get("type").and_then(Value::as_str) == Some("reasoning") {
         if let Some(summary) = source.get("summary") {
             let normalized = normalize_responses_sse_reasoning_summary(summary)?;
-            if normalized.as_array().is_some_and(|entries| !entries.is_empty()) {
+            if normalized
+                .as_array()
+                .is_some_and(|entries| !entries.is_empty())
+            {
                 item.insert("summary".to_string(), normalized);
             } else {
                 item.remove("summary");
@@ -403,8 +492,12 @@ fn read_responses_sse_output_text_payload_args(
     payload_json: String,
     label: &str,
 ) -> Result<(i64, String, i64, String), String> {
-    let payload: Value = serde_json::from_str(&payload_json)
-        .map_err(|error| format!("Failed to parse Responses {} payload JSON: {}", label, error))?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses {} payload JSON: {}",
+            label, error
+        )
+    })?;
     let Some(source) = payload.as_object() else {
         return Err(format!("Responses {} payload expected object", label));
     };
@@ -454,12 +547,8 @@ pub fn build_responses_sse_output_text_done_payload_json(
 ) -> Result<String, String> {
     let (output_index, item_id, content_index, text) =
         read_responses_sse_output_text_payload_args(payload_json, "output text done")?;
-    let output = build_responses_sse_output_text_done_payload(
-        output_index,
-        &item_id,
-        content_index,
-        &text,
-    )?;
+    let output =
+        build_responses_sse_output_text_done_payload(output_index, &item_id, content_index, &text)?;
     serde_json::to_string(&output).map_err(|error| {
         format!(
             "Failed to serialize Responses output text done payload JSON: {}",
@@ -606,7 +695,9 @@ pub fn build_responses_sse_response_event_payload(
     payload.insert("response".to_string(), response_payload);
     if lifecycle == "required_action" {
         let Some(action) = required_action else {
-            return Err("Responses SSE required_action payload missing required_action".to_string());
+            return Err(
+                "Responses SSE required_action payload missing required_action".to_string(),
+            );
         };
         payload.insert("required_action".to_string(), action);
     }
@@ -661,8 +752,12 @@ pub fn normalize_responses_sse_reasoning_summary_json(
         )
     })?;
     let output = normalize_responses_sse_reasoning_summary(&summary)?;
-    serde_json::to_string(&output)
-        .map_err(|error| format!("Failed to serialize Responses reasoning summary JSON: {}", error))
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses reasoning summary JSON: {}",
+            error
+        )
+    })
 }
 
 pub fn build_responses_sse_output_item_descriptor_json(
@@ -882,8 +977,12 @@ fn read_responses_sse_function_call_arguments_payload_source(
     payload_json: String,
     label: &str,
 ) -> Result<Map<String, Value>, String> {
-    let payload: Value = serde_json::from_str(&payload_json)
-        .map_err(|error| format!("Failed to parse Responses {} payload JSON: {}", label, error))?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses {} payload JSON: {}",
+            label, error
+        )
+    })?;
     payload
         .as_object()
         .cloned()
@@ -1144,20 +1243,54 @@ pub fn build_responses_sse_error_payload(message: &str) -> Result<Value, String>
 }
 
 pub fn build_responses_sse_error_payload_json(message_json: String) -> Result<String, String> {
-    let message: Value = serde_json::from_str(&message_json)
-        .map_err(|error| format!("Failed to parse Responses SSE error message JSON: {}", error))?;
+    let message: Value = serde_json::from_str(&message_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses SSE error message JSON: {}",
+            error
+        )
+    })?;
     let Some(message_text) = message.as_str() else {
         return Err("Responses SSE error message must be a string".to_string());
     };
     let output = build_responses_sse_error_payload(message_text)?;
-    serde_json::to_string(&output)
-        .map_err(|error| format!("Failed to serialize Responses SSE error payload JSON: {}", error))
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses SSE error payload JSON: {}",
+            error
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn builds_responses_sse_text_chunks_disabled_as_single_chunk() {
+        let chunks = build_responses_sse_text_chunks("hello world", Some(0)).unwrap();
+        assert_eq!(chunks, vec!["hello world".to_string()]);
+    }
+
+    #[test]
+    fn builds_responses_sse_text_chunks_at_size_and_boundary() {
+        let chunks = build_responses_sse_text_chunks("hello world again", Some(8)).unwrap();
+        assert_eq!(
+            chunks,
+            vec![
+                "hello ".to_string(),
+                "world ".to_string(),
+                "again".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_responses_sse_text_chunks_missing_text() {
+        let err =
+            build_responses_sse_text_chunks_json("{\"chunk_size\":8}".to_string()).unwrap_err();
+        assert!(err.contains("Responses SSE text chunk payload missing text"));
+    }
 
     #[test]
     fn canonicalizes_missing_payload_type_and_sequence_number() {
@@ -1309,7 +1442,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(output["response"]["status"], json!("requires_action"));
-        assert_eq!(output["required_action"]["type"], json!("submit_tool_outputs"));
+        assert_eq!(
+            output["required_action"]["type"],
+            json!("submit_tool_outputs")
+        );
     }
 
     #[test]
@@ -1539,25 +1675,23 @@ mod tests {
 
     #[test]
     fn builds_responses_sse_content_part_event_payload_without_part_for_done() {
-        let output = build_responses_sse_content_part_event_payload(None, 7, "msg_1", 1, "done")
-            .unwrap();
+        let output =
+            build_responses_sse_content_part_event_payload(None, 7, "msg_1", 1, "done").unwrap();
 
-        assert_eq!(output, json!({
-            "output_index": 7,
-            "item_id": "msg_1",
-            "content_index": 1
-        }));
+        assert_eq!(
+            output,
+            json!({
+                "output_index": 7,
+                "item_id": "msg_1",
+                "content_index": 1
+            })
+        );
     }
 
     #[test]
     fn builds_responses_sse_output_text_done_payload() {
-        let output = build_responses_sse_output_text_done_payload(
-            3,
-            "msg_1",
-            1,
-            "final text",
-        )
-        .unwrap();
+        let output =
+            build_responses_sse_output_text_done_payload(3, "msg_1", 1, "final text").unwrap();
 
         assert_eq!(
             output,
@@ -1573,13 +1707,8 @@ mod tests {
 
     #[test]
     fn builds_responses_sse_output_text_delta_payload() {
-        let output = build_responses_sse_output_text_delta_payload(
-            3,
-            "msg_1",
-            1,
-            "delta text",
-        )
-        .unwrap();
+        let output =
+            build_responses_sse_output_text_delta_payload(3, "msg_1", 1, "delta text").unwrap();
 
         assert_eq!(
             output,
@@ -1595,8 +1724,8 @@ mod tests {
 
     #[test]
     fn rejects_responses_sse_output_text_done_payload_missing_item_id() {
-        let err = build_responses_sse_output_text_done_payload(3, "   ", 1, "final text")
-            .unwrap_err();
+        let err =
+            build_responses_sse_output_text_done_payload(3, "   ", 1, "final text").unwrap_err();
 
         assert!(err.contains("Responses output text done payload item_id is required"));
     }
@@ -1604,10 +1733,7 @@ mod tests {
     #[test]
     fn builds_responses_sse_function_call_arguments_delta_payload() {
         let output = build_responses_sse_function_call_arguments_delta_payload(
-            2,
-            "fc_1",
-            "call_1",
-            "{\"q\"",
+            2, "fc_1", "call_1", "{\"q\"",
         )
         .unwrap();
 
@@ -1700,14 +1826,9 @@ mod tests {
 
     #[test]
     fn builds_responses_sse_reasoning_summary_text_payloads() {
-        let delta = build_responses_sse_reasoning_summary_payload(
-            "text_delta",
-            1,
-            "rs_1",
-            0,
-            "summary",
-        )
-        .unwrap();
+        let delta =
+            build_responses_sse_reasoning_summary_payload("text_delta", 1, "rs_1", 0, "summary")
+                .unwrap();
         let done = build_responses_sse_reasoning_summary_payload(
             "text_done",
             1,
@@ -1739,14 +1860,9 @@ mod tests {
 
     #[test]
     fn rejects_responses_sse_reasoning_summary_payload_missing_item_id() {
-        let err = build_responses_sse_reasoning_summary_payload(
-            "part_done",
-            1,
-            " ",
-            0,
-            "summary text",
-        )
-        .unwrap_err();
+        let err =
+            build_responses_sse_reasoning_summary_payload("part_done", 1, " ", 0, "summary text")
+                .unwrap_err();
 
         assert!(err.contains("Responses reasoning summary payload item_id is required"));
     }
@@ -1809,15 +1925,14 @@ mod tests {
 
     #[test]
     fn rejects_responses_sse_reasoning_delta_payload_missing_item_id() {
-        let err =
-            build_responses_sse_reasoning_delta_payload(
-                "text",
-                1,
-                " ",
-                0,
-                Value::String("think".to_string()),
-            )
-            .unwrap_err();
+        let err = build_responses_sse_reasoning_delta_payload(
+            "text",
+            1,
+            " ",
+            0,
+            Value::String("think".to_string()),
+        )
+        .unwrap_err();
 
         assert!(err.contains("Responses reasoning delta payload item_id is required"));
     }

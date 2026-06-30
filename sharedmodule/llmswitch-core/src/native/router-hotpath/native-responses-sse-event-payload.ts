@@ -38,6 +38,18 @@ function parseNativeSummaryEntries(raw: string): Array<{ type: 'summary_text'; t
   }
 }
 
+function parseNativeStringArray(raw: string): string[] | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== 'string')) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalizeResponsesSseEventPayloadWithNative(event: unknown): Record<string, unknown> {
   return callNativeJson(
     'canonicalizeResponsesSseEventPayloadJson',
@@ -82,6 +94,48 @@ export function normalizeResponsesSseResponsePayloadWithNative(
     const parsed = parseNativeEvent(raw);
     if (!parsed) {
       return fail('invalid Responses SSE response payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
+export function buildResponsesSseTextChunksWithNative(
+  text: string,
+  chunkSize: unknown
+): string[] {
+  const capability = 'buildResponsesSseTextChunksJson';
+  const fail = (reason?: string) => failNative<string[]>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let payloadJson: string;
+  try {
+    payloadJson = JSON.stringify({
+      text,
+      ...(typeof chunkSize === 'number' ? { chunk_size: chunkSize } : {})
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE text chunks result');
+    }
+    const parsed = parseNativeStringArray(raw);
+    if (!parsed) {
+      return fail('invalid Responses SSE text chunks result');
     }
     return parsed;
   } catch (error) {

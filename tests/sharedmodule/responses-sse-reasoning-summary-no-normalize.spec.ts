@@ -5,8 +5,9 @@ import { normalizeResponsesSseReasoningSummaryWithNative } from '../../sharedmod
 import { buildResponsesSseReasoningSummaryPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseReasoningDeltaPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseResponseEventPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseTextChunksWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 
-async function collectEvents(response: any): Promise<any[]> {
+async function collectEvents(response: any, overrides: Record<string, unknown> = {}): Promise<any[]> {
   const events: any[] = [];
   const context = {
     requestId: 'req_reasoning_summary_no_normalize',
@@ -22,7 +23,8 @@ async function collectEvents(response: any): Promise<any[]> {
     enableRecovery: false,
     enableDelay: false,
     maxOutputItems: 10,
-    maxContentParts: 10
+    maxContentParts: 10,
+    ...overrides
   } as any)) {
     events.push(event);
   }
@@ -30,6 +32,15 @@ async function collectEvents(response: any): Promise<any[]> {
 }
 
 describe('responses SSE reasoning summary no-normalize boundary', () => {
+  it('builds text chunks through the native owner', () => {
+    expect(buildResponsesSseTextChunksWithNative('hello world again', 8)).toEqual([
+      'hello ',
+      'world ',
+      'again'
+    ]);
+    expect(buildResponsesSseTextChunksWithNative('hello world', 0)).toEqual(['hello world']);
+  });
+
   it('builds response start payloads through native owner with empty output', async () => {
     const events = await collectEvents({
       id: 'resp_start_payload_native',
@@ -158,6 +169,29 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
         content: [{ type: 'output_text', text: 'hello', annotations: [{ type: 'citation' }], logprobs: [] }]
       }
     });
+  });
+
+  it('sequences output text deltas using native text chunks', async () => {
+    const events = await collectEvents({
+      id: 'resp_text_chunks_native',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'msg_1',
+        type: 'message',
+        status: 'completed',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'hello world again' }]
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    }, { chunkSize: 8 });
+
+    const deltas = events
+      .filter((event) => event.type === 'response.output_text.delta')
+      .map((event) => event.data?.delta);
+    expect(deltas).toEqual(['hello ', 'world ', 'again']);
   });
 
   it('normalizes reasoning summary entries through the native owner verbatim', () => {
