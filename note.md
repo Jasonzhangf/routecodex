@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE content parts no silent drop
+- Red evidence：`verify:sse-architecture-boundary` 新增 `parts.filter((part): part is GeminiContentPart => Boolean(part))` marker 后先红，证明 `gemini-sequencer.ts` 会静默丢弃 null/undefined content part。
+- Fix：`getCandidateParts()` 改为逐项校验；遇到 null/undefined part 直接 fail-fast 抛 `Invalid Gemini candidate part at index <n>`，合法 part 原样保留，不再用 filter 修补上游响应。
+- Verification：focused Jest `gemini-sse-no-role-fallback` 3/3 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；`build:base` PASS；`git diff --check` PASS；source replay `eventCount=2 dataEvents=1 doneEvents=1 hasPartText=true nullPartFailed=true`。真实 Gemini 样本缺口：当前 `~/.rcc/codex-samples` 与 `/Volumes/extension/.rcc/codex-samples` 未找到 Gemini provider-response 样本。
+
 # 2026-07-01: Anthropic SSE stop_reason fallback removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 `response.stop_reason ?? 'end_turn'` marker 后先红，证明 `anthropic-sequencer.ts` 仍会在缺少 provider stop_reason 时合成 `end_turn`。
 - Fix：`createAnthropicSequencer().sequenceResponse()` 在缺少 `response.stop_reason` 时 fail-fast 抛 `Invalid Anthropic response: missing stop_reason`，`message_delta.delta.stop_reason` 只使用 provider 显式真相；focused spec 增加反向缺失 stop_reason 用例。

@@ -297,6 +297,15 @@ for (const forbidden of [
   }
 }
 
+const geminiSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts');
+for (const forbidden of [
+  'parts.filter((part): part is GeminiContentPart => Boolean(part))',
+]) {
+  if (geminiSequencer.includes(forbidden)) {
+    failures.push(`Gemini SSE sequencer must not silently drop invalid content parts: ${forbidden}`);
+  }
+}
+
 const providerNeutralProjectionFiles = [
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts',

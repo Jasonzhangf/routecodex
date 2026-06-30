@@ -12,6 +12,43 @@ async function collectEvents(stream: AsyncIterable<unknown>): Promise<unknown[]>
 }
 
 describe('gemini SSE no-fallback boundary', () => {
+  it('emits explicit Gemini data events for valid content parts', async () => {
+    const response: GeminiResponse = {
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [{ text: 'hello' }]
+          },
+          finishReason: 'STOP'
+        }
+      ]
+    };
+
+    const sequencer = createGeminiSequencer();
+    const events = await collectEvents(sequencer.sequenceResponse(response));
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'gemini.data',
+        data: expect.objectContaining({
+          kind: 'part',
+          candidateIndex: 0,
+          partIndex: 0,
+          role: 'model',
+          part: { text: 'hello' }
+        })
+      }),
+      expect.objectContaining({
+        type: 'gemini.done',
+        data: expect.objectContaining({
+          kind: 'done',
+          candidates: [expect.objectContaining({ index: 0, finishReason: 'STOP' })]
+        })
+      })
+    ]));
+  });
+
   it('throws when a candidate role is missing instead of defaulting to model', async () => {
     const response: GeminiResponse = {
       candidates: [
@@ -27,5 +64,23 @@ describe('gemini SSE no-fallback boundary', () => {
     const stream = sequencer.sequenceResponse(response);
 
     await expect(collectEvents(stream)).rejects.toThrow('Invalid Gemini candidate: missing role');
+  });
+
+  it('throws when a candidate content part is null instead of silently dropping it', async () => {
+    const response: GeminiResponse = {
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [null as never]
+          }
+        }
+      ]
+    };
+
+    const sequencer = createGeminiSequencer();
+    const stream = sequencer.sequenceResponse(response);
+
+    await expect(collectEvents(stream)).rejects.toThrow('Invalid Gemini candidate part at index 0');
   });
 });

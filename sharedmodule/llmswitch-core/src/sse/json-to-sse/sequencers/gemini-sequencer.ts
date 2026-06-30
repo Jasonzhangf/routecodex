@@ -50,7 +50,12 @@ function getCandidateRole(candidate: GeminiCandidate): string {
 function getCandidateParts(candidate: GeminiCandidate): GeminiContentPart[] {
   const parts = candidate?.content?.parts;
   if (Array.isArray(parts)) {
-    return parts.filter((part): part is GeminiContentPart => Boolean(part));
+    for (let index = 0; index < parts.length; index += 1) {
+      if (parts[index] === null || parts[index] === undefined) {
+        throw new Error(`Invalid Gemini candidate part at index ${index}`);
+      }
+    }
+    return parts;
   }
   return [];
 }

@@ -251,6 +251,11 @@
 - 2026-06-29 token estimator wrapper slice：`native-virtual-router-runtime.ts` 的 `countRequestTokens` / `computeRequestTokens` 已改为共享 `callNativeJson('estimateVirtualRouterRequestTokensJson', ...)`；本地 `loadNativeRouterHotpathBindingForInternalUse` / `readNativeFunction` 已移除，empty / invalid / invalid-token-count 仍 fail-fast。
 - 新门禁：`verify-vr-no-ts-runtime` 现在同时锁 `native-virtual-router-runtime.ts`，禁止 token estimator wrapper 重新长回本地 native binding plumbing。
 - 已验证：`npm run verify:vr-no-ts-runtime`、`PATH=/opt/homebrew/opt/node@22/bin:$PATH npx tsc -p tsconfig.json --pretty false`、`node ../../node_modules/jest/bin/jest.js --config jest.config.cjs --runInBand --runTestsByPath tests/router/token-counter-media-ignore.test.ts`、`git diff --check`。
+# 2026-07-01: Gemini SSE content parts must not be silently dropped
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts` must not use `parts.filter(Boolean)` or equivalent silent cleanup for candidate content parts; null/undefined parts are provider truth errors and must fail fast.
+- Gate truth: `verify:sse-architecture-boundary` blocks `parts.filter((part): part is GeminiContentPart => Boolean(part))`. Focused spec: `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts`.
+- Replay gap: current `~/.rcc/codex-samples` and `/Volumes/extension/.rcc/codex-samples` contain no Gemini provider-response samples; source replay is the substitute evidence for this slice.
+
 # 2026-07-01: Anthropic SSE stop_reason must be explicit
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts` must not synthesize `stop_reason: 'end_turn'`; `message_delta.delta.stop_reason` is provider truth and missing `response.stop_reason` is fail-fast.
 - Gate truth: `verify:sse-architecture-boundary` blocks `response.stop_reason ?? 'end_turn'`. Focused spec: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts`.
