@@ -1,7 +1,7 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { createServertoolProgressLogger } from './progress-log-block.js';
-import { recordServertoolMatchHit, recordServertoolMatchSkipped } from './match-log-block.js';
+import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import type { ServerToolExecution } from './types.js';
 import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
@@ -75,8 +75,21 @@ export function recordServertoolEngineMatchSkipped(args: {
   if (!providerProtocol) {
     throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol');
   }
-  recordServertoolMatchSkipped({
-    ...args,
+  const skipReason = args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution';
+  args.stageRecorder?.record('servertool.match', {
+    matched: false,
+    mode: args.engineMode,
+    reason: skipReason
+  });
+  appendServerToolProgressFileEvent({
+    requestId: args.requestId,
+    flowId: 'none',
+    tool: 'none',
+    stage: 'match',
+    result: 'skipped_' + skipReason,
+    message: 'skipped (' + skipReason + ')',
+    step: 0,
+    entryEndpoint: args.entryEndpoint,
     providerProtocol
   });
 }
@@ -86,5 +99,11 @@ export function recordServertoolEngineMatchHit(args: {
   execution: ServerToolExecution;
   stageRecorder?: StageRecorder;
 }): string {
-  return recordServertoolMatchHit(args);
+  const flowId = args.execution.flowId ?? 'unknown';
+  args.stageRecorder?.record('servertool.match', {
+    matched: true,
+    flowId,
+    hasFollowup: false
+  });
+  return flowId;
 }

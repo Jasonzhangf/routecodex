@@ -54,8 +54,9 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('export function logServertoolNonBlocking(');
     expect(source).toContain('export function createServertoolObservation(');
     expect(source).toContain('createServertoolProgressLogger({');
-    expect(source).toContain('recordServertoolMatchSkipped({');
-    expect(source).toContain('return recordServertoolMatchHit(args);');
+    expect(source).toContain("args.stageRecorder?.record('servertool.match'");
+    expect(source).toContain('appendServerToolProgressFileEvent({');
+    expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/match-log-block.ts')).toBe(false);
 
     const progressSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');

@@ -5026,8 +5026,9 @@ function checkServertoolRustOutcomeCloseout() {
     'export function logServertoolNonBlocking(',
     'export function createServertoolObservation(',
     'createServertoolProgressLogger({',
-    'recordServertoolMatchSkipped({',
-    'return recordServertoolMatchHit(args);',
+    "args.stageRecorder?.record('servertool.match'",
+    'appendServerToolProgressFileEvent({',
+    "throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol')",
   ]) {
     if (!engineObservationShell.includes(marker)) {
       fail(
@@ -5584,8 +5585,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
   for (const marker of [
     'function logServerToolNonBlocking(',
     'createServertoolProgressLogger({',
-    'recordServertoolMatchSkipped({',
-    'recordServertoolMatchHit({',
+    "args.stageRecorder?.record('servertool.match'",
+    'appendServerToolProgressFileEvent({',
   ]) {
     if (engineSource.includes(marker)) {
       fail(
@@ -5946,23 +5947,29 @@ function checkServertoolProgressFileLoggingFailFast() {
 
 function checkServertoolMatchLoggingFailFast() {
   const matchLogFile = `${SERVERTOOL_TS_DIR}/match-log-block.ts`;
-  const matchLogSource = readRequired(matchLogFile);
+  if (existsSync(matchLogFile)) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'match-log-block.ts must stay physically deleted; match logging belongs to engine-observation-shell.ts'
+    );
+  }
+  const observationShellSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`);
   const observationSpec = readRequired(`${ROOT}/tests/servertool/engine-observation-shell.spec.ts`);
   for (const keyword of [
     'record_servertool_match_skipped',
     'record_servertool_match_hit',
   ]) {
-    if (matchLogSource.includes(keyword)) {
+    if (observationShellSource.includes(keyword)) {
       fail(
         'servertool-match-log-fail-fast',
-        `match-log-block.ts must not convert stageRecorder failure into non-blocking marker "${keyword}"`
+        `engine-observation-shell.ts must not convert stageRecorder failure into non-blocking marker "${keyword}"`
       );
     }
   }
-  if (/stageRecorder\?\.record[\s\S]{0,180}catch\s*\(/.test(matchLogSource)) {
+  if (/stageRecorder\?\.record[\s\S]{0,180}catch\s*\(/.test(observationShellSource)) {
     fail(
       'servertool-match-log-fail-fast',
-      'match-log-block.ts must not catch stageRecorder failures'
+      'engine-observation-shell.ts must not catch stageRecorder failures'
     );
   }
   assertContains(
