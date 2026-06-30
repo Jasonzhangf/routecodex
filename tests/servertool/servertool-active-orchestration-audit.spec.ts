@@ -121,9 +121,9 @@ const TARGETS = [
     required: [
       'planServertoolResponseStageGateWithNative',
       'runServertoolResponseStageAutoHookPass',
-      "const continueToExecution = {",
       'responseHookMatched !== true',
-      'return continueToExecution;',
+      "action: 'continue_to_execution' as const",
+      'responseStageGatePlan',
     ],
   },
   {
@@ -187,8 +187,6 @@ const TARGETS = [
     forbidden: [],
     required: [
       'orchestrateServertoolEngine',
-      "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
-      'return passthroughResult;',
       'runServertoolEntryPreflight',
       'extractToolCallsFromResponseStage',
       'resolveServertoolEntryContext',
