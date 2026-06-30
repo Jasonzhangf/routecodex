@@ -5004,8 +5004,7 @@ function checkServertoolRustOutcomeCloseout() {
     'parseServertoolCliProjectionToolArgumentsWithNative({',
     'input: projectionInput',
     'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
-    'function buildClientVisibleProjectionShellForRuntime(',
-    'const chatResponse = buildClientVisibleProjectionShellForRuntime({',
+    'const chatResponse = buildClientVisibleProjectionShellWithNative({',
   ]) {
     if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(
@@ -5017,6 +5016,7 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'const projectionShellInput = {',
     'buildClientVisibleProjectionShellWithNative(projectionShellInput)',
+    'function buildClientVisibleProjectionShellForRuntime(',
   ]) {
     if (cliProjectionRuntimeShell.includes(marker)) {
       fail(
