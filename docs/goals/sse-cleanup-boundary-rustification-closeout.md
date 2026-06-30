@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses SSE reasoning delta payload native owner slice
+
+- Red evidence: after adding `delta: content.text`, `signature: content.signature`, and `image_url: content.image_url` as forbidden markers, `npm run verify:sse-architecture-boundary` failed on `buildReasoningDeltas()`, proving `response.reasoning_text.delta` / `response.reasoning_signature.delta` / `response.reasoning_image.delta` payloads were still synthesized in TS.
+- Fix: added Rust owner `buildResponsesSseReasoningDeltaPayloadJson`; TS now calls `buildResponsesSseReasoningDeltaPayloadWithNative()` and only wraps the SSE event envelope. `reasoning_signature.signature` is preserved as raw JSON value instead of stringified.
+- Positive / reverse tests: Rust covers text/signature/image reasoning delta payloads and missing `item_id` fail-fast; Jest covers native wrapper output and sequenced reasoning delta projection.
+- Verification: Rust focused `reasoning_delta_payload` PASS 2/2; native build PASS; focused Jest 32/32 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `reasoningTextDelta=0`, `reasoningSignatureDelta=0`, and `reasoningImageDelta=0`; this real sample has no reasoning delta events, so reasoning delta payload behavior is covered by focused Jest and Rust tests.
+
 ### 2026-06-30 Responses SSE reasoning summary payload native owner slice
 
 - Red evidence: `npm run verify:sse-architecture-boundary` 先红，命中 `part: { type: 'summary_text'`，证明 `responses.ts` 仍在本地合成 `response.reasoning_summary_part.added/done` 的 payload 语义。

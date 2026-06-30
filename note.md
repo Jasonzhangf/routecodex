@@ -1,3 +1,10 @@
+# 2026-06-30: Responses SSE reasoning delta payload native owner slice
+- `responses.ts::buildReasoningDeltas()` 的 `response.reasoning_text.delta` / `response.reasoning_signature.delta` / `response.reasoning_image.delta` payload 语义下沉到 Rust `buildResponsesSseReasoningDeltaPayloadJson`，TS 只保留 SSE envelope。
+- 红测：`verify:sse-architecture-boundary` 先红，命中 `delta: content.text` / `signature: content.signature` / `image_url: content.image_url`。
+- 关键边界：`reasoning_signature.signature` 保留原始 JSON value，不字符串化。
+- 验证：Rust `reasoning_delta_payload` 2/2 PASS；native build PASS；focused Jest 32/32 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE 成功，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`。
+
 # 2026-06-30: Responses SSE reasoning summary payload native owner slice
 - `responses.ts::buildReasoningSummaryEvents()` 的 `response.reasoning_summary_part.added/done` payload 语义下沉到 Rust `buildResponsesSseReasoningSummaryPayloadJson`，TS 只保留 SSE envelope。
 - 红测：`verify:sse-architecture-boundary` 先红，命中 `part: { type: 'summary_text'`。

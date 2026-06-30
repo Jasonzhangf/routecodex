@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
 import { normalizeResponsesSseReasoningSummaryWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseReasoningSummaryPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseReasoningDeltaPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 
 async function collectEvents(response: any): Promise<any[]> {
   const events: any[] = [];
@@ -103,6 +104,91 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       item_id: 'rs_1',
       summary_index: 0,
       part: { type: 'summary_text', text: 'summary text' }
+    });
+  });
+
+  it('projects reasoning delta payloads through the native owner', async () => {
+    const events = await collectEvents({
+      id: 'resp_reasoning_delta_native',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'rs_delta_1',
+        type: 'reasoning',
+        summary: [],
+        content: [
+          { type: 'reasoning_text', text: 'think' },
+          { type: 'reasoning_signature', signature: { ciphertext: 'sig_1' } },
+          { type: 'reasoning_image', image_url: 'https://example.test/reasoning.png' }
+        ]
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    });
+
+    const reasoningTextDelta = events.find((event) => event.type === 'response.reasoning_text.delta');
+    const reasoningSignatureDelta = events.find((event) => event.type === 'response.reasoning_signature.delta');
+    const reasoningImageDelta = events.find((event) => event.type === 'response.reasoning_image.delta');
+
+    expect(reasoningTextDelta?.data).toMatchObject({
+      output_index: 0,
+      item_id: 'rs_delta_1',
+      content_index: 0,
+      delta: 'think'
+    });
+    expect(reasoningSignatureDelta?.data).toMatchObject({
+      output_index: 0,
+      item_id: 'rs_delta_1',
+      content_index: 1,
+      signature: { ciphertext: 'sig_1' }
+    });
+    expect(reasoningImageDelta?.data).toMatchObject({
+      output_index: 0,
+      item_id: 'rs_delta_1',
+      content_index: 2,
+      image_url: 'https://example.test/reasoning.png'
+    });
+  });
+
+  it('builds reasoning delta payloads through the native owner directly', () => {
+    expect(buildResponsesSseReasoningDeltaPayloadWithNative(
+      'text',
+      1,
+      'rs_1',
+      0,
+      'think'
+    )).toEqual({
+      output_index: 1,
+      item_id: 'rs_1',
+      content_index: 0,
+      delta: 'think'
+    });
+
+    expect(buildResponsesSseReasoningDeltaPayloadWithNative(
+      'signature',
+      1,
+      'rs_1',
+      1,
+      { ciphertext: 'sig' }
+    )).toEqual({
+      output_index: 1,
+      item_id: 'rs_1',
+      content_index: 1,
+      signature: { ciphertext: 'sig' }
+    });
+
+    expect(buildResponsesSseReasoningDeltaPayloadWithNative(
+      'image',
+      1,
+      'rs_1',
+      2,
+      'https://img'
+    )).toEqual({
+      output_index: 1,
+      item_id: 'rs_1',
+      content_index: 2,
+      image_url: 'https://img'
     });
   });
 });

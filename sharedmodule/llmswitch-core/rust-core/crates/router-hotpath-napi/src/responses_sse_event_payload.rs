@@ -867,6 +867,89 @@ pub fn build_responses_sse_reasoning_summary_payload_json(
     })
 }
 
+fn build_responses_sse_reasoning_delta_payload(
+    lifecycle: &str,
+    output_index: i64,
+    item_id: &str,
+    content_index: i64,
+    value: Value,
+) -> Result<Value, String> {
+    if item_id.trim().is_empty() {
+        return Err("Responses reasoning delta payload item_id is required".to_string());
+    }
+    let mut payload = Map::new();
+    payload.insert("output_index".to_string(), Value::from(output_index));
+    payload.insert("item_id".to_string(), Value::String(item_id.to_string()));
+    payload.insert("content_index".to_string(), Value::from(content_index));
+    match lifecycle {
+        "text" => {
+            payload.insert("delta".to_string(), value);
+        }
+        "signature" => {
+            payload.insert("signature".to_string(), value);
+        }
+        "image" => {
+            payload.insert("image_url".to_string(), value);
+        }
+        other => {
+            return Err(format!(
+                "Unsupported Responses reasoning delta payload lifecycle: {}",
+                other
+            ));
+        }
+    }
+    Ok(Value::Object(payload))
+}
+
+pub fn build_responses_sse_reasoning_delta_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> Result<String, String> {
+    let lifecycle = lifecycle_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Responses reasoning delta payload lifecycle is required".to_string())?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses reasoning delta payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(source) = payload.as_object() else {
+        return Err("Responses reasoning delta payload expected object".to_string());
+    };
+    let output_index = source
+        .get("output_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses reasoning delta payload missing output_index".to_string())?;
+    let item_id = source
+        .get("item_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Responses reasoning delta payload missing item_id".to_string())?;
+    let content_index = source
+        .get("content_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses reasoning delta payload missing content_index".to_string())?;
+    let value = source
+        .get("value")
+        .cloned()
+        .unwrap_or_else(|| Value::String(String::new()));
+    let output = build_responses_sse_reasoning_delta_payload(
+        lifecycle,
+        output_index,
+        item_id,
+        content_index,
+        value,
+    )?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses reasoning delta payload JSON: {}",
+            error
+        )
+    })
+}
+
 pub fn build_responses_sse_error_payload(message: &str) -> Result<Value, String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
@@ -1367,5 +1450,76 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Responses reasoning summary payload item_id is required"));
+    }
+
+    #[test]
+    fn builds_responses_sse_reasoning_delta_payloads() {
+        let text = build_responses_sse_reasoning_delta_payload(
+            "text",
+            1,
+            "rs_1",
+            0,
+            Value::String("think".to_string()),
+        )
+        .unwrap();
+        let signature = build_responses_sse_reasoning_delta_payload(
+            "signature",
+            1,
+            "rs_1",
+            1,
+            json!({ "ciphertext": "sig" }),
+        )
+        .unwrap();
+        let image = build_responses_sse_reasoning_delta_payload(
+            "image",
+            1,
+            "rs_1",
+            2,
+            Value::String("https://img".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            text,
+            json!({
+                "output_index": 1,
+                "item_id": "rs_1",
+                "content_index": 0,
+                "delta": "think"
+            })
+        );
+        assert_eq!(
+            signature,
+            json!({
+                "output_index": 1,
+                "item_id": "rs_1",
+                "content_index": 1,
+                "signature": { "ciphertext": "sig" }
+            })
+        );
+        assert_eq!(
+            image,
+            json!({
+                "output_index": 1,
+                "item_id": "rs_1",
+                "content_index": 2,
+                "image_url": "https://img"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_responses_sse_reasoning_delta_payload_missing_item_id() {
+        let err =
+            build_responses_sse_reasoning_delta_payload(
+                "text",
+                1,
+                " ",
+                0,
+                Value::String("think".to_string()),
+            )
+            .unwrap_err();
+
+        assert!(err.contains("Responses reasoning delta payload item_id is required"));
     }
 }

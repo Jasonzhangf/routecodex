@@ -364,6 +364,11 @@ export type ResponsesSseReasoningSummaryPayloadLifecycle =
   | 'text_delta'
   | 'text_done';
 
+export type ResponsesSseReasoningDeltaPayloadLifecycle =
+  | 'text'
+  | 'signature'
+  | 'image';
+
 export function buildResponsesSseReasoningSummaryPayloadWithNative(
   lifecycle: ResponsesSseReasoningSummaryPayloadLifecycle,
   outputIndex: number,
@@ -403,6 +408,53 @@ export function buildResponsesSseReasoningSummaryPayloadWithNative(
     const parsed = parseNativeEvent(raw);
     if (!parsed) {
       return fail('invalid Responses reasoning summary payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
+export function buildResponsesSseReasoningDeltaPayloadWithNative(
+  lifecycle: ResponsesSseReasoningDeltaPayloadLifecycle,
+  outputIndex: number,
+  itemId: string,
+  contentIndex: number,
+  value: unknown
+): Record<string, unknown> {
+  const capability = 'buildResponsesSseReasoningDeltaPayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let payloadJson: string;
+  try {
+    payloadJson = JSON.stringify({
+      output_index: outputIndex,
+      item_id: itemId,
+      content_index: contentIndex,
+      value
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, lifecycle);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses reasoning delta payload result');
+    }
+    const parsed = parseNativeEvent(raw);
+    if (!parsed) {
+      return fail('invalid Responses reasoning delta payload result');
     }
     return parsed;
   } catch (error) {

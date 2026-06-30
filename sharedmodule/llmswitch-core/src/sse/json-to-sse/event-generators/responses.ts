@@ -20,6 +20,7 @@ import {
   buildResponsesSseOutputTextDeltaPayloadWithNative,
   buildResponsesSseOutputTextDonePayloadWithNative,
   buildResponsesSseOutputItemDescriptorWithNative,
+  buildResponsesSseReasoningDeltaPayloadWithNative,
   buildResponsesSseReasoningSummaryPayloadWithNative,
   normalizeResponsesSseReasoningSummaryWithNative,
   normalizeResponsesSseResponsePayloadWithNative
@@ -428,6 +429,13 @@ export function* buildReasoningDeltas(
     if (content.type === 'reasoning_text') {
       if (!content.text) continue;
       const baseEvent = createBaseEvent(context, config);
+      const payload = buildResponsesSseReasoningDeltaPayloadWithNative(
+        'text',
+        context.outputIndexCounter,
+        reasoning.id,
+        contentIndex,
+        content.text
+      );
 
       yield {
         type: 'response.reasoning_text.delta',
@@ -435,15 +443,19 @@ export function* buildReasoningDeltas(
         protocol: baseEvent.protocol,
         direction: baseEvent.direction,
         data: {
-          output_index: context.outputIndexCounter,
-          item_id: reasoning.id,
-          content_index: contentIndex,
-          delta: content.text
+          ...payload
         },
         sequenceNumber: baseEvent.sequenceNumber
       };
     } else if (content.type === 'reasoning_signature') {
       const baseEvent = createBaseEvent(context, config);
+      const payload = buildResponsesSseReasoningDeltaPayloadWithNative(
+        'signature',
+        context.outputIndexCounter,
+        reasoning.id,
+        contentIndex,
+        content.signature
+      );
 
       yield {
         type: 'response.reasoning_signature.delta',
@@ -451,15 +463,19 @@ export function* buildReasoningDeltas(
         protocol: baseEvent.protocol,
         direction: baseEvent.direction,
         data: {
-          output_index: context.outputIndexCounter,
-          item_id: reasoning.id,
-          content_index: contentIndex,
-          signature: content.signature
+          ...payload
         },
         sequenceNumber: baseEvent.sequenceNumber
       };
     } else if (content.type === 'reasoning_image') {
       const baseEvent = createBaseEvent(context, config);
+      const payload = buildResponsesSseReasoningDeltaPayloadWithNative(
+        'image',
+        context.outputIndexCounter,
+        reasoning.id,
+        contentIndex,
+        content.image_url
+      );
 
       yield {
         type: 'response.reasoning_image.delta',
@@ -467,10 +483,7 @@ export function* buildReasoningDeltas(
         protocol: baseEvent.protocol,
         direction: baseEvent.direction,
         data: {
-          output_index: context.outputIndexCounter,
-          item_id: reasoning.id,
-          content_index: contentIndex,
-          image_url: content.image_url
+          ...payload
         },
         sequenceNumber: baseEvent.sequenceNumber
       };
