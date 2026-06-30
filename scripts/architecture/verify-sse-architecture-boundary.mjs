@@ -106,9 +106,12 @@ const responsesEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-t
 for (const forbidden of [
   'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',
   'response.created_at ?? Math.floor(Date.now() / 1000)',
+  'prompt_tokens',
+  'completion_tokens',
+  'cache_read_input_tokens',
 ]) {
   if (responsesEventGenerator.includes(forbidden)) {
-    failures.push(`Responses SSE generator must not synthesize created_at: ${forbidden}`);
+    failures.push(`Responses SSE generator must not keep usage compatibility/fallback marker: ${forbidden}`);
   }
 }
 

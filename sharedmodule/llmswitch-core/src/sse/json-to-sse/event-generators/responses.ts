@@ -217,39 +217,32 @@ function normalizeUsage(usage: any): {
   }
 
   const asAny = usage as Record<string, unknown>;
-  const readRequiredToken = (field: 'input_tokens' | 'output_tokens' | 'total_tokens', aliases: string[]): number | undefined => {
-    const sourceKey = [field, ...aliases].find((key) => Object.prototype.hasOwnProperty.call(asAny, key));
-    if (!sourceKey) {
+  const readRequiredToken = (field: 'input_tokens' | 'output_tokens' | 'total_tokens'): number | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(asAny, field)) {
       return undefined;
     }
-    const raw = Number(asAny[sourceKey] as number);
+    const raw = Number(asAny[field] as number);
     if (!Number.isFinite(raw) || raw < 0) {
-      throw new Error(`Invalid Responses usage.${sourceKey}`);
+      throw new Error(`Invalid Responses usage.${field}`);
     }
     return Math.round(raw);
   };
 
-  const input = readRequiredToken('input_tokens', ['prompt_tokens']);
-  const output = readRequiredToken('output_tokens', ['completion_tokens']);
-  const explicitTotal = readRequiredToken('total_tokens', []);
-  if (input === undefined && output === undefined && explicitTotal === undefined) {
+  const input = readRequiredToken('input_tokens');
+  const output = readRequiredToken('output_tokens');
+  const total = readRequiredToken('total_tokens');
+  if (input === undefined || output === undefined || total === undefined) {
     throw new Error('Invalid Responses usage: missing token fields');
   }
 
-  let cachedRaw = Number(asAny.cache_read_input_tokens as number);
-  if (!Number.isFinite(cachedRaw) && asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object') {
+  let cachedRaw = Number.NaN;
+  if (asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object') {
     const details = asAny.input_tokens_details as Record<string, unknown>;
     cachedRaw = Number(details.cached_tokens as number);
   }
-  if (
-    (Object.prototype.hasOwnProperty.call(asAny, 'cache_read_input_tokens') ||
-      (asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object' &&
-        Object.prototype.hasOwnProperty.call(asAny.input_tokens_details as Record<string, unknown>, 'cached_tokens'))) &&
-    (!Number.isFinite(cachedRaw) || cachedRaw < 0)
-  ) {
+  if (asAny.input_tokens_details && typeof asAny.input_tokens_details === 'object' && (!Number.isFinite(cachedRaw) || cachedRaw < 0)) {
     throw new Error('Invalid Responses usage cached_tokens');
   }
-  const total = explicitTotal ?? ((input ?? 0) + (output ?? 0));
 
   const normalized: {
     input_tokens: number;

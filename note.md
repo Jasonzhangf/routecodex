@@ -1,3 +1,22 @@
+# 2026-06-30: servertool cli projection input local
+
+- `cli-projection-runtime-shell.ts` 把 tool arguments native parse 结果收成 `projectionInput`，CLI projection native 输出只消费单点输入载体。
+- `cli-projection-runtime-shell.spec.ts`、`servertool-active-orchestration-audit.spec.ts`、`verify-servertool-rust-only.mjs` 已同步锁 `projectionInput` marker。
+- 验证：cli-projection focused Jest、sharedmodule `tsc`、`verify:servertool-rust-only`、`verify:function-map-compile-gate`、`verify:architecture-mainline-call-map`、`git diff --check` 均已通过。
+
+# 2026-06-30: Responses JSON->SSE usage alias fallback removed
+
+- 本 slice 收口 `sse.responses_encode_projection`：`responses.ts::normalizeUsage` 不再接受 `prompt_tokens` / `completion_tokens` / `cache_read_input_tokens` 兼容字段，也不再用 `input + output` 推导缺失的 `total_tokens`。
+- Responses JSON->SSE encode 现在只接受 canonical `usage.input_tokens` / `usage.output_tokens` / `usage.total_tokens`，cached 只接受 canonical `usage.input_tokens_details.cached_tokens`；缺字段或旧 alias 直接生成 `response.error`，不 fallback 成 completed/done。
+- 门禁：`verify-sse-architecture-boundary.mjs` 禁止 `responses.ts` 重新出现 `prompt_tokens` / `completion_tokens` / `cache_read_input_tokens` marker；`responses-sse-usage-no-fallback.spec.ts` 增加旧 alias 反向测试。
+- 验证：focused Jest `responses-json-to-sse-usage + responses-sse-usage-no-fallback` 6 passed；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；真实 4444 Responses SSE 样本先经 native materialize 再 JSON->SSE replay 成功，`has_completed=true`、`has_done=true`、`has_error=false`、usage 保持 canonical `{input_tokens,input_tokens_details.cached_tokens,output_tokens,total_tokens}`。
+
+# 2026-06-30: servertool execution-handler outcome input local
+
+- `execution-handler-materialization-shell.ts` 把 outcome native 输入收成 `outcomePlanInput`，`planServertoolOutcomeWithNative` 只消费单点输入载体。
+- `execution-handler-materialization-shell.spec.ts`、`servertool-active-orchestration-audit.spec.ts`、`verify-servertool-rust-only.mjs` 已同步锁 `outcomePlanInput` marker。
+- 验证：execution-handler focused Jest、sharedmodule `tsc`、`verify:servertool-rust-only`、`verify:function-map-compile-gate`、`verify:architecture-mainline-call-map`、`git diff --check` 均已通过。
+
 # 2026-06-30: servertool engine-postflight final result local
 
 - `engine-postflight-shell.ts` 的 `return_servertool_cli_projection_final` 与 `return_stop_message_terminal_final` 两个分支共用 `engineFinalResult`，去掉重复 final response 壳。

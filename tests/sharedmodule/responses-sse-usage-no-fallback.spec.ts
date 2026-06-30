@@ -60,6 +60,33 @@ describe('responses SSE usage no-fallback boundary', () => {
     expect(text).not.toContain('event: response.done');
   });
 
+  it('rejects legacy prompt_tokens aliases instead of normalizing them', async () => {
+    const converter = new ResponsesJsonToSseConverterRefactored();
+    const response: ResponsesResponse = {
+      id: 'resp_legacy_usage_alias',
+      object: 'response',
+      created_at: 1781149537,
+      status: 'completed',
+      model: 'gpt-5.5',
+      output: [],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        total_tokens: 15
+      } as unknown as ResponsesResponse['usage']
+    } as ResponsesResponse;
+
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_responses_legacy_usage_alias'
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('event: response.error');
+    expect(text).toContain('Invalid Responses usage: missing token fields');
+    expect(text).not.toContain('event: response.completed');
+    expect(text).not.toContain('event: response.done');
+  });
+
   it('fails missing created_at instead of synthesizing the current time', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
