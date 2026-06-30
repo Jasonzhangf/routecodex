@@ -2,7 +2,6 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
   createServertoolProviderProtocolErrorFromPlan,
-  isAdapterClientDisconnected,
   withTimeout
 } from '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js';
 import {
@@ -11,10 +10,17 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
 
 describe('servertool timeout/error block native shell', () => {
-  test('reads adapter disconnect state through native policy', () => {
-    expect(isAdapterClientDisconnected({ clientConnectionState: { disconnected: ' TRUE ' } } as any)).toBe(true);
-    expect(isAdapterClientDisconnected({ clientDisconnected: true } as any)).toBe(true);
-    expect(isAdapterClientDisconnected({ clientDisconnected: 'false' } as any)).toBe(false);
+  test('does not retain adapter disconnect facade wrapper', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts', 'utf8')
+    );
+    const entryPreflightSource = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts', 'utf8')
+    );
+
+    expect(source).not.toContain('export function isAdapterClientDisconnected(');
+    expect(source).not.toContain('isAdapterClientDisconnectedWithNative(adapterContext)');
+    expect(entryPreflightSource).toContain('isAdapterClientDisconnectedWithNative(args.options.adapterContext)');
   });
 
   test('uses Rust timeout watcher plan before arming timer', async () => {

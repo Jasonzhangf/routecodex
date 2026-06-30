@@ -1,12 +1,12 @@
 import type { ServerSideToolEngineOptions, ServerSideToolEngineResult } from './types.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
+  isAdapterClientDisconnectedWithNative,
   planServertoolClientDisconnectedErrorWithNative,
   planServertoolEntryPreflightWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  createServertoolProviderProtocolErrorFromPlan,
-  isAdapterClientDisconnected
+  createServertoolProviderProtocolErrorFromPlan
 } from './timeout-error-block.js';
 
 export function runServertoolEntryPreflight(args: {
@@ -20,7 +20,7 @@ export function runServertoolEntryPreflight(args: {
       : null;
   const entryPreflightPlan = planServertoolEntryPreflightWithNative({
     hasBaseObject: Boolean(base),
-    adapterClientDisconnected: isAdapterClientDisconnected(args.options.adapterContext)
+    adapterClientDisconnected: isAdapterClientDisconnectedWithNative(args.options.adapterContext)
   });
   if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {
     return {

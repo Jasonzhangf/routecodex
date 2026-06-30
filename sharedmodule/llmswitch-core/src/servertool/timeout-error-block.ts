@@ -1,20 +1,14 @@
-import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import {
   ProviderProtocolError,
   type ProviderErrorCategory,
   type ProviderProtocolErrorCode
 } from '../conversion/provider-protocol-error.js';
 import {
-  isAdapterClientDisconnectedWithNative,
   planServertoolTimeoutWatcherWithNative,
   type ServertoolErrorPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 // feature_id: hub.servertool_orchestration_policy
-export function isAdapterClientDisconnected(adapterContext: AdapterContext): boolean {
-  return isAdapterClientDisconnectedWithNative(adapterContext);
-}
-
 export function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,

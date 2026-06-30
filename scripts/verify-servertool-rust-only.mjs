@@ -2560,6 +2560,8 @@ function checkOrchestrationPolicyRustOwner() {
     'export function createServerToolTimeoutError(',
     'export function createServertoolRequiredResponseHookEmptyError(',
     'export function createServerToolClientDisconnectedError(',
+    'export function isAdapterClientDisconnected(',
+    'isAdapterClientDisconnectedWithNative(adapterContext)',
     'planClientDisconnectWatcherWithNative',
     'planStopMessageFetchFailedErrorWithNative',
     'planServertoolStateLoadFailedErrorWithNative',
@@ -2573,7 +2575,6 @@ function checkOrchestrationPolicyRustOwner() {
   }
   for (const needle of [
     'planServertoolTimeoutWatcherWithNative',
-    'isAdapterClientDisconnectedWithNative',
     'createServertoolProviderProtocolErrorFromPlan',
   ]) {
     assertContains(
@@ -2587,7 +2588,7 @@ function checkOrchestrationPolicyRustOwner() {
     'server-side-tools-client-disconnect-native-shell',
     TS_ENTRY_PREFLIGHT_SHELL,
     readRequired(TS_ENTRY_PREFLIGHT_SHELL),
-    "from './timeout-error-block.js'"
+    'isAdapterClientDisconnectedWithNative(args.options.adapterContext)'
   );
   pass('servertool-timeout-error-ts-thin-shell', 'timeout-error-block.ts consumes Rust timeout/disconnect/error plans only');
   pass('servertool-orchestration-policy-rust-owner', 'servertool-core owns orchestration policy parsing and compaction');
@@ -3690,7 +3691,7 @@ function checkServertoolEntryPreflightRustOwner() {
     'servertool-entry-preflight-ts-thin-shell',
     TS_ENTRY_PREFLIGHT_SHELL,
     readRequired(TS_ENTRY_PREFLIGHT_SHELL),
-    'planServertoolEntryPreflightWithNative'
+    'isAdapterClientDisconnectedWithNative(args.options.adapterContext)'
   );
   pass('servertool-entry-preflight-no-ts-owner', 'entry preflight TS semantics stay out of deleted server-side-tools facade');
 }

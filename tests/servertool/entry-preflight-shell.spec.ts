@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolEntryPreflightWithNativeMock = jest.fn();
-const isAdapterClientDisconnectedMock = jest.fn(() => false);
+const isAdapterClientDisconnectedWithNativeMock = jest.fn(() => false);
 const planServertoolClientDisconnectedErrorWithNativeMock = jest.fn((input: any) => ({
   message: `[servertool] client disconnected: ${String(input?.requestId ?? '')}`,
   code: 'SERVERTOOL_CLIENT_DISCONNECTED',
@@ -18,6 +18,7 @@ const createServertoolProviderProtocolErrorFromPlanMock = jest.fn((plan: any) =>
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    isAdapterClientDisconnectedWithNative: isAdapterClientDisconnectedWithNativeMock,
     planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
     planServertoolClientDisconnectedErrorWithNative: planServertoolClientDisconnectedErrorWithNativeMock
   })
@@ -26,7 +27,6 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js',
   () => ({
-    isAdapterClientDisconnected: isAdapterClientDisconnectedMock,
     createServertoolProviderProtocolErrorFromPlan: createServertoolProviderProtocolErrorFromPlanMock
   })
 );
@@ -52,6 +52,7 @@ describe('entry-preflight-shell', () => {
     );
 
     expect(source).toContain('planServertoolEntryPreflightWithNative');
+    expect(source).toContain('isAdapterClientDisconnectedWithNative(args.options.adapterContext)');
     expect(source).toContain('planServertoolClientDisconnectedErrorWithNative');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
     expect(source).toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
