@@ -13,6 +13,8 @@ import type {
 } from '../../types/index.js';
 import { TimeUtils, StringUtils } from '../../shared/utils.js';
 import {
+  buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative,
+  buildResponsesSseFunctionCallArgumentsDonePayloadWithNative,
   buildResponsesSseErrorPayloadWithNative,
   buildResponsesSseContentPartDescriptorWithNative,
   buildResponsesSseOutputTextDeltaPayloadWithNative,
@@ -338,16 +340,19 @@ export function* buildFunctionCallArgsDeltas(
 
   for (const chunk of chunks) {
     const baseEvent = createBaseEvent(context, config);
+    const delta = buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative(
+      context.outputIndexCounter,
+      functionCall.id,
+      functionCall.call_id,
+      chunk
+    );
     yield {
       type: 'response.function_call_arguments.delta',
       timestamp: baseEvent.timestamp,
       protocol: baseEvent.protocol,
       direction: baseEvent.direction,
       data: {
-        output_index: context.outputIndexCounter,
-        item_id: functionCall.id,
-        call_id: functionCall.call_id,
-        delta: chunk
+        ...delta
       },
       sequenceNumber: baseEvent.sequenceNumber
     };
@@ -364,6 +369,13 @@ export function buildFunctionCallDoneEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
+  const done = buildResponsesSseFunctionCallArgumentsDonePayloadWithNative(
+    context.outputIndexCounter,
+    functionCall.id,
+    functionCall.call_id,
+    functionCall.name,
+    functionCall.arguments
+  );
 
   return {
     type: 'response.function_call_arguments.done',
@@ -371,11 +383,7 @@ export function buildFunctionCallDoneEvent(
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
     data: {
-      output_index: context.outputIndexCounter,
-      item_id: functionCall.id,
-      call_id: functionCall.call_id,
-      name: functionCall.name,
-      arguments: functionCall.arguments  // done 时包含完整 arguments
+      ...done
     },
     sequenceNumber: baseEvent.sequenceNumber
   };

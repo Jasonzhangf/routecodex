@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses SSE function call arguments payload native owner slice
+
+- Red evidence: after adding `call_id: functionCall.call_id` and `arguments: functionCall.arguments` as forbidden markers, `npm run verify:sse-architecture-boundary` failed on the Responses event generator, proving `response.function_call_arguments.delta/done` payloads still synthesized function-call argument payload semantics in TS.
+- Fix: added Rust owners `buildResponsesSseFunctionCallArgumentsDeltaPayloadJson` and `buildResponsesSseFunctionCallArgumentsDonePayloadJson`; TS now calls native payload builders and only wraps the SSE event envelope.
+- Positive / reverse tests: Rust covers function-call argument delta/done payload construction and missing `call_id` fail-fast; Jest covers native wrapper output and sequenced `response.function_call_arguments.delta/done` projection without TS payload synthesis.
+- Verification: Rust focused `function_call_arguments` 5/5 PASS; native build PASS; focused Jest 29/29 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; root `tsc --noEmit` PASS. Sharedmodule `tsc --noEmit` is currently blocked by unrelated dirty `sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts` type error.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` replayed cleanly with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `functionDelta=16`, and `functionDone=1`.
+
 ### 2026-06-30 Responses SSE output text payload native owner slice
 
 - Red evidence: after adding `logprobs: []` as a forbidden marker, `npm run verify:sse-architecture-boundary` failed on the Responses event generator, proving `response.output_text.delta/done` payloads still synthesized output text payload semantics in TS.

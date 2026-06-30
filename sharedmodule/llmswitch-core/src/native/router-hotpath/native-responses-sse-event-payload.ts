@@ -282,6 +282,82 @@ function buildResponsesSseOutputTextPayloadWithNative(
   }
 }
 
+export function buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative(
+  outputIndex: number,
+  itemId: string,
+  callId: string,
+  delta: string
+): Record<string, unknown> {
+  return buildResponsesSseFunctionCallArgumentsPayloadWithNative(
+    'buildResponsesSseFunctionCallArgumentsDeltaPayloadJson',
+    {
+      output_index: outputIndex,
+      item_id: itemId,
+      call_id: callId,
+      delta
+    }
+  );
+}
+
+export function buildResponsesSseFunctionCallArgumentsDonePayloadWithNative(
+  outputIndex: number,
+  itemId: string,
+  callId: string,
+  name: string,
+  args: string
+): Record<string, unknown> {
+  return buildResponsesSseFunctionCallArgumentsPayloadWithNative(
+    'buildResponsesSseFunctionCallArgumentsDonePayloadJson',
+    {
+      output_index: outputIndex,
+      item_id: itemId,
+      call_id: callId,
+      name,
+      arguments: args
+    }
+  );
+}
+
+function buildResponsesSseFunctionCallArgumentsPayloadWithNative(
+  capability:
+    | 'buildResponsesSseFunctionCallArgumentsDeltaPayloadJson'
+    | 'buildResponsesSseFunctionCallArgumentsDonePayloadJson',
+  payload: Record<string, unknown>
+): Record<string, unknown> {
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let payloadJson: string;
+  try {
+    payloadJson = JSON.stringify(payload);
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses function call arguments payload result');
+    }
+    const parsed = parseNativeEvent(raw);
+    if (!parsed) {
+      return fail('invalid Responses function call arguments payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
 export function buildResponsesSseErrorPayloadWithNative(message: string): Record<string, unknown> {
   const capability = 'buildResponsesSseErrorPayloadJson';
   const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);

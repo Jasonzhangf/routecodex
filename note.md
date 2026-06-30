@@ -1,3 +1,11 @@
+# 2026-06-30: Responses SSE function call arguments payload native owner slice
+
+- Red evidence：新增 `verify-sse-architecture-boundary` markers `call_id: functionCall.call_id` / `arguments: functionCall.arguments` 后，门禁先红，证明 `responses.ts` 仍在本地合成 `response.function_call_arguments.delta/done` payload。
+- Fix：新增 Rust `buildResponsesSseFunctionCallArgumentsDeltaPayloadJson` / `buildResponsesSseFunctionCallArgumentsDonePayloadJson`，TS generator 只调用 native wrapper 并封装 SSE event envelope。
+- 正向/反向测试：Rust 覆盖 delta/done payload 与 missing `call_id` fail-fast；Jest 覆盖 native wrapper 与 sequenced `response.function_call_arguments.delta/done` projection。
+- 验证：Rust focused `function_call_arguments` 5/5 PASS；native build PASS；focused Jest 29/29 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；root `tsc --noEmit` PASS。sharedmodule `tsc --noEmit` 当前被无关脏改 `response-stage-orchestration-shell.ts` 类型错误阻塞。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`、`functionDelta=16`、`functionDone=1`。
+
 # 2026-06-30: Responses SSE output text payload native owner slice
 
 - Red evidence：新增 `verify-sse-architecture-boundary` marker `logprobs: []` 后，门禁先红，证明 `responses.ts` 仍在本地合成 `response.output_text.delta/done` payload。

@@ -646,6 +646,138 @@ pub fn build_responses_sse_content_part_descriptor_json(
     })
 }
 
+pub fn build_responses_sse_function_call_arguments_delta_payload(
+    output_index: i64,
+    item_id: &str,
+    call_id: &str,
+    delta: &str,
+) -> Result<Value, String> {
+    if item_id.trim().is_empty() {
+        return Err(
+            "Responses function call arguments delta payload item_id is required".to_string(),
+        );
+    }
+    if call_id.trim().is_empty() {
+        return Err(
+            "Responses function call arguments delta payload call_id is required".to_string(),
+        );
+    }
+    Ok(serde_json::json!({
+        "output_index": output_index,
+        "item_id": item_id,
+        "call_id": call_id,
+        "delta": delta
+    }))
+}
+
+pub fn build_responses_sse_function_call_arguments_done_payload(
+    output_index: i64,
+    item_id: &str,
+    call_id: &str,
+    name: &str,
+    arguments: &str,
+) -> Result<Value, String> {
+    if item_id.trim().is_empty() {
+        return Err(
+            "Responses function call arguments done payload item_id is required".to_string(),
+        );
+    }
+    if call_id.trim().is_empty() {
+        return Err(
+            "Responses function call arguments done payload call_id is required".to_string(),
+        );
+    }
+    if name.trim().is_empty() {
+        return Err("Responses function call arguments done payload name is required".to_string());
+    }
+    Ok(serde_json::json!({
+        "output_index": output_index,
+        "item_id": item_id,
+        "call_id": call_id,
+        "name": name,
+        "arguments": arguments
+    }))
+}
+
+fn read_responses_sse_function_call_arguments_payload_source(
+    payload_json: String,
+    label: &str,
+) -> Result<Map<String, Value>, String> {
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|error| format!("Failed to parse Responses {} payload JSON: {}", label, error))?;
+    payload
+        .as_object()
+        .cloned()
+        .ok_or_else(|| format!("Responses {} payload expected object", label))
+}
+
+fn read_required_i64(source: &Map<String, Value>, field: &str, label: &str) -> Result<i64, String> {
+    source
+        .get(field)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("Responses {} payload missing {}", label, field))
+}
+
+fn read_required_string(
+    source: &Map<String, Value>,
+    field: &str,
+    label: &str,
+) -> Result<String, String> {
+    source
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("Responses {} payload missing {}", label, field))
+}
+
+pub fn build_responses_sse_function_call_arguments_delta_payload_json(
+    payload_json: String,
+) -> Result<String, String> {
+    let label = "function call arguments delta";
+    let source = read_responses_sse_function_call_arguments_payload_source(payload_json, label)?;
+    let output_index = read_required_i64(&source, "output_index", label)?;
+    let item_id = read_required_string(&source, "item_id", label)?;
+    let call_id = read_required_string(&source, "call_id", label)?;
+    let delta = read_required_string(&source, "delta", label)?;
+    let output = build_responses_sse_function_call_arguments_delta_payload(
+        output_index,
+        &item_id,
+        &call_id,
+        &delta,
+    )?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses function call arguments delta payload JSON: {}",
+            error
+        )
+    })
+}
+
+pub fn build_responses_sse_function_call_arguments_done_payload_json(
+    payload_json: String,
+) -> Result<String, String> {
+    let label = "function call arguments done";
+    let source = read_responses_sse_function_call_arguments_payload_source(payload_json, label)?;
+    let output_index = read_required_i64(&source, "output_index", label)?;
+    let item_id = read_required_string(&source, "item_id", label)?;
+    let call_id = read_required_string(&source, "call_id", label)?;
+    let name = read_required_string(&source, "name", label)?;
+    let arguments = read_required_string(&source, "arguments", label)?;
+    let output = build_responses_sse_function_call_arguments_done_payload(
+        output_index,
+        &item_id,
+        &call_id,
+        &name,
+        &arguments,
+    )?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses function call arguments done payload JSON: {}",
+            error
+        )
+    })
+}
+
 pub fn build_responses_sse_error_payload(message: &str) -> Result<Value, String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
@@ -996,5 +1128,63 @@ mod tests {
             .unwrap_err();
 
         assert!(err.contains("Responses output text done payload item_id is required"));
+    }
+
+    #[test]
+    fn builds_responses_sse_function_call_arguments_delta_payload() {
+        let output = build_responses_sse_function_call_arguments_delta_payload(
+            2,
+            "fc_1",
+            "call_1",
+            "{\"q\"",
+        )
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "output_index": 2,
+                "item_id": "fc_1",
+                "call_id": "call_1",
+                "delta": "{\"q\""
+            })
+        );
+    }
+
+    #[test]
+    fn builds_responses_sse_function_call_arguments_done_payload() {
+        let output = build_responses_sse_function_call_arguments_done_payload(
+            2,
+            "fc_1",
+            "call_1",
+            "search",
+            "{\"q\":\"rust\"}",
+        )
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "output_index": 2,
+                "item_id": "fc_1",
+                "call_id": "call_1",
+                "name": "search",
+                "arguments": "{\"q\":\"rust\"}"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_responses_sse_function_call_arguments_done_missing_call_id() {
+        let err = build_responses_sse_function_call_arguments_done_payload(
+            2,
+            "fc_1",
+            " ",
+            "search",
+            "{\"q\":\"rust\"}",
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Responses function call arguments done payload call_id is required"));
     }
 }

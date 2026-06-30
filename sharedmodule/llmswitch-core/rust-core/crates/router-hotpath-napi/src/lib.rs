@@ -1979,6 +1979,26 @@ pub fn build_responses_sse_output_text_delta_payload_json(
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildResponsesSseFunctionCallArgumentsDeltaPayloadJson")]
+pub fn build_responses_sse_function_call_arguments_delta_payload_json(
+    payload_json: String,
+) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_function_call_arguments_delta_payload_json(
+        payload_json,
+    )
+    .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildResponsesSseFunctionCallArgumentsDonePayloadJson")]
+pub fn build_responses_sse_function_call_arguments_done_payload_json(
+    payload_json: String,
+) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_function_call_arguments_done_payload_json(
+        payload_json,
+    )
+    .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "buildResponsesSseErrorPayloadJson")]
 pub fn build_responses_sse_error_payload_json(message_json: String) -> NapiResult<String> {
     responses_sse_event_payload::build_responses_sse_error_payload_json(message_json)
