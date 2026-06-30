@@ -26,24 +26,6 @@ function planServertoolResponseStageGate(args: {
   });
 }
 
-function buildServertoolResponseStageOrchestrationInput(args: {
-  payload: ChatCompletionLike;
-  adapterContext: AdapterContext;
-  requestId: string;
-  entryEndpoint: string;
-  providerProtocol: string;
-  stageRecorder?: StageRecorder;
-}) {
-  return {
-    chat: args.payload as JsonObject,
-    adapterContext: args.adapterContext,
-    requestId: args.requestId,
-    entryEndpoint: args.entryEndpoint,
-    providerProtocol: args.providerProtocol,
-    stageRecorder: args.stageRecorder
-  };
-}
-
 export interface ServertoolResponseStageShellOptions {
   payload: ChatCompletionLike;
   adapterContext: AdapterContext;
@@ -98,14 +80,14 @@ export async function runServertoolResponseStageOrchestrationShell(
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
   const orchestrationStart = Date.now();
   const orchestration = await runServerToolOrchestration(
-    buildServertoolResponseStageOrchestrationInput({
-      payload: options.payload,
+    {
+      chat: options.payload as JsonObject,
       adapterContext: options.adapterContext,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint,
       providerProtocol,
       stageRecorder: options.stageRecorder
-    })
+    }
   );
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'completed', {
     elapsedMs: Date.now() - orchestrationStart,
