@@ -81,6 +81,16 @@ export const buildServertoolOutcomePlanInput = (args: {
   });
 };
 
+type ServertoolExecutionDispatchErrorInput = Parameters<
+  typeof planServertoolExecutionDispatchErrorWithNative
+>[0];
+
+function throwServertoolExecutionDispatchError(args: ServertoolExecutionDispatchErrorInput): never {
+  throw createServertoolProviderProtocolErrorFromPlan(
+    planServertoolExecutionDispatchErrorWithNative(args)
+  );
+}
+
 export function materializeNativeToolCallExecutionOutcome(args: {
   base: JsonObject;
   baseForExecution: JsonObject;
@@ -107,24 +117,20 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   });
 
   if (outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome') {
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolExecutionDispatchErrorWithNative({
-            kind: 'invalid_mixed_client_tools_outcome',
-            requestId: args.options.requestId,
-            outcomeMode: outcomePlan.outcomeMode,
-            requiresPendingInjection: outcomePlan.requiresPendingInjection
-      })
-    );
+    throwServertoolExecutionDispatchError({
+      kind: 'invalid_mixed_client_tools_outcome',
+      requestId: args.options.requestId,
+      outcomeMode: outcomePlan.outcomeMode,
+      requiresPendingInjection: outcomePlan.requiresPendingInjection
+    });
   }
 
   if (outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract') {
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolExecutionDispatchErrorWithNative({
-            kind: 'missing_servertool_execution_contract',
-            requestId: args.options.requestId,
-            outcomeMode: outcomePlan.outcomeMode
-          })
-    );
+    throwServertoolExecutionDispatchError({
+      kind: 'missing_servertool_execution_contract',
+      requestId: args.options.requestId,
+      outcomeMode: outcomePlan.outcomeMode
+    });
   }
   return {
     mode: 'tool_flow',

@@ -39,6 +39,8 @@ const TARGETS = [
       'structuredClone(args.base)',
     ],
     required: [
+      'function throwServertoolExecutionDispatchError(args: ServertoolExecutionDispatchErrorInput): never',
+      'planServertoolExecutionDispatchErrorWithNative(args)',
       'const outcomePlanInput = buildServertoolOutcomePlanInput({',
       'const outcomePlan = planServertoolOutcomeWithNative(outcomePlanInput);',
     ],
@@ -358,9 +360,9 @@ const TARGETS = [
       'clientInjectDispatch: options.clientInjectDispatch'
     ],
     required: [
-      'const bypassResult = {',
+      'const bypassResult: ServertoolResponseStageShellResult = {',
       'return bypassResult;',
-      'const passthroughResult = {',
+      'const passthroughResult: ServertoolResponseStageShellResult = {',
       'return passthroughResult;',
     ],
   },
