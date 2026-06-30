@@ -1803,6 +1803,188 @@ describe('direct passthrough route-level', () => {
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 
+  it('router-direct applies Rust default route plan after current route pool is exhausted by provider errors', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 4444 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'ykk.ykk.gpt-5.4-mini';
+    const secondProviderKey = 'asxs.crsa.gpt-5.4-mini';
+    const defaultProviderKey = 'ykk.ykk.gpt-5.3-codex-spark';
+    const direct502 = () => Object.assign(new Error('HTTP 502: upstream provider error'), {
+      statusCode: 502,
+      status: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502',
+    });
+    const direct403 = () => Object.assign(new Error('HTTP 403: upstream provider error'), {
+      statusCode: 403,
+      status: 403,
+      code: 'HTTP_403',
+      upstreamCode: 'HTTP_403',
+    });
+    const firstDirectSend = jest.fn(async () => { throw direct502(); });
+    const secondDirectSend = jest.fn(async () => { throw direct403(); });
+    const defaultDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_default_route_after_exhausted',
+        object: 'response',
+        status: 'completed',
+        output_text: 'ok',
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const allowedProviders = Array.isArray(metadata.allowedProviders) ? metadata.allowedProviders : [];
+      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const providerKey =
+        allowedProviders.includes(defaultProviderKey)
+          ? defaultProviderKey
+          : (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      return {
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: providerKey === defaultProviderKey ? 'gpt-5.3-codex-spark' : 'gpt-5.4-mini',
+        },
+        decision: {
+          routeName: providerKey === defaultProviderKey ? 'default' : 'thinking',
+          pool: providerKey === defaultProviderKey
+            ? [defaultProviderKey]
+            : [firstProviderKey, secondProviderKey],
+          routePool: providerKey === defaultProviderKey
+            ? [defaultProviderKey]
+            : [firstProviderKey, secondProviderKey],
+          reason: providerKey === defaultProviderKey ? 'default:route-contract' : 'thinking:user-input',
+        },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      virtualrouter: {
+        routingPolicyGroups: {
+          gateway_glm_4444: {
+            routing: {
+              thinking: [
+                { id: 'thinking-primary', targets: [firstProviderKey, secondProviderKey], priority: 200 },
+              ],
+              default: [
+                { id: 'default-primary', targets: [defaultProviderKey], priority: 100 },
+              ],
+            },
+          },
+        },
+      },
+      httpserver: {
+        ports: [{
+          port: 4444,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_glm_4444',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct default route plan must stay direct'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_glm_4444', (server as any).hubPipeline],
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'ykk',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4-mini' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: 'asxs',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.4-mini' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
+        },
+      }],
+      [defaultProviderKey, {
+        runtimeKey: defaultProviderKey,
+        providerId: 'ykk',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.3-codex-spark' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: defaultDirectSend,
+        },
+      }],
+    ]);
+
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 4444,
+        host: '127.0.0.1',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_glm_4444',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_default_route_after_exhausted',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.5',
+          stream: true,
+          input: 'ping',
+        },
+        metadata: {},
+      },
+    );
+
+    expect(outcome.used).toBe(true);
+    expect(outcome.auditContext.providerKey).toBe(defaultProviderKey);
+    expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_default_route_after_exhausted' });
+    expect(firstDirectSend).toHaveBeenCalledTimes(1);
+    expect(secondDirectSend).toHaveBeenCalledTimes(1);
+    expect(defaultDirectSend).toHaveBeenCalledTimes(1);
+    expect(route).toHaveBeenCalledTimes(3);
+    expect(route.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
+      allowedProviders: [defaultProviderKey],
+      routecodexRoutingPolicyGroup: 'gateway_glm_4444',
+    }));
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+  });
+
   it('HTTP BLACKBOX: router-direct provider HTTP 401 never enters standard executor', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

@@ -143,6 +143,37 @@ describe('request-executor primary exhausted plan bridge', () => {
     })).toBe(true);
   });
 
+  it('[forward] route default availability includes routing group default route even without backup tier', () => {
+    const tiers = coreUtilsModule.buildErrorErr05DefaultAvailabilityTiers({
+      routeName: 'thinking',
+      routeTiers: [
+        { id: 'thinking-primary', targets: ['fwd.paid.gpt-5.4-mini'], priority: 200 },
+      ],
+      defaultRouteTiers: [
+        { id: 'default-primary', targets: ['fwd.gpt.gpt-5.3-codex-spark', 'fwd.minimax.MiniMax-M3'], priority: 100 },
+      ],
+    });
+
+    expect(coreUtilsModule.resolveDefaultTierAvailableForErrorErr05({
+      tiers,
+      routePool: [
+        'ykk.ykk.gpt-5.4-mini',
+        'asxs.crsa.gpt-5.4-mini',
+      ],
+      excludedProviderKeys: new Set([
+        'ykk.ykk.gpt-5.4-mini',
+        'asxs.crsa.gpt-5.4-mini',
+      ]),
+    })).toBe(true);
+  });
+
+  it('[forward] ErrorErr05 routing group uses port routingPolicyGroup when metadata is absent', () => {
+    expect(coreUtilsModule.resolveErrorErr05RoutingPolicyGroup({
+      metadata: {},
+      portRoutingPolicyGroup: 'gateway_glm_4444',
+    })).toBe('gateway_glm_4444');
+  });
+
   it('[reverse] default tier availability is false when the remaining pool is already the default tier last provider', () => {
     expect(coreUtilsModule.resolveDefaultTierAvailableForErrorErr05({
       tiers: [

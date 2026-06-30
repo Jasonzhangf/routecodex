@@ -95,9 +95,11 @@ import {
   readRuntimeRequestTruthIdentifiers,
 } from './metadata-center/request-truth-readers.js';
 import {
+  buildErrorErr05DefaultAvailabilityTiers,
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
   resolveDefaultTierAvailableForErrorErr05,
+  resolveErrorErr05RoutingPolicyGroup,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
 } from './executor/request-executor-core-utils.js';
@@ -224,6 +226,7 @@ type RouterDirectRetryState = {
   maxAttempts: number;
   excludedProviderKeys: Set<string>;
   retryProviderKey?: string;
+  allowedProvidersOverride?: string[];
   lastError?: unknown;
 };
 
@@ -1422,10 +1425,14 @@ export class RouteCodexHttpServer {
     retryState: RouterDirectRetryState = createRouterDirectRetryState(input),
     directAttempt = 1,
   ): Promise<RouterDirectOutcome> {
-    const allowedProviders =
+    const routingGroupProviders =
       portConfig.routingPolicyGroup
         ? extractProviderKeysForRoutingGroup(this.userConfig, portConfig.routingPolicyGroup)
         : undefined;
+    const allowedProviders =
+      retryState.allowedProvidersOverride && retryState.allowedProvidersOverride.length > 0
+        ? [...retryState.allowedProvidersOverride]
+        : routingGroupProviders;
 
     const metadataForHub: Record<string, unknown> = {
       ...(input.metadata ?? {}),
@@ -1566,7 +1573,7 @@ export class RouteCodexHttpServer {
         });
         // G3: primary_exhausted -> default_pool. Before failing fast, ask the
         // Rust VR planner for a default_pool plan and re-inject it as the next
-        // allowedProviders target list. Host MUST NOT synthesize fallback
+        // allowedProviders target list. Host MUST NOT synthesize default route
         // targets locally.
         const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(error);
         const primaryExhaustedRoute = primaryExhaustedContext?.route;
@@ -1597,6 +1604,7 @@ export class RouteCodexHttpServer {
         if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
           retryState.excludedProviderKeys.clear();
           retryState.retryProviderKey = undefined;
+          retryState.allowedProvidersOverride = [...plan.defaultPoolTargets];
           metadataForHub.allowedProviders = [...plan.defaultPoolTargets];
           this.logStage('router-direct.primary_exhausted_to_default_pool.applied', input.requestId, {
             defaultPoolTargets: plan.defaultPoolTargets,
@@ -1735,16 +1743,33 @@ export class RouteCodexHttpServer {
       );
       const routingDecisionRouteName =
         typeof routingDecision?.routeName === 'string' ? routingDecision.routeName : undefined;
+      const routingPolicyGroupForErrorErr05 =
+        resolveErrorErr05RoutingPolicyGroup({
+          metadata: metadataForHub,
+          portRoutingPolicyGroup: portConfig.routingPolicyGroup,
+        });
       const routingDecisionTiers =
-        routingDecisionRouteName && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
+        routingDecisionRouteName && routingPolicyGroupForErrorErr05
           ? extractRoutingTiersForRoutingGroupRoute(
             this.userConfig,
-            metadataForHub.routecodexRoutingPolicyGroup,
+            routingPolicyGroupForErrorErr05,
             routingDecisionRouteName,
           )
           : [];
+      const defaultRouteTiers =
+        routingDecisionRouteName && routingPolicyGroupForErrorErr05
+          ? extractRoutingTiersForRoutingGroupRoute(
+            this.userConfig,
+            routingPolicyGroupForErrorErr05,
+            'default',
+          )
+          : [];
       const defaultTierAvailableForDecision = resolveDefaultTierAvailableForErrorErr05({
-        tiers: routingDecisionTiers,
+        tiers: buildErrorErr05DefaultAvailabilityTiers({
+          routeName: routingDecisionRouteName,
+          routeTiers: routingDecisionTiers,
+          defaultRouteTiers,
+        }),
         routePool: routingDecisionProviderPool,
         excludedProviderKeys: retryState.excludedProviderKeys,
       });
@@ -1917,16 +1942,33 @@ export class RouteCodexHttpServer {
         );
         const routingDecisionRouteName =
           typeof ctx.routingDecision?.routeName === 'string' ? ctx.routingDecision.routeName : undefined;
+        const routingPolicyGroupForErrorErr05 =
+          resolveErrorErr05RoutingPolicyGroup({
+            metadata: metadataForHub,
+            portRoutingPolicyGroup: portConfig.routingPolicyGroup,
+          });
         const routingDecisionTiers =
-          routingDecisionRouteName && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
+          routingDecisionRouteName && routingPolicyGroupForErrorErr05
             ? extractRoutingTiersForRoutingGroupRoute(
               this.userConfig,
-              metadataForHub.routecodexRoutingPolicyGroup,
+              routingPolicyGroupForErrorErr05,
               routingDecisionRouteName,
             )
             : [];
+        const defaultRouteTiers =
+          routingDecisionRouteName && routingPolicyGroupForErrorErr05
+            ? extractRoutingTiersForRoutingGroupRoute(
+              this.userConfig,
+              routingPolicyGroupForErrorErr05,
+              'default',
+            )
+            : [];
         const defaultTierAvailableForDecision = resolveDefaultTierAvailableForErrorErr05({
-          tiers: routingDecisionTiers,
+          tiers: buildErrorErr05DefaultAvailabilityTiers({
+            routeName: routingDecisionRouteName,
+            routeTiers: routingDecisionTiers,
+            defaultRouteTiers,
+          }),
           routePool: routingDecisionProviderPool,
           excludedProviderKeys: retryState.excludedProviderKeys,
         });
@@ -2003,6 +2045,46 @@ export class RouteCodexHttpServer {
             });
           },
         });
+        const routePoolRemainingAfterExclusion = routingDecisionProviderPool.filter((candidate) => {
+          if (typeof candidate !== 'string' || !candidate.trim()) {
+            return false;
+          }
+          return !retryState.excludedProviderKeys.has(candidate.trim());
+        });
+        if (
+          defaultTierAvailableForDecision
+          && routingDecisionRouteName
+          && routingDecisionRouteName !== 'default'
+          && routePoolRemainingAfterExclusion.length === 0
+        ) {
+          const plan = resolvePrimaryExhaustedPlan({
+            route: routingDecisionRouteName,
+            tiers: routingDecisionTiers,
+            exhaustedTargets: routingDecisionProviderPool,
+            knownTargets: collectPrimaryExhaustedKnownTargets(routingDecisionTiers),
+          });
+          this.logStage('router-direct.primary_exhausted_to_default_pool.evaluated', input.requestId, {
+            planStatus: plan.status,
+            routeName: routingDecisionRouteName,
+            defaultPoolTargets: plan.defaultPoolTargets,
+            fromTierId: plan.fromTierId ?? null,
+            fromTierPriority: plan.fromTierPriority ?? null,
+            exhaustedTargets: routingDecisionProviderPool,
+            excludedProviderKeys: Array.from(retryState.excludedProviderKeys),
+            allowedProviders: Array.isArray(metadataForHub.allowedProviders) ? metadataForHub.allowedProviders : undefined,
+            routecodexRoutingPolicyGroup: metadataForHub.routecodexRoutingPolicyGroup,
+          });
+          if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
+            retryState.excludedProviderKeys.clear();
+            retryState.retryProviderKey = undefined;
+            retryState.allowedProvidersOverride = [...plan.defaultPoolTargets];
+            metadataForHub.allowedProviders = [...plan.defaultPoolTargets];
+            this.logStage('router-direct.primary_exhausted_to_default_pool.applied', input.requestId, {
+              defaultPoolTargets: plan.defaultPoolTargets,
+              fromTierId: plan.fromTierId ?? null,
+            });
+          }
+        }
         retryState.lastError = error;
         directRetryRequested = true;
         retryState.retryProviderKey = undefined;

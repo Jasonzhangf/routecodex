@@ -403,4 +403,70 @@ describe('request executor provider send failure abort handling', () => {
       stage: 'provider.send'
     }));
   });
+
+  it('reroutes streaming HTTP 403 when current route pool is exhausted but default route is available', async () => {
+    const error = Object.assign(new Error('HTTP 403: insufficient quota'), {
+      statusCode: 403,
+      status: 403,
+      code: 'HTTP_403',
+      upstreamCode: 'insufficient_quota'
+    });
+    const excludedProviderKeys = new Set<string>(['ykk.ykk.gpt-5.4-mini']);
+    const recordAttempt = jest.fn();
+    const logProviderRetrySwitch = jest.fn();
+
+    await expect(processProviderSendFailure({
+      error,
+      requestId: 'req_router_direct_403_default_route_available',
+      providerKey: 'asxs.crsa.gpt-5.4-mini',
+      providerId: 'asxs',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-responses',
+      providerModel: 'gpt-5.4-mini',
+      routeName: 'thinking',
+      runtimeKey: 'asxs.crsa',
+      target: { providerKey: 'asxs.crsa.gpt-5.4-mini', runtimeKey: 'asxs.crsa' },
+      dependencies: { errorHandlingCenter: {}, debugCenter: {}, logger: {} } as any,
+      runtimeManager: { resolveRuntimeKey: (providerKey?: string) => providerKey },
+      attempt: 2,
+      maxAttempts: 6,
+      logicalRequestChainKey: 'req_router_direct_403_default_route_available',
+      routePoolForAttempt: ['asxs.crsa.gpt-5.4-mini'],
+      defaultTierAvailable: true,
+      excludedProviderKeys,
+      recordAttempt,
+      logStage: jest.fn(),
+      logProviderRetrySwitch,
+      bypassTrafficGovernor: false,
+      trafficGovernor: { observeOutcome: jest.fn() } as any,
+      trafficActiveInFlightAtAcquire: 1,
+      trafficPolicyMaxInFlight: 4,
+      consumeProviderTransportBackoffMs: jest.fn(() => 0),
+      providerSendStartedAtMs: Date.now(),
+      providerSendElapsedMs: 0,
+      cumulativeExternalLatencyMs: 0,
+      contextOverflowRetries: 0,
+      maxContextOverflowRetries: 2,
+      isStreamingRequest: true,
+      metadata: { routecodexRoutingPolicyGroup: 'gateway_glm_4444' },
+      phase: 'provider_send',
+      logNonBlockingError: jest.fn(),
+      writeProviderSnapshot: jest.fn(async () => undefined),
+      extractRetryErrorSnapshot: () => ({
+        statusCode: 403,
+        errorCode: 'HTTP_403',
+        upstreamCode: 'insufficient_quota',
+        reason: 'HTTP 403: insufficient quota'
+      })
+    })).resolves.toMatchObject({ lastError: error });
+
+    expect(recordAttempt).toHaveBeenCalledWith({ error: true });
+    expect(excludedProviderKeys.has('asxs.crsa.gpt-5.4-mini')).toBe(true);
+    expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
+      switchAction: 'exclude_and_reroute',
+      stage: 'provider.send',
+      providerKey: 'asxs.crsa.gpt-5.4-mini'
+    }));
+  });
 });

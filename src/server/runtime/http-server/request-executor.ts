@@ -60,6 +60,7 @@ import {
   describeRequestSemanticsResolution
 } from './executor/provider-response-utils.js';
 import {
+  buildErrorErr05DefaultAvailabilityTiers,
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
   mergeMetadataPreservingDefined,
@@ -812,7 +813,7 @@ export class HubRequestExecutor implements RequestExecutor {
             // G3: primary_exhausted -> default_pool. Before failing fast, ask the
             // Rust VR planner for a default_pool plan and re-inject it as the
             // next allowedProviders target list. Host MUST NOT synthesize
-            // fallback targets locally.
+            // default route targets locally.
             const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(pipelineError);
             const primaryExhaustedRoute = primaryExhaustedContext?.route;
             const primaryExhaustedTiers = primaryExhaustedRoute && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
@@ -882,13 +883,22 @@ export class HubRequestExecutor implements RequestExecutor {
           && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
             ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, routeNameForAttempt) ?? []
             : [];
+        const defaultRouteTiersForAttempt =
+          typeof routeNameForAttempt === 'string'
+          && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
+            ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, 'default') ?? []
+            : [];
         await captureResponsesConversationRequestContextAtChatProcessEntry({
           input,
           metadata: mergedMetadata,
           providerKey: target.providerKey
         });
         const defaultTierAvailableForAttempt = resolveDefaultTierAvailableForErrorErr05({
-          tiers: routeTiersForAttempt,
+          tiers: buildErrorErr05DefaultAvailabilityTiers({
+            routeName: routeNameForAttempt,
+            routeTiers: routeTiersForAttempt,
+            defaultRouteTiers: defaultRouteTiersForAttempt,
+          }),
           routePool: routePoolForAttempt,
           excludedProviderKeys,
         });

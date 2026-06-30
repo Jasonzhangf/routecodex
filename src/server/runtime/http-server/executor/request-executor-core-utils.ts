@@ -236,6 +236,38 @@ export function resolveDefaultTierAvailableForErrorErr05(args: {
   return false;
 }
 
+export function buildErrorErr05DefaultAvailabilityTiers(args: {
+  routeName?: string;
+  routeTiers?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
+  defaultRouteTiers?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
+}): Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }> {
+  const routeTiers = Array.isArray(args.routeTiers) ? args.routeTiers : [];
+  const defaultRouteTiers = Array.isArray(args.defaultRouteTiers) ? args.defaultRouteTiers : [];
+  const routeName = typeof args.routeName === 'string' ? args.routeName.trim().toLowerCase() : '';
+  if (!routeName || routeName === 'default' || defaultRouteTiers.length === 0) {
+    return routeTiers;
+  }
+  return [
+    ...routeTiers,
+    ...defaultRouteTiers.map((tier) => ({
+      ...tier,
+      backup: true,
+    })),
+  ];
+}
+
+export function resolveErrorErr05RoutingPolicyGroup(args: {
+  metadata?: Record<string, unknown>;
+  portRoutingPolicyGroup?: string;
+}): string | undefined {
+  const metadataGroup = args.metadata?.routecodexRoutingPolicyGroup;
+  if (typeof metadataGroup === 'string' && metadataGroup.trim()) {
+    return metadataGroup.trim();
+  }
+  const portGroup = args.portRoutingPolicyGroup;
+  return typeof portGroup === 'string' && portGroup.trim() ? portGroup.trim() : undefined;
+}
+
 /**
  * Host-side adapter around `evaluateSingletonRoutePoolExhaustionNative` (Rust).
  *
@@ -258,7 +290,7 @@ export function resolveSingletonRoutePoolExhaustionDecision(
  *
  * Per `docs/goals/provider-error-chain-direct-relay-audit-2026-06-15.md` G3:
  * the host MUST consult the Rust VR default-pool planner whenever a primary
- * route pool is exhausted; the host MUST NOT synthesize a fallback target list
+ * route pool is exhausted; the host MUST NOT synthesize a default target list
  * locally. This helper is the only sanctioned host bridge.
  */
 export function resolvePrimaryExhaustedPlan(
