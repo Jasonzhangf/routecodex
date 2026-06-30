@@ -24,15 +24,9 @@ const planServertoolToolCallDispatchWithNativeMock = jest.fn((input: any) => ({
 }));
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js',
-  () => ({
-    buildServertoolDispatchPlanInput: buildServertoolDispatchPlanInputMock
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
+    buildServertoolDispatchPlanInputWithNative: buildServertoolDispatchPlanInputMock,
     planServertoolToolCallDispatchWithNative: planServertoolToolCallDispatchWithNativeMock
   })
 );
@@ -76,8 +70,6 @@ describe('dispatch-preparation-shell', () => {
         adapterContext
       } as any,
       toolCalls,
-      baseObject: { choices: [] } as any,
-      baseForExecution: { choices: [] } as any,
       includeToolCallNames: null,
       excludeToolCallNames: null
     });
@@ -107,8 +99,6 @@ describe('dispatch-preparation-shell', () => {
         adapterContext: {}
       } as any,
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
-      baseObject: { choices: [] } as any,
-      baseForExecution: { choices: [] } as any,
       includeToolCallNames: null,
       excludeToolCallNames: null
     })).toThrow('Servertool dispatch preparation requires metadata center runtime_control.providerProtocol');

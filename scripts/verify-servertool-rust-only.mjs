@@ -4950,6 +4950,8 @@ function checkServertoolRustOutcomeCloseout() {
     "from '../conversion/runtime-metadata.js'",
     'readRuntimeMetadata(',
     'buildServertoolDispatchPlanInput(',
+    'baseObject: JsonObject;',
+    'baseForExecution: JsonObject;',
   ]) {
     if (dispatchPreparationShell.includes(marker)) {
       fail(

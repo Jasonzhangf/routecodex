@@ -12,8 +12,6 @@ import {
 export function prepareServertoolDispatchStage(args: {
   options: ServerSideToolEngineOptions;
   toolCalls: ToolCall[];
-  baseObject: JsonObject;
-  baseForExecution: JsonObject;
   includeToolCallNames: Set<string> | null;
   excludeToolCallNames: Set<string> | null;
 }): {

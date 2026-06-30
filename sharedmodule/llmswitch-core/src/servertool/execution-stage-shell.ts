@@ -26,8 +26,6 @@ export async function runServertoolExecutionStage(args: {
   const { dispatchPlan } = prepareServertoolDispatchStage({
     options: args.options,
     toolCalls: args.toolCalls,
-    baseObject: args.baseObject,
-    baseForExecution: args.baseObject,
     includeToolCallNames: args.includeToolCallNames,
     excludeToolCallNames: args.excludeToolCallNames
   });

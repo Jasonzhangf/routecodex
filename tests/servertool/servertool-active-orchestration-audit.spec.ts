@@ -187,6 +187,8 @@ const TARGETS = [
       'resolveServertoolRuntimePreCommandState',
       'applyPreCommandHooksToToolCalls',
       'buildServertoolDispatchPlanInput(',
+      'baseObject: JsonObject;',
+      'baseForExecution: JsonObject;',
     ],
     required: [
       'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
